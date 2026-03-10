@@ -1197,7 +1197,14 @@ def extract_text_from_image_vlm(
     return buffer, input_tokens, output_tokens
 
 
-full_page_ocr_vlm_prompt = """Spot all the text in the image at line-level, and output in JSON format as [{'bbox': [x1, y1, x2, y2], 'text': 'identified text', 'conf': 'confidence score 0-1'}, ...].
+# If not a Qwen VL model, give some more guidance on bounding box coordinates
+if "qwen" in SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL.lower():
+    additional_bounding_box_rules = ""
+else:
+    additional_bounding_box_rules = """- Bounding boxes should fit within the coordinate extents of the image, the extent of which is 0, 0 for the top left corner of the image, and 999, 999 for the bottom right corner of the image"""
+
+
+full_page_ocr_vlm_prompt = f"""Spot all the text in the image at line-level, and output in JSON format as [{{'bbox': [x1, y1, x2, y2], 'text': 'identified text', 'conf': 'confidence score 0-1'}}, ...].
 
 IMPORTANT: Extract each horizontal line of text separately. Do NOT combine multiple lines into paragraphs. Each line that appears on a separate horizontal row in the image should be a separate entry.
 
@@ -1207,23 +1214,23 @@ Rules:
 - If text spans multiple horizontal lines, split it into separate entries (one per line)
 - Do NOT combine lines that appear on different horizontal rows
 - Each bounding box should tightly fit around a single horizontal line of text
-- Bounding boxes should fit within the coordinate extents of the image, the extent of which is 0, 0 for the top left corner of the image, and 999, 999 for the bottom right corner of the image
+{additional_bounding_box_rules}
 - Empty lines should be skipped
 - 'conf' should be a confidence score from 0-1
 
 
 # Only return valid JSON, no additional text or explanation."""
 
-full_page_ocr_people_vlm_prompt = """Spot all photos of people's faces in the image, and output in JSON format as [{'bbox': [x1, y1, x2, y2], 'text': '[PERSON]', 'conf': 'confidence score 0-1'}, ...].
+full_page_ocr_people_vlm_prompt = f"""Spot all photos of people's faces in the image, and output in JSON format as [{{'bbox': [x1, y1, x2, y2], 'text': '[PERSON]', 'conf': 'confidence score 0-1'}}, ...].
 
-Always return the JSON format as [{'bbox': [x1, y1, x2, y2], 'text': '[PERSON]', 'conf': 'confidence score 0-1'}, ...].
+Always return the JSON format as [{{'bbox': [x1, y1, x2, y2], 'text': '[PERSON]', 'conf': 'confidence score 0-1'}}, ...].
 
 Rules:
 - Each photo of a person's face must be a separate entry
 - Do NOT combine multiple photos into a single entry
 - Each photo of a person's face that appears in the image should be a separate entry
 - Bounding boxes around the identified person's face should completely cover the person's face
-- Bounding boxes should fit within the coordinate extents of the image, the extent of which is 0, 0 for the top left corner of the image, and 999, 999 for the bottom right corner of the image
+{additional_bounding_box_rules}
 - 'text' should always be exactly '[PERSON]'
 - 'conf' should be a confidence score from 0-1
 - Do NOT include any other text or information in the JSON
@@ -1231,16 +1238,16 @@ Rules:
 
 # Only return valid JSON, no additional text or explanation."""
 
-full_page_ocr_signature_vlm_prompt = """Spot all signatures in the image, and output in JSON format as [{'bbox': [x1, y1, x2, y2], 'text': '[SIGNATURE]', 'conf': 'confidence score 0-1'}, ...].
+full_page_ocr_signature_vlm_prompt = f"""Spot all signatures in the image, and output in JSON format as [{{'bbox': [x1, y1, x2, y2], 'text': '[SIGNATURE]', 'conf': 'confidence score 0-1'}}, ...].
 
-Always return the JSON format as [{'bbox': [x1, y1, x2, y2], 'text': '[SIGNATURE]', 'conf': 'confidence score 0-1'}, ...].
+Always return the JSON format as [{{'bbox': [x1, y1, x2, y2], 'text': '[SIGNATURE]', 'conf': 'confidence score 0-1'}}, ...].
 
 Rules:
 - Each signature must be a separate entry
 - Do NOT combine multiple signatures into a single entry
 - Each signature that appears in the image should be a separate entry
 - Bounding boxes around the identified signature should completely cover the signature
-- Bounding boxes should fit within the coordinate extents of the image, the extent of which is 0, 0 for the top left corner of the image, and 999, 999 for the bottom right corner of the image
+{additional_bounding_box_rules}
 - 'text' should always be exactly '[SIGNATURE]'
 - 'conf' should be a confidence score from 0-1
 - Do NOT include any other text or information in the JSON.
@@ -1249,14 +1256,14 @@ Rules:
 # Only return valid JSON, no additional text or explanation."""
 
 # Test for word-level OCR with VLMs - makes some mistakes but not bad
-full_page_ocr_vlm_words_prompt = """Spot all the text in the image at word-level, and output in JSON format as [{'bbox': [x1, y1, x2, y2], 'text': 'identified word', 'conf': 'confidence score 0-1'}, ...].
+full_page_ocr_vlm_words_prompt = f"""Spot all the text in the image at word-level, and output in JSON format as [{{'bbox': [x1, y1, x2, y2], 'text': 'identified word', 'conf': 'confidence score 0-1'}}, ...].
 
 IMPORTANT: Extract each word in the image separately. Do NOT combine words into longer fragments, sentences, or paragraphs. Each entry must correspond to a single, individual word as visually separated in the image.
 
 Rules:
 - Each entry should correspond to a single distinct word (not groups of words, not whole lines)
 - For each word, provide a tight bounding box [x1, y1, x2, y2] around just that word
-- Bounding boxes should fit within the coordinate extents of the image, the extent of which is 0, 0 for the top left corner of the image, and 999, 999 for the bottom right corner of the image
+{additional_bounding_box_rules}
 - Do not merge words. Do not split words into letters. Only return one entry per word
 - Maintain the order of words as they appear spatially from top to bottom, left to right
 - Skip any empty or whitespace-only entries

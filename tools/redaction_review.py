@@ -1,6 +1,6 @@
 import os
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Tuple
 from xml.etree.ElementTree import Element, SubElement, tostring
@@ -150,7 +150,7 @@ def get_filtered_recogniser_dataframe_and_dropdowns(
 
     recogniser_entities_list = ["Redaction"]
     recogniser_dataframe_out = recogniser_dataframe_base
-    recogniser_dataframe_out_gr = gr.Dataframe()
+    pd.DataFrame()
     review_dataframe = review_df
 
     try:
@@ -162,7 +162,7 @@ def get_filtered_recogniser_dataframe_and_dropdowns(
         recogniser_entities_for_drop = update_dropdown_list_based_on_dataframe(
             review_dataframe, "label"
         )
-        recogniser_entities_drop = gr.Dropdown(
+        recogniser_entities_drop_spec = dict(
             value=recogniser_dropdown_value,
             choices=recogniser_entities_for_drop,
             allow_custom_value=True,
@@ -182,7 +182,7 @@ def get_filtered_recogniser_dataframe_and_dropdowns(
         text_entities_for_drop = update_dropdown_list_based_on_dataframe(
             review_dataframe, "text"
         )
-        text_entities_drop = gr.Dropdown(
+        text_entities_drop_spec = dict(
             value=text_dropdown_value,
             choices=text_entities_for_drop,
             allow_custom_value=True,
@@ -192,48 +192,52 @@ def get_filtered_recogniser_dataframe_and_dropdowns(
         page_entities_for_drop = update_dropdown_list_based_on_dataframe(
             review_dataframe, "page"
         )
-        page_entities_drop = gr.Dropdown(
+        page_entities_drop_spec = dict(
             value=page_dropdown_value,
             choices=page_entities_for_drop,
             allow_custom_value=True,
             interactive=True,
         )
 
-        recogniser_dataframe_out_gr = gr.Dataframe(
-            review_dataframe[["page", "label", "text", "id"]],
-            show_search="filter",
-            type="pandas",
-            headers=["page", "label", "text", "id"],
-            wrap=True,
-            max_height=400,
-        )
+        # recogniser_dataframe_out_gr = gr.Dataframe(
+        #     review_dataframe[["page", "label", "text", "id"]],
+        #     show_search="filter",
+        #     type="pandas",
+        #     headers=["page", "label", "text", "id"],
+        #     wrap=True,
+        #     max_height=400,
+        # )
+        # recogniser_dataframe_out_gr = pd.DataFrame(
+        #     review_dataframe[["page", "label", "text", "id"]]
 
-        recogniser_dataframe_out = review_dataframe[["page", "label", "text", "id"]]
+        recogniser_dataframe_out = review_dataframe.loc[
+            :, ["page", "label", "text", "id"]
+        ]
 
     except Exception as e:
         print("Could not extract recogniser information:", e)
-        recogniser_dataframe_out = recogniser_dataframe_base[
-            ["page", "label", "text", "id"]
+        recogniser_dataframe_out = recogniser_dataframe_base.loc[
+            :, ["page", "label", "text", "id"]
         ]
 
         label_choices = review_dataframe["label"].astype(str).unique().tolist()
         text_choices = review_dataframe["text"].astype(str).unique().tolist()
         page_choices = review_dataframe["page"].astype(str).unique().tolist()
 
-        recogniser_entities_drop = gr.Dropdown(
+        recogniser_entities_drop_spec = dict(
             value=recogniser_dropdown_value,
             choices=label_choices,
             allow_custom_value=True,
             interactive=True,
         )
         recogniser_entities_list = ["Redaction"]
-        text_entities_drop = gr.Dropdown(
+        text_entities_drop_spec = dict(
             value=text_dropdown_value,
             choices=text_choices,
             allow_custom_value=True,
             interactive=True,
         )
-        page_entities_drop = gr.Dropdown(
+        page_entities_drop_spec = dict(
             value=page_dropdown_value,
             choices=page_choices,
             allow_custom_value=True,
@@ -241,12 +245,12 @@ def get_filtered_recogniser_dataframe_and_dropdowns(
         )
 
     return (
-        recogniser_dataframe_out_gr,
         recogniser_dataframe_out,
-        recogniser_entities_drop,
+        recogniser_dataframe_out,
+        recogniser_entities_drop_spec,
         recogniser_entities_list,
-        text_entities_drop,
-        page_entities_drop,
+        text_entities_drop_spec,
+        page_entities_drop_spec,
     )
 
 
@@ -264,17 +268,17 @@ def update_recogniser_dataframes(
     """
     recogniser_entities_list = ["Redaction"]
     recogniser_dataframe_out = pd.DataFrame()
-    recogniser_dataframe_out_gr = gr.Dataframe()
+    recogniser_dataframe_out_gr = pd.DataFrame()
 
     # If base recogniser dataframe is empy, need to create it.
     if recogniser_dataframe_base.empty:
         (
             recogniser_dataframe_out_gr,
             recogniser_dataframe_out,
-            recogniser_entities_drop,
+            recogniser_entities_drop_spec,
             recogniser_entities_list,
-            text_entities_drop,
-            page_entities_drop,
+            text_entities_drop_spec,
+            page_entities_drop_spec,
         ) = get_filtered_recogniser_dataframe_and_dropdowns(
             page_image_annotator_object,
             recogniser_dataframe_base,
@@ -283,15 +287,23 @@ def update_recogniser_dataframes(
             page_dropdown_value,
             review_df,
             page_sizes,
+        )
+        return (
+            recogniser_entities_list,
+            recogniser_dataframe_out_gr,
+            recogniser_dataframe_out,
+            gr.update(**recogniser_entities_drop_spec),
+            gr.update(**text_entities_drop_spec),
+            gr.update(**page_entities_drop_spec),
         )
     elif recogniser_dataframe_base.iloc[0, 0] == "":
         (
             recogniser_dataframe_out_gr,
             recogniser_dataframe_out,
-            recogniser_entities_dropdown_value,
+            recogniser_entities_drop_spec,
             recogniser_entities_list,
-            text_entities_drop,
-            page_entities_drop,
+            text_entities_drop_spec,
+            page_entities_drop_spec,
         ) = get_filtered_recogniser_dataframe_and_dropdowns(
             page_image_annotator_object,
             recogniser_dataframe_base,
@@ -301,14 +313,22 @@ def update_recogniser_dataframes(
             review_df,
             page_sizes,
         )
+        return (
+            recogniser_entities_list,
+            recogniser_dataframe_out_gr,
+            recogniser_dataframe_out,
+            gr.update(**recogniser_entities_drop_spec),
+            gr.update(**text_entities_drop_spec),
+            gr.update(**page_entities_drop_spec),
+        )
     else:
         (
             recogniser_dataframe_out_gr,
             recogniser_dataframe_out,
-            recogniser_entities_dropdown,
+            _recogniser_drop_spec,
             recogniser_entities_list,
-            text_dropdown,
-            page_dropdown,
+            _text_drop_spec,
+            _page_drop_spec,
         ) = get_filtered_recogniser_dataframe_and_dropdowns(
             page_image_annotator_object,
             recogniser_dataframe_base,
@@ -328,23 +348,19 @@ def update_recogniser_dataframes(
             )
         )
 
-        recogniser_dataframe_out_gr = gr.Dataframe(
-            review_dataframe[["page", "label", "text", "id"]],
-            show_search="filter",
-            type="pandas",
-            headers=["page", "label", "text", "id"],
-            wrap=True,
-            max_height=400,
-        )
+        # recogniser_dataframe_out_gr = gr.Dataframe(
+        #     review_dataframe[["page", "label", "text", "id"]],
+        #     show_search="filter",
+        #     type="pandas",
+        #     headers=["page", "label", "text", "id"],
+        #     wrap=True,
+        #     max_height=400,
+        # )
+
+        recogniser_dataframe_out_gr = review_dataframe[["page", "label", "text", "id"]]
 
         recogniser_entities_for_drop = update_dropdown_list_based_on_dataframe(
             recogniser_dataframe_out, "label"
-        )
-        recogniser_entities_drop = gr.Dropdown(
-            value=recogniser_entities_dropdown_value,
-            choices=recogniser_entities_for_drop,
-            allow_custom_value=True,
-            interactive=True,
         )
 
         recogniser_entities_list_base = (
@@ -357,14 +373,19 @@ def update_recogniser_dataframes(
         ]
         recogniser_entities_list.insert(0, "Redaction")
 
-    return (
-        recogniser_entities_list,
-        recogniser_dataframe_out_gr,
-        recogniser_dataframe_out,
-        recogniser_entities_drop,
-        text_entities_drop,
-        page_entities_drop,
-    )
+        return (
+            recogniser_entities_list,
+            recogniser_dataframe_out_gr,
+            recogniser_dataframe_out,
+            gr.update(
+                value=recogniser_entities_dropdown_value,
+                choices=recogniser_entities_for_drop,
+                allow_custom_value=True,
+                interactive=True,
+            ),
+            text_entities_drop,
+            page_entities_drop,
+        )
 
 
 def undo_last_removal(
@@ -536,12 +557,19 @@ def update_annotator_page_from_review_df(
             # Ensure necessary columns exist in current_page_review_df before converting rows
             for key in expected_annotation_keys:
                 if key not in current_page_review_df.columns:
-                    # Add missing column with default value
-                    # Use np.nan for numeric, '' for string/object
+                    # Add missing column with default value. Use 0.0 for coords so
+                    # gradio_image_annotation never receives None/NaN (causes TypeError in preprocess_boxes).
                     default_value = (
-                        np.nan if key in ["xmin", "ymin", "xmax", "ymax"] else ""
+                        0.0 if key in ["xmin", "ymin", "xmax", "ymax"] else ""
                     )
                     current_page_review_df[key] = default_value
+
+            # Ensure coord columns have no NaN/None so image_annotator preprocess_boxes doesn't raise TypeError
+            for coord in ["xmin", "ymin", "xmax", "ymax"]:
+                if coord in current_page_review_df.columns:
+                    current_page_review_df[coord] = pd.to_numeric(
+                        current_page_review_df[coord], errors="coerce"
+                    ).fillna(0.0)
 
             # Convert filtered DataFrame rows to list of dicts
             # Using .to_dict(orient='records') is efficient for this
@@ -739,7 +767,7 @@ def _merge_horizontally_adjacent_boxes(
         "xmin": "min",
         "ymin": "min",  # To get the highest point of the combined box
         "xmax": "max",
-        "ymax": "min",  # To ensure we take just one line
+        "ymax": "max",  # To ensure we cover all text
         "text": lambda s: " ".join(s.astype(str)),  # Join the text
         # Carry over the first value for columns that are constant within a group
         "page": "first",
@@ -944,6 +972,101 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
                 }
             )
 
+            # Clip box to line-level bounds (all four coordinates) when available
+            _eps = 1e-6
+            line_cols = ["line_x0", "line_x1", "line_y0", "line_y1"]
+            has_line = all(c in new_annotations_df.columns for c in line_cols)
+            if has_line:
+                ymax_fallback = 1.0 - _eps
+                lx0 = pd.to_numeric(new_annotations_df["line_x0"], errors="coerce")
+                lx1 = pd.to_numeric(new_annotations_df["line_x1"], errors="coerce")
+                ly0 = pd.to_numeric(new_annotations_df["line_y0"], errors="coerce")
+                ly1 = pd.to_numeric(new_annotations_df["line_y1"], errors="coerce")
+                valid = (
+                    lx0.notna()
+                    & lx1.notna()
+                    & ly0.notna()
+                    & ly1.notna()
+                    & (lx0 >= 0)
+                    & (lx1 <= 1)
+                    & (ly0 >= 0)
+                    & (ly1 <= 1)
+                    & (lx0 < lx1)
+                    & (ly0 < ly1)
+                )
+                if valid.any():
+                    new_annotations_df = new_annotations_df.copy()
+                    ly1_safe = ly1.where(ly1 < 1).fillna(ymax_fallback)
+                    new_annotations_df.loc[valid, "xmin"] = pd.to_numeric(
+                        new_annotations_df.loc[valid, "xmin"], errors="coerce"
+                    ).clip(lower=lx0.loc[valid])
+                    new_annotations_df.loc[valid, "xmax"] = pd.to_numeric(
+                        new_annotations_df.loc[valid, "xmax"], errors="coerce"
+                    ).clip(upper=lx1.loc[valid])
+                    new_annotations_df.loc[valid, "ymin"] = pd.to_numeric(
+                        new_annotations_df.loc[valid, "ymin"], errors="coerce"
+                    ).clip(lower=ly0.loc[valid])
+                    new_annotations_df.loc[valid, "ymax"] = pd.to_numeric(
+                        new_annotations_df.loc[valid, "ymax"], errors="coerce"
+                    ).clip(upper=ly1_safe.loc[valid])
+                    # Ensure valid box
+                    xinv = (
+                        new_annotations_df.loc[valid, "xmin"]
+                        >= new_annotations_df.loc[valid, "xmax"]
+                    )
+                    yinv = (
+                        new_annotations_df.loc[valid, "ymin"]
+                        >= new_annotations_df.loc[valid, "ymax"]
+                    )
+                    if xinv.any():
+                        idx = new_annotations_df.index[valid][xinv]
+                        mid = (
+                            pd.to_numeric(
+                                new_annotations_df.loc[idx, "xmin"], errors="coerce"
+                            )
+                            + pd.to_numeric(
+                                new_annotations_df.loc[idx, "xmax"], errors="coerce"
+                            )
+                        ) / 2
+                        new_annotations_df.loc[idx, "xmin"] = (mid - _eps).clip(0, 1)
+                        new_annotations_df.loc[idx, "xmax"] = (mid + _eps).clip(0, 1)
+                    if yinv.any():
+                        idx = new_annotations_df.index[valid][yinv]
+                        mid = (
+                            pd.to_numeric(
+                                new_annotations_df.loc[idx, "ymin"], errors="coerce"
+                            )
+                            + pd.to_numeric(
+                                new_annotations_df.loc[idx, "ymax"], errors="coerce"
+                            )
+                        ) / 2
+                        new_annotations_df.loc[idx, "ymin"] = (mid - _eps).clip(0, 1)
+                        new_annotations_df.loc[idx, "ymax"] = (mid + _eps).clip(0, 1)
+            else:
+                # No line bounds: cap ymax only so no box spans to bottom
+                ymax_vals = pd.to_numeric(new_annotations_df["ymax"], errors="coerce")
+                need_cap = ymax_vals >= 1.0
+                if need_cap.any():
+                    new_annotations_df = new_annotations_df.copy()
+                    new_annotations_df.loc[need_cap, "ymax"] = ymax_vals.loc[
+                        need_cap
+                    ].clip(upper=1.0 - _eps)
+                    ymin_vals = pd.to_numeric(
+                        new_annotations_df.loc[need_cap, "ymin"], errors="coerce"
+                    )
+                    invalid = (
+                        new_annotations_df.loc[need_cap, "ymax"].values
+                        <= ymin_vals.values
+                    )
+                    if invalid.any():
+                        idx = new_annotations_df.index[need_cap][invalid]
+                        new_annotations_df.loc[idx, "ymax"] = (
+                            pd.to_numeric(
+                                new_annotations_df.loc[idx, "ymin"], errors="coerce"
+                            )
+                            + _eps
+                        )
+
             progress(0.3, desc="Checking for adjacent annotations to merge...")
             new_annotations_df = _merge_horizontally_adjacent_boxes(new_annotations_df)
 
@@ -1112,7 +1235,13 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
             _boxes = list()
         else:
             _valid_box_cols = [col for col in box_cols if col in _group.columns]
-            _sorted_group = _group.sort_values(by=["ymin", "xmin"])
+            _sorted_group = _group.sort_values(by=["ymin", "xmin"]).copy()
+            # Ensure coord columns have no NaN so image_annotator preprocess_boxes doesn't raise TypeError
+            for coord in ["xmin", "ymin", "xmax", "ymax"]:
+                if coord in _sorted_group.columns:
+                    _sorted_group[coord] = pd.to_numeric(
+                        _sorted_group[coord], errors="coerce"
+                    ).fillna(0.0)
             _boxes = _sorted_group[_valid_box_cols].to_dict("records")
         return (_i, {"image": _image_path, "boxes": _boxes})
 
@@ -1309,11 +1438,11 @@ def update_annotator_object_and_filter_df(
     input_folder: str = INPUT_FOLDER,
 ) -> Tuple[
     image_annotator,
-    gr.Number,
-    gr.Number,
+    int,
+    int,
     int,
     str,
-    gr.Dataframe,
+    pd.DataFrame,
     pd.DataFrame,
     List[str],
     List[str],
@@ -1341,11 +1470,11 @@ def update_annotator_object_and_filter_df(
     Returns:
         Tuple[
             image_annotator,
-            gr.Number,
-            gr.Number,
+            int,
+            int,
             int,
             str,
-            gr.Dataframe,
+            pd.DataFrame,
             pd.DataFrame,
             List[str],
             List[str],
@@ -1373,8 +1502,8 @@ def update_annotator_object_and_filter_df(
             ]
         )
     if recogniser_dataframe_base is None:  # Create a simple default if None
-        recogniser_dataframe_base = gr.Dataframe(
-            pd.DataFrame(data={"page": [], "label": [], "text": [], "id": []})
+        recogniser_dataframe_base = pd.DataFrame(
+            pd.DataFrame(columns=["page", "label", "text", "id"])
         )
 
     # Handle empty all_image_annotations state early
@@ -1402,15 +1531,13 @@ def update_annotator_object_and_filter_df(
             interactive=True,
             use_default_label=False,
         )
-        blank_df_out_gr = gr.Dataframe(
-            pd.DataFrame(columns=["page", "label", "text", "id"])
-        )
+        blank_df_out_gr = pd.DataFrame(columns=["page", "label", "text", "id"])
         blank_df_modified = pd.DataFrame(columns=["page", "label", "text", "id"])
 
         return (
             blank_annotator,
-            gr.Number(value=1),
-            gr.Number(value=1),
+            1,
+            1,
             1,
             recogniser_entities_dropdown_value,
             blank_df_out_gr,
@@ -1431,9 +1558,6 @@ def update_annotator_object_and_filter_df(
         page_num_reported = page_max_reported
 
     page_num_reported_zero_indexed = page_num_reported - 1
-
-    if not page_sizes:
-        page_num_reported = 0
 
     # --- Process page sizes DataFrame ---
     page_sizes_df = pd.DataFrame(page_sizes)
@@ -1547,7 +1671,15 @@ def update_annotator_object_and_filter_df(
                 # If error, proceed with original coordinates or handle as needed
 
         if "color" not in current_page_annotations_df.columns:
-            current_page_annotations_df["color"] = "(0, 0, 0)"
+            current_page_annotations_df["color"] = CUSTOM_BOX_COLOUR
+
+        # Ensure coord columns have no NaN/None so image_annotator preprocess_boxes doesn't raise TypeError
+        coord_cols = ["xmin", "xmax", "ymin", "ymax"]
+        for col in coord_cols:
+            if col in current_page_annotations_df.columns:
+                current_page_annotations_df[col] = pd.to_numeric(
+                    current_page_annotations_df[col], errors="coerce"
+                ).fillna(0.0)
 
         # Convert the processed DataFrame back to the list of dicts format for the annotator
         processed_current_page_annotations_list = current_page_annotations_df[
@@ -1580,9 +1712,9 @@ def update_annotator_object_and_filter_df(
             review_df.copy(),  # Keep the copy as per original function call
             page_sizes,  # Pass updated page sizes
         )
-        # Generate default black colors for labels if needed by image_annotator
+        # Generate default colors for labels if needed by image_annotator
         recogniser_colour_list = [
-            (0, 0, 0) for _ in range(len(recogniser_entities_list))
+            CUSTOM_BOX_COLOUR for _ in range(len(recogniser_entities_list))
         ]
 
     except Exception as e:
@@ -1591,8 +1723,8 @@ def update_annotator_object_and_filter_df(
         )
         recogniser_entities_list = list()
         recogniser_colour_list = list()
-        recogniser_dataframe_out_gr = gr.Dataframe(
-            pd.DataFrame(columns=["page", "label", "text", "id"])
+        recogniser_dataframe_out_gr = pd.DataFrame(
+            columns=["page", "label", "text", "id"]
         )
         recogniser_dataframe_modified = pd.DataFrame(
             columns=["page", "label", "text", "id"]
@@ -1601,18 +1733,9 @@ def update_annotator_object_and_filter_df(
         page_entities_drop = list()
 
     # --- Final Output Components ---
-    if page_sizes:
-        page_number_reported_gradio_comp = gr.Number(
-            label="Current page",
-            value=page_num_reported,
-            precision=0,
-            maximum=len(page_sizes),
-            minimum=1,
-        )
-    else:
-        page_number_reported_gradio_comp = gr.Number(
-            label="Current page", value=0, precision=0, maximum=9999, minimum=0
-        )
+    page_number_update = (
+        gr.update(value=page_num_reported, maximum=len(page_sizes)) if page_sizes else 0
+    )
 
     ### Present image_annotator outputs
     # Handle the case where current_page_image_annotator_object couldn't be prepared
@@ -1660,24 +1783,22 @@ def update_annotator_object_and_filter_df(
     all_pages_in_doc_list = [str(i) for i in range(1, len(page_sizes) + 1)]
     page_entities_drop_redaction_list.extend(all_pages_in_doc_list)
 
-    page_entities_drop_redaction = gr.Dropdown(
-        value=page_dropdown_redaction_value,
-        choices=page_entities_drop_redaction_list,
-        label="Page",
-        allow_custom_value=True,
-    )
-
     return (
         out_image_annotator,
-        page_number_reported_gradio_comp,
-        page_number_reported_gradio_comp,  # Redundant, but matches original return signature
+        page_number_update,
+        page_number_update,  # Redundant, but matches original return signature
         page_num_reported,  # Plain integer value
         recogniser_entities_dropdown_value,
         recogniser_dataframe_out_gr,
         recogniser_dataframe_modified,
         text_entities_drop,  # List of text entities for dropdown
         page_entities_drop,  # List of page numbers for dropdown
-        page_entities_drop_redaction,
+        gr.update(
+            value=page_dropdown_redaction_value,
+            choices=page_entities_drop_redaction_list,
+            allow_custom_value=True,
+            interactive=True,
+        ),
         page_sizes,  # Updated page_sizes list
         all_image_annotations,
     )  # Return the updated full state
@@ -2043,42 +2164,24 @@ def apply_redactions_to_review_df_and_files(
                 # page_sizes_df and page_to_image_path / page_to_image_dimensions
                 # already built once per file above
 
-                # Pre-load all page images in parallel (I/O + PIL); PyMuPDF is not
-                # thread-safe so PDF modification stays in the main loop below.
-                max_workers = min(MAX_WORKERS, number_of_pages)
-                preloaded_images = [None] * number_of_pages  # (image, should_close)
-                with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    futures = {
-                        executor.submit(
-                            _load_one_page_image_for_redact,
-                            i,
-                            all_image_annotations,
-                            page_to_image_path,
-                            input_folder,
-                            file_name_with_ext,
-                        ): i
-                        for i in range(number_of_pages)
-                    }
-                    for fut in progress.tqdm(
-                        as_completed(futures),
-                        total=number_of_pages,
-                        desc="Loading page images",
-                        unit="pages",
-                    ):
-                        try:
-                            i, image, should_close = fut.result()
-                            preloaded_images[i] = (image, should_close)
-                        except Exception:
-                            idx = futures[fut]
-                            preloaded_images[idx] = (None, False)
-
+                # Load images on demand per page (avoids holding all N images in memory).
+                # PyMuPDF is not thread-safe for document modification, so redaction stays sequential.
                 for i in progress.tqdm(
                     range(0, number_of_pages),
                     desc="Saving redacted pages to file",
                     unit="pages",
                 ):
-
-                    image, image_should_close = preloaded_images[i]
+                    # Load image for this page only; close after use to limit memory.
+                    try:
+                        _, image, image_should_close = _load_one_page_image_for_redact(
+                            i,
+                            all_image_annotations,
+                            page_to_image_path,
+                            input_folder,
+                            file_name_with_ext,
+                        )
+                    except Exception:
+                        image, image_should_close = None, False
                     if image is None:
                         image_should_close = False
 
@@ -2098,11 +2201,10 @@ def apply_redactions_to_review_df_and_files(
                     # Precomputed dimensions for this page (avoids .loc in redact_page_with_pymupdf)
                     dims = page_to_image_dimensions.get(i + 1)
 
-                    # Handle review PDF page if needed
+                    review_pymupdf_page = None
                     if RETURN_PDF_FOR_REVIEW and review_pdf_doc:
                         review_pymupdf_page = review_pdf_doc.load_page(i)
                         review_pymupdf_page.set_cropbox(review_pymupdf_page.mediabox)
-
                         review_annots_to_remove = [
                             a
                             for a in review_pymupdf_page.annots()
@@ -2111,34 +2213,21 @@ def apply_redactions_to_review_df_and_files(
                         for annot in review_annots_to_remove:
                             review_pymupdf_page.delete_annot(annot)
 
-                        # Apply redactions to review page (with annotations visible)
-                        review_pymupdf_page = redact_page_with_pymupdf(
-                            page=review_pymupdf_page,
-                            page_annotations=all_image_annotations[i],
-                            image=image,
-                            original_cropbox=current_cropbox,
-                            page_sizes_df=page_sizes_df,
-                            return_pdf_for_review=True,
-                            return_pdf_end_of_redaction=False,
-                            input_folder=input_folder,
-                            image_dimensions_override=dims,
-                        )
-
-                    # Apply redactions to final page (with text removed)
+                    # Single pass: apply redactions to both final and (if requested) review page.
                     pymupdf_page = redact_page_with_pymupdf(
                         page=pymupdf_page,
                         page_annotations=all_image_annotations[i],
                         image=image,
                         original_cropbox=current_cropbox,
                         page_sizes_df=page_sizes_df,
-                        return_pdf_for_review=False,
+                        return_pdf_for_review=bool(review_pymupdf_page is None),
                         return_pdf_end_of_redaction=False,
                         input_folder=input_folder,
                         image_dimensions_override=dims,
+                        review_page=review_pymupdf_page,
                     )
 
-                    # Close image if we opened/created it this iteration to prevent file
-                    # handle and memory growth (avoids slowdown/crash over many pages)
+                    # Close image immediately to free memory before next page
                     if image_should_close and image is not None:
                         try:
                             image.close()
@@ -2159,6 +2248,8 @@ def apply_redactions_to_review_df_and_files(
                     pdf_doc, out_pdf_file_path, COMPRESS_REDACTED_PDF
                 )
                 output_files.append(out_pdf_file_path)
+                pdf_doc.close()
+                pdf_doc = None
 
                 # Save review PDF if RETURN_PDF_FOR_REVIEW is True
 
@@ -2172,6 +2263,8 @@ def apply_redactions_to_review_df_and_files(
                         review_pdf_doc, out_review_pdf_file_path, COMPRESS_REDACTED_PDF
                     )
                     output_files.append(out_review_pdf_file_path)
+                    review_pdf_doc.close()
+                    review_pdf_doc = None
 
             else:
                 print("PDF input not found. Outputs not saved to PDF.")
@@ -2262,34 +2355,33 @@ def update_all_entity_df_dropdowns(
     recogniser_entities_for_drop = update_dropdown_list_based_on_dataframe(
         filtered_df, "label"
     )
-    recogniser_entities_drop = gr.Dropdown(
-        value=label_dropdown_value[0],
-        choices=recogniser_entities_for_drop,
-        allow_custom_value=True,
-        interactive=True,
-    )
-
     text_entities_for_drop = update_dropdown_list_based_on_dataframe(
         filtered_df, "text"
     )
-    text_entities_drop = gr.Dropdown(
-        value=text_dropdown_value[0],
-        choices=text_entities_for_drop,
-        allow_custom_value=True,
-        interactive=True,
-    )
-
     page_entities_for_drop = update_dropdown_list_based_on_dataframe(
         filtered_df, "page"
     )
-    page_entities_drop = gr.Dropdown(
-        value=page_dropdown_value[0],
-        choices=page_entities_for_drop,
-        allow_custom_value=True,
-        interactive=True,
-    )
 
-    return recogniser_entities_drop, text_entities_drop, page_entities_drop
+    return (
+        gr.update(
+            value=label_dropdown_value[0],
+            choices=recogniser_entities_for_drop,
+            allow_custom_value=True,
+            interactive=True,
+        ),
+        gr.update(
+            value=text_dropdown_value[0],
+            choices=text_entities_for_drop,
+            allow_custom_value=True,
+            interactive=True,
+        ),
+        gr.update(
+            value=page_dropdown_value[0],
+            choices=page_entities_for_drop,
+            allow_custom_value=True,
+            interactive=True,
+        ),
+    )
 
 
 def update_entities_df_recogniser_entities(
@@ -2329,37 +2421,38 @@ def update_entities_df_recogniser_entities(
     if not page_dropdown_value[0]:
         page_dropdown_value[0] = "1"
 
-    recogniser_entities_for_drop = update_dropdown_list_based_on_dataframe(
-        filtered_df, "label"
-    )
-    gr.Dropdown(
-        value=choice[0],
-        choices=recogniser_entities_for_drop,
-        allow_custom_value=True,
-        interactive=True,
-    )
+    # recogniser_entities_for_drop = update_dropdown_list_based_on_dataframe(
+    #     filtered_df, "label"
+    # )
+    # gr.Dropdown(
+    #     value=choice[0],
+    #     choices=recogniser_entities_for_drop,
+    #     allow_custom_value=True,
+    #     interactive=True,
+    # )
 
     text_entities_for_drop = update_dropdown_list_based_on_dataframe(
         filtered_df, "text"
     )
-    text_entities_drop = gr.Dropdown(
-        value=text_dropdown_value[0],
-        choices=text_entities_for_drop,
-        allow_custom_value=True,
-        interactive=True,
-    )
-
     page_entities_for_drop = update_dropdown_list_based_on_dataframe(
         filtered_df, "page"
     )
-    page_entities_drop = gr.Dropdown(
-        value=page_dropdown_value[0],
-        choices=page_entities_for_drop,
-        allow_custom_value=True,
-        interactive=True,
-    )
 
-    return filtered_df, text_entities_drop, page_entities_drop
+    return (
+        filtered_df,
+        gr.update(
+            value=text_dropdown_value[0],
+            choices=text_entities_for_drop,
+            allow_custom_value=True,
+            interactive=True,
+        ),
+        gr.update(
+            value=page_dropdown_value[0],
+            choices=page_entities_for_drop,
+            allow_custom_value=True,
+            interactive=True,
+        ),
+    )
 
 
 def update_entities_df_page(
@@ -2400,34 +2493,25 @@ def update_entities_df_page(
     recogniser_entities_for_drop = update_dropdown_list_based_on_dataframe(
         filtered_df, "label"
     )
-    recogniser_entities_drop = gr.Dropdown(
-        value=label_dropdown_value[0],
-        choices=recogniser_entities_for_drop,
-        allow_custom_value=True,
-        interactive=True,
-    )
-
     text_entities_for_drop = update_dropdown_list_based_on_dataframe(
         filtered_df, "text"
     )
-    text_entities_drop = gr.Dropdown(
-        value=text_dropdown_value[0],
-        choices=text_entities_for_drop,
-        allow_custom_value=True,
-        interactive=True,
-    )
 
-    page_entities_for_drop = update_dropdown_list_based_on_dataframe(
-        filtered_df, "page"
+    return (
+        filtered_df,
+        gr.update(
+            value=label_dropdown_value[0],
+            choices=recogniser_entities_for_drop,
+            allow_custom_value=True,
+            interactive=True,
+        ),
+        gr.update(
+            value=text_dropdown_value[0],
+            choices=text_entities_for_drop,
+            allow_custom_value=True,
+            interactive=True,
+        ),
     )
-    gr.Dropdown(
-        value=choice[0],
-        choices=page_entities_for_drop,
-        allow_custom_value=True,
-        interactive=True,
-    )
-
-    return filtered_df, recogniser_entities_drop, text_entities_drop
 
 
 def update_redact_choice_df_from_page_dropdown(choice: str, df: pd.DataFrame):
@@ -2447,10 +2531,6 @@ def update_redact_choice_df_from_page_dropdown(choice: str, df: pd.DataFrame):
             "page",
             "line",
             "word_text",
-            # "word_x0",
-            # "word_y0",
-            # "word_x1",
-            # "word_y1",
             "index",
         ]
     ].copy()
@@ -2459,15 +2539,15 @@ def update_redact_choice_df_from_page_dropdown(choice: str, df: pd.DataFrame):
     if "ALL" not in choice:
         filtered_df = filtered_df.loc[filtered_df["page"].astype(str).isin(choice)]
 
-    page_entities_for_drop = update_dropdown_list_based_on_dataframe(
-        filtered_df, "page"
-    )
-    gr.Dropdown(
-        value=choice[0],
-        choices=page_entities_for_drop,
-        allow_custom_value=True,
-        interactive=True,
-    )
+    # page_entities_for_drop = update_dropdown_list_based_on_dataframe(
+    #     filtered_df, "page"
+    # )
+    # gr.Dropdown(
+    #     value=choice[0],
+    #     choices=page_entities_for_drop,
+    #     allow_custom_value=True,
+    #     interactive=True,
+    # )
 
     return filtered_df
 
@@ -2504,66 +2584,55 @@ def update_entities_df_text(
     recogniser_entities_for_drop = update_dropdown_list_based_on_dataframe(
         filtered_df, "label"
     )
-    recogniser_entities_drop = gr.Dropdown(
-        value=label_dropdown_value[0],
-        choices=recogniser_entities_for_drop,
-        allow_custom_value=True,
-        interactive=True,
-    )
-
-    text_entities_for_drop = update_dropdown_list_based_on_dataframe(
-        filtered_df, "text"
-    )
-    gr.Dropdown(
-        value=choice[0],
-        choices=text_entities_for_drop,
-        allow_custom_value=True,
-        interactive=True,
-    )
-
     page_entities_for_drop = update_dropdown_list_based_on_dataframe(
         filtered_df, "page"
     )
-    page_entities_drop = gr.Dropdown(
-        value=page_dropdown_value[0],
-        choices=page_entities_for_drop,
-        allow_custom_value=True,
-        interactive=True,
-    )
 
-    return filtered_df, recogniser_entities_drop, page_entities_drop
+    return (
+        filtered_df,
+        gr.update(
+            value=label_dropdown_value[0],
+            choices=recogniser_entities_for_drop,
+            allow_custom_value=True,
+            interactive=True,
+        ),
+        gr.update(
+            value=page_dropdown_value[0],
+            choices=page_entities_for_drop,
+            allow_custom_value=True,
+            interactive=True,
+        ),
+    )
 
 
 def reset_dropdowns(df: pd.DataFrame):
     """
     Return Gradio dropdown objects with value 'ALL'.
     """
-
     recogniser_entities_for_drop = update_dropdown_list_based_on_dataframe(df, "label")
-    recogniser_entities_drop = gr.Dropdown(
-        value="ALL",
-        choices=recogniser_entities_for_drop,
-        allow_custom_value=True,
-        interactive=True,
-    )
-
     text_entities_for_drop = update_dropdown_list_based_on_dataframe(df, "text")
-    text_entities_drop = gr.Dropdown(
-        value="ALL",
-        choices=text_entities_for_drop,
-        allow_custom_value=True,
-        interactive=True,
-    )
-
     page_entities_for_drop = update_dropdown_list_based_on_dataframe(df, "page")
-    page_entities_drop = gr.Dropdown(
-        value="ALL",
-        choices=page_entities_for_drop,
-        allow_custom_value=True,
-        interactive=True,
-    )
 
-    return recogniser_entities_drop, text_entities_drop, page_entities_drop
+    return (
+        gr.update(
+            value="ALL",
+            choices=recogniser_entities_for_drop,
+            allow_custom_value=True,
+            interactive=True,
+        ),
+        gr.update(
+            value="ALL",
+            choices=text_entities_for_drop,
+            allow_custom_value=True,
+            interactive=True,
+        ),
+        gr.update(
+            value="ALL",
+            choices=page_entities_for_drop,
+            allow_custom_value=True,
+            interactive=True,
+        ),
+    )
 
 
 def increase_bottom_page_count_based_on_top(page_number: int):
@@ -2578,10 +2647,6 @@ def df_select_callback_dataframe_row_ocr_with_words(
     row_value_line = int(evt.row_value[1])  # This is the label number value
     row_value_text = evt.row_value[2]  # This is the text number value
 
-    # evt.row_value[3]  # This is the x0 value
-    # evt.row_value[4]  # This is the y0 value
-    # evt.row_value[5]  # This is the x1 value
-    # evt.row_value[6]  # This is the y1 value
     row_value_index = evt.row_value[3]  # This is the index value
 
     row_value_df = pd.DataFrame(
@@ -2589,10 +2654,6 @@ def df_select_callback_dataframe_row_ocr_with_words(
             "page": [row_value_page],
             "line": [row_value_line],
             "word_text": [row_value_text],
-            # "word_x0": [row_value_x0],
-            # "word_y0": [row_value_y0],
-            # "word_x1": [row_value_x1],
-            # "word_y1": [row_value_y1],
             "index": row_value_index,
         }
     )

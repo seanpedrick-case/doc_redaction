@@ -319,7 +319,6 @@ def choose_and_run_redactor(
     page_sizes: List[dict] = list(),
     textract_output_found: bool = False,
     text_extraction_only: bool = False,
-    redaction_method_radio: str = None,
     duplication_file_path_outputs: list = list(),
     review_file_path: str = "",
     input_folder: str = INPUT_FOLDER,
@@ -415,12 +414,6 @@ def choose_and_run_redactor(
     - RETURN_PDF_FOR_REVIEW (bool, optional): Boolean to determine whether to return a review PDF at the end of the redaction process.
     - progress (gr.Progress, optional): A progress tracker for the redaction process. Defaults to a Progress object with track_tqdm set to True.
     """
-    # Upper selector "Extract text only" overrides lower "Only extract text (no redaction)" checkbox
-    if (
-        redaction_method_radio is not None
-        and str(redaction_method_radio).strip() == "Extract text only"
-    ):
-        text_extraction_only = True
 
     tic = time.perf_counter()
 
@@ -679,7 +672,7 @@ def choose_and_run_redactor(
                 if review_file_path:
                     review_out_file_paths.append(review_file_path)
 
-        if not isinstance(pymupdf_doc, list):
+        if pymupdf_doc is not None and not isinstance(pymupdf_doc, list):
             number_of_pages = pymupdf_doc.page_count
             if total_textract_query_number > number_of_pages:
                 total_textract_query_number = number_of_pages
@@ -1454,8 +1447,13 @@ def choose_and_run_redactor(
                 # original_all_page_line_level_ocr_results_with_words = all_page_line_level_ocr_results_with_words.copy()
 
         # Remove any existing review_file paths from the review file outputs
-        # EFFICIENT_OCR: two-step process per page - try selectable text first, OCR only if needed
-        if efficient_ocr and is_pdf(file_path):
+        # EFFICIENT_OCR: two-step process per page - try selectable text first, OCR only if needed.
+        # When text extraction is selectable-text only, skip EFFICIENT_OCR checks and run only redact_text_pdf.
+        if (
+            efficient_ocr
+            and is_pdf(file_path)
+            and text_extraction_method != SELECTABLE_TEXT_EXTRACT_OPTION
+        ):
             print(
                 "Redacting file "
                 + pdf_file_name_with_ext
@@ -1576,23 +1574,6 @@ def choose_and_run_redactor(
                 if pages_needing_ocr_1based:
                     _text_path_decision_table = all_pages_decision_process_table.copy()
                     _text_path_annotations = list(annotations_all_pages)
-                    # Sync page_sizes list from page_sizes_df so text path's created image paths
-                    # and dimensions are preserved when we rebuild page_sizes_df in the OCR block.
-                    # Otherwise page_sizes keeps placeholders for pages 1–3 and coordinates get wrong division.
-                    for _, row in page_sizes_df.iterrows():
-                        p = row.get("page")
-                        if p is None:
-                            continue
-                        idx = int(p) - 1
-                        if 0 <= idx < len(page_sizes):
-                            if row.get("image_path") and "placeholder" not in str(
-                                row.get("image_path", "")
-                            ):
-                                page_sizes[idx]["image_path"] = row["image_path"]
-                            if pd.notna(row.get("image_width")):
-                                page_sizes[idx]["image_width"] = row["image_width"]
-                            if pd.notna(row.get("image_height")):
-                                page_sizes[idx]["image_height"] = row["image_height"]
 
             if pages_needing_ocr_1based:
                 progress(0.55, desc="Creating images for pages that need OCR")
@@ -2148,6 +2129,21 @@ def choose_and_run_redactor(
                             else:
                                 out_file_paths.append(out_redacted_pdf_file_path[0])
 
+                            # Release file handle so Gradio can read the output (Windows)
+                            if applied_redaction_pymupdf_doc is not None:
+                                applied_redaction_pymupdf_doc.close()
+                                applied_redaction_pymupdf_doc = None
+                            elif (
+                                not RETURN_PDF_FOR_REVIEW
+                                and pymupdf_doc is not None
+                                and not isinstance(pymupdf_doc, list)
+                            ):
+                                try:
+                                    pymupdf_doc.close()
+                                except Exception:
+                                    pass
+                                pymupdf_doc = None
+
         # Always return a file for review if a pdf is given and RETURN_PDF_FOR_REVIEW is True
         if is_pdf(file_path) is True:
             if RETURN_PDF_FOR_REVIEW is True:
@@ -2173,6 +2169,13 @@ def choose_and_run_redactor(
                         out_file_paths.append(out_review_pdf_file_path)
                     else:
                         out_file_paths.append(out_review_pdf_file_path[0])
+                    # Release file handle so Gradio can read the output (Windows)
+                    if pymupdf_doc is not None and not isinstance(pymupdf_doc, list):
+                        try:
+                            pymupdf_doc.close()
+                        except Exception:
+                            pass
+                        pymupdf_doc = None
 
         if not all_page_line_level_ocr_results_df.empty:
             all_page_line_level_ocr_results_df = all_page_line_level_ocr_results_df[
@@ -2255,46 +2258,25 @@ def choose_and_run_redactor(
                     pages_in_pdf_points=_pages_pdf_points,
                 )
             )
-
-            # Reverse y for PDF-point coordinates (text path or EFFICIENT_OCR text pages)
-            # so they match image annotator (y from top). When mixed, reverse only text pages.
-            if not all_page_line_level_ocr_results_with_words_df.empty:
-                if (
-                    pages_with_text_extraction_1based
-                    and ocr_results_use_pdf_points is False
-                ):
-                    # Mixed: reverse y only for rows from text-extracted pages
-                    mask = all_page_line_level_ocr_results_with_words_df["page"].isin(
-                        pages_with_text_extraction_1based
-                    )
-                    for col in ("word_y0", "word_y1"):
-                        all_page_line_level_ocr_results_with_words_df.loc[mask, col] = (
-                            1
-                            - all_page_line_level_ocr_results_with_words_df.loc[
-                                mask, col
-                            ].astype(float)
-                        ).round(6)
-                elif (
-                    text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION
-                    or ocr_results_use_pdf_points is True
-                ):
-                    # All from text path: reverse entire columns
-                    all_page_line_level_ocr_results_with_words_df["word_y0"] = (
-                        reverse_y_coords(
-                            all_page_line_level_ocr_results_with_words_df, "word_y0"
-                        )
-                    )
-                    all_page_line_level_ocr_results_with_words_df["word_y1"] = (
-                        reverse_y_coords(
-                            all_page_line_level_ocr_results_with_words_df, "word_y1"
-                        )
-                    )
+            # Normalize line-level coordinates too (used as fallback max for word_y1)
+            all_page_line_level_ocr_results_with_words_df = (
+                divide_coordinates_by_page_sizes(
+                    all_page_line_level_ocr_results_with_words_df,
+                    page_sizes_df,
+                    xmin="line_x0",
+                    xmax="line_x1",
+                    ymin="line_y0",
+                    ymax="line_y1",
+                    coordinates_in_pdf_points=(
+                        text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION
+                        or ocr_results_use_pdf_points is True
+                    ),
+                    pages_in_pdf_points=_pages_pdf_points,
+                )
+            )
 
             all_page_line_level_ocr_results_with_words_df["line_text"] = ""
-            all_page_line_level_ocr_results_with_words_df["line_x0"] = ""
-            all_page_line_level_ocr_results_with_words_df["line_x1"] = ""
-            all_page_line_level_ocr_results_with_words_df["line_y0"] = ""
-            all_page_line_level_ocr_results_with_words_df["line_y1"] = ""
+            # Keep line_x0, line_x1, line_y0, line_y1 so downstream can clip word boxes to line
 
             all_page_line_level_ocr_results_with_words_df.sort_values(
                 ["page", "line", "word_x0"], inplace=True
@@ -2444,9 +2426,69 @@ def choose_and_run_redactor(
 
         # Convert the gradio annotation boxes to relative coordinates
         progress(0.95, "Creating review file output")
+        # EFFICIENT_OCR: ensure text-extracted pages have mediabox dimensions and
+        # placeholder image path so divide_coordinates_by_page_sizes uses mediabox (not nan).
+        if (
+            pages_with_text_extraction_1based
+            and pymupdf_doc is not None
+            and not isinstance(pymupdf_doc, list)
+            and hasattr(pymupdf_doc, "load_page")
+        ):
+            pages_in_df = set(
+                pd.to_numeric(page_sizes_df["page"], errors="coerce")
+                .dropna()
+                .astype(int)
+            )
+            placeholder_base = "placeholder_image_{}.png"
+            for page_num in pages_with_text_extraction_1based:
+                try:
+                    pymupdf_page = pymupdf_doc.load_page(int(page_num) - 1)
+                    mb = pymupdf_page.mediabox
+                    page_int = int(page_num)
+                    if page_int in pages_in_df:
+                        # Update existing row (e.g. placeholder with nan) so division has mediabox
+                        mask = page_sizes_df["page"] == page_int
+                        page_sizes_df.loc[mask, "image_width"] = mb.width
+                        page_sizes_df.loc[mask, "image_height"] = mb.height
+                        if "mediabox_width" in page_sizes_df.columns:
+                            page_sizes_df.loc[mask, "mediabox_width"] = mb.width
+                        if "mediabox_height" in page_sizes_df.columns:
+                            page_sizes_df.loc[mask, "mediabox_height"] = mb.height
+                        # Align image_path with placeholder so annotations match
+                        page_sizes_df.loc[mask, "image_path"] = placeholder_base.format(
+                            page_int - 1
+                        )
+                    else:
+                        new_row = {
+                            "page": page_num,
+                            "image_path": placeholder_base.format(page_int - 1),
+                            "image_width": mb.width,
+                            "image_height": mb.height,
+                            "mediabox_width": mb.width,
+                            "mediabox_height": mb.height,
+                        }
+                        if "cropbox_width" in page_sizes_df.columns:
+                            new_row["cropbox_width"] = pymupdf_page.cropbox.width
+                        if "cropbox_height" in page_sizes_df.columns:
+                            new_row["cropbox_height"] = pymupdf_page.cropbox.height
+                        page_sizes_df = pd.concat(
+                            [page_sizes_df, pd.DataFrame([new_row])],
+                            ignore_index=True,
+                        )
+                        pages_in_df.add(page_int)
+                except Exception as e:
+                    print(
+                        f"Warning: Could not add/update mediabox for text-extracted page {page_num}: {e}"
+                    )
         page_sizes = page_sizes_df.to_dict(orient="records")
+
         all_image_annotations_df = convert_annotation_data_to_dataframe(
             annotations_all_pages
+        )
+        _pages_pdf_pts = (
+            set(pages_with_text_extraction_1based)
+            if pages_with_text_extraction_1based
+            else None
         )
         all_image_annotations_df = divide_coordinates_by_page_sizes(
             all_image_annotations_df,
@@ -2455,6 +2497,7 @@ def choose_and_run_redactor(
             xmax="xmax",
             ymin="ymin",
             ymax="ymax",
+            pages_in_pdf_points=_pages_pdf_pts,
         )
         annotations_all_pages_divide = create_annotation_dicts_from_annotation_df(
             all_image_annotations_df, page_sizes
@@ -2546,6 +2589,19 @@ def choose_and_run_redactor(
         combined_out_message = (
             combined_out_message + " " + out_time_message
         )  # Ensure this is a single string
+
+        # Add redaction summary (total redactions and pages with redactions)
+        if isinstance(review_file_state, pd.DataFrame) and not review_file_state.empty:
+            total_redactions = len(review_file_state)
+            pages_with_redactions = (
+                review_file_state["page"].nunique()
+                if "page" in review_file_state.columns
+                else 0
+            )
+            combined_out_message = (
+                combined_out_message
+                + f" Total redactions: {total_redactions}. Pages with redactions: {pages_with_redactions}."
+            )
 
         sum_numbers_before_seconds(combined_out_message)
 
@@ -3038,7 +3094,8 @@ def convert_pikepdf_annotations_to_result_annotation_box(
         img_annotation_box["xmax"] = image_x2
         img_annotation_box["ymax"] = image_y2
     else:
-        # If no image, use PyMuPDF coordinates
+        # If no image, use PyMuPDF coordinates (PDF points). Store 1-based page on box
+        # so convert_annotation_data_to_dataframe can join to correct mediabox row (EFFICIENT_OCR).
         convert_df = pd.DataFrame(
             {
                 "page": [page_no],
@@ -3053,8 +3110,11 @@ def convert_pikepdf_annotations_to_result_annotation_box(
         img_annotation_box["ymin"] = converted_df["ymin"].max()
         img_annotation_box["xmax"] = converted_df["xmax"].max()
         img_annotation_box["ymax"] = converted_df["ymax"].max()
+        img_annotation_box["page"] = (
+            page_no + 1
+        )  # 1-based for divide_coordinates_by_page_sizes
 
-    img_annotation_box["color"] = (0, 0, 0)
+    img_annotation_box["color"] = CUSTOM_BOX_COLOUR
 
     if isinstance(annot, Dictionary):
         img_annotation_box["label"] = str(annot["/T"])
@@ -3313,12 +3373,21 @@ def redact_single_box(
         annot = pymupdf_page.add_redact_annot(full_size_redaction_box)
         annot.set_colors(stroke=out_colour, fill=out_colour, colors=out_colour)
         annot.set_name(img_annotation_box["label"])
+        # Cache creationDate per second to avoid thousands of strftime calls per document
+        now_sec = int(time.time())
+        if not hasattr(redact_single_box, "_creation_date_cache"):
+            redact_single_box._creation_date_cache = [0, ""]
+        if redact_single_box._creation_date_cache[0] != now_sec:
+            redact_single_box._creation_date_cache[0] = now_sec
+            redact_single_box._creation_date_cache[1] = datetime.now().strftime(
+                "%Y%m%d%H%M%S"
+            )
         annot.set_info(
             info=img_annotation_box["label"],
             title=img_annotation_box["label"],
             subject=img_annotation_box["label"],
             content=img_annotation_box["text"],
-            creationDate=datetime.now().strftime("%Y%m%d%H%M%S"),
+            creationDate=redact_single_box._creation_date_cache[1],
         )
         annot.update(opacity=0.5, cross_out=False)
 
@@ -3427,7 +3496,8 @@ def redact_page_with_pymupdf(
     return_pdf_for_review: bool = RETURN_PDF_FOR_REVIEW,
     return_pdf_end_of_redaction: bool = RETURN_REDACTED_PDF,
     input_folder: str = INPUT_FOLDER,
-    image_dimensions_override: dict = None,
+    image_dimensions_override: Optional[dict] = None,
+    review_page: Optional[Page] = None,
 ):
     """
     Applies redactions to a single PyMuPDF page based on provided annotations.
@@ -3457,8 +3527,8 @@ def redact_page_with_pymupdf(
                                                 Defaults to RETURN_PDF_FOR_REVIEW.
         return_pdf_end_of_redaction (bool, optional): If True, returns both review and final redacted page objects.
                                                       Defaults to RETURN_REDACTED_PDF.
-        image_dimensions_override (dict, optional): If provided, used as image_dimensions for this page instead of
-                                                    looking up from page_sizes_df (avoids repeated .loc per page).
+        review_page (Page, optional): When provided, the same redactions are applied to this page (with text
+                                      retained for review) in a single pass, avoiding a second full annotation loop.
 
     Returns:
         Tuple[Page, dict] or Tuple[Tuple[Page, Page], dict]: A tuple containing:
@@ -3478,37 +3548,34 @@ def redact_page_with_pymupdf(
     page_no = page.number
     page_num_reported = page_no + 1
 
-    # Only convert if not already numeric (avoids O(n_pages) work on every call when
-    # apply_redactions pre-converts once)
-    if not page_sizes_df.empty and "page" in page_sizes_df.columns:
-        if not pd.api.types.is_numeric_dtype(page_sizes_df["page"]):
-            page_sizes_df[["page"]] = page_sizes_df[["page"]].apply(
-                pd.to_numeric, errors="coerce"
-            )
-
-    # Use precomputed dimensions when provided (avoids repeated .loc per page)
-    image_dimensions = dict()
-    if image_dimensions_override:
-        image_dimensions = image_dimensions_override
-    elif not image and "image_width" in page_sizes_df.columns:
-        if not pd.api.types.is_numeric_dtype(page_sizes_df["image_width"]):
-            page_sizes_df[["image_width"]] = page_sizes_df[["image_width"]].apply(
-                pd.to_numeric, errors="coerce"
-            )
-        if not pd.api.types.is_numeric_dtype(page_sizes_df["image_height"]):
-            page_sizes_df[["image_height"]] = page_sizes_df[["image_height"]].apply(
-                pd.to_numeric, errors="coerce"
-            )
-
-        image_dimensions["image_width"] = page_sizes_df.loc[
-            page_sizes_df["page"] == page_num_reported, "image_width"
-        ].max()
-        image_dimensions["image_height"] = page_sizes_df.loc[
-            page_sizes_df["page"] == page_num_reported, "image_height"
-        ].max()
-
-        if pd.isna(image_dimensions["image_width"]):
-            image_dimensions = dict()
+    # Use precomputed dimensions when provided (skips all DataFrame work on hot path)
+    if image_dimensions_override and isinstance(image_dimensions_override, dict):
+        image_dimensions = dict(image_dimensions_override)
+    else:
+        image_dimensions = dict()
+        # Only convert/lookup when caller did not pass dimensions (avoids O(n_pages) per call)
+        if not page_sizes_df.empty and "page" in page_sizes_df.columns:
+            if not pd.api.types.is_numeric_dtype(page_sizes_df["page"]):
+                page_sizes_df[["page"]] = page_sizes_df[["page"]].apply(
+                    pd.to_numeric, errors="coerce"
+                )
+        if not image and "image_width" in page_sizes_df.columns:
+            if not pd.api.types.is_numeric_dtype(page_sizes_df["image_width"]):
+                page_sizes_df[["image_width"]] = page_sizes_df[["image_width"]].apply(
+                    pd.to_numeric, errors="coerce"
+                )
+            if not pd.api.types.is_numeric_dtype(page_sizes_df["image_height"]):
+                page_sizes_df[["image_height"]] = page_sizes_df[["image_height"]].apply(
+                    pd.to_numeric, errors="coerce"
+                )
+            image_dimensions["image_width"] = page_sizes_df.loc[
+                page_sizes_df["page"] == page_num_reported, "image_width"
+            ].max()
+            image_dimensions["image_height"] = page_sizes_df.loc[
+                page_sizes_df["page"] == page_num_reported, "image_height"
+            ].max()
+            if pd.isna(image_dimensions.get("image_width")):
+                image_dimensions = dict()
 
     out_annotation_boxes = dict()
     all_image_annotation_boxes = list()
@@ -3533,7 +3600,8 @@ def redact_page_with_pymupdf(
         image_path = os.path.join(
             input_folder, f"{normalized_filename}_{page.number}.png"
         )
-        if not os.path.exists(image_path):
+        # Skip disk save when dimensions were precomputed (avoids I/O; file not needed for lookup)
+        if not image_dimensions_override and not os.path.exists(image_path):
             image.save(image_path)
     elif isinstance(image, str):
         # Normalize and validate path safety before checking existence
@@ -3579,26 +3647,44 @@ def redact_page_with_pymupdf(
             )
             img_annotation_box = fill_missing_box_ids(img_annotation_box)
             all_image_annotation_boxes.append(img_annotation_box)
-            redact_result = redact_single_box(
-                page,
-                rect,
-                img_annotation_box,
-                custom_colours,
-                return_pdf_for_review,
-                return_pdf_end_of_redaction,
-            )
-            if isinstance(redact_result, tuple):
-                page, applied_redaction_page = redact_result
-                if not hasattr(redact_page_with_pymupdf, "_applied_redaction_page"):
-                    redact_page_with_pymupdf._applied_redaction_page = (
-                        applied_redaction_page,
-                        page.number,
-                    )
-                else:
-                    redact_page_with_pymupdf._applied_redaction_page = (
-                        applied_redaction_page,
-                        page.number,
-                    )
+            if review_page is not None:
+                redact_single_box(
+                    page,
+                    rect,
+                    img_annotation_box,
+                    custom_colours,
+                    retain_text=False,
+                    return_pdf_end_of_redaction=False,
+                )
+                redact_single_box(
+                    review_page,
+                    rect,
+                    img_annotation_box,
+                    custom_colours,
+                    retain_text=True,
+                    return_pdf_end_of_redaction=False,
+                )
+            else:
+                redact_result = redact_single_box(
+                    page,
+                    rect,
+                    img_annotation_box,
+                    custom_colours,
+                    return_pdf_for_review,
+                    return_pdf_end_of_redaction,
+                )
+                if isinstance(redact_result, tuple):
+                    page, applied_redaction_page = redact_result
+                    if not hasattr(redact_page_with_pymupdf, "_applied_redaction_page"):
+                        redact_page_with_pymupdf._applied_redaction_page = (
+                            applied_redaction_page,
+                            page.number,
+                        )
+                    else:
+                        redact_page_with_pymupdf._applied_redaction_page = (
+                            applied_redaction_page,
+                            page.number,
+                        )
             continue
         # Check if an Image recogniser result, or a Gradio annotation object
         if (isinstance(annot, CustomImageRecognizerResult)) or isinstance(annot, dict):
@@ -3689,31 +3775,48 @@ def redact_page_with_pymupdf(
         all_image_annotation_boxes.append(img_annotation_box)
 
         # Redact the annotations from the document
-        redact_result = redact_single_box(
-            page,
-            rect,
-            img_annotation_box,
-            custom_colours,
-            return_pdf_for_review,
-            return_pdf_end_of_redaction,
-        )
-
-        # Handle dual page objects if returned
-        if isinstance(redact_result, tuple):
-            page, applied_redaction_page = redact_result
-            # Store the final page with page number for unpacking at end of function
-            if not hasattr(redact_page_with_pymupdf, "_applied_redaction_page"):
-                redact_page_with_pymupdf._applied_redaction_page = (
-                    applied_redaction_page,
-                    page.number,
-                )
-            else:
-                # If we already have a final page, we need to handle multiple pages
-                # For now, we'll use the last final page
-                redact_page_with_pymupdf._applied_redaction_page = (
-                    applied_redaction_page,
-                    page.number,
-                )
+        if review_page is not None:
+            redact_single_box(
+                page,
+                rect,
+                img_annotation_box,
+                custom_colours,
+                retain_text=False,
+                return_pdf_end_of_redaction=False,
+            )
+            redact_single_box(
+                review_page,
+                rect,
+                img_annotation_box,
+                custom_colours,
+                retain_text=True,
+                return_pdf_end_of_redaction=False,
+            )
+        else:
+            redact_result = redact_single_box(
+                page,
+                rect,
+                img_annotation_box,
+                custom_colours,
+                return_pdf_for_review,
+                return_pdf_end_of_redaction,
+            )
+            # Handle dual page objects if returned
+            if isinstance(redact_result, tuple):
+                page, applied_redaction_page = redact_result
+                # Store the final page with page number for unpacking at end of function
+                if not hasattr(redact_page_with_pymupdf, "_applied_redaction_page"):
+                    redact_page_with_pymupdf._applied_redaction_page = (
+                        applied_redaction_page,
+                        page.number,
+                    )
+                else:
+                    # If we already have a final page, we need to handle multiple pages
+                    # For now, we'll use the last final page
+                    redact_page_with_pymupdf._applied_redaction_page = (
+                        applied_redaction_page,
+                        page.number,
+                    )
 
     # If whole page is to be redacted, do that here
     if redact_whole_page is True:
@@ -3721,6 +3824,10 @@ def redact_page_with_pymupdf(
         whole_page_img_annotation_box = redact_whole_pymupdf_page(
             rect_height, rect_width, page, custom_colours, border=5
         )
+        if review_page is not None:
+            redact_whole_pymupdf_page(
+                rect_height, rect_width, review_page, custom_colours, border=5
+            )
         # Ensure the whole page annotation box has a unique ID
         whole_page_img_annotation_box = fill_missing_box_ids(
             whole_page_img_annotation_box
@@ -3728,7 +3835,11 @@ def redact_page_with_pymupdf(
         all_image_annotation_boxes.append(whole_page_img_annotation_box)
 
         # Handle dual page objects for whole page redaction if needed
-        if return_pdf_end_of_redaction and return_pdf_for_review:
+        if (
+            return_pdf_end_of_redaction
+            and return_pdf_for_review
+            and review_page is None
+        ):
             # Create a copy of the page for final redaction using the same approach as redact_single_box
 
             applied_redaction_doc = pymupdf.open()
@@ -3777,6 +3888,9 @@ def redact_page_with_pymupdf(
 
     set_cropbox_safely(page, original_cropbox)
     page.clean_contents()
+    if review_page is not None:
+        set_cropbox_safely(review_page, original_cropbox)
+        review_page.clean_contents()
 
     # Handle dual page objects if we have a final page
     if (
@@ -7388,20 +7502,16 @@ def generate_words_for_line(line_chars: List) -> List[Dict[str, Any]]:
 
     line_words = list()
     current_word_text = ""
-    # [x0, y0, x1, y1]: use inf/-inf so first char's min/max yield actual bounds.
-    # Previously -1 for y1 caused single-char words to get word_y1 = -1 (wrong).
-    current_word_bbox = [
-        float("inf"),
-        float("-inf"),
-        float("-inf"),
-        float("inf"),
-    ]  # [x0, y0, x1, y1]
+    current_word_bbox = [float("inf"), float("inf"), -1, -1]  # [x0, y0, x1, y1]
     prev_char = None
 
     def finalize_word():
         nonlocal current_word_text, current_word_bbox
         # Only add the word if it contains non-space text
         if current_word_text.strip():
+            # Safeguard: avoid emitting y=-1 (e.g. single-char word edge case)
+            if current_word_bbox[1] == -1 and current_word_bbox[3] != -1:
+                current_word_bbox[1] = current_word_bbox[3]
             # bbox from [x0, y0, x1, y1] to your required format
             final_bbox = [
                 round(current_word_bbox[0], 2),
@@ -7416,14 +7526,9 @@ def generate_words_for_line(line_chars: List) -> List[Dict[str, Any]]:
                     "conf": 100.0,
                 }
             )
-        # Reset for the next word (same initial bounds as above)
+        # Reset for the next word
         current_word_text = ""
-        current_word_bbox = [
-            float("inf"),
-            float("-inf"),
-            float("-inf"),
-            float("inf"),
-        ]  # [x0, y0, x1, y1]
+        current_word_bbox = [float("inf"), float("inf"), -1, -1]
 
     for char in text_chars:
         char_text = clean_unicode_text(char.get_text())
@@ -7465,10 +7570,16 @@ def generate_words_for_line(line_chars: List) -> List[Dict[str, Any]]:
         current_word_text += char_text
 
         x0, y0, x1, y1 = char.bbox
-        current_word_bbox[0] = min(current_word_bbox[0], x0)
-        current_word_bbox[1] = min(current_word_bbox[3], y0)  # pdfminer y0 is bottom
-        current_word_bbox[2] = max(current_word_bbox[2], x1)
-        current_word_bbox[3] = max(current_word_bbox[1], y1)  # pdfminer y1 is top
+        # First character of this word: set bbox from character (avoids -1 for single-char words)
+        if current_word_bbox[1] == -1 or current_word_bbox[3] == -1:
+            current_word_bbox = [x0, y0, x1, y1]
+        else:
+            current_word_bbox[0] = min(current_word_bbox[0], x0)
+            current_word_bbox[1] = min(
+                current_word_bbox[3], y0
+            )  # pdfminer y0 is bottom
+            current_word_bbox[2] = max(current_word_bbox[2], x1)
+            current_word_bbox[3] = max(current_word_bbox[1], y1)  # pdfminer y1 is top
 
         prev_char = char
 
@@ -7635,6 +7746,253 @@ def _extract_text_from_single_page(file_path: str, page_no: int) -> Tuple[
     )
 
 
+# Punctuation that should be split into separate words (same as generate_words_for_line).
+_PUNCTUATION_TO_SPLIT = {".", ",", "?", "!", ":", ";", "(", ")", "[", "]", "{", "}"}
+
+
+def _words_from_line_chars_pymupdf(
+    line_chars: List[Dict[str, Any]], off_x: float, off_y: float
+) -> List[Dict[str, Any]]:
+    """
+    Build word-level results from PyMuPDF line characters, splitting punctuation
+    into separate words (same behaviour as generate_words_for_line).
+
+    Args:
+        line_chars: List of dicts with "text", "bbox" (x0,y0,x1,y1), "size".
+        off_x, off_y: Page offset to add to bounding boxes.
+
+    Returns:
+        List of {"text", "boundingBox": [x0,y0,x1,y1], "conf": 100.0}.
+    """
+    if not line_chars:
+        return []
+    # Sort by horizontal position
+    sorted_chars = sorted(line_chars, key=lambda c: c["bbox"][0])
+    line_words: List[Dict[str, Any]] = []
+    current_word_text = ""
+    current_word_bbox: List[float] = [float("inf"), float("inf"), -1, -1]
+    prev_char: Optional[Dict[str, Any]] = None
+
+    def finalize_word() -> None:
+        nonlocal current_word_text, current_word_bbox
+        if not current_word_text.strip():
+            current_word_text = ""
+            current_word_bbox = [float("inf"), float("inf"), -1, -1]
+            return
+        if current_word_bbox[1] == -1 and current_word_bbox[3] != -1:
+            current_word_bbox[1] = current_word_bbox[3]
+        if current_word_bbox[3] == -1 and current_word_bbox[1] != -1:
+            current_word_bbox[3] = current_word_bbox[1]
+        x0, y0, x1, y1 = current_word_bbox
+        line_words.append(
+            {
+                "text": current_word_text.strip(),
+                "boundingBox": [
+                    round(x0 + off_x, 2),
+                    round(y0 + off_y, 2),
+                    round(x1 + off_x, 2),
+                    round(y1 + off_y, 2),
+                ],
+                "conf": 100.0,
+            }
+        )
+        current_word_text = ""
+        current_word_bbox = [float("inf"), float("inf"), -1, -1]
+
+    for char in sorted_chars:
+        char_text = clean_unicode_text(char["text"])
+        bbox = char["bbox"]
+        x0, y0, x1, y1 = bbox
+        char.get("size", 12.0)
+
+        if char_text in _PUNCTUATION_TO_SPLIT:
+            finalize_word()
+            line_words.append(
+                {
+                    "text": char_text,
+                    "boundingBox": [
+                        round(x0 + off_x, 2),
+                        round(y0 + off_y, 2),
+                        round(x1 + off_x, 2),
+                        round(y1 + off_y, 2),
+                    ],
+                    "conf": 100.0,
+                }
+            )
+            prev_char = char
+            continue
+
+        if char_text.isspace():
+            finalize_word()
+            prev_char = char
+            continue
+
+        if prev_char is not None:
+            space_threshold = prev_char.get("size", 12.0) * 0.25
+            min_gap = 1.0
+            gap = x0 - prev_char["bbox"][2]
+            if gap > max(space_threshold, min_gap):
+                finalize_word()
+
+        current_word_text += char_text
+        if current_word_bbox[1] == -1 or current_word_bbox[3] == -1:
+            current_word_bbox = [x0, y0, x1, y1]
+        else:
+            current_word_bbox[0] = min(current_word_bbox[0], x0)
+            current_word_bbox[1] = min(current_word_bbox[1], y0)
+            current_word_bbox[2] = max(current_word_bbox[2], x1)
+            current_word_bbox[3] = max(current_word_bbox[3], y1)
+        prev_char = char
+
+    finalize_word()
+    return line_words
+
+
+def process_page_to_structured_ocr_pymupdf(
+    page: pymupdf.Page, page_number: int, start_line_number: int
+) -> Tuple[Dict[str, Any], List[OCRResult], List[List[Dict]]]:
+
+    # 1. Extract once (no page.get_text("words") needed; words built from chars)
+    raw_dict = page.get_text("rawdict")
+
+    # Coordinates: PyMuPDF (0,0) is CropBox top-left.
+    # Only use these offsets if you MUST map back to MediaBox.
+    off_x, off_y = page.rect.x0, page.rect.y0
+
+    page_data = {"page": str(page_number), "results": {}}
+    line_results = []
+    lines_char_groups = []
+    valid_line_count = 0
+
+    for block in raw_dict["blocks"]:
+        if "lines" not in block:
+            continue
+
+        for line in block["lines"]:
+            # Join text and filter blanks
+            line_text = "".join(
+                ["".join([c["c"] for c in s["chars"]]) for s in line["spans"]]
+            )
+            if not line_text.strip():
+                continue
+
+            current_line_idx = start_line_number + valid_line_count
+            lx0, ly0, lx1, ly1 = line["bbox"]
+
+            # 2. Collect Character Objects (relative to CropBox)
+            line_chars = []
+            for span in line["spans"]:
+                for char in span["chars"]:
+                    line_chars.append(
+                        {"text": char["c"], "bbox": char["bbox"], "size": span["size"]}
+                    )
+
+            # 3. Create OCRResult (Corrected math)
+            line_obj = OCRResult(
+                text=line_text.strip(),
+                left=round(lx0 + off_x, 2),  # Position + Offset
+                top=round(ly0 + off_y, 2),  # Position + Offset
+                width=round(lx1 - lx0, 2),  # Distance (No offset!)
+                height=round(ly1 - ly0, 2),  # Distance (No offset!)
+                line=current_line_idx,
+            )
+
+            # 4. Build words from line chars with punctuation split into separate words
+            word_level_results = _words_from_line_chars_pymupdf(
+                line_chars, off_x, off_y
+            )
+
+            # 5. Build final dictionary
+            line_key = f"text_line_{current_line_idx}"
+            page_data["results"][line_key] = {
+                "line": current_line_idx,
+                "text": line_text.strip(),
+                "bounding_box": [
+                    round(lx0 + off_x, 2),
+                    round(ly0 + off_y, 2),
+                    round(lx1 + off_x, 2),
+                    round(ly1 + off_y, 2),
+                ],
+                "words": word_level_results,
+                "conf": 100.0,
+            }
+
+            line_results.append(line_obj)
+            lines_char_groups.append(line_chars)
+            valid_line_count += 1
+
+    return page_data, line_results, lines_char_groups
+
+
+def _extract_text_from_single_page_pymupdf(pdf_bytes: bytes, page_no: int) -> Tuple[
+    int,
+    List[Any],  # OCRResult objects
+    List[List[Dict]],  # Character groups per line
+    pd.DataFrame,  # Structured DataFrame
+    List[Dict[str, Any]],  # Page OCR results with words
+]:
+    """
+    Optimized version using PyMuPDF.
+    Maintains the same return signature for parallel processing.
+    """
+    reported_page_number = page_no + 1
+
+    # Initialize containers
+    all_page_line_results = []  # List of OCRResult objects
+    all_page_char_groups = []  # List of List of char dicts
+    page_ocr_results_with_words = []  # List of page_data dicts
+
+    # 1. Open the document inside the function for thread safety
+    doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    page = doc[page_no]
+
+    # 2. Call our helper to get structured data
+    # We pass 1 as the starting line number for this page
+    page_data, line_results, char_groups = process_page_to_structured_ocr_pymupdf(
+        page=page, page_number=reported_page_number, start_line_number=1
+    )
+
+    # 3. Handle the return objects to match your original structure
+    all_page_line_results.extend(line_results)
+    all_page_char_groups.extend(char_groups)
+
+    # Your original code expected a list of these dicts (per container)
+    # Since PyMuPDF processes the page as a whole, we wrap it in a list.
+    page_ocr_results_with_words.append(page_data)
+
+    # 4. Create the DataFrame
+    if line_results:
+        page_text_ocr_outputs = pd.DataFrame(
+            [
+                {
+                    "page": reported_page_number,
+                    "text": result.text.strip(),
+                    "left": result.left,
+                    "top": result.top,
+                    "width": result.width,
+                    "height": result.height,
+                    "line": result.line,
+                    "conf": 100.0,
+                }
+                for result in line_results
+            ]
+        )
+    else:
+        page_text_ocr_outputs = pd.DataFrame(
+            columns=["page", "text", "left", "top", "width", "height", "line", "conf"]
+        )
+
+    doc.close()  # Always close for memory efficiency
+
+    return (
+        page_no,
+        all_page_line_results,
+        all_page_char_groups,
+        page_text_ocr_outputs,
+        page_ocr_results_with_words,
+    )
+
+
 def page_has_extractable_text(
     file_path: str, page_no: int, min_words: int = EFFICIENT_OCR_MIN_WORDS
 ) -> bool:
@@ -7722,14 +8080,22 @@ def create_text_redaction_process_results(
 ):
     decision_process_table = pd.DataFrame()
 
-    if len(analyser_results) > 0:
+    if len(analyser_results) > 0 and len(analysed_bounding_boxes) > 0:
         # Create summary df of annotations to be made
         analysed_bounding_boxes_df_new = pd.DataFrame(analysed_bounding_boxes)
 
-        # Remove brackets and split the string into four separate columns
-        # Split the boundingBox list into four separate columns
+        # Support both camelCase (merge_text_bounding_boxes) and snake_case
+        bbox_col = (
+            "boundingBox"
+            if "boundingBox" in analysed_bounding_boxes_df_new.columns
+            else "bounding_box"
+        )
+        if bbox_col not in analysed_bounding_boxes_df_new.columns:
+            return decision_process_table
+
+        # Split the bounding box list into four separate columns
         analysed_bounding_boxes_df_new[["xmin", "ymin", "xmax", "ymax"]] = (
-            analysed_bounding_boxes_df_new["boundingBox"].apply(pd.Series)
+            analysed_bounding_boxes_df_new[bbox_col].apply(pd.Series)
         )
 
         # Convert the new columns to integers (if needed)
@@ -7749,7 +8115,7 @@ def create_text_redaction_process_results(
 
         decision_process_table = pd.concat(
             [decision_process_table, analysed_bounding_boxes_df_new], axis=0
-        ).drop(["result", "boundingBox"], axis=1)
+        ).drop("result", axis=1)
 
     return decision_process_table
 
@@ -7970,11 +8336,14 @@ def redact_text_pdf(
         pages_to_iterate = list(range(page_loop_start, page_loop_end))
 
     max_workers = min(MAX_WORKERS, len(pages_to_iterate))
+
+    with open(file_path, "rb") as f:
+        pdf_buffer = f.read()
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         extraction_results = list(
             tqdm(
                 executor.map(
-                    lambda p: _extract_text_from_single_page(file_path, p),
+                    lambda p: _extract_text_from_single_page_pymupdf(pdf_buffer, p),
                     pages_to_iterate,
                 ),
                 total=len(pages_to_iterate),
@@ -8010,121 +8379,18 @@ def redact_text_pdf(
             print("Image path not found:", e)
             image_path = ""
 
+        # EFFICIENT_OCR: use placeholder for text-only pages so annotations match page_sizes
+        # and we don't create real images (placeholders have mediabox for coordinate division).
+        if pages_to_process and (
+            not image_path
+            or "placeholder_image" in str(image_path)
+            or "image_placeholder" in str(image_path)
+        ):
+            image_path = f"placeholder_image_{page_no}.png"
+
         page_image_annotations = {"image": image_path, "boxes": []}  # image
 
         pymupdf_page = pymupdf_doc.load_page(page_no)
-        pymupdf_page.set_cropbox(pymupdf_page.mediabox)  # Set CropBox to MediaBox
-
-        # If image_path is empty or a placeholder and RETURN_PDF_FOR_REVIEW is True,
-        # create the image for review purposes
-        # if RETURN_PDF_FOR_REVIEW and (
-        #     not image_path
-        #     or "placeholder_image" in str(image_path)
-        #     or "image_placeholder" in str(image_path)
-        # ):
-        #     try:
-        #         # Create the actual image using process_single_page_for_image_conversion
-        #         _, created_image_path, _, _ = process_single_page_for_image_conversion(
-        #             pdf_path=file_path,
-        #             page_num=page_no,  # page_no is already 0-indexed
-        #             image_dpi=IMAGES_DPI,
-        #             create_images=True,
-        #             input_folder=input_folder,
-        #         )
-
-        #         # Use the created image path if it exists
-        #         if os.path.exists(created_image_path):
-        #             image_path = created_image_path
-        #             page_image_annotations["image"] = image_path
-        #             # Load the image to get its actual dimensions
-        #             try:
-        #                 created_image = Image.open(created_image_path)
-        #                 actual_image_width, actual_image_height = created_image.size
-        #             except Exception as e:
-        #                 print(f"Warning: Could not load image to get dimensions: {e}")
-        #                 actual_image_width = pd.NA
-        #                 actual_image_height = pd.NA
-
-        #             # Update image_path and dimensions in page_sizes_df for future reference
-        #             if not page_sizes_df.empty:
-        #                 if "image_path" in page_sizes_df.columns:
-        #                     # Update existing row if page exists
-        #                     page_mask = page_sizes_df["page"] == int(
-        #                         reported_page_number
-        #                     )
-        #                     if page_mask.any():
-        #                         page_sizes_df.loc[page_mask, "image_path"] = (
-        #                             created_image_path
-        #                         )
-        #                         if "image_width" in page_sizes_df.columns:
-        #                             page_sizes_df.loc[page_mask, "image_width"] = (
-        #                                 actual_image_width
-        #                             )
-        #                         if "image_height" in page_sizes_df.columns:
-        #                             page_sizes_df.loc[page_mask, "image_height"] = (
-        #                                 actual_image_height
-        #                             )
-        #                     else:
-        #                         # Add new row if page doesn't exist in page_sizes_df
-        #                         new_row = {
-        #                             "page": int(reported_page_number),
-        #                             "image_path": created_image_path,
-        #                             "image_width": actual_image_width,
-        #                             "image_height": actual_image_height,
-        #                             "mediabox_width": pymupdf_page.mediabox.width,
-        #                             "mediabox_height": pymupdf_page.mediabox.height,
-        #                             "cropbox_width": pymupdf_page.cropbox.width,
-        #                             "cropbox_height": pymupdf_page.cropbox.height,
-        #                             "original_cropbox": pymupdf_page.cropbox,
-        #                         }
-        #                         page_sizes_df = pd.concat(
-        #                             [page_sizes_df, pd.DataFrame([new_row])],
-        #                             ignore_index=True,
-        #                         )
-        #                 else:
-        #                     # Add image_path column if it doesn't exist
-        #                     page_sizes_df["image_path"] = ""
-        #                     if "image_width" not in page_sizes_df.columns:
-        #                         page_sizes_df["image_width"] = pd.NA
-        #                     if "image_height" not in page_sizes_df.columns:
-        #                         page_sizes_df["image_height"] = pd.NA
-        #                     page_mask = page_sizes_df["page"] == int(
-        #                         reported_page_number
-        #                     )
-        #                     if page_mask.any():
-        #                         page_sizes_df.loc[page_mask, "image_path"] = (
-        #                             created_image_path
-        #                         )
-        #                         page_sizes_df.loc[page_mask, "image_width"] = (
-        #                             actual_image_width
-        #                         )
-        #                         page_sizes_df.loc[page_mask, "image_height"] = (
-        #                             actual_image_height
-        #                         )
-        #                     else:
-        #                         new_row = {
-        #                             "page": int(reported_page_number),
-        #                             "image_path": created_image_path,
-        #                             "image_width": actual_image_width,
-        #                             "image_height": actual_image_height,
-        #                             "mediabox_width": pymupdf_page.mediabox.width,
-        #                             "mediabox_height": pymupdf_page.mediabox.height,
-        #                             "cropbox_width": pymupdf_page.cropbox.width,
-        #                             "cropbox_height": pymupdf_page.cropbox.height,
-        #                             "original_cropbox": pymupdf_page.cropbox,
-        #                         }
-        #                         page_sizes_df = pd.concat(
-        #                             [page_sizes_df, pd.DataFrame([new_row])],
-        #                             ignore_index=True,
-        #                         )
-        #         else:
-        #             print(
-        #                 f"Warning: Failed to create image for page {reported_page_number} for review"
-        #             )
-        #     except Exception as e:
-        #         print(
-        #             f"Error creating image for page {reported_page_number} for review: {e}"
-        #         )
         pymupdf_page.set_cropbox(pymupdf_page.mediabox)  # Set CropBox to MediaBox
 
         page_analyser_results = list()
@@ -8486,15 +8752,6 @@ def redact_text_pdf(
             ymax="ymax",
         )
 
-        # Coordinates need to be reversed for ymin and ymax to match with image annotator objects downstream
-
-        all_pages_decision_process_table["ymin"] = reverse_y_coords(
-            all_pages_decision_process_table, "ymin"
-        )
-        all_pages_decision_process_table["ymax"] = reverse_y_coords(
-            all_pages_decision_process_table, "ymax"
-        )
-
     # Convert decision table to relative coordinates
     if not all_line_level_ocr_results_df.empty:
 
@@ -8507,12 +8764,6 @@ def redact_text_pdf(
             ymax="height",
             coordinates_in_pdf_points=True,
         )
-
-        # Coordinates need to be reversed for ymin and ymax to match with image annotator objects downstream
-        if not all_line_level_ocr_results_df.empty:
-            all_line_level_ocr_results_df["top"] = reverse_y_coords(
-                all_line_level_ocr_results_df, "top"
-            )
 
     # Remove empty dictionary items from ocr results with words
     all_page_line_level_ocr_results_with_words = [

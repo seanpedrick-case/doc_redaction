@@ -57,7 +57,7 @@ The app now includes built-in example files that you can use to quickly test dif
 
 Once you have clicked on an example, you can click the 'Extract text and redact document' button to load the example into the app and redact it.
 
-**For tabular data:** On the 'Word or Excel/csv files' tab, you'll find examples for both redaction and duplicate detection:
+**For tabular data:** On the 'Word or Excel/CSV files' tab, you'll find examples for both redaction and duplicate detection:
 
 - **CSV file redaction** - Shows how to redact specific columns in tabular data
 - **Word document redaction** - Demonstrates Word document processing
@@ -546,7 +546,7 @@ The app also includes functionality to find duplicate cells or rows in CSV, Exce
 
 **Step 1: Upload files and configure analysis**
 
-Navigate to the 'Word or Excel/csv files' tab and scroll down to the "Find duplicate cells in tabular data" section. Upload your tabular files (CSV, Excel, or Parquet) and configure the analysis parameters:
+Navigate to the 'Word or Excel/CSV files' tab and scroll down to the "Find duplicate cells in tabular data" section. Upload your tabular files (CSV, Excel, or Parquet) and configure the analysis parameters:
 
 - **Similarity threshold**: Score (0-1) to consider cells a match. 1 = perfect match
 - **Minimum word count**: Cells with fewer words than this value are ignored

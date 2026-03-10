@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import gradio as gr
 import numpy as np
 import pandas as pd
+import polars as pl
 import pymupdf
 from gradio import Progress
 from pdf2image import convert_from_path, pdfinfo_from_path
@@ -797,6 +798,11 @@ def prepare_images_for_pages(
     return pdf_image_file_paths, page_sizes
 
 
+def _get_bbox(d: dict) -> list:
+    """Get bounding box list from dict; support both 'bounding_box' and 'boundingBox'."""
+    return d.get("bounding_box") or d.get("boundingBox") or [0, 0, 0, 0]
+
+
 def word_level_ocr_output_to_dataframe(ocr_results: dict) -> pd.DataFrame:
     """
     Convert a json of ocr results to a dataframe
@@ -819,23 +825,25 @@ def word_level_ocr_output_to_dataframe(ocr_results: dict) -> pd.DataFrame:
             line_number = int(line_data["line"])
             # Support both "confidence" (Textract/json_to_ocrresult) and "conf" (other OCR)
             line_conf = line_data.get("confidence", line_data.get("conf", 100.0))
+            line_bbox = _get_bbox(line_data)
             for word in line_data["words"]:
                 word_conf = word.get("confidence", word.get("conf", 100.0))
+                word_bbox = _get_bbox(word)
                 rows.append(
                     {
                         "page": page_number,
                         "line": line_number,
                         "word_text": word["text"],
-                        "word_x0": word["bounding_box"][0],
-                        "word_y0": word["bounding_box"][1],
-                        "word_x1": word["bounding_box"][2],
-                        "word_y1": word["bounding_box"][3],
+                        "word_x0": word_bbox[0],
+                        "word_y0": word_bbox[1],
+                        "word_x1": word_bbox[2],
+                        "word_y1": word_bbox[3],
                         "word_conf": word_conf,
                         "line_text": "",  # line_data['text'], # This data is too large to include
-                        "line_x0": line_data["bounding_box"][0],
-                        "line_y0": line_data["bounding_box"][1],
-                        "line_x1": line_data["bounding_box"][2],
-                        "line_y1": line_data["bounding_box"][3],
+                        "line_x0": line_bbox[0],
+                        "line_y0": line_bbox[1],
+                        "line_x1": line_bbox[2],
+                        "line_y1": line_bbox[3],
                         "line_conf": line_conf,
                     }
                 )
@@ -2068,238 +2076,225 @@ def divide_coordinates_by_page_sizes(
     if review_file_df.empty or xmin not in review_file_df.columns:
         return review_file_df  # Return early if empty or key column missing
 
-    # --- Initial Type Conversion ---
     coord_cols = [xmin, xmax, ymin, ymax]
     cols_to_convert = coord_cols + ["page"]
-    temp_df = review_file_df.copy()  # Work on a copy initially
-
     for col in cols_to_convert:
-        if col in temp_df.columns:
-            temp_df[col] = pd.to_numeric(temp_df[col], errors="coerce")
-        else:
-            # If essential 'page' or coord column missing, cannot proceed meaningfully
+        if col not in review_file_df.columns:
             if col == "page" or col in coord_cols:
                 print(
                     f"Warning: Required column '{col}' not found in review_file_df. Returning original DataFrame."
                 )
                 return review_file_df
 
-    # If any coordinate is less than 0, set it to 0
-    temp_df[xmin] = temp_df[xmin].apply(lambda x: 0 if x < 0 else x)
-    temp_df[xmax] = temp_df[xmax].apply(lambda x: 0 if x < 0 else x)
-    temp_df[ymin] = temp_df[ymin].apply(lambda x: 0 if x < 0 else x)
-    temp_df[ymax] = temp_df[ymax].apply(lambda x: 0 if x < 0 else x)
+    # Normalize columns in pandas so pl.from_pandas() does not fail on mixed types
+    temp_pd = review_file_df.copy()
+    for col in cols_to_convert:
+        if col in temp_pd.columns:
+            temp_pd[col] = pd.to_numeric(temp_pd[col], errors="coerce")
+    # Object columns with mixed int/str (e.g. id, label) make PyArrow fail; normalize to string
+    for col in temp_pd.columns:
+        if col not in cols_to_convert and temp_pd[col].dtype == object:
+            temp_pd[col] = temp_pd[col].astype(str)
+    df = pl.from_pandas(temp_pd)
+    for col in cols_to_convert:
+        if col in df.columns:
+            df = df.with_columns(pl.col(col).cast(pl.Float64, strict=False))
 
-    # Round all coordinates to 6 decimal places
-    temp_df[xmin] = temp_df[xmin].round(6)
-    temp_df[xmax] = temp_df[xmax].round(6)
-    temp_df[ymin] = temp_df[ymin].round(6)
-    temp_df[ymax] = temp_df[ymax].round(6)
-
-    # --- Identify Absolute Coordinates ---
-    # Create mask for rows where *all* coordinates are potentially absolute (> 1)
-    # Handle potential NaNs introduced by to_numeric - treat NaN as not absolute.
-    is_absolute_mask = (
-        ((temp_df[xmin] > 1) & (temp_df[xmin].notna()))
-        | ((temp_df[xmax] > 1) & (temp_df[xmax].notna()))
-        | ((temp_df[ymin] > 1) & (temp_df[ymin].notna()))
-        | ((temp_df[ymax] > 1) & (temp_df[ymax].notna()))
+    # Clip to 0 and round
+    df = df.with_columns(
+        [
+            pl.col(c).clip(0, float("inf")).round(6)
+            for c in coord_cols
+            if c in df.columns
+        ]
     )
 
-    # --- Separate DataFrames ---
-    df_rel = temp_df[
-        ~is_absolute_mask
-    ]  # Rows already relative or with NaN/mixed coords
-    df_abs = temp_df[
-        is_absolute_mask
-    ].copy()  # Absolute rows - COPY here to allow modifications
+    # Identify absolute coordinates (any coord > 1 and not null)
+    is_absolute = (
+        (pl.col(xmin) > 1) & pl.col(xmin).is_not_nan()
+        | (pl.col(xmax) > 1) & pl.col(xmax).is_not_nan()
+        | (pl.col(ymin) > 1) & pl.col(ymin).is_not_nan()
+        | (pl.col(ymax) > 1) & pl.col(ymax).is_not_nan()
+    )
+    df_rel = df.filter(~is_absolute)
+    df_abs = df.filter(is_absolute)
 
-    # --- Process Absolute Coordinates ---
-    if not df_abs.empty:
-        # Merge page sizes if necessary
-        if "image_width" not in df_abs.columns and not page_sizes_df.empty:
-            ps_df_copy = page_sizes_df.copy()  # Work on a copy of page sizes
-
-            # Ensure page is numeric for merge key matching
-            ps_df_copy["page"] = pd.to_numeric(ps_df_copy["page"], errors="coerce")
-
-            # Columns to merge from page_sizes
-            merge_cols = [
+    if not df_abs.is_empty() and not page_sizes_df.empty:
+        merge_cols = [
+            "page",
+            "image_width",
+            "image_height",
+            "mediabox_width",
+            "mediabox_height",
+        ]
+        available = [c for c in merge_cols if c in page_sizes_df.columns]
+        if "page" in available:
+            ps = pl.from_pandas(page_sizes_df[available].copy())
+            for c in [
                 "page",
                 "image_width",
                 "image_height",
                 "mediabox_width",
                 "mediabox_height",
-            ]
-            available_merge_cols = [
-                col for col in merge_cols if col in ps_df_copy.columns
-            ]
-
-            # Prepare dimension columns in the copy
-            for col in [
-                "image_width",
-                "image_height",
-                "mediabox_width",
-                "mediabox_height",
             ]:
-                if col in ps_df_copy.columns:
-                    # Replace "<NA>" string if present
-                    if ps_df_copy[col].dtype == "object":
-                        ps_df_copy[col] = ps_df_copy[col].replace("<NA>", pd.NA)
-                    # Convert to numeric
-                    ps_df_copy[col] = pd.to_numeric(ps_df_copy[col], errors="coerce")
+                if c in ps.columns:
+                    ps = ps.with_columns(pl.col(c).cast(pl.Float64, strict=False))
+            df_abs = df_abs.join(ps, on="page", how="left")
 
-            # Perform the merge
-            if "page" in available_merge_cols:  # Check if page exists for merging
-                df_abs = df_abs.merge(
-                    ps_df_copy[available_merge_cols], on="page", how="left"
-                )
-            else:
-                print(
-                    "Warning: 'page' column not found in page_sizes_df. Cannot merge dimensions."
-                )
-
-        # When coordinates are in PDF points (e.g. from redact_text_pdf), always use
-        # mediabox for division. Otherwise fall back to mediabox when image dimensions
-        # are missing (e.g. unvisited pages, or selectable text without prepared images).
-        # When pages_in_pdf_points is set (EFFICIENT_OCR mixed), use mediabox only for
-        # those pages and image dimensions for the rest.
         if "mediabox_width" in df_abs.columns and "mediabox_height" in df_abs.columns:
             if coordinates_in_pdf_points:
-                # Force use of mediabox so PDF-point coordinates are divided correctly
-                # even when image_width/image_height exist (e.g. from a previous run).
-                df_abs["image_width"] = df_abs["mediabox_width"]
-                df_abs["image_height"] = df_abs["mediabox_height"]
+                df_abs = df_abs.with_columns(
+                    pl.col("mediabox_width").alias("image_width"),
+                    pl.col("mediabox_height").alias("image_height"),
+                )
             elif pages_in_pdf_points is not None:
-                # Per-page: use mediabox for pages in pages_in_pdf_points, image dims otherwise
-                page_numeric = pd.to_numeric(df_abs["page"], errors="coerce")
-                use_mediabox = page_numeric.isin(pages_in_pdf_points)
-                img_w = df_abs["image_width"].fillna(df_abs["mediabox_width"])
-                img_h = df_abs["image_height"].fillna(df_abs["mediabox_height"])
-                df_abs["_div_width"] = np.where(
-                    use_mediabox, df_abs["mediabox_width"], img_w
+                # Normalize to int set so 1-based page matches (e.g. 1.0 -> 1)
+                _pdf_pts = {int(p) for p in pages_in_pdf_points}
+                use_mediabox = (
+                    pl.col("page").cast(pl.Int64, strict=False).is_in(list(_pdf_pts))
                 )
-                df_abs["_div_height"] = np.where(
-                    use_mediabox, df_abs["mediabox_height"], img_h
+                img_w = pl.col("mediabox_width")
+                img_h = pl.col("mediabox_height")
+                if "image_width" in df_abs.columns:
+                    img_w = pl.col("image_width").fill_null(pl.col("mediabox_width"))
+                if "image_height" in df_abs.columns:
+                    img_h = pl.col("image_height").fill_null(pl.col("mediabox_height"))
+                # For pages_in_pdf_points always use mediabox so text-path coords (PDF points) divide correctly
+                df_abs = df_abs.with_columns(
+                    pl.when(use_mediabox)
+                    .then(pl.col("mediabox_width"))
+                    .otherwise(img_w)
+                    .alias("image_width"),
+                    pl.when(use_mediabox)
+                    .then(pl.col("mediabox_height"))
+                    .otherwise(img_h)
+                    .alias("image_height"),
                 )
-                df_abs["image_width"] = df_abs["_div_width"]
-                df_abs["image_height"] = df_abs["_div_height"]
-                df_abs.drop(columns=["_div_width", "_div_height"], inplace=True)
+                # If join missed (nulls), fall back to mediabox for those pages so we don't divide by image pixels
+                df_abs = df_abs.with_columns(
+                    pl.when(use_mediabox & pl.col("image_width").is_null())
+                    .then(pl.col("mediabox_width"))
+                    .otherwise(pl.col("image_width"))
+                    .alias("image_width"),
+                    pl.when(use_mediabox & pl.col("image_height").is_null())
+                    .then(pl.col("mediabox_height"))
+                    .otherwise(pl.col("image_height"))
+                    .alias("image_height"),
+                )
             elif "image_width" not in df_abs.columns:
-                df_abs["image_width"] = df_abs["mediabox_width"]
-                df_abs["image_height"] = df_abs["mediabox_height"]
-            elif "image_width" in df_abs.columns:
-                df_abs["image_width"] = df_abs["image_width"].fillna(
-                    df_abs["mediabox_width"]
+                df_abs = df_abs.with_columns(
+                    pl.col("mediabox_width").alias("image_width"),
+                    pl.col("mediabox_height").alias("image_height"),
                 )
-                df_abs["image_height"] = df_abs["image_height"].fillna(
-                    df_abs["mediabox_height"]
-                )
-
-        # Ensure divisor columns are numeric before division
-        divisors_numeric = True
-        for col in ["image_width", "image_height"]:
-            if col in df_abs.columns:
-                df_abs[col] = pd.to_numeric(df_abs[col], errors="coerce")
             else:
-                print(
-                    f"Warning: Dimension column '{col}' missing. Cannot perform division."
+                df_abs = df_abs.with_columns(
+                    pl.col("image_width")
+                    .fill_null(pl.col("mediabox_width"))
+                    .alias("image_width"),
+                    pl.col("image_height")
+                    .fill_null(pl.col("mediabox_height"))
+                    .alias("image_height"),
                 )
-                divisors_numeric = False
 
-        # Perform division if dimensions are available and numeric
-        if (
-            divisors_numeric
-            and "image_width" in df_abs.columns
-            and "image_height" in df_abs.columns
-        ):
-            # Use np.errstate to suppress warnings about division by zero or NaN if desired
-            with np.errstate(divide="ignore", invalid="ignore"):
-                df_abs[xmin] = round(df_abs[xmin] / df_abs["image_width"], 6)
-                df_abs[xmax] = round(df_abs[xmax] / df_abs["image_width"], 6)
-                df_abs[ymin] = round(df_abs[ymin] / df_abs["image_height"], 6)
-                df_abs[ymax] = round(df_abs[ymax] / df_abs["image_height"], 6)
-                # Replace potential infinities with NaN (optional, depending on desired outcome)
-                df_abs.replace([np.inf, -np.inf], np.nan, inplace=True)
+        if "image_width" in df_abs.columns and "image_height" in df_abs.columns:
+            df_abs = df_abs.with_columns(
+                (pl.col(xmin) / pl.col("image_width")).round(6).alias(xmin),
+                (pl.col(xmax) / pl.col("image_width")).round(6).alias(xmax),
+                (pl.col(ymin) / pl.col("image_height")).round(6).alias(ymin),
+                (pl.col(ymax) / pl.col("image_height")).round(6).alias(ymax),
+            )
+            df_abs = df_abs.with_columns(
+                [
+                    pl.when(pl.col(c).is_in([float("inf"), float("-inf")]))
+                    .then(pl.lit(None).cast(pl.Float64))
+                    .otherwise(pl.col(c))
+                    .alias(c)
+                    for c in coord_cols
+                ]
+            )
         else:
             print(
                 "Skipping coordinate division due to missing or non-numeric dimension columns."
             )
 
-    # --- Combine Relative and Processed Absolute DataFrames ---
-    dfs_to_concat = [df for df in [df_rel, df_abs] if not df.empty]
-
-    if dfs_to_concat:
-        final_df = pd.concat(dfs_to_concat, ignore_index=True)
-    else:
-        # If both splits were empty, return an empty DF with original columns
+    if df_rel.is_empty() and df_abs.is_empty():
         print(
             "Warning: Both relative and absolute splits resulted in empty DataFrames."
         )
-        final_df = pd.DataFrame(columns=review_file_df.columns)
+        return pd.DataFrame(columns=review_file_df.columns)
+    # Drop dimension columns from df_abs so concat matches df_rel schema (Polars requires same width)
+    for c in ["image_width", "image_height", "mediabox_width", "mediabox_height"]:
+        if c in df_abs.columns:
+            df_abs = df_abs.drop(c)
+    out = pl.concat([df_rel, df_abs])
 
-    # --- Final Sort ---
-    required_sort_columns = {"page", xmin, ymin}
-    if not final_df.empty and required_sort_columns.issubset(final_df.columns):
-        # Ensure sort columns are numeric before sorting
-        final_df["page"] = pd.to_numeric(final_df["page"], errors="coerce")
-        final_df[ymin] = pd.to_numeric(final_df[ymin], errors="coerce")
-        final_df[xmin] = pd.to_numeric(final_df[xmin], errors="coerce")
-        # Sort by page, ymin, xmin (note order compared to multiply function)
-        final_df.sort_values(["page", ymin, xmin], inplace=True, na_position="last")
+    if not out.is_empty():
+        out = out.sort(["page", ymin, xmin], nulls_last=True)
 
-    # --- Clean Up Columns ---
-    # Correctly drop columns and reassign the result
-    cols_to_drop = ["image_width", "image_height", "mediabox_width", "mediabox_height"]
-    final_df = final_df.drop(columns=cols_to_drop, errors="ignore")
+        # Clamp to [0,1] while preserving box dimensions.
+        # Cap ymax at 1 - 1e-6 so no box spans the full bottom (avoids single-char words with ymax=1).
+        _ymax_cap = 1.0 - 1e-6
+        out = out.with_columns(
+            pl.col(ymin).alias("_ymin_orig"),
+            pl.col(ymax).alias("_ymax_orig"),
+            pl.col(xmin).alias("_xmin_orig"),
+            pl.col(xmax).alias("_xmax_orig"),
+        )
+        out = out.with_columns(
+            pl.col(ymin).clip(0, float("inf")).alias(ymin),
+            pl.col(xmin).clip(0, float("inf")).alias(xmin),
+            pl.col(xmax).clip(float("-inf"), 1).alias(xmax),
+            pl.col(ymax).clip(float("-inf"), _ymax_cap).alias(ymax),
+        )
+        # Preserve height/width when clamping
+        out = out.with_columns(
+            pl.when(pl.col("_ymax_orig") > 1)
+            .then(
+                (pl.col(ymin) + (pl.col("_ymax_orig") - pl.col("_ymin_orig"))).clip(
+                    float("-inf"), _ymax_cap
+                )
+            )
+            .otherwise(pl.col(ymax))
+            .alias(ymax),
+            pl.when(pl.col("_xmax_orig") > 1)
+            .then(
+                (pl.col(xmin) + (pl.col("_xmax_orig") - pl.col("_xmin_orig"))).clip(
+                    float("-inf"), 1
+                )
+            )
+            .otherwise(pl.col(xmax))
+            .alias(xmax),
+        )
+        out = out.with_columns(
+            pl.when(pl.col("_ymin_orig") < 0)
+            .then(
+                (pl.col(ymax) - (pl.col("_ymax_orig") - pl.col("_ymin_orig"))).clip(
+                    0, float("inf")
+                )
+            )
+            .otherwise(pl.col(ymin))
+            .alias(ymin),
+            pl.when(pl.col("_xmin_orig") < 0)
+            .then(
+                (pl.col(xmax) - (pl.col("_xmax_orig") - pl.col("_xmin_orig"))).clip(
+                    0, float("inf")
+                )
+            )
+            .otherwise(pl.col(xmin))
+            .alias(xmin),
+        )
+        out = out.drop(["_ymin_orig", "_ymax_orig", "_xmin_orig", "_xmax_orig"])
+        out = out.with_columns(
+            [pl.col(c).round(6) for c in coord_cols if c in out.columns]
+        )
 
-    # If coordinates fall outside [0, 1], clamp to bounds while preserving box dimensions
-    # so that thin boxes (e.g. OCR word with ymax slightly > page height) don't get
-    # stretched to the full page (e.g. ymax=1 while ymin stays small).
-    ymin_vals = pd.to_numeric(final_df[ymin], errors="coerce")
-    ymax_vals = pd.to_numeric(final_df[ymax], errors="coerce")
-    xmin_vals = pd.to_numeric(final_df[xmin], errors="coerce")
-    xmax_vals = pd.to_numeric(final_df[xmax], errors="coerce")
-    final_df[ymin] = ymin_vals.clip(lower=0)
-    final_df[xmin] = xmin_vals.clip(lower=0)
-    final_df[xmax] = xmax_vals.clip(upper=1)
-    final_df[ymax] = ymax_vals.clip(upper=1)
-    # Preserve height: if ymax was clamped to 1, keep box height so thin boxes don't span to page bottom
-    ymax_gt_1 = ymax_vals > 1
-    if ymax_gt_1.any():
-        preserved_ymax = (
-            final_df.loc[ymax_gt_1, ymin] + (ymax_vals - ymin_vals).loc[ymax_gt_1]
-        ).clip(upper=1)
-        final_df.loc[ymax_gt_1, ymax] = preserved_ymax
-    # Preserve width: if xmax was clamped to 1, keep box width
-    xmax_gt_1 = xmax_vals > 1
-    if xmax_gt_1.any():
-        preserved_xmax = (
-            final_df.loc[xmax_gt_1, xmin] + (xmax_vals - xmin_vals).loc[xmax_gt_1]
-        ).clip(upper=1)
-        final_df.loc[xmax_gt_1, xmax] = preserved_xmax
-    # If ymin was clamped from below 0, preserve height by shifting ymax down
-    ymin_lt_0 = ymin_vals < 0
-    if ymin_lt_0.any():
-        preserved_ymin = (
-            final_df.loc[ymin_lt_0, ymax] - (ymax_vals - ymin_vals).loc[ymin_lt_0]
-        ).clip(lower=0)
-        final_df.loc[ymin_lt_0, ymin] = preserved_ymin
-    # If xmin was clamped from below 0, preserve width
-    xmin_lt_0 = xmin_vals < 0
-    if xmin_lt_0.any():
-        preserved_xmin = (
-            final_df.loc[xmin_lt_0, xmax] - (xmax_vals - xmin_vals).loc[xmin_lt_0]
-        ).clip(lower=0)
-        final_df.loc[xmin_lt_0, xmin] = preserved_xmin
-
-    # Round to match coordinate precision used earlier in this function
-    final_df[ymin] = final_df[ymin].round(6)
-    final_df[ymax] = final_df[ymax].round(6)
-    final_df[xmin] = final_df[xmin].round(6)
-    final_df[xmax] = final_df[xmax].round(6)
-
-    return final_df
+    result = out.to_pandas()
+    # Restore page column to integer-like type so UI filters (e.g. page == "1") match;
+    # Polars cast made it float (1.0) so astype(str) became "1.0" and broke dropdown filter.
+    if "page" in result.columns and not result.empty:
+        result["page"] = pd.to_numeric(result["page"], errors="coerce")
+        result["page"] = result["page"].astype("Int64")
+    return result
 
 
 def multiply_coordinates_by_page_sizes(
@@ -2315,100 +2310,90 @@ def multiply_coordinates_by_page_sizes(
 
     Separates relative (<=1) and absolute (>1) coordinates, merges page sizes
     for relative coordinates, calculates absolute pixel values, and recombines.
+    Implemented with Polars for performance; returns pandas DataFrame.
     """
     if review_file_df.empty or xmin not in review_file_df.columns:
         return review_file_df  # Return early if empty or key column missing
 
     coord_cols = [xmin, xmax, ymin, ymax]
-    # Initial type conversion for coordinates and page
+    df = pl.from_pandas(review_file_df.copy())
+
+    # Cast coordinates and page to numeric
     for col in coord_cols + ["page"]:
-        if col in review_file_df.columns:
-            # Use astype for potentially faster conversion if confident,
-            # but to_numeric is safer for mixed types/errors
-            review_file_df[col] = pd.to_numeric(review_file_df[col], errors="coerce")
+        if col in df.columns:
+            df = df.with_columns(pl.col(col).cast(pl.Float64, strict=False))
 
-    # --- Identify relative coordinates ---
-    # Create mask for rows where *all* coordinates are potentially relative (<= 1)
-    # Handle potential NaNs introduced by to_numeric - treat NaN as not relative here.
-    is_relative_mask = (
-        (review_file_df[xmin].le(1) & review_file_df[xmin].notna())
-        & (review_file_df[xmax].le(1) & review_file_df[xmax].notna())
-        & (review_file_df[ymin].le(1) & review_file_df[ymin].notna())
-        & (review_file_df[ymax].le(1) & review_file_df[ymax].notna())
+    # Identify relative coordinates (all <= 1 and not null)
+    is_relative = (
+        pl.col(xmin).le(1)
+        & pl.col(xmin).is_not_nan()
+        & pl.col(xmax).le(1)
+        & pl.col(xmax).is_not_nan()
+        & pl.col(ymin).le(1)
+        & pl.col(ymin).is_not_nan()
+        & pl.col(ymax).le(1)
+        & pl.col(ymax).is_not_nan()
     )
+    df_abs = df.filter(~is_relative)
+    df_rel = df.filter(is_relative)
 
-    # Separate DataFrames (minimal copies)
-    df_abs = review_file_df[~is_relative_mask].copy()  # Keep absolute rows separately
-    df_rel = review_file_df[is_relative_mask].copy()  # Work only with relative rows
+    if df_rel.is_empty():
+        if not df_abs.is_empty() and {"page", xmin, ymin}.issubset(df_abs.columns):
+            df_abs = df_abs.sort(["page", xmin, ymin], nulls_last=True)
+        return df_abs.to_pandas()
 
-    if df_rel.empty:
-        # If no relative coordinates, just sort and return absolute ones (if any)
-        if not df_abs.empty and {"page", xmin, ymin}.issubset(df_abs.columns):
-            df_abs.sort_values(["page", xmin, ymin], inplace=True, na_position="last")
-        return df_abs
-
-    # --- Process relative coordinates ---
-    if "image_width" not in df_rel.columns and not page_sizes_df.empty:
-        # Prepare page_sizes_df for merge
-        page_sizes_df = page_sizes_df.copy()  # Avoid modifying original page_sizes_df
-        page_sizes_df["page"] = pd.to_numeric(page_sizes_df["page"], errors="coerce")
-        # Ensure proper NA handling for image dimensions
-        page_sizes_df[["image_width", "image_height"]] = page_sizes_df[
-            ["image_width", "image_height"]
-        ].replace("<NA>", pd.NA)
-        page_sizes_df["image_width"] = pd.to_numeric(
-            page_sizes_df["image_width"], errors="coerce"
+    # Join page sizes for relative rows
+    if (
+        not page_sizes_df.empty
+        and "image_width" in page_sizes_df.columns
+        and "image_height" in page_sizes_df.columns
+    ):
+        ps = pl.from_pandas(
+            page_sizes_df[["page", "image_width", "image_height"]].copy()
         )
-        page_sizes_df["image_height"] = pd.to_numeric(
-            page_sizes_df["image_height"], errors="coerce"
+        ps = ps.with_columns(
+            pl.col("page").cast(pl.Float64, strict=False),
+            pl.col("image_width").cast(pl.Float64, strict=False),
+            pl.col("image_height").cast(pl.Float64, strict=False),
         )
+        df_rel = df_rel.join(ps, on="page", how="left")
 
-        # Merge page sizes
-        df_rel = df_rel.merge(
-            page_sizes_df[["page", "image_width", "image_height"]],
-            on="page",
-            how="left",
-        )
+    # Multiply coordinates where dimensions exist
+    has_size = pl.col("image_width").is_not_nan() & pl.col("image_height").is_not_nan()
+    df_rel = df_rel.with_columns(
+        [
+            pl.when(has_size)
+            .then((pl.col(xmin) * pl.col("image_width")).round(6))
+            .otherwise(pl.col(xmin))
+            .alias(xmin),
+            pl.when(has_size)
+            .then((pl.col(xmax) * pl.col("image_width")).round(6))
+            .otherwise(pl.col(xmax))
+            .alias(xmax),
+            pl.when(has_size)
+            .then((pl.col(ymin) * pl.col("image_height")).round(6))
+            .otherwise(pl.col(ymin))
+            .alias(ymin),
+            pl.when(has_size)
+            .then((pl.col(ymax) * pl.col("image_height")).round(6))
+            .otherwise(pl.col(ymax))
+            .alias(ymax),
+        ]
+    )
+    for c in ["image_width", "image_height"]:
+        if c in df_rel.columns:
+            df_rel = df_rel.drop(c)
 
-    # Multiply coordinates where image dimensions are available
-    if "image_width" in df_rel.columns:
-        # Create mask for rows in df_rel that have valid image dimensions
-        has_size_mask = df_rel["image_width"].notna() & df_rel["image_height"].notna()
-
-        # Apply multiplication using .loc and the mask (vectorized and efficient)
-        df_rel.loc[has_size_mask, xmin] *= df_rel.loc[has_size_mask, "image_width"]
-        df_rel.loc[has_size_mask, xmax] *= df_rel.loc[has_size_mask, "image_width"]
-        df_rel.loc[has_size_mask, ymin] *= df_rel.loc[has_size_mask, "image_height"]
-        df_rel.loc[has_size_mask, ymax] *= df_rel.loc[has_size_mask, "image_height"]
-
-    # --- Combine absolute and processed relative DataFrames ---
-    # Use list comprehension to handle potentially empty DataFrames
-    dfs_to_concat = [df for df in [df_abs, df_rel] if not df.empty]
-
-    if not dfs_to_concat:
-        return pd.DataFrame()  # Return empty if both are empty
-
-    final_df = pd.concat(dfs_to_concat, ignore_index=True)
-
-    # --- Final Sort ---
-    required_sort_columns = {"page", xmin, ymin}
-    if not final_df.empty and required_sort_columns.issubset(final_df.columns):
-        # Handle potential NaNs in sort columns gracefully
-        final_df.sort_values(["page", xmin, ymin], inplace=True, na_position="last")
-
-    # Round coordinates to 6 decimal places
-    final_df[xmin] = final_df[xmin].round(6)
-    final_df[xmax] = final_df[xmax].round(6)
-    final_df[ymin] = final_df[ymin].round(6)
-    final_df[ymax] = final_df[ymax].round(6)
-
-    # Convert any negative coordinates to 0
-    final_df[xmin] = final_df[xmin].apply(lambda x: 0 if x < 0 else x)
-    final_df[xmax] = final_df[xmax].apply(lambda x: 0 if x < 0 else x)
-    final_df[ymin] = final_df[ymin].apply(lambda x: 0 if x < 0 else x)
-    final_df[ymax] = final_df[ymax].apply(lambda x: 0 if x < 0 else x)
-
-    return final_df
+    out = pl.concat([df_abs, df_rel])
+    out = out.sort(["page", xmin, ymin], nulls_last=True)
+    out = out.with_columns(
+        [
+            pl.col(c).clip(0, float("inf")).round(6)
+            for c in coord_cols
+            if c in out.columns
+        ]
+    )
+    return out.to_pandas()
 
 
 def do_proximity_match_by_page_for_text(df1: pd.DataFrame, df2: pd.DataFrame):
@@ -2562,10 +2547,10 @@ def _extract_page_number(image_path: Any) -> int:
 
 def convert_annotation_data_to_dataframe(all_annotations: List[Dict[str, Any]]):
     """
-    Convert annotation list to DataFrame using Pandas explode and json_normalize.
+    Convert annotation list to DataFrame using Polars for performance.
+    Returns a pandas DataFrame with columns image, page, label, color, xmin, xmax, ymin, ymax, text, id.
     """
     if not all_annotations:
-        # Return an empty DataFrame with the expected schema if input is empty
         print("No annotations found, returning empty dataframe")
         return pd.DataFrame(
             columns=[
@@ -2582,97 +2567,94 @@ def convert_annotation_data_to_dataframe(all_annotations: List[Dict[str, Any]]):
             ]
         )
 
-    # 1. Create initial DataFrame from the list of annotations
-    # Use list comprehensions with .get() for robustness
-    df = pd.DataFrame(
-        {
-            "image": [anno.get("image") for anno in all_annotations],
-            # Ensure 'boxes' defaults to an empty list if missing or None
-            "boxes": [
-                (
-                    anno.get("boxes")
-                    if isinstance(anno.get("boxes"), list)
-                    else (
-                        [anno.get("boxes")]
-                        if isinstance(anno.get("boxes"), dict)
-                        else []
-                    )
-                )
-                for anno in all_annotations
-            ],
-        }
-    )
-
-    # 2. Calculate the page number using the helper function
-    df["page"] = df["image"].apply(_extract_page_number)
-
-    # 3. Handle empty 'boxes' lists *before* exploding.
-    # Explode removes rows where the list is empty. We want to keep them
-    # as rows with NA values. Replace empty lists with a list containing
-    # a single placeholder dictionary.
     placeholder_box = {
-        "xmin": pd.NA,
-        "xmax": pd.NA,
-        "ymin": pd.NA,
-        "ymax": pd.NA,
-        "text": pd.NA,
-        "id": pd.NA,
+        "xmin": None,
+        "xmax": None,
+        "ymin": None,
+        "ymax": None,
+        "text": None,
+        "id": None,
+        "label": None,
     }
-    df["boxes"] = df["boxes"].apply(lambda x: x if x else [placeholder_box])
+    records = []
+    for anno in all_annotations:
+        image = anno.get("image")
+        page_from_image = _extract_page_number(image)
+        boxes = anno.get("boxes")
+        if not isinstance(boxes, list):
+            boxes = [boxes] if isinstance(boxes, dict) else []
+        if not boxes:
+            boxes = [placeholder_box.copy()]
+        for box in boxes:
+            if isinstance(box, dict):
+                # Use per-box page when present (e.g. text-path with empty image so all don't become page 1).
+                # Reject 0 or negative (UI/state use 1-based pages); fall back to page_from_image.
+                box_page = box.get("page")
+                if box_page is not None:
+                    try:
+                        p = int(float(box_page))
+                        page = p if p >= 1 else page_from_image
+                    except (TypeError, ValueError):
+                        page = page_from_image
+                else:
+                    page = page_from_image
+                row = {"image": image, "page": page}
+                for k, v in box.items():
+                    if k != "page" and k != "image":
+                        # Normalise colour to list so Polars gets a consistent schema
+                        # (some boxes have color as list [r,g,b], tuple, or string)
+                        if k == "color" and v is not None:
+                            if isinstance(v, (list, tuple)) and len(v) >= 3:
+                                v = [int(float(x)) for x in v[:3]]
+                            elif isinstance(v, str):
+                                # e.g. "128,128,128" or "(0, 0, 0)"
+                                s = v.strip("()").replace(" ", "")
+                                parts = s.split(",")
+                                if len(parts) >= 3:
+                                    v = [int(float(p)) for p in parts[:3]]
+                                else:
+                                    v = [0, 0, 0]
+                            else:
+                                v = [0, 0, 0]
+                        elif k == "color" and v is None:
+                            v = [0, 0, 0]
+                        row[k] = v
+                records.append(row)
 
-    # 4. Explode the 'boxes' column. Each item in the list becomes a new row.
-    df_exploded = df.explode("boxes", ignore_index=True)
+    if not records:
+        return pd.DataFrame(
+            columns=[
+                "image",
+                "page",
+                "label",
+                "color",
+                "xmin",
+                "xmax",
+                "ymin",
+                "ymax",
+                "text",
+                "id",
+            ]
+        )
 
-    # 5. Normalize the 'boxes' column (which now contains dictionaries or the placeholder)
-    # This turns the dictionaries into separate columns.
-    # Check for NaNs or non-dict items just in case, though placeholder handles most cases.
-    mask = df_exploded["boxes"].notna() & df_exploded["boxes"].apply(
-        isinstance, args=(dict,)
-    )
-    normalized_boxes = pd.json_normalize(df_exploded.loc[mask, "boxes"])
-
-    # 6. Combine the base data (image, page) with the normalized box data
-    # Use the index of the exploded frame (where mask is True) to ensure correct alignment
-    # Drop any columns from normalized_boxes that already exist on the left side to avoid
-    # duplicate column errors (e.g. box dicts may carry their own "page" key).
-    left_cols = ["image", "page"]
-    normalized_boxes = normalized_boxes.drop(
-        columns=[c for c in left_cols if c in normalized_boxes.columns]
-    )
-    final_df = (
-        df_exploded.loc[mask, left_cols].reset_index(drop=True).join(normalized_boxes)
-    )
-
-    # --- Optional: Handle rows that might have had non-dict items in 'boxes' ---
-    # If there were rows filtered out by 'mask', you might want to add them back
-    # with NA values for box columns. However, the placeholder strategy usually
-    # prevents this from being necessary.
-
-    # 7. Ensure essential columns exist and set column order
+    df = pl.from_dicts(records)
     essential_box_cols = ["xmin", "xmax", "ymin", "ymax", "text", "id", "label"]
     for col in essential_box_cols:
-        if col not in final_df.columns:
-            final_df[col] = pd.NA  # Add column with NA if it wasn't present in any box
-        final_df[col] = final_df[col].replace({None: pd.NA})
-
-    base_cols = ["image"]
-    extra_box_cols = [
-        col
-        for col in final_df.columns
-        if col not in base_cols and col not in essential_box_cols
-    ]
-    final_col_order = base_cols + essential_box_cols + sorted(extra_box_cols)
-
-    # Reindex to ensure consistent column order and presence of essential columns
-    # Using fill_value=pd.NA isn't strictly needed here as we added missing columns above,
-    # but it's good practice if columns could be missing for other reasons.
-    final_df = final_df.reindex(columns=final_col_order, fill_value=pd.NA)
-    final_df = final_df.dropna(
-        subset=["xmin", "xmax", "ymin", "ymax", "text", "id", "label"], how="all"
+        if col not in df.columns:
+            df = df.with_columns(pl.lit(None).alias(col))
+    # Drop rows where all of the essential box fields are null (matches pandas dropna(..., how="all"))
+    null_mask = pl.all_horizontal(
+        [pl.col(c).is_null() for c in essential_box_cols if c in df.columns]
     )
-    final_df.replace({None: pd.NA})
-
-    return final_df
+    df = df.filter(~null_mask)
+    base_cols = ["image"]
+    extra_box_cols = sorted(
+        [c for c in df.columns if c not in base_cols and c not in essential_box_cols]
+    )
+    final_col_order = base_cols + essential_box_cols + extra_box_cols
+    final_col_order = [c for c in final_col_order if c in df.columns]
+    df = df.select(final_col_order)
+    return df.to_pandas()
 
 
 def create_annotation_dicts_from_annotation_df(
@@ -3624,65 +3606,46 @@ def convert_review_df_to_annotation_json(
     if not review_file_df.empty:
         # Convert list colors to tuples (important for some downstream uses)
         if "color" in review_file_df.columns:
-            review_file_df["color"] = review_file_df["color"].apply(
-                lambda x: tuple(x) if isinstance(x, list) else x
-            )
+            is_list = review_file_df["color"].apply(lambda x: isinstance(x, list))
+            if is_list.any():
+                review_file_df.loc[is_list, "color"] = review_file_df.loc[
+                    is_list, "color"
+                ].apply(tuple)
         # Ensure page column is nullable integer type for reliable grouping
         if "page" in review_file_df.columns:
             review_file_df["page"] = review_file_df["page"].astype("Int64")
 
     # --- Group Annotations by Page ---
-    if "page" in review_file_df.columns:
-        grouped_annotations = review_file_df.groupby("page")
-        group_keys = set(
-            grouped_annotations.groups.keys()
-        )  # Use set for faster lookups
-    else:
-        # Cannot group if page column is missing
-        print("Error: 'page' column missing, cannot group annotations.")
-        grouped_annotations = None
-        group_keys = set()
-
-    # --- Build JSON Structure ---
-    json_data = list()
     output_cols_for_boxes = [
         col
         for col in ["label", "color", xmin, ymin, xmax, ymax, "id", "text"]
         if col in review_file_df.columns
     ]
 
-    # Iterate through page_sizes_df to define the structure (one entry per image path)
-    for _, row in page_sizes_df.iterrows():
-        page_num = row["page"]  # Already Int64
-        pdf_image_path = row["image_path"]
-        annotation_boxes = list()  # Default to empty list
-
-        # Check if the page exists in the grouped annotations (using the faster set lookup)
-        # Check pd.notna because page_num could be <NA> if conversion failed
-        if pd.notna(page_num) and page_num in group_keys and grouped_annotations:
-            try:
-                page_group_df = grouped_annotations.get_group(page_num)
-                # Convert the group to list of dicts, selecting only needed box properties
-                # Handle potential NaN coordinates before conversion to JSON
-                annotation_boxes = (
-                    page_group_df[output_cols_for_boxes]
+    if "page" in review_file_df.columns:
+        # Build page -> list of box dicts once (avoids iterrows + get_group per page)
+        page_to_boxes = {}
+        for page_num, group in review_file_df.groupby("page"):
+            if pd.notna(page_num):
+                page_to_boxes[page_num] = (
+                    group[output_cols_for_boxes]
                     .replace({np.nan: None})
                     .to_dict(orient="records")
                 )
+    else:
+        print("Error: 'page' column missing, cannot group annotations.")
+        page_to_boxes = {}
 
-                # Optional: Round coordinates here if needed AFTER potential multiplication
-                # for box in annotation_boxes:
-                #     for coord in [xmin, ymin, xmax, ymax]:
-                #         if coord in box and box[coord] is not None:
-                #             box[coord] = round(float(box[coord]), 2) # Example: round to 2 decimals
-
-            except KeyError:
-                print(
-                    f"Warning: Group key {page_num} not found despite being in group_keys (should not happen)."
-                )
-                annotation_boxes = list()  # Keep empty
-
-        # Append the structured data for this image/page
-        json_data.append({"image": pdf_image_path, "boxes": annotation_boxes})
+    # --- Build JSON Structure ---
+    # Iterate page_sizes by column (no iterrows); lookup boxes by page
+    json_data = [
+        {
+            "image": pdf_image_path,
+            "boxes": page_to_boxes.get(page_num, []) if pd.notna(page_num) else [],
+        }
+        for page_num, pdf_image_path in zip(
+            page_sizes_df["page"], page_sizes_df["image_path"]
+        )
+    ]
 
     return json_data

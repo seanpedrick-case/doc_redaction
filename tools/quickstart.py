@@ -110,7 +110,7 @@ def handle_step_2_next(
             colnames_dropdown,  # walkthrough_colnames
             excel_sheets_dropdown,  # walkthrough_excel_sheets
             main_colnames_update,  # in_colnames
-            main_excel_sheets_update,  # in_excel_sheets (defined in "Word or Excel/csv files" tab)
+            main_excel_sheets_update,  # in_excel_sheets (defined in "Word or Excel/CSV files" tab)
             gr.Radio(
                 visible=show_text_extract_method
             ),  # walkthrough_text_extract_method_radio

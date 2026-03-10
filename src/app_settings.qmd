@@ -343,13 +343,17 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Description:** Minimum number of extractable words on a page to use the text-only route when `EFFICIENT_OCR` is enabled; below this threshold the page uses OCR.
     * **Default Value:** `20`
 
+* **`MAX_WORKERS`**
+    * **Description:** Default maximum number of worker threads for parallel processing across the app. Used as the default or cap for thread pools in review (saving redacted pages, loading page images), file conversion (PDF-to-images, input file listing, annotation processing), file redaction (text extraction, merge/summary, pikepdf annotations), custom image analyser (mapping analyzer results to bounding boxes), and data anonymisation (initial column cleaning). When not set, `OCR_FIRST_PASS_MAX_WORKERS` and `SUMMARY_PAGE_GROUP_MAX_WORKERS` default to this value; set those explicitly to override for OCR or summarisation only.
+    * **Default Value:** `8`
+
 * **`OCR_FIRST_PASS_MAX_WORKERS`**
-    * **Description:** Maximum number of threads for the OCR first pass in image-based PDF redaction (e.g. when using AWS Textract). Set to `1` for sequential processing; use a value greater than `1` to run OCR on multiple pages in parallel. Only applies when the OCR method supports parallel calls (e.g. Textract). Can be overridden via CLI `--ocr_first_pass_max_workers` or direct-mode/Lambda env.
-    * **Default Value:** `3`
+    * **Description:** Maximum number of threads for the OCR first pass in image-based PDF redaction (e.g. when using AWS Textract). Set to `1` for sequential processing; use a value greater than `1` to run OCR on multiple pages in parallel. Only applies when the OCR method supports parallel calls (e.g. Textract). Defaults to `MAX_WORKERS` if not set. Can be overridden via CLI `--ocr_first_pass_max_workers` or direct-mode/Lambda env.
+    * **Default Value:** Same as `MAX_WORKERS` (e.g. `8`)
 
 * **`SUMMARY_PAGE_GROUP_MAX_WORKERS`**
-    * **Description:** Maximum number of threads for page-group summarisation in document summarisation. Set to `1` for sequential processing (recommended for local LLM models); use a value greater than `1` to summarise multiple page groups in parallel (typically for API-based models). Can be overridden via CLI `--summary_page_group_max_workers` or direct-mode/Lambda env.
-    * **Default Value:** `1`
+    * **Description:** Maximum number of threads for page-group summarisation in document summarisation. Set to `1` for sequential processing (recommended for local LLM models); use a value greater than `1` to summarise multiple page groups in parallel (typically for API-based models). Defaults to `MAX_WORKERS` if not set. Can be overridden via CLI `--summary_page_group_max_workers` or direct-mode/Lambda env.
+    * **Default Value:** Same as `MAX_WORKERS` (e.g. `8`)
 
 ### Hybrid Textract + Bedrock VLM
 

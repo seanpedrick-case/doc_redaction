@@ -949,8 +949,8 @@ def calculate_time_taken(
     convert_page_time: float = 0.3,
     textract_page_time: float = 0.6,
     comprehend_page_time: float = 0.6,
-    local_text_extraction_page_time: float = 0.3,
-    local_pii_redaction_page_time: float = 0.5,
+    local_text_extraction_page_time: float = 0.1,
+    local_pii_redaction_page_time: float = 0.4,
     local_ocr_extraction_page_time: float = 1.5,
     TEXTRACT_TEXT_EXTRACT_OPTION: str = TEXTRACT_TEXT_EXTRACT_OPTION,
     SELECTABLE_TEXT_EXTRACT_OPTION: str = SELECTABLE_TEXT_EXTRACT_OPTION,
@@ -1254,7 +1254,7 @@ def show_info_box_on_click(
     total_pdf_page_count,
 ):
     gr.Info(
-        "Example data loaded. Now click on 'Extract text and redact document' below to run the example redaction."
+        "Example data loaded. Now click on 'Extract text and redact document' on the Redact PDFs/images tab to run the example redaction."
     )
 
     # Convert deny_list_state, allow_list_state, and fully_redacted_list_state to lists if they are DataFrames
@@ -1392,7 +1392,7 @@ def show_info_box_on_click_ocr_examples(
     custom_llm_instructions_textbox,
 ):
     gr.Info(
-        "Example OCR data loaded. Now click on 'Extract text and redact document' below to run the OCR analysis."
+        "Example OCR data loaded. Now click on 'Extract text and redact document' on the Redact PDFs/images tab to run the OCR analysis."
     )
 
     is_no_redaction = pii_identification_method_drop == NO_REDACTION_PII_OPTION
@@ -1448,7 +1448,7 @@ def show_duplicate_info_box_on_click(
     combine_page_text_for_duplicates_bool,
 ):
     gr.Info(
-        "Example data loaded. Now click on 'Identify duplicate pages/subdocuments' below to run the example duplicate detection."
+        "Example data loaded. Now click on 'Identify duplicate pages/subdocuments' on the Identify duplicate pages tab to run the example duplicate detection."
     )
 
 
@@ -1462,7 +1462,7 @@ def show_tabular_info_box_on_click(
     tabular_min_word_count,
 ):
     gr.Info(
-        "Example data loaded. Now click on 'Redact text/data files' or 'Find duplicate cells/rows' below to run the example."
+        "Example data loaded. Now click on 'Redact text/data files' or 'Find duplicate cells/rows' on the Word or Excel/CSV files tab to run the example."
     )
 
     return (

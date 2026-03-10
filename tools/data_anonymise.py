@@ -3,6 +3,7 @@ import os
 import secrets
 import time
 import unicodedata
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
@@ -41,6 +42,7 @@ from tools.config import (
     MAX_SIMULTANEOUS_FILES,
     MAX_TABLE_COLUMNS,
     MAX_TABLE_ROWS,
+    MAX_WORKERS,
     OUTPUT_FOLDER,
     PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS,
     RUN_AWS_FUNCTIONS,
@@ -1197,8 +1199,19 @@ def anonymise_script(
 
     if do_initial_clean:
         progress(0.2, desc="Cleaning text")
-        for col in progress.tqdm(df.columns, desc="Cleaning text", unit="Columns"):
-            df[col] = initial_clean(df[col])
+        columns = list(df.columns)
+        max_workers = min(MAX_WORKERS, len(columns))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            cleaned = list(
+                progress.tqdm(
+                    executor.map(lambda col: (col, initial_clean(df[col])), columns),
+                    total=len(columns),
+                    desc="Cleaning text",
+                    unit="Columns",
+                )
+            )
+        for col, cleaned_series in cleaned:
+            df[col] = cleaned_series
 
     # DataFrame to dict
     df_dict = df.to_dict(orient="list")

@@ -489,7 +489,6 @@ def maybe_extract_then_summarise(
     document_cropboxes,
     textract_output_found_checkbox,
     only_extract_text_radio,
-    redaction_method_radio,
     duplication_file_path_outputs_list_state,
     latest_review_file_path,
     textract_query_number,
@@ -677,7 +676,6 @@ def maybe_extract_then_summarise(
         page_sizes_from_prepare,
         textract_found_after_prepare,
         True,  # text_extraction_only: summarisation route never runs PII detection
-        redaction_method_radio,  # not used for summarisation (we pass True above) but required by signature
         duplication_file_path_outputs_list_state or [],
         latest_review_file_path or "",
         input_folder_textbox or "",
@@ -846,8 +844,11 @@ initial_aws_textract_visible = (
     DEFAULT_TEXT_EXTRACTION_MODEL == TEXTRACT_TEXT_EXTRACT_OPTION
 )
 
+text_extract_method_radio_message = """Choose text extraction method."""
+
+
 walkthrough_text_extract_method_radio = gr.Radio(
-    label="""Choose text extraction method. Local options are lower quality but cost nothing - they may be worth a try if you are willing to spend some time reviewing outputs. If shown,AWS Textract has a cost per page - £1.14 ($1.50) without signature detection (default), £2.66 ($3.50) per 1,000 pages with signature detection. Change this in the tab below (AWS Textract signature detection).""",
+    label=text_extract_method_radio_message,
     value=DEFAULT_TEXT_EXTRACTION_MODEL,
     choices=TEXT_EXTRACTION_MODELS,
     visible=True,
@@ -983,7 +984,7 @@ if not SHOW_OCR_GUI_OPTIONS:
     SHOW_LOCAL_OCR_MODEL_OPTIONS = False
 
 text_extract_method_radio = gr.Radio(
-    label="""Choose text extraction method. Local options are lower quality but cost nothing - they may be worth a try if you are willing to spend some time reviewing outputs. If shown,AWS Textract has a cost per page - £1.14 ($1.50) without signature detection (default), £2.66 ($3.50) per 1,000 pages with signature detection. Change this in the tab below (AWS Textract signature detection).""",
+    label=text_extract_method_radio_message,
     value=DEFAULT_TEXT_EXTRACTION_MODEL,
     choices=TEXT_EXTRACTION_MODELS,
     visible=SHOW_OCR_GUI_OPTIONS,
@@ -2384,7 +2385,7 @@ with blocks:
 
             ### Step 2
 
-            # Note: in_excel_sheets is defined in the "Word or Excel/csv files" tab (id=5)
+            # Note: in_excel_sheets is defined in the "Word or Excel/CSV files" tab (id=5)
             # Both tabs are in the same gr.Tabs() context, so components are accessible at runtime
             step_2_back_btn.click(
                 lambda: gr.Walkthrough(selected=1), outputs=walkthrough
@@ -2560,29 +2561,18 @@ with blocks:
 
             with gr.Accordion("Redaction settings", open=show_main_redaction_accordion):
                 in_doc_files.render()
-                open_tab_text = ""
-                default_text = ""
                 textract_text = ""
-                comprehend_text = ""
-                if DEFAULT_TEXT_EXTRACTION_MODEL == TEXTRACT_TEXT_EXTRACT_OPTION:
-                    textract_text = " AWS Textract has a cost per page."
+
+                if (
+                    SHOW_AWS_TEXT_EXTRACTION_OPTIONS
+                    and DEFAULT_TEXT_EXTRACTION_MODEL == TEXTRACT_TEXT_EXTRACT_OPTION
+                ):
+                    textract_text = " AWS Textract has a cost per page - $1.50 without signature detection (default), $3.50 per 1,000 pages with signature detection. Enable this in the tab below (AWS Textract signature detection)."
                 else:
                     textract_text = ""
-                if DEFAULT_PII_DETECTION_MODEL == AWS_PII_OPTION:
-                    comprehend_text = (
-                        " AWS Comprehend has a cost per character processed."
-                    )
-                else:
-                    comprehend_text = ""
-                if textract_text or comprehend_text:
-                    open_tab_text = " Open tab to see more details."
-                if textract_text and comprehend_text:
-                    default_text = ""
-                else:
-                    default_text = f" The default text extraction method is {DEFAULT_TEXT_EXTRACTION_MODEL}, and the default personal information detection method is {DEFAULT_PII_DETECTION_MODEL}. "
 
                 with gr.Accordion(
-                    label=f"Change default text extraction settings.{default_text}{textract_text}{comprehend_text}{open_tab_text}".strip(),
+                    label=f"Change default text extraction settings.{textract_text}".strip(),
                     open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
                 ):
 
@@ -2593,7 +2583,7 @@ with blocks:
                     ):
                         text_extract_method_radio.render()
                         # Store accordion references for dynamic visibility control
-                        # Initialize visibility based on default text extraction method
+                        # Initialise visibility based on default text extraction method
                         local_ocr_accordion = gr.Accordion(
                             label="Change default local OCR model",
                             open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
@@ -2629,8 +2619,18 @@ with blocks:
                     with aws_textract_signature_accordion:
                         handwrite_signature_checkbox.render()
 
+                if (
+                    SHOW_AWS_PII_DETECTION_OPTIONS
+                    and DEFAULT_PII_DETECTION_MODEL == AWS_PII_OPTION
+                ):
+                    comprehend_text = (
+                        ". AWS Comprehend has a small cost per character processed."
+                    )
+                else:
+                    comprehend_text = ""
+
                 with gr.Accordion(
-                    "Change PII identification method",
+                    f"Change PII identification method{comprehend_text}".strip(),
                     open=True,
                     visible=SHOW_PII_IDENTIFICATION_OPTIONS,
                 ):
@@ -2940,7 +2940,6 @@ with blocks:
                     zoom_str = str(annotator_zoom_number) + "%"
 
                     annotator = image_annotator(
-                        value=None,
                         label="Modify redaction boxes",
                         label_list=["Redaction"],
                         label_colors=[(0, 0, 0)],
@@ -3108,35 +3107,30 @@ with blocks:
                                             info="When enabled, the search text will be treated as a regular expression pattern instead of literal text",
                                         )
 
-                            all_page_line_level_ocr_results_with_words_df = gr.Dataframe(
-                                pd.DataFrame(
-                                    data={
-                                        "page": list(),
-                                        "line": list(),
-                                        "word_text": list(),
-                                        # "word_x0": list(),
-                                        # "word_y0": list(),
-                                        # "word_x1": list(),
-                                        # "word_y1": list(),
-                                        "index": list(),
-                                    }
-                                ),
-                                row_count=(0, "dynamic"),
-                                type="pandas",
-                                label="Click table row to select and go to page",
-                                headers=[
-                                    "page",
-                                    "line",
-                                    "word_text",
-                                    # "word_x0",
-                                    # "word_y0",
-                                    # "word_x1",
-                                    # "word_y1",
-                                    "index",
-                                ],
-                                wrap=False,
-                                max_height=400,
-                                show_search="filter",
+                            all_page_line_level_ocr_results_with_words_df = (
+                                gr.Dataframe(
+                                    pd.DataFrame(
+                                        data={
+                                            "page": list(),
+                                            "line": list(),
+                                            "word_text": list(),
+                                            "index": list(),
+                                        }
+                                    ),
+                                    row_count=(0, "dynamic"),
+                                    type="pandas",
+                                    label="Click table row to select and go to page",
+                                    headers=[
+                                        "page",
+                                        "line",
+                                        "word_text",
+                                        "index",
+                                    ],
+                                    wrap=False,
+                                    max_height=400,
+                                    show_search="filter",
+                                    column_widths=["15%", "15%", "55%", "15%"],
+                                )
                             )
 
                             redact_selected_btn = gr.Button(
@@ -3153,10 +3147,6 @@ with blocks:
                                             "page": list(),
                                             "line": list(),
                                             "word_text": list(),
-                                            # "word_x0": list(),
-                                            # "word_y0": list(),
-                                            # "word_x1": list(),
-                                            # "word_y1": list(),
                                             "index": list(),
                                         }
                                     ),
@@ -3166,13 +3156,10 @@ with blocks:
                                         "page",
                                         "line",
                                         "word_text",
-                                        # "word_x0",
-                                        # "word_y0",
-                                        # "word_x1",
-                                        # "word_y1",
                                         "index",
                                     ],
                                     wrap=False,
+                                    column_widths=["15%", "15%", "55%", "15%"],
                                 )
                                 redact_selected_row_btn = gr.Button(
                                     value="Redact specific text row"
@@ -3378,7 +3365,7 @@ with blocks:
         ###
         # WORD / TABULAR DATA TAB
         ###
-        with gr.Tab(label="Word or Excel/csv files", id=5):
+        with gr.Tab(label="Word or Excel/CSV files", id=5):
 
             gr.Markdown(
                 """Choose a Word or tabular data file (xlsx or csv) to redact. Note that when redacting complex Word files with e.g. images, some content/formatting will be removed, and it may not attempt to redact headers. You may prefer to convert the doc file to PDF in Word, and then run it through the first tab of this app (Print to PDF in print settings). Alternatively, an xlsx file output is provided when redacting docx files directly to allow for copying and pasting outputs back into the original document if preferred."""
@@ -3480,7 +3467,7 @@ with blocks:
                     )
 
             with gr.Accordion(
-                "Redact Word or Excel/csv files options",
+                "Redact Word or Excel/CSV files options",
                 open=show_main_redaction_accordion,
             ):
                 with gr.Accordion("Upload docx, xlsx, or csv files", open=True):
@@ -4482,7 +4469,6 @@ with blocks:
             page_sizes,
             textract_output_found_checkbox,
             only_extract_text_radio,
-            redaction_method_radio,
             duplication_file_path_outputs_list_state,
             latest_review_file_path,
             input_folder_textbox,
@@ -4668,7 +4654,6 @@ with blocks:
             page_sizes,
             textract_output_found_checkbox,
             only_extract_text_radio,
-            redaction_method_radio,
             duplication_file_path_outputs_list_state,
             latest_review_file_path,
             input_folder_textbox,
@@ -4877,7 +4862,6 @@ with blocks:
             page_sizes,
             textract_output_found_checkbox,
             only_extract_text_radio,
-            redaction_method_radio,
             duplication_file_path_outputs_list_state,
             latest_review_file_path,
             input_folder_textbox,
@@ -8332,7 +8316,6 @@ with blocks:
             document_cropboxes,
             textract_output_found_checkbox,
             only_extract_text_radio,
-            redaction_method_radio,
             duplication_file_path_outputs_list_state,
             latest_review_file_path,
             textract_query_number,
