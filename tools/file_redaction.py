@@ -2169,10 +2169,14 @@ def choose_and_run_redactor(
                                         text=APPLY_REDACTIONS_TEXT,
                                     )
 
-                            # Clear the stored final pages from both sources
-                            if has_image_pages:
+                            # Clear the stored final pages from both sources (guard for concurrent requests)
+                            if has_image_pages and hasattr(
+                                redact_image_pdf, "_applied_redaction_pages"
+                            ):
                                 delattr(redact_image_pdf, "_applied_redaction_pages")
-                            if has_text_pages:
+                            if has_text_pages and hasattr(
+                                redact_text_pdf, "_applied_redaction_pages"
+                            ):
                                 delattr(redact_text_pdf, "_applied_redaction_pages")
 
                     # Save final redacted PDF if we have dual outputs or if RETURN_PDF_FOR_REVIEW is False
@@ -3993,8 +3997,9 @@ def redact_page_with_pymupdf(
 
         set_cropbox_safely(applied_redaction_page, original_cropbox)
         applied_redaction_page.clean_contents()
-        # Clear the stored final page
-        delattr(redact_page_with_pymupdf, "_applied_redaction_page")
+        # Clear the stored final page (guard for concurrent requests sharing the same function ref)
+        if hasattr(redact_page_with_pymupdf, "_applied_redaction_page"):
+            delattr(redact_page_with_pymupdf, "_applied_redaction_page")
         return (page, applied_redaction_page), out_annotation_boxes
 
     else:
