@@ -801,6 +801,7 @@ def anonymise_files_with_open_text(
         print(out_time)
 
         actual_time_taken_number += out_time_float
+        actual_time_taken_number = round(actual_time_taken_number, 1)
 
         if isinstance(out_message, str):
             out_message = [out_message]

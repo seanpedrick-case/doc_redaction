@@ -895,7 +895,7 @@ walkthrough_deny_list_state = gr.Dropdown(
 
 walkthrough_allow_list_state = gr.Dropdown(
     allow_custom_value=True,
-    label="Allow list (always exclude these words from redaction)",
+    label="Allow list (never redact these words)",
     interactive=True,
     multiselect=True,
     visible=True,
@@ -1091,7 +1091,7 @@ in_deny_list_state = gr.Dropdown(
 
 in_allow_list_state = gr.Dropdown(
     allow_custom_value=True,
-    label="Allow list (always exclude these words from redaction)",
+    label="Allow list (never redact these words)",
     interactive=True,
     multiselect=True,
     visible=SHOW_PII_IDENTIFICATION_OPTIONS,
@@ -1348,16 +1348,7 @@ with blocks:
     pdf_doc_state = gr.State(list())
     all_image_annotations_state = gr.State(list())
 
-    all_decision_process_table_state = gr.Dataframe(
-        value=pd.DataFrame(),
-        headers=None,
-        column_count=0,
-        row_count=(0, "dynamic"),
-        label="all_decision_process_table",
-        visible=False,
-        type="pandas",
-        wrap=True,
-    )
+    all_decision_process_table_state = gr.State(pd.DataFrame())
 
     all_page_line_level_ocr_results = gr.State(list())
     all_page_line_level_ocr_results_with_words = gr.State(list())
@@ -2909,7 +2900,8 @@ with blocks:
                     visible=True,
                     type="pandas",
                     wrap=True,
-                    show_search=True,
+                    show_search="search",
+                    max_height=400,
                 )
 
             with gr.Row():
@@ -3024,6 +3016,7 @@ with blocks:
                                 headers=["page", "label", "text", "id"],
                                 wrap=True,
                                 max_height=400,
+                                show_search="filter",
                             )
 
                             with gr.Row(equal_height=True):
@@ -3181,10 +3174,10 @@ with blocks:
                             visible=True,
                             type="pandas",
                             wrap=True,
-                            show_search="filter",
                             show_label=False,
                             column_widths=["15%", "15%", "70%"],
                             max_height=400,
+                            show_search="search",
                         )
                         reset_all_ocr_results_btn = gr.Button(
                             value="Reset OCR output table filter"
@@ -3320,7 +3313,7 @@ with blocks:
                             "Page2_Text",
                         ],
                         wrap=True,
-                        show_search=True,
+                        show_search="search",
                     )
                 with gr.Row():
                     exclude_match_btn = gr.Button(
@@ -3336,13 +3329,13 @@ with blocks:
                         label="Match Source (Document 1)",
                         wrap=True,
                         headers=["page", "text"],
-                        show_search=True,
+                        show_search="search",
                     )
                     page2_text_preview = gr.Dataframe(
                         label="Match Duplicate (Document 2)",
                         wrap=True,
                         headers=["page", "text"],
-                        show_search=True,
+                        show_search="search",
                     )
 
                 gr.Markdown("### Downloadable Files")
@@ -3582,7 +3575,7 @@ with blocks:
                             "Text2",
                         ],
                         wrap=True,
-                        show_search=True,
+                        show_search="search",
                     )
 
                     with gr.Row(equal_height=True):

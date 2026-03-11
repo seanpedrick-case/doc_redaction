@@ -1925,9 +1925,11 @@ def call_aws_bedrock(
     model_choice: str,
     bedrock_runtime: boto3.Session.client,
     assistant_prefill: str = "",
+    max_retries: int = 5,
+    retry_delay_seconds: float = 2.0,
 ) -> ResponseObject:
     """
-    This function sends a request to AWS Claude with the following parameters:
+    This function sends a request to AWS Bedrock with the following parameters:
     - prompt: The user's input prompt to be processed by the model.
     - system_prompt: A system-defined prompt that provides context or instructions for the model.
     - temperature: A value that controls the randomness of the model's output, with higher values resulting in more diverse responses.
@@ -1935,6 +1937,8 @@ def call_aws_bedrock(
     - model_choice: The specific model to use for processing the request.
     - bedrock_runtime: The client object for boto3 Bedrock runtime
     - assistant_prefill: A string indicating the text that the response should start with.
+    - max_retries: Maximum number of retry attempts on failure (default 5).
+    - retry_delay_seconds: Delay in seconds between retries (default 2.0).
 
     The function constructs the request configuration, invokes the model, extracts the response text, and returns a ResponseObject containing the text and metadata.
     """
@@ -1973,41 +1977,59 @@ def call_aws_bedrock(
 
     system_prompt_list = [{"text": system_prompt}]
 
-    # The converse API call.
-    api_response = bedrock_runtime.converse(
-        modelId=model_choice,
-        messages=messages,
-        system=system_prompt_list,
-        inferenceConfig=inference_config,
-    )
+    last_error = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            # The converse API call.
+            api_response = bedrock_runtime.converse(
+                modelId=model_choice,
+                messages=messages,
+                system=system_prompt_list,
+                inferenceConfig=inference_config,
+            )
 
-    output_message = api_response["output"]["message"]
+            output_message = api_response["output"]["message"]
 
-    if "reasoningContent" in output_message["content"][0]:
-        # Extract the reasoning text
-        output_message["content"][0]["reasoningContent"]["reasoningText"]["text"]
+            if "reasoningContent" in output_message["content"][0]:
+                # Extract the reasoning text
+                output_message["content"][0]["reasoningContent"]["reasoningText"][
+                    "text"
+                ]
 
-        # Extract the output text
-        if assistant_prefill_added:
-            text = assistant_prefill + output_message["content"][1]["text"]
-        else:
-            text = output_message["content"][1]["text"]
-    else:
-        if assistant_prefill_added:
-            text = assistant_prefill + output_message["content"][0]["text"]
-        else:
-            text = output_message["content"][0]["text"]
+                # Extract the output text
+                if assistant_prefill_added:
+                    text = assistant_prefill + output_message["content"][1]["text"]
+                else:
+                    text = output_message["content"][1]["text"]
+            else:
+                if assistant_prefill_added:
+                    text = assistant_prefill + output_message["content"][0]["text"]
+                else:
+                    text = output_message["content"][0]["text"]
 
-    # The usage statistics are neatly provided in the 'usage' key.
-    usage = api_response["usage"]
+            # The usage statistics are neatly provided in the 'usage' key.
+            usage = api_response["usage"]
 
-    # The full API response metadata is in 'ResponseMetadata' if you still need it.
-    api_response["ResponseMetadata"]
+            # The full API response metadata is in 'ResponseMetadata' if you still need it.
+            api_response["ResponseMetadata"]
 
-    # Create ResponseObject with the cleanly extracted data.
-    response = ResponseObject(text=text, usage_metadata=usage)
+            # Create ResponseObject with the cleanly extracted data.
+            response = ResponseObject(text=text, usage_metadata=usage)
 
-    return response
+            return response
+
+        except Exception as e:
+            last_error = e
+            if attempt < max_retries:
+                print(
+                    f"Bedrock converse API attempt {attempt}/{max_retries} failed: {e}. "
+                    f"Retrying in {retry_delay_seconds}s..."
+                )
+                time.sleep(retry_delay_seconds)
+            else:
+                raise RuntimeError(
+                    f"Failed to call Bedrock API after {max_retries} attempts: {str(last_error)}"
+                ) from last_error
 
 
 def calculate_tokens_from_metadata(

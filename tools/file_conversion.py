@@ -2294,6 +2294,10 @@ def divide_coordinates_by_page_sizes(
     if "page" in result.columns and not result.empty:
         result["page"] = pd.to_numeric(result["page"], errors="coerce")
         result["page"] = result["page"].astype("Int64")
+    # Ensure coordinate columns are native Python floats (not np.float64) for JSON/dict serialisation
+    for c in coord_cols:
+        if c in result.columns:
+            result[c] = result[c].apply(lambda x: float(x) if pd.notna(x) else x)
     return result
 
 
@@ -2340,7 +2344,13 @@ def multiply_coordinates_by_page_sizes(
     if df_rel.is_empty():
         if not df_abs.is_empty() and {"page", xmin, ymin}.issubset(df_abs.columns):
             df_abs = df_abs.sort(["page", xmin, ymin], nulls_last=True)
-        return df_abs.to_pandas()
+        result_early = df_abs.to_pandas()
+        for c in coord_cols:
+            if c in result_early.columns:
+                result_early[c] = result_early[c].apply(
+                    lambda x: float(x) if pd.notna(x) else x
+                )
+        return result_early
 
     # Join page sizes for relative rows
     if (
@@ -2393,7 +2403,11 @@ def multiply_coordinates_by_page_sizes(
             if c in out.columns
         ]
     )
-    return out.to_pandas()
+    result = out.to_pandas()
+    for c in coord_cols:
+        if c in result.columns:
+            result[c] = result[c].apply(lambda x: float(x) if pd.notna(x) else x)
+    return result
 
 
 def do_proximity_match_by_page_for_text(df1: pd.DataFrame, df2: pd.DataFrame):
@@ -3621,6 +3635,13 @@ def convert_review_df_to_annotation_json(
         for col in ["label", "color", xmin, ymin, xmax, ymax, "id", "text"]
         if col in review_file_df.columns
     ]
+
+    # Ensure coordinate columns are native Python floats (not np.float64) for JSON/dict
+    for c in [xmin, xmax, ymin, ymax]:
+        if c in review_file_df.columns:
+            review_file_df[c] = review_file_df[c].apply(
+                lambda x: float(x) if pd.notna(x) else x
+            )
 
     if "page" in review_file_df.columns:
         # Build page -> list of box dicts once (avoids iterrows + get_group per page)

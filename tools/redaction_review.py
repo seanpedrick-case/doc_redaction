@@ -813,16 +813,24 @@ def get_and_merge_current_page_annotations(
         if not df.empty
     ]
     if dfs_to_concat:
-        combined = pd.concat(dfs_to_concat, ignore_index=True)
+        if len(dfs_to_concat) == 1:
+            combined = dfs_to_concat[0].copy()
+        else:
+            combined = pd.concat(dfs_to_concat, ignore_index=True)
         if "id" in combined.columns:
             has_id = combined["id"].notna()
             if has_id.any():
                 deduped = combined.loc[has_id].drop_duplicates(
                     subset=["id"], keep="first"
                 )
-                updated_df = pd.concat(
-                    [combined.loc[~has_id], deduped], ignore_index=True
-                ).sort_values(by=["page", "xmin", "ymin"])
+                no_id = combined.loc[~has_id]
+                parts = [p for p in [no_id, deduped] if not p.empty]
+                if len(parts) == 1:
+                    updated_df = parts[0].sort_values(by=["page", "xmin", "ymin"])
+                else:
+                    updated_df = pd.concat(parts, ignore_index=True).sort_values(
+                        by=["page", "xmin", "ymin"]
+                    )
             else:
                 updated_df = combined.sort_values(by=["page", "xmin", "ymin"])
         else:

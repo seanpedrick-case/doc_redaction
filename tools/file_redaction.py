@@ -66,6 +66,7 @@ from tools.config import (
     INFERENCE_SERVER_PII_OPTION,
     INPUT_FOLDER,
     LOAD_TRUNCATED_IMAGES,
+    LOCAL_PII_OPTION,
     LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
     LOCAL_TRANSFORMERS_LLM_PII_OPTION,
     MAX_DOC_PAGES,
@@ -219,6 +220,34 @@ def merge_page_results(data: list):
             )
         )
     return sorted(merged_list, key=lambda x: x["page"])
+
+
+def _word_count_by_page_from_ocr_results_with_words(
+    ocr_with_words: List[dict], page_numbers_1based: List[int]
+) -> Dict[int, int]:
+    """
+    Compute word count per page from the flat list of line-level OCR results with words.
+    Used by EFFICIENT_OCR to classify pages as above/below efficient_ocr_min_words threshold.
+
+    Args:
+        ocr_with_words: List of dicts with "page" and "results" (line_key -> {words: [...]}).
+        page_numbers_1based: 1-based page numbers to include in the returned dict.
+
+    Returns:
+        Dict mapping page number (1-based) to word count.
+    """
+    by_page = defaultdict(int)
+    for item in ocr_with_words or []:
+        if not item:
+            continue
+        p = item.get("page")
+        if p is None:
+            continue
+        page_num = int(p) if isinstance(p, str) else p
+        for line_data in item.get("results", {}).values():
+            words = line_data.get("words", [])
+            by_page[page_num] += len(words) if isinstance(words, list) else 0
+    return {p: by_page.get(p, 0) for p in page_numbers_1based}
 
 
 def add_page_range_suffix_to_file_path(
@@ -1474,34 +1503,79 @@ def choose_and_run_redactor(
             )
             start_page_0 = (page_min - 1) if page_min > 0 else 0
             end_page_0 = start_page_0 + number_of_pages_to_process
-            page_range = range(start_page_0, end_page_0)
+            all_pages_1based = list(range(start_page_0 + 1, end_page_0 + 1))
 
-            # Single PDF pass: determine which pages have extractable text (one open, no per-page re-open)
+            # EFFICIENT_OCR: use redact_text_pdf (extraction only) on all pages to get word counts;
+            # no separate check loop—extraction doubles as the check. Then classify pages by threshold.
             progress(
                 0.4,
-                desc="Efficient OCR: Checking for pages suitable for efficient text extraction method",
+                desc="Efficient OCR: Extracting text on all pages (word-count check)",
             )
-            num_pages = len(page_range)
-            page_has_text_list = list(
-                tqdm(
-                    get_pages_extractable_text_single_pass(
-                        file_path,
-                        list(page_range),
-                        efficient_ocr_min_words,
-                    ),
-                    total=num_pages,
-                    unit="pages",
-                    desc="Efficient OCR: Checking for pages suitable for simple text extraction method",
-                )
+            (
+                pymupdf_doc,
+                _,
+                _,
+                annotations_all_pages,
+                _,
+                page_break_return,
+                comprehend_query_number,
+                all_page_line_level_ocr_results_with_words_first,
+                llm_model_name_text,
+                llm_total_input_tokens_text,
+                llm_total_output_tokens_text,
+                extraction_results,
+            ) = redact_text_pdf(
+                file_path,
+                language,
+                chosen_redact_entities,
+                chosen_redact_comprehend_entities,
+                in_allow_list_flat,
+                page_min,
+                page_max if page_max > 0 else number_of_pages,
+                0,
+                page_break_return,
+                annotations_all_pages,
+                all_page_line_level_ocr_results_df,
+                all_pages_decision_process_table,
+                pymupdf_doc,
+                list(),  # empty: first pass only used for word-count classification
+                pii_identification_method,
+                comprehend_query_number,
+                comprehend_client,
+                custom_recogniser_word_list_flat,
+                redact_whole_page_list_flat,
+                max_fuzzy_spelling_mistakes_num,
+                match_fuzzy_whole_phrase_bool,
+                page_sizes_df,
+                document_cropboxes,
+                True,  # text_extraction_only
+                output_folder=output_folder,
+                input_folder=input_folder,
+                bedrock_runtime=bedrock_runtime,
+                model_choice=CLOUD_LLM_PII_MODEL_CHOICE,
+                custom_llm_instructions=custom_llm_instructions,
+                chosen_llm_entities=chosen_llm_entities,
+                efficient_ocr=efficient_ocr,
+                pages_to_process=all_pages_1based,
+                efficient_ocr_extraction_pass=True,
             )
-            # Result is already in page order from single-pass iteration
+            llm_total_input_tokens += llm_total_input_tokens_text
+            llm_total_output_tokens += llm_total_output_tokens_text
+            if llm_model_name_text and not llm_model_name:
+                llm_model_name = llm_model_name_text
 
-            # Build lists of pages for text vs OCR so we can call each function once (enables parallel OCR in redact_image_pdf)
+            page_word_counts = _word_count_by_page_from_ocr_results_with_words(
+                all_page_line_level_ocr_results_with_words_first, all_pages_1based
+            )
             pages_with_text_1based = [
-                p + 1 for p, has_text in page_has_text_list if has_text
+                p
+                for p in all_pages_1based
+                if page_word_counts.get(p, 0) >= efficient_ocr_min_words
             ]
             pages_needing_ocr_1based = [
-                p + 1 for p, has_text in page_has_text_list if not has_text
+                p
+                for p in all_pages_1based
+                if page_word_counts.get(p, 0) < efficient_ocr_min_words
             ]
             efficient_ocr_text_pages = len(pages_with_text_1based)
             efficient_ocr_ocr_pages = len(pages_needing_ocr_1based)
@@ -1519,6 +1593,10 @@ def choose_and_run_redactor(
                 print(
                     f"EFFICIENT_OCR: Processing {len(pages_with_text_1based)} page(s) with selectable text extraction (no OCR)."
                 )
+                pages_with_text_set = set(pages_with_text_1based)
+                pre_extracted_for_text = [
+                    r for r in extraction_results if (r[0] + 1) in pages_with_text_set
+                ]
                 (
                     pymupdf_doc,
                     all_pages_decision_process_table,
@@ -1545,7 +1623,7 @@ def choose_and_run_redactor(
                     all_page_line_level_ocr_results_df,
                     all_pages_decision_process_table,
                     pymupdf_doc,
-                    all_page_line_level_ocr_results_with_words,
+                    list(),  # empty so only text-page data is accumulated (OCR pages filled by redact_image_pdf)
                     pii_identification_method,
                     comprehend_query_number,
                     comprehend_client,
@@ -1564,6 +1642,7 @@ def choose_and_run_redactor(
                     chosen_llm_entities=chosen_llm_entities,
                     efficient_ocr=efficient_ocr,
                     pages_to_process=pages_with_text_1based,
+                    pre_extracted_results=pre_extracted_for_text,
                 )
                 llm_total_input_tokens += llm_total_input_tokens_text
                 llm_total_output_tokens += llm_total_output_tokens_text
@@ -2817,12 +2896,12 @@ def convert_pikepdf_to_image_coords(
 
     # Convert the Y-coordinates (flip using the image height)
     x1, y1, x2, y2 = rect_coordinates
-    x1_image = x1 * scale_width
-    new_y1_image = image_page_height - (
-        y2 * scale_height
+    x1_image = round(x1 * scale_width, 2)
+    new_y1_image = round(
+        image_page_height - (y2 * scale_height), 2
     )  # Flip Y0 (since it starts from bottom)
-    x2_image = x2 * scale_width
-    new_y2_image = image_page_height - (y1 * scale_height)  # Flip Y1
+    x2_image = round(x2 * scale_width, 2)
+    new_y2_image = round(image_page_height - (y1 * scale_height), 2)  # Flip Y1
 
     return x1_image, new_y1_image, x2_image, new_y2_image
 
@@ -6435,17 +6514,124 @@ def redact_image_pdf(
 
     # SECOND PASS: Perform PII detection on all pages using stored OCR results
     print("Second pass: Performing PII detection on all pages...")
+
+    # Optional: run PII detection in parallel for Local and AWS Comprehend (skip when CUSTOM_VLM_PERSON is used).
+    pii_results_by_page_image = {}
+    _use_parallel_image_pii = (
+        pii_identification_method in (LOCAL_PII_OPTION, AWS_PII_OPTION)
+        and (chosen_redact_entities or chosen_redact_comprehend_entities)
+        and not (
+            pii_identification_method == AWS_PII_OPTION
+            and "CUSTOM_VLM_PERSON" in (chosen_redact_comprehend_entities or [])
+        )
+    )
+    if _use_parallel_image_pii and ocr_results_by_page:
+        _pii_pages = (
+            list(page_loop_pages)
+            if page_loop_pages is not None
+            else list(range(page_loop_start, page_loop_end))
+        )
+        _pii_jobs = []
+        for _pno in _pii_pages:
+            if _pno not in ocr_results_by_page:
+                continue
+            _pdata = ocr_results_by_page[_pno]
+            _plocr = _pdata.get("page_line_level_ocr_results")
+            _plocrw = _pdata.get("page_line_level_ocr_results_with_words")
+            if (
+                not _plocr
+                or not isinstance(_plocr, dict)
+                or "results" not in _plocr
+                or not _plocrw
+            ):
+                continue
+            if isinstance(_plocrw, list):
+                if (
+                    not _plocrw
+                    or not isinstance(_plocrw[0], dict)
+                    or "results" not in _plocrw[0]
+                ):
+                    continue
+            elif not isinstance(_plocrw, dict) or "results" not in _plocrw:
+                continue
+            _pii_jobs.append((_pno, _pdata))
+        text_analyzer_kwargs_parallel = {}
+        if _pii_jobs:
+            _n = len(_pii_jobs)
+            _workers = min(MAX_WORKERS, _n)
+            with ThreadPoolExecutor(max_workers=_workers) as executor:
+                _results = list(
+                    tqdm(
+                        executor.map(
+                            lambda item: _run_image_pii_for_one_page(
+                                item[0],
+                                item[1],
+                                image_analyser,
+                                chosen_redact_comprehend_entities,
+                                chosen_llm_entities,
+                                pii_identification_method,
+                                comprehend_client,
+                                bedrock_runtime,
+                                chosen_redact_entities,
+                                language,
+                                allow_list,
+                                score_threshold,
+                                nlp_analyser,
+                                custom_llm_instructions,
+                                file_name,
+                                text_analyzer_kwargs_parallel,
+                            ),
+                            _pii_jobs,
+                        ),
+                        total=_n,
+                        unit="pages",
+                        desc="Detecting PII (parallel, image path)",
+                    )
+                )
+            for (
+                _pno,
+                _boxes,
+                _cq,
+                _llm_name,
+                _llm_in,
+                _llm_out,
+            ) in _results:
+                pii_results_by_page_image[_pno] = (
+                    _boxes,
+                    _cq,
+                    _llm_name,
+                    _llm_in,
+                    _llm_out,
+                )
+
+    # Precompute redact_whole_page set for O(1) membership in the loop (same speedup as redact_text_pdf)
+    redact_whole_page_set_image = set()
+    if redact_whole_page_list:
+        for _p in redact_whole_page_list:
+            try:
+                redact_whole_page_set_image.add(int(_p))
+            except (TypeError, ValueError):
+                redact_whole_page_set_image.add(_p)
+
     if page_loop_pages is not None:
         pii_progress_bar = tqdm(
             page_loop_pages,
             unit="pages",
-            desc="Detecting PII (following image-based OCR)",
+            desc=(
+                "Applying redactions to pages"
+                if pii_results_by_page_image
+                else "Detecting PII (following image-based OCR)"
+            ),
         )
     else:
         pii_progress_bar = tqdm(
             range(page_loop_start, page_loop_end),
             unit="pages remaining",
-            desc="Detecting PII (following image-based OCR)",
+            desc=(
+                "Applying redactions to pages"
+                if pii_results_by_page_image
+                else "Detecting PII (following image-based OCR)"
+            ),
         )
 
     # Initialize redacted_image - will be updated inside loop for image files
@@ -6806,30 +6992,40 @@ def redact_image_pdf(
                             )
 
                     # Call analyze_text for all PII detection methods (Local, AWS Comprehend, LLM, Inference Server)
-                    (
-                        page_redaction_bounding_boxes,
-                        comprehend_query_number_new,
-                        llm_model_name_page,
-                        llm_input_tokens_page,
-                        llm_output_tokens_page,
-                    ) = image_analyser.analyze_text(
-                        page_line_level_ocr_results["results"],
-                        page_line_level_ocr_results_with_words["results"],
-                        chosen_redact_comprehend_entities=chosen_redact_comprehend_entities,
-                        chosen_llm_entities=chosen_llm_entities,
-                        pii_identification_method=pii_identification_method,
-                        comprehend_client=comprehend_client,
-                        bedrock_runtime=bedrock_runtime,
-                        custom_entities=chosen_redact_entities,
-                        language=language,
-                        allow_list=allow_list,
-                        score_threshold=score_threshold,
-                        nlp_analyser=nlp_analyser,
-                        custom_llm_instructions=custom_llm_instructions,
-                        file_name=file_name,
-                        page_number=int(reported_page_number),
-                        **text_analyzer_kwargs,
-                    )
+                    # Use precomputed result when parallel PII was run (Local/AWS Comprehend).
+                    if page_no in pii_results_by_page_image:
+                        (
+                            page_redaction_bounding_boxes,
+                            comprehend_query_number_new,
+                            llm_model_name_page,
+                            llm_input_tokens_page,
+                            llm_output_tokens_page,
+                        ) = pii_results_by_page_image[page_no]
+                    else:
+                        (
+                            page_redaction_bounding_boxes,
+                            comprehend_query_number_new,
+                            llm_model_name_page,
+                            llm_input_tokens_page,
+                            llm_output_tokens_page,
+                        ) = image_analyser.analyze_text(
+                            page_line_level_ocr_results["results"],
+                            page_line_level_ocr_results_with_words["results"],
+                            chosen_redact_comprehend_entities=chosen_redact_comprehend_entities,
+                            chosen_llm_entities=chosen_llm_entities,
+                            pii_identification_method=pii_identification_method,
+                            comprehend_client=comprehend_client,
+                            bedrock_runtime=bedrock_runtime,
+                            custom_entities=chosen_redact_entities,
+                            language=language,
+                            allow_list=allow_list,
+                            score_threshold=score_threshold,
+                            nlp_analyser=nlp_analyser,
+                            custom_llm_instructions=custom_llm_instructions,
+                            file_name=file_name,
+                            page_number=int(reported_page_number),
+                            **text_analyzer_kwargs,
+                        )
 
                     comprehend_query_number = (
                         comprehend_query_number + comprehend_query_number_new
@@ -6858,14 +7054,12 @@ def redact_image_pdf(
                 page_merged_redaction_bboxes = list()
 
             if is_pdf(file_path) is True:
-                if redact_whole_page_list:
-                    int_reported_page_number = int(reported_page_number)
-                    if int_reported_page_number in redact_whole_page_list:
-                        redact_whole_page = True
-                    else:
-                        redact_whole_page = False
-                else:
-                    redact_whole_page = False
+                int_reported_page_number = int(reported_page_number)
+                redact_whole_page = (
+                    int_reported_page_number in redact_whole_page_set_image
+                    if redact_whole_page_set_image
+                    else False
+                )
 
                 # Check if there are question answer boxes
                 if form_key_value_results_list:
@@ -6878,7 +7072,7 @@ def redact_image_pdf(
                     )
 
                 # 3. Draw the merged boxes
-                ## Apply annotations to pdf with pymupdf
+                ## Apply annotations to pdf with pymupdf (pass dimensions to skip .loc in redact_page_with_pymupdf)
                 redact_result = redact_page_with_pymupdf(
                     pymupdf_page,
                     page_merged_redaction_bboxes,
@@ -6887,6 +7081,10 @@ def redact_image_pdf(
                     original_cropbox=original_cropbox,
                     page_sizes_df=page_sizes_df,
                     input_folder=input_folder,
+                    image_dimensions_override={
+                        "image_width": page_width,
+                        "image_height": page_height,
+                    },
                 )
 
                 # Handle dual page objects if returned
@@ -7895,6 +8093,8 @@ def process_page_to_structured_ocr_pymupdf(
                 width=round(lx1 - lx0, 2),  # Distance (No offset!)
                 height=round(ly1 - ly0, 2),  # Distance (No offset!)
                 line=current_line_idx,
+                conf=100.0,
+                model="PyMuPDF",
             )
 
             # 4. Build words from line chars with punctuation split into separate words
@@ -8127,22 +8327,201 @@ def _build_one_pikepdf_redaction_annotation(analysed_bounding_box: dict):
         Type=Name.Annot,
         Subtype=Name.Square,
         QuadPoints=[
-            bounding_box[0],
-            bounding_box[3],
-            bounding_box[2],
-            bounding_box[3],
-            bounding_box[0],
-            bounding_box[1],
-            bounding_box[2],
-            bounding_box[1],
+            round(bounding_box[0], 2),
+            round(bounding_box[3], 2),
+            round(bounding_box[2], 2),
+            round(bounding_box[3], 2),
+            round(bounding_box[0], 2),
+            round(bounding_box[1], 2),
+            round(bounding_box[2], 2),
+            round(bounding_box[1], 2),
         ],
-        Rect=[bounding_box[0], bounding_box[1], bounding_box[2], bounding_box[3]],
-        C=[0, 0, 0],
+        Rect=[
+            round(bounding_box[0], 2),
+            round(bounding_box[1], 2),
+            round(bounding_box[2], 2),
+            round(bounding_box[3], 2),
+        ],
+        C=list(CUSTOM_BOX_COLOUR),
         IC=[0, 0, 0],
         CA=1,
         T=analysed_bounding_box["result"].entity_type,
         Contents=analysed_bounding_box["text"],
         BS=Dictionary(W=0, S=Name.S),
+    )
+
+
+def convert_redaction_boxes_pymupdf_to_pdf(
+    analysed_bounding_boxes: List[dict], page_height: float
+) -> List[dict]:
+    """
+    Convert redaction box coordinates from PyMuPDF (top-left origin, y down)
+    to PDF Rect convention (bottom-left origin, y up). Does not mutate inputs.
+    """
+    if not analysed_bounding_boxes or page_height <= 0:
+        return list(analysed_bounding_boxes) if analysed_bounding_boxes else []
+    out = []
+    for box in analysed_bounding_boxes:
+        box = copy.deepcopy(box)
+        bbox = box.get("boundingBox") or box.get("bounding_box")
+        if not bbox or len(bbox) < 4:
+            out.append(box)
+            continue
+        left, y0, right, y1 = bbox[0], bbox[1], bbox[2], bbox[3]
+        # PyMuPDF: y0 = top (smaller), y1 = bottom (larger). PDF: bottom < top (y up).
+        pdf_y_bottom = page_height - y1
+        pdf_y_top = page_height - y0
+        box["boundingBox"] = [left, pdf_y_bottom, right, pdf_y_top]
+        if "bounding_box" in box:
+            box["bounding_box"] = box["boundingBox"]
+        out.append(box)
+    return out
+
+
+def _run_image_pii_for_one_page(
+    page_no: int,
+    page_data: dict,
+    image_analyser,
+    chosen_redact_comprehend_entities: List[str],
+    chosen_llm_entities: List[str],
+    pii_identification_method: str,
+    comprehend_client,
+    bedrock_runtime,
+    chosen_redact_entities: List[str],
+    language: str,
+    allow_list: List[str],
+    score_threshold: float,
+    nlp_analyser,
+    custom_llm_instructions: str,
+    file_name: str,
+    text_analyzer_kwargs: dict,
+) -> Tuple[int, List, int, str, int, int]:
+    """
+    Run image_analyser.analyze_text for a single page (used for parallel Local/AWS Comprehend in redact_image_pdf).
+    Returns (page_no, page_redaction_bounding_boxes, comprehend_query_number_new, llm_model_name, llm_input_tokens, llm_output_tokens).
+    """
+    page_line_level_ocr_results = page_data.get("page_line_level_ocr_results")
+    page_line_level_ocr_results_with_words = page_data.get(
+        "page_line_level_ocr_results_with_words"
+    )
+    reported_page_number = page_data.get("reported_page_number", str(page_no + 1))
+    if (
+        not page_line_level_ocr_results
+        or not isinstance(page_line_level_ocr_results, dict)
+        or "results" not in page_line_level_ocr_results
+    ):
+        return (page_no, list(), 0, "", 0, 0)
+    if not page_line_level_ocr_results_with_words:
+        return (page_no, list(), 0, "", 0, 0)
+    if isinstance(page_line_level_ocr_results_with_words, list):
+        if not page_line_level_ocr_results_with_words:
+            return (page_no, list(), 0, "", 0, 0)
+        ocr_with_words = page_line_level_ocr_results_with_words[0]
+    else:
+        ocr_with_words = page_line_level_ocr_results_with_words
+    if not isinstance(ocr_with_words, dict) or "results" not in ocr_with_words:
+        return (page_no, list(), 0, "", 0, 0)
+    (
+        page_redaction_bounding_boxes,
+        comprehend_query_number_new,
+        llm_model_name_page,
+        llm_input_tokens_page,
+        llm_output_tokens_page,
+    ) = image_analyser.analyze_text(
+        page_line_level_ocr_results["results"],
+        ocr_with_words["results"],
+        chosen_redact_comprehend_entities=chosen_redact_comprehend_entities,
+        chosen_llm_entities=chosen_llm_entities,
+        pii_identification_method=pii_identification_method,
+        comprehend_client=comprehend_client,
+        bedrock_runtime=bedrock_runtime,
+        custom_entities=chosen_redact_entities,
+        language=language,
+        allow_list=allow_list,
+        score_threshold=score_threshold,
+        nlp_analyser=nlp_analyser,
+        custom_llm_instructions=custom_llm_instructions,
+        file_name=file_name,
+        page_number=int(reported_page_number),
+        **text_analyzer_kwargs,
+    )
+    return (
+        page_no,
+        page_redaction_bounding_boxes,
+        comprehend_query_number_new,
+        llm_model_name_page,
+        llm_input_tokens_page,
+        llm_output_tokens_page,
+    )
+
+
+def _run_pii_for_one_page(
+    extraction_result: Tuple,
+    language: str,
+    chosen_redact_entities: List[str],
+    chosen_redact_comprehend_entities: List[str],
+    allow_list: List[str],
+    pii_identification_method: str,
+    nlp_analyser,
+    score_threshold: float,
+    custom_entities: List[str],
+    comprehend_client,
+    comprehend_query_number: int,
+    bedrock_runtime,
+    model_choice: str,
+    custom_llm_instructions: str,
+    chosen_llm_entities: List[str],
+    output_folder: str,
+    file_name: str,
+) -> Tuple[int, List, str, int, int]:
+    """
+    Run PII identification for a single page (used for parallel Local/AWS Comprehend).
+    Returns (page_no, page_redaction_bounding_boxes, llm_model_name, llm_input_tokens, llm_output_tokens).
+    """
+    (
+        page_no,
+        line_level_text_results_list,
+        line_characters,
+        _page_text_ocr_outputs,
+        _page_ocr_results_with_words,
+    ) = extraction_result
+    reported_page_number = page_no + 1
+    page_analyser_results = list()
+    page_redaction_bounding_boxes = list()
+    (
+        page_redaction_bounding_boxes,
+        llm_model_name_page,
+        llm_input_tokens_page,
+        llm_output_tokens_page,
+    ) = run_page_text_redaction(
+        language,
+        chosen_redact_entities,
+        chosen_redact_comprehend_entities,
+        line_level_text_results_list,
+        line_characters,
+        page_analyser_results,
+        page_redaction_bounding_boxes,
+        comprehend_client,
+        allow_list,
+        pii_identification_method,
+        nlp_analyser,
+        score_threshold,
+        custom_entities,
+        comprehend_query_number,
+        bedrock_runtime=bedrock_runtime,
+        model_choice=model_choice,
+        custom_llm_instructions=custom_llm_instructions,
+        chosen_llm_entities=chosen_llm_entities,
+        output_folder=output_folder,
+        file_name=file_name,
+        page_number=reported_page_number,
+    )
+    return (
+        page_no,
+        page_redaction_bounding_boxes,
+        llm_model_name_page,
+        llm_input_tokens_page,
+        llm_output_tokens_page,
     )
 
 
@@ -8211,6 +8590,8 @@ def redact_text_pdf(
     chosen_llm_entities: List[str] = None,
     efficient_ocr: bool = EFFICIENT_OCR,
     pages_to_process: Optional[List[int]] = None,
+    efficient_ocr_extraction_pass: bool = False,
+    pre_extracted_results: Optional[List[Tuple]] = None,
 ):
     # Initialize LLM token tracking variables
     llm_total_input_tokens = 0
@@ -8329,34 +8710,142 @@ def redact_text_pdf(
 
     print("Page range: ", str(page_loop_start + 1), "to", str(page_loop_end))
 
-    # First pass: parallel text extraction (read-only per page, thread-safe)
+    # First pass: parallel text extraction (read-only per page, thread-safe).
+    # When pre_extracted_results is provided (e.g. EFFICIENT_OCR second pass), reuse them.
     if page_loop_pages is not None:
         pages_to_iterate = list(page_loop_pages)
     else:
         pages_to_iterate = list(range(page_loop_start, page_loop_end))
 
-    max_workers = min(MAX_WORKERS, len(pages_to_iterate))
+    if pre_extracted_results is not None and pages_to_process is not None:
+        pages_set = set(p - 1 for p in pages_to_process)
+        extraction_results = [r for r in pre_extracted_results if r[0] in pages_set]
+        extraction_results.sort(key=lambda r: r[0])
+    else:
+        max_workers = min(MAX_WORKERS, len(pages_to_iterate))
 
-    with open(file_path, "rb") as f:
-        pdf_buffer = f.read()
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        extraction_results = list(
-            tqdm(
-                executor.map(
-                    lambda p: _extract_text_from_single_page_pymupdf(pdf_buffer, p),
-                    pages_to_iterate,
-                ),
-                total=len(pages_to_iterate),
-                unit="pages",
-                desc="Extracting text (simple text extraction)",
+        with open(file_path, "rb") as f:
+            pdf_buffer = f.read()
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            extraction_results = list(
+                tqdm(
+                    executor.map(
+                        lambda p: _extract_text_from_single_page_pymupdf(pdf_buffer, p),
+                        pages_to_iterate,
+                    ),
+                    total=len(pages_to_iterate),
+                    unit="pages",
+                    desc="Extracting text (simple text extraction)",
+                )
             )
+        extraction_results.sort(key=lambda r: r[0])
+
+    # Optional: run PII detection in parallel for Local and AWS Comprehend (bounded by MAX_WORKERS).
+    pii_results_by_page = {}
+    if (
+        pii_identification_method in (LOCAL_PII_OPTION, AWS_PII_OPTION)
+        and not text_extraction_only
+        and (chosen_redact_entities or chosen_redact_comprehend_entities)
+        and extraction_results
+    ):
+        num_pages = len(extraction_results)
+        max_workers = min(MAX_WORKERS, num_pages)
+        progress(
+            0.45,
+            desc=f"Detecting PII in parallel ({pii_identification_method}, {num_pages} pages)",
         )
-    extraction_results.sort(key=lambda r: r[0])
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            pii_results_list = list(
+                tqdm(
+                    executor.map(
+                        lambda ext: _run_pii_for_one_page(
+                            ext,
+                            language,
+                            chosen_redact_entities,
+                            chosen_redact_comprehend_entities,
+                            allow_list,
+                            pii_identification_method,
+                            nlp_analyser,
+                            score_threshold,
+                            custom_entities,
+                            comprehend_client,
+                            comprehend_query_number,
+                            bedrock_runtime,
+                            model_choice,
+                            custom_llm_instructions,
+                            chosen_llm_entities,
+                            output_folder,
+                            file_name,
+                        ),
+                        extraction_results,
+                    ),
+                    total=num_pages,
+                    unit="pages",
+                    desc="Detecting PII (parallel)",
+                )
+            )
+        for (
+            page_no,
+            page_redaction_bounding_boxes,
+            llm_name,
+            llm_in,
+            llm_out,
+        ) in pii_results_list:
+            pii_results_by_page[page_no] = (
+                page_redaction_bounding_boxes,
+                llm_name,
+                llm_in,
+                llm_out,
+            )
+
+    # Precompute per-page lookups so the loop does O(1) access instead of repeated DataFrame .loc
+    # (Same approach as redaction_review: pass image_dimensions_override to skip per-call .loc in redact_page_with_pymupdf.)
+    image_path_by_page = {}
+    page_to_image_dimensions = {}
+    if not page_sizes_df.empty and "page" in page_sizes_df.columns:
+        if "image_path" in page_sizes_df.columns:
+            for _page_one_based, _row in page_sizes_df.set_index("page")[
+                "image_path"
+            ].items():
+                try:
+                    image_path_by_page[int(_page_one_based)] = _row
+                except (TypeError, ValueError):
+                    pass
+        if (
+            "image_width" in page_sizes_df.columns
+            and "image_height" in page_sizes_df.columns
+        ):
+            sub = page_sizes_df[
+                ["page", "image_width", "image_height"]
+            ].drop_duplicates("page")
+            for _, row in sub.iterrows():
+                p = row["page"]
+                if pd.notna(p):
+                    w, h = row["image_width"], row["image_height"]
+                    if pd.notna(w) and pd.notna(h):
+                        try:
+                            page_to_image_dimensions[int(p)] = {
+                                "image_width": float(w),
+                                "image_height": float(h),
+                            }
+                        except (TypeError, ValueError):
+                            pass
+    redact_whole_page_set = set()
+    if redact_whole_page_list:
+        for _p in redact_whole_page_list:
+            try:
+                redact_whole_page_set.add(int(_p))
+            except (TypeError, ValueError):
+                redact_whole_page_set.add(_p)
 
     progress_bar_redact = tqdm(
         extraction_results,
         unit="pages",
-        desc="Detecting PII (following simple text extraction)",
+        desc=(
+            "Applying redactions to pages"
+            if pii_results_by_page
+            else "Detecting PII (following simple text extraction)"
+        ),
     )
 
     for extraction_result in progress_bar_redact:
@@ -8370,13 +8859,9 @@ def redact_text_pdf(
         reported_page_number = str(page_no + 1)
         # Create annotations for every page, even if blank.
 
-        # Try to find image path location
-        try:
-            image_path = page_sizes_df.loc[
-                page_sizes_df["page"] == int(reported_page_number), "image_path"
-            ].iloc[0]
-        except Exception as e:
-            print("Image path not found:", e)
+        # Image path: use precomputed lookup to avoid O(n) .loc per page
+        image_path = image_path_by_page.get(int(reported_page_number), "")
+        if image_path == "" or (isinstance(image_path, float) and pd.isna(image_path)):
             image_path = ""
 
         # EFFICIENT_OCR: use placeholder for text-only pages so annotations match page_sizes
@@ -8412,36 +8897,45 @@ def redact_text_pdf(
         all_page_line_level_ocr_results_with_words.extend(page_ocr_results_with_words)
 
         ### REDACTION
+
         if pii_identification_method != NO_REDACTION_PII_OPTION:
             if chosen_redact_entities or chosen_redact_comprehend_entities:
-                (
-                    page_redaction_bounding_boxes,
-                    llm_model_name_page,
-                    llm_input_tokens_page,
-                    llm_output_tokens_page,
-                ) = run_page_text_redaction(
-                    language,
-                    chosen_redact_entities,
-                    chosen_redact_comprehend_entities,
-                    all_page_line_level_text_extraction_results_list,
-                    all_page_line_text_extraction_characters,
-                    page_analyser_results,
-                    page_redaction_bounding_boxes,
-                    comprehend_client,
-                    allow_list,
-                    pii_identification_method,
-                    nlp_analyser,
-                    score_threshold,
-                    custom_entities,
-                    comprehend_query_number,
-                    bedrock_runtime=bedrock_runtime,
-                    model_choice=model_choice,
-                    custom_llm_instructions=custom_llm_instructions,
-                    chosen_llm_entities=chosen_llm_entities,
-                    output_folder=output_folder,
-                    file_name=file_name,
-                    page_number=int(reported_page_number),
-                )
+                if page_no in pii_results_by_page:
+                    (
+                        page_redaction_bounding_boxes,
+                        llm_model_name_page,
+                        llm_input_tokens_page,
+                        llm_output_tokens_page,
+                    ) = pii_results_by_page[page_no]
+                else:
+                    (
+                        page_redaction_bounding_boxes,
+                        llm_model_name_page,
+                        llm_input_tokens_page,
+                        llm_output_tokens_page,
+                    ) = run_page_text_redaction(
+                        language,
+                        chosen_redact_entities,
+                        chosen_redact_comprehend_entities,
+                        all_page_line_level_text_extraction_results_list,
+                        all_page_line_text_extraction_characters,
+                        page_analyser_results,
+                        page_redaction_bounding_boxes,
+                        comprehend_client,
+                        allow_list,
+                        pii_identification_method,
+                        nlp_analyser,
+                        score_threshold,
+                        custom_entities,
+                        comprehend_query_number,
+                        bedrock_runtime=bedrock_runtime,
+                        model_choice=model_choice,
+                        custom_llm_instructions=custom_llm_instructions,
+                        chosen_llm_entities=chosen_llm_entities,
+                        output_folder=output_folder,
+                        file_name=file_name,
+                        page_number=int(reported_page_number),
+                    )
 
                 if (
                     not page_redaction_bounding_boxes
@@ -8459,25 +8953,25 @@ def redact_text_pdf(
                 if llm_model_name_page and not llm_model_name:
                     llm_model_name = llm_model_name_page
 
-                # Annotate redactions on page
+                # Annotate redactions on page (convert PyMuPDF top-left coords to PDF bottom-left for Rect)
+                page_height = pymupdf_page.mediabox.height
+                boxes_for_pdf = convert_redaction_boxes_pymupdf_to_pdf(
+                    page_redaction_bounding_boxes, page_height
+                )
                 pikepdf_redaction_annotations_on_page = (
-                    create_pikepdf_annotations_for_bounding_boxes(
-                        page_redaction_bounding_boxes
-                    )
+                    create_pikepdf_annotations_for_bounding_boxes(boxes_for_pdf)
                 )
 
             else:
                 pikepdf_redaction_annotations_on_page = list()
 
-            # Make pymupdf page redactions
-            if redact_whole_page_list:
-                int_reported_page_number = int(reported_page_number)
-                if int_reported_page_number in redact_whole_page_list:
-                    redact_whole_page = True
-                else:
-                    redact_whole_page = False
-            else:
-                redact_whole_page = False
+            # Make pymupdf page redactions (use set for O(1) membership)
+            int_reported_page_number = int(reported_page_number)
+            redact_whole_page = (
+                int_reported_page_number in redact_whole_page_set
+                if redact_whole_page_set
+                else False
+            )
 
             redact_result = redact_page_with_pymupdf(
                 pymupdf_page,
@@ -8488,6 +8982,9 @@ def redact_text_pdf(
                 original_cropbox=original_cropboxes[page_no],
                 page_sizes_df=page_sizes_df,
                 input_folder=input_folder,
+                image_dimensions_override=page_to_image_dimensions.get(
+                    int(reported_page_number)
+                ),
             )
 
             # Handle dual page objects if returned
@@ -8631,7 +9128,7 @@ def redact_text_pdf(
 
             current_loop_page += 1
 
-            return (
+            early_result = (
                 pymupdf_doc,
                 all_pages_decision_process_table,
                 all_line_level_ocr_results_df,
@@ -8641,6 +9138,14 @@ def redact_text_pdf(
                 comprehend_query_number,
                 all_page_line_level_ocr_results_with_words,
             )
+            if efficient_ocr_extraction_pass:
+                return early_result + (
+                    llm_model_name,
+                    llm_total_input_tokens,
+                    llm_total_output_tokens,
+                    extraction_results,
+                )
+            return early_result
 
         # Check if the image already exists in annotations_all_pages
         existing_index = next(
@@ -8691,7 +9196,7 @@ def redact_text_pdf(
                     ]
                 )
 
-            return (
+            page_break_result = (
                 pymupdf_doc,
                 all_pages_decision_process_table,
                 all_line_level_ocr_results_df,
@@ -8701,6 +9206,14 @@ def redact_text_pdf(
                 comprehend_query_number,
                 all_page_line_level_ocr_results_with_words,
             )
+            if efficient_ocr_extraction_pass:
+                return page_break_result + (
+                    llm_model_name,
+                    llm_total_input_tokens,
+                    llm_total_output_tokens,
+                    extraction_results,
+                )
+            return page_break_result
 
     # Write all page outputs
     # Filter out empty DataFrames before concatenation to avoid FutureWarning
@@ -8770,7 +9283,7 @@ def redact_text_pdf(
         d for d in all_page_line_level_ocr_results_with_words if d
     ]
 
-    return (
+    result = (
         pymupdf_doc,
         all_pages_decision_process_table,
         all_line_level_ocr_results_df,
@@ -8783,6 +9296,9 @@ def redact_text_pdf(
         llm_total_input_tokens,
         llm_total_output_tokens,
     )
+    if efficient_ocr_extraction_pass:
+        return result + (extraction_results,)
+    return result
 
 
 def visualise_ocr_words_bounding_boxes(

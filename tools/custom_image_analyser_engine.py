@@ -1097,6 +1097,8 @@ def _call_bedrock_vlm_api(
     temperature: float = None,
     top_p: float = None,
     timeout: int = 60,
+    max_retries: int = 5,
+    retry_delay_seconds: float = 2.0,
 ) -> Tuple[str, int, int]:
     """
     Calls AWS Bedrock API with an image and text prompt for vision models.
@@ -1110,12 +1112,14 @@ def _call_bedrock_vlm_api(
         temperature: Sampling temperature
         top_p: Nucleus sampling parameter
         timeout: Request timeout in seconds
+        max_retries: Maximum number of retry attempts on failure (default 5)
+        retry_delay_seconds: Delay in seconds between retries (default 2.0)
 
     Returns:
         Tuple[str, int, int]: The generated text response, input tokens, output tokens
 
     Raises:
-        ConnectionError: If the API request fails
+        ConnectionError: If the API request fails after all retries
         ValueError: If the response format is invalid
     """
     if bedrock_runtime is None:
@@ -1150,41 +1154,53 @@ def _call_bedrock_vlm_api(
     if top_p is not None:
         inference_config["topP"] = top_p
 
-    try:
-        # Call Bedrock converse API
-        api_response = bedrock_runtime.converse(
-            modelId=model_choice,
-            messages=messages,
-            inferenceConfig=inference_config,
-        )
+    last_error = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            # Call Bedrock converse API
+            api_response = bedrock_runtime.converse(
+                modelId=model_choice,
+                messages=messages,
+                inferenceConfig=inference_config,
+            )
 
-        # Extract response text
-        output_message = api_response["output"]["message"]
-        if "content" in output_message and len(output_message["content"]) > 0:
-            # Handle reasoning content if present
-            if "reasoningContent" in output_message["content"][0]:
-                # Extract the output text (skip reasoning)
-                if len(output_message["content"]) > 1:
-                    text = output_message["content"][1]["text"]
+            # Extract response text
+            output_message = api_response["output"]["message"]
+            if "content" in output_message and len(output_message["content"]) > 0:
+                # Handle reasoning content if present
+                if "reasoningContent" in output_message["content"][0]:
+                    # Extract the output text (skip reasoning)
+                    if len(output_message["content"]) > 1:
+                        text = output_message["content"][1]["text"]
+                    else:
+                        text = ""
                 else:
-                    text = ""
+                    text = output_message["content"][0]["text"]
             else:
-                text = output_message["content"][0]["text"]
-        else:
-            raise ValueError("No content in Bedrock response")
+                raise ValueError("No content in Bedrock response")
 
-        # Extract token usage from API response
-        input_tokens = 0
-        output_tokens = 0
-        if "usage" in api_response:
-            usage = api_response["usage"]
-            input_tokens = usage.get("inputTokens", 0)
-            output_tokens = usage.get("outputTokens", 0)
+            # Extract token usage from API response
+            input_tokens = 0
+            output_tokens = 0
+            if "usage" in api_response:
+                usage = api_response["usage"]
+                input_tokens = usage.get("inputTokens", 0)
+                output_tokens = usage.get("outputTokens", 0)
 
-        return text, input_tokens, output_tokens
+            return text, input_tokens, output_tokens
 
-    except Exception as e:
-        raise ConnectionError(f"Failed to call Bedrock API: {str(e)}")
+        except Exception as e:
+            last_error = e
+            if attempt < max_retries:
+                print(
+                    f"Bedrock API attempt {attempt}/{max_retries} failed: {e}. "
+                    f"Retrying in {retry_delay_seconds}s..."
+                )
+                time.sleep(retry_delay_seconds)
+            else:
+                raise ConnectionError(
+                    f"Failed to call Bedrock API after {max_retries} attempts: {str(last_error)}"
+                ) from last_error
 
 
 def _call_gemini_vlm_api(
@@ -2246,11 +2262,8 @@ def _process_textract_page_with_hybrid_bedrock_vlm(
         else:
             save_examples = False
 
-    # Collect successful VLM updates (key -> new text, confidence, words)
-    # Accumulate VLM token usage for usage logs
-    hybrid_vlm_input_tokens = 0
-    hybrid_vlm_output_tokens = 0
-    updates = []
+    # Build list of (key, line_conf, bbox, cropped) for lines below threshold
+    tasks = []
     for key, line_conf, bbox in line_level_items:
         if line_conf > confidence_threshold:
             continue
@@ -2264,10 +2277,14 @@ def _process_textract_page_with_hybrid_bedrock_vlm(
         cropped = image.crop((crop_left, crop_top, crop_right, crop_bottom))
         if cropped.size[0] < 10 or cropped.size[1] < 10:
             continue
+        tasks.append((key, line_conf, bbox, cropped))
 
+    def _run_one_line_vlm(
+        task: Tuple[str, float, Tuple, Image.Image],
+    ) -> Dict[str, Any]:
+        """Run Bedrock VLM on one line crop. Returns dict with key, line_conf, bbox, cropped, and either vlm_result or error."""
+        key, line_conf, bbox, cropped = task
         prompt_used = model_default_prompt
-        raw_response = None
-        attempt_error = None
         try:
             vlm_result = _bedrock_vlm_ocr_predict(
                 cropped,
@@ -2277,10 +2294,50 @@ def _process_textract_page_with_hybrid_bedrock_vlm(
             )
             if save_examples:
                 prompt_used = vlm_result.get("prompt", prompt_used)
-                raw_response = vlm_result.get("raw_response")
+            return {
+                "key": key,
+                "line_conf": line_conf,
+                "bbox": bbox,
+                "cropped": cropped,
+                "vlm_result": vlm_result,
+                "prompt_used": prompt_used,
+                "raw_response": (
+                    vlm_result.get("raw_response") if save_examples else None
+                ),
+                "error": None,
+            }
         except Exception as e:
-            attempt_error = str(e)
-            print(f"Hybrid Textract-Bedrock VLM failed for line {key}: {e}")
+            return {
+                "key": key,
+                "line_conf": line_conf,
+                "bbox": bbox,
+                "cropped": cropped,
+                "vlm_result": None,
+                "prompt_used": prompt_used,
+                "raw_response": None,
+                "error": str(e),
+            }
+
+    # Run VLM inference in parallel for all low-confidence lines
+    hybrid_vlm_input_tokens = 0
+    hybrid_vlm_output_tokens = 0
+    updates = []
+    vlm_results_list = []
+    if tasks:
+        max_workers_hybrid = min(MAX_WORKERS, len(tasks))
+        with ThreadPoolExecutor(max_workers=max_workers_hybrid) as executor:
+            vlm_results_list = list(executor.map(_run_one_line_vlm, tasks))
+
+    # Process each VLM result (post-processing and optional logging on main thread)
+    for res in vlm_results_list:
+        key = res["key"]
+        line_conf = res["line_conf"]
+        bbox = res["bbox"]
+        cropped = res["cropped"]
+        prompt_used = res["prompt_used"]
+        raw_response = res["raw_response"]
+        if res["error"] is not None:
+            print(f"Hybrid Textract-Bedrock VLM failed for line {key}: {res['error']}")
             if save_examples and hybrid_examples_folder and inference_log_path:
                 try:
                     safe_name = (
@@ -2292,7 +2349,7 @@ def _process_textract_page_with_hybrid_bedrock_vlm(
                         "key": key,
                         "line_conf": line_conf,
                         "prompt": prompt_used,
-                        "error": attempt_error,
+                        "error": res["error"],
                         "raw_response": None,
                     }
                     with open(inference_log_path, "a", encoding="utf-8") as log_f:
@@ -2300,6 +2357,8 @@ def _process_textract_page_with_hybrid_bedrock_vlm(
                 except Exception as save_err:
                     print(f"Could not save hybrid example for {key}: {save_err}")
             continue
+
+        vlm_result = res["vlm_result"]
         hybrid_vlm_input_tokens += vlm_result.get("vlm_input_tokens", 0)
         hybrid_vlm_output_tokens += vlm_result.get("vlm_output_tokens", 0)
         rec_texts = vlm_result.get("rec_texts", [])
@@ -2681,10 +2740,10 @@ def _inference_server_ocr_predict(
             # Split into words for compatibility with PaddleOCR format
             words = cleaned_text.split()
 
-            # If text has more than 30 words, assume something went wrong and skip it
-            if len(words) > 30:
+            # If text has more than HYBRID_OCR_MAX_NEW_TOKENS words, assume something went wrong and skip it
+            if len(words) > HYBRID_OCR_MAX_NEW_TOKENS:
                 print(
-                    f"Inference-server OCR warning: Extracted text has {len(words)} words, which exceeds the 30 word limit. Skipping."
+                    f"Inference-server OCR warning: Extracted text has {len(words)} words, which exceeds the {HYBRID_OCR_MAX_NEW_TOKENS} word limit. Skipping."
                 )
                 return {"rec_texts": [], "rec_scores": []}
 
@@ -2715,7 +2774,7 @@ def _bedrock_vlm_ocr_predict(
     prompt: str = model_default_prompt,
     model_choice: str = None,
     bedrock_runtime=None,
-    max_retries: int = 5,
+    max_retries: int = 10,
     return_prompt_and_response: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -2839,7 +2898,7 @@ def _bedrock_vlm_ocr_predict(
                     score = 1.0
                 if text_content:
                     words = re.sub(r"[\r\n]+", " ", text_content).strip().split()
-                    if len(words) <= 30:
+                    if len(words) <= HYBRID_OCR_MAX_NEW_TOKENS:
                         return _add_prompt_response(
                             {
                                 "rec_texts": words,
@@ -2932,9 +2991,9 @@ def _bedrock_vlm_ocr_predict(
 
             words = cleaned_text.split()
 
-            if len(words) > 30:
+            if len(words) > HYBRID_OCR_MAX_NEW_TOKENS:
                 print(
-                    f"Bedrock VLM OCR warning: Extracted text has {len(words)} words, which exceeds the 30 word limit. Skipping."
+                    f"Bedrock VLM OCR warning: Extracted text has {len(words)} words, which exceeds the {HYBRID_OCR_MAX_NEW_TOKENS} word limit. Skipping."
                 )
                 return _add_prompt_response({"rec_texts": [], "rec_scores": []})
 
@@ -3129,9 +3188,9 @@ def _gemini_vlm_ocr_predict(
 
             words = cleaned_text.split()
 
-            if len(words) > 30:
+            if len(words) > HYBRID_OCR_MAX_NEW_TOKENS:
                 print(
-                    f"Gemini VLM OCR warning: Extracted text has {len(words)} words, which exceeds the 30 word limit. Skipping."
+                    f"Gemini VLM OCR warning: Extracted text has {len(words)} words, which exceeds the {HYBRID_OCR_MAX_NEW_TOKENS} word limit. Skipping."
                 )
                 return {"rec_texts": [], "rec_scores": []}
 
@@ -3323,9 +3382,9 @@ def _azure_openai_vlm_ocr_predict(
 
             words = cleaned_text.split()
 
-            if len(words) > 30:
+            if len(words) > HYBRID_OCR_MAX_NEW_TOKENS:
                 print(
-                    f"Azure/OpenAI VLM OCR warning: Extracted text has {len(words)} words, which exceeds the 30 word limit. Skipping."
+                    f"Azure/OpenAI VLM OCR warning: Extracted text has {len(words)} words, which exceeds the {HYBRID_OCR_MAX_NEW_TOKENS} word limit. Skipping."
                 )
                 return {"rec_texts": [], "rec_scores": []}
 
@@ -10097,16 +10156,35 @@ def do_aws_comprehend_call(
     allow_list: List[str],
     chosen_redact_comprehend_entities: List[str],
     all_text_line_results: List[Tuple],
+    max_retries: int = 10,
+    retry_delay: int = 1,
 ):
+    """
+    Uses AWS Comprehend to detect PII entities in a text batch and maps the results
+    back to the original lines for further processing.
+
+    Args:
+        current_batch (str): The concatenated text being analysed for PII.
+        current_batch_mapping (List[Tuple]): Mapping from batch offsets back to
+            individual line offsets and line indices for result mapping.
+        comprehend_client (botocore.client.BaseClient): AWS Comprehend boto3 client for making API calls.
+        language (str): The ISO language code for the text (e.g. "en").
+        allow_list (List[str]): List of lowercased phrases or words which, if detected,
+            should not be flagged/redacted even if AWS returns them as PII.
+        chosen_redact_comprehend_entities (List[str]): List of PII entity types (from AWS) enabled for detection/redaction.
+        all_text_line_results (List[Tuple]): Existing recognition results by line; this will be updated in-place and returned.
+        max_retries (int, optional): Maximum number of times to retry the AWS API in case of failure. Default is 10.
+        retry_delay (int, optional): Number of seconds to wait between retries. Default is 1.
+
+    Returns:
+        List[Tuple]: Updated list of recognition results by text line, with AWS detected PII mapped back to their source.
+    """
     if not current_batch:
         return all_text_line_results
     # Guard: if no relevant AWS entity types are selected, skip AWS entirely.
     # (CUSTOM/CUSTOM_FUZZY and other local-only entities are handled via Presidio.)
     if not chosen_redact_comprehend_entities:
         return all_text_line_results
-
-    max_retries = 3
-    retry_delay = 3
 
     for attempt in range(max_retries):
         try:
@@ -11538,14 +11616,38 @@ def run_page_text_redaction(
     )
 
 
+def _char_bbox_and_text(char: Any) -> Tuple[Optional[List[float]], str]:
+    """
+    Get bbox and text from a character object. Supports both pdfminer LTChar
+    and PyMuPDF dict format {"text": ..., "bbox": [x0,y0,x1,y1], ...}.
+    Returns (bbox_list or None, text_str).
+    """
+    if isinstance(char, LTChar):
+        return (
+            getattr(char, "bbox", None),
+            getattr(char, "_text", None)
+            or (char.get_text() if callable(getattr(char, "get_text", None)) else "")
+            or "",
+        )
+    if isinstance(char, dict) and "bbox" in char:
+        bbox = char["bbox"]
+        text = char.get("text", "")
+        return (
+            bbox if isinstance(bbox, (list, tuple)) and len(bbox) >= 4 else None,
+            text,
+        )
+    return (None, "")
+
+
 def merge_text_bounding_boxes(
     analyser_results: dict,
-    characters: List[LTChar],
+    characters: List[Any],
     combine_pixel_dist: int = 20,
     vertical_padding: int = 0,
 ):
     """
-    Merge identified bounding boxes containing PII that are very close to one another
+    Merge identified bounding boxes containing PII that are very close to one another.
+    Supports both pdfminer LTChar objects and PyMuPDF-style dicts with "bbox" and "text" keys.
     """
     analysed_bounding_boxes = list()
     original_bounding_boxes = list()  # List to hold original bounding boxes
@@ -11554,16 +11656,13 @@ def merge_text_bounding_boxes(
         # Extract bounding box coordinates for sorting
         bounding_boxes = list()
         for result in analyser_results:
-            char_boxes = [
-                char.bbox
-                for char in characters[result.start : result.end]
-                if isinstance(char, LTChar)
-            ]
-            char_text = [
-                char._text
-                for char in characters[result.start : result.end]
-                if isinstance(char, LTChar)
-            ]
+            char_boxes = []
+            char_text = []
+            for char in characters[result.start : result.end]:
+                bbox, text = _char_bbox_and_text(char)
+                if bbox is not None:
+                    char_boxes.append(bbox)
+                    char_text.append(text)
             if char_boxes:
                 # Calculate the bounding box that encompasses all characters
                 left = min(box[0] for box in char_boxes)
