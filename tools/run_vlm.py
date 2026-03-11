@@ -7,6 +7,8 @@ import spaces
 from PIL import Image
 
 from tools.config import (
+    CLOUD_VLM_MODEL_CHOICE,
+    DEFAULT_INFERENCE_SERVER_VLM_MODEL,
     LOAD_PADDLE_AT_STARTUP,
     MAX_INPUT_TOKEN_LENGTH,
     MAX_NEW_TOKENS,
@@ -18,6 +20,9 @@ from tools.config import (
     PADDLE_USE_TEXTLINE_ORIENTATION,
     QUANTISE_VLM_MODELS,
     REPORT_VLM_OUTPUTS_TO_GUI,
+    SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL,
+    SHOW_BEDROCK_VLM_MODELS,
+    SHOW_INFERENCE_SERVER_VLM_OPTIONS,
     SHOW_VLM_MODEL_OPTIONS,
     USE_FLASH_ATTENTION,
     VLM_DEFAULT_DO_SAMPLE,
@@ -1198,7 +1203,17 @@ def extract_text_from_image_vlm(
 
 
 # If not a Qwen VL model, give some more guidance on bounding box coordinates
-if "qwen" in SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL.lower():
+if (
+    (
+        "qwen" in str(SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL).lower()
+        and SHOW_VLM_MODEL_OPTIONS
+    )
+    or (
+        "qwen" in str(DEFAULT_INFERENCE_SERVER_VLM_MODEL).lower()
+        and SHOW_INFERENCE_SERVER_VLM_OPTIONS
+    )
+    or ("qwen" in str(CLOUD_VLM_MODEL_CHOICE).lower() and SHOW_BEDROCK_VLM_MODELS)
+):
     additional_bounding_box_rules = ""
 else:
     additional_bounding_box_rules = """- Bounding boxes should fit within the coordinate extents of the image, the extent of which is 0, 0 for the top left corner of the image, and 999, 999 for the bottom right corner of the image"""
