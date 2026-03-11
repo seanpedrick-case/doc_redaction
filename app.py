@@ -3669,15 +3669,21 @@ with blocks:
         with gr.Tab(
             label="Document summarisation", id=8, visible=visible_summarisation_tab
         ):
+
             gr.Markdown(
-                """
-            This tab allows you to summarise documents using Large Language Model (LLM)-based summarisation. The summarisation process:
+                """This tab allows you to summarise documents using Large Language Model (LLM)-based summarisation. Upload a PDF or OCR CSV file (from a previous redaction run) to summarise. The summarisation process:
                 1. Groups pages to fit within the maximum LLM context length, or by a maximum number of pages per group defined below if smaller
                 2. Summarises each page group
                 3. Creates an overall summary of the entire document based on the page group summaries
-                """,
+                
+                Large language models can hallucinate or make mistakes - the summaries produced here are intended for informational purposes only and not for further distribution or use.""",
                 line_breaks=True,
             )
+
+            if SHOW_COSTS:
+                gr.Markdown(
+                    "Note that the summarisation process using AWS Bedrock has a cost (approximately $0.50 per 1,000 pages summarised), and this will be charged to the same cost code as the redaction process (see Redact PDFs/images tab to select a cost code)."
+                )
 
             in_summarisation_ocr_files = gr.File(
                 label="Upload PDF or OCR CSV files to summarise",
