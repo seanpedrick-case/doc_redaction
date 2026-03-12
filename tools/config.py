@@ -932,6 +932,39 @@ VLM_MAX_IMAGE_SIZE = int(
     get_or_create_env_var("VLM_MAX_IMAGE_SIZE", "819200")
 )  # Maximum total pixels (width * height) for images passed to VLM, as a multiple of 32*32 for Qwen3-VL. Images with more pixels will be resized while maintaining aspect ratio. Default is 819200 (800*32*32).
 
+ADD_VLM_BOUNDING_BOX_RULES = convert_string_to_boolean(
+    get_or_create_env_var("ADD_VLM_BOUNDING_BOX_RULES", "False")
+)  # Whether to add bounding box rules to the VLM prompt.
+
+# Bedrock VLM OCR cost estimation (used when text extraction method is "AWS Bedrock VLM OCR - all PDF types")
+BEDROCK_VLM_INPUT_COST = float(
+    get_or_create_env_var(
+        "BEDROCK_VLM_INPUT_COST", "1.13"
+    )  # Based on Amazon Nova Pro input cost of $1.13 per million tokens
+)  # USD per million input tokens for Bedrock VLM OCR cost estimate.
+BEDROCK_VLM_OUTPUT_COST = float(
+    get_or_create_env_var(
+        "BEDROCK_VLM_OUTPUT_COST", "4.52"
+    )  # Based on Amazon Nova Pro output cost of $4.52 per million tokens
+)  # USD per million output tokens for Bedrock VLM OCR cost estimate.
+BEDROCK_VLM_PIXELS_PER_INPUT_TOKEN = int(
+    get_or_create_env_var("BEDROCK_VLM_PIXELS_PER_INPUT_TOKEN", "2500")
+)  # Pixels (width*height) per input token; used with VLM_MAX_IMAGE_SIZE to estimate input tokens per page for cost calculation.
+
+# Bedrock LLM cost estimation (used when PII identification method is "LLM (AWS Bedrock)")
+BEDROCK_LLM_INPUT_COST = float(
+    get_or_create_env_var("BEDROCK_LLM_INPUT_COST", "1.13")
+)  # USD per million input tokens for Bedrock LLM (e.g. PII detection) cost estimate. Based on Amazon Nova Pro input cost of $1.13 per million tokens
+BEDROCK_LLM_OUTPUT_COST = float(
+    get_or_create_env_var("BEDROCK_LLM_OUTPUT_COST", "4.52")
+)  # USD per million output tokens for Bedrock LLM cost estimate. Based on Amazon Nova Pro output cost of $4.52 per million tokens
+BEDROCK_LLM_INPUT_TOKENS_PER_PAGE = int(
+    get_or_create_env_var("BEDROCK_LLM_INPUT_TOKENS_PER_PAGE", "2000")
+)  # Estimated input tokens per page for Bedrock LLM cost calculation.
+BEDROCK_LLM_OUTPUT_TOKENS_PER_PAGE = int(
+    get_or_create_env_var("BEDROCK_LLM_OUTPUT_TOKENS_PER_PAGE", "250")
+)  # Estimated output tokens per page for Bedrock LLM cost calculation.
+
 VLM_MIN_IMAGE_SIZE = int(
     get_or_create_env_var("VLM_MIN_IMAGE_SIZE", "614400")
 )  # Minimum total pixels (width * height) for images passed to VLM, as a multiple of 32*32 for Qwen3-VL. Images with less pixels will be resized while maintaining aspect ratio. Default is 614400 (600*32*32).
@@ -1177,7 +1210,7 @@ MODEL_CACHE_PATH = ensure_folder_within_app_directory(MODEL_CACHE_PATH)
 
 
 HYBRID_OCR_CONFIDENCE_THRESHOLD = int(
-    get_or_create_env_var("HYBRID_OCR_CONFIDENCE_THRESHOLD", "97")
+    get_or_create_env_var("HYBRID_OCR_CONFIDENCE_THRESHOLD", "90")
 )  # The tesseract confidence threshold under which the text will be passed to PaddleOCR for re-extraction using the hybrid OCR method.
 
 HYBRID_OCR_PADDING = int(
@@ -1189,10 +1222,15 @@ HYBRID_TEXTRACT_BEDROCK_VLM = convert_string_to_boolean(
     get_or_create_env_var("HYBRID_TEXTRACT_BEDROCK_VLM", "False")
 )
 HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD = int(
-    get_or_create_env_var("HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD", "97")
+    get_or_create_env_var(
+        "HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD",
+        str(HYBRID_OCR_CONFIDENCE_THRESHOLD),
+    )
 )  # Line average confidence below this (0-100) triggers Bedrock VLM re-extraction.
 HYBRID_TEXTRACT_BEDROCK_VLM_PADDING = int(
-    get_or_create_env_var("HYBRID_TEXTRACT_BEDROCK_VLM_PADDING", "5")
+    get_or_create_env_var(
+        "HYBRID_TEXTRACT_BEDROCK_VLM_PADDING", str(HYBRID_OCR_PADDING)
+    )
 )  # Padding (pixels) around line crop when calling Bedrock VLM.
 
 TESSERACT_WORD_LEVEL_OCR = convert_string_to_boolean(
@@ -1901,6 +1939,9 @@ INCLUDE_LAYOUT_EXTRACTION_TEXTRACT_OPTION = get_or_create_env_var(
 INCLUDE_TABLE_EXTRACTION_TEXTRACT_OPTION = get_or_create_env_var(
     "INCLUDE_TABLE_EXTRACTION_TEXTRACT_OPTION", "False"
 )
+INCLUDE_FACE_IDENTIFICATION_TEXTRACT_OPTION = get_or_create_env_var(
+    "INCLUDE_FACE_IDENTIFICATION_TEXTRACT_OPTION", "False"
+)
 
 if INCLUDE_FORM_EXTRACTION_TEXTRACT_OPTION == "True":
     HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS.append("Extract forms")
@@ -1908,6 +1949,8 @@ if INCLUDE_LAYOUT_EXTRACTION_TEXTRACT_OPTION == "True":
     HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS.append("Extract layout")
 if INCLUDE_TABLE_EXTRACTION_TEXTRACT_OPTION == "True":
     HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS.append("Extract tables")
+if INCLUDE_FACE_IDENTIFICATION_TEXTRACT_OPTION == "True":
+    HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS.append("Face identification")
 
 # Whether to split punctuation from words in Textract output
 # If True, punctuation marks (full stops, commas, quotes, brackets, etc.) will be separated
@@ -2437,7 +2480,11 @@ if CHOSEN_REDACT_ENTITIES:
 if FULL_ENTITY_LIST:
     FULL_ENTITY_LIST = _get_env_list(FULL_ENTITY_LIST)
 
-if (
+SHOW_CUSTOM_VLM_ENTITIES = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_CUSTOM_VLM_ENTITIES", "False")
+)
+
+if SHOW_CUSTOM_VLM_ENTITIES and (
     SHOW_VLM_MODEL_OPTIONS
     or SHOW_INFERENCE_SERVER_VLM_OPTIONS
     or SHOW_BEDROCK_VLM_MODELS

@@ -41,9 +41,23 @@ def is_data_file_type_walkthrough(files):
 
 
 def route_walkthrough_files(files):
-    """Route files from walkthrough to appropriate component and determine if data file."""
+    """Route files from walkthrough to appropriate component and determine if data file.
+
+    Also returns visibility updates for step 2 text extraction components: when the
+    upload is CSV/Excel (data file), those are hidden; when it is a document, they
+    follow SHOW_OCR_GUI_OPTIONS (radio) and accordions are left unchanged.
+    """
     if not files:
-        return None, None, False, gr.Walkthrough(selected=2)
+        show_text_extract = SHOW_OCR_GUI_OPTIONS
+        return (
+            None,
+            None,
+            False,
+            gr.Walkthrough(selected=2),
+            gr.update(visible=show_text_extract),
+            gr.update(),
+            gr.update(),
+        )
 
     is_data = is_data_file_type_walkthrough(files)
     doc_files = []
@@ -60,11 +74,26 @@ def route_walkthrough_files(files):
             else:
                 doc_files.append(file)
 
-    # Return files for appropriate component (None for the other)
+    # Hide text extraction options on step 2 when CSV/Excel (data file) was uploaded
+    show_text_extract = (not is_data) and SHOW_OCR_GUI_OPTIONS
     if is_data:
-        return None, data_files, True, gr.Walkthrough(selected=2)
+        text_extract_updates = (
+            gr.update(visible=False),
+            gr.update(visible=False),
+            gr.update(visible=False),
+        )
     else:
-        return doc_files, None, False, gr.Walkthrough(selected=2)
+        # Document: show radio if enabled; leave accordions unchanged (they follow radio selection)
+        text_extract_updates = (
+            gr.update(visible=show_text_extract),
+            gr.update(),
+            gr.update(),
+        )
+
+    if is_data:
+        return None, data_files, True, gr.Walkthrough(selected=2), *text_extract_updates
+    else:
+        return doc_files, None, False, gr.Walkthrough(selected=2), *text_extract_updates
 
 
 def handle_step_2_next(
@@ -133,14 +162,34 @@ def handle_step_2_next(
         )
 
 
-def update_step_2_on_data_file_upload(files, is_data_file):
-    """Update Step 2 components when data files are uploaded."""
+def _data_files_fingerprint(files):
+    """Return a stable key for the current file list to detect redundant updates."""
+    if not files:
+        return ()
+    return tuple(getattr(f, "name", str(f)) for f in files if f is not None)
+
+
+def update_step_2_on_data_file_upload(files, is_data_file, last_processed_keys=None):
+    """Update Step 2 components when data files are uploaded.
+
+    When last_processed_keys is provided (from gr.State), returns (colnames, sheets, new_keys)
+    and skips recomputation if files are unchanged to avoid Gradio re-firing change and
+    causing an infinite loading loop on the column dropdown.
+    """
+    keys = _data_files_fingerprint(files)
+    if last_processed_keys is not None and keys == last_processed_keys:
+        return gr.update(), gr.update(), last_processed_keys
+
     if is_data_file and files:
-        # Use put_columns_in_df to populate dropdowns
         colnames_dropdown, excel_sheets_dropdown = put_columns_in_df(files)
-        return colnames_dropdown, excel_sheets_dropdown
+        if last_processed_keys is not None:
+            return colnames_dropdown, excel_sheets_dropdown, keys
+        return colnames_dropdown, excel_sheets_dropdown, keys
     else:
-        return gr.Dropdown(visible=False), gr.Dropdown(visible=False)
+        no_op = gr.Dropdown(visible=False), gr.Dropdown(visible=False), keys
+        if last_processed_keys is not None:
+            return *no_op, () if not keys else keys
+        return no_op
 
 
 def handle_text_extract_method_selection(text_extract_method: str):
@@ -298,9 +347,6 @@ def handle_redaction_method_selection(redaction_method: str, pii_method: str):
         ),  # walkthrough_list_accordion
         gr.update(
             visible=is_redact_all_pii_or_selected_terms
-        ),  # walkthrough_redact_duplicate_pages_checkbox
-        gr.update(
-            visible=is_redact_all_pii_or_selected_terms
         ),  # walkthrough_max_fuzzy_spelling_mistakes_num
     )
 
@@ -341,8 +387,7 @@ def handle_main_redaction_method_selection(redaction_method, pii_method):
         ],  # in_redact_llm_entities (was wrongly going to textbox as str(["CUSTOM"]) -> "['CUSTOM']")
         gr.update(),  # custom_llm_instructions_textbox - leave value unchanged
         raw[5],  # walkthrough_list_accordion
-        raw[6],  # redact_duplicate_pages_checkbox
-        raw[7],  # max_fuzzy_spelling_mistakes_num
+        raw[6],  # max_fuzzy_spelling_mistakes_num
         gr.update(visible=show_pii_method),  # entity_types_to_redact_accordion
         gr.update(visible=show_selected_terms_lists),  # terms_accordion
         gr.update(value=is_extract_text_only),  # only_extract_text_radio
@@ -370,16 +415,43 @@ def handle_pii_method_selection(pii_method: str):
             or pii_method == AWS_LLM_PII_OPTION
         )
 
+    # Use gr.update(visible=...) only to avoid value resets that can trigger change
+    # events on the target components and cause loading loops (e.g. tabular PII -> LLM).
     return (
-        gr.Dropdown(visible=show_local_entities),  # walkthrough_in_redact_entities
-        gr.Dropdown(
+        gr.update(visible=show_local_entities),  # walkthrough_in_redact_entities
+        gr.update(
             visible=show_comprehend_entities
         ),  # walkthrough_in_redact_comprehend_entities
-        gr.Dropdown(visible=is_llm_method),  # walkthrough_in_redact_llm_entities
-        gr.Textbox(
-            visible=is_llm_method
-        ),  # walkthrough_custom_llm_instructions_textbox
+        gr.update(visible=is_llm_method),  # walkthrough_in_redact_llm_entities
+        gr.update(visible=is_llm_method),  # walkthrough_custom_llm_instructions_textbox
         gr.update(visible=is_llm_method),  # walkthrough_llm_entities_accordion
+    )
+
+
+def handle_pii_method_selection_tabular(pii_method: str):
+    """Handle tabular PII method selection. Updates only accordion visibility for the
+    LLM block; leaves walkthrough_in_redact_llm_entities and
+    walkthrough_custom_llm_instructions_textbox as no-ops to avoid loading spinners
+    hanging on those nested components when switching to LLM (AWS Bedrock).
+    """
+    if pii_method is None or (isinstance(pii_method, str) and not pii_method.strip()):
+        show_local_entities = True
+        show_comprehend_entities = False
+        is_llm_method = False
+    else:
+        show_local_entities = pii_method == LOCAL_PII_OPTION
+        show_comprehend_entities = pii_method == AWS_PII_OPTION
+        is_llm_method = (
+            pii_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION
+            or pii_method == INFERENCE_SERVER_PII_OPTION
+            or pii_method == AWS_LLM_PII_OPTION
+        )
+    return (
+        gr.update(visible=show_local_entities),
+        gr.update(visible=show_comprehend_entities),
+        gr.update(),  # no-op: avoid updating nested component (loading hang)
+        gr.update(),  # no-op: avoid updating nested component (loading hang)
+        gr.update(visible=is_llm_method),  # accordion controls visibility of LLM block
     )
 
 
@@ -669,15 +741,23 @@ def sync_walkthrough_tabular_outputs_to_original(summary_text, output_file_value
 
 
 def update_step_3_tabular_visibility(is_data_file):
-    """Update visibility of Step 3 tabular components based on file type.
+    """Update visibility of Step 3 components based on file type.
+
+    When a data file (CSV/Excel) is chosen: show tabular options, hide document-only options.
+    When a document is chosen: show document options (PII method, duplicate pages, etc.), hide tabular options.
 
     Args:
         is_data_file: Boolean indicating if uploaded file is a data file
 
     Returns:
-        Tuple of visibility updates for tabular components
+        Tuple of visibility updates for document-only and tabular components
     """
+    show_doc = not is_data_file
     return (
+        gr.update(visible=show_doc),  # walkthrough_local_ocr_method_radio
+        gr.update(visible=show_doc),  # walkthrough_pii_identification_method_drop
+        gr.update(visible=show_doc),  # walkthrough_fully_redacted_list_state
+        gr.update(visible=show_doc),  # walkthrough_redact_duplicate_pages_checkbox
         gr.update(
             visible=is_data_file
         ),  # walkthrough_pii_identification_method_drop_tabular

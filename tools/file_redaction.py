@@ -673,7 +673,7 @@ def choose_and_run_redactor(
     # If we have already redacted the last file, return the input out_message and file list to the relevant outputs
     if latest_file_completed >= number_of_files:
 
-        print("Completed last file")
+        print("Completed last file, performing final checks")
         progress(0.95, "Completed last file, performing final checks")
         current_loop_page = 0
 
@@ -701,19 +701,25 @@ def choose_and_run_redactor(
                 if review_file_path:
                     review_out_file_paths.append(review_file_path)
 
+        # Use document page count when available (pymupdf_doc is set by state from last run).
+        # Default to 1 only when we have no valid document (e.g. initial state pymupdf_doc=list(),
+        # or no files were processed in this session).
+        number_of_pages = 1
         if pymupdf_doc is not None and not isinstance(pymupdf_doc, list):
-            number_of_pages = pymupdf_doc.page_count
+            if hasattr(pymupdf_doc, "page_count"):
+                _cnt = pymupdf_doc.page_count
+                if _cnt and _cnt > 0:
+                    number_of_pages = _cnt
+        if number_of_pages and number_of_pages > 0:
             if total_textract_query_number > number_of_pages:
                 total_textract_query_number = number_of_pages
-            # Ensure Total pages UI shows document count (not stale input)
-            if number_of_pages and number_of_pages > 0:
-                annotate_max_pages = number_of_pages
-                annotate_max_pages_bottom = number_of_pages
-        else:
-            number_of_pages = 1
+            annotate_max_pages = number_of_pages
+            annotate_max_pages_bottom = number_of_pages
 
         # No files to process: total page count stays 0 for usage logging
         total_pages_for_ui = number_of_pages if number_of_pages else 1
+
+        print("number_of_pages:", number_of_pages)
 
         sum_numbers_before_seconds(combined_out_message)
 
@@ -790,7 +796,22 @@ def choose_and_run_redactor(
     # Prepare documents and images as required if they don't already exist
     prepare_images_flag = None  # Determines whether to call prepare_image_or_pdf
 
-    if efficient_ocr and file_paths_loop:
+    # When Textract + Extract signatures/forms/tables/Face identification, we run all pages through
+    # redact_image_pdf (skip EFFICIENT_OCR two-step), so we must prepare all images upfront.
+    # Face identification requires the Bedrock VLM person pass in redact_image_pdf.
+    _textract_needs_full_analysis_global = (
+        text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+        and any(
+            opt in (handwrite_signature_checkbox or [])
+            for opt in (
+                "Extract signatures",
+                "Extract forms",
+                "Extract tables",
+                "Face identification",
+            )
+        )
+    )
+    if efficient_ocr and file_paths_loop and not _textract_needs_full_analysis_global:
         # Defer image load: only create images for pages that need OCR, after word check
         first_file = (
             file_paths_loop[0]
@@ -1270,18 +1291,24 @@ def choose_and_run_redactor(
                 print(out_message)
                 raise Exception(out_message)
 
-    # If using Textract and CUSTOM_VLM_PERSON or CUSTOM_VLM_SIGNATURE is selected,
-    # ensure bedrock_runtime is available for the additional VLM detection passes
-    if (
-        text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
-        and bedrock_runtime is None
-        and (
-            "CUSTOM_VLM_PERSON" in chosen_redact_entities
-            or "CUSTOM_VLM_SIGNATURE" in chosen_redact_entities
-        )
-    ):
+    # If using image-based extraction (Textract, Bedrock VLM, etc.) and CUSTOM_VLM_PERSON /
+    # CUSTOM_VLM_SIGNATURE is selected, or "Face identification" is checked (which adds
+    # CUSTOM_VLM_PERSON inside redact_image_pdf), ensure bedrock_runtime is available.
+    _image_based_extraction = text_extraction_method in (
+        TEXTRACT_TEXT_EXTRACT_OPTION,
+        BEDROCK_VLM_TEXT_EXTRACT_OPTION,
+        TESSERACT_TEXT_EXTRACT_OPTION,
+        GEMINI_VLM_TEXT_EXTRACT_OPTION,
+        AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION,
+    )
+    _face_or_person_selected = (
+        "CUSTOM_VLM_PERSON" in (chosen_redact_entities or [])
+        or "CUSTOM_VLM_SIGNATURE" in (chosen_redact_entities or [])
+        or "Face identification" in (handwrite_signature_checkbox or [])
+    )
+    if _image_based_extraction and bedrock_runtime is None and _face_or_person_selected:
         print(
-            "CUSTOM_VLM_PERSON or CUSTOM_VLM_SIGNATURE selected with Textract. Connecting to Bedrock for additional detection."
+            "CUSTOM_VLM_PERSON or CUSTOM_VLM_SIGNATURE selected, or Face identification enabled. Connecting to Bedrock for additional detection."
         )
         if RUN_AWS_FUNCTIONS and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:
             print("Connecting to Bedrock via existing SSO connection for VLM detection")
@@ -1478,10 +1505,13 @@ def choose_and_run_redactor(
         # Remove any existing review_file paths from the review file outputs
         # EFFICIENT_OCR: two-step process per page - try selectable text first, OCR only if needed.
         # When text extraction is selectable-text only, skip EFFICIENT_OCR checks and run only redact_text_pdf.
+        # When Textract is selected with Extract signatures/forms/tables/Face identification, skip
+        # EFFICIENT_OCR so all pages go through redact_image_pdf (Textract analysis and/or face pass).
         if (
             efficient_ocr
             and is_pdf(file_path)
             and text_extraction_method != SELECTABLE_TEXT_EXTRACT_OPTION
+            and not _textract_needs_full_analysis_global
         ):
             print(
                 "Redacting file "
@@ -2213,19 +2243,19 @@ def choose_and_run_redactor(
                                 out_file_paths.append(out_redacted_pdf_file_path[0])
 
                             # Release file handle so Gradio can read the output (Windows)
-                            if applied_redaction_pymupdf_doc is not None:
-                                applied_redaction_pymupdf_doc.close()
-                                applied_redaction_pymupdf_doc = None
-                            elif (
-                                not RETURN_PDF_FOR_REVIEW
-                                and pymupdf_doc is not None
-                                and not isinstance(pymupdf_doc, list)
-                            ):
-                                try:
-                                    pymupdf_doc.close()
-                                except Exception:
-                                    pass
-                                pymupdf_doc = None
+                            # if applied_redaction_pymupdf_doc is not None:
+                            #     applied_redaction_pymupdf_doc.close()
+                            #     applied_redaction_pymupdf_doc = None
+                            # elif (
+                            #     not RETURN_PDF_FOR_REVIEW
+                            #     and pymupdf_doc is not None
+                            #     and not isinstance(pymupdf_doc, list)
+                            # ):
+                            #     try:
+                            #         pymupdf_doc.close()
+                            #     except Exception:
+                            #         pass
+                            #     pymupdf_doc = None
 
         # Always return a file for review if a pdf is given and RETURN_PDF_FOR_REVIEW is True
         if is_pdf(file_path) is True:
@@ -2253,12 +2283,12 @@ def choose_and_run_redactor(
                     else:
                         out_file_paths.append(out_review_pdf_file_path[0])
                     # Release file handle so Gradio can read the output (Windows)
-                    if pymupdf_doc is not None and not isinstance(pymupdf_doc, list):
-                        try:
-                            pymupdf_doc.close()
-                        except Exception:
-                            pass
-                        pymupdf_doc = None
+                    # if pymupdf_doc is not None and not isinstance(pymupdf_doc, list):
+                    #     try:
+                    #         pymupdf_doc.close()
+                    #     except Exception:
+                    #         pass
+                    #     pymupdf_doc = None
 
         if not all_page_line_level_ocr_results_df.empty:
             all_page_line_level_ocr_results_df = all_page_line_level_ocr_results_df[
@@ -2776,6 +2806,15 @@ def choose_and_run_redactor(
         if _doc_pages and _doc_pages > 0:
             annotate_max_pages = _doc_pages
 
+    # Ensure total_pdf_page_count (for usage logs) reflects the full document page count,
+    # not a subset (e.g. when EFFICIENT_OCR only processes OCR-needed pages or when
+    # loading from existing Textract JSON).
+    total_pages_for_usage_log = number_of_pages
+    if not isinstance(pymupdf_doc, list) and hasattr(pymupdf_doc, "page_count"):
+        _doc_pages = pymupdf_doc.page_count
+        if _doc_pages and _doc_pages > 0:
+            total_pages_for_usage_log = _doc_pages
+
     estimated_time_taken_state = round(estimated_time_taken_state, 1)
 
     return (
@@ -2819,7 +2858,7 @@ def choose_and_run_redactor(
         llm_model_name,
         llm_total_input_tokens,
         llm_total_output_tokens,
-        number_of_pages,
+        total_pages_for_usage_log,
     )
 
 
@@ -4368,8 +4407,16 @@ def redact_image_pdf(
     """
 
     # Default chosen_llm_entities to chosen_redact_comprehend_entities if not provided
-    if chosen_llm_entities is None:
-        chosen_llm_entities = chosen_redact_comprehend_entities
+    # if chosen_llm_entities is None:
+    #     chosen_llm_entities = chosen_redact_comprehend_entities
+
+    if "Face identification" in handwrite_signature_checkbox:
+        if "CUSTOM_VLM_PERSON" not in chosen_redact_entities:
+            chosen_redact_entities.append("CUSTOM_VLM_PERSON")
+        if "CUSTOM_VLM_PERSON" not in chosen_redact_comprehend_entities:
+            chosen_redact_comprehend_entities.append("CUSTOM_VLM_PERSON")
+        if "CUSTOM_VLM_PERSON" not in chosen_llm_entities:
+            chosen_llm_entities.append("CUSTOM_VLM_PERSON")
 
     tic = time.perf_counter()
 
@@ -4610,6 +4657,37 @@ def redact_image_pdf(
                 "reported_page_number": str(page_1based),
             }
 
+    # Load existing Textract OCR results from output folder if present (per-page use in loop).
+    # When a page exists in this file, use it as page_line_level_ocr_results_with_words,
+    # recreate page_line_level_ocr_results, and skip OCR (including hybrid textract-bedrock).
+    textract_ocr_by_page_1based = None
+    if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
+        existing_textract_ocr_path = (
+            output_folder + file_name + "_ocr_results_with_words_textract.json"
+        )
+        if os.path.exists(existing_textract_ocr_path):
+            (
+                loaded_textract_ocr_list,
+                is_missing,
+                log_files_output_paths,
+            ) = load_and_convert_ocr_results_with_words_json(
+                existing_textract_ocr_path,
+                log_files_output_paths,
+                page_sizes_df,
+            )
+            if not is_missing and loaded_textract_ocr_list:
+                textract_ocr_by_page_1based = {}
+                for item in loaded_textract_ocr_list:
+                    p = item.get("page")
+                    if p is not None:
+                        page_1based = int(p) if isinstance(p, str) else p
+                        textract_ocr_by_page_1based[page_1based] = item
+                if textract_ocr_by_page_1based:
+                    print(
+                        f"Found existing Textract OCR results file: {existing_textract_ocr_path} "
+                        f"({len(textract_ocr_by_page_1based)} pages). Will use for matching pages and skip OCR/hybrid."
+                    )
+
     # When > 1, OCR first pass runs analyse_page_with_textract in parallel (AWS Textract only).
     # With efficient_ocr, the caller can pass pages_to_process so multiple OCR-needed pages
     # are processed in one call, enabling parallel OCR.
@@ -4641,6 +4719,91 @@ def redact_image_pdf(
             unit="pages",
             desc="Performing image-based OCR",
         )
+
+    # Parallel Bedrock VLM page OCR: run perform_ocr for all pages that need it, then use results in the loop.
+    ocr_results_from_parallel = {}
+    if (
+        text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
+        and bedrock_runtime is not None
+    ):
+        _bedrock_ocr_tasks = []
+        _pages_iter = (
+            list(page_loop_pages)
+            if page_loop_pages is not None
+            else list(range(page_loop_start, page_loop_end))
+        )
+        for _pno in _pages_iter:
+            try:
+                _img_path = page_sizes_df.loc[
+                    page_sizes_df["page"] == (_pno + 1), "image_path"
+                ].iloc[0]
+            except Exception:
+                _img_path = (
+                    pdf_image_file_paths[_pno]
+                    if _pno < len(pdf_image_file_paths)
+                    else ""
+                )
+            if all_page_line_level_ocr_results_with_words:
+                _reported = str(_pno + 1)
+                _match = next(
+                    (
+                        item
+                        for item in all_page_line_level_ocr_results_with_words
+                        if int(item.get("page", -1)) == int(_reported)
+                    ),
+                    None,
+                )
+                if _match:
+                    continue
+            _actual = _img_path
+            if isinstance(_img_path, str) and (
+                "placeholder_image" in _img_path or "image_placeholder" in _img_path
+            ):
+                try:
+                    _, _created, _, _ = process_single_page_for_image_conversion(
+                        pdf_path=file_path,
+                        page_num=_pno,
+                        image_dpi=IMAGES_DPI,
+                        create_images=True,
+                        input_folder=input_folder,
+                    )
+                    if os.path.exists(_created):
+                        _actual = _created
+                        if not page_sizes_df.empty:
+                            page_sizes_df.loc[
+                                page_sizes_df["page"] == (_pno + 1),
+                                "image_path",
+                            ] = _created
+                except Exception:
+                    pass
+            _bedrock_ocr_tasks.append((_pno, _actual))
+        if _bedrock_ocr_tasks:
+
+            def _run_bedrock_page_ocr(task):
+                pno, actual_path = task
+                return (
+                    pno,
+                    image_analyser.perform_ocr(
+                        actual_path,
+                        bedrock_runtime=bedrock_runtime,
+                        gemini_client=gemini_client,
+                        gemini_config=gemini_config,
+                        azure_openai_client=azure_openai_client,
+                        vlm_model_choice=CLOUD_VLM_MODEL_CHOICE,
+                        inference_server_model_name=(
+                            inference_server_vlm_model
+                            if inference_server_vlm_model
+                            else None
+                        ),
+                    ),
+                )
+
+            _max_workers = min(MAX_WORKERS, len(_bedrock_ocr_tasks))
+            with ThreadPoolExecutor(max_workers=_max_workers) as executor:
+                for pno, result in executor.map(
+                    _run_bedrock_page_ocr, _bedrock_ocr_tasks
+                ):
+                    ocr_results_from_parallel[pno] = result
 
     for page_no in ocr_progress_bar:
 
@@ -4864,64 +5027,75 @@ def redact_image_pdf(
                     )
 
                 else:
-                    # Check if image_path is a placeholder and create the actual image if needed
-                    actual_image_path = image_path
-                    if isinstance(image_path, str) and (
-                        "placeholder_image" in image_path
-                        or "image_placeholder" in image_path
-                    ):
-                        try:
-                            # Use the current page number (page_no is 0-indexed)
-                            # Create the actual image using process_single_page_for_image_conversion
-                            _, created_image_path, _, _ = (
-                                process_single_page_for_image_conversion(
-                                    pdf_path=file_path,
-                                    page_num=page_no,  # page_no is already 0-indexed
-                                    image_dpi=IMAGES_DPI,
-                                    create_images=True,
-                                    input_folder=input_folder,
+                    # Use pre-computed result from parallel Bedrock OCR if available
+                    if page_no in ocr_results_from_parallel:
+                        (
+                            page_word_level_ocr_results,
+                            page_vlm_input_tokens,
+                            page_vlm_output_tokens,
+                            page_vlm_model_name,
+                        ) = ocr_results_from_parallel[page_no]
+                    else:
+                        # Check if image_path is a placeholder and create the actual image if needed
+                        actual_image_path = image_path
+                        if isinstance(image_path, str) and (
+                            "placeholder_image" in image_path
+                            or "image_placeholder" in image_path
+                        ):
+                            try:
+                                # Use the current page number (page_no is 0-indexed)
+                                # Create the actual image using process_single_page_for_image_conversion
+                                _, created_image_path, _, _ = (
+                                    process_single_page_for_image_conversion(
+                                        pdf_path=file_path,
+                                        page_num=page_no,  # page_no is already 0-indexed
+                                        image_dpi=IMAGES_DPI,
+                                        create_images=True,
+                                        input_folder=input_folder,
+                                    )
                                 )
-                            )
 
-                            # Use the created image path if it exists
-                            if os.path.exists(created_image_path):
-                                actual_image_path = created_image_path
-                                # Update image_path in page_sizes_df for future reference
-                                if not page_sizes_df.empty:
-                                    page_sizes_df.loc[
-                                        page_sizes_df["page"] == (page_no + 1),
-                                        "image_path",
-                                    ] = created_image_path
+                                # Use the created image path if it exists
+                                if os.path.exists(created_image_path):
+                                    actual_image_path = created_image_path
+                                    # Update image_path in page_sizes_df for future reference
+                                    if not page_sizes_df.empty:
+                                        page_sizes_df.loc[
+                                            page_sizes_df["page"] == (page_no + 1),
+                                            "image_path",
+                                        ] = created_image_path
+                                    print(
+                                        f"Created actual image for page {page_no + 1} from placeholder: {created_image_path}"
+                                    )
+                                else:
+                                    print(
+                                        f"Warning: Failed to create image for page {page_no + 1} from placeholder"
+                                    )
+                            except Exception as e:
                                 print(
-                                    f"Created actual image for page {page_no + 1} from placeholder: {created_image_path}"
+                                    f"Error creating image from placeholder for OCR: {e}"
                                 )
-                            else:
-                                print(
-                                    f"Warning: Failed to create image for page {page_no + 1} from placeholder"
-                                )
-                        except Exception as e:
-                            print(f"Error creating image from placeholder for OCR: {e}")
-                            # Fall back to using the placeholder path (will likely fail, but preserves original behavior)
-                            actual_image_path = image_path
+                                # Fall back to using the placeholder path (will likely fail, but preserves original behavior)
+                                actual_image_path = image_path
 
-                    (
-                        page_word_level_ocr_results,
-                        page_vlm_input_tokens,
-                        page_vlm_output_tokens,
-                        page_vlm_model_name,
-                    ) = image_analyser.perform_ocr(
-                        actual_image_path,
-                        bedrock_runtime=bedrock_runtime,
-                        gemini_client=gemini_client,
-                        gemini_config=gemini_config,
-                        azure_openai_client=azure_openai_client,
-                        vlm_model_choice=CLOUD_VLM_MODEL_CHOICE,
-                        inference_server_model_name=(
-                            inference_server_vlm_model
-                            if inference_server_vlm_model
-                            else None
-                        ),
-                    )
+                        (
+                            page_word_level_ocr_results,
+                            page_vlm_input_tokens,
+                            page_vlm_output_tokens,
+                            page_vlm_model_name,
+                        ) = image_analyser.perform_ocr(
+                            actual_image_path,
+                            bedrock_runtime=bedrock_runtime,
+                            gemini_client=gemini_client,
+                            gemini_config=gemini_config,
+                            azure_openai_client=azure_openai_client,
+                            vlm_model_choice=CLOUD_VLM_MODEL_CHOICE,
+                            inference_server_model_name=(
+                                inference_server_vlm_model
+                                if inference_server_vlm_model
+                                else None
+                            ),
+                        )
 
                     # Accumulate VLM token usage
                     vlm_total_input_tokens += page_vlm_input_tokens
@@ -4945,12 +5119,20 @@ def redact_image_pdf(
 
                 # Optional additional Bedrock VLM pass to detect people
                 # and inject [PERSON] entries into the word-level OCR structure for AWS Bedrock VLM OCR.
+                # Only run when the user has selected CUSTOM_VLM_PERSON (in any entity selector).
+                _person_selected = (
+                    "CUSTOM_VLM_PERSON" in chosen_redact_entities
+                    or "CUSTOM_VLM_PERSON" in (chosen_redact_comprehend_entities or [])
+                    or "CUSTOM_VLM_PERSON" in (chosen_llm_entities or [])
+                )
                 if (
-                    text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
-                    or text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
-                    or pii_identification_method == AWS_PII_OPTION
-                    or pii_identification_method == AWS_LLM_PII_OPTION
-                    and "CUSTOM_VLM_PERSON" in chosen_redact_entities
+                    (
+                        text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
+                        or text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+                        or pii_identification_method == AWS_PII_OPTION
+                        or pii_identification_method == AWS_LLM_PII_OPTION
+                    )
+                    and _person_selected
                     and isinstance(page_line_level_ocr_results_with_words, dict)
                     and page_line_level_ocr_results_with_words.get("results")
                     and image is not None
@@ -5066,12 +5248,21 @@ def redact_image_pdf(
 
                 # Optional additional Bedrock VLM pass to detect signatures
                 # and inject [SIGNATURE] entries into the word-level OCR structure for AWS Bedrock VLM OCR.
+                # Only run when the user has selected CUSTOM_VLM_SIGNATURE (in any entity selector).
+                _signature_selected = (
+                    "CUSTOM_VLM_SIGNATURE" in chosen_redact_entities
+                    or "CUSTOM_VLM_SIGNATURE"
+                    in (chosen_redact_comprehend_entities or [])
+                    or "CUSTOM_VLM_SIGNATURE" in (chosen_llm_entities or [])
+                )
                 if (
-                    text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
-                    or text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
-                    or pii_identification_method == AWS_PII_OPTION
-                    or pii_identification_method == AWS_LLM_PII_OPTION
-                    and "CUSTOM_VLM_SIGNATURE" in chosen_redact_entities
+                    (
+                        text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
+                        or text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+                        or pii_identification_method == AWS_PII_OPTION
+                        or pii_identification_method == AWS_LLM_PII_OPTION
+                    )
+                    and _signature_selected
                     and isinstance(page_line_level_ocr_results_with_words, dict)
                     and page_line_level_ocr_results_with_words.get("results")
                     and image is not None
@@ -5445,6 +5636,43 @@ def redact_image_pdf(
 
             # Check if page exists in existing textract data. If not, send to service to analyse
             if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
+                # Use existing Textract ocr_results_with_words file if this page is present:
+                # load as page_line_level_ocr_results_with_words, recreate page_line_level_ocr_results,
+                # store in ocr_results_by_page, and skip all OCR (including hybrid textract-bedrock).
+                if (
+                    textract_ocr_by_page_1based is not None
+                    and (page_no + 1) in textract_ocr_by_page_1based
+                ):
+                    page_line_level_ocr_results_with_words = (
+                        textract_ocr_by_page_1based[page_no + 1]
+                    )
+                    page_line_level_ocr_results = (
+                        recreate_page_line_level_ocr_results_with_page(
+                            page_line_level_ocr_results_with_words
+                        )
+                    )
+                    if all_page_line_level_ocr_results_with_words is None:
+                        all_page_line_level_ocr_results_with_words = list()
+                    all_page_line_level_ocr_results_with_words.append(
+                        page_line_level_ocr_results_with_words
+                    )
+                    if page_no >= page_min and page_no < page_max:
+                        ocr_results_by_page[page_no] = {
+                            "page_line_level_ocr_results": page_line_level_ocr_results,
+                            "page_line_level_ocr_results_with_words": page_line_level_ocr_results_with_words,
+                            "page_signature_recogniser_results": page_signature_recogniser_results,
+                            "page_handwriting_recogniser_results": page_handwriting_recogniser_results,
+                            "handwriting_or_signature_boxes": handwriting_or_signature_boxes,
+                            "image_path": image_path,
+                            "pymupdf_page": pymupdf_page,
+                            "original_cropbox": original_cropbox,
+                            "page_width": page_width,
+                            "page_height": page_height,
+                            "image": image,
+                            "reported_page_number": reported_page_number,
+                        }
+                    continue
+
                 text_blocks = list()
                 page_exists = False
 
@@ -6127,7 +6355,24 @@ def redact_image_pdf(
                     idx = future_to_index[future]
                     results[idx] = future.result()
 
-        textract_data = {"pages": [r[0] for r in results]}
+        # Merge parallel results into existing loaded data so we don't overwrite
+        # pages that were in the JSON but not in this run (e.g. EFFICIENT_OCR only processes OCR pages).
+        new_pages_from_parallel = [r[0] for r in results]
+        pages_by_no = {str(pg.get("page_no")): pg for pg in new_pages_from_parallel}
+        existing_pages = textract_data.get("pages", [])
+        seen_page_nos = set()
+        merged_pages = []
+        for pg in existing_pages:
+            pno = str(pg.get("page_no"))
+            seen_page_nos.add(pno)
+            merged_pages.append(pages_by_no.get(pno, pg))
+        for pg in new_pages_from_parallel:
+            pno = str(pg.get("page_no"))
+            if pno not in seen_page_nos:
+                merged_pages.append(pg)
+                seen_page_nos.add(pno)
+        merged_pages.sort(key=lambda p: int(p.get("page_no", 0)))
+        textract_data = {"pages": merged_pages}
         textract_request_metadata.extend(r[1] for r in results)
         if (
             textract_json_file_path

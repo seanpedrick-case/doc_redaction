@@ -371,6 +371,38 @@ When AWS Textract is selected for text extraction, these options allow lines wit
     * **Description:** Padding in pixels around the line crop when calling Bedrock VLM for re-extraction.
     * **Default Value:** `5`
 
+### Bedrock VLM and LLM cost estimation
+
+These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM OCR - all PDF types" or "LLM (AWS Bedrock)" PII detection is selected. Estimates are shown in the UI (e.g. estimated cost and time).
+
+* **`BEDROCK_VLM_INPUT_COST`**
+    * **Description:** USD per million input tokens for Bedrock VLM OCR cost estimate.
+    * **Default Value:** `3.0`
+
+* **`BEDROCK_VLM_OUTPUT_COST`**
+    * **Description:** USD per million output tokens for Bedrock VLM OCR cost estimate.
+    * **Default Value:** `15.0`
+
+* **`BEDROCK_VLM_PIXELS_PER_INPUT_TOKEN`**
+    * **Description:** Pixels (width × height) per input token; used with `VLM_MAX_IMAGE_SIZE` to estimate input tokens per page for VLM cost calculation.
+    * **Default Value:** `2500`
+
+* **`BEDROCK_LLM_INPUT_COST`**
+    * **Description:** USD per million input tokens for Bedrock LLM (e.g. PII detection) cost estimate.
+    * **Default Value:** `3.0`
+
+* **`BEDROCK_LLM_OUTPUT_COST`**
+    * **Description:** USD per million output tokens for Bedrock LLM cost estimate.
+    * **Default Value:** `15.0`
+
+* **`BEDROCK_LLM_INPUT_TOKENS_PER_PAGE`**
+    * **Description:** Estimated input tokens per page used for Bedrock LLM cost calculation.
+    * **Default Value:** `2000`
+
+* **`BEDROCK_LLM_OUTPUT_TOKENS_PER_PAGE`**
+    * **Description:** Estimated output tokens per page used for Bedrock LLM cost calculation.
+    * **Default Value:** `250`
+
 * **`SHOW_BEDROCK_VLM_MODELS`**, **`SHOW_GEMINI_VLM_MODELS`**, **`SHOW_AZURE_OPENAI_VLM_MODELS`**
     * **Description:** Controls whether AWS Bedrock, Google Gemini, or Azure/OpenAI VLM text extraction options are shown in the UI.
     * **Default Value:** `"False"` for all.
@@ -671,6 +703,10 @@ When AWS Textract is selected for text extraction, these options allow lines wit
     * **Description:** If set to `"True"`, saves input images sent to VLM OCR for debugging purposes.
     * **Default Value:** `"False"`
 
+* **`ADD_VLM_BOUNDING_BOX_RULES`**
+    * **Description:** If set to `"True"`, adds bounding box rules to the VLM prompt (e.g. coordinate format or output constraints for OCR).
+    * **Default Value:** `"False"`
+
 * **`HYBRID_OCR_MAX_NEW_TOKENS`**
     * **Description:** Maximum number of tokens to generate for hybrid OCR operations.
     * **Default Value:** `30`
@@ -768,7 +804,7 @@ When AWS Textract is selected for text extraction, these options allow lines wit
     * **Default Value:** `[]`
 
 * **`HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS`**
-    * **Description:** Full list of available options for Textract's handwriting and signature detection. Can include `'Extract handwriting'`, `'Extract signatures'`, and optionally `'Extract forms'`, `'Extract layout'`, `'Extract tables'` if the corresponding include options are enabled.
+    * **Description:** Full list of available options for Textract's handwriting and signature detection. Can include `'Extract handwriting'`, `'Extract signatures'`, and optionally `'Extract forms'`, `'Extract layout'`, `'Extract tables'`, and `'Face identification'` if the corresponding include options are enabled.
     * **Default Value:** `['Extract handwriting', 'Extract signatures']`
 
 * **`INCLUDE_FORM_EXTRACTION_TEXTRACT_OPTION`**
@@ -776,6 +812,10 @@ When AWS Textract is selected for text extraction, these options allow lines wit
 * **`INCLUDE_TABLE_EXTRACTION_TEXTRACT_OPTION`**
     * **Description:** Booleans (`"True"`/`"False"`) to include Forms, Layout, and Tables as selectable options for Textract analysis.
     * **Default Value:** `"False"` for all.
+
+* **`INCLUDE_FACE_IDENTIFICATION_TEXTRACT_OPTION`**
+    * **Description:** When set to `"True"`, adds "Face identification" as a selectable option in the handwriting/signature checkbox group. When enabled with AWS Bedrock VLM OCR, a second VLM pass per page is run to identify faces (cost and time estimates account for this).
+    * **Default Value:** `"False"`
 
 ### Tabular Data Options
 

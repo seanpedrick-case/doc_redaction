@@ -29,6 +29,13 @@ from tools.config import (
     AWS_LLM_PII_OPTION,
     AWS_PII_OPTION,
     AWS_USER_POOL_ID,
+    BEDROCK_LLM_INPUT_COST,
+    BEDROCK_LLM_INPUT_TOKENS_PER_PAGE,
+    BEDROCK_LLM_OUTPUT_COST,
+    BEDROCK_LLM_OUTPUT_TOKENS_PER_PAGE,
+    BEDROCK_VLM_INPUT_COST,
+    BEDROCK_VLM_OUTPUT_COST,
+    BEDROCK_VLM_PIXELS_PER_INPUT_TOKEN,
     BEDROCK_VLM_TEXT_EXTRACT_OPTION,
     CHOSEN_LOCAL_OCR_MODEL,
     CUSTOM_HEADER,
@@ -54,6 +61,7 @@ from tools.config import (
     TEXTRACT_TEXT_EXTRACT_OPTION,
     TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER,
     TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER,
+    VLM_MAX_IMAGE_SIZE,
     aws_comprehend_language_choices,
     convert_string_to_boolean,
     textract_language_choices,
@@ -111,7 +119,7 @@ def reset_data_vars():
 
 
 def reset_aws_call_vars():
-    return 0, 0
+    return 0, 0, 0, 0, 0, 0, "", ""
 
 
 ### functions related to summarisation ###
@@ -210,6 +218,19 @@ def get_file_name_no_ext(file_path: str):
     # print(filename_without_extension)
 
     return filename_without_extension
+
+
+def _file_name_from_pdf_path(full_file_name):
+    """Derive a safe file_name prefix from a PDF path (for summary output naming)."""
+    if not full_file_name or not str(full_file_name).strip():
+        return "document"
+    basename = os.path.basename(full_file_name)
+    name_without_ext, _ = os.path.splitext(basename)
+    filename_prefix = (name_without_ext or "document")[:20]
+    invalid_chars = '<>:"/\\|?*'
+    for char in invalid_chars:
+        filename_prefix = filename_prefix.replace(char, "_")
+    return filename_prefix if filename_prefix else "document"
 
 
 ###
@@ -539,7 +560,7 @@ def check_for_relevant_ocr_output_with_words(
     elif text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
         file_ending = "_ocr_results_with_words_textract.json"
     else:
-        print("No valid text extraction method found. Returning False")
+        # print("No valid text extraction method found. Returning False")
         return False
 
     doc_file_with_ending = doc_file_name_no_extension_textbox + file_ending
@@ -882,12 +903,27 @@ def calculate_aws_costs(
     usd_gbp_conversion_rate: float = 0.76,
     textract_page_cost: float = 1.5 / 1000,
     textract_signature_cost: float = 2.0 / 1000,
+    textract_forms_cost: float = 50.0 / 1000,
+    textract_layout_cost: float = 4.0 / 1000,
+    textract_tables_cost: float = 15.0 / 1000,
     comprehend_unit_cost: float = 0.0001,
     comprehend_size_unit_average: float = 250,
     average_characters_per_page: float = 2000,
+    bedrock_vlm_output_token_ratio: float = 0.08,
+    bedrock_vlm_face_output_token_ratio: float = 0.03,
     TEXTRACT_TEXT_EXTRACT_OPTION: str = TEXTRACT_TEXT_EXTRACT_OPTION,
+    BEDROCK_VLM_TEXT_EXTRACT_OPTION: str = BEDROCK_VLM_TEXT_EXTRACT_OPTION,
     NO_REDACTION_PII_OPTION: str = NO_REDACTION_PII_OPTION,
     AWS_PII_OPTION: str = AWS_PII_OPTION,
+    AWS_LLM_PII_OPTION: str = AWS_LLM_PII_OPTION,
+    VLM_MAX_IMAGE_SIZE: int = VLM_MAX_IMAGE_SIZE,
+    BEDROCK_VLM_INPUT_COST: float = BEDROCK_VLM_INPUT_COST,
+    BEDROCK_VLM_OUTPUT_COST: float = BEDROCK_VLM_OUTPUT_COST,
+    BEDROCK_VLM_PIXELS_PER_INPUT_TOKEN: int = BEDROCK_VLM_PIXELS_PER_INPUT_TOKEN,
+    BEDROCK_LLM_INPUT_COST: float = BEDROCK_LLM_INPUT_COST,
+    BEDROCK_LLM_OUTPUT_COST: float = BEDROCK_LLM_OUTPUT_COST,
+    BEDROCK_LLM_INPUT_TOKENS_PER_PAGE: int = BEDROCK_LLM_INPUT_TOKENS_PER_PAGE,
+    BEDROCK_LLM_OUTPUT_TOKENS_PER_PAGE: int = BEDROCK_LLM_OUTPUT_TOKENS_PER_PAGE,
 ):
     """
     Calculate the approximate cost of submitting a document to AWS Textract and/or AWS Comprehend, assuming that Textract outputs do not already exist in the output folder.
@@ -902,12 +938,21 @@ def calculate_aws_costs(
     - usd_gbp_conversion_rate (float, optional): Conversion rate used for USD to GBP. Last changed 14th April 2025.
     - textract_page_cost (float, optional): AWS pricing for Textract text extraction per page ($).
     - textract_signature_cost (float, optional): Additional AWS cost above standard AWS Textract extraction for extracting signatures.
+    - textract_forms_cost (float, optional): AWS Textract cost per page for "Extract forms" ($50/1000 pages).
+    - textract_layout_cost (float, optional): AWS Textract cost per page for "Extract layout" ($4/1000 pages).
+    - textract_tables_cost (float, optional): AWS Textract cost per page for "Extract tables" ($15/1000 pages).
     - comprehend_unit_cost (float, optional): Cost per 'unit' (300 character minimum) for identifying PII in text with AWS Comprehend.
     - comprehend_size_unit_average (float, optional): Average size of a 'unit' of text passed to AWS Comprehend by the app through the batching process
     - average_characters_per_page (float, optional): Average number of characters on an A4 page.
+    - bedrock_vlm_output_token_ratio (float, optional): Ratio of output to input tokens for Bedrock VLM OCR (~0.08 in practice).
+    - bedrock_vlm_face_output_token_ratio (float, optional): Ratio of output to input tokens for the face-identification second run (~0.03 in practice).
     - TEXTRACT_TEXT_EXTRACT_OPTION (str, optional): String label for the text_extract_method_radio button for AWS Textract.
+    - BEDROCK_VLM_TEXT_EXTRACT_OPTION (str, optional): String label for AWS Bedrock VLM OCR text extraction.
     - NO_REDACTION_PII_OPTION (str, optional): String label for pii_identification_method_drop for no redaction.
     - AWS_PII_OPTION (str, optional): String label for pii_identification_method_drop for AWS Comprehend.
+    - AWS_LLM_PII_OPTION (str, optional): String label for PII identification via LLM (AWS Bedrock).
+    - VLM_MAX_IMAGE_SIZE, BEDROCK_VLM_*: used for Bedrock VLM OCR cost estimate.
+    - BEDROCK_LLM_*: used for Bedrock LLM (e.g. PII detection) cost estimate when that method is selected (2000 input / 250 output tokens per page).
     """
     text_extraction_cost = 0
     pii_identification_cost = 0
@@ -920,6 +965,35 @@ def calculate_aws_costs(
 
             if "Extract signatures" in handwrite_signature_checkbox:
                 text_extraction_cost += textract_signature_cost * number_of_pages
+            if "Extract forms" in handwrite_signature_checkbox:
+                text_extraction_cost += textract_forms_cost * number_of_pages
+            if "Extract layout" in handwrite_signature_checkbox:
+                text_extraction_cost += textract_layout_cost * number_of_pages
+            if "Extract tables" in handwrite_signature_checkbox:
+                text_extraction_cost += textract_tables_cost * number_of_pages
+
+        elif text_extract_method_radio == BEDROCK_VLM_TEXT_EXTRACT_OPTION:
+            # Estimate input tokens per page from max image size; output tokens ~8% of input
+            input_tokens_per_page = ceil(
+                VLM_MAX_IMAGE_SIZE / BEDROCK_VLM_PIXELS_PER_INPUT_TOKEN
+            )
+            output_tokens_per_page = (
+                input_tokens_per_page * bedrock_vlm_output_token_ratio
+            )
+            total_input_tokens = number_of_pages * input_tokens_per_page
+            total_output_tokens = number_of_pages * output_tokens_per_page
+            text_extraction_cost = total_input_tokens * (
+                BEDROCK_VLM_INPUT_COST / 1_000_000
+            ) + total_output_tokens * (BEDROCK_VLM_OUTPUT_COST / 1_000_000)
+            # Face identification does a second run per page: same input tokens, output ~3% of input
+            if "Face identification" in handwrite_signature_checkbox:
+                face_input_tokens = total_input_tokens
+                face_output_tokens = int(
+                    total_input_tokens * bedrock_vlm_face_output_token_ratio
+                )
+                text_extraction_cost += face_input_tokens * (
+                    BEDROCK_VLM_INPUT_COST / 1_000_000
+                ) + face_output_tokens * (BEDROCK_VLM_OUTPUT_COST / 1_000_000)
 
     if pii_identification_method != NO_REDACTION_PII_OPTION:
         if pii_identification_method == AWS_PII_OPTION:
@@ -928,6 +1002,14 @@ def calculate_aws_costs(
                 * comprehend_unit_cost
             )
             pii_identification_cost = comprehend_page_cost * number_of_pages
+
+        elif pii_identification_method == AWS_LLM_PII_OPTION:
+            # Bedrock LLM (e.g. PII detection): 2000 input tokens, 250 output tokens per page
+            llm_input_tokens = number_of_pages * BEDROCK_LLM_INPUT_TOKENS_PER_PAGE
+            llm_output_tokens = number_of_pages * BEDROCK_LLM_OUTPUT_TOKENS_PER_PAGE
+            pii_identification_cost = llm_input_tokens * (
+                BEDROCK_LLM_INPUT_COST / 1_000_000
+            ) + llm_output_tokens * (BEDROCK_LLM_OUTPUT_COST / 1_000_000)
 
     calculated_aws_cost = (
         calculated_aws_cost + text_extraction_cost + pii_identification_cost
@@ -946,17 +1028,20 @@ def calculate_time_taken(
     textract_output_found_checkbox: bool,
     only_extract_text_radio: bool,
     local_ocr_output_found_checkbox: bool,
+    handwrite_signature_checkbox: List[str],
     convert_page_time: float = 0.3,
     textract_page_time: float = 0.6,
     comprehend_page_time: float = 0.6,
-    local_text_extraction_page_time: float = 0.1,
+    local_text_extraction_page_time: float = 0.2,
     local_pii_redaction_page_time: float = 0.4,
     local_ocr_extraction_page_time: float = 1.5,
     TEXTRACT_TEXT_EXTRACT_OPTION: str = TEXTRACT_TEXT_EXTRACT_OPTION,
+    BEDROCK_VLM_TEXT_EXTRACT_OPTION: str = BEDROCK_VLM_TEXT_EXTRACT_OPTION,
     SELECTABLE_TEXT_EXTRACT_OPTION: str = SELECTABLE_TEXT_EXTRACT_OPTION,
     local_ocr_option: str = TESSERACT_TEXT_EXTRACT_OPTION,
     NO_REDACTION_PII_OPTION: str = NO_REDACTION_PII_OPTION,
     AWS_PII_OPTION: str = AWS_PII_OPTION,
+    AWS_LLM_PII_OPTION: str = AWS_LLM_PII_OPTION,
 ):
     """
     Calculate the approximate time to redact a document.
@@ -967,7 +1052,8 @@ def calculate_time_taken(
     - textract_output_found_checkbox (bool, optional): Boolean indicating if AWS Textract text extraction outputs have been found.
     - only_extract_text_radio (bool, optional): Option to only extract text from the document rather than redact.
     - local_ocr_output_found_checkbox (bool, optional): Boolean indicating if local OCR text extraction outputs have been found.
-    - textract_page_time (float, optional): Approximate time to query AWS Textract.
+    - handwrite_signature_checkbox: List of selected options (e.g. "Face identification"); when Face identification is selected with Bedrock VLM, extraction time is doubled.
+    - textract_page_time (float, optional): Approximate time to query AWS Textract (also used for Bedrock VLM OCR).
     - comprehend_page_time (float, optional): Approximate time to query text on a page with AWS Comprehend.
     - local_text_redaction_page_time (float, optional): Approximate time to extract text on a page with the local text redaction option.
     - local_pii_redaction_page_time (float, optional): Approximate time to redact text on a page with the local text redaction option.
@@ -977,6 +1063,7 @@ def calculate_time_taken(
     - local_ocr_option (str, optional): String label for text_extract_method_radio for local OCR.
     - NO_REDACTION_PII_OPTION (str, optional): String label for pii_identification_method_drop for no redaction.
     - AWS_PII_OPTION (str, optional): String label for pii_identification_method_drop for AWS Comprehend.
+    - BEDROCK_VLM_TEXT_EXTRACT_OPTION, AWS_LLM_PII_OPTION (str, optional): Labels for Bedrock VLM OCR and LLM PII; times match Textract and Comprehend respectively.
     """
     calculated_time_taken = 0
     page_conversion_time_taken = 0
@@ -995,6 +1082,11 @@ def calculate_time_taken(
     if text_extract_method_radio == TEXTRACT_TEXT_EXTRACT_OPTION:
         if textract_output_found_checkbox is not True:
             page_extraction_time_taken = number_of_pages * textract_page_time
+    elif text_extract_method_radio == BEDROCK_VLM_TEXT_EXTRACT_OPTION:
+        if textract_output_found_checkbox is not True:
+            page_extraction_time_taken = number_of_pages * textract_page_time
+            if "Face identification" in (handwrite_signature_checkbox or []):
+                page_extraction_time_taken *= 2
     elif text_extract_method_radio == local_ocr_option:
         if local_ocr_output_found_checkbox is not True:
             page_extraction_time_taken = (
@@ -1003,9 +1095,9 @@ def calculate_time_taken(
     elif text_extract_method_radio == SELECTABLE_TEXT_EXTRACT_OPTION:
         page_conversion_time_taken = number_of_pages * local_text_extraction_page_time
 
-    # Page redaction time
+    # Page redaction time (Bedrock LLM PII uses same time as AWS Comprehend)
     if pii_identification_method != NO_REDACTION_PII_OPTION:
-        if pii_identification_method == AWS_PII_OPTION:
+        if pii_identification_method in (AWS_PII_OPTION, AWS_LLM_PII_OPTION):
             page_redaction_time_taken = number_of_pages * comprehend_page_time
         else:
             page_redaction_time_taken = number_of_pages * local_pii_redaction_page_time
@@ -1168,20 +1260,6 @@ def get_system_font_path():
     return None
 
 
-# Create a custom error class
-class ProcessStop(UserWarning):
-    pass
-
-
-# How to display it
-def silent_exception_handler(etype, value, tb):
-    print(f"etype: {etype}, value: {value}, tb: {tb}")
-    if issubclass(etype, ProcessStop):
-        print(f"INFO: {value}")  # Only print the message, no traceback
-    else:
-        sys.__excepthook__(etype, value, tb)  # Use default for real bugs
-
-
 # Custom logging filter to remove logs from healthiness/readiness endpoints so they don't fill up application log flow
 class EndpointFilter(logging.Filter):
     def __init__(self, path: str, *args, **kwargs):
@@ -1211,24 +1289,21 @@ def check_duplicate_pages_checkbox(redact_duplicate_pages_checkbox_value: bool):
         # Silently raise an error to avoid showing a popup
         return
     if redact_duplicate_pages_checkbox_value:
-        print("Redact duplicate pages checkbox is enabled, identifying duplicates")
+        print("Identifying duplicates")
         sys.tracebacklimit = 0  # Suppress traceback
-        raise ProcessStop(
-            "Redact duplicate pages checkbox is enabled, identifying duplicates."
+        gr.Info("Redact duplicate pages checkbox is enabled, Identifying duplicates")
+        raise gr.Error(
+            message="Redact duplicate pages checkbox is enabled, identifying duplicates.",
+            title="Finding duplicates...",
+            visible=False,
+            print_exception=False,
         )
 
 
-def restore_sys_tracebacklimit():
-    sys.tracebacklimit = 1000  # Restore traceback limit
-    return
-
-
 # Tab switch functions
-
-
 def change_tab_to_tabular_or_document_redactions(is_data_file):
     if is_data_file:
-        return gr.Tabs(selected=3)
+        return gr.Tabs(selected=5)
     else:
         return gr.Tabs(selected=1)
 

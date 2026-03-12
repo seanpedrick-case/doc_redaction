@@ -533,6 +533,7 @@ def get_input_file_names(
                 full_file_name = file_path
 
     all_relevant_files_str = ", ".join(all_relevant_files)
+    print("file_name_with_extension on document upload:", file_name_with_extension)
     return (
         all_relevant_files_str,
         file_name_with_extension,
@@ -1280,6 +1281,57 @@ def combine_review_pdf_files(file_list, output_folder: str = OUTPUT_FOLDER):
     return [out_path]
 
 
+def prepare_image_or_pdf_with_efficient_ocr(
+    file_paths,
+    text_extract_method,
+    all_page_line_level_ocr_results_df_base,
+    all_page_line_level_ocr_results_with_words_df_base,
+    latest_file_completed_num,
+    out_message,
+    first_loop_state,
+    number_of_pages,
+    all_annotations_object,
+    prepare_for_review,
+    in_fully_redacted_list,
+    output_folder,
+    input_folder,
+    efficient_ocr,
+    prepare_images_bool_false,
+    page_sizes,
+    pymupdf_doc,
+    page_min,
+    page_max,
+):
+    """When EFFICIENT_OCR is enabled, skip loading all images; they are created later only for pages that need OCR."""
+    prepare_images = (
+        False
+        if efficient_ocr
+        else (
+            prepare_images_bool_false if prepare_images_bool_false is not None else True
+        )
+    )
+    return prepare_image_or_pdf(
+        file_paths,
+        text_extract_method,
+        all_page_line_level_ocr_results_df_base,
+        all_page_line_level_ocr_results_with_words_df_base,
+        latest_file_completed_num,
+        out_message,
+        first_loop_state,
+        number_of_pages,
+        all_annotations_object,
+        prepare_for_review,
+        in_fully_redacted_list,
+        output_folder,
+        input_folder,
+        prepare_images,
+        page_sizes,
+        pymupdf_doc,
+        page_min,
+        page_max,
+    )
+
+
 def prepare_image_or_pdf(
     file_paths: List[str],
     text_extract_method: str,
@@ -1842,9 +1894,9 @@ def prepare_image_or_pdf(
     else:
         number_of_pages = len(page_sizes)
 
-    print(f"Finished loading in {file_path_number} file(s)")
-
-    gr.Info(f"Finished loading in {file_path_number} file(s)")
+    if first_loop_state is True:
+        print(f"Finished loading in {file_path_number} file(s)")
+        gr.Info(f"Finished loading in {file_path_number} file(s)")
 
     return (
         combined_out_message,

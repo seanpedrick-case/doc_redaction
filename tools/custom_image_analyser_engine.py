@@ -69,6 +69,7 @@ from tools.config import (
     USE_LLAMA_SWAP,
     USE_TRANSFORMERS_VLM_MODEL_AS_LLM,
     VLM_MAX_IMAGE_SIZE,
+    VLM_MIN_IMAGE_SIZE,
 )
 from tools.helper_functions import clean_unicode_text, get_system_font_path
 from tools.load_spacy_model_custom_recognisers import custom_entities
@@ -651,6 +652,8 @@ def save_vlm_prompt_response(
     top_p: Optional[float] = None,
     model_type: str = "VLM",
     task_suffix: Optional[str] = None,
+    input_tokens: Optional[int] = None,
+    output_tokens: Optional[int] = None,
 ) -> str:
     """
     Save VLM prompt and response to a text file for traceability.
@@ -661,12 +664,14 @@ def save_vlm_prompt_response(
         output_folder: Output folder path
         model_choice: Model used
         image_name: Optional image name (without extension) for the filename
-        page_number: Optional page number for the filename
+        page_number: Optional page number (0-based) for the filename; displayed in log as 1-based.
         temperature: Temperature used (if applicable)
         max_new_tokens: Max tokens used (if applicable)
         top_p: Top-p parameter used (if applicable)
         model_type: Type of model (e.g., "VLM", "Bedrock", "Inference Server", "Gemini", "Azure/OpenAI")
         task_suffix: Optional suffix to add to filename (e.g., "_person", "_sig") to distinguish task types
+        input_tokens: Optional input token count from the VLM call
+        output_tokens: Optional output token count from the VLM call
 
     Returns:
         Path to the saved file
@@ -713,7 +718,11 @@ def save_vlm_prompt_response(
         if image_name:
             f.write(f"Image: {image_name}\n")
         if page_number is not None:
-            f.write(f"Page: {page_number}\n")
+            f.write(f"Page: {page_number + 1}\n")
+        if input_tokens is not None:
+            f.write(f"Input tokens: {input_tokens}\n")
+        if output_tokens is not None:
+            f.write(f"Output tokens: {output_tokens}\n")
         f.write(f"Model: {model_choice}\n")
         f.write(f"Model Type: {model_type}\n")
         if temperature is not None:
@@ -3429,7 +3438,6 @@ def plot_text_bounding_boxes(
     # Load the image
     img = image
     width, height = img.size
-    print(img.size)
     # Create a drawing object
     draw = ImageDraw.Draw(img)
 
@@ -5094,28 +5102,52 @@ def _bedrock_page_ocr_predict(
                 "model": [],
             }
 
+        # Resize image to respect VLM_MAX_IMAGE_SIZE and VLM_MIN_IMAGE_SIZE (aspect ratio
+        # preserved). Bounding box coordinates are scaled back to the original image space
+        # via scale_x/scale_y so they match the image used in choose_and_run_redactor /
+        # redact_image_pdf (e.g. image_annotator).
         scale_x = 1.0
         scale_y = 1.0
         try:
+            if image.mode != "RGB":
+                image = image.convert("RGB")
             original_width, original_height = image.size
-            # Skip resizing for AWS Bedrock VLM OCR
-            from tools.config import BEDROCK_VLM_TEXT_EXTRACT_OPTION
+            total_pixels = original_width * original_height
+            size_scale = 1.0
 
-            processed_image = _prepare_image_for_vlm(
-                image, ocr_method=BEDROCK_VLM_TEXT_EXTRACT_OPTION
-            )
-            processed_width, processed_height = processed_image.size
+            if total_pixels > VLM_MAX_IMAGE_SIZE:
+                size_scale = (VLM_MAX_IMAGE_SIZE / total_pixels) ** 0.5
+                # print(
+                #     f"Bedrock page OCR: Image has {total_pixels:,} pixels ({original_width}x{original_height}), "
+                #     f"exceeds VLM_MAX_IMAGE_SIZE {VLM_MAX_IMAGE_SIZE:,}. Resizing by factor {size_scale:.3f}"
+                # )
+            elif total_pixels < VLM_MIN_IMAGE_SIZE and VLM_MIN_IMAGE_SIZE > 0:
+                size_scale = (VLM_MIN_IMAGE_SIZE / total_pixels) ** 0.5
+                # print(
+                #     f"Bedrock page OCR: Image has {total_pixels:,} pixels ({original_width}x{original_height}), "
+                #     f"below VLM_MIN_IMAGE_SIZE {VLM_MIN_IMAGE_SIZE:,}. Resizing by factor {size_scale:.3f}"
+                # )
 
-            scale_x = (
-                float(original_width) / float(processed_width)
-                if processed_width > 0
-                else 1.0
-            )
-            scale_y = (
-                float(original_height) / float(processed_height)
-                if processed_height > 0
-                else 1.0
-            )
+            if size_scale != 1.0:
+                new_width = max(1, int(original_width * size_scale))
+                new_height = max(1, int(original_height * size_scale))
+                processed_image = image.resize(
+                    (new_width, new_height), Image.Resampling.LANCZOS
+                )
+                processed_width, processed_height = new_width, new_height
+                scale_x = (
+                    float(original_width) / float(processed_width)
+                    if processed_width > 0
+                    else 1.0
+                )
+                scale_y = (
+                    float(original_height) / float(processed_height)
+                    if processed_height > 0
+                    else 1.0
+                )
+            else:
+                processed_image = image
+                processed_width, processed_height = original_width, original_height
         except Exception as prep_error:
             print(f"Bedrock page OCR error: Could not prepare image: {prep_error}")
             return {
@@ -5258,6 +5290,8 @@ def _bedrock_page_ocr_predict(
                     top_p=model_default_top_p,
                     model_type="Bedrock",
                     task_suffix=task_suffix,
+                    input_tokens=vlm_input_tokens,
+                    output_tokens=vlm_output_tokens,
                 )
                 print(f"Saved Bedrock VLM prompt/response to: {saved_file}")
             except Exception as save_error:
@@ -5522,6 +5556,8 @@ def _gemini_page_ocr_predict(
                     max_new_tokens=model_default_max_new_tokens,
                     model_type="Gemini",
                     task_suffix=task_suffix,
+                    input_tokens=vlm_input_tokens,
+                    output_tokens=vlm_output_tokens,
                 )
                 print(f"Saved Gemini VLM prompt/response to: {saved_file}")
             except Exception as save_error:
@@ -5764,6 +5800,8 @@ def _azure_openai_page_ocr_predict(
                     max_new_tokens=model_default_max_new_tokens,
                     model_type="Azure/OpenAI",
                     task_suffix=task_suffix,
+                    input_tokens=vlm_input_tokens,
+                    output_tokens=vlm_output_tokens,
                 )
                 print(f"Saved Azure/OpenAI VLM prompt/response to: {saved_file}")
             except Exception as save_error:

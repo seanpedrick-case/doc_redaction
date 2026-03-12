@@ -7,6 +7,7 @@ import spaces
 from PIL import Image
 
 from tools.config import (
+    ADD_VLM_BOUNDING_BOX_RULES,
     CLOUD_VLM_MODEL_CHOICE,
     DEFAULT_INFERENCE_SERVER_VLM_MODEL,
     LOAD_PADDLE_AT_STARTUP,
@@ -1202,21 +1203,22 @@ def extract_text_from_image_vlm(
     return buffer, input_tokens, output_tokens
 
 
-# If not a Qwen VL model, give some more guidance on bounding box coordinates
-if (
-    (
-        "qwen" in str(SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL).lower()
-        and SHOW_VLM_MODEL_OPTIONS
-    )
-    or (
-        "qwen" in str(DEFAULT_INFERENCE_SERVER_VLM_MODEL).lower()
-        and SHOW_INFERENCE_SERVER_VLM_OPTIONS
-    )
-    or ("qwen" in str(CLOUD_VLM_MODEL_CHOICE).lower() and SHOW_BEDROCK_VLM_MODELS)
-):
-    additional_bounding_box_rules = ""
+# Optionally,, give some more guidance on bounding box coordinates
+if ADD_VLM_BOUNDING_BOX_RULES:
+    if (
+        (
+            "qwen" in str(SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL).lower()
+            and SHOW_VLM_MODEL_OPTIONS
+        )
+        or (
+            "qwen" in str(DEFAULT_INFERENCE_SERVER_VLM_MODEL).lower()
+            and SHOW_INFERENCE_SERVER_VLM_OPTIONS
+        )
+        or ("qwen" in str(CLOUD_VLM_MODEL_CHOICE).lower() and SHOW_BEDROCK_VLM_MODELS)
+    ):
+        additional_bounding_box_rules = """- Bounding boxes should fit within the coordinate extents of the image: 0, 0 is the top left corner of the image, and 999, 999 is the bottom right corner of the image"""
 else:
-    additional_bounding_box_rules = """- Bounding boxes should fit within the coordinate extents of the image, the extent of which is 0, 0 for the top left corner of the image, and 999, 999 for the bottom right corner of the image"""
+    additional_bounding_box_rules = ""
 
 
 full_page_ocr_vlm_prompt = f"""Spot all the text in the image at line-level, and output in JSON format as [{{'bbox': [x1, y1, x2, y2], 'text': 'identified text', 'conf': 'confidence score 0-1'}}, ...].
@@ -1238,8 +1240,6 @@ Rules:
 
 full_page_ocr_people_vlm_prompt = f"""Spot all photos of people's faces in the image, and output in JSON format as [{{'bbox': [x1, y1, x2, y2], 'text': '[PERSON]', 'conf': 'confidence score 0-1'}}, ...].
 
-Always return the JSON format as [{{'bbox': [x1, y1, x2, y2], 'text': '[PERSON]', 'conf': 'confidence score 0-1'}}, ...].
-
 Rules:
 - Each photo of a person's face must be a separate entry
 - Do NOT combine multiple photos into a single entry
@@ -1254,8 +1254,6 @@ Rules:
 # Only return valid JSON, no additional text or explanation."""
 
 full_page_ocr_signature_vlm_prompt = f"""Spot all signatures in the image, and output in JSON format as [{{'bbox': [x1, y1, x2, y2], 'text': '[SIGNATURE]', 'conf': 'confidence score 0-1'}}, ...].
-
-Always return the JSON format as [{{'bbox': [x1, y1, x2, y2], 'text': '[SIGNATURE]', 'conf': 'confidence score 0-1'}}, ...].
 
 Rules:
 - Each signature must be a separate entry

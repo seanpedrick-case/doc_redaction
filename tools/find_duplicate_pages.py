@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import gradio as gr
 import pandas as pd
+import pymupdf
 from gradio import Progress
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -785,6 +786,7 @@ def save_results_and_redaction_lists(
 
         for redact_file, group in final_df.groupby(grouping_col):
             # Sanitize the filename to prevent path injection
+
             output_file_name_stem = Path(redact_file).stem
             output_file_name = output_file_name_stem + "_pages_to_redact.csv"
             # Use secure path operations for the output file
@@ -1369,10 +1371,10 @@ def run_duplicate_analysis(
     all_page_line_level_ocr_results_df_base: pd.DataFrame,
     ocr_df_paths_list: list[str],
     combine_pages: bool = True,
+    current_document_name: str | None = None,
     output_folder: str = OUTPUT_FOLDER,
     preview_length: int = 500,
     progress=gr.Progress(track_tqdm=True),
-    current_document_name: str | None = None,
 ):
     """
     Main wrapper function to orchestrate the duplicate page analysis process.
@@ -1388,10 +1390,10 @@ def run_duplicate_analysis(
         combine_pages (bool, optional): If True, text from multiple pages is combined into larger segments for analysis. Defaults to True.
         all_page_line_level_ocr_results_df_base (pd.DataFrame): The base dataframe containing the OCR results.
         ocr_df_paths_list (list[str]): A list of file paths to the OCR results.
+        current_document_name (str | None, optional): When files is a DataFrame, used as the stem for saved filenames (e.g. from doc_file_name_with_extension_textbox). If None or empty, falls back to "uploaded_ocr".
         output_folder (str, optional): The directory where the similarity results and redaction lists will be saved. Defaults to OUTPUT_FOLDER.
         preview_length (int, optional): The maximum number of characters to display in the text preview panes. Defaults to 500.
         progress (gr.Progress, optional): A Gradio progress tracker object to display progress in the UI.
-        current_document_name (str | None, optional): When files is a DataFrame, used as the stem for saved filenames (e.g. from doc_file_name_with_extension_textbox). If None or empty, falls back to "uploaded_ocr".
     """
 
     if isinstance(files, pd.DataFrame) and files.empty:
@@ -1516,7 +1518,7 @@ def run_duplicate_analysis(
     )
 
     end_time = time.time()
-    processing_time = round(end_time - start_time, 2)
+    processing_time = round(end_time - start_time, 1)
 
     return (
         results_df,
@@ -1644,11 +1646,12 @@ def apply_whole_page_redactions_from_list(
     doc_file_name_with_extension_textbox: str,
     review_file_state: pd.DataFrame,
     duplicate_output_paths: list[str],
-    pymupdf_doc: object,
+    pymupdf_doc: pymupdf.Document,
     page_sizes: list[dict],
     all_existing_annotations: list[dict],
     combine_pages: bool = True,
     new_annotations_with_bounding_boxes: List[dict] = list(),
+    review_file_path: str = "",
 ):
     """
     This function applies redactions to whole pages based on a provided list of duplicate page numbers. It supports two modes of operation: combining pages and not combining pages. When combining pages is enabled, it attempts to identify duplicate pages across different files and applies redactions accordingly. If combining pages is disabled, it relies on new annotations with bounding boxes to determine which pages to redact. The function utilises a PyMuPDF document object to manipulate the PDF file, and it also considers the sizes of pages to ensure accurate redaction application.
@@ -1663,7 +1666,9 @@ def apply_whole_page_redactions_from_list(
         all_existing_annotations (list[dict]): A list of all existing annotations in the document.
         combine_pages (bool, optional): A flag indicating whether to combine pages for redaction. Defaults to True.
         new_annotations_with_bounding_boxes (List[dict], optional): A list of new annotations with bounding boxes. Defaults to an empty list.
+        review_file_path (str, optional): Path to the review PDF file. If pymupdf_doc is not available (e.g. after redaction the handle was released), the document is loaded from this path.
     """
+
     if all_existing_annotations is None:
         all_existing_annotations = list()
 
@@ -1679,11 +1684,6 @@ def apply_whole_page_redactions_from_list(
         duplicate_output_paths = []
 
     all_annotations = all_existing_annotations.copy()
-
-    if not pymupdf_doc:
-        message = "No document file currently under review. Please upload the relevant PDF on the Review redactions tab under the top 'Upload PDFs/images...' section to apply duplicate redactions."
-        print(f"Warning: {message}")
-        raise Warning(message)
 
     list_whole_pages_to_redact = list()
 
@@ -1767,6 +1767,7 @@ def apply_whole_page_redactions_from_list(
                 file_name_from_path = file_name_from_path.replace(
                     "_redactions_for_review", ""
                 )
+
                 if expected_duplicate_pages_to_redact_name in file_name_from_path:
                     if PAGES_TO_REDACT_SUFFIX in file_name_from_path:
                         whole_pages_list = pd.read_csv(output_file, header=None)
@@ -1827,7 +1828,8 @@ def apply_whole_page_redactions_from_list(
         else:
             message = "No relevant list of whole pages to redact found."
             print(message)
-            raise Warning(message)
+            gr.Info(message)
+            return review_file_state, all_annotations
 
         list_whole_pages_to_redact = list(set(list_whole_pages_to_redact))
 
@@ -1849,9 +1851,10 @@ def apply_whole_page_redactions_from_list(
 
     else:
         if not new_annotations_with_bounding_boxes:
-            message = "Can't find any new annotations to add"
+            message = "No new annotations to add"
             print(message)
-            raise Warning(message)
+            gr.Info(message)
+            return review_file_state, all_annotations
 
         list_whole_pages_to_redact = list()
         for annotation in new_annotations_with_bounding_boxes:
@@ -1966,6 +1969,12 @@ def apply_whole_page_redactions_from_list(
             message = "No new whole page redactions were added."
         print(message)
         gr.Info(message)
+
+        if pymupdf_doc is not None:
+            try:
+                pymupdf_doc.close()
+            except Exception:
+                pass
         return review_file_state, all_annotations
 
     expected_cols = [
@@ -2012,6 +2021,11 @@ def apply_whole_page_redactions_from_list(
     print(out_message)
     gr.Info(out_message)
 
+    if pymupdf_doc is not None:
+        try:
+            pymupdf_doc.close()
+        except Exception:
+            pass
     return review_file_out, all_annotations
 
 

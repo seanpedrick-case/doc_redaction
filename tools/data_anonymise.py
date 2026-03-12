@@ -586,6 +586,38 @@ def anonymise_files_with_open_text(
             out_message = "Cannot connect to AWS Comprehend service. Please provide access keys under Textract settings on the Redaction settings tab, or choose another PII identification method."
             raise (out_message)
 
+    # Create Bedrock runtime client when using LLM-based PII detection with AWS Bedrock
+    bedrock_runtime = None
+    if pii_identification_method == AWS_LLM_PII_OPTION:
+        if RUN_AWS_FUNCTIONS and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:
+            print("Connecting to Bedrock via existing SSO connection")
+            bedrock_runtime = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+        elif aws_access_key_textbox and aws_secret_key_textbox:
+            print(
+                "Connecting to Bedrock using AWS access key and secret keys from user input."
+            )
+            bedrock_runtime = boto3.client(
+                "bedrock-runtime",
+                aws_access_key_id=aws_access_key_textbox,
+                aws_secret_access_key=aws_secret_key_textbox,
+                region_name=AWS_REGION,
+            )
+        elif RUN_AWS_FUNCTIONS:
+            print("Connecting to Bedrock via existing SSO connection")
+            bedrock_runtime = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+        elif AWS_ACCESS_KEY and AWS_SECRET_KEY:
+            print("Getting Bedrock credentials from environment variables")
+            bedrock_runtime = boto3.client(
+                "bedrock-runtime",
+                aws_access_key_id=AWS_ACCESS_KEY,
+                aws_secret_access_key=AWS_SECRET_KEY,
+                region_name=AWS_REGION,
+            )
+        else:
+            out_message = "Cannot connect to AWS Bedrock service. Please provide access keys under Textract settings on the Redaction settings tab, or choose another PII identification method."
+            print(out_message)
+            raise Exception(out_message)
+
     # Check if files and text exist
     if not file_paths:
         if in_text:
@@ -670,6 +702,7 @@ def anonymise_files_with_open_text(
                 comprehend_client,
                 output_folder=OUTPUT_FOLDER,
                 do_initial_clean=do_initial_clean,
+                bedrock_runtime=bedrock_runtime,
             )
         else:
             # If file is an xlsx, we are going to run through all the Excel sheets to anonymise them separately.
@@ -749,6 +782,7 @@ def anonymise_files_with_open_text(
                         comprehend_client,
                         output_folder=output_folder,
                         do_initial_clean=do_initial_clean,
+                        bedrock_runtime=bedrock_runtime,
                     )
 
             else:
@@ -786,6 +820,7 @@ def anonymise_files_with_open_text(
                     comprehend_client,
                     output_folder=output_folder,
                     do_initial_clean=do_initial_clean,
+                    bedrock_runtime=bedrock_runtime,
                 )
 
         out_message_out = ""
@@ -863,6 +898,7 @@ def tabular_anonymise_wrapper_func(
     nlp_analyser: AnalyzerEngine = nlp_analyser,
     output_folder: str = OUTPUT_FOLDER,
     do_initial_clean: bool = DO_INITIAL_TABULAR_DATA_CLEAN,
+    bedrock_runtime=None,
 ):
     """
     This function wraps the anonymisation process for a given dataframe. It filters the dataframe based on chosen columns, applies the specified anonymisation strategy using the anonymise_script function, and exports the anonymised data to a file.
@@ -982,12 +1018,19 @@ def tabular_anonymise_wrapper_func(
         comprehend_client,
         nlp_analyser=nlp_analyser,
         do_initial_clean=do_initial_clean,
+        bedrock_runtime=bedrock_runtime,
     )
 
     anon_df_part_out.replace("^nan$", "", regex=True, inplace=True)
 
     # Rejoin the dataframe together
     anon_df_out = pd.concat([anon_df_part_out, anon_df_remain], axis=1)
+    # Reorder to match original column order; add any missing columns as empty
+    # (avoids KeyError when e.g. chosen_cols referred to columns from another sheet/file)
+    missing_cols = [c for c in all_cols_original_order if c not in anon_df_out.columns]
+    if missing_cols:
+        for c in missing_cols:
+            anon_df_out[c] = ""
     anon_df_out = anon_df_out[all_cols_original_order]
 
     # Export file

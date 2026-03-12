@@ -454,6 +454,8 @@ def save_llm_prompt_response(
     max_tokens: int,
     file_name: Optional[str] = None,
     page_number: Optional[int] = None,
+    input_tokens: Optional[int] = None,
+    output_tokens: Optional[int] = None,
 ) -> str:
     """
     Save LLM prompt and response to a text file for traceability.
@@ -474,7 +476,9 @@ def save_llm_prompt_response(
         temperature: Temperature used
         max_tokens: Max tokens used
         file_name: Optional file name (without extension) for the filename
-        page_number: Optional page number for the filename
+        page_number: Optional page number (0-based) for the filename; displayed in log as 1-based.
+        input_tokens: Optional input token count from the LLM call
+        output_tokens: Optional output token count from the LLM call
 
     Returns:
         Path to the saved file
@@ -514,7 +518,11 @@ def save_llm_prompt_response(
         if file_name:
             f.write(f"File: {file_name}\n")
         if page_number is not None:
-            f.write(f"Page: {page_number}\n")
+            f.write(f"Page: {page_number + 1}\n")
+        if input_tokens is not None:
+            f.write(f"Input tokens: {input_tokens}\n")
+        if output_tokens is not None:
+            f.write(f"Output tokens: {output_tokens}\n")
         f.write(f"Batch Number: {batch_number}\n")
         f.write(f"Model: {model_choice}\n")
         f.write(f"Language: {language}\n")
@@ -767,36 +775,9 @@ def call_llm_for_entity_detection(
         print(f"LLM entity detection failed: {e}")
         raise
 
-    # Save prompt and response if output_folder is provided.
-    # Use the same system_prompt and user_prompt that were sent to the model
-    # (no combined/rendered version) so the log correctly shows system vs user.
-    if output_folder and response_text:
-        try:
-            saved_file = save_llm_prompt_response(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                response_text=response_text,
-                output_folder=output_folder,
-                batch_number=batch_number,
-                model_choice=model_choice,
-                entities_to_detect=entities_to_detect,
-                language=language,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                file_name=file_name,
-                page_number=page_number,
-            )
-            print(f"Saved LLM prompt/response to: {saved_file}")
-        except Exception as e:
-            print(f"Warning: Could not save LLM prompt/response: {e}")
-
-    # Parse the response
-    entities = parse_llm_entity_response(response_text, text)
-
-    # Extract token usage from response
+    # Extract token usage from response (before save so we can write it to the log file)
     input_tokens = 0
     output_tokens = 0
-
     try:
         if isinstance(response, dict) and "usage" in response:
             # inference-server or llama-cpp format
@@ -818,6 +799,34 @@ def call_llm_for_entity_detection(
             input_tokens = num_transformer_input_tokens
         if num_transformer_generated_tokens and num_transformer_generated_tokens > 0:
             output_tokens = num_transformer_generated_tokens
+
+    # Save prompt and response if output_folder is provided.
+    # Use the same system_prompt and user_prompt that were sent to the model
+    # (no combined/rendered version) so the log correctly shows system vs user.
+    if output_folder and response_text:
+        try:
+            saved_file = save_llm_prompt_response(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                response_text=response_text,
+                output_folder=output_folder,
+                batch_number=batch_number,
+                model_choice=model_choice,
+                entities_to_detect=entities_to_detect,
+                language=language,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                file_name=file_name,
+                page_number=page_number,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
+            print(f"Saved LLM prompt/response to: {saved_file}")
+        except Exception as e:
+            print(f"Warning: Could not save LLM prompt/response: {e}")
+
+    # Parse the response
+    entities = parse_llm_entity_response(response_text, text)
 
     return entities, input_tokens, output_tokens
 

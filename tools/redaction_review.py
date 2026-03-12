@@ -2093,6 +2093,12 @@ def apply_redactions_to_review_df_and_files(
 
                     fill = img_annotation_box["color"]
 
+                    if not isinstance(fill, tuple):
+                        try:
+                            fill = tuple(fill)
+                        except Exception:
+                            fill = tuple(CUSTOM_BOX_COLOUR)
+
                     # Ensure fill is a valid RGB tuple with integer values 0-255
                     # Handle both list and tuple formats, and convert float values to proper RGB
                     if isinstance(fill, (list, tuple)) and len(fill) == 3:

@@ -40,7 +40,7 @@ from tools.config import (
     TIMEOUT_WAIT,
     model_name_map,
 )
-from tools.file_conversion import word_level_ocr_df_to_line_level_ocr_df
+from tools.file_conversion import is_pdf, word_level_ocr_df_to_line_level_ocr_df
 from tools.helper_functions import (
     clean_column_name,
     create_batch_file_path_details,
@@ -110,14 +110,37 @@ Table to summarise:
 
 Summary:"""
 
-# comprehensive_summary_format_prompt = "Return a comprehensive summary that covers all the important topics and themes described in the summaries below. Structure the summary with Main issues as headings, with significant topics described in bullet points below them in order of relative significance. Format the output for Excel display using: **bold text** for main headings, • bullet points for sub-items, and line breaks between sections. Avoid markdown symbols like # or ##."
 
-# comprehensive_summary_format_prompt_by_group = "Return a comprehensive summary that covers all the important topics and themes described in the summaries below. Structure the summary with main issues as headings, with significant Subtopics described in bullet points below them in order of relative significance. Compare and contrast differences between the topics and themes from each Group. Format the output for Excel display using: **bold text** for main headings, • bullet points for sub-items, and line breaks between sections. Avoid markdown symbols like # or ##."
+def _summarisation_upload_to_paths(file_upload):
+    """Normalise Gradio file input to a list of file paths (str, list, or dict with 'name')."""
+    if not file_upload:
+        return []
+    paths = []
+    if isinstance(file_upload, str):
+        paths.append(file_upload)
+    elif isinstance(file_upload, list):
+        for item in file_upload:
+            if isinstance(item, str):
+                paths.append(item)
+            elif isinstance(item, dict):
+                paths.append(item.get("name") or item.get("path") or "")
+            elif hasattr(item, "name"):
+                paths.append(item.name)
+            elif hasattr(item, "path"):
+                paths.append(item.path)
+    elif isinstance(file_upload, dict):
+        paths.append(file_upload.get("name") or file_upload.get("path") or "")
+    elif hasattr(file_upload, "name"):
+        paths.append(file_upload.name)
+    elif hasattr(file_upload, "path"):
+        paths.append(file_upload.path)
+    return [p for p in paths if p and str(p).strip()]
 
-# # Alternative Excel formatting options
-# excel_rich_text_format_prompt = "Return a comprehensive summary that covers all the important topics and themes described in the summaries below. Structure the summary with main issues as headings, with significant topics described in bullet points below them in order of relative significance. Format for Excel using: BOLD for main headings, bullet points (•) for sub-items, and line breaks between sections. Use simple text formatting that Excel can interpret."
 
-# excel_plain_text_format_prompt = "Return a comprehensive summary that covers all the important topics and themes described in the summaries below. Structure the summary with main issues as headings, with significant topics described in bullet points below them in order of relative significance. Format as plain text with clear structure: use ALL CAPS for main headings, bullet points (•) for sub-items, and line breaks between sections. Avoid any special formatting symbols."
+def _upload_contains_pdf(file_upload):
+    """Return True if the summarisation upload contains any PDF file."""
+    paths = _summarisation_upload_to_paths(file_upload)
+    return any(is_pdf(p) for p in paths)
 
 
 ###
