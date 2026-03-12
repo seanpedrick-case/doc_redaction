@@ -1557,7 +1557,7 @@ CLOUD_SUMMARISATION_MODEL_CHOICE = get_or_create_env_var(
 # Note: This should be set after model lists are defined
 CLOUD_VLM_MODEL_CHOICE = get_or_create_env_var(
     "CLOUD_VLM_MODEL_CHOICE",
-    "qwen.qwen3-vl-235b-a22b",  # Will be set to default below if empty
+    "amazon.nova-pro-v1:0",  # In tests I have seen amazon nova pro outperform qwen3-vl-235b-a22b #"qwen.qwen3-vl-235b-a22b",  # Will be set to default below if empty
 )  # Default model choice for cloud VLM OCR (Bedrock, Gemini, or Azure/OpenAI)
 
 # Set default CLOUD_VLM_MODEL_CHOICE if not provided

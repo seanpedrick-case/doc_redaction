@@ -28,6 +28,9 @@ from tools.llm_entity_detection_prompts import (
     create_entity_detection_system_prompt,
 )
 
+# Max length for column/sheet name in tabular log filenames (to keep filenames short)
+LLM_LOG_TABULAR_NAME_MAX_LEN = 25
+
 # Import LLM functions from local tools.llm_funcs
 try:
     # Use send_request from llm_funcs.py which handles all model sources, retries, and response parsing
@@ -441,6 +444,18 @@ def parse_llm_entity_response(
     return entities_out
 
 
+def _sanitize_for_filename(s: str, max_len: Optional[int] = None) -> str:
+    """Sanitize a string for use in a filename (alphanumeric, spaces to underscores)."""
+    out = (
+        "".join(c for c in (s or "") if c.isalnum() or c in (" ", "-", "_"))
+        .strip()
+        .replace(" ", "_")
+    )
+    if max_len is not None and len(out) > max_len:
+        out = out[:max_len]
+    return out or "unknown"
+
+
 def save_llm_prompt_response(
     system_prompt: str,
     user_prompt: str,
@@ -454,6 +469,9 @@ def save_llm_prompt_response(
     max_tokens: int,
     file_name: Optional[str] = None,
     page_number: Optional[int] = None,
+    sheet_name: Optional[str] = None,
+    column_name: Optional[str] = None,
+    row_number: Optional[int] = None,
     input_tokens: Optional[int] = None,
     output_tokens: Optional[int] = None,
 ) -> str:
@@ -475,8 +493,11 @@ def save_llm_prompt_response(
         language: Language code
         temperature: Temperature used
         max_tokens: Max tokens used
-        file_name: Optional file name (without extension) for the filename
+        file_name: Optional file name (without extension) for the filename / log header
         page_number: Optional page number (0-based) for the filename; displayed in log as 1-based.
+        sheet_name: Optional Excel sheet name (tabular data); included in log and filename if present.
+        column_name: Optional column name (tabular data); included in log and filename (shortened if long).
+        row_number: Optional row number (1-based for display; tabular data); included in log and filename.
         input_tokens: Optional input token count from the LLM call
         output_tokens: Optional output token count from the LLM call
 
@@ -491,18 +512,31 @@ def save_llm_prompt_response(
     llm_logs_folder = os.path.join(output_folder, "llm_prompts_responses")
     os.makedirs(llm_logs_folder, exist_ok=True)
 
-    # Create filename with file name and page number if available, otherwise use timestamp
-    if file_name and page_number is not None:
-        # Sanitize file name for use in filename (remove invalid characters)
-        safe_file_name = "".join(
-            c for c in file_name if c.isalnum() or c in (" ", "-", "_")
-        ).strip()
-        safe_file_name = safe_file_name.replace(" ", "_")
+    # Tabular: filename = sheet (if relevant) + column (shortened) + row
+    is_tabular = (
+        column_name is not None or sheet_name is not None or row_number is not None
+    )
+    if is_tabular:
+        parts = ["llm"]
+        if sheet_name:
+            parts.append(
+                _sanitize_for_filename(sheet_name, LLM_LOG_TABULAR_NAME_MAX_LEN)
+            )
+        if column_name:
+            parts.append(
+                _sanitize_for_filename(column_name, LLM_LOG_TABULAR_NAME_MAX_LEN)
+            )
+        if row_number is not None:
+            parts.append(f"row{row_number:05d}")
+        parts.append(f"batch_{batch_number:04d}")
+        filename = "_".join(parts) + ".txt"
+    elif file_name and page_number is not None:
+        # Document: file name + page number
+        safe_file_name = _sanitize_for_filename(file_name)
         filename = (
             f"llm_{safe_file_name}_page_{page_number:04d}_batch_{batch_number:04d}.txt"
         )
     else:
-        # Fallback to timestamp if file/page info not available
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"llm_batch_{batch_number:04d}_{timestamp}.txt"
     filepath = os.path.join(llm_logs_folder, filename)
@@ -517,6 +551,12 @@ def save_llm_prompt_response(
         f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         if file_name:
             f.write(f"File: {file_name}\n")
+        if sheet_name:
+            f.write(f"Sheet: {sheet_name}\n")
+        if column_name is not None:
+            f.write(f"Column: {column_name}\n")
+        if row_number is not None:
+            f.write(f"Row: {row_number}\n")
         if page_number is not None:
             f.write(f"Page: {page_number + 1}\n")
         if input_tokens is not None:
@@ -578,6 +618,9 @@ def call_llm_for_entity_detection(
     custom_instructions: str = "",
     file_name: Optional[str] = None,
     page_number: Optional[int] = None,
+    sheet_name: Optional[str] = None,
+    column_name: Optional[str] = None,
+    row_number: Optional[int] = None,
     inference_method: Optional[str] = None,
     local_model=None,
     tokenizer=None,
@@ -603,7 +646,10 @@ def call_llm_for_entity_detection(
         batch_number: Batch number for logging
         custom_instructions: Optional custom instructions to include in the prompt
         file_name: Optional file name (without extension) for saving logs
-        page_number: Optional page number for saving logs
+        page_number: Optional page number for saving logs (document flow)
+        sheet_name: Optional Excel sheet name for tabular logs
+        column_name: Optional column name for tabular logs
+        row_number: Optional row number (1-based) for tabular logs
         inference_method: Inference method to use ("aws-bedrock", "local", "inference-server", "azure-openai", "gemini")
                          If None, uses CHOSEN_LLM_PII_INFERENCE_METHOD from config
         local_model: Local model instance (required for "local" method)
@@ -818,10 +864,14 @@ def call_llm_for_entity_detection(
                 max_tokens=max_tokens,
                 file_name=file_name,
                 page_number=page_number,
+                sheet_name=sheet_name,
+                column_name=column_name,
+                row_number=row_number,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
             )
-            print(f"Saved LLM prompt/response to: {saved_file}")
+            if 0 == 1:  # To avoid lint check issue
+                print(f"Saved LLM prompt/response to: {saved_file}")
         except Exception as e:
             print(f"Warning: Could not save LLM prompt/response: {e}")
 

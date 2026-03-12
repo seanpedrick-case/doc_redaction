@@ -363,6 +363,7 @@ def choose_and_run_redactor(
     inference_server_vlm_model: str = "",
     efficient_ocr: bool = EFFICIENT_OCR,
     efficient_ocr_min_words: Union[int, float, None] = EFFICIENT_OCR_MIN_WORDS,
+    hybrid_textract_bedrock_vlm: bool = HYBRID_TEXTRACT_BEDROCK_VLM,
     llm_model_name="",
     llm_total_input_tokens=0,
     llm_total_output_tokens=0,
@@ -1122,7 +1123,7 @@ def choose_and_run_redactor(
     # Try to connect to AWS Bedrock Runtime Client if using LLM-based PII detection
     if pii_identification_method == AWS_LLM_PII_OPTION or (
         text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
-        and HYBRID_TEXTRACT_BEDROCK_VLM
+        and hybrid_textract_bedrock_vlm
     ):
         if RUN_AWS_FUNCTIONS and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:
             print("Connecting to Bedrock via existing SSO connection")
@@ -1802,6 +1803,7 @@ def choose_and_run_redactor(
                     pages_to_process=pages_needing_ocr_1based,
                     ocr_first_pass_max_workers=ocr_first_pass_max_workers,
                     pages_in_pdf_points=pages_with_text_1based,
+                    hybrid_textract_bedrock_vlm=hybrid_textract_bedrock_vlm,
                 )
                 out_file_paths = out_file_paths.copy()
                 vlm_total_input_tokens += vlm_total_input_tokens_page
@@ -1946,6 +1948,7 @@ def choose_and_run_redactor(
                 inference_server_vlm_model=inference_server_vlm_model,
                 efficient_ocr=efficient_ocr,
                 ocr_first_pass_max_workers=ocr_first_pass_max_workers,
+                hybrid_textract_bedrock_vlm=hybrid_textract_bedrock_vlm,
             )
 
             # This line creates a copy of out_file_paths to break potential links with log_files_output_paths
@@ -4343,6 +4346,7 @@ def redact_image_pdf(
     custom_llm_instructions: str = "",
     inference_server_vlm_model: str = "",
     efficient_ocr: bool = EFFICIENT_OCR,
+    hybrid_textract_bedrock_vlm: bool = HYBRID_TEXTRACT_BEDROCK_VLM,
     pages_to_process: Optional[List[int]] = None,
     ocr_first_pass_max_workers: Optional[int] = None,
     pages_in_pdf_points: Optional[List[int]] = None,
@@ -5872,7 +5876,7 @@ def redact_image_pdf(
 
                 # Hybrid Textract + Bedrock VLM: re-run low-confidence lines with Bedrock VLM
                 if (
-                    HYBRID_TEXTRACT_BEDROCK_VLM
+                    hybrid_textract_bedrock_vlm
                     and text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
                     and image is not None
                     and bedrock_runtime is not None
@@ -6245,7 +6249,7 @@ def redact_image_pdf(
                             text_extraction_method=text_extraction_method,
                             chosen_local_ocr_model=chosen_local_ocr_model,
                             log_files_output_paths=log_files_output_paths,
-                            textract_hybrid_bedrock_used=HYBRID_TEXTRACT_BEDROCK_VLM,
+                            textract_hybrid_bedrock_used=hybrid_textract_bedrock_vlm,
                         )
                         # If config is enabled and a new visualization file was added, add it to out_file_paths
                         if (
@@ -6418,7 +6422,7 @@ def redact_image_pdf(
 
             # Hybrid Textract + Bedrock VLM: re-run low-confidence lines with Bedrock VLM
             if (
-                HYBRID_TEXTRACT_BEDROCK_VLM
+                hybrid_textract_bedrock_vlm
                 and text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
                 and image is not None
                 and CLOUD_VLM_MODEL_CHOICE
@@ -6731,7 +6735,7 @@ def redact_image_pdf(
                             text_extraction_method=text_extraction_method,
                             chosen_local_ocr_model=chosen_local_ocr_model,
                             log_files_output_paths=log_files_output_paths,
-                            textract_hybrid_bedrock_used=HYBRID_TEXTRACT_BEDROCK_VLM,
+                            textract_hybrid_bedrock_used=hybrid_textract_bedrock_vlm,
                         )
                         if (
                             INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES

@@ -51,6 +51,7 @@ from tools.config import (
     FULL_LLM_ENTITY_LIST,
     GEMINI_API_KEY,
     GRADIO_TEMP_DIR,
+    HYBRID_TEXTRACT_BEDROCK_VLM,
     IMAGES_DPI,
     INFERENCE_SERVER_API_URL,
     INFERENCE_SERVER_PII_OPTION,
@@ -724,6 +725,18 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
         metavar="N",
         help="Max threads for OCR first pass (1 = sequential). Defaults to OCR_FIRST_PASS_MAX_WORKERS config (e.g. 3).",
     )
+    pdf_group.add_argument(
+        "--hybrid_textract_bedrock_vlm",
+        action="store_true",
+        default=None,
+        help="When using AWS Textract, re-run low-confidence lines with Bedrock VLM for higher quality. Defaults to HYBRID_TEXTRACT_BEDROCK_VLM config.",
+    )
+    pdf_group.add_argument(
+        "--no_hybrid_textract_bedrock_vlm",
+        action="store_false",
+        dest="hybrid_textract_bedrock_vlm",
+        help="Disable hybrid Textract + Bedrock VLM (use Textract only).",
+    )
 
     # --- LLM PII Detection Arguments ---
     llm_group = parser.add_argument_group("LLM PII Detection Options")
@@ -1289,6 +1302,9 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
                         args.ocr_first_pass_max_workers
                         if getattr(args, "ocr_first_pass_max_workers", None) is not None
                         else OCR_FIRST_PASS_MAX_WORKERS
+                    ),
+                    hybrid_textract_bedrock_vlm=getattr(
+                        args, "hybrid_textract_bedrock_vlm", HYBRID_TEXTRACT_BEDROCK_VLM
                     ),
                     # Note: bedrock_runtime, gemini_client, gemini_config, azure_openai_client
                     # are initialized inside choose_and_run_redactor based on text_extraction_method
@@ -2186,6 +2202,9 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
                     ocr_first_pass_max_workers=(
                         getattr(args, "ocr_first_pass_max_workers", None)
                         or OCR_FIRST_PASS_MAX_WORKERS
+                    ),
+                    hybrid_textract_bedrock_vlm=getattr(
+                        args, "hybrid_textract_bedrock_vlm", HYBRID_TEXTRACT_BEDROCK_VLM
                     ),
                     text_extraction_only=True,
                 )

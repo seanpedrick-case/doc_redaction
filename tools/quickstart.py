@@ -131,13 +131,38 @@ def handle_step_2_next(
         else:
             main_excel_sheets_update = excel_sheets_dropdown
 
+        # Preserve user's column selection in walkthrough_colnames; do not overwrite with colnames_dropdown
+        # (colnames_dropdown has value=all columns, which would reset a one-column selection to all four)
+        if (
+            walkthrough_colnames_val
+            and len(walkthrough_colnames_val) > 0
+            and walkthrough_colnames_val[0] != "Choose columns to anonymise"
+        ):
+            walkthrough_colnames_update = gr.update(
+                value=walkthrough_colnames_val, visible=True
+            )
+        else:
+            walkthrough_colnames_update = colnames_dropdown
+
+        # Preserve user's sheet selection in walkthrough_excel_sheets when they have made one
+        if (
+            walkthrough_excel_sheets_val
+            and len(walkthrough_excel_sheets_val) > 0
+            and walkthrough_excel_sheets_val[0] != "Choose Excel sheets to anonymise"
+        ):
+            walkthrough_excel_sheets_update = gr.update(
+                value=walkthrough_excel_sheets_val, visible=True
+            )
+        else:
+            walkthrough_excel_sheets_update = excel_sheets_dropdown
+
         # Return updates for both walkthrough and main components, and advance walkthrough
         # Note: walkthrough_local_ocr_method_radio and walkthrough_handwrite_signature_checkbox visibility
         # are controlled by event handler on walkthrough_text_extract_method_radio
         # Note: Step 3 PII components visibility is controlled by event handler on walkthrough_redaction_method_dropdown
         return (
-            colnames_dropdown,  # walkthrough_colnames
-            excel_sheets_dropdown,  # walkthrough_excel_sheets
+            walkthrough_colnames_update,  # walkthrough_colnames
+            walkthrough_excel_sheets_update,  # walkthrough_excel_sheets
             main_colnames_update,  # in_colnames
             main_excel_sheets_update,  # in_excel_sheets (defined in "Word or Excel/CSV files" tab)
             gr.Radio(
@@ -449,8 +474,6 @@ def handle_pii_method_selection_tabular(pii_method: str):
     return (
         gr.update(visible=show_local_entities),
         gr.update(visible=show_comprehend_entities),
-        gr.update(),  # no-op: avoid updating nested component (loading hang)
-        gr.update(),  # no-op: avoid updating nested component (loading hang)
         gr.update(visible=is_llm_method),  # accordion controls visibility of LLM block
     )
 

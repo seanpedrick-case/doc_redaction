@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
+from functools import partial
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import botocore
@@ -27,6 +28,7 @@ from presidio_analyzer import AnalyzerEngine, RecognizerResult
 from tools.config import (
     AWS_LLM_PII_OPTION,
     AWS_PII_OPTION,
+    CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE,
     CLOUD_LLM_PII_MODEL_CHOICE,
     CONVERT_LINE_TO_WORD_LEVEL,
     DEFAULT_INFERENCE_SERVER_VLM_MODEL,
@@ -105,6 +107,11 @@ COMPREHEND_CHARACTERS_PER_UNIT = 100
 
 # Phrase-ending punctuation marks (batch boundaries)
 PHRASE_ENDING_PUNCTUATION = {".", "!", "?", ";", ":"}
+
+# When Bedrock VLM word count differs from Textract by this many or less, we still
+# accept Bedrock text and derive word-level boxes from the Textract line bbox via
+# line-to-word segmentation.
+MAX_WORD_COUNT_DIFF_FOR_LINE_DERIVED_WORDS = 6
 
 
 def ends_with_phrase_punctuation(word: str) -> bool:
@@ -2016,12 +2023,6 @@ def _process_page_result_with_hybrid_vlm_ocr(
         sum(1 for m in rec_models if m == "Paddle")
 
     return page_results
-
-
-# When Bedrock VLM word count differs from Textract by this many or less, we still
-# accept Bedrock text and derive word-level boxes from the Textract line bbox via
-# line-to-word segmentation.
-MAX_WORD_COUNT_DIFF_FOR_LINE_DERIVED_WORDS = 6
 
 
 def _convert_single_line_to_word_level_standalone(
@@ -6367,6 +6368,97 @@ class CustomImageAnalyzerEngine:
 
         return output
 
+    @staticmethod
+    def _process_one_line_to_words(
+        task: Tuple,
+        output_folder: str,
+        image_name: Optional[str],
+    ) -> Tuple[int, Dict[str, List]]:
+        """
+        Process a single line to word-level bounding boxes. Used by
+        _convert_line_to_word_level for parallel execution.
+
+        Args:
+            task: (line_index, line_image, line_text, line_conf, line_model,
+                  line_left, line_top, line_width, line_height)
+            output_folder: Passed to AdaptiveSegmenter
+            image_name: Passed to segmenter.segment()
+        Returns:
+            (line_index, word_dict) with word_dict having keys text, left, top,
+            width, height, conf, model (all lists).
+        """
+        (
+            i,
+            line_image,
+            line_text,
+            line_conf,
+            line_model,
+            line_left,
+            line_top,
+            line_width,
+            line_height,
+        ) = task
+        word_dict = {
+            "text": [],
+            "left": [],
+            "top": [],
+            "width": [],
+            "height": [],
+            "conf": [],
+            "model": [],
+        }
+        segmenter = AdaptiveSegmenter(output_folder=output_folder)
+        single_line_data = {
+            "text": [line_text],
+            "left": [0],
+            "top": [0],
+            "width": [line_width],
+            "height": [line_height],
+            "conf": [line_conf],
+            "line": [i],
+        }
+        word_output, _ = segmenter.segment(
+            single_line_data, line_image, image_name=image_name
+        )
+        if not word_output or not word_output.get("text"):
+            words = line_text.split()
+            if words:
+                num_chars = len("".join(words))
+                num_spaces = len(words) - 1
+                if num_chars > 0:
+                    char_space_ratio = 2.0
+                    estimated_space_width = (
+                        line_width / (num_chars * char_space_ratio + num_spaces)
+                        if (num_chars * char_space_ratio + num_spaces) > 0
+                        else line_width / num_chars
+                    )
+                    avg_char_width = estimated_space_width * char_space_ratio
+                    current_left = 0
+                    for word in words:
+                        word_width = len(word) * avg_char_width
+                        clamped_left = max(0, min(current_left, line_width))
+                        clamped_width = max(
+                            0, min(word_width, line_width - clamped_left)
+                        )
+                        word_dict["text"].append(word)
+                        word_dict["left"].append(line_left + clamped_left)
+                        word_dict["top"].append(line_top)
+                        word_dict["width"].append(clamped_width)
+                        word_dict["height"].append(line_height)
+                        word_dict["conf"].append(line_conf)
+                        word_dict["model"].append(line_model)
+                        current_left += word_width + estimated_space_width
+            return (i, word_dict)
+        for j in range(len(word_output["text"])):
+            word_dict["text"].append(word_output["text"][j])
+            word_dict["left"].append(line_left + word_output["left"][j])
+            word_dict["top"].append(line_top + word_output["top"][j])
+            word_dict["width"].append(word_output["width"][j])
+            word_dict["height"].append(word_output["height"][j])
+            word_dict["conf"].append(word_output["conf"][j])
+            word_dict["model"].append(line_model)
+        return (i, word_dict)
+
     def _convert_line_to_word_level(
         self,
         line_data: Dict[str, List],
@@ -6378,6 +6470,7 @@ class CustomImageAnalyzerEngine:
         """
         Converts line-level OCR results to word-level using AdaptiveSegmenter.segment().
         This method processes each line individually using the adaptive segmentation algorithm.
+        Lines are processed in parallel with ThreadPoolExecutor when there is more than one.
 
         Args:
             line_data: Dictionary with keys "text", "left", "top", "width", "height", "conf" (all lists)
@@ -6430,45 +6523,32 @@ class CustomImageAnalyzerEngine:
             print(
                 f"Warning: Image dimension mismatch! Expected {image_width}x{image_height}, but got {actual_width}x{actual_height}"
             )
-            # print(f"Using actual dimensions: {actual_width}x{actual_height}")
-            # Update to use actual dimensions
             image_width = actual_width
             image_height = actual_height
 
-        # print("Segmenting line-level OCR results to word-level...")
-
-        segmenter = AdaptiveSegmenter(output_folder=self.output_folder)
-
-        # Process each line
+        # Build list of tasks: one per valid line (crop and validate on main thread)
+        tasks = []
         for i in range(len(line_data["text"])):
             line_text = line_data["text"][i]
             line_conf = line_data["conf"][i]
-            # Extract model, defaulting to "Paddle" if not available
             if "model" in line_data and len(line_data["model"]) > i:
                 line_model = line_data["model"][i]
             else:
                 line_model = "Paddle"
 
-            # Get the float values
             f_left = float(line_data["left"][i])
             f_top = float(line_data["top"][i])
             f_width = float(line_data["width"][i])
             f_height = float(line_data["height"][i])
-
-            # A simple heuristic to check if coords are normalized
-            # If any value is > 1.0, assume they are already pixels
             is_normalized = (
                 f_left <= 1.0 and f_top <= 1.0 and f_width <= 1.0 and f_height <= 1.0
             )
-
             if is_normalized:
-                # Convert from normalized (0.0-1.0) to absolute pixels
                 line_left = float(round(f_left * image_width))
                 line_top = float(round(f_top * image_height))
                 line_width = float(round(f_width * image_width))
                 line_height = float(round(f_height * image_height))
             else:
-                # They are already pixels, just convert to int
                 line_left = float(round(f_left))
                 line_top = float(round(f_top))
                 line_width = float(round(f_width))
@@ -6477,120 +6557,61 @@ class CustomImageAnalyzerEngine:
             if not line_text.strip():
                 continue
 
-            # Clamp bounding box to image boundaries
             line_left = int(max(0, min(line_left, image_width - 1)))
             line_top = int(max(0, min(line_top, image_height - 1)))
             line_width = int(max(1, min(line_width, image_width - line_left)))
             line_height = int(max(1, min(line_height, image_height - line_top)))
 
-            # Validate crop coordinates are within bounds
             if line_left >= image_width or line_top >= image_height:
-                # print(f"Warning: Line coordinates out of bounds. Skipping line '{line_text[:50]}...'")
                 continue
-
             if line_left + line_width > image_width:
                 line_width = image_width - line_left
-                # print(f"Warning: Adjusted line_width to {line_width} to fit within image")
-
             if line_top + line_height > image_height:
                 line_height = image_height - line_top
-                # print(f"Warning: Adjusted line_height to {line_height} to fit within image")
-
-            # Ensure we have valid dimensions
             if line_width <= 0 or line_height <= 0:
-                # print(f"Warning: Invalid line dimensions ({line_width}x{line_height}). Skipping line '{line_text[:50]}...'")
                 continue
 
-            # Crop the line image from the full image
             try:
                 line_image = image_np[
                     line_top : line_top + line_height,
                     line_left : line_left + line_width,
-                ]
+                ].copy()
             except IndexError:
-                # print(f"Error cropping line image: {e}")
-                # print(f"Attempted to crop: [{line_top}:{line_top + line_height}, {line_left}:{line_left + line_width}]")
-                # print(f"Image_np shape: {image_np.shape}")
+                continue
+            if line_image.size == 0 or len(line_image.shape) < 2:
                 continue
 
-            if line_image is None or line_image.size == 0:
-                # print(f"Warning: Cropped line_image is None or empty. Skipping line '{line_text[:50]}...'")
-                continue
-
-            # Validate line_image has valid shape
-            if len(line_image.shape) < 2:
-                # print(f"Warning: line_image has invalid shape {line_image.shape}. Skipping line '{line_text[:50]}...'")
-                continue
-
-            # Create single-line data structure for segment method
-            single_line_data = {
-                "text": [line_text],
-                "left": [0],  # Relative to cropped image
-                "top": [0],
-                "width": [line_width],
-                "height": [line_height],
-                "conf": [line_conf],
-                "line": [i],
-            }
-
-            # Validate line_image before passing to segmenter
-            if line_image is None:
-                # print(f"Error: line_image is None for line '{line_text[:50]}...'")
-                continue
-
-            # Use AdaptiveSegmenter.segment() to segment this line
-            try:
-                word_output, _ = segmenter.segment(
-                    single_line_data, line_image, image_name=image_name
+            tasks.append(
+                (
+                    i,
+                    line_image,
+                    line_text,
+                    line_conf,
+                    line_model,
+                    line_left,
+                    line_top,
+                    line_width,
+                    line_height,
                 )
-            except Exception:
-                # print(f"Error in segmenter.segment for line '{line_text[:50]}...': {e}")
-                # print(f"line_image shape: {line_image.shape if line_image is not None else 'None'}")
-                raise
+            )
 
-            if not word_output or not word_output.get("text"):
-                # If segmentation failed, fall back to proportional estimation
-                words = line_text.split()
-                if words:
-                    num_chars = len("".join(words))
-                    num_spaces = len(words) - 1
-                    if num_chars > 0:
-                        char_space_ratio = 2.0
-                        estimated_space_width = (
-                            line_width / (num_chars * char_space_ratio + num_spaces)
-                            if (num_chars * char_space_ratio + num_spaces) > 0
-                            else line_width / num_chars
-                        )
-                        avg_char_width = estimated_space_width * char_space_ratio
-                        current_left = 0
-                        for word in words:
-                            word_width = len(word) * avg_char_width
-                            clamped_left = max(0, min(current_left, line_width))
-                            clamped_width = max(
-                                0, min(word_width, line_width - clamped_left)
-                            )
-                            output["text"].append(word)
-                            output["left"].append(
-                                line_left + clamped_left
-                            )  # Add line offset
-                            output["top"].append(line_top)
-                            output["width"].append(clamped_width)
-                            output["height"].append(line_height)
-                            output["conf"].append(line_conf)
-                            output["model"].append(line_model)
-                            current_left += word_width + estimated_space_width
-                continue
+        if not tasks:
+            return output
 
-            # Adjust coordinates back to full image coordinates
-            for j in range(len(word_output["text"])):
-                output["text"].append(word_output["text"][j])
-                output["left"].append(line_left + word_output["left"][j])
-                output["top"].append(line_top + word_output["top"][j])
-                output["width"].append(word_output["width"][j])
-                output["height"].append(word_output["height"][j])
-                output["conf"].append(word_output["conf"][j])
-                # Preserve the model from the line-level data
-                output["model"].append(line_model)
+        # Process lines in parallel (or single line in thread)
+        max_workers = min(MAX_WORKERS, len(tasks))
+        process_one = partial(
+            CustomImageAnalyzerEngine._process_one_line_to_words,
+            output_folder=self.output_folder,
+            image_name=image_name,
+        )
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            results = list(executor.map(process_one, tasks))
+
+        # Merge results in line order to preserve document order
+        for _i, word_dict in sorted(results, key=lambda x: x[0]):
+            for key in output:
+                output[key].extend(word_dict[key])
 
         return output
 
@@ -8683,8 +8704,21 @@ class CustomImageAnalyzerEngine:
                     "model_choice", CLOUD_LLM_PII_MODEL_CHOICE
                 )
 
-            # Set LLM model name for tracking
-            llm_model_name = model_choice or ""
+            # Set LLM model name for tracking (use custom-instructions model when applicable)
+            custom_instructions_model = (
+                CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE.strip()
+                if isinstance(CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE, str)
+                and CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE.strip()
+                else ""
+            )
+            if (
+                (custom_llm_instructions or "").strip()
+                and model_choice == CLOUD_LLM_PII_MODEL_CHOICE
+                and custom_instructions_model
+            ):
+                llm_model_name = custom_instructions_model
+            else:
+                llm_model_name = model_choice or ""
 
             # Handle custom entities first (same as AWS Comprehend)
             # Include CUSTOM/CUSTOM_FUZZY (deny list) so deny-list words are redacted when CUSTOM is selected
@@ -10649,8 +10683,21 @@ def run_page_text_redaction(
                 "model_choice", CLOUD_LLM_PII_MODEL_CHOICE
             )
 
-        # Set LLM model name for tracking
-        llm_model_name = model_choice or ""
+        # Set LLM model name for tracking (use custom-instructions model when applicable)
+        custom_instructions_model = (
+            CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE.strip()
+            if isinstance(CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE, str)
+            and CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE.strip()
+            else ""
+        )
+        if (
+            (custom_llm_instructions or "").strip()
+            and model_choice == CLOUD_LLM_PII_MODEL_CHOICE
+            and custom_instructions_model
+        ):
+            llm_model_name = custom_instructions_model
+        else:
+            llm_model_name = model_choice or ""
 
         # Handle custom entities first (same as AWS Comprehend)
         # Include CUSTOM/CUSTOM_FUZZY (deny list) so deny-list words are redacted when CUSTOM is selected

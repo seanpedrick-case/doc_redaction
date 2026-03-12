@@ -1230,7 +1230,7 @@ def send_request(
     elif "AWS" in model_source:
         for i in progress_bar:
             try:
-                print("Calling AWS Bedrock model, attempt", i + 1)
+                # print("Calling AWS Bedrock model, attempt", i + 1)
                 response = call_aws_bedrock(
                     prompt,
                     system_prompt,

@@ -451,12 +451,11 @@ def put_columns_in_df(in_file: List[str]):
     for file in in_file:
         file_name = file.name
         file_type = detect_file_type(file_name)
-        print("File type is:", file_type)
+        # print("File type is:", file_type)
 
         if (file_type == "xlsx") | (file_type == "xls"):
             number_of_excel_files += 1
             new_choices = []
-            print("Running through all xlsx sheets")
             anon_xlsx = pd.ExcelFile(file_name)
             new_sheet_names = anon_xlsx.sheet_names
             # Iterate through the sheet names

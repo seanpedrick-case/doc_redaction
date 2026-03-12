@@ -23,7 +23,10 @@ from tools.config import (
     DEFAULT_MIN_WORD_COUNT,
     DEFAULT_PAGE_MAX,
     DEFAULT_PAGE_MIN,
+    EFFICIENT_OCR,
+    EFFICIENT_OCR_MIN_WORDS,
     GEMINI_API_KEY,
+    HYBRID_TEXTRACT_BEDROCK_VLM,
     IMAGES_DPI,
     INFERENCE_SERVER_API_URL,
     LAMBDA_DEFAULT_USERNAME,
@@ -481,6 +484,25 @@ def lambda_handler(event, context):
                 "ocr_first_pass_max_workers",
                 os.getenv(
                     "OCR_FIRST_PASS_MAX_WORKERS", str(OCR_FIRST_PASS_MAX_WORKERS)
+                ),
+            )
+        ),
+        "efficient_ocr": convert_string_to_boolean(
+            arguments.get(
+                "efficient_ocr", os.getenv("EFFICIENT_OCR", str(EFFICIENT_OCR))
+            )
+        ),
+        "efficient_ocr_min_words": int(
+            arguments.get(
+                "efficient_ocr_min_words",
+                os.getenv("EFFICIENT_OCR_MIN_WORDS", str(EFFICIENT_OCR_MIN_WORDS)),
+            )
+        ),
+        "hybrid_textract_bedrock_vlm": convert_string_to_boolean(
+            arguments.get(
+                "hybrid_textract_bedrock_vlm",
+                os.getenv(
+                    "HYBRID_TEXTRACT_BEDROCK_VLM", str(HYBRID_TEXTRACT_BEDROCK_VLM)
                 ),
             )
         ),
