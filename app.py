@@ -2658,7 +2658,7 @@ with blocks:
                         variant="secondary",
                     )
 
-                    with gr.Tab("Modify existing redactions", id=3):
+                    with gr.Tab("Modify redactions", id=3):
                         with gr.Accordion("Search suggested redactions", open=True):
                             with gr.Row(equal_height=True):
                                 recogniser_entity_dropdown = gr.Dropdown(

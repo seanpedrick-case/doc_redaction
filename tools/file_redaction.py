@@ -308,6 +308,268 @@ def add_page_range_suffix_to_file_path(
         return f"{file_path}_{start_page}_{end_page}"
 
 
+def run_custom_vlm_only_pass(
+    file_path: str,
+    pdf_image_file_paths: list,
+    pymupdf_doc,
+    page_sizes_df: pd.DataFrame,
+    chosen_redact_entities: list,
+    bedrock_runtime,
+    output_folder: str,
+    input_folder: str,
+    number_of_pages: int,
+    page_min: int = 0,
+    page_max: int = 0,
+    progress=None,
+) -> tuple:
+    """
+    Run only the CUSTOM_VLM (face, signature) detection on page images and apply
+    those redactions to the existing pages in pymupdf_doc. Used when text extraction
+    is selectable text but user selected CUSTOM_VLM_* entities (so text comes from
+    PDF, VLM detection from images).
+    Returns (vlm_total_input_tokens, vlm_total_output_tokens, vlm_model_name,
+            vlm_annotations_list, vlm_decision_rows) for merging into annotations_all_pages
+    and all_pages_decision_process_table.
+    """
+    vlm_total_input_tokens = 0
+    vlm_total_output_tokens = 0
+    vlm_model_name = ""
+    vlm_annotations_list = []  # list of {"image": path, "boxes": [dict, ...]}
+    vlm_decision_rows = []  # list of dicts for decision process table
+
+    file_name = get_file_name_without_type(file_path)
+    normalised_coords_range = 999
+
+    run_person = "CUSTOM_VLM_PERSON" in (chosen_redact_entities or [])
+    run_signature = "CUSTOM_VLM_SIGNATURE" in (chosen_redact_entities or [])
+
+    start_page_0 = (page_min - 1) if page_min > 0 else 0
+    end_page_0 = min(
+        number_of_pages,
+        (page_max if page_max > 0 else number_of_pages),
+    )
+
+    for page_no in range(start_page_0, end_page_0):
+        if page_no >= len(pdf_image_file_paths):
+            break
+        image_path = pdf_image_file_paths[page_no]
+        if not image_path or not os.path.exists(image_path):
+            continue
+        try:
+            image = Image.open(image_path)
+        except Exception:
+            continue
+        page_width, page_height = image.size
+        pymupdf_page = pymupdf_doc.load_page(page_no)
+        reported_page_number = page_no + 1
+        vlm_boxes = []
+
+        if run_person and bedrock_runtime:
+            try:
+                image_name = (
+                    os.path.basename(image_path)
+                    if isinstance(image_path, str)
+                    else f"{file_name}_{reported_page_number}.png"
+                )
+                people_ocr_result = _bedrock_page_ocr_predict(
+                    image,
+                    image_name=image_name,
+                    normalised_coords_range=normalised_coords_range,
+                    output_folder=output_folder,
+                    detect_people_only=True,
+                    model_choice=CLOUD_VLM_MODEL_CHOICE or None,
+                    bedrock_runtime=bedrock_runtime,
+                )
+                if isinstance(people_ocr_result, tuple) and len(people_ocr_result) == 4:
+                    people_ocr, pi, po, pname = people_ocr_result
+                    vlm_total_input_tokens += pi
+                    vlm_total_output_tokens += po
+                    if pname and not vlm_model_name:
+                        vlm_model_name = pname
+                else:
+                    people_ocr = (
+                        people_ocr_result[0]
+                        if isinstance(people_ocr_result, tuple)
+                        else people_ocr_result
+                    )
+                texts = people_ocr.get("text", [])
+                lefts = people_ocr.get("left", [])
+                tops = people_ocr.get("top", [])
+                widths = people_ocr.get("width", [])
+                heights = people_ocr.get("height", [])
+                confs = people_ocr.get("conf", [])
+                for idx, text in enumerate(texts):
+                    if text != "[PERSON]":
+                        continue
+                    try:
+                        left = int(lefts[idx])
+                        top = int(tops[idx])
+                        width = int(widths[idx])
+                        height = int(heights[idx])
+                        conf = float(confs[idx]) if idx < len(confs) else 0.0
+                    except Exception:
+                        continue
+                    vlm_boxes.append(
+                        CustomImageRecognizerResult(
+                            "CUSTOM_VLM_PERSON",
+                            0,
+                            0,
+                            conf,
+                            left,
+                            top,
+                            width,
+                            height,
+                            "[PERSON]",
+                        )
+                    )
+            except Exception as e:
+                print(
+                    f"Warning: Bedrock VLM person detection failed on page {reported_page_number}: {e}"
+                )
+
+        if run_signature and bedrock_runtime:
+            try:
+                image_name = (
+                    os.path.basename(image_path)
+                    if isinstance(image_path, str)
+                    else f"{file_name}_{reported_page_number}.png"
+                )
+                sig_ocr_result = _bedrock_page_ocr_predict(
+                    image,
+                    image_name=image_name,
+                    normalised_coords_range=normalised_coords_range,
+                    output_folder=output_folder,
+                    detect_signatures_only=True,
+                    model_choice=CLOUD_VLM_MODEL_CHOICE or None,
+                    bedrock_runtime=bedrock_runtime,
+                )
+                if isinstance(sig_ocr_result, tuple) and len(sig_ocr_result) == 4:
+                    sig_ocr, si, so, sname = sig_ocr_result
+                    vlm_total_input_tokens += si
+                    vlm_total_output_tokens += so
+                    if sname and not vlm_model_name:
+                        vlm_model_name = sname
+                else:
+                    sig_ocr = (
+                        sig_ocr_result[0]
+                        if isinstance(sig_ocr_result, tuple)
+                        else sig_ocr_result
+                    )
+                texts = sig_ocr.get("text", [])
+                lefts = sig_ocr.get("left", [])
+                tops = sig_ocr.get("top", [])
+                widths = sig_ocr.get("width", [])
+                heights = sig_ocr.get("height", [])
+                confs = sig_ocr.get("conf", [])
+                for idx, text in enumerate(texts):
+                    if text != "[SIGNATURE]":
+                        continue
+                    try:
+                        left = int(lefts[idx])
+                        top = int(tops[idx])
+                        width = int(widths[idx])
+                        height = int(heights[idx])
+                        conf = float(confs[idx]) if idx < len(confs) else 0.0
+                    except Exception:
+                        continue
+                    vlm_boxes.append(
+                        CustomImageRecognizerResult(
+                            "CUSTOM_VLM_SIGNATURE",
+                            0,
+                            0,
+                            conf,
+                            left,
+                            top,
+                            width,
+                            height,
+                            "[SIGNATURE]",
+                        )
+                    )
+            except Exception as e:
+                print(
+                    f"Warning: Bedrock VLM signature detection failed on page {reported_page_number}: {e}"
+                )
+
+        if vlm_boxes:
+            image_dimensions_override = {
+                "image_width": page_width,
+                "image_height": page_height,
+            }
+            redact_page_with_pymupdf(
+                pymupdf_page,
+                {"boxes": vlm_boxes},
+                image_path,
+                page_sizes_df=page_sizes_df,
+                input_folder=input_folder,
+                image_dimensions_override=image_dimensions_override,
+            )
+            # Bedrock VLM layer already converted 0-999 to image pixels; store as 0-1 relative
+            # by dividing by image dimensions so divide_coordinates_by_page_sizes leaves them unchanged.
+            reported_page_number = page_no + 1
+            w, h = max(1, page_width), max(1, page_height)
+            # Use CUSTOM_BOX_COLOUR from config for review_file_state; fall back to black if missing
+            if (
+                CUSTOM_BOX_COLOUR
+                and isinstance(CUSTOM_BOX_COLOUR, (tuple, list))
+                and len(CUSTOM_BOX_COLOUR) >= 3
+            ):
+                vlm_box_color = tuple(int(CUSTOM_BOX_COLOUR[i]) for i in range(3))
+            else:
+                vlm_box_color = (0, 0, 0)
+            all_image_annotations_boxes = []
+            for box in vlm_boxes:
+                try:
+                    # Convert from image pixel coords to relative 0-1
+                    xmin = box.left / w
+                    ymin = box.top / h
+                    xmax = (box.left + box.width) / w
+                    ymax = (box.top + box.height) / h
+                    label = getattr(box, "entity_type", "Redaction")
+                    text = getattr(box, "text", "") or ""
+                    img_annotation_box = {
+                        "xmin": xmin,
+                        "ymin": ymin,
+                        "xmax": xmax,
+                        "ymax": ymax,
+                        "label": label,
+                        "text": text,
+                        "color": vlm_box_color,
+                    }
+                    filled = fill_missing_box_ids(img_annotation_box)
+                    all_image_annotations_boxes.append(filled)
+                    vlm_decision_rows.append(
+                        {
+                            "image_path": image_path,
+                            "page": reported_page_number,
+                            "label": label,
+                            "xmin": xmin,
+                            "xmax": xmax,
+                            "ymin": ymin,
+                            "ymax": ymax,
+                            "boundingBox": [xmin, ymin, xmax, ymax],
+                            "text": text,
+                            "start": getattr(box, "start", 0),
+                            "end": getattr(box, "end", 0),
+                            "score": getattr(box, "score", 0.0),
+                            "id": filled.get("id", ""),
+                        }
+                    )
+                except AttributeError:
+                    continue
+            if all_image_annotations_boxes:
+                vlm_annotations_list.append(
+                    {"image": image_path, "boxes": all_image_annotations_boxes}
+                )
+
+    return (
+        vlm_total_input_tokens,
+        vlm_total_output_tokens,
+        vlm_model_name,
+        vlm_annotations_list,
+        vlm_decision_rows,
+    )
+
+
 def choose_and_run_redactor(
     file_paths: List[str],
     prepared_pdf_file_paths: List[str],
@@ -510,6 +772,18 @@ def choose_and_run_redactor(
         if "CUSTOM_FUZZY" not in chosen_llm_entities:
             chosen_llm_entities.append("CUSTOM_FUZZY")
 
+    # Any entity starting with CUSTOM_VLM (e.g. CUSTOM_VLM_PERSON, CUSTOM_VLM_SIGNATURE) requires
+    # image-based analysis; when user selected simple text extraction we still run image path for these.
+    _has_any_custom_vlm_entity = any(
+        str(e).startswith("CUSTOM_VLM")
+        for lst in (
+            chosen_redact_entities,
+            chosen_redact_comprehend_entities or [],
+            chosen_llm_entities or [],
+        )
+        for e in lst
+    )
+
     if pii_identification_method == "None":
         pii_identification_method = NO_REDACTION_PII_OPTION
 
@@ -681,10 +955,11 @@ def choose_and_run_redactor(
         if isinstance(combined_out_message, list):
             combined_out_message = "\n".join(combined_out_message)
 
+        _sep = "\n" if combined_out_message else ""
         if isinstance(out_message, list) and out_message:
-            combined_out_message = combined_out_message + "\n".join(out_message)
+            combined_out_message = combined_out_message + _sep + "\n".join(out_message)
         elif out_message:
-            combined_out_message = combined_out_message + "\n" + out_message
+            combined_out_message = combined_out_message + _sep + out_message
 
         from tools.secure_regex_utils import safe_remove_leading_newlines
 
@@ -797,9 +1072,9 @@ def choose_and_run_redactor(
     # Prepare documents and images as required if they don't already exist
     prepare_images_flag = None  # Determines whether to call prepare_image_or_pdf
 
-    # When Textract + Extract signatures/forms/tables/Face identification, we run all pages through
-    # redact_image_pdf (skip EFFICIENT_OCR two-step), so we must prepare all images upfront.
-    # Face identification requires the Bedrock VLM person pass in redact_image_pdf.
+    # When Textract + Extract signatures/forms/tables (not Face identification alone), we run all
+    # pages through redact_image_pdf (skip EFFICIENT_OCR). Face identification uses EFFICIENT_OCR
+    # (simple text where possible) then a VLM-only pass on all page images.
     _textract_needs_full_analysis_global = (
         text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
         and any(
@@ -808,11 +1083,27 @@ def choose_and_run_redactor(
                 "Extract signatures",
                 "Extract forms",
                 "Extract tables",
-                "Face identification",
             )
         )
     )
-    if efficient_ocr and file_paths_loop and not _textract_needs_full_analysis_global:
+    # After EFFICIENT_OCR (text for high-word pages, OCR for low-word), run VLM (face/signature)
+    # on all page images when CUSTOM_VLM_* is selected or Textract + Face identification.
+    _run_vlm_pass_after_all_pages = _has_any_custom_vlm_entity or (
+        text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+        and "Face identification" in (handwrite_signature_checkbox or [])
+    )
+    # When user selected simple text extraction but any CUSTOM_VLM_* entity (face, signature, etc.),
+    # run all pages through redact_image_pdf so VLM-based detection can take place.
+    _custom_vlm_requires_image_global = (
+        text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION
+        and _has_any_custom_vlm_entity
+    )
+    if (
+        efficient_ocr
+        and file_paths_loop
+        and not _textract_needs_full_analysis_global
+        and not _custom_vlm_requires_image_global
+    ):
         # Defer image load: only create images for pages that need OCR, after word check
         first_file = (
             file_paths_loop[0]
@@ -837,6 +1128,7 @@ def choose_and_run_redactor(
     elif (
         prepare_images_flag is None
         and text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION
+        and not _custom_vlm_requires_image_global
     ):
         print("Running text extraction analysis, not preparing images.")
         prepare_images_flag = False
@@ -1292,9 +1584,8 @@ def choose_and_run_redactor(
                 print(out_message)
                 raise Exception(out_message)
 
-    # If using image-based extraction (Textract, Bedrock VLM, etc.) and CUSTOM_VLM_PERSON /
-    # CUSTOM_VLM_SIGNATURE is selected, or "Face identification" is checked (which adds
-    # CUSTOM_VLM_PERSON inside redact_image_pdf), ensure bedrock_runtime is available.
+    # If using image-based extraction (Textract, Bedrock VLM, etc.) or simple text + any CUSTOM_VLM_*
+    # entity, and any CUSTOM_VLM_* or Face identification is selected, ensure bedrock_runtime is available.
     _image_based_extraction = text_extraction_method in (
         TEXTRACT_TEXT_EXTRACT_OPTION,
         BEDROCK_VLM_TEXT_EXTRACT_OPTION,
@@ -1302,14 +1593,16 @@ def choose_and_run_redactor(
         GEMINI_VLM_TEXT_EXTRACT_OPTION,
         AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION,
     )
-    _face_or_person_selected = (
-        "CUSTOM_VLM_PERSON" in (chosen_redact_entities or [])
-        or "CUSTOM_VLM_SIGNATURE" in (chosen_redact_entities or [])
-        or "Face identification" in (handwrite_signature_checkbox or [])
+    _needs_bedrock_for_vlm = _has_any_custom_vlm_entity or "Face identification" in (
+        handwrite_signature_checkbox or []
     )
-    if _image_based_extraction and bedrock_runtime is None and _face_or_person_selected:
+    if (
+        (_image_based_extraction or _custom_vlm_requires_image_global)
+        and bedrock_runtime is None
+        and _needs_bedrock_for_vlm
+    ):
         print(
-            "CUSTOM_VLM_PERSON or CUSTOM_VLM_SIGNATURE selected, or Face identification enabled. Connecting to Bedrock for additional detection."
+            "CUSTOM_VLM entity (face/signature/etc.) or Face identification enabled. Connecting to Bedrock for additional detection."
         )
         if RUN_AWS_FUNCTIONS and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:
             print("Connecting to Bedrock via existing SSO connection for VLM detection")
@@ -1864,6 +2157,125 @@ def choose_and_run_redactor(
                 list(pages_with_text_1based) if pages_with_text_1based else None
             )
 
+            # When CUSTOM_VLM_* or Textract+Face identification: run VLM (face/signature) on all
+            # page images after text/OCR extraction, so simple-text pages keep simple extraction.
+            if (
+                _run_vlm_pass_after_all_pages
+                and bedrock_runtime is not None
+                and pymupdf_doc is not None
+                and not isinstance(pymupdf_doc, list)
+            ):
+                num_pages = pymupdf_doc.page_count
+                if num_pages and num_pages > 0:
+                    progress(
+                        0.65, desc="Preparing images for VLM (face/signature) pass"
+                    )
+                    if pages_needing_ocr_1based:
+                        # We have pdf_image_file_paths for OCR pages; add images for text pages
+                        if pages_with_text_1based:
+                            (
+                                text_page_image_paths,
+                                page_sizes,
+                            ) = prepare_images_for_pages(
+                                file_path,
+                                pages_with_text_1based,
+                                input_folder,
+                                pymupdf_doc,
+                                page_sizes,
+                                progress,
+                            )
+                            full_pdf_image_file_paths = [
+                                (
+                                    pdf_image_file_paths[i]
+                                    if i < len(pdf_image_file_paths)
+                                    else ""
+                                )
+                                or (
+                                    text_page_image_paths[i]
+                                    if i < len(text_page_image_paths)
+                                    else ""
+                                )
+                                for i in range(num_pages)
+                            ]
+                        else:
+                            full_pdf_image_file_paths = pdf_image_file_paths
+                    else:
+                        # All pages used text path; create images for all for VLM pass
+                        full_pdf_image_file_paths, page_sizes = (
+                            prepare_images_for_pages(
+                                file_path,
+                                all_pages_1based,
+                                input_folder,
+                                pymupdf_doc,
+                                page_sizes,
+                                progress,
+                            )
+                        )
+                    full_page_sizes_df = pd.DataFrame(page_sizes)
+                    if (
+                        not full_page_sizes_df.empty
+                        and "page" in full_page_sizes_df.columns
+                    ):
+                        full_page_sizes_df[["page"]] = full_page_sizes_df[
+                            ["page"]
+                        ].apply(pd.to_numeric, errors="coerce")
+                    entities_for_vlm = list(chosen_redact_entities or [])
+                    if (
+                        "Face identification" in (handwrite_signature_checkbox or [])
+                        and "CUSTOM_VLM_PERSON" not in entities_for_vlm
+                    ):
+                        entities_for_vlm.append("CUSTOM_VLM_PERSON")
+                    progress(0.7, desc="Running VLM (face/signature) on all pages")
+                    print(
+                        "Running CUSTOM_VLM (face/signature) detection on all page images "
+                        "after text/OCR extraction."
+                    )
+                    (
+                        vlm_in,
+                        vlm_out,
+                        vlm_name,
+                        vlm_annotations_list,
+                        vlm_decision_rows,
+                    ) = run_custom_vlm_only_pass(
+                        file_path,
+                        full_pdf_image_file_paths,
+                        pymupdf_doc,
+                        full_page_sizes_df,
+                        entities_for_vlm,
+                        bedrock_runtime,
+                        output_folder,
+                        input_folder,
+                        num_pages,
+                        page_min=page_min,
+                        page_max=page_max if page_max > 0 else num_pages,
+                        progress=progress,
+                    )
+                    vlm_total_input_tokens += vlm_in
+                    vlm_total_output_tokens += vlm_out
+                    if vlm_name and not vlm_model_name:
+                        vlm_model_name = vlm_name
+                    # Merge VLM (face/signature) boxes into annotations and decision table.
+                    # Use placeholder image path so create_annotation_dicts_from_annotation_df
+                    # merges these boxes into the same per-page entry as page_sizes (Review tab
+                    # image_annotator expects one entry per page in order).
+                    if vlm_annotations_list:
+                        placeholder_base = "placeholder_image_{}.png"
+                        for idx, vlm_anno in enumerate(vlm_annotations_list):
+                            vlm_anno["image"] = placeholder_base.format(idx)
+                        annotations_all_pages.extend(vlm_annotations_list)
+                    if vlm_decision_rows:
+                        vlm_df = pd.DataFrame(vlm_decision_rows)
+                        if (
+                            all_pages_decision_process_table is not None
+                            and not all_pages_decision_process_table.empty
+                        ):
+                            all_pages_decision_process_table = pd.concat(
+                                [all_pages_decision_process_table, vlm_df],
+                                ignore_index=True,
+                            )
+                        else:
+                            all_pages_decision_process_table = vlm_df
+
         elif (
             text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
             or text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
@@ -2026,6 +2438,55 @@ def choose_and_run_redactor(
             llm_total_output_tokens += llm_total_output_tokens_text
             if llm_model_name_text and not llm_model_name:
                 llm_model_name = llm_model_name_text
+
+            # When selectable text + CUSTOM_VLM_*: keep text from PDF, run VLM (face/signature) on images only
+            if (
+                _custom_vlm_requires_image_global
+                and bedrock_runtime is not None
+                and pdf_image_file_paths
+            ):
+                print(
+                    "CUSTOM_VLM entity (face/signature/etc.) selected with simple text extraction: "
+                    "running VLM detection on page images and merging with text-based redactions."
+                )
+                (
+                    vlm_in,
+                    vlm_out,
+                    vlm_name,
+                    vlm_annotations_list,
+                    vlm_decision_rows,
+                ) = run_custom_vlm_only_pass(
+                    file_path,
+                    pdf_image_file_paths,
+                    pymupdf_doc,
+                    page_sizes_df,
+                    chosen_redact_entities,
+                    bedrock_runtime,
+                    output_folder,
+                    input_folder,
+                    number_of_pages,
+                    page_min=page_min,
+                    page_max=page_max if page_max > 0 else number_of_pages,
+                    progress=progress,
+                )
+                vlm_total_input_tokens += vlm_in
+                vlm_total_output_tokens += vlm_out
+                if vlm_name and not vlm_model_name:
+                    vlm_model_name = vlm_name
+                if vlm_annotations_list:
+                    annotations_all_pages.extend(vlm_annotations_list)
+                if vlm_decision_rows:
+                    vlm_df = pd.DataFrame(vlm_decision_rows)
+                    if (
+                        all_pages_decision_process_table is not None
+                        and not all_pages_decision_process_table.empty
+                    ):
+                        all_pages_decision_process_table = pd.concat(
+                            [all_pages_decision_process_table, vlm_df],
+                            ignore_index=True,
+                        )
+                    else:
+                        all_pages_decision_process_table = vlm_df
         else:
             out_message = "No redaction method selected"
             print(out_message)
@@ -2680,15 +3141,18 @@ def choose_and_run_redactor(
         elif combined_out_message is None:
             combined_out_message = ""
 
+        _sep = "\n" if combined_out_message else ""
         if isinstance(out_message, list) and out_message:
-            combined_out_message = combined_out_message + "\n".join(out_message)
+            combined_out_message = combined_out_message + _sep + "\n".join(out_message)
         elif isinstance(out_message, str) and out_message:
-            combined_out_message = combined_out_message + "\n" + out_message
+            combined_out_message = combined_out_message + _sep + out_message
 
         if efficient_ocr_text_pages is not None:
+            _sep = "\n" if combined_out_message else ""
             combined_out_message = (
                 combined_out_message
-                + "\nEfficient OCR: "
+                + _sep
+                + "Efficient OCR: "
                 + str(efficient_ocr_text_pages)
                 + " page(s) via text extraction, "
                 + str(efficient_ocr_ocr_pages)
@@ -3297,10 +3761,10 @@ def set_cropbox_safely(page: Page, original_cropbox: Optional[Rect]):
             )
 
     if reason_for_defaulting:
-        print(
-            f"Warning (Page {page.number}): Cannot use original cropbox because {reason_for_defaulting} "
-            f"Defaulting to the page's mediabox as the cropbox."
-        )
+        # print(
+        #     f"Warning (Page {page.number}): Cannot use original cropbox because {reason_for_defaulting} "
+        #     f"Defaulting to the page's mediabox as the cropbox."
+        # )
         page.set_cropbox(mediabox)
     else:
         page.set_cropbox(original_cropbox)
@@ -4414,7 +4878,14 @@ def redact_image_pdf(
     # if chosen_llm_entities is None:
     #     chosen_llm_entities = chosen_redact_comprehend_entities
 
-    if "Face identification" in handwrite_signature_checkbox:
+    # When AWS Textract + Face identification: always analyse all pages for faces (as if
+    # CUSTOM_VLM_PERSON were enabled), regardless of PII method or text_extraction_only.
+    if "Face identification" in (handwrite_signature_checkbox or []):
+        chosen_redact_entities = list(chosen_redact_entities or [])
+        chosen_redact_comprehend_entities = list(
+            chosen_redact_comprehend_entities or []
+        )
+        chosen_llm_entities = list(chosen_llm_entities or [])
         if "CUSTOM_VLM_PERSON" not in chosen_redact_entities:
             chosen_redact_entities.append("CUSTOM_VLM_PERSON")
         if "CUSTOM_VLM_PERSON" not in chosen_redact_comprehend_entities:
@@ -5123,12 +5594,19 @@ def redact_image_pdf(
 
                 # Optional additional Bedrock VLM pass to detect people
                 # and inject [PERSON] entries into the word-level OCR structure for AWS Bedrock VLM OCR.
-                # Only run when the user has selected CUSTOM_VLM_PERSON (in any entity selector).
+                # Run when CUSTOM_VLM_PERSON is selected (in any entity selector), or when AWS Textract
+                # + Face identification is selected (all pages analysed for faces regardless of PII method
+                # or text_extraction_only).
                 _person_selected = (
-                    "CUSTOM_VLM_PERSON" in chosen_redact_entities
+                    "CUSTOM_VLM_PERSON" in (chosen_redact_entities or [])
                     or "CUSTOM_VLM_PERSON" in (chosen_redact_comprehend_entities or [])
                     or "CUSTOM_VLM_PERSON" in (chosen_llm_entities or [])
                 )
+                _textract_face_identification = (
+                    text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+                    and "Face identification" in (handwrite_signature_checkbox or [])
+                )
+                _run_face_pass = _person_selected or _textract_face_identification
                 if (
                     (
                         text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
@@ -5136,7 +5614,7 @@ def redact_image_pdf(
                         or pii_identification_method == AWS_PII_OPTION
                         or pii_identification_method == AWS_LLM_PII_OPTION
                     )
-                    and _person_selected
+                    and _run_face_pass
                     and isinstance(page_line_level_ocr_results_with_words, dict)
                     and page_line_level_ocr_results_with_words.get("results")
                     and image is not None
@@ -6980,9 +7458,15 @@ def redact_image_pdf(
             current_loop_page += 1
             continue
 
+        # Include VLM (face/signature) boxes in outputs even when "Only extract text (no redaction)"
+        _include_vlm_boxes_in_outputs = _run_face_pass or _textract_face_identification
+        _vlm_boxes_only_no_redaction = (
+            False  # set True when we add VLM boxes to outputs only (no PDF redaction)
+        )
         if (
             pii_identification_method != NO_REDACTION_PII_OPTION
             or RETURN_PDF_FOR_REVIEW is True
+            or _include_vlm_boxes_in_outputs
         ):
             page_redaction_bounding_boxes = list()
             comprehend_query_number_new = 0
@@ -7325,53 +7809,117 @@ def redact_image_pdf(
                         )
                     )
 
-                # 3. Draw the merged boxes
-                ## Apply annotations to pdf with pymupdf (pass dimensions to skip .loc in redact_page_with_pymupdf)
-                redact_result = redact_page_with_pymupdf(
-                    pymupdf_page,
-                    page_merged_redaction_bboxes,
-                    image_path,
-                    redact_whole_page=redact_whole_page,
-                    original_cropbox=original_cropbox,
-                    page_sizes_df=page_sizes_df,
-                    input_folder=input_folder,
-                    image_dimensions_override={
-                        "image_width": page_width,
-                        "image_height": page_height,
-                    },
-                )
-
-                # Handle dual page objects if returned
-                if isinstance(redact_result[0], tuple):
-                    (
-                        pymupdf_page,
-                        pymupdf_applied_redaction_page,
-                    ), page_image_annotations = redact_result
-                    # Store the final page with its original page number for later use
-                    if not hasattr(redact_image_pdf, "_applied_redaction_pages"):
-                        redact_image_pdf._applied_redaction_pages = list()
-                    redact_image_pdf._applied_redaction_pages.append(
-                        (pymupdf_applied_redaction_page, page_no)
+                # When "Only extract text (no redaction)" but we have VLM (face/signature) boxes:
+                # add them to annotations and decision table without applying redactions to the PDF.
+                if (
+                    pii_identification_method == NO_REDACTION_PII_OPTION
+                    and page_merged_redaction_bboxes
+                ):
+                    _vlm_boxes_only_no_redaction = True
+                    all_image_annotations_boxes = list()
+                    for box in page_merged_redaction_bboxes:
+                        try:
+                            img_annotation_box = {
+                                "xmin": box.left,
+                                "ymin": box.top,
+                                "xmax": box.left + box.width,
+                                "ymax": box.top + box.height,
+                                "label": getattr(box, "entity_type", "Redaction"),
+                                "text": getattr(box, "text", "") or "",
+                                "color": CUSTOM_BOX_COLOUR,
+                            }
+                            all_image_annotations_boxes.append(
+                                fill_missing_box_ids(img_annotation_box)
+                            )
+                        except AttributeError:
+                            continue
+                    page_image_annotations = {
+                        "image": image_path,
+                        "boxes": all_image_annotations_boxes,
+                    }
+                    existing_index = next(
+                        (
+                            index
+                            for index, ann in enumerate(annotations_all_pages)
+                            if ann.get("image") == page_image_annotations["image"]
+                        ),
+                        None,
                     )
+                    if existing_index is not None:
+                        annotations_all_pages[existing_index] = page_image_annotations
+                    else:
+                        annotations_all_pages.append(page_image_annotations)
+                    decision_process_table = pd.DataFrame(
+                        [
+                            {
+                                "text": result.text,
+                                "xmin": result.left,
+                                "ymin": result.top,
+                                "xmax": result.left + result.width,
+                                "ymax": result.top + result.height,
+                                "label": result.entity_type,
+                                "start": result.start,
+                                "end": result.end,
+                                "score": result.score,
+                                "page": reported_page_number,
+                            }
+                            for result in page_merged_redaction_bboxes
+                        ]
+                    )
+                    if not decision_process_table.empty:
+                        all_pages_decision_process_list.extend(
+                            decision_process_table.to_dict("records")
+                        )
                 else:
-                    pymupdf_page, page_image_annotations = redact_result
-                    # When dual output is requested but this page had no redaction boxes,
-                    # we still need an "applied" page entry so the final PDF replace loop
-                    # replaces every page. Otherwise only pages with at least one redaction
-                    # get replaced, and other pages stay as review-style (annotations only).
-                    if RETURN_PDF_FOR_REVIEW and RETURN_REDACTED_PDF:
+                    # 3. Draw the merged boxes
+                    ## Apply annotations to pdf with pymupdf (pass dimensions to skip .loc in redact_page_with_pymupdf)
+                    redact_result = redact_page_with_pymupdf(
+                        pymupdf_page,
+                        page_merged_redaction_bboxes,
+                        image_path,
+                        redact_whole_page=redact_whole_page,
+                        original_cropbox=original_cropbox,
+                        page_sizes_df=page_sizes_df,
+                        input_folder=input_folder,
+                        image_dimensions_override={
+                            "image_width": page_width,
+                            "image_height": page_height,
+                        },
+                    )
+
+                    # Handle dual page objects if returned
+                    if isinstance(redact_result[0], tuple):
+                        (
+                            pymupdf_page,
+                            pymupdf_applied_redaction_page,
+                        ), page_image_annotations = redact_result
+                        # Store the final page with its original page number for later use
                         if not hasattr(redact_image_pdf, "_applied_redaction_pages"):
                             redact_image_pdf._applied_redaction_pages = list()
-                        applied_doc = pymupdf.open()
-                        applied_doc.insert_pdf(
-                            pymupdf_page.parent,
-                            from_page=page_no,
-                            to_page=page_no,
-                        )
-                        applied_page_copy = applied_doc[0]
                         redact_image_pdf._applied_redaction_pages.append(
-                            (applied_page_copy, page_no)
+                            (pymupdf_applied_redaction_page, page_no)
                         )
+                    else:
+                        pymupdf_page, page_image_annotations = redact_result
+                        # When dual output is requested but this page had no redaction boxes,
+                        # we still need an "applied" page entry so the final PDF replace loop
+                        # replaces every page. Otherwise only pages with at least one redaction
+                        # get replaced, and other pages stay as review-style (annotations only).
+                        if RETURN_PDF_FOR_REVIEW and RETURN_REDACTED_PDF:
+                            if not hasattr(
+                                redact_image_pdf, "_applied_redaction_pages"
+                            ):
+                                redact_image_pdf._applied_redaction_pages = list()
+                            applied_doc = pymupdf.open()
+                            applied_doc.insert_pdf(
+                                pymupdf_page.parent,
+                                from_page=page_no,
+                                to_page=page_no,
+                            )
+                            applied_page_copy = applied_doc[0]
+                            redact_image_pdf._applied_redaction_pages.append(
+                                (applied_page_copy, page_no)
+                            )
 
             # If an image_path file, draw onto the image_path
             elif is_pdf(file_path) is False:
@@ -7450,33 +7998,34 @@ def redact_image_pdf(
                     "boxes": all_image_annotations_boxes,
                 }
 
-            # Convert decision process to table
-            decision_process_table = pd.DataFrame(
-                [
-                    {
-                        "text": result.text,
-                        "xmin": result.left,
-                        "ymin": result.top,
-                        "xmax": result.left + result.width,
-                        "ymax": result.top + result.height,
-                        "label": result.entity_type,
-                        "start": result.start,
-                        "end": result.end,
-                        "score": result.score,
-                        "page": reported_page_number,
-                    }
-                    for result in page_merged_redaction_bboxes
-                ]
-            )
-
-            # all_pages_decision_process_list.append(decision_process_table.to_dict('records'))
-
-            if not decision_process_table.empty:  # Ensure there are records to add
-                all_pages_decision_process_list.extend(
-                    decision_process_table.to_dict("records")
+            # Convert decision process to table (skip when already done in NO_REDACTION VLM-only branch)
+            if not _vlm_boxes_only_no_redaction:
+                decision_process_table = pd.DataFrame(
+                    [
+                        {
+                            "text": result.text,
+                            "xmin": result.left,
+                            "ymin": result.top,
+                            "xmax": result.left + result.width,
+                            "ymax": result.top + result.height,
+                            "label": result.entity_type,
+                            "start": result.start,
+                            "end": result.end,
+                            "score": result.score,
+                            "page": reported_page_number,
+                        }
+                        for result in page_merged_redaction_bboxes
+                    ]
                 )
 
-            decision_process_table = fill_missing_ids(decision_process_table)
+                # all_pages_decision_process_list.append(decision_process_table.to_dict('records'))
+
+                if not decision_process_table.empty:  # Ensure there are records to add
+                    all_pages_decision_process_list.extend(
+                        decision_process_table.to_dict("records")
+                    )
+
+                decision_process_table = fill_missing_ids(decision_process_table)
 
             toc = time.perf_counter()
 

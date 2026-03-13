@@ -1885,9 +1885,7 @@ def prepare_image_or_pdf(
             out_message = list()
 
         out_message.append(out_time)
-        if not combined_out_message:
-            combined_out_message = ""
-        combined_out_message = "\n".join(out_message)
+        combined_out_message = "\n".join(out_message).strip() if out_message else ""
 
     if not page_sizes:
         number_of_pages = 1

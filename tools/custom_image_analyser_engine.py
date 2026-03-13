@@ -10376,50 +10376,60 @@ def run_page_text_redaction(
             chosen_redact_entities, valid_language_entities, language
         )
 
+        # When only CUSTOM_VLM_* entities are chosen, local PII has nothing to do;
+        # allow progress so image/VLM analysis can run.
+        only_custom_vlm = chosen_redact_entities and all(
+            str(e).startswith("CUSTOM_VLM_") for e in (chosen_redact_entities or [])
+        )
+
         if language_supported_entities:
             text_analyzer_kwargs["entities"] = language_supported_entities
+        elif only_custom_vlm:
+            # Skip local PII; leave all_text_line_results empty so pipeline continues to VLM
+            pass
         else:
             out_message = f"No relevant entities supported for language: {language}"
             print(out_message)
             raise Warning(out_message)
 
-        # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
-        # Also exclude allow_list since we pass it explicitly
-        presidio_kwargs = {
-            k: v
-            for k, v in text_analyzer_kwargs.items()
-            if k
-            not in [
-                "inference_method",
-                "model_choice",
-                "api_url",
-                "local_model",
-                "tokenizer",
-                "assistant_model",
-                "client",
-                "client_config",
-                "temperature",
-                "max_tokens",
-                "custom_instructions",
-                "allow_list",
-            ]
-        }
+        if language_supported_entities:
+            # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
+            # Also exclude allow_list since we pass it explicitly
+            presidio_kwargs = {
+                k: v
+                for k, v in text_analyzer_kwargs.items()
+                if k
+                not in [
+                    "inference_method",
+                    "model_choice",
+                    "api_url",
+                    "local_model",
+                    "tokenizer",
+                    "assistant_model",
+                    "client",
+                    "client_config",
+                    "temperature",
+                    "max_tokens",
+                    "custom_instructions",
+                    "allow_list",
+                ]
+            }
 
-        page_analyser_result = nlp_analyser.analyze(
-            text=page_text,
-            language=language,
-            score_threshold=score_threshold,
-            return_decision_process=True,
-            allow_list=allow_list,
-            **presidio_kwargs,
-        )
+            page_analyser_result = nlp_analyser.analyze(
+                text=page_text,
+                language=language,
+                score_threshold=score_threshold,
+                return_decision_process=True,
+                allow_list=allow_list,
+                **presidio_kwargs,
+            )
 
-        all_text_line_results = map_back_entity_results(
-            page_analyser_result,
-            page_text_mapping,
-            all_text_line_results,
-            allow_list=allow_list,
-        )
+            all_text_line_results = map_back_entity_results(
+                page_analyser_result,
+                page_text_mapping,
+                all_text_line_results,
+                allow_list=allow_list,
+            )
 
     elif pii_identification_method == AWS_PII_OPTION:
 

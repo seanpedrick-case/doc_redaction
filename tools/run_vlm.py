@@ -1242,6 +1242,7 @@ full_page_ocr_people_vlm_prompt = f"""Spot all photos of people's faces in the i
 
 Rules:
 - Each photo of a person's face must be a separate entry
+- The image of the face must be a photo, not a drawing or sketch
 - Do NOT combine multiple photos into a single entry
 - Each photo of a person's face that appears in the image should be a separate entry
 - Bounding boxes around the identified person's face should completely cover the person's face

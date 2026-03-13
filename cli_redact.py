@@ -1439,6 +1439,9 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
                     _,
                     processing_time,
                     comprehend_query_number,
+                    _,
+                    _,
+                    _,
                 ) = anonymise_files_with_open_text(
                     file_paths=args.input_file,
                     in_text="",  # Not used for file-based operations
