@@ -255,24 +255,65 @@ def parse_llm_entity_response(
         r"<thinking>.*?</thinking>", "", response_text, flags=re.DOTALL | re.IGNORECASE
     )
 
-    # Try to extract JSON from the response
-    # LLMs sometimes wrap JSON in markdown code blocks or add explanatory text
-    json_match = re.search(
-        r'\{[^{}]*"entities"[^{}]*\[.*?\].*?\}', response_text, re.DOTALL
-    )
-    if not json_match:
-        # Try to find any JSON object
-        json_match = re.search(r'\{.*?"entities".*?\}', response_text, re.DOTALL)
+    # Prefer extracting from markdown code block (e.g. ```json\n...\n```<end_of_turn>)
+    # so we get a clean slice and can strip trailing tokens before parsing
+    json_str = None
+    if "```json" in response_text or "```" in response_text:
+        code_block = re.search(
+            r"```(?:json)?\s*\n?(.*?)(?:\n?```|$)", response_text, re.DOTALL
+        )
+        if code_block:
+            candidate = code_block.group(1).strip()
+            # Strip trailing tokens that some models append (e.g. <end_of_turn>)
+            candidate = re.sub(r"<end_of_turn>\s*$", "", candidate, flags=re.IGNORECASE)
+            candidate = candidate.rstrip()
+            # Extract only the root JSON object by brace matching so we never include trailing garbage
+            start = candidate.find("{")
+            if start >= 0:
+                depth = 0
+                for i in range(start, len(candidate)):
+                    if candidate[i] == "{":
+                        depth += 1
+                    elif candidate[i] == "}":
+                        depth -= 1
+                        if depth == 0:
+                            json_str = candidate[start : i + 1]
+                            break
+                if json_str is None:
+                    json_str = candidate[start:]  # fallback: from first { to end
 
-    if json_match:
-        json_str = json_match.group(0)
+    # Fallback: try regex-based extraction (fragile for nested braces)
+    if json_str is None:
+        json_match = re.search(
+            r'\{[^{}]*"entities"[^{}]*\[.*?\].*?\}', response_text, re.DOTALL
+        )
+        if not json_match:
+            json_match = re.search(r'\{.*?"entities".*?\}', response_text, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(0)
+
+    if json_str:
         try:
-            # Clean up the JSON string
+            # Clean up the JSON string (in case we came from regex path)
             json_str = json_str.strip()
-            # Remove markdown code block markers if present
+            # Remove markdown code block markers if present (regex path may include them)
             json_str = re.sub(r"^```json\s*", "", json_str, flags=re.MULTILINE)
             json_str = re.sub(r"^```\s*", "", json_str, flags=re.MULTILINE)
+            # Strip trailing tokens again (e.g. <end_of_turn> after closing })
+            json_str = re.sub(r"<end_of_turn>\s*$", "", json_str, flags=re.IGNORECASE)
             json_str = json_str.strip()
+            # Keep only the root object if trailing garbage remains (brace-match from start)
+            start = json_str.find("{")
+            if start >= 0:
+                depth = 0
+                for i in range(start, len(json_str)):
+                    if json_str[i] == "{":
+                        depth += 1
+                    elif json_str[i] == "}":
+                        depth -= 1
+                        if depth == 0:
+                            json_str = json_str[start : i + 1]
+                            break
 
             # Fix common JSON issues:
             # 1. Remove trailing commas before closing brackets/braces

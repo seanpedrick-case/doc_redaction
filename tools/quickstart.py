@@ -442,13 +442,14 @@ def handle_pii_method_selection(pii_method: str):
 
     # Use gr.update(visible=...) only to avoid value resets that can trigger change
     # events on the target components and cause loading loops (e.g. tabular PII -> LLM).
+    # Only return to the two entity dropdowns and the accordion; components inside the
+    # accordion (walkthrough_in_redact_llm_entities, walkthrough_custom_llm_instructions_textbox)
+    # are shown/hidden by the accordion visibility.
     return (
         gr.update(visible=show_local_entities),  # walkthrough_in_redact_entities
         gr.update(
             visible=show_comprehend_entities
         ),  # walkthrough_in_redact_comprehend_entities
-        gr.update(visible=is_llm_method),  # walkthrough_in_redact_llm_entities
-        gr.update(visible=is_llm_method),  # walkthrough_custom_llm_instructions_textbox
         gr.update(visible=is_llm_method),  # walkthrough_llm_entities_accordion
     )
 
