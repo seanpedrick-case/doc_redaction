@@ -1241,13 +1241,13 @@ with blocks:
     )
 
     estimated_aws_costs_number = gr.Number(
-        label="Approximate AWS Textract and/or Comprehend cost ($)",
+        label="Approximate AWS services cost ($)",
         value=0,
         visible=False,
         precision=2,
     )
     estimated_time_taken_number = gr.Number(
-        label="Approximate time taken to extract text/redact (minutes)",
+        label="Approximate time for task (minutes)",
         value=0,
         visible=False,
         precision=2,
@@ -1924,14 +1924,14 @@ with blocks:
                                     interactive=False,
                                 )
                                 walkthrough_estimated_aws_costs_number = gr.Number(
-                                    label="Approximate AWS Textract and/or Comprehend cost (£)",
+                                    label="Approximate AWS services cost (£)",
                                     value=0.00,
                                     precision=2,
                                     visible=SHOW_COSTS,
                                     interactive=False,
                                 )
                                 walkthrough_estimated_time_taken_number = gr.Number(
-                                    label="Approximate time taken to extract text/redact (minutes)",
+                                    label="Approximate time for task (minutes)",
                                     value=0,
                                     visible=SHOW_COSTS,
                                     precision=2,
@@ -2372,14 +2372,14 @@ with blocks:
                                 with gr.Row(equal_height=True):
                                     total_pdf_page_count.render()
                                     estimated_aws_costs_number = gr.Number(
-                                        label="Approximate AWS Textract and/or Comprehend cost (£)",
+                                        label="Approximate AWS services cost (£)",
                                         value=0.00,
                                         precision=2,
                                         visible=True,
                                         interactive=False,
                                     )
                                     estimated_time_taken_number = gr.Number(
-                                        label="Approximate time taken to extract text/redact (minutes)",
+                                        label="Approximate time for task (minutes)",
                                         value=0,
                                         visible=True,
                                         precision=2,

@@ -308,6 +308,153 @@ def add_page_range_suffix_to_file_path(
         return f"{file_path}_{start_page}_{end_page}"
 
 
+def _run_vlm_only_pass_one_page(
+    args: tuple,
+) -> tuple:
+    """
+    Worker for one page: run Bedrock VLM person/signature detection. Returns
+    (page_no, image_path, page_width, page_height, vlm_boxes, input_tokens, output_tokens, model_name).
+    Used by run_custom_vlm_only_pass for parallel page processing.
+    """
+    (
+        page_no,
+        image_path,
+        file_name,
+        run_person,
+        run_signature,
+        normalised_coords_range,
+        output_folder,
+        bedrock_runtime,
+    ) = args
+    reported_page_number = page_no + 1
+    vlm_boxes = []
+    ti, to, name = 0, 0, ""
+
+    try:
+        image = Image.open(image_path)
+    except Exception:
+        return (page_no, image_path, 0, 0, [], 0, 0, "")
+
+    page_width, page_height = image.size
+    image_name = (
+        os.path.basename(image_path)
+        if isinstance(image_path, str)
+        else f"{file_name}_{reported_page_number}.png"
+    )
+
+    if run_person and bedrock_runtime:
+        try:
+            people_ocr_result = _bedrock_page_ocr_predict(
+                image,
+                image_name=image_name,
+                normalised_coords_range=normalised_coords_range,
+                output_folder=output_folder,
+                detect_people_only=True,
+                model_choice=CLOUD_VLM_MODEL_CHOICE or None,
+                bedrock_runtime=bedrock_runtime,
+            )
+            if isinstance(people_ocr_result, tuple) and len(people_ocr_result) == 4:
+                people_ocr, pi, po, pname = people_ocr_result
+                ti, to, name = ti + pi, to + po, pname or name
+            else:
+                people_ocr = (
+                    people_ocr_result[0]
+                    if isinstance(people_ocr_result, tuple)
+                    else people_ocr_result
+                )
+            texts = people_ocr.get("text", [])
+            lefts = people_ocr.get("left", [])
+            tops = people_ocr.get("top", [])
+            widths = people_ocr.get("width", [])
+            heights = people_ocr.get("height", [])
+            confs = people_ocr.get("conf", [])
+            for idx, text in enumerate(texts):
+                if text != "[PERSON]":
+                    continue
+                try:
+                    left = int(lefts[idx])
+                    top = int(tops[idx])
+                    width = int(widths[idx])
+                    height = int(heights[idx])
+                    conf = float(confs[idx]) if idx < len(confs) else 0.0
+                except Exception:
+                    continue
+                vlm_boxes.append(
+                    CustomImageRecognizerResult(
+                        "CUSTOM_VLM_PERSON",
+                        0,
+                        0,
+                        conf,
+                        left,
+                        top,
+                        width,
+                        height,
+                        "[PERSON]",
+                    )
+                )
+        except Exception as e:
+            print(
+                f"Warning: Bedrock VLM person detection failed on page {reported_page_number}: {e}"
+            )
+
+    if run_signature and bedrock_runtime:
+        try:
+            sig_ocr_result = _bedrock_page_ocr_predict(
+                image,
+                image_name=image_name,
+                normalised_coords_range=normalised_coords_range,
+                output_folder=output_folder,
+                detect_signatures_only=True,
+                model_choice=CLOUD_VLM_MODEL_CHOICE or None,
+                bedrock_runtime=bedrock_runtime,
+            )
+            if isinstance(sig_ocr_result, tuple) and len(sig_ocr_result) == 4:
+                sig_ocr, si, so, sname = sig_ocr_result
+                ti, to, name = ti + si, to + so, sname or name
+            else:
+                sig_ocr = (
+                    sig_ocr_result[0]
+                    if isinstance(sig_ocr_result, tuple)
+                    else sig_ocr_result
+                )
+            texts = sig_ocr.get("text", [])
+            lefts = sig_ocr.get("left", [])
+            tops = sig_ocr.get("top", [])
+            widths = sig_ocr.get("width", [])
+            heights = sig_ocr.get("height", [])
+            confs = sig_ocr.get("conf", [])
+            for idx, text in enumerate(texts):
+                if text != "[SIGNATURE]":
+                    continue
+                try:
+                    left = int(lefts[idx])
+                    top = int(tops[idx])
+                    width = int(widths[idx])
+                    height = int(heights[idx])
+                    conf = float(confs[idx]) if idx < len(confs) else 0.0
+                except Exception:
+                    continue
+                vlm_boxes.append(
+                    CustomImageRecognizerResult(
+                        "CUSTOM_VLM_SIGNATURE",
+                        0,
+                        0,
+                        conf,
+                        left,
+                        top,
+                        width,
+                        height,
+                        "[SIGNATURE]",
+                    )
+                )
+        except Exception as e:
+            print(
+                f"Warning: Bedrock VLM signature detection failed on page {reported_page_number}: {e}"
+            )
+
+    return (page_no, image_path, page_width, page_height, vlm_boxes, ti, to, name)
+
+
 def run_custom_vlm_only_pass(
     file_path: str,
     pdf_image_file_paths: list,
@@ -327,6 +474,7 @@ def run_custom_vlm_only_pass(
     those redactions to the existing pages in pymupdf_doc. Used when text extraction
     is selectable text but user selected CUSTOM_VLM_* entities (so text comes from
     PDF, VLM detection from images).
+    Bedrock VLM API calls are run in parallel across pages (ThreadPoolExecutor).
     Returns (vlm_total_input_tokens, vlm_total_output_tokens, vlm_model_name,
             vlm_annotations_list, vlm_decision_rows) for merging into annotations_all_pages
     and all_pages_decision_process_table.
@@ -349,217 +497,125 @@ def run_custom_vlm_only_pass(
         (page_max if page_max > 0 else number_of_pages),
     )
 
+    # Build list of (page_no, image_path) for pages we can process
+    page_args = []
     for page_no in range(start_page_0, end_page_0):
         if page_no >= len(pdf_image_file_paths):
             break
         image_path = pdf_image_file_paths[page_no]
         if not image_path or not os.path.exists(image_path):
             continue
-        try:
-            image = Image.open(image_path)
-        except Exception:
-            continue
-        page_width, page_height = image.size
-        pymupdf_page = pymupdf_doc.load_page(page_no)
-        reported_page_number = page_no + 1
-        vlm_boxes = []
-
-        if run_person and bedrock_runtime:
-            try:
-                image_name = (
-                    os.path.basename(image_path)
-                    if isinstance(image_path, str)
-                    else f"{file_name}_{reported_page_number}.png"
-                )
-                people_ocr_result = _bedrock_page_ocr_predict(
-                    image,
-                    image_name=image_name,
-                    normalised_coords_range=normalised_coords_range,
-                    output_folder=output_folder,
-                    detect_people_only=True,
-                    model_choice=CLOUD_VLM_MODEL_CHOICE or None,
-                    bedrock_runtime=bedrock_runtime,
-                )
-                if isinstance(people_ocr_result, tuple) and len(people_ocr_result) == 4:
-                    people_ocr, pi, po, pname = people_ocr_result
-                    vlm_total_input_tokens += pi
-                    vlm_total_output_tokens += po
-                    if pname and not vlm_model_name:
-                        vlm_model_name = pname
-                else:
-                    people_ocr = (
-                        people_ocr_result[0]
-                        if isinstance(people_ocr_result, tuple)
-                        else people_ocr_result
-                    )
-                texts = people_ocr.get("text", [])
-                lefts = people_ocr.get("left", [])
-                tops = people_ocr.get("top", [])
-                widths = people_ocr.get("width", [])
-                heights = people_ocr.get("height", [])
-                confs = people_ocr.get("conf", [])
-                for idx, text in enumerate(texts):
-                    if text != "[PERSON]":
-                        continue
-                    try:
-                        left = int(lefts[idx])
-                        top = int(tops[idx])
-                        width = int(widths[idx])
-                        height = int(heights[idx])
-                        conf = float(confs[idx]) if idx < len(confs) else 0.0
-                    except Exception:
-                        continue
-                    vlm_boxes.append(
-                        CustomImageRecognizerResult(
-                            "CUSTOM_VLM_PERSON",
-                            0,
-                            0,
-                            conf,
-                            left,
-                            top,
-                            width,
-                            height,
-                            "[PERSON]",
-                        )
-                    )
-            except Exception as e:
-                print(
-                    f"Warning: Bedrock VLM person detection failed on page {reported_page_number}: {e}"
-                )
-
-        if run_signature and bedrock_runtime:
-            try:
-                image_name = (
-                    os.path.basename(image_path)
-                    if isinstance(image_path, str)
-                    else f"{file_name}_{reported_page_number}.png"
-                )
-                sig_ocr_result = _bedrock_page_ocr_predict(
-                    image,
-                    image_name=image_name,
-                    normalised_coords_range=normalised_coords_range,
-                    output_folder=output_folder,
-                    detect_signatures_only=True,
-                    model_choice=CLOUD_VLM_MODEL_CHOICE or None,
-                    bedrock_runtime=bedrock_runtime,
-                )
-                if isinstance(sig_ocr_result, tuple) and len(sig_ocr_result) == 4:
-                    sig_ocr, si, so, sname = sig_ocr_result
-                    vlm_total_input_tokens += si
-                    vlm_total_output_tokens += so
-                    if sname and not vlm_model_name:
-                        vlm_model_name = sname
-                else:
-                    sig_ocr = (
-                        sig_ocr_result[0]
-                        if isinstance(sig_ocr_result, tuple)
-                        else sig_ocr_result
-                    )
-                texts = sig_ocr.get("text", [])
-                lefts = sig_ocr.get("left", [])
-                tops = sig_ocr.get("top", [])
-                widths = sig_ocr.get("width", [])
-                heights = sig_ocr.get("height", [])
-                confs = sig_ocr.get("conf", [])
-                for idx, text in enumerate(texts):
-                    if text != "[SIGNATURE]":
-                        continue
-                    try:
-                        left = int(lefts[idx])
-                        top = int(tops[idx])
-                        width = int(widths[idx])
-                        height = int(heights[idx])
-                        conf = float(confs[idx]) if idx < len(confs) else 0.0
-                    except Exception:
-                        continue
-                    vlm_boxes.append(
-                        CustomImageRecognizerResult(
-                            "CUSTOM_VLM_SIGNATURE",
-                            0,
-                            0,
-                            conf,
-                            left,
-                            top,
-                            width,
-                            height,
-                            "[SIGNATURE]",
-                        )
-                    )
-            except Exception as e:
-                print(
-                    f"Warning: Bedrock VLM signature detection failed on page {reported_page_number}: {e}"
-                )
-
-        if vlm_boxes:
-            image_dimensions_override = {
-                "image_width": page_width,
-                "image_height": page_height,
-            }
-            redact_page_with_pymupdf(
-                pymupdf_page,
-                {"boxes": vlm_boxes},
+        page_args.append(
+            (
+                page_no,
                 image_path,
-                page_sizes_df=page_sizes_df,
-                input_folder=input_folder,
-                image_dimensions_override=image_dimensions_override,
+                file_name,
+                run_person,
+                run_signature,
+                normalised_coords_range,
+                output_folder,
+                bedrock_runtime,
             )
-            # Bedrock VLM layer already converted 0-999 to image pixels; store as 0-1 relative
-            # by dividing by image dimensions so divide_coordinates_by_page_sizes leaves them unchanged.
-            reported_page_number = page_no + 1
-            w, h = max(1, page_width), max(1, page_height)
-            # Use CUSTOM_BOX_COLOUR from config for review_file_state; fall back to black if missing
-            if (
-                CUSTOM_BOX_COLOUR
-                and isinstance(CUSTOM_BOX_COLOUR, (tuple, list))
-                and len(CUSTOM_BOX_COLOUR) >= 3
-            ):
-                vlm_box_color = tuple(int(CUSTOM_BOX_COLOUR[i]) for i in range(3))
-            else:
-                vlm_box_color = (0, 0, 0)
-            all_image_annotations_boxes = []
-            for box in vlm_boxes:
-                try:
-                    # Convert from image pixel coords to relative 0-1
-                    xmin = box.left / w
-                    ymin = box.top / h
-                    xmax = (box.left + box.width) / w
-                    ymax = (box.top + box.height) / h
-                    label = getattr(box, "entity_type", "Redaction")
-                    text = getattr(box, "text", "") or ""
-                    img_annotation_box = {
-                        "xmin": xmin,
-                        "ymin": ymin,
-                        "xmax": xmax,
-                        "ymax": ymax,
+        )
+
+    # Run Bedrock VLM calls in parallel across pages
+    if not page_args:
+        return (
+            vlm_total_input_tokens,
+            vlm_total_output_tokens,
+            vlm_model_name,
+            vlm_annotations_list,
+            vlm_decision_rows,
+        )
+
+    max_workers = min(MAX_WORKERS, len(page_args))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        page_results = list(
+            executor.map(
+                _run_vlm_only_pass_one_page,
+                page_args,
+            )
+        )
+
+    # Apply redactions and build annotations in page order (pymupdf is not thread-safe)
+    for res in page_results:
+        page_no, image_path, page_width, page_height, vlm_boxes, ti, to, name = res
+        vlm_total_input_tokens += ti
+        vlm_total_output_tokens += to
+        if name and not vlm_model_name:
+            vlm_model_name = name
+
+        if not vlm_boxes:
+            continue
+
+        pymupdf_page = pymupdf_doc.load_page(page_no)
+        image_dimensions_override = {
+            "image_width": page_width,
+            "image_height": page_height,
+        }
+        redact_page_with_pymupdf(
+            pymupdf_page,
+            {"boxes": vlm_boxes},
+            image_path,
+            page_sizes_df=page_sizes_df,
+            input_folder=input_folder,
+            image_dimensions_override=image_dimensions_override,
+        )
+
+        # Build annotations and decision rows for review/outputs
+        reported_page_number = page_no + 1
+        w, h = max(1, page_width), max(1, page_height)
+        if (
+            CUSTOM_BOX_COLOUR
+            and isinstance(CUSTOM_BOX_COLOUR, (tuple, list))
+            and len(CUSTOM_BOX_COLOUR) >= 3
+        ):
+            vlm_box_color = tuple(int(CUSTOM_BOX_COLOUR[i]) for i in range(3))
+        else:
+            vlm_box_color = (0, 0, 0)
+        all_image_annotations_boxes = []
+        for box in vlm_boxes:
+            try:
+                xmin = box.left / w
+                ymin = box.top / h
+                xmax = (box.left + box.width) / w
+                ymax = (box.top + box.height) / h
+                label = getattr(box, "entity_type", "Redaction")
+                text = getattr(box, "text", "") or ""
+                img_annotation_box = {
+                    "xmin": xmin,
+                    "ymin": ymin,
+                    "xmax": xmax,
+                    "ymax": ymax,
+                    "label": label,
+                    "text": text,
+                    "color": vlm_box_color,
+                }
+                filled = fill_missing_box_ids(img_annotation_box)
+                all_image_annotations_boxes.append(filled)
+                vlm_decision_rows.append(
+                    {
+                        "image_path": image_path,
+                        "page": reported_page_number,
                         "label": label,
+                        "xmin": xmin,
+                        "xmax": xmax,
+                        "ymin": ymin,
+                        "ymax": ymax,
+                        "boundingBox": [xmin, ymin, xmax, ymax],
                         "text": text,
-                        "color": vlm_box_color,
+                        "start": getattr(box, "start", 0),
+                        "end": getattr(box, "end", 0),
+                        "score": getattr(box, "score", 0.0),
+                        "id": filled.get("id", ""),
                     }
-                    filled = fill_missing_box_ids(img_annotation_box)
-                    all_image_annotations_boxes.append(filled)
-                    vlm_decision_rows.append(
-                        {
-                            "image_path": image_path,
-                            "page": reported_page_number,
-                            "label": label,
-                            "xmin": xmin,
-                            "xmax": xmax,
-                            "ymin": ymin,
-                            "ymax": ymax,
-                            "boundingBox": [xmin, ymin, xmax, ymax],
-                            "text": text,
-                            "start": getattr(box, "start", 0),
-                            "end": getattr(box, "end", 0),
-                            "score": getattr(box, "score", 0.0),
-                            "id": filled.get("id", ""),
-                        }
-                    )
-                except AttributeError:
-                    continue
-            if all_image_annotations_boxes:
-                vlm_annotations_list.append(
-                    {"image": image_path, "boxes": all_image_annotations_boxes}
                 )
+            except AttributeError:
+                continue
+        if all_image_annotations_boxes:
+            vlm_annotations_list.append(
+                {"image": image_path, "boxes": all_image_annotations_boxes}
+            )
 
     return (
         vlm_total_input_tokens,
