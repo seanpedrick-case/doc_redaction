@@ -3,6 +3,7 @@ import base64
 import copy
 import io
 import json
+import math
 import os
 import re
 import time
@@ -855,6 +856,48 @@ def _prepare_image_for_vlm(
     return image
 
 
+def _pad_image_for_vlm_aspect_ratio(
+    image: Image.Image,
+    max_aspect: float = 10.0,
+) -> Image.Image:
+    """
+    Pad image so aspect ratio max(w/h, h/w) <= max_aspect (e.g. 10:1).
+    Used for Bedrock, inference-server, and transformers VLM to avoid API errors
+    on very long/thin hybrid crops. Returns RGB image.
+    """
+    if image is None:
+        return image
+    try:
+        w, h = image.size
+        if w < 1 or h < 1:
+            return image.convert("RGB") if image.mode != "RGB" else image
+        current = max(w / float(h), h / float(w))
+        if current <= max_aspect:
+            return image.convert("RGB") if image.mode != "RGB" else image
+        img = image.convert("RGB") if image.mode != "RGB" else image
+        if w >= h:
+            new_h = max(int(math.ceil(w / max_aspect)), 1)
+            new_w, new_h = w, new_h
+        else:
+            new_w = max(int(math.ceil(h / max_aspect)), 1)
+            new_w, new_h = new_w, h
+        canvas = Image.new("RGB", (new_w, new_h), color=(255, 255, 255))
+        scale = min(new_w / float(w), new_h / float(h))
+        if scale < 1.0:
+            rw = max(1, int(round(w * scale)))
+            rh = max(1, int(round(h * scale)))
+            paste_img = img.resize((rw, rh), Image.Resampling.LANCZOS)
+        else:
+            paste_img = img
+            rw, rh = w, h
+        ox = max((new_w - rw) // 2, 0)
+        oy = max((new_h - rh) // 2, 0)
+        canvas.paste(paste_img, (ox, oy))
+        return canvas
+    except Exception:
+        return image.convert("RGB") if image.mode != "RGB" else image
+
+
 def _call_inference_server_vlm_api(
     image: Image.Image,
     prompt: str,
@@ -913,6 +956,14 @@ def _call_inference_server_vlm_api(
         )
     if timeout is None:
         timeout = INFERENCE_SERVER_TIMEOUT
+
+    # Pad image so aspect ratio <= 10:1 (same as Bedrock); hybrid crops can be very long/thin
+    try:
+        image = _pad_image_for_vlm_aspect_ratio(image, max_aspect=10.0)
+    except Exception as e:
+        print(
+            f"Warning: could not pad image for inference-server VLM aspect ratio: {e}"
+        )
 
     # Convert PIL Image to base64
     buffer = io.BytesIO()
@@ -1143,7 +1194,27 @@ def _call_bedrock_vlm_api(
     if model_choice is None:
         raise ValueError("model_choice is required for Bedrock VLM calls")
 
-    # Convert PIL Image to base64
+    # Bedrock Converse API requires image aspect ratio <= 20:1. Pad to 10:1 for hybrid crops.
+    try:
+        image = _pad_image_for_vlm_aspect_ratio(image, max_aspect=10.0)
+    except Exception as aspect_error:
+        print(
+            f"Warning: could not adjust image aspect ratio for Bedrock VLM: {aspect_error}"
+        )
+    # Final safeguard: never send aspect > 20:1
+    try:
+        w, h = image.size
+        if w > 0 and h > 0:
+            aspect = max(w / float(h), h / float(w))
+            if aspect > 20.0:
+                image = _pad_image_for_vlm_aspect_ratio(image, max_aspect=19.5)
+                print(
+                    f"Bedrock VLM: re-padded image to satisfy aspect ratio (was {aspect:.1f}:1)."
+                )
+    except Exception:
+        pass
+
+    # Encode the (possibly padded) image and send to Bedrock
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     image_bytes = buffer.getvalue()
@@ -1576,6 +1647,12 @@ def _vlm_ocr_predict(
         except Exception as prep_error:
             print(f"VLM OCR error: Could not prepare image for VLM: {prep_error}")
             return {"rec_texts": [], "rec_scores": []}
+
+        # Pad so aspect ratio <= 10:1 for hybrid line crops (same as Bedrock/inference-server)
+        try:
+            image = _pad_image_for_vlm_aspect_ratio(image, max_aspect=10.0)
+        except Exception:
+            pass
 
         # Use the VLM to extract text
         # Pass None for parameters to prioritize model-specific defaults from run_vlm.py
@@ -3770,6 +3847,10 @@ def _vlm_page_ocr_predict(
         try:
             original_width, original_height = image.size
             processed_image = _prepare_image_for_vlm(image)
+            # Pad so aspect ratio <= 10:1 (same as Bedrock/inference-server) for hybrid/long pages
+            processed_image = _pad_image_for_vlm_aspect_ratio(
+                processed_image, max_aspect=10.0
+            )
             processed_width, processed_height = processed_image.size
 
             # Use float division to avoid rounding errors

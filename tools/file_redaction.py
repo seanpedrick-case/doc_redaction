@@ -3385,6 +3385,15 @@ def choose_and_run_redactor(
     log_files_output_paths = sorted(list(set(log_files_output_paths)))
     out_file_paths = sorted(list(set(out_file_paths)))
 
+    # Only pass paths that exist to Gradio (avoids FileNotFoundError when gr.File stats paths
+    # that no longer exist, e.g. after loading existing Textract results or in ephemeral containers)
+    out_file_paths = [
+        p for p in out_file_paths if isinstance(p, str) and os.path.exists(p)
+    ]
+    log_files_output_paths = [
+        p for p in log_files_output_paths if isinstance(p, str) and os.path.exists(p)
+    ]
+
     # Create OCR review files list for input_review_files component
 
     if ocr_file_path:
@@ -3405,11 +3414,14 @@ def choose_and_run_redactor(
                 all_page_line_level_ocr_results_with_words_df_file_path[0]
             )
 
-    # Output file paths
+    # Output file paths (only include existing paths so Gradio gr.File does not raise on os.stat)
     if not review_file_path:
         review_out_file_paths = [prepared_pdf_file_paths[-1]]
     else:
         review_out_file_paths = [prepared_pdf_file_paths[-1], review_file_path]
+    review_out_file_paths = [
+        p for p in review_out_file_paths if isinstance(p, str) and os.path.exists(p)
+    ]
 
     if total_textract_query_number > number_of_pages:
         total_textract_query_number = number_of_pages
@@ -3433,6 +3445,16 @@ def choose_and_run_redactor(
             total_pages_for_usage_log = _doc_pages
 
     estimated_time_taken_state = round(estimated_time_taken_state, 1)
+
+    # Only pass existing paths to Gradio for any path lists used by file components
+    duplication_file_path_outputs = [
+        p
+        for p in duplication_file_path_outputs
+        if isinstance(p, str) and os.path.exists(p)
+    ]
+    ocr_review_files = [
+        p for p in ocr_review_files if isinstance(p, str) and os.path.exists(p)
+    ]
 
     return (
         combined_out_message,
