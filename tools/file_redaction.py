@@ -1597,10 +1597,11 @@ def choose_and_run_redactor(
         bedrock_runtime = None
 
     # If using AWS Comprehend and CUSTOM_VLM_PERSON or CUSTOM_VLM_SIGNATURE is selected,
-    # ensure bedrock_runtime is available for the additional VLM detection passes
+    # ensure bedrock_runtime is available only when CUSTOM_VLM_BACKEND is bedrock_vlm.
     if (
         pii_identification_method == AWS_PII_OPTION
         and bedrock_runtime is None
+        and CUSTOM_VLM_BACKEND == "bedrock_vlm"
         and (
             "CUSTOM_VLM_PERSON" in chosen_redact_comprehend_entities
             or "CUSTOM_VLM_SIGNATURE" in chosen_redact_comprehend_entities
@@ -1724,7 +1725,8 @@ def choose_and_run_redactor(
                 raise Exception(out_message)
 
     # If using image-based extraction (Textract, Bedrock VLM, etc.) or simple text + any CUSTOM_VLM_*
-    # entity, and any CUSTOM_VLM_* or Face identification is selected, ensure bedrock_runtime is available.
+    # entity, ensure bedrock_runtime is available only when actually needed: Face identification
+    # (Textract) uses Bedrock; CUSTOM_VLM_* uses Bedrock only when CUSTOM_VLM_BACKEND is bedrock_vlm.
     _image_based_extraction = text_extraction_method in (
         TEXTRACT_TEXT_EXTRACT_OPTION,
         BEDROCK_VLM_TEXT_EXTRACT_OPTION,
@@ -1732,9 +1734,9 @@ def choose_and_run_redactor(
         GEMINI_VLM_TEXT_EXTRACT_OPTION,
         AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION,
     )
-    _needs_bedrock_for_vlm = _has_any_custom_vlm_entity or "Face identification" in (
+    _needs_bedrock_for_vlm = "Face identification" in (
         handwrite_signature_checkbox or []
-    )
+    ) or (_has_any_custom_vlm_entity and CUSTOM_VLM_BACKEND == "bedrock_vlm")
     if (
         (_image_based_extraction or _custom_vlm_requires_image_global)
         and bedrock_runtime is None
@@ -5433,6 +5435,18 @@ def redact_image_pdf(
         reported_page_number = str(page_no + 1)
         # print(f"OCR preparation - Current page: {reported_page_number}")
 
+        # Define once per iteration so they are always set before use at _include_vlm_boxes_in_outputs (line ~7610)
+        _person_selected = (
+            "CUSTOM_VLM_PERSON" in (chosen_redact_entities or [])
+            or "CUSTOM_VLM_PERSON" in (chosen_redact_comprehend_entities or [])
+            or "CUSTOM_VLM_PERSON" in (chosen_llm_entities or [])
+        )
+        _textract_face_identification = (
+            text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+            and "Face identification" in (handwrite_signature_checkbox or [])
+        )
+        _run_face_pass = _person_selected or _textract_face_identification
+
         handwriting_or_signature_boxes = list()
         page_signature_recogniser_results = list()
         page_handwriting_recogniser_results = list()
@@ -5745,16 +5759,7 @@ def redact_image_pdf(
                 # Run when CUSTOM_VLM_PERSON is selected (in any entity selector), or when AWS Textract
                 # + Face identification is selected (all pages analysed for faces regardless of PII method
                 # or text_extraction_only).
-                _person_selected = (
-                    "CUSTOM_VLM_PERSON" in (chosen_redact_entities or [])
-                    or "CUSTOM_VLM_PERSON" in (chosen_redact_comprehend_entities or [])
-                    or "CUSTOM_VLM_PERSON" in (chosen_llm_entities or [])
-                )
-                _textract_face_identification = (
-                    text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
-                    and "Face identification" in (handwrite_signature_checkbox or [])
-                )
-                _run_face_pass = _person_selected or _textract_face_identification
+                # (_run_face_pass, _textract_face_identification set at start of loop)
                 if (
                     (
                         text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
