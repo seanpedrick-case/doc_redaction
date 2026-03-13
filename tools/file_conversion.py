@@ -2091,62 +2091,22 @@ def remove_duplicate_images_with_blank_boxes(data: List[dict]) -> List[dict]:
     return result
 
 
-def divide_coordinates_by_page_sizes(
-    review_file_df: pd.DataFrame,
+def divide_coordinates_by_page_sizes_pl(
+    df: pl.DataFrame,
     page_sizes_df: pd.DataFrame,
-    xmin="xmin",
-    xmax="xmax",
-    ymin="ymin",
-    ymax="ymax",
+    xmin: str = "xmin",
+    xmax: str = "xmax",
+    ymin: str = "ymin",
+    ymax: str = "ymax",
     coordinates_in_pdf_points: bool = False,
     pages_in_pdf_points: Optional[Set[int]] = None,
-) -> pd.DataFrame:
+) -> pl.DataFrame:
     """
-    Optimized function to convert absolute image coordinates (>1) to relative coordinates (<=1).
-
-    Identifies rows with absolute coordinates, merges page size information,
-    divides coordinates by dimensions, and combines with already-relative rows.
-
-    Args:
-        review_file_df: Input DataFrame with potentially mixed coordinate systems.
-        page_sizes_df: DataFrame with page dimensions ('page', 'image_width',
-                       'image_height', 'mediabox_width', 'mediabox_height').
-        xmin, xmax, ymin, ymax: Names of the coordinate columns.
-        coordinates_in_pdf_points: If True, coordinates are in PDF space (points);
-            use mediabox_width/mediabox_height for division regardless of
-            image_width/image_height (e.g. when called from redact_text_pdf).
-        pages_in_pdf_points: If set, page numbers (1-based) whose coordinates are in PDF
-            points; all other pages use image dimensions. Used when EFFICIENT_OCR mixes
-            text-extracted pages (PDF points) and OCR pages (image pixels). Ignored if
-            coordinates_in_pdf_points is True for the whole dataframe.
-
-    Returns:
-        DataFrame with coordinates converted to relative system, sorted.
+    Polars-only coordinate division: absolute coords (>1) to relative (<=1).
+    Expects df to have numeric coord columns. Returns pl.DataFrame.
     """
-    if review_file_df.empty or xmin not in review_file_df.columns:
-        return review_file_df  # Return early if empty or key column missing
-
     coord_cols = [xmin, xmax, ymin, ymax]
-    cols_to_convert = coord_cols + ["page"]
-    for col in cols_to_convert:
-        if col not in review_file_df.columns:
-            if col == "page" or col in coord_cols:
-                print(
-                    f"Warning: Required column '{col}' not found in review_file_df. Returning original DataFrame."
-                )
-                return review_file_df
-
-    # Normalize columns in pandas so pl.from_pandas() does not fail on mixed types
-    temp_pd = review_file_df.copy()
-    for col in cols_to_convert:
-        if col in temp_pd.columns:
-            temp_pd[col] = pd.to_numeric(temp_pd[col], errors="coerce")
-    # Object columns with mixed int/str (e.g. id, label) make PyArrow fail; normalize to string
-    for col in temp_pd.columns:
-        if col not in cols_to_convert and temp_pd[col].dtype == object:
-            temp_pd[col] = temp_pd[col].astype(str)
-    df = pl.from_pandas(temp_pd)
-    for col in cols_to_convert:
+    for col in coord_cols:
         if col in df.columns:
             df = df.with_columns(pl.col(col).cast(pl.Float64, strict=False))
 
@@ -2188,7 +2148,9 @@ def divide_coordinates_by_page_sizes(
                 "mediabox_height",
             ]:
                 if c in ps.columns:
-                    ps = ps.with_columns(pl.col(c).cast(pl.Float64, strict=False))
+                    # Cast page to Int64 so join key matches df_abs; cast sizes to Float64
+                    dtype = pl.Int64 if c == "page" else pl.Float64
+                    ps = ps.with_columns(pl.col(c).cast(dtype, strict=False))
             df_abs = df_abs.join(ps, on="page", how="left")
 
         if "mediabox_width" in df_abs.columns and "mediabox_height" in df_abs.columns:
@@ -2271,7 +2233,7 @@ def divide_coordinates_by_page_sizes(
         print(
             "Warning: Both relative and absolute splits resulted in empty DataFrames."
         )
-        return pd.DataFrame(columns=review_file_df.columns)
+        return df_rel
     # Drop dimension columns from df_abs so concat matches df_rel schema (Polars requires same width)
     for c in ["image_width", "image_height", "mediabox_width", "mediabox_height"]:
         if c in df_abs.columns:
@@ -2338,16 +2300,79 @@ def divide_coordinates_by_page_sizes(
             [pl.col(c).round(6) for c in coord_cols if c in out.columns]
         )
 
+    return out
+
+
+def divide_coordinates_by_page_sizes(
+    review_file_df: pd.DataFrame,
+    page_sizes_df: pd.DataFrame,
+    xmin="xmin",
+    xmax="xmax",
+    ymin="ymin",
+    ymax="ymax",
+    coordinates_in_pdf_points: bool = False,
+    pages_in_pdf_points: Optional[Set[int]] = None,
+) -> pd.DataFrame:
+    """
+    Optimized function to convert absolute image coordinates (>1) to relative coordinates (<=1).
+
+    Identifies rows with absolute coordinates, merges page size information,
+    divides coordinates by dimensions, and combines with already-relative rows.
+
+    Args:
+        review_file_df: Input DataFrame with potentially mixed coordinate systems.
+        page_sizes_df: DataFrame with page dimensions ('page', 'image_width',
+                       'image_height', 'mediabox_width', 'mediabox_height').
+        xmin, xmax, ymin, ymax: Names of the coordinate columns.
+        coordinates_in_pdf_points: If True, coordinates are in PDF space (points);
+            use mediabox_width/mediabox_height for division regardless of
+            image_width/image_height (e.g. when called from redact_text_pdf).
+        pages_in_pdf_points: If set, page numbers (1-based) whose coordinates are in PDF
+            points; all other pages use image dimensions. Used when EFFICIENT_OCR mixes
+            text-extracted pages (PDF points) and OCR pages (image pixels). Ignored if
+            coordinates_in_pdf_points is True for the whole dataframe.
+
+    Returns:
+        DataFrame with coordinates converted to relative system, sorted.
+    """
+    if review_file_df.empty or xmin not in review_file_df.columns:
+        return review_file_df
+
+    coord_cols = [xmin, xmax, ymin, ymax]
+    cols_to_convert = coord_cols + ["page"]
+    for col in cols_to_convert:
+        if col not in review_file_df.columns:
+            if col == "page" or col in coord_cols:
+                print(
+                    f"Warning: Required column '{col}' not found in review_file_df. Returning original DataFrame."
+                )
+                return review_file_df
+
+    temp_pd = review_file_df.copy()
+    for col in cols_to_convert:
+        if col in temp_pd.columns:
+            temp_pd[col] = pd.to_numeric(temp_pd[col], errors="coerce")
+    for col in temp_pd.columns:
+        if col not in cols_to_convert and temp_pd[col].dtype == object:
+            temp_pd[col] = temp_pd[col].astype(str)
+    df = pl.from_pandas(temp_pd)
+    out = divide_coordinates_by_page_sizes_pl(
+        df,
+        page_sizes_df,
+        xmin=xmin,
+        xmax=xmax,
+        ymin=ymin,
+        ymax=ymax,
+        coordinates_in_pdf_points=coordinates_in_pdf_points,
+        pages_in_pdf_points=pages_in_pdf_points,
+    )
     result = out.to_pandas()
-    # Restore page column to integer-like type so UI filters (e.g. page == "1") match;
-    # Polars cast made it float (1.0) so astype(str) became "1.0" and broke dropdown filter.
     if "page" in result.columns and not result.empty:
         result["page"] = pd.to_numeric(result["page"], errors="coerce")
         result["page"] = result["page"].astype("Int64")
-    # Ensure coordinate columns are native Python floats (not np.float64) for JSON/dict serialisation
     for c in coord_cols:
         if c in result.columns:
-            result[c] = result[c].apply(lambda x: float(x) if pd.notna(x) else x)
+            result[c] = result[c].astype(float)
     return result
 
 
@@ -2370,12 +2395,14 @@ def multiply_coordinates_by_page_sizes(
         return review_file_df  # Return early if empty or key column missing
 
     coord_cols = [xmin, xmax, ymin, ymax]
-    df = pl.from_pandas(review_file_df.copy())
+    df = pl.from_pandas(review_file_df)
 
-    # Cast coordinates and page to numeric
-    for col in coord_cols + ["page"]:
-        if col in df.columns:
-            df = df.with_columns(pl.col(col).cast(pl.Float64, strict=False))
+    # Cast coordinates and page to numeric (single with_columns for less overhead)
+    cast_cols = [c for c in coord_cols + ["page"] if c in df.columns]
+    if cast_cols:
+        df = df.with_columns(
+            [pl.col(c).cast(pl.Float64, strict=False) for c in cast_cols]
+        )
 
     # Identify relative coordinates (all <= 1 and not null)
     is_relative = (
@@ -2397,9 +2424,7 @@ def multiply_coordinates_by_page_sizes(
         result_early = df_abs.to_pandas()
         for c in coord_cols:
             if c in result_early.columns:
-                result_early[c] = result_early[c].apply(
-                    lambda x: float(x) if pd.notna(x) else x
-                )
+                result_early[c] = result_early[c].astype(float)
         return result_early
 
     # Join page sizes for relative rows
@@ -2440,9 +2465,9 @@ def multiply_coordinates_by_page_sizes(
             .alias(ymax),
         ]
     )
-    for c in ["image_width", "image_height"]:
-        if c in df_rel.columns:
-            df_rel = df_rel.drop(c)
+    drop_cols = [c for c in ["image_width", "image_height"] if c in df_rel.columns]
+    if drop_cols:
+        df_rel = df_rel.drop(drop_cols)
 
     out = pl.concat([df_abs, df_rel])
     out = out.sort(["page", xmin, ymin], nulls_last=True)
@@ -2456,7 +2481,7 @@ def multiply_coordinates_by_page_sizes(
     result = out.to_pandas()
     for c in coord_cols:
         if c in result.columns:
-            result[c] = result[c].apply(lambda x: float(x) if pd.notna(x) else x)
+            result[c] = result[c].astype(float)
     return result
 
 
@@ -2811,6 +2836,7 @@ def convert_annotation_json_to_review_df(
     redaction_decision_output: pd.DataFrame = pd.DataFrame(),
     page_sizes: List[dict] = list(),
     do_proximity_match: bool = True,
+    prebuilt_df: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """
     Convert the annotation json data to a dataframe format.
@@ -2819,10 +2845,18 @@ def convert_annotation_json_to_review_df(
 
     Refactored for improved efficiency, prioritizing ID-based join and conditionally applying
     coordinate division and proximity matching.
+
+    When prebuilt_df is provided (e.g. from chunked parallel build), it is used as the initial
+    DataFrame and the annotation-to-DataFrame conversion is skipped.
     """
 
-    # 1. Convert annotations to DataFrame
-    review_file_df = convert_annotation_data_to_dataframe(all_annotations)
+    # 1. Convert annotations to DataFrame (or use prebuilt from chunked parallel build)
+    if prebuilt_df is not None:
+        review_file_df = prebuilt_df.copy()
+    else:
+        review_file_df = convert_annotation_data_to_dataframe(
+            all_annotations if all_annotations else []
+        )
 
     # Only keep rows in review_df where there are coordinates (assuming xmin is representative)
     # Use .notna() for robustness with potential None or NaN values

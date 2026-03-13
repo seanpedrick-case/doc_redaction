@@ -129,8 +129,8 @@ from tools.config import (
     INPUT_FOLDER,
     INTRO_TEXT,
     LANGUAGE_CHOICES,
-    LLM_PII_MAX_TOKENS,
-    LLM_PII_TEMPERATURE,
+    LLM_MAX_NEW_TOKENS,
+    LLM_TEMPERATURE,
     LOAD_PREVIOUS_TEXTRACT_JOBS_S3,
     LOCAL_OCR_MODEL_OPTIONS,
     LOCAL_PII_OPTION,
@@ -1638,12 +1638,12 @@ with blocks:
             )
             ocr_example_labels.append("Example email LLM PII detection")
 
-        # When RUN_ALL_EXAMPLES_THROUGH_AWS, replace text extraction with AWS Textract and PII with AWS Comprehend (except "Only extract text")
+        # When RUN_ALL_EXAMPLES_THROUGH_AWS, use AWS Textract for text extraction and AWS Bedrock LLM for PII (except "Only extract text")
         if RUN_ALL_EXAMPLES_THROUGH_AWS:
             for ex in available_ocr_examples:
                 ex[1] = TEXTRACT_TEXT_EXTRACT_OPTION
                 if ex[2] != NO_REDACTION_PII_OPTION:
-                    ex[2] = AWS_PII_OPTION
+                    ex[2] = AWS_LLM_PII_OPTION
 
         # Only create examples if we have available files
         if available_ocr_examples:
@@ -9605,8 +9605,8 @@ with blocks:
                 "llm_model_choice": CLOUD_LLM_PII_MODEL_CHOICE,
                 "llm_inference_method": CHOSEN_LLM_PII_INFERENCE_METHOD,
                 "inference_server_pii_model": DEFAULT_INFERENCE_SERVER_PII_MODEL,
-                "llm_temperature": LLM_PII_TEMPERATURE,
-                "llm_max_tokens": LLM_PII_MAX_TOKENS,
+                "llm_temperature": LLM_TEMPERATURE,
+                "llm_max_tokens": LLM_MAX_NEW_TOKENS,
                 "llm_redact_entities": CHOSEN_LLM_ENTITIES,
                 "custom_llm_instructions": "",  # Can be set via environment variable if needed
                 # Document Summarisation Arguments (used when task is summarise)

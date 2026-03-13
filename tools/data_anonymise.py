@@ -36,8 +36,8 @@ from tools.config import (
     DEFAULT_LANGUAGE,
     DO_INITIAL_TABULAR_DATA_CLEAN,
     INFERENCE_SERVER_PII_OPTION,
-    LLM_PII_MAX_TOKENS,
-    LLM_PII_TEMPERATURE,
+    LLM_MAX_NEW_TOKENS,
+    LLM_TEMPERATURE,
     LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
     LOCAL_TRANSFORMERS_LLM_PII_OPTION,
     MAX_SIMULTANEOUS_FILES,
@@ -1595,35 +1595,6 @@ def anonymise_script(
                 LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
             )
 
-        # Load PII-specific model and tokenizer if not already provided
-        # if (
-        #     text_analyzer_kwargs.get("local_model") is None
-        #     and text_analyzer_kwargs.get("inference_method") == "local"
-        # ):
-        #     from tools.llm_funcs import USE_LLAMA_CPP, get_pii_model
-
-        #     try:
-        #         text_analyzer_kwargs["local_model"] = get_pii_model()
-        #     except Exception as e:
-        #         print(
-        #             f"Warning: Failed to load PII model: {e}. "
-        #             f"Will attempt to load model on-demand."
-        #         )
-        # if (
-        #     text_analyzer_kwargs.get("tokenizer") is None
-        #     and text_analyzer_kwargs.get("inference_method") == "local"
-        #     and USE_LLAMA_CPP != "True"
-        # ):
-        #     from tools.llm_funcs import get_pii_tokenizer
-
-        #     try:
-        #         text_analyzer_kwargs["tokenizer"] = get_pii_tokenizer()
-        #     except Exception as e:
-        #         print(
-        #             f"Warning: Failed to load PII tokenizer: {e}. "
-        #             f"Will attempt to load tokenizer on-demand."
-        #         )
-
         # Use the same logic as AWS_LLM_PII_OPTION for the rest
         # Default chosen_llm_entities to chosen_redact_comprehend_entities if not provided
         if chosen_llm_entities is None:
@@ -1747,10 +1718,10 @@ def anonymise_script(
                             bedrock_runtime=bedrock_runtime,
                             model_choice=effective_model_choice,
                             temperature=text_analyzer_kwargs.get(
-                                "temperature", LLM_PII_TEMPERATURE
+                                "temperature", LLM_TEMPERATURE
                             ),
                             max_tokens=text_analyzer_kwargs.get(
-                                "max_tokens", LLM_PII_MAX_TOKENS
+                                "max_tokens", LLM_MAX_NEW_TOKENS
                             ),
                             output_folder=(
                                 output_folder

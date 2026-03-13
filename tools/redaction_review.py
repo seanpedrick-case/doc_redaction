@@ -1,6 +1,8 @@
 import os
+import re
+import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Tuple
 from xml.etree.ElementTree import Element, SubElement, tostring
@@ -15,6 +17,7 @@ defusedxml.defuse_stdlib()
 import gradio as gr
 import numpy as np
 import pandas as pd
+import polars as pl
 import pymupdf
 from gradio_image_annotation import image_annotator
 from gradio_image_annotation.image_annotator import AnnotatedImageData
@@ -24,17 +27,22 @@ from pymupdf import Document, Rect
 from tools.config import (
     COMPRESS_REDACTED_PDF,
     CUSTOM_BOX_COLOUR,
+    ENABLE_PARALLEL_FILES_APPLY_REDACTIONS,
+    ENABLE_REVIEW_CSV_PARALLELISM,
     INPUT_FOLDER,
     MAX_IMAGE_PIXELS,
     MAX_WORKERS,
     OUTPUT_FOLDER,
+    PROFILE_REDACTION_APPLY,
     RETURN_PDF_FOR_REVIEW,
+    USE_POLARS_FOR_REVIEW,
 )
 from tools.file_conversion import (
     convert_annotation_data_to_dataframe,
     convert_annotation_json_to_review_df,
     convert_review_df_to_annotation_json,
     divide_coordinates_by_page_sizes,
+    divide_coordinates_by_page_sizes_pl,
     fill_missing_ids,
     is_pdf,
     multiply_coordinates_by_page_sizes,
@@ -42,7 +50,7 @@ from tools.file_conversion import (
     remove_duplicate_images_with_blank_boxes,
     save_pdf_with_or_without_compression,
 )
-from tools.file_redaction import redact_page_with_pymupdf
+from tools.file_redaction import redact_page_with_pymupdf, set_cropbox_safely
 from tools.helper_functions import (
     _generate_unique_ids,
     detect_file_type,
@@ -54,6 +62,11 @@ from tools.secure_path_utils import (
 
 if not MAX_IMAGE_PIXELS:
     Image.MAX_IMAGE_PIXELS = None
+
+# Chunked review CSV: minimum number of pages to enable parallel annotation->DF build
+REVIEW_CSV_PARALLEL_MIN_PAGES = 20
+# Pages per chunk when building review DF from annotations in parallel
+REVIEW_CSV_PAGES_PER_CHUNK = 15
 
 
 def decrease_page(number: int, all_annotations: dict):
@@ -1948,7 +1961,6 @@ def apply_redactions_to_review_df_and_files(
 
     output_files = list()
     output_log_files = list()
-    pdf_doc = list()
     review_df = review_file_state
 
     # Always use the provided input_folder parameter
@@ -1992,8 +2004,15 @@ def apply_redactions_to_review_df_and_files(
         print("No valid file paths found. Cannot apply redactions.")
         return doc, all_image_annotations, output_files, output_log_files, review_df
 
-    for file_path in file_paths:
-        file_name_without_ext = get_file_name_without_type(file_path)
+    def _run_apply_redactions_loop(file_paths_to_process):
+        _out_files = []
+        _out_log_files = []
+        _review_df = review_file_state
+        for file_path in file_paths_to_process:
+            pdf_doc = None
+            _profile_page_times = []
+            _profile_image_times = []
+            file_name_without_ext = get_file_name_without_type(file_path)
         file_name_with_ext = os.path.basename(file_path)
 
         file_extension = os.path.splitext(file_path)[1].lower()
@@ -2033,6 +2052,7 @@ def apply_redactions_to_review_df_and_files(
                     break
 
         # Build page_sizes_df and lookups once per file (reused for PDF redaction and review CSV)
+        _t0_page_sizes = time.perf_counter() if PROFILE_REDACTION_APPLY else None
         page_sizes_df = pd.DataFrame(page_sizes) if page_sizes else pd.DataFrame()
         page_to_image_path = {}
         page_to_image_dimensions = {}
@@ -2075,11 +2095,15 @@ def apply_redactions_to_review_df_and_files(
                                 "image_width": float(w),
                                 "image_height": float(h),
                             }
+        if PROFILE_REDACTION_APPLY:
+            _t_page_sizes = time.perf_counter() - _t0_page_sizes
+        else:
+            _t_page_sizes = 0.0
 
         if save_pdf is True:
             # If working with image docs
             if (is_pdf(file_path) is False) & (file_extension != ".csv"):
-                image = Image.open(file_paths[-1])
+                image = Image.open(file_path)
 
                 draw = ImageDraw.Draw(image)
 
@@ -2093,11 +2117,43 @@ def apply_redactions_to_review_df_and_files(
 
                     fill = img_annotation_box["color"]
 
+                    # Parse color: may be (r,g,b) tuple/list or string like "(128, 128, 128)" / "[128 128 128]"
                     if not isinstance(fill, tuple):
-                        try:
+                        if isinstance(fill, list) and len(fill) == 3:
                             fill = tuple(fill)
-                        except Exception:
-                            fill = tuple(CUSTOM_BOX_COLOUR)
+                        elif isinstance(fill, str):
+                            from tools.secure_regex_utils import safe_extract_rgb_values
+
+                            parsed = safe_extract_rgb_values(fill.strip())
+                            if parsed is not None:
+                                fill = parsed
+                            else:
+                                # Try bracket+space format e.g. "[128 128 128]"
+                                match = re.match(
+                                    r"\[\s*(\d{1,3})\s+(\d{1,3})\s+(\d{1,3})\s*\]",
+                                    fill.strip(),
+                                )
+                                if match:
+                                    r, g, b = (
+                                        int(match.group(1)),
+                                        int(match.group(2)),
+                                        int(match.group(3)),
+                                    )
+                                    if (
+                                        0 <= r <= 255
+                                        and 0 <= g <= 255
+                                        and 0 <= b <= 255
+                                    ):
+                                        fill = (r, g, b)
+                                    else:
+                                        fill = CUSTOM_BOX_COLOUR
+                                else:
+                                    fill = CUSTOM_BOX_COLOUR
+                        else:
+                            try:
+                                fill = tuple(fill)
+                            except Exception:
+                                fill = CUSTOM_BOX_COLOUR
 
                     # Ensure fill is a valid RGB tuple with integer values 0-255
                     # Handle both list and tuple formats, and convert float values to proper RGB
@@ -2154,9 +2210,7 @@ def apply_redactions_to_review_df_and_files(
                     )
                     image.save(output_folder + file_name_without_ext + "_redacted.png")
 
-                output_files.append(output_image_path)
-
-                doc = [image]
+                _out_files.append(output_image_path)
 
             elif file_extension == ".csv":
                 pdf_doc = list()
@@ -2166,7 +2220,7 @@ def apply_redactions_to_review_df_and_files(
                 pdf_doc = pymupdf.open(file_path)
                 orig_pdf_file_path = file_path
 
-                output_files.append(orig_pdf_file_path)
+                _out_files.append(orig_pdf_file_path)
 
                 number_of_pages = pdf_doc.page_count
 
@@ -2180,24 +2234,52 @@ def apply_redactions_to_review_df_and_files(
 
                 # Load images on demand per page (avoids holding all N images in memory).
                 # PyMuPDF is not thread-safe for document modification, so redaction stays sequential.
-                for i in progress.tqdm(
-                    range(0, number_of_pages),
-                    desc="Saving redacted pages to file",
-                    unit="pages",
-                ):
-                    # Load image for this page only; close after use to limit memory.
-                    try:
-                        _, image, image_should_close = _load_one_page_image_for_redact(
-                            i,
-                            all_image_annotations,
-                            page_to_image_path,
-                            input_folder,
-                            file_name_with_ext,
-                        )
-                    except Exception:
-                        image, image_should_close = None, False
-                    if image is None:
-                        image_should_close = False
+                _page_iter = (
+                    progress.tqdm(
+                        range(0, number_of_pages),
+                        desc="Saving redacted pages to file",
+                        unit="pages",
+                    )
+                    if progress is not None
+                    else range(0, number_of_pages)
+                )
+                for i in _page_iter:
+                    page_annotations = (
+                        all_image_annotations[i]
+                        if i < len(all_image_annotations)
+                        else {}
+                    )
+                    page_boxes = (
+                        page_annotations.get("boxes")
+                        if isinstance(page_annotations, dict)
+                        else []
+                    )
+                    has_boxes = bool(page_boxes and len(page_boxes) > 0)
+
+                    # Load image only when page has redaction boxes (avoids I/O for blank pages).
+                    image = None
+                    image_should_close = False
+                    if has_boxes:
+                        if PROFILE_REDACTION_APPLY:
+                            _t_img0 = time.perf_counter()
+                        try:
+                            _, image, image_should_close = (
+                                _load_one_page_image_for_redact(
+                                    i,
+                                    all_image_annotations,
+                                    page_to_image_path,
+                                    input_folder,
+                                    file_name_with_ext,
+                                )
+                            )
+                        except Exception:
+                            image, image_should_close = None, False
+                        if image is None:
+                            image_should_close = False
+                        if PROFILE_REDACTION_APPLY:
+                            _profile_image_times.append(time.perf_counter() - _t_img0)
+                    elif PROFILE_REDACTION_APPLY:
+                        _profile_image_times.append(0.0)
 
                     pymupdf_page = pdf_doc.load_page(i)
                     current_cropbox = pymupdf_page.cropbox
@@ -2228,18 +2310,31 @@ def apply_redactions_to_review_df_and_files(
                             review_pymupdf_page.delete_annot(annot)
 
                     # Single pass: apply redactions to both final and (if requested) review page.
-                    pymupdf_page = redact_page_with_pymupdf(
-                        page=pymupdf_page,
-                        page_annotations=all_image_annotations[i],
-                        image=image,
-                        original_cropbox=current_cropbox,
-                        page_sizes_df=page_sizes_df,
-                        return_pdf_for_review=bool(review_pymupdf_page is None),
-                        return_pdf_end_of_redaction=False,
-                        input_folder=input_folder,
-                        image_dimensions_override=dims,
-                        review_page=review_pymupdf_page,
-                    )
+                    if has_boxes:
+                        if PROFILE_REDACTION_APPLY:
+                            _t_redact0 = time.perf_counter()
+                        pymupdf_page = redact_page_with_pymupdf(
+                            page=pymupdf_page,
+                            page_annotations=all_image_annotations[i],
+                            image=image,
+                            original_cropbox=current_cropbox,
+                            page_sizes_df=page_sizes_df,
+                            return_pdf_for_review=bool(review_pymupdf_page is None),
+                            return_pdf_end_of_redaction=False,
+                            input_folder=input_folder,
+                            image_dimensions_override=dims,
+                            review_page=review_pymupdf_page,
+                        )
+                        if PROFILE_REDACTION_APPLY:
+                            _profile_page_times.append(time.perf_counter() - _t_redact0)
+                    else:
+                        set_cropbox_safely(pymupdf_page, current_cropbox)
+                        pymupdf_page.clean_contents()
+                        if review_pymupdf_page is not None:
+                            set_cropbox_safely(review_pymupdf_page, current_cropbox)
+                            review_pymupdf_page.clean_contents()
+                        if PROFILE_REDACTION_APPLY:
+                            _profile_page_times.append(0.0)
 
                     # Close image immediately to free memory before next page
                     if image_should_close and image is not None:
@@ -2261,7 +2356,7 @@ def apply_redactions_to_review_df_and_files(
                 save_pdf_with_or_without_compression(
                     pdf_doc, out_pdf_file_path, COMPRESS_REDACTED_PDF
                 )
-                output_files.append(out_pdf_file_path)
+                _out_files.append(out_pdf_file_path)
                 pdf_doc.close()
                 pdf_doc = None
 
@@ -2276,7 +2371,7 @@ def apply_redactions_to_review_df_and_files(
                     save_pdf_with_or_without_compression(
                         review_pdf_doc, out_review_pdf_file_path, COMPRESS_REDACTED_PDF
                     )
-                    output_files.append(out_review_pdf_file_path)
+                    _out_files.append(out_review_pdf_file_path)
                     review_pdf_doc.close()
                     review_pdf_doc = None
 
@@ -2287,43 +2382,126 @@ def apply_redactions_to_review_df_and_files(
         else:
             if is_pdf(file_path) is True:
                 orig_pdf_file_path = file_path
-                output_files.append(orig_pdf_file_path)
+                _out_files.append(orig_pdf_file_path)
 
+        _t_review_csv = 0.0
         try:
-            review_df = convert_annotation_json_to_review_df(
-                all_image_annotations, review_file_state.copy(), page_sizes=page_sizes
-            )
-
-            # page_sizes_df already built once per file above
-            review_df = divide_coordinates_by_page_sizes(review_df, page_sizes_df)
-
-            review_df = review_df[
-                [
-                    "image",
-                    "page",
-                    "label",
-                    "color",
-                    "xmin",
-                    "ymin",
-                    "xmax",
-                    "ymax",
-                    "text",
-                    "id",
+            if PROFILE_REDACTION_APPLY:
+                _t_review0 = time.perf_counter()
+            if (
+                ENABLE_REVIEW_CSV_PARALLELISM
+                and len(all_image_annotations) >= REVIEW_CSV_PARALLEL_MIN_PAGES
+            ):
+                chunk_size = REVIEW_CSV_PAGES_PER_CHUNK
+                chunks = [
+                    all_image_annotations[i : i + chunk_size]
+                    for i in range(0, len(all_image_annotations), chunk_size)
                 ]
-            ]
+                with ThreadPoolExecutor(
+                    max_workers=min(MAX_WORKERS, len(chunks))
+                ) as executor:
+                    partial_dfs = list(
+                        executor.map(convert_annotation_data_to_dataframe, chunks)
+                    )
+                combined = pd.concat(partial_dfs, ignore_index=True)
+                _review_df = convert_annotation_json_to_review_df(
+                    all_image_annotations,
+                    review_file_state.copy(),
+                    page_sizes=page_sizes,
+                    prebuilt_df=combined,
+                )
+            else:
+                _review_df = convert_annotation_json_to_review_df(
+                    all_image_annotations,
+                    review_file_state.copy(),
+                    page_sizes=page_sizes,
+                )
 
             out_review_file_file_path = (
                 output_folder + file_name_with_ext + "_review_file.csv"
             )
+            review_cols = [
+                "image",
+                "page",
+                "label",
+                "color",
+                "xmin",
+                "ymin",
+                "xmax",
+                "ymax",
+                "text",
+                "id",
+            ]
 
-            review_df.to_csv(out_review_file_file_path, index=None)
-            output_files.append(out_review_file_file_path)
+            if USE_POLARS_FOR_REVIEW and not _review_df.empty:
+                coord_cols = ["xmin", "xmax", "ymin", "ymax"]
+                cols_to_convert = coord_cols + ["page"]
+                temp_pd = _review_df.copy()
+                for col in cols_to_convert:
+                    if col in temp_pd.columns:
+                        temp_pd[col] = pd.to_numeric(temp_pd[col], errors="coerce")
+                for col in temp_pd.columns:
+                    if col not in cols_to_convert and temp_pd[col].dtype == object:
+                        temp_pd[col] = temp_pd[col].astype(str)
+                pl_df = pl.from_pandas(temp_pd)
+                pl_df = divide_coordinates_by_page_sizes_pl(pl_df, page_sizes_df)
+                pl_df = pl_df.select([c for c in review_cols if c in pl_df.columns])
+                pl_df.write_csv(out_review_file_file_path)
+                _review_df = pl_df.to_pandas()
+                if "page" in _review_df.columns and not _review_df.empty:
+                    _review_df["page"] = pd.to_numeric(
+                        _review_df["page"], errors="coerce"
+                    )
+                    _review_df["page"] = _review_df["page"].astype("Int64")
+                for c in coord_cols:
+                    if c in _review_df.columns:
+                        _review_df[c] = _review_df[c].astype(float)
+            else:
+                _review_df = divide_coordinates_by_page_sizes(_review_df, page_sizes_df)
+                _review_df = _review_df[review_cols]
+                _review_df.to_csv(out_review_file_file_path, index=None)
+
+            _out_files.append(out_review_file_file_path)
+            if PROFILE_REDACTION_APPLY:
+                _t_review_csv = time.perf_counter() - _t_review0
 
         except Exception as e:
             print(
                 "In apply redactions function, could not save annotations to csv file:",
                 e,
             )
+        if PROFILE_REDACTION_APPLY:
+            _total_page = sum(_profile_page_times)
+            _total_img = sum(_profile_image_times)
+            print(
+                "[PROFILE_REDACTION_APPLY] file=%s | page_sizes=%.3fs | image_load_total=%.3fs | redact_pages_total=%.3fs | review_csv=%.3fs"
+                % (
+                    file_name_with_ext or file_path,
+                    _t_page_sizes,
+                    _total_img,
+                    _total_page,
+                    _t_review_csv,
+                )
+            )
+
+        return (_out_files, _out_log_files, _review_df)
+
+    if ENABLE_PARALLEL_FILES_APPLY_REDACTIONS and len(file_paths) > 1:
+        with ThreadPoolExecutor(
+            max_workers=min(MAX_WORKERS, len(file_paths))
+        ) as executor:
+            futures = [
+                executor.submit(_run_apply_redactions_loop, [fp]) for fp in file_paths
+            ]
+            for fut in as_completed(futures):
+                o_f, o_l, rev_df = fut.result()
+                output_files.extend(o_f)
+                output_log_files.extend(o_l)
+                review_df = rev_df
+    else:
+        o_f, o_l, review_df = _run_apply_redactions_loop(file_paths)
+        output_files.extend(o_f)
+        output_log_files.extend(o_l)
 
     return doc, all_image_annotations, output_files, output_log_files, review_df
 

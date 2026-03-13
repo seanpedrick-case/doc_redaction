@@ -34,8 +34,8 @@ from tools.config import (
     LAMBDA_MAX_POLL_ATTEMPTS,
     LAMBDA_POLL_INTERVAL,
     LAMBDA_PREPARE_IMAGES,
-    LLM_PII_MAX_TOKENS,
-    LLM_PII_TEMPERATURE,
+    LLM_MAX_NEW_TOKENS,
+    LLM_TEMPERATURE,
     OCR_FIRST_PASS_MAX_WORKERS,
     SUMMARY_PAGE_GROUP_MAX_WORKERS,
 )
@@ -528,13 +528,13 @@ def lambda_handler(event, context):
         "llm_temperature": float(
             arguments.get(
                 "llm_temperature",
-                os.getenv("LLM_PII_TEMPERATURE", LLM_PII_TEMPERATURE),
+                os.getenv("LLM_TEMPERATURE", LLM_TEMPERATURE),
             )
         ),
         "llm_max_tokens": int(
             arguments.get(
                 "llm_max_tokens",
-                os.getenv("LLM_PII_MAX_TOKENS", LLM_PII_MAX_TOKENS),
+                os.getenv("LLM_MAX_NEW_TOKENS", LLM_MAX_NEW_TOKENS),
             )
         ),
         "llm_redact_entities": _get_env_list(

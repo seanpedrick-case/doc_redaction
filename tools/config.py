@@ -1340,19 +1340,13 @@ model_source = list()
 # This is a simple identifier for the model (e.g., "gemma-3-4b", "qwen-3-4b")
 # The actual model loading uses LOCAL_TRANSFORMERS_LLM_PII_REPO_ID, LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE, and LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
 LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = get_or_create_env_var(
-    "LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE", "gemma-3-4b"
+    "LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE", "gemma-3-27b"
 )  # Model identifier for local transformers PII detection. This is used for display/logging purposes.
 # These variables are the primary configuration for local model loading
 # Define these early so they're available for use below
 LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = get_or_create_env_var(
     "LOCAL_TRANSFORMERS_LLM_PII_REPO_ID", "unsloth/gemma-3-4b-it-bnb-4bit"
 )  # Hugging Face repository ID for PII detection model (e.g., "unsloth/gemma-3-4b-it-bnb-4bit")
-LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = get_or_create_env_var(
-    "LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE", "gemma-3-4b-it-qat-UD-Q4_K_XL.gguf"
-)  # Optional: Specific model filename if needed. If empty, uses the default from the repo.
-LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER = get_or_create_env_var(
-    "LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER", "model/gemma3_4b"
-)  # Optional: Local folder for PII model. If empty, uses MODEL_CACHE_PATH
 
 
 USE_LLAMA_SWAP = get_or_create_env_var("USE_LLAMA_SWAP", "False")
@@ -1381,6 +1375,93 @@ if (
         model_full_names.append(SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL)
         model_short_names.append(SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL)
         model_source.append("Local")
+
+# HF token may or may not be needed for downloading models from Hugging Face
+HF_TOKEN = get_or_create_env_var("HF_TOKEN", "")
+
+LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START = convert_string_to_boolean(
+    get_or_create_env_var("LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START", "False")
+)
+
+MULTIMODAL_PROMPT_FORMAT = convert_string_to_boolean(
+    get_or_create_env_var("MULTIMODAL_PROMPT_FORMAT", "False")
+)
+
+GEMMA3_12B_REPO_ID = get_or_create_env_var(
+    "GEMMA3_12B_REPO_TRANSFORMERS_ID", "unsloth/gemma-3-12b-it-bnb-4bit"
+)
+GEMMA3_27B_REPO_ID = get_or_create_env_var(
+    "GEMMA3_27B_REPO_TRANSFORMERS_ID", "unsloth/gemma-3-27b-it-bnb-4bit"
+)
+GPT_OSS_REPO_ID = get_or_create_env_var("GPT_OSS_REPO_ID", "openai/gpt-oss-20b")
+
+# Qwen 3.5 model repo IDs (9B through 122B, from run_vlm.py)
+QWEN35_9B_REPO_ID = get_or_create_env_var(
+    "QWEN35_9B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-9B"
+)
+QWEN35_27B_REPO_ID = get_or_create_env_var(
+    "QWEN35_27B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-27B"
+)
+QWEN35_27B_BNB_4BIT_REPO_ID = get_or_create_env_var(
+    "QWEN35_27B_BNB_4BIT_REPO_TRANSFORMERS_ID", "skkwowee/Qwen3.5-27B-bnb-4bit"
+)
+QWEN35_35B_A3B_REPO_ID = get_or_create_env_var(
+    "QWEN35_35B_A3B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-35B-A3B"
+)
+QWEN35_122B_A10B_REPO_ID = get_or_create_env_var(
+    "QWEN35_122B_A10B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-122B-A10B"
+)
+
+
+# Override LOCAL_TRANSFORMERS_LLM_PII_* variables based on LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+# This allows users to set just the model choice and have the correct repo/file/folder automatically selected
+if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
+    model_choice_lower = LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE.lower()
+
+    if "gemma-3-12b" in model_choice_lower or "gemma3-12b" in model_choice_lower:
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GEMMA3_12B_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Gemma 3 12B"
+    elif "gemma-3-27b" in model_choice_lower or "gemma3-27b" in model_choice_lower:
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GEMMA3_27B_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Gemma 3 27B"
+    elif "gpt-oss" in model_choice_lower:
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GPT_OSS_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "gpt-oss-20b"
+    elif "qwen3.5-9b" in model_choice_lower or "qwen-3.5-9b" in model_choice_lower:
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_9B_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 9B"
+    elif (
+        "qwen3.5-27b-bnb" in model_choice_lower
+        or "qwen3.5-27b-4bit" in model_choice_lower
+    ):
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_27B_BNB_4BIT_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 27B (4-bit)"
+    elif "qwen3.5-27b" in model_choice_lower or "qwen-3.5-27b" in model_choice_lower:
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_27B_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 27B"
+    elif "qwen3.5-35b" in model_choice_lower or "qwen-3.5-35b" in model_choice_lower:
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_35B_A3B_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 35B-A3B"
+    elif "qwen3.5-122b" in model_choice_lower or "qwen-3.5-122b" in model_choice_lower:
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_122B_A10B_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 122B-A10B"
+
+# Map LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE to LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE format
+model_choice_lower = LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE.lower()
+
+# Set MULTIMODAL_PROMPT_FORMAT based on model choice
+if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE in [
+    "Gemma 3 12B",
+    "Gemma 3 27B",
+    "Qwen 3.5 9B",
+    "Qwen 3.5 27B (4-bit)",
+    "Qwen 3.5 27B",
+    "Qwen 3.5 35B-A3B",
+    "Qwen 3.5 122B-A10B",
+]:
+    MULTIMODAL_PROMPT_FORMAT = True
+
+### AWS Bedrock LLM Model Options
 
 amazon_models = [
     "anthropic.claude-3-haiku-20240307-v1:0",
@@ -1583,226 +1664,23 @@ CUSTOM_VLM_BACKEND = (
 if CUSTOM_VLM_BACKEND not in ("transformers_vlm", "inference_vlm", "bedrock_vlm"):
     CUSTOM_VLM_BACKEND = "bedrock_vlm"
 
-# print("model_name_map:", model_name_map)
-
-# HF token may or may not be needed for downloading models from Hugging Face
-HF_TOKEN = get_or_create_env_var("HF_TOKEN", "")
-
-LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START = convert_string_to_boolean(
-    get_or_create_env_var("LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START", "False")
+# Local transformers LLM generation parameters
+LLM_MODEL_DTYPE = get_or_create_env_var("LLM_MODEL_DTYPE", "bfloat16")
+QUANTISE_TRANSFORMERS_LLM_MODELS = convert_string_to_boolean(
+    get_or_create_env_var("QUANTISE_TRANSFORMERS_LLM_MODELS", "False")
+)
+INT8_WITH_OFFLOAD_TO_CPU = convert_string_to_boolean(
+    get_or_create_env_var("INT8_WITH_OFFLOAD_TO_CPU", "False")
+)
+COMPILE_MODE = get_or_create_env_var("COMPILE_MODE", "reduce-overhead")
+COMPILE_TRANSFORMERS = convert_string_to_boolean(
+    get_or_create_env_var("COMPILE_TRANSFORMERS", "False")
 )
 
-MULTIMODAL_PROMPT_FORMAT = convert_string_to_boolean(
-    get_or_create_env_var("MULTIMODAL_PROMPT_FORMAT", "False")
+PRINT_TRANSFORMERS_USER_PROMPT = convert_string_to_boolean(
+    get_or_create_env_var("PRINT_TRANSFORMERS_USER_PROMPT", "False")
 )
 
-# Following is not currently supported
-# If you are using a system with low VRAM, you can set this to True to reduce the memory requirements
-LOW_VRAM_SYSTEM = convert_string_to_boolean(
-    get_or_create_env_var("LOW_VRAM_SYSTEM", "False")
-)
-
-if LOW_VRAM_SYSTEM:
-    print("Using settings for low VRAM system")
-    USE_LLAMA_CPP = get_or_create_env_var("USE_LLAMA_CPP", "True")
-    LLM_MAX_NEW_TOKENS = int(get_or_create_env_var("LLM_MAX_NEW_TOKENS", "4096"))
-    LLM_CONTEXT_LENGTH = int(get_or_create_env_var("LLM_CONTEXT_LENGTH", "8192"))
-    LLM_BATCH_SIZE = int(get_or_create_env_var("LLM_BATCH_SIZE", "512"))
-    K_QUANT_LEVEL = int(
-        get_or_create_env_var("K_QUANT_LEVEL", "2")
-    )  # 2 = q4_0, 8 = q8_0, 4 = fp16
-    V_QUANT_LEVEL = int(
-        get_or_create_env_var("V_QUANT_LEVEL", "2")
-    )  # 2 = q4_0, 8 = q8_0, 4 = fp16
-
-USE_LLAMA_CPP = get_or_create_env_var(
-    "USE_LLAMA_CPP", "False"
-)  # Not currently supported
-
-GEMMA2_REPO_ID = get_or_create_env_var("GEMMA2_2B_REPO_ID", "unsloth/gemma-2-it-GGUF")
-GEMMA2_REPO_TRANSFORMERS_ID = get_or_create_env_var(
-    "GEMMA2_2B_REPO_TRANSFORMERS_ID", "unsloth/gemma-2-2b-it-bnb-4bit"
-)
-if USE_LLAMA_CPP == "False":
-    GEMMA2_REPO_ID = GEMMA2_REPO_TRANSFORMERS_ID
-GEMMA2_MODEL_FILE = get_or_create_env_var(
-    "GEMMA2_2B_MODEL_FILE", "gemma-2-2b-it.q8_0.gguf"
-)
-GEMMA2_MODEL_FOLDER = get_or_create_env_var("GEMMA2_2B_MODEL_FOLDER", "model/gemma")
-
-GEMMA3_4B_REPO_ID = get_or_create_env_var(
-    "GEMMA3_4B_REPO_ID", "unsloth/gemma-3-4b-it-qat-GGUF"
-)
-GEMMA3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var(
-    "GEMMA3_4B_REPO_TRANSFORMERS_ID", "unsloth/gemma-3-4b-it-bnb-4bit"
-)
-if USE_LLAMA_CPP == "False":
-    GEMMA3_4B_REPO_ID = GEMMA3_4B_REPO_TRANSFORMERS_ID
-GEMMA3_4B_MODEL_FILE = get_or_create_env_var(
-    "GEMMA3_4B_MODEL_FILE", "gemma-3-4b-it-qat-UD-Q4_K_XL.gguf"
-)
-GEMMA3_4B_MODEL_FOLDER = get_or_create_env_var(
-    "GEMMA3_4B_MODEL_FOLDER", "model/gemma3_4b"
-)
-
-GEMMA3_12B_REPO_ID = get_or_create_env_var(
-    "GEMMA3_12B_REPO_ID", "unsloth/gemma-3-12b-it-GGUF"
-)
-GEMMA3_12B_REPO_TRANSFORMERS_ID = get_or_create_env_var(
-    "GEMMA3_12B_REPO_TRANSFORMERS_ID", "unsloth/gemma-3-12b-it-bnb-4bit"
-)
-if USE_LLAMA_CPP == "False":
-    GEMMA3_12B_REPO_ID = GEMMA3_12B_REPO_TRANSFORMERS_ID
-GEMMA3_12B_MODEL_FILE = get_or_create_env_var(
-    "GEMMA3_12B_MODEL_FILE", "gemma-3-12b-it-UD-Q4_K_XL.gguf"
-)
-GEMMA3_12B_MODEL_FOLDER = get_or_create_env_var(
-    "GEMMA3_12B_MODEL_FOLDER", "model/gemma3_12b"
-)
-
-GEMMA3_27B_REPO_ID = get_or_create_env_var(
-    "GEMMA3_27B_REPO_ID", "unsloth/gemma-3-27b-it-GGUF"
-)
-GEMMA3_27B_REPO_TRANSFORMERS_ID = get_or_create_env_var(
-    "GEMMA3_27B_REPO_TRANSFORMERS_ID", "unsloth/gemma-3-27b-it-bnb-4bit"
-)
-if USE_LLAMA_CPP == "False":
-    GEMMA3_27B_REPO_ID = GEMMA3_27B_REPO_TRANSFORMERS_ID
-GEMMA3_27B_MODEL_FILE = get_or_create_env_var(
-    "GEMMA3_27B_MODEL_FILE", "gemma-3-27b-it-UD-Q4_K_XL.gguf"
-)
-GEMMA3_27B_MODEL_FOLDER = get_or_create_env_var(
-    "GEMMA3_27B_MODEL_FOLDER", "model/gemma3_27b"
-)
-
-GPT_OSS_REPO_ID = get_or_create_env_var("GPT_OSS_REPO_ID", "unsloth/gpt-oss-20b-GGUF")
-GPT_OSS_REPO_TRANSFORMERS_ID = get_or_create_env_var(
-    "GPT_OSS_REPO_TRANSFORMERS_ID", "unsloth/gpt-oss-20b-unsloth-bnb-4bit"
-)
-if USE_LLAMA_CPP == "False":
-    GPT_OSS_REPO_ID = GPT_OSS_REPO_TRANSFORMERS_ID
-GPT_OSS_MODEL_FILE = get_or_create_env_var("GPT_OSS_MODEL_FILE", "gpt-oss-20b-F16.gguf")
-GPT_OSS_MODEL_FOLDER = get_or_create_env_var("GPT_OSS_MODEL_FOLDER", "model/gpt_oss")
-
-QWEN3_4B_REPO_ID = get_or_create_env_var(
-    "QWEN3_4B_REPO_ID", "unsloth/Qwen3-4B-Instruct-2507-GGUF"
-)
-QWEN3_4B_REPO_TRANSFORMERS_ID = get_or_create_env_var(
-    "QWEN3_4B_REPO_TRANSFORMERS_ID", "unsloth/Qwen3-4B-unsloth-bnb-4bit"
-)
-if USE_LLAMA_CPP == "False":
-    QWEN3_4B_REPO_ID = QWEN3_4B_REPO_TRANSFORMERS_ID
-
-QWEN3_4B_MODEL_FILE = get_or_create_env_var(
-    "QWEN3_4B_MODEL_FILE", "Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf"
-)
-QWEN3_4B_MODEL_FOLDER = get_or_create_env_var("QWEN3_4B_MODEL_FOLDER", "model/qwen")
-
-GRANITE_4_TINY_REPO_ID = get_or_create_env_var(
-    "GRANITE_4_TINY_REPO_ID", "unsloth/granite-4.0-h-tiny-GGUF"
-)
-GRANITE_4_TINY_REPO_TRANSFORMERS_ID = get_or_create_env_var(
-    "GRANITE_4_TINY_REPO_TRANSFORMERS_ID", "unsloth/granite-4.0-h-tiny-FP8-Dynamic"
-)
-if USE_LLAMA_CPP == "False":
-    GRANITE_4_TINY_REPO_ID = GRANITE_4_TINY_REPO_TRANSFORMERS_ID
-GRANITE_4_TINY_MODEL_FILE = get_or_create_env_var(
-    "GRANITE_4_TINY_MODEL_FILE", "granite-4.0-h-tiny-UD-Q4_K_XL.gguf"
-)
-GRANITE_4_TINY_MODEL_FOLDER = get_or_create_env_var(
-    "GRANITE_4_TINY_MODEL_FOLDER", "model/granite"
-)
-
-GRANITE_4_3B_REPO_ID = get_or_create_env_var(
-    "GRANITE_4_3B_REPO_ID", "unsloth/granite-4.0-h-micro-GGUF"
-)
-GRANITE_4_3B_REPO_TRANSFORMERS_ID = get_or_create_env_var(
-    "GRANITE_4_3B_REPO_TRANSFORMERS_ID", "unsloth/granite-4.0-micro-unsloth-bnb-4bit"
-)
-if USE_LLAMA_CPP == "False":
-    GRANITE_4_3B_REPO_ID = GRANITE_4_3B_REPO_TRANSFORMERS_ID
-GRANITE_4_3B_MODEL_FILE = get_or_create_env_var(
-    "GRANITE_4_3B_MODEL_FILE", "granite-4.0-h-micro-UD-Q4_K_XL.gguf"
-)
-GRANITE_4_3B_MODEL_FOLDER = get_or_create_env_var(
-    "GRANITE_4_3B_MODEL_FOLDER", "model/granite"
-)
-
-# Override LOCAL_TRANSFORMERS_LLM_PII_* variables based on LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
-# This allows users to set just the model choice and have the correct repo/file/folder automatically selected
-if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
-    model_choice_lower = LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE.lower()
-
-    if "gemma-3-4b" in model_choice_lower or "gemma3-4b" in model_choice_lower:
-        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GEMMA3_4B_REPO_ID
-        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = GEMMA3_4B_MODEL_FILE
-        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER = GEMMA3_4B_MODEL_FOLDER
-    elif "gemma-3-12b" in model_choice_lower or "gemma3-12b" in model_choice_lower:
-        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GEMMA3_12B_REPO_ID
-        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = GEMMA3_12B_MODEL_FILE
-        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER = GEMMA3_12B_MODEL_FOLDER
-    elif "gemma-3-27b" in model_choice_lower or "gemma3-27b" in model_choice_lower:
-        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GEMMA3_27B_REPO_ID
-        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = GEMMA3_27B_MODEL_FILE
-        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER = GEMMA3_27B_MODEL_FOLDER
-    elif "gemma-2" in model_choice_lower or "gemma2" in model_choice_lower:
-        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GEMMA2_REPO_ID
-        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = GEMMA2_MODEL_FILE
-        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER = GEMMA2_MODEL_FOLDER
-    elif "qwen-3-4b" in model_choice_lower or "qwen3-4b" in model_choice_lower:
-        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN3_4B_REPO_ID
-        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = QWEN3_4B_MODEL_FILE
-        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER = QWEN3_4B_MODEL_FOLDER
-    elif "gpt-oss" in model_choice_lower:
-        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GPT_OSS_REPO_ID
-        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = GPT_OSS_MODEL_FILE
-        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER = GPT_OSS_MODEL_FOLDER
-    elif (
-        "granite-4-tiny" in model_choice_lower or "granite4-tiny" in model_choice_lower
-    ):
-        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GRANITE_4_TINY_REPO_ID
-        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = GRANITE_4_TINY_MODEL_FILE
-        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER = GRANITE_4_TINY_MODEL_FOLDER
-    elif (
-        "granite-4-micro" in model_choice_lower
-        or "granite4-micro" in model_choice_lower
-    ):
-        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GRANITE_4_3B_REPO_ID
-        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE = GRANITE_4_3B_MODEL_FILE
-        LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER = GRANITE_4_3B_MODEL_FOLDER
-    # If model choice doesn't match any known model, keep the existing values from environment variables
-
-# Map LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE to LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE format
-model_choice_lower = LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE.lower()
-
-if "gemma-3-4b" in model_choice_lower or "gemma3-4b" in model_choice_lower:
-    LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Gemma 3 4B"
-elif "gemma-3-12b" in model_choice_lower or "gemma3-12b" in model_choice_lower:
-    LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Gemma 3 12B"
-elif "gemma-3-27b" in model_choice_lower or "gemma3-27b" in model_choice_lower:
-    LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Gemma 3 27B"
-elif "gemma-2" in model_choice_lower or "gemma2" in model_choice_lower:
-    LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Gemma 2b"
-elif "qwen-3-4b" in model_choice_lower or "qwen3-4b" in model_choice_lower:
-    LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3 4B"
-elif "gpt-oss" in model_choice_lower:
-    LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "gpt-oss-20b"
-elif "granite-4-tiny" in model_choice_lower or "granite4-tiny" in model_choice_lower:
-    LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Granite 4 Tiny"
-elif "granite-4-micro" in model_choice_lower or "granite4-micro" in model_choice_lower:
-    LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Granite 4 Micro"
-
-# Set MULTIMODAL_PROMPT_FORMAT based on model choice
-if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE in [
-    "Gemma 3 4B",
-    "Gemma 3 12B",
-    "Gemma 3 27B",
-]:
-    MULTIMODAL_PROMPT_FORMAT = True
-
-LLM_MAX_GPU_LAYERS = int(
-    get_or_create_env_var("LLM_MAX_GPU_LAYERS", "-1")
-)  # Maximum possible
 LLM_TEMPERATURE = float(get_or_create_env_var("LLM_TEMPERATURE", "0.1"))
 LLM_TOP_K = int(
     get_or_create_env_var("LLM_TOP_K", "64")
@@ -1810,62 +1688,27 @@ LLM_TOP_K = int(
 LLM_MIN_P = float(get_or_create_env_var("LLM_MIN_P", "0"))
 LLM_TOP_P = float(get_or_create_env_var("LLM_TOP_P", "0.95"))
 LLM_REPETITION_PENALTY = float(get_or_create_env_var("LLM_REPETITION_PENALTY", "1.0"))
-LLM_LAST_N_TOKENS = int(get_or_create_env_var("LLM_LAST_N_TOKENS", "512"))
 LLM_MAX_NEW_TOKENS = int(get_or_create_env_var("LLM_MAX_NEW_TOKENS", "4096"))
 LLM_SEED = int(get_or_create_env_var("LLM_SEED", "42"))
 LLM_RESET = convert_string_to_boolean(get_or_create_env_var("LLM_RESET", "False"))
 LLM_STREAM = convert_string_to_boolean(get_or_create_env_var("LLM_STREAM", "True"))
 LLM_THREADS = int(get_or_create_env_var("LLM_THREADS", "-1"))
-LLM_BATCH_SIZE = int(get_or_create_env_var("LLM_BATCH_SIZE", "2048"))
 LLM_CONTEXT_LENGTH = int(
     get_or_create_env_var("LLM_CONTEXT_LENGTH", "32768")
 )  # LLM only: maximum context length for text LLMs (e.g. llama.cpp). Separate from MAX_INPUT_TOKEN_LENGTH (VLM).
-LLM_SAMPLE = convert_string_to_boolean(get_or_create_env_var("LLM_SAMPLE", "True"))
 LLM_STOP_STRINGS = _get_env_list(
     get_or_create_env_var("LLM_STOP_STRINGS", r"['\n\n\n\n\n\n']")
 )
+LLM_RETRY_ATTEMPTS = int(get_or_create_env_var("NUMBER_OF_RETRY_ATTEMPTS", "10"))
+LLM_TIMEOUT_WAIT = int(get_or_create_env_var("TIMEOUT_WAIT", "5"))
 
+# Additional LLM configuration options (not currently implemented)
 SPECULATIVE_DECODING = convert_string_to_boolean(
     get_or_create_env_var("SPECULATIVE_DECODING", "False")
 )
-NUM_PRED_TOKENS = int(get_or_create_env_var("NUM_PRED_TOKENS", "2"))
-
-
-# LLM-specific configs for PII detection
-# These can be overridden via environment variables, otherwise use general LLM configs
-LLM_PII_TEMPERATURE = float(
-    get_or_create_env_var("LLM_PII_TEMPERATURE", str(LLM_TEMPERATURE))
-)
-LLM_PII_MAX_TOKENS = int(
-    get_or_create_env_var("LLM_PII_MAX_TOKENS", str(LLM_MAX_NEW_TOKENS))
-)
-LLM_PII_NUMBER_OF_RETRY_ATTEMPTS = int(
-    get_or_create_env_var("LLM_PII_NUMBER_OF_RETRY_ATTEMPTS", "3")
-)
-LLM_PII_TIMEOUT_WAIT = int(get_or_create_env_var("LLM_PII_TIMEOUT_WAIT", "5"))
-
-# Additional LLM configuration options
-ASSISTANT_MODEL = get_or_create_env_var("ASSISTANT_MODEL", "")
-BATCH_SIZE_DEFAULT = int(get_or_create_env_var("BATCH_SIZE_DEFAULT", "512"))
-COMPILE_MODE = get_or_create_env_var("COMPILE_MODE", "reduce-overhead")
-COMPILE_TRANSFORMERS = convert_string_to_boolean(
-    get_or_create_env_var("COMPILE_TRANSFORMERS", "False")
-)
-DEDUPLICATION_THRESHOLD = float(get_or_create_env_var("DEDUPLICATION_THRESHOLD", "0.9"))
-INT8_WITH_OFFLOAD_TO_CPU = convert_string_to_boolean(
-    get_or_create_env_var("INT8_WITH_OFFLOAD_TO_CPU", "False")
-)
-MAX_COMMENT_CHARS = int(get_or_create_env_var("MAX_COMMENT_CHARS", "1000"))
-MAX_TIME_FOR_LOOP = int(get_or_create_env_var("MAX_TIME_FOR_LOOP", "3600"))
-MODEL_DTYPE = get_or_create_env_var("MODEL_DTYPE", "bfloat16")
-NUMBER_OF_RETRY_ATTEMPTS = int(get_or_create_env_var("NUMBER_OF_RETRY_ATTEMPTS", "3"))
-TIMEOUT_WAIT = int(get_or_create_env_var("TIMEOUT_WAIT", "30"))
-QUANTISE_TRANSFORMERS_LLM_MODELS = convert_string_to_boolean(
-    get_or_create_env_var("QUANTISE_TRANSFORMERS_LLM_MODELS", "False")
-)
-PRINT_TRANSFORMERS_USER_PROMPT = convert_string_to_boolean(
-    get_or_create_env_var("PRINT_TRANSFORMERS_USER_PROMPT", "False")
-)
+ASSISTANT_MODEL = get_or_create_env_var(
+    "ASSISTANT_MODEL", ""
+)  # Not currently implemented
 
 
 # If you are using e.g. gpt-oss, you can add a reasoning suffix to set reasoning level, or turn it off in the case of Qwen 3 4B
@@ -1875,15 +1718,19 @@ model_type_for_reasoning = LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
 if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE == "gpt-oss-20b":
     REASONING_SUFFIX = get_or_create_env_var("REASONING_SUFFIX", "Reasoning: low")
     # print("Using REASONING_SUFFIX: Reasoning: low")
-elif LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE == "Qwen 3 4B":
+elif LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE == "Qwen 3 4B" or (
+    LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+    and "Qwen 3.5" in LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+):
     # print("Using REASONING_SUFFIX: /nothink")
-    REASONING_SUFFIX = get_or_create_env_var("REASONING_SUFFIX", "/nothink")
+    REASONING_SUFFIX = get_or_create_env_var("REASONING_SUFFIX", "<think> </think>")
 else:
     # print("No reasoning suffix applied")
     REASONING_SUFFIX = get_or_create_env_var("REASONING_SUFFIX", "")
 
-
+###
 # Entities for redaction
+###
 CHOSEN_COMPREHEND_ENTITIES = get_or_create_env_var(
     "CHOSEN_COMPREHEND_ENTITIES",
     "['EMAIL','ADDRESS','NAME','PHONE', 'PASSPORT_NUMBER', 'UK_NATIONAL_INSURANCE_NUMBER', 'UK_NATIONAL_HEALTH_SERVICE_NUMBER', 'CUSTOM']",
@@ -2084,6 +1931,31 @@ RETURN_REDACTED_PDF = convert_string_to_boolean(
 COMPRESS_REDACTED_PDF = convert_string_to_boolean(
     get_or_create_env_var("COMPRESS_REDACTED_PDF", "False")
 )  # On low memory systems, the compression options in pymupdf can cause the app to crash if the PDF is longer than 500 pages or so. Setting this to False will save the PDF only with a basic cleaning option enabled
+
+# When True, print lightweight timing for apply_redactions_to_review_df_and_files (page_sizes build, per-page redaction, review CSV). For debugging hotspots only.
+PROFILE_REDACTION_APPLY = convert_string_to_boolean(
+    get_or_create_env_var("PROFILE_REDACTION_APPLY", "False")
+)
+
+# When True, merge overlapping or very close redaction boxes into fewer larger rectangles before applying (reduces redact_single_box calls on dense pages). Off by default. Warning - may turn a page into one single large redaction box if there are many redactions on the page.
+MERGE_SMALL_REDACTIONS = convert_string_to_boolean(
+    get_or_create_env_var("MERGE_SMALL_REDACTIONS", "False")
+)
+
+# When True, use Polars for review DataFrame coordinate scaling and CSV write in apply_redactions_to_review_df_and_files (faster for large annotation sets).
+USE_POLARS_FOR_REVIEW = convert_string_to_boolean(
+    get_or_create_env_var("USE_POLARS_FOR_REVIEW", "True")
+)
+
+# When True and multiple file paths are given, process each file in parallel in apply_redactions_to_review_df_and_files. Off by default.
+ENABLE_PARALLEL_FILES_APPLY_REDACTIONS = convert_string_to_boolean(
+    get_or_create_env_var("ENABLE_PARALLEL_FILES_APPLY_REDACTIONS", "True")
+)
+
+# When True, build review DataFrame from all_image_annotations in chunked parallel workers (experimental). Off by default.
+ENABLE_REVIEW_CSV_PARALLELISM = convert_string_to_boolean(
+    get_or_create_env_var("ENABLE_REVIEW_CSV_PARALLELISM", "True")
+)
 
 ###
 # APP RUN / GUI OPTIONS

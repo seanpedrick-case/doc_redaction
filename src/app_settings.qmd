@@ -584,8 +584,8 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
     * **Default Value:** `"gemma-3-4b"`
 
 * **`LOCAL_TRANSFORMERS_LLM_PII_REPO_ID`**, **`LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE`**, **`LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER`**
-    * **Description:** Hugging Face repo ID, optional model filename, and local folder for the local transformers PII detection model. Can be overridden automatically based on `LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE`.
-    * **Default Values:** e.g. `"unsloth/gemma-3-4b-it-bnb-4bit"`, `"gemma-3-4b-it-qat-UD-Q4_K_XL.gguf"`, `"model/gemma3_4b"`.
+    * **Description:** Hugging Face repo ID, for the local transformers PII detection model. Can be overridden automatically based on `LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE`.
+    * **Default Values:** e.g. `"unsloth/gemma-3-4b-it-bnb-4bit"`.
 
 * **`LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START`**
     * **Description:** If set to `"True"`, loads the local transformers LLM PII model at application startup (reduces latency on first use).
@@ -595,19 +595,11 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
     * **Description:** If set to `"True"`, uses multimodal prompt format for the local LLM. Set automatically for some model choices (e.g. Gemma 3 4B/12B).
     * **Default Value:** `"False"`
 
-* **`LOW_VRAM_SYSTEM`**
-    * **Description:** If set to `"True"`, applies lower-memory settings (e.g. smaller batch size, optional use of llama.cpp). Use on systems with limited GPU memory.
-    * **Default Value:** `"False"`
-
-* **`USE_LLAMA_CPP`**
-    * **Description:** If set to `"True"`, use llama.cpp for local LLM inference. When `LOW_VRAM_SYSTEM` is true, this defaults to `"True"`. Not fully supported in all flows.
-    * **Default Value:** `"False"` (or `"True"` when `LOW_VRAM_SYSTEM` is true).
-
 * **`REASONING_SUFFIX`**
     * **Description:** Suffix added to prompts for reasoning-capable models (e.g. `"Reasoning: low"` for gpt-oss-20b, `"/nothink"` for Qwen 3 4B to disable chain-of-thought). Model-specific; see config for defaults.
     * **Default Value:** Model-dependent (e.g. `"Reasoning: low"` or `"/nothink"` or `''`).
 
-* **LLM generation parameters:** **`LLM_TEMPERATURE`** (default `0.6`), **`LLM_TOP_K`** (`64`), **`LLM_MIN_P`** (`0`), **`LLM_TOP_P`** (`0.95`), **`LLM_REPETITION_PENALTY`** (`1.0`), **`LLM_MAX_NEW_TOKENS`** (`4096`), **`LLM_CONTEXT_LENGTH`** (`16384`), **`LLM_SEED`** (`42`), **`LLM_STREAM`** (`True`), **`LLM_SAMPLE`** (`True`), **`LLM_MAX_GPU_LAYERS`** (`-1`), and related **`LLM_*`** variables in `tools/config.py` control local/transformers LLM generation. **`LLM_PII_TEMPERATURE`**, **`LLM_PII_MAX_TOKENS`**, **`LLM_PII_NUMBER_OF_RETRY_ATTEMPTS`** (`3`), and **`LLM_PII_TIMEOUT_WAIT`** (`5`) control PII detection LLM calls and retries.
+* **LLM generation parameters:** **`LLM_TEMPERATURE`** (default `0.1`), **`LLM_TOP_K`** (`64`), **`LLM_MIN_P`** (`0`), **`LLM_TOP_P`** (`0.95`), **`LLM_REPETITION_PENALTY`** (`1.0`), **`LLM_MAX_NEW_TOKENS`** (`4096`), **`LLM_CONTEXT_LENGTH`** (`32768`), **`LLM_SEED`** (`42`), **`LLM_RESET`** (`False`), **`LLM_STREAM`** (`True`), **`LLM_STOP_STRINGS`**, **`LLM_THREADS`** (`-1`), **`SPECULATIVE_DECODING`** (`False`), **`ASSISTANT_MODEL`**, **`LLM_MODEL_DTYPE`** (`bfloat16`), and other **`LLM_*`** / related variables in `tools/config.py` control local/transformers LLM generation in `tools/llm_funcs.py`. **`LLM_TEMPERATURE`** and **`LLM_MAX_NEW_TOKENS`** also control PII detection LLM calls and retries.
 
 * **`SHOW_INFERENCE_SERVER_VLM_OPTIONS`**
     * **Description:** If set to `"True"`, allows the user to select inference-server-related options from the UI.

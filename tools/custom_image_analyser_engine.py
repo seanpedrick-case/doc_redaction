@@ -43,8 +43,8 @@ from tools.config import (
     INFERENCE_SERVER_MODEL_NAME,
     INFERENCE_SERVER_PII_OPTION,
     INFERENCE_SERVER_TIMEOUT,
-    LLM_PII_MAX_TOKENS,
-    LLM_PII_TEMPERATURE,
+    LLM_MAX_NEW_TOKENS,
+    LLM_TEMPERATURE,
     LOAD_PADDLE_AT_STARTUP,
     LOCAL_OCR_MODEL_OPTIONS,
     LOCAL_PII_OPTION,
@@ -8927,10 +8927,10 @@ class CustomImageAnalyzerEngine:
                                 all_text_line_results=all_text_line_results,
                                 model_choice=model_choice,
                                 temperature=text_analyzer_kwargs.get(
-                                    "temperature", LLM_PII_TEMPERATURE
+                                    "temperature", LLM_TEMPERATURE
                                 ),
                                 max_tokens=text_analyzer_kwargs.get(
-                                    "max_tokens", LLM_PII_MAX_TOKENS
+                                    "max_tokens", LLM_MAX_NEW_TOKENS
                                 ),
                                 output_folder=getattr(self, "output_folder", None),
                                 batch_number=comprehend_query_number + 1,
@@ -9029,10 +9029,10 @@ class CustomImageAnalyzerEngine:
                                 all_text_line_results=all_text_line_results,
                                 model_choice=model_choice,
                                 temperature=text_analyzer_kwargs.get(
-                                    "temperature", LLM_PII_TEMPERATURE
+                                    "temperature", LLM_TEMPERATURE
                                 ),
                                 max_tokens=text_analyzer_kwargs.get(
-                                    "max_tokens", LLM_PII_MAX_TOKENS
+                                    "max_tokens", LLM_MAX_NEW_TOKENS
                                 ),
                                 output_folder=getattr(self, "output_folder", None),
                                 batch_number=comprehend_query_number + 1,
@@ -9106,10 +9106,10 @@ class CustomImageAnalyzerEngine:
                         all_text_line_results=all_text_line_results,
                         model_choice=model_choice,
                         temperature=text_analyzer_kwargs.get(
-                            "temperature", LLM_PII_TEMPERATURE
+                            "temperature", LLM_TEMPERATURE
                         ),
                         max_tokens=text_analyzer_kwargs.get(
-                            "max_tokens", LLM_PII_MAX_TOKENS
+                            "max_tokens", LLM_MAX_NEW_TOKENS
                         ),
                         output_folder=getattr(self, "output_folder", None),
                         batch_number=comprehend_query_number + 1,
@@ -9288,10 +9288,10 @@ class CustomImageAnalyzerEngine:
                                 all_text_line_results=all_text_line_results,
                                 model_choice=model_choice,
                                 temperature=text_analyzer_kwargs.get(
-                                    "temperature", LLM_PII_TEMPERATURE
+                                    "temperature", LLM_TEMPERATURE
                                 ),
                                 max_tokens=text_analyzer_kwargs.get(
-                                    "max_tokens", LLM_PII_MAX_TOKENS
+                                    "max_tokens", LLM_MAX_NEW_TOKENS
                                 ),
                                 output_folder=getattr(self, "output_folder", None),
                                 batch_number=comprehend_query_number + 1,
@@ -9390,10 +9390,10 @@ class CustomImageAnalyzerEngine:
                                 all_text_line_results=all_text_line_results,
                                 model_choice=model_choice,
                                 temperature=text_analyzer_kwargs.get(
-                                    "temperature", LLM_PII_TEMPERATURE
+                                    "temperature", LLM_TEMPERATURE
                                 ),
                                 max_tokens=text_analyzer_kwargs.get(
-                                    "max_tokens", LLM_PII_MAX_TOKENS
+                                    "max_tokens", LLM_MAX_NEW_TOKENS
                                 ),
                                 output_folder=getattr(self, "output_folder", None),
                                 batch_number=comprehend_query_number + 1,
@@ -9467,10 +9467,10 @@ class CustomImageAnalyzerEngine:
                         all_text_line_results=all_text_line_results,
                         model_choice=model_choice,
                         temperature=text_analyzer_kwargs.get(
-                            "temperature", LLM_PII_TEMPERATURE
+                            "temperature", LLM_TEMPERATURE
                         ),
                         max_tokens=text_analyzer_kwargs.get(
-                            "max_tokens", LLM_PII_MAX_TOKENS
+                            "max_tokens", LLM_MAX_NEW_TOKENS
                         ),
                         output_folder=getattr(self, "output_folder", None),
                         batch_number=comprehend_query_number + 1,
@@ -9522,35 +9522,6 @@ class CustomImageAnalyzerEngine:
                     else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
                 ),
             )
-
-            # # Load PII-specific model and tokenizer if not already provided
-            # if (
-            #     text_analyzer_kwargs.get("local_model") is None
-            #     and text_analyzer_kwargs.get("inference_method") == "local"
-            # ):
-            #     from tools.llm_funcs import USE_LLAMA_CPP, get_pii_model
-
-            #     try:
-            #         text_analyzer_kwargs["local_model"] = get_pii_model()
-            #     except Exception as e:
-            #         print(
-            #             f"Warning: Failed to load PII model: {e}. "
-            #             f"Will attempt to load model on-demand."
-            #         )
-            # if (
-            #     text_analyzer_kwargs.get("tokenizer") is None
-            #     and text_analyzer_kwargs.get("inference_method") == "local"
-            #     and USE_LLAMA_CPP != "True"
-            # ):
-            #     from tools.llm_funcs import get_pii_tokenizer
-
-            #     try:
-            #         text_analyzer_kwargs["tokenizer"] = get_pii_tokenizer()
-            #     except Exception as e:
-            #         print(
-            #             f"Warning: Failed to load PII tokenizer: {e}. "
-            #             f"Will attempt to load tokenizer on-demand."
-            #         )
 
             # Handle custom entities first (same as AWS Comprehend)
             # Include CUSTOM/CUSTOM_FUZZY (deny list) so deny-list words are redacted when CUSTOM is selected
@@ -9678,10 +9649,10 @@ class CustomImageAnalyzerEngine:
                                 all_text_line_results=all_text_line_results,
                                 model_choice=model_choice,
                                 temperature=text_analyzer_kwargs.get(
-                                    "temperature", LLM_PII_TEMPERATURE
+                                    "temperature", LLM_TEMPERATURE
                                 ),
                                 max_tokens=text_analyzer_kwargs.get(
-                                    "max_tokens", LLM_PII_MAX_TOKENS
+                                    "max_tokens", LLM_MAX_NEW_TOKENS
                                 ),
                                 output_folder=getattr(self, "output_folder", None),
                                 batch_number=comprehend_query_number + 1,
@@ -9780,10 +9751,10 @@ class CustomImageAnalyzerEngine:
                                 all_text_line_results=all_text_line_results,
                                 model_choice=model_choice,
                                 temperature=text_analyzer_kwargs.get(
-                                    "temperature", LLM_PII_TEMPERATURE
+                                    "temperature", LLM_TEMPERATURE
                                 ),
                                 max_tokens=text_analyzer_kwargs.get(
-                                    "max_tokens", LLM_PII_MAX_TOKENS
+                                    "max_tokens", LLM_MAX_NEW_TOKENS
                                 ),
                                 output_folder=getattr(self, "output_folder", None),
                                 batch_number=comprehend_query_number + 1,
@@ -9857,10 +9828,10 @@ class CustomImageAnalyzerEngine:
                         all_text_line_results=all_text_line_results,
                         model_choice=model_choice,
                         temperature=text_analyzer_kwargs.get(
-                            "temperature", LLM_PII_TEMPERATURE
+                            "temperature", LLM_TEMPERATURE
                         ),
                         max_tokens=text_analyzer_kwargs.get(
-                            "max_tokens", LLM_PII_MAX_TOKENS
+                            "max_tokens", LLM_MAX_NEW_TOKENS
                         ),
                         output_folder=getattr(self, "output_folder", None),
                         batch_number=comprehend_query_number + 1,
@@ -10912,10 +10883,10 @@ def run_page_text_redaction(
                             all_text_line_results=all_text_line_results,
                             model_choice=model_choice,
                             temperature=text_analyzer_kwargs.get(
-                                "temperature", LLM_PII_TEMPERATURE
+                                "temperature", LLM_TEMPERATURE
                             ),
                             max_tokens=text_analyzer_kwargs.get(
-                                "max_tokens", LLM_PII_MAX_TOKENS
+                                "max_tokens", LLM_MAX_NEW_TOKENS
                             ),
                             output_folder=output_folder,
                             batch_number=comprehend_query_number + 1,
@@ -11006,10 +10977,10 @@ def run_page_text_redaction(
                             all_text_line_results=all_text_line_results,
                             model_choice=model_choice,
                             temperature=text_analyzer_kwargs.get(
-                                "temperature", LLM_PII_TEMPERATURE
+                                "temperature", LLM_TEMPERATURE
                             ),
                             max_tokens=text_analyzer_kwargs.get(
-                                "max_tokens", LLM_PII_MAX_TOKENS
+                                "max_tokens", LLM_MAX_NEW_TOKENS
                             ),
                             output_folder=output_folder,
                             batch_number=comprehend_query_number + 1,
@@ -11072,10 +11043,10 @@ def run_page_text_redaction(
                     all_text_line_results=all_text_line_results,
                     model_choice=model_choice,
                     temperature=text_analyzer_kwargs.get(
-                        "temperature", LLM_PII_TEMPERATURE
+                        "temperature", LLM_TEMPERATURE
                     ),
                     max_tokens=text_analyzer_kwargs.get(
-                        "max_tokens", LLM_PII_MAX_TOKENS
+                        "max_tokens", LLM_MAX_NEW_TOKENS
                     ),
                     output_folder=output_folder,
                     batch_number=comprehend_query_number + 1,
@@ -11248,10 +11219,10 @@ def run_page_text_redaction(
                             all_text_line_results=all_text_line_results,
                             model_choice=model_choice,
                             temperature=text_analyzer_kwargs.get(
-                                "temperature", LLM_PII_TEMPERATURE
+                                "temperature", LLM_TEMPERATURE
                             ),
                             max_tokens=text_analyzer_kwargs.get(
-                                "max_tokens", LLM_PII_MAX_TOKENS
+                                "max_tokens", LLM_MAX_NEW_TOKENS
                             ),
                             output_folder=output_folder,
                             batch_number=comprehend_query_number + 1,
@@ -11342,10 +11313,10 @@ def run_page_text_redaction(
                             all_text_line_results=all_text_line_results,
                             model_choice=model_choice,
                             temperature=text_analyzer_kwargs.get(
-                                "temperature", LLM_PII_TEMPERATURE
+                                "temperature", LLM_TEMPERATURE
                             ),
                             max_tokens=text_analyzer_kwargs.get(
-                                "max_tokens", LLM_PII_MAX_TOKENS
+                                "max_tokens", LLM_MAX_NEW_TOKENS
                             ),
                             output_folder=output_folder,
                             batch_number=comprehend_query_number + 1,
@@ -11408,10 +11379,10 @@ def run_page_text_redaction(
                     all_text_line_results=all_text_line_results,
                     model_choice=model_choice,
                     temperature=text_analyzer_kwargs.get(
-                        "temperature", LLM_PII_TEMPERATURE
+                        "temperature", LLM_TEMPERATURE
                     ),
                     max_tokens=text_analyzer_kwargs.get(
-                        "max_tokens", LLM_PII_MAX_TOKENS
+                        "max_tokens", LLM_MAX_NEW_TOKENS
                     ),
                     output_folder=output_folder,
                     batch_number=comprehend_query_number + 1,
@@ -11586,10 +11557,10 @@ def run_page_text_redaction(
                             all_text_line_results=all_text_line_results,
                             model_choice=model_choice,
                             temperature=text_analyzer_kwargs.get(
-                                "temperature", LLM_PII_TEMPERATURE
+                                "temperature", LLM_TEMPERATURE
                             ),
                             max_tokens=text_analyzer_kwargs.get(
-                                "max_tokens", LLM_PII_MAX_TOKENS
+                                "max_tokens", LLM_MAX_NEW_TOKENS
                             ),
                             output_folder=output_folder,
                             batch_number=comprehend_query_number + 1,
@@ -11680,10 +11651,10 @@ def run_page_text_redaction(
                             all_text_line_results=all_text_line_results,
                             model_choice=model_choice,
                             temperature=text_analyzer_kwargs.get(
-                                "temperature", LLM_PII_TEMPERATURE
+                                "temperature", LLM_TEMPERATURE
                             ),
                             max_tokens=text_analyzer_kwargs.get(
-                                "max_tokens", LLM_PII_MAX_TOKENS
+                                "max_tokens", LLM_MAX_NEW_TOKENS
                             ),
                             output_folder=output_folder,
                             batch_number=comprehend_query_number + 1,
@@ -11746,10 +11717,10 @@ def run_page_text_redaction(
                     all_text_line_results=all_text_line_results,
                     model_choice=model_choice,
                     temperature=text_analyzer_kwargs.get(
-                        "temperature", LLM_PII_TEMPERATURE
+                        "temperature", LLM_TEMPERATURE
                     ),
                     max_tokens=text_analyzer_kwargs.get(
-                        "max_tokens", LLM_PII_MAX_TOKENS
+                        "max_tokens", LLM_MAX_NEW_TOKENS
                     ),
                     output_folder=output_folder,
                     batch_number=comprehend_query_number + 1,

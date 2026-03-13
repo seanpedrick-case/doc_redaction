@@ -76,6 +76,7 @@ from tools.config import (
     MAX_TIME_VALUE,
     MAX_WORKERS,
     MERGE_BOUNDING_BOXES,
+    MERGE_SMALL_REDACTIONS,
     NO_REDACTION_PII_OPTION,
     OCR_FIRST_PASS_MAX_WORKERS,
     OUTPUT_FOLDER,
@@ -4245,6 +4246,52 @@ def redact_whole_pymupdf_page(
     return whole_page_img_annotation_box
 
 
+def _merge_adjacent_redaction_boxes(
+    boxes: List[dict],
+    threshold: float = 2.0,
+) -> List[dict]:
+    """
+    Merge overlapping or nearly touching dict-style redaction boxes into fewer
+    larger rectangles. Boxes must have xmin, ymin, xmax, ymax. Other keys
+    are taken from the first box in each merged group. In-place style:
+    repeatedly merge any two boxes that overlap or are within threshold
+    (in coordinate units), until no merges possible.
+    """
+    if not boxes or len(boxes) <= 1:
+        return list(boxes)
+
+    def _union(b1: dict, b2: dict) -> dict:
+        out = dict(b1)
+        out["xmin"] = min(b1["xmin"], b2["xmin"])
+        out["ymin"] = min(b1["ymin"], b2["ymin"])
+        out["xmax"] = max(b1["xmax"], b2["xmax"])
+        out["ymax"] = max(b1["ymax"], b2["ymax"])
+        return out
+
+    def _overlap_or_close(b1: dict, b2: dict) -> bool:
+        if b1["xmax"] + threshold < b2["xmin"] or b2["xmax"] + threshold < b1["xmin"]:
+            return False
+        if b1["ymax"] + threshold < b2["ymin"] or b2["ymax"] + threshold < b1["ymin"]:
+            return False
+        return True
+
+    merged = list(boxes)
+    while True:
+        changed = False
+        for i in range(len(merged)):
+            for j in range(i + 1, len(merged)):
+                if _overlap_or_close(merged[i], merged[j]):
+                    merged[i] = _union(merged[i], merged[j])
+                    merged.pop(j)
+                    changed = True
+                    break
+            if changed:
+                break
+        if not changed:
+            break
+    return merged
+
+
 def redact_page_with_pymupdf(
     page: Page,
     page_annotations: dict,
@@ -4389,6 +4436,14 @@ def redact_page_with_pymupdf(
     # Check if this is an object used in the Gradio Annotation component
     if isinstance(page_annotations, dict):
         page_annotations = page_annotations["boxes"]
+
+    # Optional: merge overlapping/close dict boxes to reduce redact_single_box calls
+    if (
+        MERGE_SMALL_REDACTIONS
+        and page_annotations
+        and all(isinstance(b, dict) for b in page_annotations)
+    ):
+        page_annotations = _merge_adjacent_redaction_boxes(page_annotations)
 
     for annot in page_annotations:
         # Pikepdf redaction annotations (from text-path create_pikepdf_annotations_for_bounding_boxes)

@@ -56,9 +56,9 @@ from tools.config import (
     INFERENCE_SERVER_API_URL,
     INFERENCE_SERVER_PII_OPTION,
     INPUT_FOLDER,
+    LLM_MAX_NEW_TOKENS,
     LLM_PII_INFERENCE_METHODS,
-    LLM_PII_MAX_TOKENS,
-    LLM_PII_TEMPERATURE,
+    LLM_TEMPERATURE,
     LOCAL_OCR_MODEL_OPTIONS,
     LOCAL_PII_OPTION,
     LOCAL_TRANSFORMERS_LLM_PII_OPTION,
@@ -762,13 +762,13 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
     llm_group.add_argument(
         "--llm_temperature",
         type=float,
-        default=LLM_PII_TEMPERATURE,
+        default=LLM_TEMPERATURE,
         help="Temperature for LLM PII detection (lower = more deterministic).",
     )
     llm_group.add_argument(
         "--llm_max_tokens",
         type=int,
-        default=LLM_PII_MAX_TOKENS,
+        default=LLM_MAX_NEW_TOKENS,
         help="Maximum tokens in LLM response for PII detection.",
     )
     llm_group.add_argument(
@@ -1426,7 +1426,7 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
 
                 # Note: anonymise_files_with_open_text initializes LLM clients internally
                 # based on pii_identification_method. LLM model choices and parameters
-                # can be set via environment variables (CLOUD_LLM_PII_MODEL_CHOICE, LLM_PII_TEMPERATURE, etc.)
+                # can be set via environment variables (CLOUD_LLM_PII_MODEL_CHOICE, LLM_TEMPERATURE, etc.)
                 # before running the CLI.
 
                 # Run the anonymisation function directly

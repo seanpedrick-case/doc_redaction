@@ -40,7 +40,7 @@ from tools.config import (
 )
 from tools.helper_functions import get_system_font_path
 
-text_read_default_prompt = """Read all the text in the centre line of the image, and return the text in the dictionary format {"text":"text content", "confidence":"confidence score from 0-1"}. Ignore cut words in the top or bottom margins of the image. Ensure that spaces between words and upper/lower cases are preserved. If you can't read the text, return an empty string ""."""
+text_read_default_prompt = """Read all the text in the centre line of the image, and return the text in the dictionary format {"text":"text content", "confidence":"confidence score from 0-1"}. Ignore cut or obscured words above or below the centre line. Ensure that spaces between words and upper/lower cases are preserved. If you can't read the text, return an empty string ""."""
 
 if LOAD_PADDLE_AT_STARTUP is True:
     # Set PaddleOCR environment variables BEFORE importing PaddleOCR

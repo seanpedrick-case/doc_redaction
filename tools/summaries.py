@@ -18,26 +18,20 @@ from tools.config import (
     AWS_LLM_PII_OPTION,
     AWS_REGION,
     AWS_SECRET_KEY,
-    BATCH_SIZE_DEFAULT,
     CLOUD_LLM_PII_MODEL_CHOICE,
     CLOUD_SUMMARISATION_MODEL_CHOICE,
-    DEDUPLICATION_THRESHOLD,
     DEFAULT_INFERENCE_SERVER_PII_MODEL,
     INFERENCE_SERVER_PII_OPTION,
     LLM_CONTEXT_LENGTH,
     LLM_MAX_NEW_TOKENS,
     LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
     LOCAL_TRANSFORMERS_LLM_PII_OPTION,
-    MAX_COMMENT_CHARS,
     MAX_SPACES_GPU_RUN_TIME,
-    MAX_TIME_FOR_LOOP,
-    NUMBER_OF_RETRY_ATTEMPTS,
     OUTPUT_FOLDER,
     PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS,
     REASONING_SUFFIX,
     RUN_AWS_FUNCTIONS,
     SUMMARY_PAGE_GROUP_MAX_WORKERS,
-    TIMEOUT_WAIT,
     model_name_map,
 )
 from tools.file_conversion import is_pdf, word_level_ocr_df_to_line_level_ocr_df
@@ -55,12 +49,6 @@ from tools.llm_funcs import (
 )
 
 max_tokens = LLM_MAX_NEW_TOKENS
-timeout_wait = TIMEOUT_WAIT
-number_of_api_retry_attempts = NUMBER_OF_RETRY_ATTEMPTS
-max_time_for_loop = MAX_TIME_FOR_LOOP
-batch_size_default = BATCH_SIZE_DEFAULT
-deduplication_threshold = DEDUPLICATION_THRESHOLD
-max_comment_character_length = MAX_COMMENT_CHARS
 reasoning_suffix = REASONING_SUFFIX
 max_text_length = 500
 

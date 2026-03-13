@@ -68,46 +68,34 @@ _pii_assistant_model = None
 # This allows llm_funcs.py to work even if some config variables don't exist
 from tools.config import (
     ASSISTANT_MODEL,
-    BATCH_SIZE_DEFAULT,
     COMPILE_MODE,
     COMPILE_TRANSFORMERS,
-    DEDUPLICATION_THRESHOLD,
     HF_TOKEN,
     INT8_WITH_OFFLOAD_TO_CPU,
-    LLM_BATCH_SIZE,
     LLM_CONTEXT_LENGTH,
-    LLM_LAST_N_TOKENS,
-    LLM_MAX_GPU_LAYERS,
     LLM_MAX_NEW_TOKENS,
     LLM_MIN_P,
+    LLM_MODEL_DTYPE,
     LLM_REPETITION_PENALTY,
     LLM_RESET,
-    LLM_SAMPLE,
+    LLM_RETRY_ATTEMPTS,
     LLM_SEED,
     LLM_STOP_STRINGS,
     LLM_STREAM,
     LLM_TEMPERATURE,
     LLM_THREADS,
+    LLM_TIMEOUT_WAIT,
     LLM_TOP_K,
     LLM_TOP_P,
     LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START,
     LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
-    LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE,
-    LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER,
     LOCAL_TRANSFORMERS_LLM_PII_REPO_ID,
-    MAX_COMMENT_CHARS,
-    MAX_TIME_FOR_LOOP,
-    MODEL_DTYPE,
     MULTIMODAL_PROMPT_FORMAT,
-    NUM_PRED_TOKENS,
-    NUMBER_OF_RETRY_ATTEMPTS,
     QUANTISE_TRANSFORMERS_LLM_MODELS,
     REASONING_SUFFIX,
     SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL,
     SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS,
     SPECULATIVE_DECODING,
-    TIMEOUT_WAIT,
-    USE_LLAMA_CPP,
     USE_LLAMA_SWAP,
     USE_TRANSFORMERS_VLM_MODEL_AS_LLM,
     VLM_DISABLE_QWEN3_5_THINKING,
@@ -127,89 +115,52 @@ def _report_llm_output_to_gui(text: str) -> None:
         pass
 
 
-if isinstance(NUM_PRED_TOKENS, str):
-    NUM_PRED_TOKENS = int(NUM_PRED_TOKENS)
-if isinstance(LLM_MAX_GPU_LAYERS, str):
-    LLM_MAX_GPU_LAYERS = int(LLM_MAX_GPU_LAYERS)
 if isinstance(LLM_THREADS, str):
     LLM_THREADS = int(LLM_THREADS)
 
 max_tokens = LLM_MAX_NEW_TOKENS
-timeout_wait = TIMEOUT_WAIT
-number_of_api_retry_attempts = NUMBER_OF_RETRY_ATTEMPTS
-max_time_for_loop = MAX_TIME_FOR_LOOP
-batch_size_default = BATCH_SIZE_DEFAULT
-deduplication_threshold = DEDUPLICATION_THRESHOLD
-max_comment_character_length = MAX_COMMENT_CHARS
 
 temperature = LLM_TEMPERATURE
 top_k = LLM_TOP_K
 top_p = LLM_TOP_P
 min_p = LLM_MIN_P
 repetition_penalty = LLM_REPETITION_PENALTY
-last_n_tokens = LLM_LAST_N_TOKENS
 LLM_MAX_NEW_TOKENS: int = LLM_MAX_NEW_TOKENS
 seed: int = LLM_SEED
 reset: bool = LLM_RESET
 stream: bool = LLM_STREAM
-batch_size: int = LLM_BATCH_SIZE
 context_length: int = LLM_CONTEXT_LENGTH
-sample = LLM_SAMPLE
-stop_strings = LLM_STOP_STRINGS
 speculative_decoding = SPECULATIVE_DECODING
-if LLM_MAX_GPU_LAYERS != 0:
-    gpu_layers = int(LLM_MAX_GPU_LAYERS)
-    torch_device = "cuda"
-else:
-    gpu_layers = 0
-    torch_device = "cpu"
 
 if not LLM_THREADS:
     threads = 1
 else:
     threads = LLM_THREADS
 
+timeout_wait = LLM_TIMEOUT_WAIT
+number_of_api_retry_attempts = LLM_RETRY_ATTEMPTS
 
-class llama_cpp_init_config_gpu:
-    def __init__(
-        self,
-        last_n_tokens=last_n_tokens,
-        seed=seed,
-        n_threads=threads,
-        n_batch=batch_size,
-        n_ctx=context_length,
-        n_gpu_layers=gpu_layers,
-        reset=reset,
-    ):
 
-        self.last_n_tokens = last_n_tokens
-        self.seed = seed
-        self.n_threads = n_threads
-        self.n_batch = n_batch
+class LocalLLMContextConfig:
+    """Holds context length and GPU layer count for local transformers model loading."""
+
+    def __init__(self, n_ctx: int = context_length, n_gpu_layers: int = -1):
         self.n_ctx = n_ctx
         self.n_gpu_layers = n_gpu_layers
-        self.reset = reset
-        # self.stop: list[str] = field(default_factory=lambda: [stop_string])
 
-    def update_gpu(self, new_value):
+    def update_gpu(self, new_value: int) -> None:
         self.n_gpu_layers = new_value
 
-    def update_context(self, new_value):
+    def update_context(self, new_value: int) -> None:
         self.n_ctx = new_value
 
 
-class llama_cpp_init_config_cpu(llama_cpp_init_config_gpu):
-    def __init__(self):
-        super().__init__()
-        self.n_gpu_layers = gpu_layers
-        self.n_ctx = context_length
+# GPU and CPU context configs for load_model (CPU uses 0 GPU layers).
+local_gpu_context = LocalLLMContextConfig(n_ctx=context_length, n_gpu_layers=-1)
+local_cpu_context = LocalLLMContextConfig(n_ctx=context_length, n_gpu_layers=0)
 
 
-gpu_config = llama_cpp_init_config_gpu()
-cpu_config = llama_cpp_init_config_cpu()
-
-
-class LlamaCPPGenerationConfig:
+class LocalLLMGenerationConfig:
     def __init__(
         self,
         temperature=temperature,
@@ -249,8 +200,8 @@ class ResponseObject:
 
 def get_model_path(
     repo_id=LOCAL_TRANSFORMERS_LLM_PII_REPO_ID,
-    model_filename=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE,
-    model_dir=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER,
+    model_filename="",
+    model_dir="",
     hf_token=HF_TOKEN,
 ):
     # Construct the expected local path
@@ -288,16 +239,16 @@ def get_model_path(
 
 def load_model(
     local_model_type: str = None,
-    gpu_layers: int = gpu_layers,
+    gpu_layers: int = -1,
     max_context_length: int = context_length,
-    gpu_config: llama_cpp_init_config_gpu = gpu_config,
-    cpu_config: llama_cpp_init_config_cpu = cpu_config,
-    torch_device: str = torch_device,
+    gpu_context: LocalLLMContextConfig = local_gpu_context,
+    cpu_context: LocalLLMContextConfig = local_cpu_context,
+    torch_device: str = "cpu",
     repo_id=LOCAL_TRANSFORMERS_LLM_PII_REPO_ID,
-    model_filename=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE,
-    model_dir=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER,
+    model_filename="",
+    model_dir="",
     compile_mode=COMPILE_MODE,
-    model_dtype=MODEL_DTYPE,
+    model_dtype=LLM_MODEL_DTYPE,
     hf_token=HF_TOKEN,
     speculative_decoding=speculative_decoding,
     model=None,
@@ -305,15 +256,15 @@ def load_model(
     assistant_model=None,
 ):
     """
-    Load in a model from Hugging Face hub via the transformers package, or using llama_cpp_python by downloading a GGUF file from Huggingface Hub.
+    Load a model from Hugging Face Hub via the transformers package.
 
     Args:
-        local_model_type (str): The type of local model to load (e.g., "llama-cpp").
-        gpu_layers (int): The number of GPU layers to offload to the GPU.
+        local_model_type (str): The type of local model to load.
+        gpu_layers (int): The number of GPU layers to offload to the GPU (-1 for default).
         max_context_length (int): The maximum context length for the model.
-        gpu_config (llama_cpp_init_config_gpu): Configuration object for GPU-specific Llama.cpp parameters.
-        cpu_config (llama_cpp_init_config_cpu): Configuration object for CPU-specific Llama.cpp parameters.
-        torch_device (str): The device to load the model on ("cuda" for GPU, "cpu" for CPU).
+        gpu_context (LocalLLMContextConfig): Context config for GPU (n_ctx, n_gpu_layers).
+        cpu_context (LocalLLMContextConfig): Context config for CPU.
+        torch_device (str): The device to load the model on ("cuda" or "cpu").
         repo_id (str): The Hugging Face repository ID where the model is located.
         model_filename (str): The specific filename of the model to download from the repository.
         model_dir (str): The local directory where the model will be stored or downloaded.
@@ -321,14 +272,11 @@ def load_model(
         model_dtype (str): The data type to use for the model.
         hf_token (str): The Hugging Face token to use for the model.
         speculative_decoding (bool): Whether to use speculative decoding.
-        model (Llama/transformers model): The model to load.
-        tokenizer (list/transformers tokenizer): The tokenizer to load.
-        assistant_model (transformers model): The assistant model for speculative decoding.
+        model (transformers model): Optional pre-loaded model (skips loading if provided).
+        tokenizer (transformers tokenizer): Optional pre-loaded tokenizer.
+        assistant_model (transformers model): Optional assistant model for speculative decoding.
     Returns:
-        tuple: A tuple containing:
-            - model (Llama/transformers model): The loaded Llama.cpp/transformers model instance.
-            - tokenizer (list/transformers tokenizer): An empty list (tokenizer is not used with Llama.cpp directly in this setup), or a transformers tokenizer.
-            - assistant_model (transformers model): The assistant model for speculative decoding (if speculative_decoding is True).
+        tuple: (model, tokenizer, assistant_model).
     """
 
     # If model is provided, validate that tokenizer is also provided and compatible
@@ -371,7 +319,6 @@ def load_model(
     print("Is a CUDA device available on this computer?", torch.backends.cudnn.enabled)
     if torch.cuda.is_available():
         torch_device = "cuda"
-        gpu_layers = int(LLM_MAX_GPU_LAYERS)
         print("CUDA version:", torch.version.cuda)
         # try:
         #    os.system("nvidia-smi")
@@ -393,8 +340,8 @@ def load_model(
     # GPU mode
     if torch_device == "cuda":
         torch.cuda.empty_cache()
-        gpu_config.update_gpu(gpu_layers)
-        gpu_config.update_context(max_context_length)
+        gpu_context.update_gpu(gpu_layers)
+        gpu_context.update_context(max_context_length)
 
         from transformers import (
             AutoModelForCausalLM,
@@ -408,7 +355,7 @@ def load_model(
         # 1. Set Data Type (dtype)
         # For H200/Hopper: 'bfloat16'
         # For RTX 3060/Ampere: 'float16'
-        dtype_str = model_dtype  # os.environ.get("MODEL_DTYPE", "bfloat16").lower()
+        dtype_str = model_dtype  # os.environ.get("LLM_MODEL_DTYPE", "bfloat16").lower()
         if dtype_str == "bfloat16":
             torch_dtype = torch.bfloat16
         elif dtype_str == "float16":
@@ -536,9 +483,9 @@ def load_model(
 
         print(
             "Loading with",
-            gpu_config.n_gpu_layers,
+            gpu_context.n_gpu_layers,
             "model layers sent to GPU and a maximum context length of",
-            gpu_config.n_ctx,
+            gpu_context.n_ctx,
         )
 
     # CPU mode
@@ -557,21 +504,16 @@ def load_model(
             )
             if not tokenizer.pad_token:
                 tokenizer.pad_token = tokenizer.eos_token
-            print(
-                f"Loaded tokenizer from {model_id} for compatibility (llama-cpp handles tokenization internally)"
-            )
+            print(f"Loaded tokenizer from {model_id} for compatibility")
         except Exception as e:
-            print(f"Warning: Could not load tokenizer for llama-cpp model: {e}")
-            print(
-                "Note: llama-cpp models handle tokenization internally, so tokenizer may not be needed"
-            )
+            print(f"Warning: Could not load tokenizer: {e}")
             tokenizer = None
 
         print(
             "Loading with",
-            cpu_config.n_gpu_layers,
+            cpu_context.n_gpu_layers,
             "model layers sent to GPU and a maximum context length of",
-            cpu_config.n_ctx,
+            cpu_context.n_ctx,
         )
 
     print("Finished loading model:", local_model_type)
@@ -683,16 +625,14 @@ if (
         print("Loading local PII model:", LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE)
         _pii_model, _pii_tokenizer, _pii_assistant_model = load_model(
             local_model_type=LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
-            gpu_layers=gpu_layers,
             max_context_length=context_length,
-            gpu_config=gpu_config,
-            cpu_config=cpu_config,
-            torch_device=torch_device,
+            gpu_context=local_gpu_context,
+            cpu_context=local_cpu_context,
             repo_id=LOCAL_TRANSFORMERS_LLM_PII_REPO_ID,
-            model_filename=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE,
-            model_dir=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER,
+            model_filename="",
+            model_dir="",
             compile_mode=COMPILE_MODE,
-            model_dtype=MODEL_DTYPE,
+            model_dtype=LLM_MODEL_DTYPE,
             hf_token=HF_TOKEN,
             model=_pii_model,
             tokenizer=_pii_tokenizer,
@@ -707,7 +647,7 @@ if (
 def call_transformers_model(
     prompt: str,
     system_prompt: str,
-    gen_config: LlamaCPPGenerationConfig,
+    gen_config: LocalLLMGenerationConfig,
     model=_pii_model,
     tokenizer=_pii_tokenizer,
     assistant_model=_pii_assistant_model,
@@ -923,7 +863,7 @@ def call_transformers_model(
             dim=1,
         )
 
-    # Map LlamaCPP parameters to transformers parameters.
+    # Map generation config to transformers parameters.
     # When use_vlm_safe_generation (VLM model used for LLM tasks), use greedy decoding to avoid
     # "probability tensor contains inf/nan or element < 0" errors in torch.multinomial on some setups.
     if use_vlm_safe_generation:
@@ -1341,7 +1281,7 @@ def send_request(
             try:
                 print("Calling local model, attempt", i + 1)
 
-                gen_config = LlamaCPPGenerationConfig()
+                gen_config = LocalLLMGenerationConfig()
                 gen_config.update_temp(temperature)
 
                 # Call transformers model; use VLM model/tokenizer when USE_TRANSFORMERS_VLM_MODEL_AS_LLM and available
@@ -1402,7 +1342,7 @@ def send_request(
                         "api_url is required when model_source is 'inference-server'"
                     )
 
-                gen_config = LlamaCPPGenerationConfig()
+                gen_config = LocalLLMGenerationConfig()
                 gen_config.update_temp(temperature)
 
                 response = call_inference_server_api(
@@ -1608,13 +1548,8 @@ def process_requests(
                 output_tokens = response.usage_metadata.get("outputTokens", 0)
 
             elif "Local" in model_source:
-                if USE_LLAMA_CPP == "True":
-                    output_tokens = response["usage"].get("completion_tokens", 0)
-                    input_tokens = response["usage"].get("prompt_tokens", 0)
-
-                if USE_LLAMA_CPP == "False":
-                    input_tokens = num_transformer_input_tokens
-                    output_tokens = num_transformer_generated_tokens
+                input_tokens = num_transformer_input_tokens
+                output_tokens = num_transformer_generated_tokens
 
             elif "inference-server" in model_source:
                 # inference-server returns the same format as llama-cpp
@@ -1647,31 +1582,31 @@ def process_requests(
 def call_inference_server_api(
     formatted_string: str,
     system_prompt: str,
-    gen_config: LlamaCPPGenerationConfig,
+    gen_config: LocalLLMGenerationConfig,
     api_url: str = "http://localhost:8080",
     model_name: str = None,
     use_llama_swap: bool = USE_LLAMA_SWAP,
 ):
     """
     Calls a inference-server API endpoint with a formatted user message and system prompt,
-    using generation parameters from the LlamaCPPGenerationConfig object.
+    using generation parameters from the LocalLLMGenerationConfig object.
 
-    This function provides the same interface as call_llama_cpp_chatmodel but calls
+    This function provides the same interface as call_transformers_model but calls
     a remote inference-server instance instead of a local model.
 
     Args:
         formatted_string (str): The formatted input text for the user's message.
         system_prompt (str): The system-level instructions for the model.
-        gen_config (LlamaCPPGenerationConfig): An object containing generation parameters.
+        gen_config (LocalLLMGenerationConfig): An object containing generation parameters.
         api_url (str): The base URL of the inference-server API (default: "http://localhost:8080").
         model_name (str): Optional model name to use. If None, uses the default model.
         use_llama_swap (bool): Whether to use llama-swap for the model.
     Returns:
-        dict: Response in the same format as call_llama_cpp_chatmodel
+        dict: Response in the same format as the inference-server chat completions API
 
     Example:
         # Create generation config
-        gen_config = LlamaCPPGenerationConfig(temperature=0.7, max_tokens=100)
+        gen_config = LocalLLMGenerationConfig(temperature=0.7, max_tokens=100)
 
         # Call the API
         response = call_inference_server_api(
