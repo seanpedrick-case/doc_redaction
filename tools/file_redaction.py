@@ -52,6 +52,7 @@ from tools.config import (
     CLOUD_VLM_MODEL_CHOICE,
     CUSTOM_BOX_COLOUR,
     CUSTOM_ENTITIES,
+    CUSTOM_VLM_BACKEND,
     DEFAULT_LANGUAGE,
     EFFICIENT_OCR,
     EFFICIENT_OCR_MIN_WORDS,
@@ -308,13 +309,53 @@ def add_page_range_suffix_to_file_path(
         return f"{file_path}_{start_page}_{end_page}"
 
 
+def _parse_vlm_person_signature_result(ocr_result, entity_type: str, text_label: str):
+    """Parse VLM OCR result dict into list of CustomImageRecognizerResult. Shared across backends."""
+    boxes = []
+    if isinstance(ocr_result, tuple) and len(ocr_result) >= 1:
+        ocr_result = ocr_result[0]
+    if not isinstance(ocr_result, dict):
+        return boxes
+    texts = ocr_result.get("text", [])
+    lefts = ocr_result.get("left", [])
+    tops = ocr_result.get("top", [])
+    widths = ocr_result.get("width", [])
+    heights = ocr_result.get("height", [])
+    confs = ocr_result.get("conf", [])
+    for idx, text in enumerate(texts):
+        if text != text_label:
+            continue
+        try:
+            left = int(lefts[idx])
+            top = int(tops[idx])
+            width = int(widths[idx])
+            height = int(heights[idx])
+            conf = float(confs[idx]) if idx < len(confs) else 0.0
+        except Exception:
+            continue
+        boxes.append(
+            CustomImageRecognizerResult(
+                entity_type,
+                0,
+                0,
+                conf,
+                left,
+                top,
+                width,
+                height,
+                text_label,
+            )
+        )
+    return boxes
+
+
 def _run_vlm_only_pass_one_page(
     args: tuple,
 ) -> tuple:
     """
-    Worker for one page: run Bedrock VLM person/signature detection. Returns
+    Worker for one page: run VLM person/signature detection using the backend set in
+    CUSTOM_VLM_BACKEND (transformers_vlm, inference_vlm, or bedrock_vlm). Returns
     (page_no, image_path, page_width, page_height, vlm_boxes, input_tokens, output_tokens, model_name).
-    Used by run_custom_vlm_only_pass for parallel page processing.
     """
     (
         page_no,
@@ -325,6 +366,8 @@ def _run_vlm_only_pass_one_page(
         normalised_coords_range,
         output_folder,
         bedrock_runtime,
+        custom_vlm_backend,
+        inference_server_vlm_model,
     ) = args
     reported_page_number = page_no + 1
     vlm_boxes = []
@@ -342,115 +385,140 @@ def _run_vlm_only_pass_one_page(
         else f"{file_name}_{reported_page_number}.png"
     )
 
-    if run_person and bedrock_runtime:
-        try:
-            people_ocr_result = _bedrock_page_ocr_predict(
-                image,
-                image_name=image_name,
-                normalised_coords_range=normalised_coords_range,
-                output_folder=output_folder,
-                detect_people_only=True,
-                model_choice=CLOUD_VLM_MODEL_CHOICE or None,
-                bedrock_runtime=bedrock_runtime,
-            )
-            if isinstance(people_ocr_result, tuple) and len(people_ocr_result) == 4:
-                people_ocr, pi, po, pname = people_ocr_result
-                ti, to, name = ti + pi, to + po, pname or name
-            else:
-                people_ocr = (
-                    people_ocr_result[0]
-                    if isinstance(people_ocr_result, tuple)
-                    else people_ocr_result
-                )
-            texts = people_ocr.get("text", [])
-            lefts = people_ocr.get("left", [])
-            tops = people_ocr.get("top", [])
-            widths = people_ocr.get("width", [])
-            heights = people_ocr.get("height", [])
-            confs = people_ocr.get("conf", [])
-            for idx, text in enumerate(texts):
-                if text != "[PERSON]":
-                    continue
-                try:
-                    left = int(lefts[idx])
-                    top = int(tops[idx])
-                    width = int(widths[idx])
-                    height = int(heights[idx])
-                    conf = float(confs[idx]) if idx < len(confs) else 0.0
-                except Exception:
-                    continue
-                vlm_boxes.append(
-                    CustomImageRecognizerResult(
-                        "CUSTOM_VLM_PERSON",
-                        0,
-                        0,
-                        conf,
-                        left,
-                        top,
-                        width,
-                        height,
-                        "[PERSON]",
-                    )
-                )
-        except Exception as e:
-            print(
-                f"Warning: Bedrock VLM person detection failed on page {reported_page_number}: {e}"
-            )
+    def add_tokens(result_tuple):
+        nonlocal ti, to, name
+        if isinstance(result_tuple, tuple) and len(result_tuple) == 4:
+            _, pi, po, pname = result_tuple
+            ti, to, name = ti + pi, to + po, pname or name
 
-    if run_signature and bedrock_runtime:
-        try:
-            sig_ocr_result = _bedrock_page_ocr_predict(
-                image,
-                image_name=image_name,
-                normalised_coords_range=normalised_coords_range,
-                output_folder=output_folder,
-                detect_signatures_only=True,
-                model_choice=CLOUD_VLM_MODEL_CHOICE or None,
-                bedrock_runtime=bedrock_runtime,
-            )
-            if isinstance(sig_ocr_result, tuple) and len(sig_ocr_result) == 4:
-                sig_ocr, si, so, sname = sig_ocr_result
-                ti, to, name = ti + si, to + so, sname or name
-            else:
-                sig_ocr = (
-                    sig_ocr_result[0]
-                    if isinstance(sig_ocr_result, tuple)
-                    else sig_ocr_result
+    if custom_vlm_backend == "bedrock_vlm" and bedrock_runtime:
+        if run_person:
+            try:
+                people_ocr_result = _bedrock_page_ocr_predict(
+                    image,
+                    image_name=image_name,
+                    normalised_coords_range=normalised_coords_range,
+                    output_folder=output_folder,
+                    detect_people_only=True,
+                    model_choice=CLOUD_VLM_MODEL_CHOICE or None,
+                    bedrock_runtime=bedrock_runtime,
                 )
-            texts = sig_ocr.get("text", [])
-            lefts = sig_ocr.get("left", [])
-            tops = sig_ocr.get("top", [])
-            widths = sig_ocr.get("width", [])
-            heights = sig_ocr.get("height", [])
-            confs = sig_ocr.get("conf", [])
-            for idx, text in enumerate(texts):
-                if text != "[SIGNATURE]":
-                    continue
-                try:
-                    left = int(lefts[idx])
-                    top = int(tops[idx])
-                    width = int(widths[idx])
-                    height = int(heights[idx])
-                    conf = float(confs[idx]) if idx < len(confs) else 0.0
-                except Exception:
-                    continue
-                vlm_boxes.append(
-                    CustomImageRecognizerResult(
-                        "CUSTOM_VLM_SIGNATURE",
-                        0,
-                        0,
-                        conf,
-                        left,
-                        top,
-                        width,
-                        height,
-                        "[SIGNATURE]",
+                add_tokens(people_ocr_result)
+                vlm_boxes.extend(
+                    _parse_vlm_person_signature_result(
+                        people_ocr_result, "CUSTOM_VLM_PERSON", "[PERSON]"
                     )
                 )
-        except Exception as e:
-            print(
-                f"Warning: Bedrock VLM signature detection failed on page {reported_page_number}: {e}"
-            )
+            except Exception as e:
+                print(
+                    f"Warning: Bedrock VLM person detection failed on page {reported_page_number}: {e}"
+                )
+        if run_signature:
+            try:
+                sig_ocr_result = _bedrock_page_ocr_predict(
+                    image,
+                    image_name=image_name,
+                    normalised_coords_range=normalised_coords_range,
+                    output_folder=output_folder,
+                    detect_signatures_only=True,
+                    model_choice=CLOUD_VLM_MODEL_CHOICE or None,
+                    bedrock_runtime=bedrock_runtime,
+                )
+                add_tokens(sig_ocr_result)
+                vlm_boxes.extend(
+                    _parse_vlm_person_signature_result(
+                        sig_ocr_result, "CUSTOM_VLM_SIGNATURE", "[SIGNATURE]"
+                    )
+                )
+            except Exception as e:
+                print(
+                    f"Warning: Bedrock VLM signature detection failed on page {reported_page_number}: {e}"
+                )
+    elif custom_vlm_backend == "inference_vlm":
+        model_name = inference_server_vlm_model or None
+        if run_person:
+            try:
+                people_ocr_result = _inference_server_page_ocr_predict(
+                    image,
+                    image_name=image_name,
+                    normalised_coords_range=normalised_coords_range,
+                    output_folder=output_folder,
+                    detect_people_only=True,
+                    detect_signatures_only=False,
+                    model_name=model_name,
+                )
+                add_tokens(people_ocr_result)
+                vlm_boxes.extend(
+                    _parse_vlm_person_signature_result(
+                        people_ocr_result, "CUSTOM_VLM_PERSON", "[PERSON]"
+                    )
+                )
+            except Exception as e:
+                print(
+                    f"Warning: Inference VLM person detection failed on page {reported_page_number}: {e}"
+                )
+        if run_signature:
+            try:
+                sig_ocr_result = _inference_server_page_ocr_predict(
+                    image,
+                    image_name=image_name,
+                    normalised_coords_range=normalised_coords_range,
+                    output_folder=output_folder,
+                    detect_people_only=False,
+                    detect_signatures_only=True,
+                    model_name=model_name,
+                )
+                add_tokens(sig_ocr_result)
+                vlm_boxes.extend(
+                    _parse_vlm_person_signature_result(
+                        sig_ocr_result, "CUSTOM_VLM_SIGNATURE", "[SIGNATURE]"
+                    )
+                )
+            except Exception as e:
+                print(
+                    f"Warning: Inference VLM signature detection failed on page {reported_page_number}: {e}"
+                )
+    elif custom_vlm_backend == "transformers_vlm":
+        if run_person:
+            try:
+                people_ocr_result = _vlm_page_ocr_predict(
+                    image,
+                    image_name=image_name,
+                    normalised_coords_range=normalised_coords_range,
+                    output_folder=output_folder,
+                    detect_people_only=True,
+                    detect_signatures_only=False,
+                )
+                add_tokens(people_ocr_result)
+                vlm_boxes.extend(
+                    _parse_vlm_person_signature_result(
+                        people_ocr_result, "CUSTOM_VLM_PERSON", "[PERSON]"
+                    )
+                )
+            except Exception as e:
+                print(
+                    f"Warning: Transformers VLM person detection failed on page {reported_page_number}: {e}"
+                )
+        if run_signature:
+            try:
+                sig_ocr_result = _vlm_page_ocr_predict(
+                    image,
+                    image_name=image_name,
+                    normalised_coords_range=normalised_coords_range,
+                    output_folder=output_folder,
+                    detect_people_only=False,
+                    detect_signatures_only=True,
+                )
+                add_tokens(sig_ocr_result)
+                vlm_boxes.extend(
+                    _parse_vlm_person_signature_result(
+                        sig_ocr_result, "CUSTOM_VLM_SIGNATURE", "[SIGNATURE]"
+                    )
+                )
+            except Exception as e:
+                print(
+                    f"Warning: Transformers VLM signature detection failed on page {reported_page_number}: {e}"
+                )
 
     return (page_no, image_path, page_width, page_height, vlm_boxes, ti, to, name)
 
@@ -468,13 +536,15 @@ def run_custom_vlm_only_pass(
     page_min: int = 0,
     page_max: int = 0,
     progress=None,
+    inference_server_vlm_model: str = "",
 ) -> tuple:
     """
     Run only the CUSTOM_VLM (face, signature) detection on page images and apply
     those redactions to the existing pages in pymupdf_doc. Used when text extraction
     is selectable text but user selected CUSTOM_VLM_* entities (so text comes from
     PDF, VLM detection from images).
-    Bedrock VLM API calls are run in parallel across pages (ThreadPoolExecutor).
+    Backend is chosen by config CUSTOM_VLM_BACKEND: 'transformers_vlm', 'inference_vlm', or 'bedrock_vlm'.
+    API calls are run in parallel across pages (ThreadPoolExecutor).
     Returns (vlm_total_input_tokens, vlm_total_output_tokens, vlm_model_name,
             vlm_annotations_list, vlm_decision_rows) for merging into annotations_all_pages
     and all_pages_decision_process_table.
@@ -487,9 +557,20 @@ def run_custom_vlm_only_pass(
 
     file_name = get_file_name_without_type(file_path)
     normalised_coords_range = 999
+    custom_vlm_backend = CUSTOM_VLM_BACKEND
 
     run_person = "CUSTOM_VLM_PERSON" in (chosen_redact_entities or [])
     run_signature = "CUSTOM_VLM_SIGNATURE" in (chosen_redact_entities or [])
+
+    # Skip if chosen backend is not available
+    if custom_vlm_backend == "bedrock_vlm" and not bedrock_runtime:
+        return (
+            vlm_total_input_tokens,
+            vlm_total_output_tokens,
+            vlm_model_name,
+            vlm_annotations_list,
+            vlm_decision_rows,
+        )
 
     start_page_0 = (page_min - 1) if page_min > 0 else 0
     end_page_0 = min(
@@ -497,7 +578,7 @@ def run_custom_vlm_only_pass(
         (page_max if page_max > 0 else number_of_pages),
     )
 
-    # Build list of (page_no, image_path) for pages we can process
+    # Build list of (page_no, image_path, ...) for pages we can process
     page_args = []
     for page_no in range(start_page_0, end_page_0):
         if page_no >= len(pdf_image_file_paths):
@@ -515,6 +596,8 @@ def run_custom_vlm_only_pass(
                 normalised_coords_range,
                 output_folder,
                 bedrock_runtime,
+                custom_vlm_backend,
+                inference_server_vlm_model or "",
             )
         )
 
@@ -2214,10 +2297,13 @@ def choose_and_run_redactor(
             )
 
             # When CUSTOM_VLM_* or Textract+Face identification: run VLM (face/signature) on all
-            # page images after text/OCR extraction, so simple-text pages keep simple extraction.
+            # page images after text/OCR extraction. Backend from CUSTOM_VLM_BACKEND (bedrock_vlm, inference_vlm, transformers_vlm).
+            _vlm_backend_available = (
+                CUSTOM_VLM_BACKEND != "bedrock_vlm" or bedrock_runtime is not None
+            )
             if (
                 _run_vlm_pass_after_all_pages
-                and bedrock_runtime is not None
+                and _vlm_backend_available
                 and pymupdf_doc is not None
                 and not isinstance(pymupdf_doc, list)
             ):
@@ -2305,6 +2391,7 @@ def choose_and_run_redactor(
                         page_min=page_min,
                         page_max=page_max if page_max > 0 else num_pages,
                         progress=progress,
+                        inference_server_vlm_model=inference_server_vlm_model,
                     )
                     vlm_total_input_tokens += vlm_in
                     vlm_total_output_tokens += vlm_out
@@ -2495,10 +2582,14 @@ def choose_and_run_redactor(
             if llm_model_name_text and not llm_model_name:
                 llm_model_name = llm_model_name_text
 
-            # When selectable text + CUSTOM_VLM_*: keep text from PDF, run VLM (face/signature) on images only
+            # When selectable text + CUSTOM_VLM_*: keep text from PDF, run VLM (face/signature) on images only.
+            # Backend from CUSTOM_VLM_BACKEND (bedrock_vlm, inference_vlm, transformers_vlm).
+            _vlm_backend_available_selectable = (
+                CUSTOM_VLM_BACKEND != "bedrock_vlm" or bedrock_runtime is not None
+            )
             if (
                 _custom_vlm_requires_image_global
-                and bedrock_runtime is not None
+                and _vlm_backend_available_selectable
                 and pdf_image_file_paths
             ):
                 print(
@@ -2524,6 +2615,7 @@ def choose_and_run_redactor(
                     page_min=page_min,
                     page_max=page_max if page_max > 0 else number_of_pages,
                     progress=progress,
+                    inference_server_vlm_model=inference_server_vlm_model,
                 )
                 vlm_total_input_tokens += vlm_in
                 vlm_total_output_tokens += vlm_out

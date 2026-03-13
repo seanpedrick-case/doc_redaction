@@ -723,6 +723,10 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
     * **Description:** Default model choice for cloud VLM OCR (AWS Bedrock, Gemini, or Azure/OpenAI). Used when cloud VLM options are enabled.
     * **Default Value:** `"qwen.qwen3-vl-235b-a22b"` (or first available cloud model if empty)
 
+* **`CUSTOM_VLM_BACKEND`**
+    * **Description:** Backend used for CUSTOM_VLM_PERSON and CUSTOM_VLM_SIGNATURE (face and signature detection) when those entities are selected for redaction. One of: `"transformers_vlm"` (local transformers VLM), `"inference_vlm"` (inference-server VLM), or `"bedrock_vlm"` (AWS Bedrock VLM). Applies regardless of the PII identification method (Local, AWS Comprehend, or LLM). Value is case-insensitive; invalid values fall back to `"bedrock_vlm"`.
+    * **Default Value:** `"bedrock_vlm"`
+
 * **`CLOUD_LLM_PII_MODEL_CHOICE`**
     * **Description:** Default AWS Bedrock (or cloud) model for LLM-based PII detection when `SHOW_AWS_BEDROCK_LLM_MODELS` (or other cloud LLM options) is enabled. Used by `tools/llm_entity_detection.py`.
     * **Default Value:** `"amazon.nova-pro-v1:0"`

@@ -1575,6 +1575,14 @@ else:
     # Use the value from environment variable
     CLOUD_VLM_MODEL_CHOICE = CLOUD_VLM_MODEL_CHOICE.strip()
 
+# Backend used for CUSTOM_VLM_PERSON / CUSTOM_VLM_SIGNATURE (face/signature detection).
+# One of: 'transformers_vlm', 'inference_vlm', 'bedrock_vlm'.
+CUSTOM_VLM_BACKEND = (
+    get_or_create_env_var("CUSTOM_VLM_BACKEND", "bedrock_vlm").strip().lower()
+)
+if CUSTOM_VLM_BACKEND not in ("transformers_vlm", "inference_vlm", "bedrock_vlm"):
+    CUSTOM_VLM_BACKEND = "bedrock_vlm"
+
 # print("model_name_map:", model_name_map)
 
 # HF token may or may not be needed for downloading models from Hugging Face

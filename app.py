@@ -1732,6 +1732,40 @@ with blocks:
                 precision=0,
                 visible=False,
             )
+            # Placeholder cost components so event handlers have valid outputs when SHOW_COSTS and not SHOW_QUICKSTART
+            if SHOW_COSTS:
+                walkthrough_textract_output_found_checkbox = gr.Checkbox(
+                    value=False,
+                    label="Existing Textract output file found",
+                    interactive=False,
+                    visible=False,
+                )
+                walkthrough_relevant_ocr_output_with_words_found_checkbox = gr.Checkbox(
+                    value=False,
+                    label="Existing local OCR output file found",
+                    interactive=False,
+                    visible=False,
+                )
+                walkthrough_total_pdf_page_count = gr.Number(
+                    label="Total page count",
+                    value=0,
+                    visible=False,
+                    interactive=False,
+                )
+                walkthrough_estimated_aws_costs_number = gr.Number(
+                    label="Approximate AWS services cost (£)",
+                    value=0.00,
+                    precision=2,
+                    visible=False,
+                    interactive=False,
+                )
+                walkthrough_estimated_time_taken_number = gr.Number(
+                    label="Approximate time for task (minutes)",
+                    value=0,
+                    visible=False,
+                    precision=2,
+                    interactive=False,
+                )
             # Placeholder buttons so step_4_*_btn.click() handlers below are defined
             step_4_next_document_redact_btn = gr.Button(
                 "Redact document", variant="primary", visible=False
