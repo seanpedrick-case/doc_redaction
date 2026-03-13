@@ -350,6 +350,25 @@ def parse_llm_entity_response(
                 json_str,
             )
 
+            # Final trim: strip trailing whitespace, control chars, backticks, and truncate to root object only
+            # (avoids "Expecting ',' delimiter" when trailing \r, ```, <end_of_turn>, or other bytes remain)
+            json_str = json_str.rstrip().rstrip("\r\t")
+            json_str = re.sub(r"[ \t\r\n]+$", "", json_str)
+            json_str = re.sub(r"`+$", "", json_str)
+            json_str = re.sub(r"<end_of_turn>\s*$", "", json_str, flags=re.IGNORECASE)
+            json_str = json_str.rstrip()
+            start = json_str.find("{")
+            if start >= 0:
+                depth = 0
+                for i in range(start, len(json_str)):
+                    if json_str[i] == "{":
+                        depth += 1
+                    elif json_str[i] == "}":
+                        depth -= 1
+                        if depth == 0:
+                            json_str = json_str[start : i + 1]
+                            break
+
             # Try to parse the JSON
             try:
                 data = json.loads(json_str)
@@ -881,11 +900,12 @@ def call_llm_for_entity_detection(
                 output_tokens = response.usage_metadata.candidates_token_count
     except (KeyError, AttributeError) as e:
         print(f"Warning: Could not extract token usage from response: {e}")
-        # Fallback: use transformer token counts if available
-        if num_transformer_input_tokens and num_transformer_input_tokens > 0:
-            input_tokens = num_transformer_input_tokens
-        if num_transformer_generated_tokens and num_transformer_generated_tokens > 0:
-            output_tokens = num_transformer_generated_tokens
+
+    # Fallback for Local/transformers: response is plain text, so use token counts from send_request
+    if num_transformer_input_tokens and num_transformer_input_tokens > 0:
+        input_tokens = num_transformer_input_tokens
+    if num_transformer_generated_tokens and num_transformer_generated_tokens > 0:
+        output_tokens = num_transformer_generated_tokens
 
     # Save prompt and response if output_folder is provided.
     # Use the same system_prompt and user_prompt that were sent to the model
