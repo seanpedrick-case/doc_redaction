@@ -2665,15 +2665,6 @@ def convert_annotation_data_to_dataframe(all_annotations: List[Dict[str, Any]]):
             ]
         )
 
-    placeholder_box = {
-        "xmin": None,
-        "xmax": None,
-        "ymin": None,
-        "ymax": None,
-        "text": None,
-        "id": None,
-        "label": None,
-    }
     records = []
     for anno in all_annotations:
         image = anno.get("image")
@@ -2681,10 +2672,32 @@ def convert_annotation_data_to_dataframe(all_annotations: List[Dict[str, Any]]):
         boxes = anno.get("boxes")
         if not isinstance(boxes, list):
             boxes = [boxes] if isinstance(boxes, dict) else []
-        if not boxes:
-            boxes = [placeholder_box.copy()]
+        # Do not add a placeholder box when boxes is empty; that created blank annotations
+        # in review_file_state when changing page or saving.
         for box in boxes:
             if isinstance(box, dict):
+                # Skip blank/zero-area boxes (e.g. from image_annotator with 0,0,0,0 or None).
+                def _num(v):
+                    if v is None:
+                        return None
+                    try:
+                        return float(v)
+                    except (TypeError, ValueError):
+                        return None
+
+                xmin, ymin, xmax, ymax = (
+                    _num(box.get("xmin")),
+                    _num(box.get("ymin")),
+                    _num(box.get("xmax")),
+                    _num(box.get("ymax")),
+                )
+                if xmin is None and ymin is None and xmax is None and ymax is None:
+                    continue
+                if (xmin or 0) == (xmax or 0) and (ymin or 0) == (ymax or 0):
+                    continue
+                if (xmin or 0) >= (xmax or 0) or (ymin or 0) >= (ymax or 0):
+                    continue
+
                 # Use per-box page when present (e.g. text-path with empty image so all don't become page 1).
                 # Reject 0 or negative (UI/state use 1-based pages); fall back to page_from_image.
                 box_page = box.get("page")
@@ -2872,6 +2885,19 @@ def convert_annotation_json_to_review_df(
     review_file_df.dropna(
         subset=["xmin", "ymin", "xmax", "ymax"], how="any", inplace=True
     )
+
+    # Drop blank/zero-area annotations (e.g. image_annotator sometimes sends 0,0,0,0 boxes)
+    if not review_file_df.empty and all(
+        c in review_file_df.columns for c in ["xmin", "ymin", "xmax", "ymax"]
+    ):
+        xmin, ymin, xmax, ymax = (
+            pd.to_numeric(review_file_df["xmin"], errors="coerce"),
+            pd.to_numeric(review_file_df["ymin"], errors="coerce"),
+            pd.to_numeric(review_file_df["xmax"], errors="coerce"),
+            pd.to_numeric(review_file_df["ymax"], errors="coerce"),
+        )
+        zero_area = (xmin >= xmax) | (ymin >= ymax)
+        review_file_df = review_file_df.loc[~zero_area]
 
     # Exit early if the initial conversion results in an empty DataFrame
     if review_file_df.empty:

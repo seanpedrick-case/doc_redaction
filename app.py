@@ -2656,6 +2656,7 @@ with blocks:
                         interactive=True,
                         enable_keyboard_shortcuts=True,
                         use_default_label=False,
+                        image_type="filepath",
                     )
 
                     with gr.Row(equal_height=True):

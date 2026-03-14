@@ -19,7 +19,6 @@ import numpy as np
 import pandas as pd
 import polars as pl
 import pymupdf
-from gradio_image_annotation import image_annotator
 from gradio_image_annotation.image_annotator import AnnotatedImageData
 from PIL import Image, ImageDraw
 from pymupdf import Document, Rect
@@ -1469,7 +1468,7 @@ def update_annotator_object_and_filter_df(
     doc_full_file_name_textbox: str = "",
     input_folder: str = INPUT_FOLDER,
 ) -> Tuple[
-    image_annotator,
+    AnnotatedImageData,
     int,
     int,
     int,
@@ -1515,7 +1514,7 @@ def update_annotator_object_and_filter_df(
         ]: Updated Gradio components and relevant page annotations.
     """
 
-    zoom_str = str(zoom) + "%"
+    str(zoom) + "%"
 
     # Handle default empty review_df and recogniser_dataframe_base
     if review_df is None or not isinstance(review_df, pd.DataFrame):
@@ -1543,26 +1542,7 @@ def update_annotator_object_and_filter_df(
         print("No all_image_annotation object found")
         # Return blank/default outputs
 
-        blank_annotator = image_annotator(
-            value=None,
-            boxes_alpha=0.1,
-            box_thickness=1,
-            label_list=list(),
-            label_colors=list(),
-            show_label=False,
-            height=zoom_str,
-            width=zoom_str,
-            box_min_size=1,
-            box_selected_thickness=2,
-            handle_size=4,
-            sources=None,
-            show_clear_button=False,
-            show_share_button=False,
-            show_remove_button=False,
-            handles_cursor=True,
-            interactive=True,
-            use_default_label=False,
-        )
+        blank_annotator = None
         blank_df_out_gr = pd.DataFrame(columns=["page", "label", "text", "id"])
         blank_df_modified = pd.DataFrame(columns=["page", "label", "text", "id"])
 
@@ -1749,7 +1729,7 @@ def update_annotator_object_and_filter_df(
             page_sizes,  # Pass updated page sizes
         )
         # Generate default colors for labels (library expects hex string or RGB tuple; tuples are converted to hex)
-        recogniser_colour_list = [
+        [
             CUSTOM_BOX_COLOUR for _ in range(len(recogniser_entities_list))
         ]
 
@@ -1758,7 +1738,6 @@ def update_annotator_object_and_filter_df(
             f"Error calling update_recogniser_dataframes: {e}. Returning empty/default filter data."
         )
         recogniser_entities_list = list()
-        recogniser_colour_list = list()
         recogniser_dataframe_out_gr = pd.DataFrame(
             columns=["page", "label", "text", "id"]
         )
@@ -1779,9 +1758,7 @@ def update_annotator_object_and_filter_df(
         # This should ideally be covered by the initial empty check for all_image_annotations,
         # but as a safeguard:
         print("Warning: Could not prepare annotator object for the current page.")
-        out_image_annotator = image_annotator(
-            value=None, interactive=False
-        )  # Present blank/non-interactive
+        out_image_annotator = None
     else:
         if current_page_image_annotator_object["image"].startswith("placeholder_image"):
             current_page_image_annotator_object["image"], page_sizes_df = (
@@ -1794,26 +1771,7 @@ def update_annotator_object_and_filter_df(
                 )
             )
 
-        out_image_annotator = image_annotator(
-            value=current_page_image_annotator_object,
-            boxes_alpha=0.1,
-            box_thickness=1,
-            label_list=recogniser_entities_list,  # Use labels from update_recogniser_dataframes
-            label_colors=recogniser_colour_list,
-            show_label=False,
-            height=zoom_str,
-            width=zoom_str,
-            box_min_size=1,
-            box_selected_thickness=2,
-            handle_size=4,
-            sources=None,  # ["upload"],
-            show_clear_button=False,
-            show_share_button=False,
-            show_remove_button=False,
-            handles_cursor=True,
-            interactive=True,  # Keep interactive if data is present
-            use_default_label=False,
-        )
+        out_image_annotator = current_page_image_annotator_object
 
     page_entities_drop_redaction_list = ["ALL"]
     all_pages_in_doc_list = [str(i) for i in range(1, len(page_sizes) + 1)]
@@ -2025,6 +1983,9 @@ def apply_redactions_to_review_df_and_files(
         _review_df = review_file_state
         for file_path in file_paths_to_process:
             pdf_doc = None
+            review_pdf_doc = None
+            number_of_pages = 0
+            _tmp_pdf_path = None
             _profile_page_times = []
             _profile_image_times = []
             file_name_without_ext = get_file_name_without_type(file_path)
@@ -2122,6 +2083,9 @@ def apply_redactions_to_review_df_and_files(
 
                 draw = ImageDraw.Draw(image)
 
+                output_image_path = (
+                    output_folder + file_name_without_ext + "_redacted.png"
+                )
                 for img_annotation_box in page_image_annotator_object["boxes"]:
                     coords = [
                         img_annotation_box["xmin"],
@@ -2220,12 +2184,56 @@ def apply_redactions_to_review_df_and_files(
 
                     draw.rectangle(coords, fill=fill)
 
-                    output_image_path = (
-                        output_folder + file_name_without_ext + "_redacted.png"
-                    )
-                    image.save(output_folder + file_name_without_ext + "_redacted.png")
-
+                image.save(output_image_path)
                 _out_files.append(output_image_path)
+
+                # For image under review, also produce _redacted.pdf and _redactions_for_review.pdf (same as PDF route)
+                if doc is not None and getattr(doc, "page_count", 0) >= 1:
+                    try:
+                        _tmp_pdf_path = os.path.join(
+                            output_folder,
+                            file_name_without_ext + "_temp_apply.pdf",
+                        )
+                        doc.save(_tmp_pdf_path)
+                        pdf_doc = pymupdf.open(_tmp_pdf_path)
+                        review_pdf_doc = (
+                            pymupdf.open(_tmp_pdf_path)
+                            if RETURN_PDF_FOR_REVIEW
+                            else None
+                        )
+                        number_of_pages = pdf_doc.page_count
+                    except Exception as e:
+                        print(f"Failed to create PDFs from image doc: {e}")
+                        pdf_doc = None
+                        review_pdf_doc = None
+                        _tmp_pdf_path = None
+                else:
+                    # Fallback: doc not available (e.g. pdf_doc_state is list() or None after initial redaction).
+                    # Create one-page PDF from the image file so we still produce both PDFs.
+                    try:
+                        _tmp_pdf_path = os.path.join(
+                            output_folder,
+                            file_name_without_ext + "_temp_apply.pdf",
+                        )
+                        img_pdf = pymupdf.open()
+                        img_page = img_pdf.new_page(
+                            width=image.width, height=image.height
+                        )
+                        img_page.insert_image(img_page.rect, filename=file_path)
+                        img_pdf.save(_tmp_pdf_path)
+                        img_pdf.close()
+                        pdf_doc = pymupdf.open(_tmp_pdf_path)
+                        review_pdf_doc = (
+                            pymupdf.open(_tmp_pdf_path)
+                            if RETURN_PDF_FOR_REVIEW
+                            else None
+                        )
+                        number_of_pages = pdf_doc.page_count
+                    except Exception as e:
+                        print(f"Failed to create PDFs from image file: {e}")
+                        pdf_doc = None
+                        review_pdf_doc = None
+                        _tmp_pdf_path = None
 
             elif file_extension == ".csv":
                 pdf_doc = list()
@@ -2240,10 +2248,21 @@ def apply_redactions_to_review_df_and_files(
                 number_of_pages = pdf_doc.page_count
 
                 # Create review PDF document if RETURN_PDF_FOR_REVIEW is True
-                review_pdf_doc = None
                 if RETURN_PDF_FOR_REVIEW:
                     review_pdf_doc = pymupdf.open(file_path)
+                else:
+                    review_pdf_doc = None
 
+            else:
+                print("File type not recognised.")
+
+            # Run page loop for both PDF and image (when doc was converted to temp PDF)
+            if (
+                pdf_doc is not None
+                and hasattr(pdf_doc, "page_count")
+                and not isinstance(pdf_doc, list)
+                and number_of_pages > 0
+            ):
                 # page_sizes_df and page_to_image_path / page_to_image_dimensions
                 # already built once per file above
 
@@ -2358,8 +2377,6 @@ def apply_redactions_to_review_df_and_files(
                         except Exception:
                             pass
                     image = None
-            else:
-                print("File type not recognised.")
 
             progress(0.9, "Saving output files")
 
@@ -2389,6 +2406,13 @@ def apply_redactions_to_review_df_and_files(
                     _out_files.append(out_review_pdf_file_path)
                     review_pdf_doc.close()
                     review_pdf_doc = None
+
+                # Remove temp PDF used for image->PDF route
+                if _tmp_pdf_path and os.path.isfile(_tmp_pdf_path):
+                    try:
+                        os.remove(_tmp_pdf_path)
+                    except Exception:
+                        pass
 
             else:
                 print("PDF input not found. Outputs not saved to PDF.")

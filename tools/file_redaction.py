@@ -2670,12 +2670,12 @@ def choose_and_run_redactor(
                 progress(0.9, "Saving redacted file")
 
                 if is_pdf(file_path) is False:
-                    out_redacted_pdf_file_path = (
+                    out_redacted_png_path = (
                         output_folder + pdf_file_name_without_ext + "_redacted.png"
                     )
                     # Add page range suffix if partial processing
-                    out_redacted_pdf_file_path = add_page_range_suffix_to_file_path(
-                        out_redacted_pdf_file_path,
+                    out_redacted_png_path = add_page_range_suffix_to_file_path(
+                        out_redacted_png_path,
                         page_min,
                         current_loop_page,
                         number_of_pages,
@@ -2696,12 +2696,63 @@ def choose_and_run_redactor(
                     # Otherwise could be an image object
                     else:
                         img = pymupdf_doc[-1]
-                    img.save(out_redacted_pdf_file_path, "PNG", resolution=image_dpi)
+                    img.save(out_redacted_png_path, "PNG", resolution=image_dpi)
 
-                    if isinstance(out_redacted_pdf_file_path, str):
-                        out_file_paths.append(out_redacted_pdf_file_path)
+                    if isinstance(out_redacted_png_path, str):
+                        out_file_paths.append(out_redacted_png_path)
                     else:
-                        out_file_paths.append(out_redacted_pdf_file_path[0])
+                        out_file_paths.append(out_redacted_png_path[0])
+
+                    # Same outputs as PDF route: _redacted.pdf and _redactions_for_review.pdf
+                    try:
+                        img_doc = pymupdf.open()
+                        page = img_doc.new_page(width=img.width, height=img.height)
+                        page.insert_image(page.rect, filename=out_redacted_png_path)
+                        out_redacted_pdf_file_path = (
+                            output_folder + pdf_file_name_without_ext + "_redacted.pdf"
+                        )
+                        out_redacted_pdf_file_path = add_page_range_suffix_to_file_path(
+                            out_redacted_pdf_file_path,
+                            page_min,
+                            current_loop_page,
+                            number_of_pages,
+                            page_max,
+                        )
+                        save_pdf_with_or_without_compression(
+                            img_doc, out_redacted_pdf_file_path
+                        )
+                        if isinstance(out_redacted_pdf_file_path, str):
+                            out_file_paths.append(out_redacted_pdf_file_path)
+                        else:
+                            out_file_paths.append(out_redacted_pdf_file_path[0])
+                        img_doc.close()
+
+                        if RETURN_PDF_FOR_REVIEW is True:
+                            out_review_pdf_file_path = (
+                                output_folder
+                                + pdf_file_name_without_ext
+                                + "_redactions_for_review.pdf"
+                            )
+                            out_review_pdf_file_path = (
+                                add_page_range_suffix_to_file_path(
+                                    out_review_pdf_file_path,
+                                    page_min,
+                                    current_loop_page,
+                                    number_of_pages,
+                                    page_max,
+                                )
+                            )
+                            review_img_doc = pymupdf.open(out_redacted_pdf_file_path)
+                            save_pdf_with_or_without_compression(
+                                review_img_doc, out_review_pdf_file_path
+                            )
+                            if isinstance(out_review_pdf_file_path, str):
+                                out_file_paths.append(out_review_pdf_file_path)
+                            else:
+                                out_file_paths.append(out_review_pdf_file_path[0])
+                            review_img_doc.close()
+                    except Exception as e:
+                        print(f"Failed to create PDF outputs from image: {e}")
 
                 else:
                     # Check if we have dual PDF documents to save

@@ -23,7 +23,6 @@ from botocore.exceptions import (
     PartialCredentialsError,
 )
 from fastapi import FastAPI
-from gradio_image_annotation import image_annotator
 
 from tools.config import (
     AWS_LLM_PII_OPTION,
@@ -76,17 +75,7 @@ def reset_state_vars():
         pd.DataFrame(),
         0,
         "",
-        image_annotator(
-            label="Modify redaction boxes",
-            label_list=["Redaction"],
-            label_colors=[(0, 0, 0)],
-            show_label=False,
-            sources=None,  # ["upload"],
-            show_clear_button=False,
-            show_share_button=False,
-            show_remove_button=False,
-            interactive=False,
-        ),
+        None,
         [],
         [],
         pd.DataFrame(),
