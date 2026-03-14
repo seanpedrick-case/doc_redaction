@@ -69,6 +69,17 @@ REVIEW_CSV_PARALLEL_MIN_PAGES = 20
 REVIEW_CSV_PAGES_PER_CHUNK = 15
 
 
+def _ensure_box_colour_string(colour):
+    """Ensure colour is a string for gradio_image_annotation (JS expects .startsWith)."""
+    if colour is None:
+        return "(0, 0, 0)"
+    if isinstance(colour, str):
+        return colour
+    if isinstance(colour, (tuple, list)) and len(colour) >= 3:
+        return f"({int(colour[0])}, {int(colour[1])}, {int(colour[2])})"
+    return "(0, 0, 0)"
+
+
 def decrease_page(number: int, all_annotations: dict):
     """
     Decrease page number for review redactions page.
@@ -1693,6 +1704,10 @@ def update_annotator_object_and_filter_df(
 
         if "color" not in current_page_annotations_df.columns:
             current_page_annotations_df["color"] = CUSTOM_BOX_COLOUR
+        # gradio_image_annotation JS expects colour as string (e.g. .startsWith("rgba"))
+        current_page_annotations_df["color"] = current_page_annotations_df[
+            "color"
+        ].apply(_ensure_box_colour_string)
 
         # Ensure coord columns have no NaN/None so image_annotator preprocess_boxes doesn't raise TypeError
         coord_cols = ["xmin", "xmax", "ymin", "ymax"]
@@ -1733,7 +1748,7 @@ def update_annotator_object_and_filter_df(
             review_df.copy(),  # Keep the copy as per original function call
             page_sizes,  # Pass updated page sizes
         )
-        # Generate default colors for labels if needed by image_annotator
+        # Generate default colors for labels (library expects hex string or RGB tuple; tuples are converted to hex)
         recogniser_colour_list = [
             CUSTOM_BOX_COLOUR for _ in range(len(recogniser_entities_list))
         ]

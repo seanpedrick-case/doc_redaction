@@ -1613,6 +1613,15 @@ def prepare_image_or_pdf(
                 pymupdf_doc, image_sizes_width, image_sizes_height, image_file_paths
             )
 
+            # Create base version of the annotation object for review (same as PDF branch)
+            if (not all_annotations_object) and (prepare_for_review is True):
+                all_annotations_object = list()
+                for image_path in image_file_paths:
+                    annotation = dict()
+                    annotation["image"] = image_path
+                    annotation["boxes"] = list()
+                    all_annotations_object.append(annotation)
+
             converted_file_path = output_folder + file_name_with_ext
 
             pymupdf_doc.save(converted_file_path, garbage=4, deflate=True, clean=True)
