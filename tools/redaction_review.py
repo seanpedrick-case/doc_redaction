@@ -88,11 +88,14 @@ def decrease_page(number: int, all_annotations: dict):
 
     if number > 1:
         return number - 1, number - 1
-    elif number <= 1:
-        # return 1, 1
-        raise Warning("At first page")
     else:
-        raise Warning("At first page")
+        gr.Info("At first page", duration=5)
+        raise gr.Error(
+            message="At first page",
+            title="At first page...",
+            visible=False,
+            print_exception=False,
+        )
 
 
 def increase_page(number: int, all_annotations: dict):
@@ -108,10 +111,14 @@ def increase_page(number: int, all_annotations: dict):
 
     if number < max_pages:
         return number + 1, number + 1
-    # elif number == max_pages:
-    #    return max_pages, max_pages
     else:
-        raise Warning("At last page")
+        gr.Info("At last page", duration=5)
+        raise gr.Error(
+            message="At last page",
+            title="At last page...",
+            visible=False,
+            print_exception=False,
+        )
 
 
 def update_zoom(
@@ -221,17 +228,6 @@ def get_filtered_recogniser_dataframe_and_dropdowns(
             allow_custom_value=True,
             interactive=True,
         )
-
-        # recogniser_dataframe_out_gr = gr.Dataframe(
-        #     review_dataframe[["page", "label", "text", "id"]],
-        #     show_search="filter",
-        #     type="pandas",
-        #     headers=["page", "label", "text", "id"],
-        #     wrap=True,
-        #     max_height=400,
-        # )
-        # recogniser_dataframe_out_gr = pd.DataFrame(
-        #     review_dataframe[["page", "label", "text", "id"]]
 
         recogniser_dataframe_out = review_dataframe.loc[
             :, ["page", "label", "text", "id"]
@@ -1683,7 +1679,36 @@ def update_annotator_object_and_filter_df(
                 # If error, proceed with original coordinates or handle as needed
 
         if "color" not in current_page_annotations_df.columns:
-            current_page_annotations_df["color"] = CUSTOM_BOX_COLOUR
+            # Preserve user-defined box colours from review_df (e.g. after Apply redactions)
+            if (
+                review_df is not None
+                and not review_df.empty
+                and "color" in review_df.columns
+                and "page" in review_df.columns
+            ):
+                review_page = pd.to_numeric(review_df["page"], errors="coerce")
+                page_mask = review_page == page_num_reported
+                review_page_df = review_df.loc[page_mask].copy()
+                if (
+                    not review_page_df.empty
+                    and "id" in review_page_df.columns
+                    and "id" in current_page_annotations_df.columns
+                ):
+                    # Match by id so colours stay with the right box
+                    id_to_color = review_page_df.set_index("id")["color"].to_dict()
+                    current_page_annotations_df["color"] = current_page_annotations_df[
+                        "id"
+                    ].map(lambda x: id_to_color.get(x, CUSTOM_BOX_COLOUR))
+                elif not review_page_df.empty and len(review_page_df) == len(
+                    current_page_annotations_df
+                ):
+                    current_page_annotations_df["color"] = review_page_df[
+                        "color"
+                    ].values
+                else:
+                    current_page_annotations_df["color"] = CUSTOM_BOX_COLOUR
+            else:
+                current_page_annotations_df["color"] = CUSTOM_BOX_COLOUR
         # gradio_image_annotation JS expects colour as string (e.g. .startsWith("rgba"))
         current_page_annotations_df["color"] = current_page_annotations_df[
             "color"
@@ -1729,9 +1754,7 @@ def update_annotator_object_and_filter_df(
             page_sizes,  # Pass updated page sizes
         )
         # Generate default colors for labels (library expects hex string or RGB tuple; tuples are converted to hex)
-        [
-            CUSTOM_BOX_COLOUR for _ in range(len(recogniser_entities_list))
-        ]
+        [CUSTOM_BOX_COLOUR for _ in range(len(recogniser_entities_list))]
 
     except Exception as e:
         print(
@@ -1824,6 +1847,50 @@ def update_all_page_annotation_object_based_on_previous_page(
 
     if not current_page:
         current_page = 1
+
+    # Derive image_height, image_width from image shape; orientation from object
+    img = page_image_annotator_object.get("image")
+    image_height = page_image_annotator_object.get("image_height")
+    image_width = page_image_annotator_object.get("image_width")
+    if isinstance(img, np.ndarray) and img.size > 0:
+        # shape is (height, width, channels)
+        image_height = int(img.shape[0])
+        image_width = int(img.shape[1])
+        page_image_annotator_object["image_height"] = image_height
+        page_image_annotator_object["image_width"] = image_width
+    orientation = page_image_annotator_object.get("orientation")
+
+    # Transform box coordinates from current orientation back to orientation 0.
+    # Matches component: 90° CW new_x = H - old_y, new_y = old_x; 90° CCW new_x = old_y, new_y = W - old_x.
+    if (
+        orientation in (1, 2, 3)
+        and image_height is not None
+        and image_width is not None
+    ):
+        W, H = image_width, image_height
+        boxes = page_image_annotator_object.get("boxes") or []
+        for box in boxes:
+            xmin_d, ymin_d = box["xmin"], box["ymin"]
+            xmax_d, ymax_d = box["xmax"], box["ymax"]
+            if orientation == 1:
+                # 90° CW reverse: old_x = y_d, old_y = H - x_d
+                box["xmin"] = ymin_d
+                box["xmax"] = ymax_d
+                box["ymin"] = H - xmax_d
+                box["ymax"] = H - xmin_d
+            elif orientation == 2:
+                # 180° CW reverse: old_x = W - x_d, old_y = H - y_d
+                box["xmin"] = W - xmax_d
+                box["xmax"] = W - xmin_d
+                box["ymin"] = H - ymax_d
+                box["ymax"] = H - ymin_d
+            elif orientation == 3:
+                # 270° CW (90° CCW) reverse: old_x = W - y_d, old_y = x_d
+                box["xmin"] = W - ymax_d
+                box["xmax"] = W - ymin_d
+                box["ymin"] = xmin_d
+                box["ymax"] = xmax_d
+        page_image_annotator_object["orientation"] = 0
 
     # This replaces the numpy array image object with the image file path
     page_image_annotator_object, all_image_annotations = (

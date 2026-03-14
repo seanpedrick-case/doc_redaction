@@ -4083,12 +4083,7 @@ def define_box_colour(
             and len(out_colour) == 3
             and all(isinstance(c, float) and 0.0 <= c <= 1.0 for c in out_colour)
         ):
-            out_colour = (
-                0,
-                0,
-                0,
-            )  # Fallback to black if any previous logic resulted in an invalid state
-            out_colour = img_annotation_box["color"]
+            out_colour = (0.0, 0.0, 0.0)
     else:
         if CUSTOM_BOX_COLOUR:
             # Should be a tuple of three integers between 0 and 255 from config
@@ -4102,12 +4097,13 @@ def define_box_colour(
                     for component in CUSTOM_BOX_COLOUR[:3]
                 )
         else:
-            out_colour = (
-                0,
-                0,
-                0,
-            )  # Fallback to black if no custom box colour is provided
+            out_colour = (0.0, 0.0, 0.0)
 
+    # PyMuPDF requires 1, 3 or 4 float components in 0-1; ensure tuple of floats
+    if isinstance(out_colour, (tuple, list)) and len(out_colour) in (3, 4):
+        out_colour = tuple(float(max(0.0, min(1.0, c))) for c in out_colour)
+    else:
+        out_colour = (0.0, 0.0, 0.0)
     return out_colour
 
 
@@ -4235,8 +4231,13 @@ def redact_single_box(
         shape = pymupdf_page.new_shape()
         shape.draw_rect(pymupdf_rect)
 
-        # Use solid fill for normal redaction
-        shape.finish(color=out_colour, fill=out_colour)
+        # PyMuPDF requires 1, 3 or 4 float components in range 0-1
+        _colour = out_colour
+        if isinstance(_colour, (tuple, list)) and len(_colour) in (3, 4):
+            _colour = tuple(float(max(0.0, min(1.0, c))) for c in _colour)
+        else:
+            _colour = (0.0, 0.0, 0.0)
+        shape.finish(color=_colour, fill=_colour)
         shape.commit()
 
         return pymupdf_page

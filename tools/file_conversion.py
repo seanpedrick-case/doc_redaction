@@ -2718,18 +2718,40 @@ def convert_annotation_data_to_dataframe(all_annotations: List[Dict[str, Any]]):
                             if isinstance(v, (list, tuple)) and len(v) >= 3:
                                 v = [int(float(x)) for x in v[:3]]
                             elif isinstance(v, str):
-                                # e.g. "128,128,128" or "(0, 0, 0)"
                                 s = v.strip("()").replace(" ", "")
+                                # e.g. "(128,128,128)" or "128,128,128"
                                 parts = s.split(",")
                                 if len(parts) >= 3:
                                     v = [int(float(p)) for p in parts[:3]]
+                                elif s.startswith("#") and len(s) in (4, 7):
+                                    # Hex #rgb or #rrggbb (from gradio_image_annotation label_colors)
+                                    hex_s = s[1:]
+                                    if len(hex_s) == 3:
+                                        v = [
+                                            int(hex_s[i : i + 1] * 2, 16)
+                                            for i in (0, 1, 2)
+                                        ]
+                                    else:
+                                        v = [
+                                            int(hex_s[i : i + 2], 16) for i in (0, 2, 4)
+                                        ]
                                 else:
                                     v = [0, 0, 0]
                             else:
                                 v = [0, 0, 0]
                         elif k == "color" and v is None:
                             v = [0, 0, 0]
+                        if k == "color":
+                            # Store as string "(r, g, b)" so column survives Polars/pandas
+                            # round-trip (list columns can be lost or corrupted)
+                            v = (
+                                f"({int(v[0])}, {int(v[1])}, {int(v[2])})"
+                                if isinstance(v, (list, tuple)) and len(v) >= 3
+                                else "(0, 0, 0)"
+                            )
                         row[k] = v
+                if "color" not in row:
+                    row["color"] = "(0, 0, 0)"
                 records.append(row)
 
     if not records:

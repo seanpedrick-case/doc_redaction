@@ -59,7 +59,7 @@ dependencies = [
     "Faker==40.8.0",
     "python-levenshtein==0.27.3",
     "spaczz==0.6.1",
-    "gradio_image_annotation @ https://github.com/seanpedrick-case/gradio_image_annotator/releases/download/v0.5.2/gradio_image_annotation-0.5.2-py3-none-any.whl",
+    "gradio_image_annotation @ https://github.com/seanpedrick-case/gradio_image_annotator/releases/download/v0.5.3/gradio_image_annotation-0.5.3-py3-none-any.whl",
     "rapidfuzz==3.14.3",
     "python-dotenv==1.0.1",
     "awslambdaric==3.1.1",
