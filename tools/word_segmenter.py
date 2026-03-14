@@ -1688,16 +1688,24 @@ class HybridWordSegmenter:
         if line_image is None:
             return line_data
 
+        # Handle grayscale (2D) or BGR (3D) line images
+        if len(line_image.shape) == 2:
+            gray = np.ascontiguousarray(line_image)
+        else:
+            gray = cv2.cvtColor(line_image, cv2.COLOR_BGR2GRAY)
+        img_h, img_w = gray.shape[:2]
+
+        # OpenCV GaussianBlur(5,5) and later adaptiveThreshold need minimum dimensions.
+        # Avoid "Unknown C++ exception" on very small line crops (e.g. 1–4 px).
+        if img_h < 5 or img_w < 5:
+            return self.convert_line_to_word_level(line_data, img_w, img_h)
+
         if line_data and line_data.get("text"):
             words = line_data["text"][0].split()
             if len(words) <= 1:
-                img_h, img_w = line_image.shape[:2]
                 return self.convert_line_to_word_level(line_data, img_w, img_h)
 
         # --- PRE-PROCESSING: The "Bulldozer" Approach ---
-        gray = cv2.cvtColor(line_image, cv2.COLOR_BGR2GRAY)
-        img_h, img_w = gray.shape[:2]
-
         # 1. Gaussian Blur: Suppress high-frequency speckle noise that confuses the main segmenter
         # We accept slight edge blurring for the sake of noise reduction.
         blurred_gray = cv2.GaussianBlur(gray, (5, 5), 0)
