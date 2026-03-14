@@ -99,6 +99,7 @@ from tools.config import (
     USE_LLAMA_SWAP,
     USE_TRANSFORMERS_VLM_MODEL_AS_LLM,
     VLM_DISABLE_QWEN3_5_THINKING,
+    VLM_QWEN3_5_NOTHINK_SUFFIX,
 )
 
 
@@ -708,7 +709,15 @@ def call_transformers_model(
     # prompt so the model continues with the answer (avoids continue_final_message which can fail
     # when the chat template does not include the final assistant message in the rendered string).
     add_nothink_assistant_turn = (
-        VLM_DISABLE_QWEN3_5_THINKING and USE_TRANSFORMERS_VLM_MODEL_AS_LLM
+        VLM_DISABLE_QWEN3_5_THINKING
+        and "Qwen 3.5" in LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+    ) or (
+        VLM_DISABLE_QWEN3_5_THINKING
+        and USE_TRANSFORMERS_VLM_MODEL_AS_LLM
+        and (
+            "Qwen 3.5" in SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+            or "Qwen3.5" in SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+        )
     )
 
     # 1. Define the conversation as a list of dictionaries
@@ -842,10 +851,10 @@ def call_transformers_model(
 
     attention_mask = torch.ones_like(input_ids).to(device)
 
-    # When disabling Qwen3.5 thinking, append <think></think> to prompt so model continues with the answer
+    # When disabling Qwen3.5 thinking, append suffix to prompt so model continues with the answer (same as run_vlm).
     if add_nothink_assistant_turn:
         nothink_tokens = tokenizer.encode(
-            "<think></think>", add_special_tokens=False, return_tensors="pt"
+            VLM_QWEN3_5_NOTHINK_SUFFIX, add_special_tokens=False, return_tensors="pt"
         )
         if nothink_tokens.dim() == 1:
             nothink_tokens = nothink_tokens.unsqueeze(0)

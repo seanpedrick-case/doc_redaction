@@ -580,7 +580,7 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
     * **Default Value:** `"False"`
 
 * **`LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE`**
-    * **Description:** Identifier for the local transformers LLM used for PII detection (e.g. `"gemma-3-4b"`, `"qwen-3-4b"`). Used for display and to select the correct repo/file/folder. Supported values include gemma-3-4b, gemma-3-12b, gemma-2, qwen-3-4b, gpt-oss-20b, granite-4-tiny, granite-4-micro. Ignored for local LLM when `USE_TRANSFORMERS_VLM_MODEL_AS_LLM` is `"True"` (the VLM model is used instead).
+    * **Description:** Identifier for the local transformers LLM used for PII detection (e.g. `"gemma-3-4b"`, `"qwen-3-4b"`). Used for display and to select the correct repo/file/folder. Supported values include gemma-3-4b, gemma-3-12b, gemma-2, qwen-3-4b, GPT-OSS 20B, granite-4-tiny, granite-4-micro. Ignored for local LLM when `USE_TRANSFORMERS_VLM_MODEL_AS_LLM` is `"True"` (the VLM model is used instead).
     * **Default Value:** `"gemma-3-4b"`
 
 * **`LOCAL_TRANSFORMERS_LLM_PII_REPO_ID`**, **`LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE`**, **`LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER`**
@@ -596,7 +596,7 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
     * **Default Value:** `"False"`
 
 * **`REASONING_SUFFIX`**
-    * **Description:** Suffix added to prompts for reasoning-capable models (e.g. `"Reasoning: low"` for gpt-oss-20b, `"/nothink"` for Qwen 3 4B to disable chain-of-thought). Model-specific; see config for defaults.
+    * **Description:** Suffix added to prompts for reasoning-capable models (e.g. `"Reasoning: low"` for GPT-OSS 20B, `"/nothink"` for Qwen 3 4B to disable chain-of-thought). Model-specific; see config for defaults.
     * **Default Value:** Model-dependent (e.g. `"Reasoning: low"` or `"/nothink"` or `''`).
 
 * **LLM generation parameters:** **`LLM_TEMPERATURE`** (default `0.1`), **`LLM_TOP_K`** (`64`), **`LLM_MIN_P`** (`0`), **`LLM_TOP_P`** (`0.95`), **`LLM_REPETITION_PENALTY`** (`1.0`), **`LLM_MAX_NEW_TOKENS`** (`4096`), **`LLM_CONTEXT_LENGTH`** (`32768`), **`LLM_SEED`** (`42`), **`LLM_RESET`** (`False`), **`LLM_STREAM`** (`True`), **`LLM_STOP_STRINGS`**, **`LLM_THREADS`** (`-1`), **`SPECULATIVE_DECODING`** (`False`), **`ASSISTANT_MODEL`**, **`LLM_MODEL_DTYPE`** (`bfloat16`), and other **`LLM_*`** / related variables in `tools/config.py` control local/transformers LLM generation in `tools/llm_funcs.py`. **`LLM_TEMPERATURE`** and **`LLM_MAX_NEW_TOKENS`** also control PII detection LLM calls and retries.
@@ -800,7 +800,7 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
     * **Default Value:** `[]`
 
 * **`HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS`**
-    * **Description:** Full list of available options for Textract's handwriting and signature detection. Can include `'Extract handwriting'`, `'Extract signatures'`, and optionally `'Extract forms'`, `'Extract layout'`, `'Extract tables'`, and `'Face identification'` if the corresponding include options are enabled.
+    * **Description:** Full list of available options for Textract's handwriting and signature detection. Can include `'Extract handwriting'`, `'Extract signatures'`, and optionally `'Extract forms'`, `'Extract layout'`, `'Extract tables'`, and `'Face detection'` if the corresponding include options are enabled.
     * **Default Value:** `['Extract handwriting', 'Extract signatures']`
 
 * **`INCLUDE_FORM_EXTRACTION_TEXTRACT_OPTION`**
@@ -810,7 +810,7 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
     * **Default Value:** `"False"` for all.
 
 * **`INCLUDE_FACE_IDENTIFICATION_TEXTRACT_OPTION`**
-    * **Description:** When set to `"True"`, adds "Face identification" as a selectable option in the handwriting/signature checkbox group. When enabled with AWS Bedrock VLM OCR, a second VLM pass per page is run to identify faces (cost and time estimates account for this).
+    * **Description:** When set to `"True"`, adds "Face detection" as a selectable option in the handwriting/signature checkbox group. When enabled with AWS Bedrock VLM OCR, a second VLM pass per page is run to identify faces (cost and time estimates account for this).
     * **Default Value:** `"False"`
 
 ### Tabular Data Options

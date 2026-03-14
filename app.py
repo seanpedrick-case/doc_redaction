@@ -144,6 +144,7 @@ from tools.config import (
     NO_REDACTION_PII_OPTION,
     OUTPUT_COST_CODES_PATH,
     OUTPUT_FOLDER,
+    OVERWRITE_EXISTING_OCR_RESULTS,
     PADDLE_MODEL_PATH,
     PII_DETECTION_MODELS,
     REMOVE_DUPLICATE_ROWS,
@@ -3560,26 +3561,35 @@ with blocks:
                     page_min.render()
                     page_max.render()
 
-            with gr.Accordion("Efficient OCR", open=False):
-                gr.Markdown(
-                    "When enabled, PDFs are processed per page: selectable text extraction is tried first; only pages with too little text use OCR (Tesseract/Textract/VLM), saving time and cost."
-                )
-                with gr.Row():
-                    efficient_ocr_checkbox = gr.Checkbox(
-                        label="Use efficient OCR (try text first, OCR only when needed)",
-                        value=EFFICIENT_OCR,
-                    )
-                    high_quality_textract_ocr_checkbox = gr.Checkbox(
-                        label="High-quality Textract OCR (re-run low-confidence lines with Bedrock VLM)",
-                        value=HYBRID_TEXTRACT_BEDROCK_VLM,
-                    )
-                    efficient_ocr_min_words_number = gr.Number(
-                        label="Minimum words on page for text-only route (below this use OCR)",
-                        value=EFFICIENT_OCR_MIN_WORDS,
-                        precision=0,
-                        minimum=0,
-                        step=1,
-                    )
+            with gr.Accordion("Advanced OCR settings", open=False):
+                with gr.Row(equal_height=True):
+                    with gr.Column(scale=2):
+                        gr.Markdown(
+                            "When enabled, PDFs are processed per page: selectable text extraction is tried first; only pages with too little text use OCR (Tesseract/Textract/VLM), saving time and cost."
+                        )
+
+                        efficient_ocr_checkbox = gr.Checkbox(
+                            label="Use efficient OCR (try text first, OCR only when needed)",
+                            value=EFFICIENT_OCR,
+                        )
+                        efficient_ocr_min_words_number = gr.Number(
+                            label="Minimum words on page for text-only route (below this use OCR)",
+                            value=EFFICIENT_OCR_MIN_WORDS,
+                            precision=0,
+                            minimum=0,
+                            step=1,
+                        )
+                    with gr.Column(scale=1):
+                        high_quality_textract_ocr_checkbox = gr.Checkbox(
+                            label="High-quality Textract OCR (re-run low-confidence lines with Bedrock VLM)",
+                            value=HYBRID_TEXTRACT_BEDROCK_VLM,
+                            visible=SHOW_AWS_TEXT_EXTRACTION_OPTIONS,
+                        )
+                    with gr.Column(scale=1):
+                        overwrite_existing_ocr_checkbox = gr.Checkbox(
+                            label="Overwrite existing OCR results for new redaction task",
+                            value=OVERWRITE_EXISTING_OCR_RESULTS,
+                        )
 
             with gr.Accordion(
                 "Language selection", open=False, visible=SHOW_LANGUAGE_SELECTION
@@ -4437,6 +4447,7 @@ with blocks:
             efficient_ocr_checkbox,
             efficient_ocr_min_words_number,
             high_quality_textract_ocr_checkbox,
+            overwrite_existing_ocr_checkbox,
             llm_model_name_textbox,
             llm_total_input_tokens_number,
             llm_total_output_tokens_number,
@@ -4908,6 +4919,7 @@ with blocks:
             efficient_ocr_checkbox,
             efficient_ocr_min_words_number,
             high_quality_textract_ocr_checkbox,
+            overwrite_existing_ocr_checkbox,
             llm_model_name_textbox,
             llm_total_input_tokens_number,
             llm_total_output_tokens_number,
@@ -5555,6 +5567,7 @@ with blocks:
             efficient_ocr_checkbox,
             efficient_ocr_min_words_number,
             high_quality_textract_ocr_checkbox,
+            overwrite_existing_ocr_checkbox,
             llm_model_name_textbox,
             llm_total_input_tokens_number,
             llm_total_output_tokens_number,
@@ -8452,6 +8465,7 @@ with blocks:
         efficient_ocr_checkbox,
         efficient_ocr_min_words_number,
         high_quality_textract_ocr_checkbox,
+        overwrite_existing_ocr_checkbox,
         llm_model_name_textbox,
         llm_total_input_tokens_number,
         llm_total_output_tokens_number,
@@ -8666,6 +8680,11 @@ with blocks:
                 if high_quality_textract_ocr_checkbox is not None
                 else False
             ),
+            (
+                overwrite_existing_ocr_checkbox
+                if overwrite_existing_ocr_checkbox is not None
+                else False
+            ),
             llm_model_name_textbox or "",
             llm_total_input_tokens_number or 0,
             llm_total_output_tokens_number or 0,
@@ -8799,6 +8818,7 @@ with blocks:
             efficient_ocr_checkbox,
             efficient_ocr_min_words_number,
             high_quality_textract_ocr_checkbox,
+            overwrite_existing_ocr_checkbox,
             llm_model_name_textbox,
             llm_total_input_tokens_number,
             llm_total_output_tokens_number,

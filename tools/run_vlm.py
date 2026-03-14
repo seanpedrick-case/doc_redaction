@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 from threading import Thread
 
 import gradio as gr
@@ -36,6 +37,7 @@ from tools.config import (
     VLM_DISABLE_QWEN3_5_THINKING,
     VLM_MAX_IMAGE_SIZE,
     VLM_MIN_IMAGE_SIZE,
+    VLM_QWEN3_5_NOTHINK_SUFFIX,
     VLM_SEED,
 )
 from tools.helper_functions import get_system_font_path
@@ -1080,7 +1082,7 @@ def extract_text_from_image_vlm(
         messages, tokenize=False, add_generation_prompt=True
     )
     if VLM_DISABLE_QWEN3_5_THINKING:
-        prompt_full = prompt_full + "<think></think>"
+        prompt_full = prompt_full + VLM_QWEN3_5_NOTHINK_SUFFIX
 
     # Cap max_pixels so image tokens + text fit within MAX_INPUT_TOKEN_LENGTH (image token count scales with resolution).
     # Reserve ~1k tokens for prompt; allow max_pixels below VLM_MIN_IMAGE_SIZE when context is small to avoid VRAM spike.
@@ -1139,6 +1141,7 @@ def extract_text_from_image_vlm(
     # Only Qwen3-VL models currently support presence_penalty
     if actual_presence_penalty is not None and model_supports_presence_penalty:
         generation_kwargs["presence_penalty"] = actual_presence_penalty
+    start_time = time.time()
     thread = Thread(target=model.generate, kwargs=generation_kwargs)
     thread.start()
 
@@ -1167,6 +1170,8 @@ def extract_text_from_image_vlm(
 
     # Print final newline after streaming is complete
     print()  # Add newline at the end
+
+    end_time = time.time()
 
     # Estimate token usage for local models
     # For local transformers models, we can estimate using the tokenizer if available
@@ -1198,6 +1203,14 @@ def extract_text_from_image_vlm(
         # If token counting fails, use rough word-based estimates
         input_tokens = len(actual_text.split()) * 2  # Rough estimate
         output_tokens = len(buffer.split()) * 2  # Rough estimate
+
+    duration = end_time - start_time
+    tokens_per_second = output_tokens / duration if duration > 0 else 0
+
+    print("\n--- Performance ---")
+    print(f"Time taken: {duration:.2f} seconds")
+    print(f"Generated tokens: {output_tokens}")
+    print(f"Tokens per second: {tokens_per_second:.2f}")
 
     # Return the complete text and token estimates
     return buffer, input_tokens, output_tokens

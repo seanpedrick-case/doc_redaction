@@ -766,6 +766,7 @@ def choose_and_run_redactor(
     efficient_ocr: bool = EFFICIENT_OCR,
     efficient_ocr_min_words: Union[int, float, None] = EFFICIENT_OCR_MIN_WORDS,
     hybrid_textract_bedrock_vlm: bool = HYBRID_TEXTRACT_BEDROCK_VLM,
+    overwrite_existing_ocr_results: bool = OVERWRITE_EXISTING_OCR_RESULTS,
     llm_model_name="",
     llm_total_input_tokens=0,
     llm_total_output_tokens=0,
@@ -1212,8 +1213,8 @@ def choose_and_run_redactor(
     # Prepare documents and images as required if they don't already exist
     prepare_images_flag = None  # Determines whether to call prepare_image_or_pdf
 
-    # When Textract + Extract signatures/forms/tables (not Face identification alone), we run all
-    # pages through redact_image_pdf (skip EFFICIENT_OCR). Face identification uses EFFICIENT_OCR
+    # When Textract + Extract signatures/forms/tables (not Face detection alone), we run all
+    # pages through redact_image_pdf (skip EFFICIENT_OCR). Face detection uses EFFICIENT_OCR
     # (simple text where possible) then a VLM-only pass on all page images.
     _textract_needs_full_analysis_global = (
         text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
@@ -1227,10 +1228,10 @@ def choose_and_run_redactor(
         )
     )
     # After EFFICIENT_OCR (text for high-word pages, OCR for low-word), run VLM (face/signature)
-    # on all page images when CUSTOM_VLM_* is selected or Textract + Face identification.
+    # on all page images when CUSTOM_VLM_* is selected or Textract + Face detection.
     _run_vlm_pass_after_all_pages = _has_any_custom_vlm_entity or (
         text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
-        and "Face identification" in (handwrite_signature_checkbox or [])
+        and "Face detection" in (handwrite_signature_checkbox or [])
     )
     # When user selected simple text extraction but any CUSTOM_VLM_* entity (face, signature, etc.),
     # run all pages through redact_image_pdf so VLM-based detection can take place.
@@ -1726,7 +1727,7 @@ def choose_and_run_redactor(
                 raise Exception(out_message)
 
     # If using image-based extraction (Textract, Bedrock VLM, etc.) or simple text + any CUSTOM_VLM_*
-    # entity, ensure bedrock_runtime is available only when actually needed: Face identification
+    # entity, ensure bedrock_runtime is available only when actually needed: Face detection
     # (Textract) uses Bedrock; CUSTOM_VLM_* uses Bedrock only when CUSTOM_VLM_BACKEND is bedrock_vlm.
     _image_based_extraction = text_extraction_method in (
         TEXTRACT_TEXT_EXTRACT_OPTION,
@@ -1735,7 +1736,7 @@ def choose_and_run_redactor(
         GEMINI_VLM_TEXT_EXTRACT_OPTION,
         AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION,
     )
-    _needs_bedrock_for_vlm = "Face identification" in (
+    _needs_bedrock_for_vlm = "Face detection" in (
         handwrite_signature_checkbox or []
     ) or (_has_any_custom_vlm_entity and CUSTOM_VLM_BACKEND == "bedrock_vlm")
     if (
@@ -1744,7 +1745,7 @@ def choose_and_run_redactor(
         and _needs_bedrock_for_vlm
     ):
         print(
-            "CUSTOM_VLM entity (face/signature/etc.) or Face identification enabled. Connecting to Bedrock for additional detection."
+            "CUSTOM_VLM entity (face/signature/etc.) or Face detection enabled. Connecting to Bedrock for additional detection."
         )
         if RUN_AWS_FUNCTIONS and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:
             print("Connecting to Bedrock via existing SSO connection for VLM detection")
@@ -1921,7 +1922,7 @@ def choose_and_run_redactor(
 
         if not all_page_line_level_ocr_results_with_words:
             if (
-                not OVERWRITE_EXISTING_OCR_RESULTS
+                not overwrite_existing_ocr_results
                 and local_ocr_output_found_checkbox is True
                 and os.path.exists(
                     all_page_line_level_ocr_results_with_words_json_file_path
@@ -1941,7 +1942,7 @@ def choose_and_run_redactor(
         # Remove any existing review_file paths from the review file outputs
         # EFFICIENT_OCR: two-step process per page - try selectable text first, OCR only if needed.
         # When text extraction is selectable-text only, skip EFFICIENT_OCR checks and run only redact_text_pdf.
-        # When Textract is selected with Extract signatures/forms/tables/Face identification, skip
+        # When Textract is selected with Extract signatures/forms/tables/Face detection, skip
         # EFFICIENT_OCR so all pages go through redact_image_pdf (Textract analysis and/or face pass).
         if (
             efficient_ocr
@@ -2239,6 +2240,7 @@ def choose_and_run_redactor(
                     ocr_first_pass_max_workers=ocr_first_pass_max_workers,
                     pages_in_pdf_points=pages_with_text_1based,
                     hybrid_textract_bedrock_vlm=hybrid_textract_bedrock_vlm,
+                    overwrite_existing_ocr_results=overwrite_existing_ocr_results,
                 )
                 out_file_paths = out_file_paths.copy()
                 vlm_total_input_tokens += vlm_total_input_tokens_page
@@ -2299,7 +2301,7 @@ def choose_and_run_redactor(
                 list(pages_with_text_1based) if pages_with_text_1based else None
             )
 
-            # When CUSTOM_VLM_* or Textract+Face identification: run VLM (face/signature) on all
+            # When CUSTOM_VLM_* or Textract+Face detection: run VLM (face/signature) on all
             # page images after text/OCR extraction. Backend from CUSTOM_VLM_BACKEND (bedrock_vlm, inference_vlm, transformers_vlm).
             _vlm_backend_available = (
                 CUSTOM_VLM_BACKEND != "bedrock_vlm" or bedrock_runtime is not None
@@ -2366,7 +2368,7 @@ def choose_and_run_redactor(
                         ].apply(pd.to_numeric, errors="coerce")
                     entities_for_vlm = list(chosen_redact_entities or [])
                     if (
-                        "Face identification" in (handwrite_signature_checkbox or [])
+                        "Face detection" in (handwrite_signature_checkbox or [])
                         and "CUSTOM_VLM_PERSON" not in entities_for_vlm
                     ):
                         entities_for_vlm.append("CUSTOM_VLM_PERSON")
@@ -2507,6 +2509,7 @@ def choose_and_run_redactor(
                 efficient_ocr=efficient_ocr,
                 ocr_first_pass_max_workers=ocr_first_pass_max_workers,
                 hybrid_textract_bedrock_vlm=hybrid_textract_bedrock_vlm,
+                overwrite_existing_ocr_results=overwrite_existing_ocr_results,
             )
 
             # This line creates a copy of out_file_paths to break potential links with log_files_output_paths
@@ -5038,6 +5041,7 @@ def redact_image_pdf(
     inference_server_vlm_model: str = "",
     efficient_ocr: bool = EFFICIENT_OCR,
     hybrid_textract_bedrock_vlm: bool = HYBRID_TEXTRACT_BEDROCK_VLM,
+    overwrite_existing_ocr_results: bool = OVERWRITE_EXISTING_OCR_RESULTS,
     pages_to_process: Optional[List[int]] = None,
     ocr_first_pass_max_workers: Optional[int] = None,
     pages_in_pdf_points: Optional[List[int]] = None,
@@ -5105,9 +5109,9 @@ def redact_image_pdf(
     # if chosen_llm_entities is None:
     #     chosen_llm_entities = chosen_redact_comprehend_entities
 
-    # When AWS Textract + Face identification: always analyse all pages for faces (as if
+    # When AWS Textract + Face detection: always analyse all pages for faces (as if
     # CUSTOM_VLM_PERSON were enabled), regardless of PII method or text_extraction_only.
-    if "Face identification" in (handwrite_signature_checkbox or []):
+    if "Face detection" in (handwrite_signature_checkbox or []):
         chosen_redact_entities = list(chosen_redact_entities or [])
         chosen_redact_comprehend_entities = list(
             chosen_redact_comprehend_entities or []
@@ -5207,7 +5211,7 @@ def redact_image_pdf(
         textract_json_file_path = (
             output_folder + file_name + textract_suffix + "_textract.json"
         )
-        if OVERWRITE_EXISTING_OCR_RESULTS:
+        if overwrite_existing_ocr_results:
             # Skip loading existing results, start fresh
             textract_data = {}
             is_missing = True
@@ -5235,7 +5239,7 @@ def redact_image_pdf(
             output_folder + file_name + "_ocr_results_with_words_local_ocr.json"
         )
 
-        if OVERWRITE_EXISTING_OCR_RESULTS:
+        if overwrite_existing_ocr_results:
             # Skip loading existing results, start fresh
             all_page_line_level_ocr_results_with_words = []
             is_missing = True
@@ -5520,7 +5524,7 @@ def redact_image_pdf(
         )
         _textract_face_identification = (
             text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
-            and "Face identification" in (handwrite_signature_checkbox or [])
+            and "Face detection" in (handwrite_signature_checkbox or [])
         )
         _run_face_pass = _person_selected or _textract_face_identification
 
@@ -5834,7 +5838,7 @@ def redact_image_pdf(
                 # Optional additional Bedrock VLM pass to detect people
                 # and inject [PERSON] entries into the word-level OCR structure for AWS Bedrock VLM OCR.
                 # Run when CUSTOM_VLM_PERSON is selected (in any entity selector), or when AWS Textract
-                # + Face identification is selected (all pages analysed for faces regardless of PII method
+                # + Face detection is selected (all pages analysed for faces regardless of PII method
                 # or text_extraction_only).
                 # (_run_face_pass, _textract_face_identification set at start of loop)
                 if (
@@ -8514,7 +8518,7 @@ def redact_image_pdf(
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
         # Write the updated existing textract data back to the JSON file
 
-        if OVERWRITE_EXISTING_OCR_RESULTS or original_textract_data != textract_data:
+        if overwrite_existing_ocr_results or original_textract_data != textract_data:
             secure_file_write(
                 output_folder,
                 file_name + textract_suffix + "_textract.json",
@@ -8529,7 +8533,7 @@ def redact_image_pdf(
         #     f"Writing updated existing local OCR data back to the JSON file: {all_page_line_level_ocr_results_with_words_json_file_path}"
         # )
         if (
-            OVERWRITE_EXISTING_OCR_RESULTS
+            overwrite_existing_ocr_results
             or original_all_page_line_level_ocr_results_with_words
             != all_page_line_level_ocr_results_with_words
         ):

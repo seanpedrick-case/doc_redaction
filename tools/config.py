@@ -1067,6 +1067,9 @@ VLM_DISABLE_QWEN3_5_THINKING = convert_string_to_boolean(
     get_or_create_env_var("VLM_DISABLE_QWEN3_5_THINKING", "False")
 )  # Whether to disable Qwen3.5 thinking.
 
+# Suffix appended to the generation prompt when Qwen3.5 thinking is disabled (used in run_vlm and llm_funcs).
+VLM_QWEN3_5_NOTHINK_SUFFIX = "<think></think>"
+
 
 ### Local OCR model - Tesseract vs PaddleOCR
 CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var(
@@ -1337,33 +1340,14 @@ model_short_names = list()
 model_source = list()
 
 # Local Transformers LLM PII Detection Model Configuration
-# This is a simple identifier for the model (e.g., "gemma-3-4b", "qwen-3-4b")
-# The actual model loading uses LOCAL_TRANSFORMERS_LLM_PII_REPO_ID, LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE, and LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
+# See below for the list of accepted models
 LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = get_or_create_env_var(
-    "LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE", "gemma-3-27b"
-)  # Model identifier for local transformers PII detection. This is used for display/logging purposes.
-# These variables are the primary configuration for local model loading
-# Define these early so they're available for use below
+    "LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE", "Qwen 3.5 9B"
+)
 LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = get_or_create_env_var(
-    "LOCAL_TRANSFORMERS_LLM_PII_REPO_ID", "unsloth/gemma-3-4b-it-bnb-4bit"
-)  # Hugging Face repository ID for PII detection model (e.g., "unsloth/gemma-3-4b-it-bnb-4bit")
+    "LOCAL_TRANSFORMERS_LLM_PII_REPO_ID", "Qwen/Qwen3.5-9B"
+)  # Hugging Face repository ID for PII detection model
 
-
-USE_LLAMA_SWAP = get_or_create_env_var("USE_LLAMA_SWAP", "False")
-if USE_LLAMA_SWAP == "True":
-    USE_LLAMA_SWAP = True
-else:
-    USE_LLAMA_SWAP = False
-
-if (
-    SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS
-    and LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
-):
-    # Use LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE for display if available, otherwise use LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
-    display_name = LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
-    model_full_names.append(display_name)
-    model_short_names.append(display_name)
-    model_source.append("Local")
 
 # When USE_TRANSFORMERS_VLM_MODEL_AS_LLM is True, register the VLM model as a Local option so LLM entity detection can use it
 if (
@@ -1393,7 +1377,7 @@ GEMMA3_12B_REPO_ID = get_or_create_env_var(
 GEMMA3_27B_REPO_ID = get_or_create_env_var(
     "GEMMA3_27B_REPO_TRANSFORMERS_ID", "unsloth/gemma-3-27b-it-bnb-4bit"
 )
-GPT_OSS_REPO_ID = get_or_create_env_var("GPT_OSS_REPO_ID", "openai/gpt-oss-20b")
+GPT_OSS_REPO_ID = get_or_create_env_var("GPT_OSS_REPO_ID", "openai/GPT-OSS 20B")
 
 # Qwen 3.5 model repo IDs (9B through 122B, from run_vlm.py)
 QWEN35_9B_REPO_ID = get_or_create_env_var(
@@ -1412,10 +1396,13 @@ QWEN35_122B_A10B_REPO_ID = get_or_create_env_var(
     "QWEN35_122B_A10B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-122B-A10B"
 )
 
+NVIDIA_NEMOTRON_30B_A3B_REPO_ID = get_or_create_env_var(
+    "NVIDIA_NEMOTRON_30B_A3B_REPO_TRANSFORMERS_ID",
+    "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4",
+)
 
-# Override LOCAL_TRANSFORMERS_LLM_PII_* variables based on LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
-# This allows users to set just the model choice and have the correct repo/file/folder automatically selected
 if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
+    # Rename LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE for display on GUI
     model_choice_lower = LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE.lower()
 
     if "gemma-3-12b" in model_choice_lower or "gemma3-12b" in model_choice_lower:
@@ -1426,7 +1413,7 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Gemma 3 27B"
     elif "gpt-oss" in model_choice_lower:
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GPT_OSS_REPO_ID
-        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "gpt-oss-20b"
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "GPT-OSS 20B"
     elif "qwen3.5-9b" in model_choice_lower or "qwen-3.5-9b" in model_choice_lower:
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_9B_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 9B"
@@ -1445,9 +1432,22 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
     elif "qwen3.5-122b" in model_choice_lower or "qwen-3.5-122b" in model_choice_lower:
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_122B_A10B_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 122B-A10B"
+    elif (
+        "nvidia-nemotron-3-nano-30b-a3b-nvfp4" in model_choice_lower
+        or "nvidia-nemotron-3-nano-30b-a3b-nvfp4" in model_choice_lower
+    ):
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = NVIDIA_NEMOTRON_30B_A3B_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "NVIDIA Nemotron 3 Nano 30B A3B NVFP4"
 
-# Map LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE to LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE format
-model_choice_lower = LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE.lower()
+if (
+    SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS
+    and LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+):
+
+    display_name = LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+    model_full_names.append(display_name)
+    model_short_names.append(display_name)
+    model_source.append("Local")
 
 # Set MULTIMODAL_PROMPT_FORMAT based on model choice
 if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE in [
@@ -1472,7 +1472,7 @@ amazon_models = [
     "amazon.nova-lite-v1:0",
     "amazon.nova-pro-v1:0",
     "deepseek.v3-v1:0",
-    "openai.gpt-oss-20b-1:0",
+    "openai.GPT-OSS 20B-1:0",
     "openai.gpt-oss-120b-1:0",
     "google.gemma-3-12b-it",
     "mistral.ministral-3-14b-instruct",
@@ -1516,6 +1516,7 @@ if SHOW_AZURE_LLM_MODELS:
     model_short_names.extend(["gpt-5-mini", "gpt-4o-mini"])
     model_source.extend(["Azure/OpenAI"] * len(azure_models))
 
+
 # Register inference-server models
 CHOSEN_INFERENCE_SERVER_PII_MODEL = ""
 inference_server_models = [
@@ -1558,6 +1559,15 @@ INFERENCE_SERVER_LLM_PII_MODEL_CHOICE = get_or_create_env_var(
         )
     ),
 )  # Model choice for inference-server PII detection. Defaults to DEFAULT_INFERENCE_SERVER_PII_MODEL, then CHOSEN_INFERENCE_SERVER_PII_MODEL
+
+# Is Llama Swap used for model selection?
+USE_LLAMA_SWAP = convert_string_to_boolean(
+    get_or_create_env_var("USE_LLAMA_SWAP", "False")
+)
+
+###
+# Map all model names to their short names and sources
+###
 
 model_name_map = {
     full: {"short_name": short, "source": source}
@@ -1696,9 +1706,7 @@ LLM_THREADS = int(get_or_create_env_var("LLM_THREADS", "-1"))
 LLM_CONTEXT_LENGTH = int(
     get_or_create_env_var("LLM_CONTEXT_LENGTH", "32768")
 )  # LLM only: maximum context length for text LLMs (e.g. llama.cpp). Separate from MAX_INPUT_TOKEN_LENGTH (VLM).
-LLM_STOP_STRINGS = _get_env_list(
-    get_or_create_env_var("LLM_STOP_STRINGS", r"['\n\n\n\n\n\n']")
-)
+LLM_STOP_STRINGS = _get_env_list(get_or_create_env_var("LLM_STOP_STRINGS", ""))
 LLM_RETRY_ATTEMPTS = int(get_or_create_env_var("NUMBER_OF_RETRY_ATTEMPTS", "10"))
 LLM_TIMEOUT_WAIT = int(get_or_create_env_var("TIMEOUT_WAIT", "5"))
 
@@ -1715,15 +1723,12 @@ ASSISTANT_MODEL = get_or_create_env_var(
 # Use LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE if available, otherwise check LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
 model_type_for_reasoning = LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
 
-if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE == "gpt-oss-20b":
+if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE == "GPT-OSS 20B":
     REASONING_SUFFIX = get_or_create_env_var("REASONING_SUFFIX", "Reasoning: low")
     # print("Using REASONING_SUFFIX: Reasoning: low")
-elif LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE == "Qwen 3 4B" or (
-    LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
-    and "Qwen 3.5" in LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
-):
+elif "Qwen 3 " in LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
     # print("Using REASONING_SUFFIX: /nothink")
-    REASONING_SUFFIX = get_or_create_env_var("REASONING_SUFFIX", "<think> </think>")
+    REASONING_SUFFIX = get_or_create_env_var("REASONING_SUFFIX", "/think")
 else:
     # print("No reasoning suffix applied")
     REASONING_SUFFIX = get_or_create_env_var("REASONING_SUFFIX", "")
@@ -1805,7 +1810,7 @@ if INCLUDE_LAYOUT_EXTRACTION_TEXTRACT_OPTION == "True":
 if INCLUDE_TABLE_EXTRACTION_TEXTRACT_OPTION == "True":
     HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS.append("Extract tables")
 if INCLUDE_FACE_IDENTIFICATION_TEXTRACT_OPTION == "True":
-    HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS.append("Face identification")
+    HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS.append("Face detection")
 
 # Whether to split punctuation from words in Textract output
 # If True, punctuation marks (full stops, commas, quotes, brackets, etc.) will be separated

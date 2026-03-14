@@ -64,6 +64,7 @@ from tools.config import (
     LOCAL_TRANSFORMERS_LLM_PII_OPTION,
     OCR_FIRST_PASS_MAX_WORKERS,
     OUTPUT_FOLDER,
+    OVERWRITE_EXISTING_OCR_RESULTS,
     PADDLE_MODEL_PATH,
     PREPROCESS_LOCAL_OCR_IMAGES,
     REMOVE_DUPLICATE_ROWS,
@@ -737,6 +738,18 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
         dest="hybrid_textract_bedrock_vlm",
         help="Disable hybrid Textract + Bedrock VLM (use Textract only).",
     )
+    pdf_group.add_argument(
+        "--overwrite_existing_ocr_results",
+        action="store_true",
+        default=None,
+        help="Ignore cached OCR JSON files and re-run OCR. Defaults to OVERWRITE_EXISTING_OCR_RESULTS config (e.g. False).",
+    )
+    pdf_group.add_argument(
+        "--no_overwrite_existing_ocr_results",
+        action="store_false",
+        dest="overwrite_existing_ocr_results",
+        help="Use existing OCR results when available (do not overwrite cached JSON).",
+    )
 
     # --- LLM PII Detection Arguments ---
     llm_group = parser.add_argument_group("LLM PII Detection Options")
@@ -1305,6 +1318,11 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
                     ),
                     hybrid_textract_bedrock_vlm=getattr(
                         args, "hybrid_textract_bedrock_vlm", HYBRID_TEXTRACT_BEDROCK_VLM
+                    ),
+                    overwrite_existing_ocr_results=getattr(
+                        args,
+                        "overwrite_existing_ocr_results",
+                        OVERWRITE_EXISTING_OCR_RESULTS,
                     ),
                     # Note: bedrock_runtime, gemini_client, gemini_config, azure_openai_client
                     # are initialized inside choose_and_run_redactor based on text_extraction_method
@@ -2208,6 +2226,11 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
                     ),
                     hybrid_textract_bedrock_vlm=getattr(
                         args, "hybrid_textract_bedrock_vlm", HYBRID_TEXTRACT_BEDROCK_VLM
+                    ),
+                    overwrite_existing_ocr_results=getattr(
+                        args,
+                        "overwrite_existing_ocr_results",
+                        OVERWRITE_EXISTING_OCR_RESULTS,
                     ),
                     text_extraction_only=True,
                 )

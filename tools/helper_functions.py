@@ -984,8 +984,8 @@ def calculate_aws_costs(
             text_extraction_cost = total_input_tokens * (
                 BEDROCK_VLM_INPUT_COST / 1_000_000
             ) + total_output_tokens * (BEDROCK_VLM_OUTPUT_COST / 1_000_000)
-            # Face identification does a second run per page: same input tokens, output ~3% of input
-            if "Face identification" in handwrite_signature_checkbox:
+            # Face detection does a second run per page: same input tokens, output ~3% of input
+            if "Face detection" in handwrite_signature_checkbox:
                 face_input_tokens = total_input_tokens
                 face_output_tokens = int(
                     total_input_tokens * bedrock_vlm_face_output_token_ratio
@@ -1051,7 +1051,7 @@ def calculate_time_taken(
     - textract_output_found_checkbox (bool, optional): Boolean indicating if AWS Textract text extraction outputs have been found.
     - only_extract_text_radio (bool, optional): Option to only extract text from the document rather than redact.
     - local_ocr_output_found_checkbox (bool, optional): Boolean indicating if local OCR text extraction outputs have been found.
-    - handwrite_signature_checkbox: List of selected options (e.g. "Face identification"); when Face identification is selected with Bedrock VLM, extraction time is doubled.
+    - handwrite_signature_checkbox: List of selected options (e.g. "Face detection"); when Face detection is selected with Bedrock VLM, extraction time is doubled.
     - textract_page_time (float, optional): Approximate time to query AWS Textract (also used for Bedrock VLM OCR).
     - comprehend_page_time (float, optional): Approximate time to query text on a page with AWS Comprehend.
     - local_text_redaction_page_time (float, optional): Approximate time to extract text on a page with the local text redaction option.
@@ -1084,7 +1084,7 @@ def calculate_time_taken(
     elif text_extract_method_radio == BEDROCK_VLM_TEXT_EXTRACT_OPTION:
         if textract_output_found_checkbox is not True:
             page_extraction_time_taken = number_of_pages * textract_page_time
-            if "Face identification" in (handwrite_signature_checkbox or []):
+            if "Face detection" in (handwrite_signature_checkbox or []):
                 page_extraction_time_taken *= 2
     elif text_extract_method_radio == local_ocr_option:
         if local_ocr_output_found_checkbox is not True:
