@@ -906,7 +906,7 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
     existing_annotations_list: List[Dict],
     existing_recogniser_entity_df: pd.DataFrame,
     redaction_label: str = "Redaction",
-    colour_label: str = "(0, 0, 0)",
+    colour_label: str = str(CUSTOM_BOX_COLOUR),
     annotate_current_page: int = 1,
     progress: gr.Progress = gr.Progress(),
 ) -> Tuple[
@@ -928,16 +928,73 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
         Tuple[List[Dict], List[Dict], pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]: A tuple containing the updated annotations list, updated existing annotations list, updated annotations DataFrame, updated existing annotations DataFrame, updated recogniser entity DataFrame, and the original existing recogniser entity DataFrame.
     """
 
-    # Validate colour_label: must be a 3-number tuple with each value in [0, 255]
-    # If invalid, fallback to '(0, 0, 0)' as requested
-    fallback_colour = "(0, 0, 0)"
-
     existing_annotations_df = get_and_merge_current_page_annotations(
         page_sizes,
         annotate_current_page,
         existing_annotations_list,
         existing_annotations_df,
     )
+
+    # Validate colour_label: must be a 3-number tuple string (0-255), or tuple/list, or hex string
+    # If invalid, fallback to '(0, 0, 0)' as requested
+    fallback_colour = str(CUSTOM_BOX_COLOUR)
+    colour_label = str(colour_label)
+
+    def _parse_hex_to_rgb(s: str):
+        """Parse #RGB, #RRGGBB, RGB or RRGGBB to (r, g, b) or None."""
+        s = s.strip()
+        if s.startswith("#"):
+            s = s[1:].strip()
+        if len(s) not in (3, 6):
+            return None
+        if not all(c in "0123456789aAbBcCdDeEfF" for c in s):
+            return None
+        try:
+            if len(s) == 3:
+                r_val = int(s[0] * 2, 16)
+                g_val = int(s[1] * 2, 16)
+                b_val = int(s[2] * 2, 16)
+            else:
+                r_val = int(s[0:2], 16)
+                g_val = int(s[2:4], 16)
+                b_val = int(s[4:6], 16)
+            return (r_val, g_val, b_val)
+        except ValueError:
+            return None
+
+    def _parse_rgba_to_rgb(s: str):
+        """Parse rgba(r, g, b, a) to (r, g, b) in 0-255, or None. Handles 0-1 and 0-255 RGB."""
+        s = s.strip()
+        if len(s) > 120:
+            return None
+        if not s.lower().startswith("rgba(") or ")" not in s:
+            return None
+        match = re.match(
+            r"rgba\s*\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*[\d.]+\s*\)",
+            s,
+            re.IGNORECASE,
+        )
+        if not match:
+            return None
+        try:
+            r_val = float(match.group(1))
+            g_val = float(match.group(2))
+            b_val = float(match.group(3))
+            if max(r_val, g_val, b_val) > 1:
+                r_val, g_val, b_val = (
+                    int(round(r_val)),
+                    int(round(g_val)),
+                    int(round(b_val)),
+                )
+            else:
+                r_val = int(round(r_val * 255))
+                g_val = int(round(g_val * 255))
+                b_val = int(round(b_val * 255))
+            if 0 <= r_val <= 255 and 0 <= g_val <= 255 and 0 <= b_val <= 255:
+                return (r_val, g_val, b_val)
+        except (ValueError, TypeError):
+            pass
+        return None
 
     try:
         valid = False
@@ -946,9 +1003,14 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
             from tools.secure_regex_utils import safe_extract_rgb_values
 
             rgb_values = safe_extract_rgb_values(label_str)
+            if not rgb_values:
+                rgb_values = _parse_hex_to_rgb(label_str)
+            if not rgb_values:
+                rgb_values = _parse_rgba_to_rgb(label_str)
             if rgb_values:
                 r_val, g_val, b_val = rgb_values
                 if 0 <= r_val <= 255 and 0 <= g_val <= 255 and 0 <= b_val <= 255:
+                    colour_label = f"({r_val}, {g_val}, {b_val})"
                     valid = True
         elif isinstance(colour_label, (tuple, list)) and len(colour_label) == 3:
             r_val, g_val, b_val = colour_label

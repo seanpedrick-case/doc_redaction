@@ -4122,8 +4122,9 @@ def redact_single_box(
         pymupdf_page (Page): The PyMuPDF page object to which the redaction will be applied.
         pymupdf_rect (Rect): The PyMuPDF rectangle defining the bounds of the redaction box.
         img_annotation_box (dict): A dictionary containing annotation details, such as label, text, and color.
-        custom_colours (bool, optional): If True, uses custom colors for the redaction box.
-                                        Defaults to USE_GUI_BOX_COLOURS_FOR_OUTPUTS.
+        custom_colours (bool, optional): If True, uses custom colors for the final redacted PDF
+                                        (..._redacted.pdf). The review PDF (..._redactions_for_review.pdf)
+                                        always uses custom colours. Defaults to USE_GUI_BOX_COLOURS_FOR_OUTPUTS.
         retain_text (bool, optional): If True, adds a redaction annotation but retains the underlying text.
                                       If False, the text within the redaction area is deleted.
                                       Defaults to RETURN_PDF_FOR_REVIEW.
@@ -4159,7 +4160,10 @@ def redact_single_box(
         pymupdf_x1 + 2, redact_bottom_y, pymupdf_x2 - 2, redact_top_y
     )  # Slightly smaller than outside box
 
-    out_colour = define_box_colour(
+    # Review PDF (..._redactions_for_review.pdf): always use custom colours
+    review_colour = define_box_colour(True, img_annotation_box, CUSTOM_BOX_COLOUR)
+    # Final redacted PDF (..._redacted.pdf): respect USE_GUI_BOX_COLOURS_FOR_OUTPUTS
+    output_colour = define_box_colour(
         custom_colours, img_annotation_box, CUSTOM_BOX_COLOUR
     )
 
@@ -4183,7 +4187,7 @@ def redact_single_box(
     if retain_text is True:
 
         annot = pymupdf_page.add_redact_annot(full_size_redaction_box)
-        annot.set_colors(stroke=out_colour, fill=out_colour, colors=out_colour)
+        annot.set_colors(stroke=review_colour, fill=review_colour, colors=review_colour)
         annot.set_name(img_annotation_box["label"])
         # Cache creationDate per second to avoid thousands of strftime calls per document
         now_sec = int(time.time())
@@ -4215,7 +4219,7 @@ def redact_single_box(
             shape.draw_rect(pymupdf_rect)
 
             # Use solid fill for normal redaction
-            shape.finish(color=out_colour, fill=out_colour)
+            shape.finish(color=output_colour, fill=output_colour)
             shape.commit()
 
             return pymupdf_page, applied_redaction_page
@@ -4232,7 +4236,7 @@ def redact_single_box(
         shape.draw_rect(pymupdf_rect)
 
         # PyMuPDF requires 1, 3 or 4 float components in range 0-1
-        _colour = out_colour
+        _colour = output_colour
         if isinstance(_colour, (tuple, list)) and len(_colour) in (3, 4):
             _colour = tuple(float(max(0.0, min(1.0, c))) for c in _colour)
         else:

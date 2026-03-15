@@ -2798,8 +2798,8 @@ with blocks:
                                             label="Label for new redactions",
                                             value="Redaction",
                                         )
-                                        colour_label = gr.Textbox(
-                                            label="Colour for labels (three number RGB format, max 255 with brackets)",
+                                        colour_label = gr.ColorPicker(
+                                            label="Colour for labels",
                                             value=CUSTOM_BOX_COLOUR,
                                         )
                                     with gr.Column():
@@ -2873,7 +2873,7 @@ with blocks:
                             undo_last_redact_btn = gr.Button(
                                 value="Undo latest redaction", variant="primary"
                             )
-                    with gr.Tab("View", id=10):
+                    with gr.Tab("View text", id=10):
                         with gr.Accordion("View extracted text", open=True):
                             all_page_line_level_ocr_results_df = gr.Dataframe(
                                 value=pd.DataFrame(columns=["page", "line", "text"]),
