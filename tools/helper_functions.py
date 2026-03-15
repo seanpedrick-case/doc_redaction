@@ -527,7 +527,6 @@ def check_for_existing_textract_file(
     textract_output_path = secure_join(
         output_folder, doc_file_name_no_extension_textbox + suffix + "_textract.json"
     )
-    print(f"textract_output_path: {textract_output_path}")
 
     if os.path.exists(textract_output_path):
         # print("Existing Textract analysis output file found.")
@@ -555,10 +554,6 @@ def check_for_relevant_ocr_output_with_words(
     doc_file_with_ending = doc_file_name_no_extension_textbox + file_ending
 
     local_ocr_output_path = secure_join(output_folder, doc_file_with_ending)
-
-    print(f"output_folder: {output_folder}")
-    print(f"doc_file_name_no_extension_textbox: {doc_file_name_no_extension_textbox}")
-    print(f"local_ocr_output_path: {local_ocr_output_path}")
 
     if os.path.exists(local_ocr_output_path):
         print("Existing OCR with words analysis output file found.")

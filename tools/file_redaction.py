@@ -5699,10 +5699,13 @@ def redact_image_pdf(
 
             if image is None:
                 # Check if image_path is a placeholder and create the actual image
-                if isinstance(image_path, str) and "placeholder_image" in image_path:
+                if isinstance(image_path, str) and (
+                    "placeholder_image" in image_path
+                    or "image_placeholder" in image_path
+                ):
                     # print(f"Detected placeholder image path: {image_path}")
                     try:
-                        # Extract page number from placeholder path
+                        # Extract page number from placeholder path (e.g. placeholder_image_0.png or image_placeholder_0.png)
                         page_num_from_placeholder = int(
                             image_path.split("_")[-1].split(".")[0]
                         )
@@ -5762,6 +5765,24 @@ def redact_image_pdf(
                 page_width = pymupdf_page.mediabox.width
                 page_height = pymupdf_page.mediabox.height
 
+            # Ensure page_sizes_df has the dimensions we're using for this page (image or
+            # mediabox) so that divide_coordinates_by_page_sizes uses the same size later.
+            # Otherwise OCR/Textract boxes (in image pixels) get divided by mediabox and
+            # appear too big and shifted (e.g. towards bottom-right).
+            try:
+                _page_1based = page_no + 1
+                if not page_sizes_df.empty and "page" in page_sizes_df.columns:
+                    mask = page_sizes_df["page"] == _page_1based
+                    if mask.any():
+                        if "image_width" not in page_sizes_df.columns:
+                            page_sizes_df["image_width"] = float("nan")
+                        if "image_height" not in page_sizes_df.columns:
+                            page_sizes_df["image_height"] = float("nan")
+                        page_sizes_df.loc[mask, "image_width"] = float(page_width)
+                        page_sizes_df.loc[mask, "image_height"] = float(page_height)
+            except Exception:
+                pass
+
             # Step 1: Perform OCR. Either with Tesseract, cloud VLM, or with AWS Textract
             # If using Tesseract or cloud VLM (all image-based OCR methods)
             if (
@@ -5790,9 +5811,9 @@ def redact_image_pdf(
                     page_line_level_ocr_results_with_words = list()
 
                 if page_line_level_ocr_results_with_words:
-                    print(
-                        "Found OCR results for page in existing OCR with words object"
-                    )
+                    # print(
+                    #     "Found OCR results for page in existing OCR with words object"
+                    # )
 
                     page_line_level_ocr_results = (
                         recreate_page_line_level_ocr_results_with_page(
