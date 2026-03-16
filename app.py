@@ -9293,6 +9293,8 @@ with blocks:
                 session_hash_textbox,
                 cost_code_dataframe,
                 input_folder_textbox,
+                default_cost_code_textbox,
+                cost_code_choice_drop,
             ],
             outputs=[default_cost_code_textbox, cost_code_choice_drop],
         )

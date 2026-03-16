@@ -42,6 +42,7 @@ from tools.config import (
     COST_CODES_PATH,
     CUSTOM_HEADER,
     CUSTOM_HEADER_VALUE,
+    DEFAULT_COST_CODE,
     DEFAULT_LANGUAGE,
     DOCUMENT_REDACTION_BUCKET,
     INFERENCE_SERVER_PII_OPTION,
@@ -253,8 +254,16 @@ def load_in_default_cost_codes(cost_codes_path: str, default_cost_code: str = ""
     if "" not in dropdown_choices:
         dropdown_choices.insert(0, "")
 
+    # Use passed default if in choices, else fall back to DEFAULT_COST_CODE so dropdown shows app default on load
+    if default_cost_code and default_cost_code in dropdown_choices:
+        value = default_cost_code
+    elif DEFAULT_COST_CODE and DEFAULT_COST_CODE in dropdown_choices:
+        value = DEFAULT_COST_CODE
+    else:
+        value = ""
+
     out_dropdown = gr.Dropdown(
-        value=default_cost_code if default_cost_code in dropdown_choices else "",
+        value=value,
         label="Choose cost code for analysis",
         choices=dropdown_choices,
         allow_custom_value=False,
@@ -420,6 +429,10 @@ def save_default_cost_code_for_session(
         and RUN_AWS_FUNCTIONS
         and DOCUMENT_REDACTION_BUCKET
     ):
+        # Ensure the file exists before upload (e.g. in case of path or write edge cases)
+        if not os.path.exists(csv_path):
+            ensure_folder_exists(os.path.dirname(csv_path))
+            updated.to_csv(csv_path, index=False)
         s3_prefix = _get_session_default_cost_codes_s3_key_prefix()
         s3_full_key = s3_prefix + SESSION_DEFAULT_COST_CODES_FILENAME
         upload_result = upload_file_to_s3(
@@ -524,21 +537,29 @@ def apply_session_default_cost_code(
     session_hash: str,
     cost_code_dataframe: pd.DataFrame,
     input_folder: str | None = None,
+    current_default_cost_code: str | None = None,
+    current_dropdown_value: str | None = None,
 ) -> tuple[str, str]:
     """
     Look up the saved default cost code for session_hash. If found and valid in
     cost_code_dataframe, return (default_cost_code, default_cost_code) for
-    default_cost_code_textbox and cost_code_choice_drop. Otherwise ("", "").
-    If input_folder is provided, local CSV is read from that folder first.
+    default_cost_code_textbox and cost_code_choice_drop. When no saved default
+    applies, return (current_default_cost_code, current_dropdown_value) so the
+    dropdown keeps showing e.g. DEFAULT_COST_CODE instead of being cleared.
     """
     default_code = load_session_default_cost_code(session_hash, input_folder)
     if not default_code:
-        return "", ""
+        # Preserve current values so we don't overwrite with "" on app load
+        cur = current_default_cost_code if current_default_cost_code is not None else ""
+        drop = current_dropdown_value if current_dropdown_value is not None else ""
+        return cur, drop
     if cost_code_dataframe is None or cost_code_dataframe.empty:
         return default_code, default_code
     choices = list(cost_code_dataframe.iloc[:, 0].astype(str).unique())
     if default_code not in choices:
-        return "", ""
+        cur = current_default_cost_code if current_default_cost_code is not None else ""
+        drop = current_dropdown_value if current_dropdown_value is not None else ""
+        return cur, drop
     return default_code, default_code
 
 
