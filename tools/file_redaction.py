@@ -1067,7 +1067,7 @@ def choose_and_run_redactor(
     # Check if any files were found and assign to file_paths_list
     file_paths_list = filtered_files if filtered_files else []
 
-    print("Latest file completed:", latest_file_completed)
+    # print("Latest file completed:", latest_file_completed)
 
     # If latest_file_completed is used, get the specific file
     if not isinstance(file_paths, (str, dict)):
@@ -1972,68 +1972,130 @@ def choose_and_run_redactor(
             end_page_0 = start_page_0 + number_of_pages_to_process
             all_pages_1based = list(range(start_page_0 + 1, end_page_0 + 1))
 
-            # EFFICIENT_OCR: use redact_text_pdf (extraction only) on all pages to get word counts;
-            # no separate check loop—extraction doubles as the check. Then classify pages by threshold.
-            progress(
-                0.4,
-                desc="Efficient OCR: Extracting text on all pages (word-count check)",
-            )
-            (
-                pymupdf_doc,
-                _,
-                _,
-                annotations_all_pages,
-                _,
-                page_break_return,
-                comprehend_query_number,
-                all_page_line_level_ocr_results_with_words_first,
-                llm_model_name_text,
-                llm_total_input_tokens_text,
-                llm_total_output_tokens_text,
-                extraction_results,
-            ) = redact_text_pdf(
-                file_path,
-                language,
-                chosen_redact_entities,
-                chosen_redact_comprehend_entities,
-                in_allow_list_flat,
-                page_min,
-                page_max if page_max > 0 else number_of_pages,
-                0,
-                page_break_return,
-                annotations_all_pages,
-                all_page_line_level_ocr_results_df,
-                all_pages_decision_process_table,
-                pymupdf_doc,
-                list(),  # empty: first pass only used for word-count classification
-                pii_identification_method,
-                comprehend_query_number,
-                comprehend_client,
-                custom_recogniser_word_list_flat,
-                redact_whole_page_list_flat,
-                max_fuzzy_spelling_mistakes_num,
-                match_fuzzy_whole_phrase_bool,
-                page_sizes_df,
-                document_cropboxes,
-                True,  # text_extraction_only
-                output_folder=output_folder,
-                input_folder=input_folder,
-                bedrock_runtime=bedrock_runtime,
-                model_choice=CLOUD_LLM_PII_MODEL_CHOICE,
-                custom_llm_instructions=custom_llm_instructions,
-                chosen_llm_entities=chosen_llm_entities,
-                efficient_ocr=efficient_ocr,
-                pages_to_process=all_pages_1based,
-                efficient_ocr_extraction_pass=True,
-            )
-            llm_total_input_tokens += llm_total_input_tokens_text
-            llm_total_output_tokens += llm_total_output_tokens_text
-            if llm_model_name_text and not llm_model_name:
-                llm_model_name = llm_model_name_text
+            # Try to reuse existing OCR results (from a previous run) for the
+            # Efficient OCR word-count classification pass, so we do not
+            # re-extract text for all pages in subsequent sessions.
+            use_cached_word_counts = False
+            all_page_line_level_ocr_results_with_words_first = []
+            extraction_results = None
 
-            page_word_counts = _word_count_by_page_from_ocr_results_with_words(
-                all_page_line_level_ocr_results_with_words_first, all_pages_1based
-            )
+            if not overwrite_existing_ocr_results:
+                if ocr_fallback_method == TESSERACT_TEXT_EXTRACT_OPTION:
+                    cached_ocr_path = (
+                        output_folder
+                        + pdf_file_name_without_ext
+                        + "_ocr_results_with_words_local_ocr.json"
+                    )
+                    if os.path.exists(cached_ocr_path):
+                        print(
+                            "EFFICIENT_OCR: Using existing local OCR results for word-count classification."
+                        )
+                        (
+                            all_page_line_level_ocr_results_with_words_first,
+                            _,
+                            log_files_output_paths,
+                        ) = load_and_convert_ocr_results_with_words_json(
+                            cached_ocr_path,
+                            log_files_output_paths,
+                            page_sizes_df,
+                        )
+                        use_cached_word_counts = bool(
+                            all_page_line_level_ocr_results_with_words_first
+                        )
+                elif ocr_fallback_method == TEXTRACT_TEXT_EXTRACT_OPTION:
+                    # Use OCR-results-with-words file (same format as local OCR), not raw
+                    # Textract JSON, so _word_count_by_page_from_ocr_results_with_words gets
+                    # a list of dicts with "page" and "results".
+                    cached_ocr_path = (
+                        output_folder
+                        + pdf_file_name_without_ext
+                        + "_ocr_results_with_words_textract.json"
+                    )
+                    if os.path.exists(cached_ocr_path):
+                        print(
+                            "EFFICIENT_OCR: Using existing Textract OCR results for word-count classification."
+                        )
+                        (
+                            all_page_line_level_ocr_results_with_words_first,
+                            _,
+                            log_files_output_paths,
+                        ) = load_and_convert_ocr_results_with_words_json(
+                            cached_ocr_path,
+                            log_files_output_paths,
+                            page_sizes_df,
+                        )
+                        use_cached_word_counts = bool(
+                            all_page_line_level_ocr_results_with_words_first
+                        )
+
+            if use_cached_word_counts:
+                page_word_counts = _word_count_by_page_from_ocr_results_with_words(
+                    all_page_line_level_ocr_results_with_words_first,
+                    all_pages_1based,
+                )
+            else:
+                # EFFICIENT_OCR: use redact_text_pdf (extraction only) on all pages to get word counts;
+                # no separate check loop—extraction doubles as the check. Then classify pages by threshold.
+                progress(
+                    0.4,
+                    desc="Efficient OCR: Extracting text on all pages (word-count check)",
+                )
+                (
+                    pymupdf_doc,
+                    _,
+                    _,
+                    annotations_all_pages,
+                    _,
+                    page_break_return,
+                    comprehend_query_number,
+                    all_page_line_level_ocr_results_with_words_first,
+                    llm_model_name_text,
+                    llm_total_input_tokens_text,
+                    llm_total_output_tokens_text,
+                    extraction_results,
+                ) = redact_text_pdf(
+                    file_path,
+                    language,
+                    chosen_redact_entities,
+                    chosen_redact_comprehend_entities,
+                    in_allow_list_flat,
+                    page_min,
+                    page_max if page_max > 0 else number_of_pages,
+                    0,
+                    page_break_return,
+                    annotations_all_pages,
+                    all_page_line_level_ocr_results_df,
+                    all_pages_decision_process_table,
+                    pymupdf_doc,
+                    list(),  # empty: first pass only used for word-count classification
+                    pii_identification_method,
+                    comprehend_query_number,
+                    comprehend_client,
+                    custom_recogniser_word_list_flat,
+                    redact_whole_page_list_flat,
+                    max_fuzzy_spelling_mistakes_num,
+                    match_fuzzy_whole_phrase_bool,
+                    page_sizes_df,
+                    document_cropboxes,
+                    True,  # text_extraction_only
+                    output_folder=output_folder,
+                    input_folder=input_folder,
+                    bedrock_runtime=bedrock_runtime,
+                    model_choice=CLOUD_LLM_PII_MODEL_CHOICE,
+                    custom_llm_instructions=custom_llm_instructions,
+                    chosen_llm_entities=chosen_llm_entities,
+                    efficient_ocr=efficient_ocr,
+                    pages_to_process=all_pages_1based,
+                    efficient_ocr_extraction_pass=True,
+                )
+                llm_total_input_tokens += llm_total_input_tokens_text
+                llm_total_output_tokens += llm_total_output_tokens_text
+                if llm_model_name_text and not llm_model_name:
+                    llm_model_name = llm_model_name_text
+
+                page_word_counts = _word_count_by_page_from_ocr_results_with_words(
+                    all_page_line_level_ocr_results_with_words_first, all_pages_1based
+                )
             pages_with_text_1based = [
                 p
                 for p in all_pages_1based
@@ -2061,9 +2123,14 @@ def choose_and_run_redactor(
                     f"EFFICIENT_OCR: Processing {len(pages_with_text_1based)} page(s) with selectable text extraction (no OCR)."
                 )
                 pages_with_text_set = set(pages_with_text_1based)
-                pre_extracted_for_text = [
-                    r for r in extraction_results if (r[0] + 1) in pages_with_text_set
-                ]
+                if extraction_results is not None:
+                    pre_extracted_for_text = [
+                        r
+                        for r in extraction_results
+                        if (r[0] + 1) in pages_with_text_set
+                    ]
+                else:
+                    pre_extracted_for_text = None
                 (
                     pymupdf_doc,
                     all_pages_decision_process_table,
@@ -6550,7 +6617,9 @@ def redact_image_pdf(
                 text_blocks = list()
                 page_exists = False
 
-                # Parallel Textract: build job and defer API call to post-loop worker
+                # Parallel Textract: build lightweight job and defer API call to post-loop worker.
+                # To keep memory usage low on large documents, we avoid storing full image
+                # objects or image bytes here; workers will reopen the image from disk.
                 if use_ocr_parallel_textract:
                     if not image:
                         try:
@@ -6568,9 +6637,6 @@ def redact_image_pdf(
                                 f"Could not load image for Textract job page {reported_page_number}: {e}"
                             )
                             continue
-                    image_buffer = io.BytesIO()
-                    image.save(image_buffer, format="PNG")
-                    pdf_page_as_bytes = image_buffer.getvalue()
                     page_exists = (
                         any(
                             pg.get("page_no") == reported_page_number
@@ -6590,12 +6656,10 @@ def redact_image_pdf(
                         {
                             "page_no": page_no,
                             "reported_page_number": reported_page_number,
-                            "image_bytes": pdf_page_as_bytes,
                             "cached_text_blocks": cached_text_blocks,
                             "page_width": page_width,
                             "page_height": page_height,
                             "image_path": image_path,
-                            "image": image,
                             "original_cropbox": original_cropbox,
                             "handwriting_or_signature_boxes": handwriting_or_signature_boxes,
                             "page_signature_recogniser_results": page_signature_recogniser_results,
@@ -7180,8 +7244,28 @@ def redact_image_pdf(
                 }
                 new_textract_request_metadata = "cached"
             else:
+                # Reopen image from path and convert to bytes inside the worker to avoid
+                # holding all page image bytes in memory in the main process.
+                image_path = job.get("image_path", "")
+                page_no_str = job.get("reported_page_number", "")
+                try:
+                    if isinstance(image_path, str) and image_path:
+                        normalized_path = os.path.normpath(os.path.abspath(image_path))
+                        image = Image.open(normalized_path)
+                        image_buffer = io.BytesIO()
+                        image.save(image_buffer, format="PNG")
+                        pdf_page_as_bytes = image_buffer.getvalue()
+                    else:
+                        raise ValueError(
+                            f"Invalid image_path for Textract job page {page_no_str}: {image_path}"
+                        )
+                except Exception as e:
+                    raise Exception(
+                        f"Could not open image for Textract job page {page_no_str}: {e}"
+                    )
+
                 text_blocks, new_textract_request_metadata = analyse_page_with_textract(
-                    job["image_bytes"],
+                    pdf_page_as_bytes,
                     job["reported_page_number"],
                     textract_client,
                     handwrite_signature_checkbox,
@@ -7284,7 +7368,15 @@ def redact_image_pdf(
             reported_page_number = job["reported_page_number"]
             post_process_pbar.set_postfix_str(f"page {reported_page_number}")
             image_path = job["image_path"]
-            image = job["image"]
+            # Reopen image on demand instead of storing it in every job to reduce memory usage.
+            try:
+                if isinstance(image_path, str) and image_path:
+                    normalized_path = os.path.normpath(os.path.abspath(image_path))
+                    image = Image.open(normalized_path)
+                else:
+                    image = None
+            except Exception:
+                image = None
             page_width = job["page_width"]
             page_height = job["page_height"]
             original_cropbox = job["original_cropbox"]
