@@ -172,6 +172,7 @@ from tools.config import (
     SHOW_COSTS,
     SHOW_DIFFICULT_OCR_EXAMPLES,
     SHOW_EXAMPLES,
+    SHOW_HYBRID_TEXTRACT_BEDROCK_CHECKBOX,
     SHOW_INFERENCE_SERVER_PII_OPTIONS,
     SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS,
     SHOW_LANGUAGE_SELECTION,
@@ -3597,7 +3598,8 @@ with blocks:
                         high_quality_textract_ocr_checkbox = gr.Checkbox(
                             label="High-quality Textract OCR (re-run low-confidence lines with Bedrock VLM)",
                             value=HYBRID_TEXTRACT_BEDROCK_VLM,
-                            visible=SHOW_AWS_TEXT_EXTRACTION_OPTIONS,
+                            visible=SHOW_AWS_TEXT_EXTRACTION_OPTIONS
+                            and SHOW_HYBRID_TEXTRACT_BEDROCK_CHECKBOX,
                         )
                     with gr.Column(scale=1):
                         overwrite_existing_ocr_checkbox = gr.Checkbox(

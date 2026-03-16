@@ -359,6 +359,10 @@ Configurations related to text extraction, PII detection, and the redaction proc
 
 When AWS Textract is selected for text extraction, these options allow lines with low confidence to be re-extracted using Bedrock VLM and the result to replace the Textract output for those lines.
 
+* **`SHOW_HYBRID_TEXTRACT_BEDROCK_CHECKBOX`**
+    * **Description:** When set to `'True'`, the "High-quality Textract OCR (re-run low-confidence lines with Bedrock VLM)" checkbox is shown in the GUI when AWS Textract options are visible. Set to `'False'` to hide this option from the UI.
+    * **Default Value:** `'False'`
+
 * **`HYBRID_TEXTRACT_BEDROCK_VLM`**
     * **Description:** When set to `'True'` and AWS Textract is selected, lines whose average confidence is below `HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD` are re-analyzed with Bedrock VLM and the extracted text replaces the Textract result for those lines.
     * **Default Value:** `'False'`

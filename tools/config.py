@@ -672,6 +672,9 @@ SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS = convert_string_to_boolean(
 SHOW_AWS_TEXT_EXTRACTION_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_AWS_TEXT_EXTRACTION_OPTIONS", "True")
 )
+SHOW_HYBRID_TEXTRACT_BEDROCK_CHECKBOX = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_HYBRID_TEXTRACT_BEDROCK_CHECKBOX", "False")
+)
 SHOW_BEDROCK_VLM_MODELS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_BEDROCK_VLM_MODELS", "False")
 )
