@@ -240,9 +240,11 @@ def upload_file_to_s3(
 
     if RUN_AWS_FUNCTIONS:
         try:
-            if s3_bucket and s3_key and local_file_paths:
+            # Allow empty s3_key for uploads to bucket root
+            if s3_bucket and local_file_paths:
 
                 s3_client = boto3.client("s3", region_name=AWS_REGION)
+                s3_key_prefix = s3_key if s3_key else ""
 
                 if isinstance(local_file_paths, str):
                     local_file_paths = [local_file_paths]
@@ -254,7 +256,7 @@ def upload_file_to_s3(
                             # Get file name off file path
                             file_name = os.path.basename(file)
 
-                            s3_key_full = s3_key + file_name
+                            s3_key_full = s3_key_prefix + file_name
                             # print("S3 key: ", s3_bucket, "/", s3_key_full, sep="")
 
                             s3_client.upload_file(file, s3_bucket, s3_key_full)

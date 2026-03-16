@@ -17,16 +17,17 @@ from tools.config import (
     CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE,
     CLOUD_LLM_PII_MODEL_CHOICE,
     INFERENCE_SERVER_API_URL,
-    LLM_PII_MAX_TOKENS,
-    LLM_PII_NUMBER_OF_RETRY_ATTEMPTS,
-    LLM_PII_TEMPERATURE,
-    LLM_PII_TIMEOUT_WAIT,
+    LLM_MAX_NEW_TOKENS,
+    LLM_TEMPERATURE,
     model_name_map,
 )
 from tools.llm_entity_detection_prompts import (
     create_entity_detection_prompt,
     create_entity_detection_system_prompt,
 )
+
+# Max length for column/sheet name in tabular log filenames (to keep filenames short)
+LLM_LOG_TABULAR_NAME_MAX_LEN = 25
 
 # Import LLM functions from local tools.llm_funcs
 try:
@@ -252,24 +253,65 @@ def parse_llm_entity_response(
         r"<thinking>.*?</thinking>", "", response_text, flags=re.DOTALL | re.IGNORECASE
     )
 
-    # Try to extract JSON from the response
-    # LLMs sometimes wrap JSON in markdown code blocks or add explanatory text
-    json_match = re.search(
-        r'\{[^{}]*"entities"[^{}]*\[.*?\].*?\}', response_text, re.DOTALL
-    )
-    if not json_match:
-        # Try to find any JSON object
-        json_match = re.search(r'\{.*?"entities".*?\}', response_text, re.DOTALL)
+    # Prefer extracting from markdown code block (e.g. ```json\n...\n```<end_of_turn>)
+    # so we get a clean slice and can strip trailing tokens before parsing
+    json_str = None
+    if "```json" in response_text or "```" in response_text:
+        code_block = re.search(
+            r"```(?:json)?\s*\n?(.*?)(?:\n?```|$)", response_text, re.DOTALL
+        )
+        if code_block:
+            candidate = code_block.group(1).strip()
+            # Strip trailing tokens that some models append (e.g. <end_of_turn>)
+            candidate = re.sub(r"<end_of_turn>\s*$", "", candidate, flags=re.IGNORECASE)
+            candidate = candidate.rstrip()
+            # Extract only the root JSON object by brace matching so we never include trailing garbage
+            start = candidate.find("{")
+            if start >= 0:
+                depth = 0
+                for i in range(start, len(candidate)):
+                    if candidate[i] == "{":
+                        depth += 1
+                    elif candidate[i] == "}":
+                        depth -= 1
+                        if depth == 0:
+                            json_str = candidate[start : i + 1]
+                            break
+                if json_str is None:
+                    json_str = candidate[start:]  # fallback: from first { to end
 
-    if json_match:
-        json_str = json_match.group(0)
+    # Fallback: try regex-based extraction (fragile for nested braces)
+    if json_str is None:
+        json_match = re.search(
+            r'\{[^{}]*"entities"[^{}]*\[.*?\].*?\}', response_text, re.DOTALL
+        )
+        if not json_match:
+            json_match = re.search(r'\{.*?"entities".*?\}', response_text, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(0)
+
+    if json_str:
         try:
-            # Clean up the JSON string
+            # Clean up the JSON string (in case we came from regex path)
             json_str = json_str.strip()
-            # Remove markdown code block markers if present
+            # Remove markdown code block markers if present (regex path may include them)
             json_str = re.sub(r"^```json\s*", "", json_str, flags=re.MULTILINE)
             json_str = re.sub(r"^```\s*", "", json_str, flags=re.MULTILINE)
+            # Strip trailing tokens again (e.g. <end_of_turn> after closing })
+            json_str = re.sub(r"<end_of_turn>\s*$", "", json_str, flags=re.IGNORECASE)
             json_str = json_str.strip()
+            # Keep only the root object if trailing garbage remains (brace-match from start)
+            start = json_str.find("{")
+            if start >= 0:
+                depth = 0
+                for i in range(start, len(json_str)):
+                    if json_str[i] == "{":
+                        depth += 1
+                    elif json_str[i] == "}":
+                        depth -= 1
+                        if depth == 0:
+                            json_str = json_str[start : i + 1]
+                            break
 
             # Fix common JSON issues:
             # 1. Remove trailing commas before closing brackets/braces
@@ -305,6 +347,25 @@ def parse_llm_entity_response(
                 r'\1: "\2"\3',
                 json_str,
             )
+
+            # Final trim: strip trailing whitespace, control chars, backticks, and truncate to root object only
+            # (avoids "Expecting ',' delimiter" when trailing \r, ```, <end_of_turn>, or other bytes remain)
+            json_str = json_str.rstrip().rstrip("\r\t")
+            json_str = re.sub(r"[ \t\r\n]+$", "", json_str)
+            json_str = re.sub(r"`+$", "", json_str)
+            json_str = re.sub(r"<end_of_turn>\s*$", "", json_str, flags=re.IGNORECASE)
+            json_str = json_str.rstrip()
+            start = json_str.find("{")
+            if start >= 0:
+                depth = 0
+                for i in range(start, len(json_str)):
+                    if json_str[i] == "{":
+                        depth += 1
+                    elif json_str[i] == "}":
+                        depth -= 1
+                        if depth == 0:
+                            json_str = json_str[start : i + 1]
+                            break
 
             # Try to parse the JSON
             try:
@@ -441,6 +502,18 @@ def parse_llm_entity_response(
     return entities_out
 
 
+def _sanitize_for_filename(s: str, max_len: Optional[int] = None) -> str:
+    """Sanitize a string for use in a filename (alphanumeric, spaces to underscores)."""
+    out = (
+        "".join(c for c in (s or "") if c.isalnum() or c in (" ", "-", "_"))
+        .strip()
+        .replace(" ", "_")
+    )
+    if max_len is not None and len(out) > max_len:
+        out = out[:max_len]
+    return out or "unknown"
+
+
 def save_llm_prompt_response(
     system_prompt: str,
     user_prompt: str,
@@ -454,6 +527,11 @@ def save_llm_prompt_response(
     max_tokens: int,
     file_name: Optional[str] = None,
     page_number: Optional[int] = None,
+    sheet_name: Optional[str] = None,
+    column_name: Optional[str] = None,
+    row_number: Optional[int] = None,
+    input_tokens: Optional[int] = None,
+    output_tokens: Optional[int] = None,
 ) -> str:
     """
     Save LLM prompt and response to a text file for traceability.
@@ -473,8 +551,13 @@ def save_llm_prompt_response(
         language: Language code
         temperature: Temperature used
         max_tokens: Max tokens used
-        file_name: Optional file name (without extension) for the filename
-        page_number: Optional page number for the filename
+        file_name: Optional file name (without extension) for the filename / log header
+        page_number: Optional page number (0-based) for the filename; displayed in log as 1-based.
+        sheet_name: Optional Excel sheet name (tabular data); included in log and filename if present.
+        column_name: Optional column name (tabular data); included in log and filename (shortened if long).
+        row_number: Optional row number (1-based for display; tabular data); included in log and filename.
+        input_tokens: Optional input token count from the LLM call
+        output_tokens: Optional output token count from the LLM call
 
     Returns:
         Path to the saved file
@@ -487,18 +570,31 @@ def save_llm_prompt_response(
     llm_logs_folder = os.path.join(output_folder, "llm_prompts_responses")
     os.makedirs(llm_logs_folder, exist_ok=True)
 
-    # Create filename with file name and page number if available, otherwise use timestamp
-    if file_name and page_number is not None:
-        # Sanitize file name for use in filename (remove invalid characters)
-        safe_file_name = "".join(
-            c for c in file_name if c.isalnum() or c in (" ", "-", "_")
-        ).strip()
-        safe_file_name = safe_file_name.replace(" ", "_")
+    # Tabular: filename = sheet (if relevant) + column (shortened) + row
+    is_tabular = (
+        column_name is not None or sheet_name is not None or row_number is not None
+    )
+    if is_tabular:
+        parts = ["llm"]
+        if sheet_name:
+            parts.append(
+                _sanitize_for_filename(sheet_name, LLM_LOG_TABULAR_NAME_MAX_LEN)
+            )
+        if column_name:
+            parts.append(
+                _sanitize_for_filename(column_name, LLM_LOG_TABULAR_NAME_MAX_LEN)
+            )
+        if row_number is not None:
+            parts.append(f"row{row_number:05d}")
+        parts.append(f"batch_{batch_number:04d}")
+        filename = "_".join(parts) + ".txt"
+    elif file_name and page_number is not None:
+        # Document: file name + page number
+        safe_file_name = _sanitize_for_filename(file_name)
         filename = (
             f"llm_{safe_file_name}_page_{page_number:04d}_batch_{batch_number:04d}.txt"
         )
     else:
-        # Fallback to timestamp if file/page info not available
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"llm_batch_{batch_number:04d}_{timestamp}.txt"
     filepath = os.path.join(llm_logs_folder, filename)
@@ -513,8 +609,18 @@ def save_llm_prompt_response(
         f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         if file_name:
             f.write(f"File: {file_name}\n")
+        if sheet_name:
+            f.write(f"Sheet: {sheet_name}\n")
+        if column_name is not None:
+            f.write(f"Column: {column_name}\n")
+        if row_number is not None:
+            f.write(f"Row: {row_number}\n")
         if page_number is not None:
-            f.write(f"Page: {page_number}\n")
+            f.write(f"Page: {page_number + 1}\n")
+        if input_tokens is not None:
+            f.write(f"Input tokens: {input_tokens}\n")
+        if output_tokens is not None:
+            f.write(f"Output tokens: {output_tokens}\n")
         f.write(f"Batch Number: {batch_number}\n")
         f.write(f"Model: {model_choice}\n")
         f.write(f"Language: {language}\n")
@@ -561,15 +667,18 @@ def call_llm_for_entity_detection(
     language: str,
     bedrock_runtime: Optional[boto3.Session.client] = None,
     model_choice: str = CLOUD_LLM_PII_MODEL_CHOICE,
-    temperature: float = LLM_PII_TEMPERATURE,
-    max_tokens: int = LLM_PII_MAX_TOKENS,
-    max_retries: int = LLM_PII_NUMBER_OF_RETRY_ATTEMPTS,
-    retry_delay: int = LLM_PII_TIMEOUT_WAIT,
+    temperature: float = LLM_TEMPERATURE,
+    max_tokens: int = LLM_MAX_NEW_TOKENS,
+    max_retries: int = 10,
+    retry_delay: int = 3,
     output_folder: Optional[str] = None,
     batch_number: int = 0,
     custom_instructions: str = "",
     file_name: Optional[str] = None,
     page_number: Optional[int] = None,
+    sheet_name: Optional[str] = None,
+    column_name: Optional[str] = None,
+    row_number: Optional[int] = None,
     inference_method: Optional[str] = None,
     local_model=None,
     tokenizer=None,
@@ -595,7 +704,10 @@ def call_llm_for_entity_detection(
         batch_number: Batch number for logging
         custom_instructions: Optional custom instructions to include in the prompt
         file_name: Optional file name (without extension) for saving logs
-        page_number: Optional page number for saving logs
+        page_number: Optional page number for saving logs (document flow)
+        sheet_name: Optional Excel sheet name for tabular logs
+        column_name: Optional column name for tabular logs
+        row_number: Optional row number (1-based) for tabular logs
         inference_method: Inference method to use ("aws-bedrock", "local", "inference-server", "azure-openai", "gemini")
                          If None, uses CHOSEN_LLM_PII_INFERENCE_METHOD from config
         local_model: Local model instance (required for "local" method)
@@ -645,14 +757,18 @@ def call_llm_for_entity_detection(
         entity for entity in entities_to_detect if not entity.startswith("CUSTOM_VLM_")
     ]
 
-    # Validate that we have either entities or custom instructions
+    # No standard entities and no custom instructions
     if not filtered_entities and (
         not custom_instructions or not custom_instructions.strip()
     ):
-        raise ValueError(
-            "No standard entities selected and no custom instructions provided. "
-            "Please select at least one entity type (excluding CUSTOM_VLM_* entities) or provide custom instructions for LLM-based PII detection."
-        )
+        # Nothing selected at all → error
+        if not entities_to_detect:
+            raise ValueError(
+                "No standard entities selected and no custom instructions provided. "
+                "Please select at least one entity type (excluding CUSTOM_VLM_* entities) or provide custom instructions for LLM-based PII detection."
+            )
+        # Only CUSTOM_VLM_* entities selected (handled separately via VLM) → return blank
+        return []
 
     # Determine model source from model_choice if using model_name_map
     model_source = None
@@ -763,6 +879,32 @@ def call_llm_for_entity_detection(
         print(f"LLM entity detection failed: {e}")
         raise
 
+    # Extract token usage from response (before save so we can write it to the log file)
+    input_tokens = 0
+    output_tokens = 0
+    try:
+        if isinstance(response, dict) and "usage" in response:
+            # inference-server or llama-cpp format
+            input_tokens = response["usage"].get("prompt_tokens", 0)
+            output_tokens = response["usage"].get("completion_tokens", 0)
+        elif hasattr(response, "usage_metadata"):
+            # Check if it's AWS Bedrock format
+            if isinstance(response.usage_metadata, dict):
+                input_tokens = response.usage_metadata.get("inputTokens", 0)
+                output_tokens = response.usage_metadata.get("outputTokens", 0)
+            # Check if it's Gemini format
+            elif hasattr(response.usage_metadata, "prompt_token_count"):
+                input_tokens = response.usage_metadata.prompt_token_count
+                output_tokens = response.usage_metadata.candidates_token_count
+    except (KeyError, AttributeError) as e:
+        print(f"Warning: Could not extract token usage from response: {e}")
+
+    # Fallback for Local/transformers: response is plain text, so use token counts from send_request
+    if num_transformer_input_tokens and num_transformer_input_tokens > 0:
+        input_tokens = num_transformer_input_tokens
+    if num_transformer_generated_tokens and num_transformer_generated_tokens > 0:
+        output_tokens = num_transformer_generated_tokens
+
     # Save prompt and response if output_folder is provided.
     # Use the same system_prompt and user_prompt that were sent to the model
     # (no combined/rendered version) so the log correctly shows system vs user.
@@ -781,39 +923,19 @@ def call_llm_for_entity_detection(
                 max_tokens=max_tokens,
                 file_name=file_name,
                 page_number=page_number,
+                sheet_name=sheet_name,
+                column_name=column_name,
+                row_number=row_number,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
             )
-            print(f"Saved LLM prompt/response to: {saved_file}")
+            if 0 == 1:  # To avoid lint check issue
+                print(f"Saved LLM prompt/response to: {saved_file}")
         except Exception as e:
             print(f"Warning: Could not save LLM prompt/response: {e}")
 
     # Parse the response
     entities = parse_llm_entity_response(response_text, text)
-
-    # Extract token usage from response
-    input_tokens = 0
-    output_tokens = 0
-
-    try:
-        if isinstance(response, dict) and "usage" in response:
-            # inference-server or llama-cpp format
-            input_tokens = response["usage"].get("prompt_tokens", 0)
-            output_tokens = response["usage"].get("completion_tokens", 0)
-        elif hasattr(response, "usage_metadata"):
-            # Check if it's AWS Bedrock format
-            if isinstance(response.usage_metadata, dict):
-                input_tokens = response.usage_metadata.get("inputTokens", 0)
-                output_tokens = response.usage_metadata.get("outputTokens", 0)
-            # Check if it's Gemini format
-            elif hasattr(response.usage_metadata, "prompt_token_count"):
-                input_tokens = response.usage_metadata.prompt_token_count
-                output_tokens = response.usage_metadata.candidates_token_count
-    except (KeyError, AttributeError) as e:
-        print(f"Warning: Could not extract token usage from response: {e}")
-        # Fallback: use transformer token counts if available
-        if num_transformer_input_tokens and num_transformer_input_tokens > 0:
-            input_tokens = num_transformer_input_tokens
-        if num_transformer_generated_tokens and num_transformer_generated_tokens > 0:
-            output_tokens = num_transformer_generated_tokens
 
     return entities, input_tokens, output_tokens
 
@@ -951,8 +1073,8 @@ def do_llm_entity_detection_call(
     chosen_redact_llm_entities: List[str] = None,
     all_text_line_results: List[Tuple] = None,
     model_choice: str = CLOUD_LLM_PII_MODEL_CHOICE,
-    temperature: float = LLM_PII_TEMPERATURE,
-    max_tokens: int = LLM_PII_MAX_TOKENS,
+    temperature: float = LLM_TEMPERATURE,
+    max_tokens: int = LLM_MAX_NEW_TOKENS,
     output_folder: Optional[str] = None,
     batch_number: int = 0,
     custom_instructions: str = "",

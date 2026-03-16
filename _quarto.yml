@@ -9,6 +9,7 @@ website:
   page-navigation: true
   back-to-top-navigation: true
   search: true
+  google-analytics: G-9JNEKNN14K
   navbar:
     left:
       - href: index.qmd
@@ -21,6 +22,8 @@ website:
         text: App installation guide (with CDK)
       - href: src/app_settings.qmd
         text: App settings management guide
+      - href: src/redaction_with_vlm_and_llms.qmd
+        text: Redaction with local VLM and LLMs
 
 format:
   html:

@@ -97,6 +97,10 @@ Settings related to image processing within the application.
     * **Description:** Sets the maximum number of pixels for an image that the application will process. Leave blank for no limit. This can help prevent issues with very large images.
     * **Default Value:** `''`
 
+* **`MERGE_BOUNDING_BOXES`**
+    * **Description:** When enabled (`'True'`), merges nearby bounding boxes (reconstruction, grouping, and horizontal merge). Affects OCR/Textract result processing.
+    * **Default Value:** `'True'`
+
 * **`MAX_SPACES_GPU_RUN_TIME`**
     * **Description:** Maximum number of seconds to run the GPU on Hugging Face Spaces. Used to limit long-running VLM/OCR jobs when deployed on Spaces.
     * **Default Value:** `60`
@@ -339,13 +343,69 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Description:** Minimum number of extractable words on a page to use the text-only route when `EFFICIENT_OCR` is enabled; below this threshold the page uses OCR.
     * **Default Value:** `20`
 
+* **`MAX_WORKERS`**
+    * **Description:** Default maximum number of worker threads for parallel processing across the app. Used as the default or cap for thread pools in review (saving redacted pages, loading page images), file conversion (PDF-to-images, input file listing, annotation processing), file redaction (text extraction, merge/summary, pikepdf annotations), custom image analyser (mapping analyzer results to bounding boxes), and data anonymisation (initial column cleaning). When not set, `OCR_FIRST_PASS_MAX_WORKERS` and `SUMMARY_PAGE_GROUP_MAX_WORKERS` default to this value; set those explicitly to override for OCR or summarisation only.
+    * **Default Value:** `8`
+
 * **`OCR_FIRST_PASS_MAX_WORKERS`**
-    * **Description:** Maximum number of threads for the OCR first pass in image-based PDF redaction (e.g. when using AWS Textract). Set to `1` for sequential processing; use a value greater than `1` to run OCR on multiple pages in parallel. Only applies when the OCR method supports parallel calls (e.g. Textract). Can be overridden via CLI `--ocr_first_pass_max_workers` or direct-mode/Lambda env.
-    * **Default Value:** `3`
+    * **Description:** Maximum number of threads for the OCR first pass in image-based PDF redaction (e.g. when using AWS Textract). Set to `1` for sequential processing; use a value greater than `1` to run OCR on multiple pages in parallel. Only applies when the OCR method supports parallel calls (e.g. Textract). Defaults to `MAX_WORKERS` if not set. Can be overridden via CLI `--ocr_first_pass_max_workers` or direct-mode/Lambda env.
+    * **Default Value:** Same as `MAX_WORKERS` (e.g. `8`)
 
 * **`SUMMARY_PAGE_GROUP_MAX_WORKERS`**
-    * **Description:** Maximum number of threads for page-group summarisation in document summarisation. Set to `1` for sequential processing (recommended for local LLM models); use a value greater than `1` to summarise multiple page groups in parallel (typically for API-based models). Can be overridden via CLI `--summary_page_group_max_workers` or direct-mode/Lambda env.
-    * **Default Value:** `1`
+    * **Description:** Maximum number of threads for page-group summarisation in document summarisation. Set to `1` for sequential processing (recommended for local LLM models); use a value greater than `1` to summarise multiple page groups in parallel (typically for API-based models). Defaults to `MAX_WORKERS` if not set. Can be overridden via CLI `--summary_page_group_max_workers` or direct-mode/Lambda env.
+    * **Default Value:** Same as `MAX_WORKERS` (e.g. `8`)
+
+### Hybrid Textract + Bedrock VLM
+
+When AWS Textract is selected for text extraction, these options allow lines with low confidence to be re-extracted using Bedrock VLM and the result to replace the Textract output for those lines.
+
+* **`SHOW_HYBRID_TEXTRACT_BEDROCK_CHECKBOX`**
+    * **Description:** When set to `'True'`, the "High-quality Textract OCR (re-run low-confidence lines with Bedrock VLM)" checkbox is shown in the GUI when AWS Textract options are visible. Set to `'False'` to hide this option from the UI.
+    * **Default Value:** `'False'`
+
+* **`HYBRID_TEXTRACT_BEDROCK_VLM`**
+    * **Description:** When set to `'True'` and AWS Textract is selected, lines whose average confidence is below `HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD` are re-analyzed with Bedrock VLM and the extracted text replaces the Textract result for those lines.
+    * **Default Value:** `'False'`
+
+* **`HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD`**
+    * **Description:** Line average confidence (0–100) below this value triggers Bedrock VLM re-extraction when `HYBRID_TEXTRACT_BEDROCK_VLM` is enabled.
+    * **Default Value:** `97`
+
+* **`HYBRID_TEXTRACT_BEDROCK_VLM_PADDING`**
+    * **Description:** Padding in pixels around the line crop when calling Bedrock VLM for re-extraction.
+    * **Default Value:** `5`
+
+### Bedrock VLM and LLM cost estimation
+
+These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM OCR - all PDF types" or "LLM (AWS Bedrock)" PII detection is selected. Estimates are shown in the UI (e.g. estimated cost and time).
+
+* **`BEDROCK_VLM_INPUT_COST`**
+    * **Description:** USD per million input tokens for Bedrock VLM OCR cost estimate.
+    * **Default Value:** `3.0`
+
+* **`BEDROCK_VLM_OUTPUT_COST`**
+    * **Description:** USD per million output tokens for Bedrock VLM OCR cost estimate.
+    * **Default Value:** `15.0`
+
+* **`BEDROCK_VLM_PIXELS_PER_INPUT_TOKEN`**
+    * **Description:** Pixels (width × height) per input token; used with `VLM_MAX_IMAGE_SIZE` to estimate input tokens per page for VLM cost calculation.
+    * **Default Value:** `2500`
+
+* **`BEDROCK_LLM_INPUT_COST`**
+    * **Description:** USD per million input tokens for Bedrock LLM (e.g. PII detection) cost estimate.
+    * **Default Value:** `3.0`
+
+* **`BEDROCK_LLM_OUTPUT_COST`**
+    * **Description:** USD per million output tokens for Bedrock LLM cost estimate.
+    * **Default Value:** `15.0`
+
+* **`BEDROCK_LLM_INPUT_TOKENS_PER_PAGE`**
+    * **Description:** Estimated input tokens per page used for Bedrock LLM cost calculation.
+    * **Default Value:** `2000`
+
+* **`BEDROCK_LLM_OUTPUT_TOKENS_PER_PAGE`**
+    * **Description:** Estimated output tokens per page used for Bedrock LLM cost calculation.
+    * **Default Value:** `250`
 
 * **`SHOW_BEDROCK_VLM_MODELS`**, **`SHOW_GEMINI_VLM_MODELS`**, **`SHOW_AZURE_OPENAI_VLM_MODELS`**
     * **Description:** Controls whether AWS Bedrock, Google Gemini, or Azure/OpenAI VLM text extraction options are shown in the UI.
@@ -442,6 +502,10 @@ Configurations related to text extraction, PII detection, and the redaction proc
 
 ### Local OCR (Tesseract & PaddleOCR)
 
+* **`SHOW_OCR_GUI_OPTIONS`**
+    * **Description:** If set to `"True"`, OCR-related options (e.g. local OCR model, Paddle options) are shown in the UI.
+    * **Default Value:** `"True"`
+
 * **`CHOSEN_LOCAL_OCR_MODEL`**
     * **Description:** Choose the engine for local OCR: `"tesseract"`, `"paddle"`, `"hybrid-paddle"`, `"hybrid-vlm"`, `"hybrid-paddle-vlm"`, `"hybrid-paddle-inference-server"`, `"vlm"`, or `"inference-server"`.
     * **Default Value:** `"tesseract"`
@@ -515,17 +579,17 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Description:** If set to `"True"`, loads the PaddleOCR model at application startup.
     * **Default Value:** `"False"`
 
-* **`USE_TRANFORMERS_VLM_MODEL_AS_LLM`**
+* **`USE_TRANSFORMERS_VLM_MODEL_AS_LLM`**
     * **Description:** When set to `"True"`, use the same local transformers VLM model (e.g. Qwen3-VL-4B-Instruct) for LLM tasks (e.g. PII entity detection in `tools/llm_entity_detection.py`) as for VLM/OCR. Overrides `LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE` when local transformers LLM is selected. The VLM model must be loaded first (e.g. by running VLM OCR); otherwise the standard PII model is used.
     * **Default Value:** `"False"`
 
 * **`LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE`**
-    * **Description:** Identifier for the local transformers LLM used for PII detection (e.g. `"gemma-3-4b"`, `"qwen-3-4b"`). Used for display and to select the correct repo/file/folder. Supported values include gemma-3-4b, gemma-3-12b, gemma-2, qwen-3-4b, gpt-oss-20b, granite-4-tiny, granite-4-micro. Ignored for local LLM when `USE_TRANFORMERS_VLM_MODEL_AS_LLM` is `"True"` (the VLM model is used instead).
+    * **Description:** Identifier for the local transformers LLM used for PII detection (e.g. `"gemma-3-4b"`, `"qwen-3-4b"`). Used for display and to select the correct repo/file/folder. Supported values include gemma-3-4b, gemma-3-12b, gemma-2, qwen-3-4b, GPT-OSS 20B, granite-4-tiny, granite-4-micro. Ignored for local LLM when `USE_TRANSFORMERS_VLM_MODEL_AS_LLM` is `"True"` (the VLM model is used instead).
     * **Default Value:** `"gemma-3-4b"`
 
 * **`LOCAL_TRANSFORMERS_LLM_PII_REPO_ID`**, **`LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE`**, **`LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER`**
-    * **Description:** Hugging Face repo ID, optional model filename, and local folder for the local transformers PII detection model. Can be overridden automatically based on `LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE`.
-    * **Default Values:** e.g. `"unsloth/gemma-3-4b-it-bnb-4bit"`, `"gemma-3-4b-it-qat-UD-Q4_K_XL.gguf"`, `"model/gemma3_4b"`.
+    * **Description:** Hugging Face repo ID, for the local transformers PII detection model. Can be overridden automatically based on `LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE`.
+    * **Default Values:** e.g. `"unsloth/gemma-3-4b-it-bnb-4bit"`.
 
 * **`LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START`**
     * **Description:** If set to `"True"`, loads the local transformers LLM PII model at application startup (reduces latency on first use).
@@ -535,19 +599,11 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Description:** If set to `"True"`, uses multimodal prompt format for the local LLM. Set automatically for some model choices (e.g. Gemma 3 4B/12B).
     * **Default Value:** `"False"`
 
-* **`LOW_VRAM_SYSTEM`**
-    * **Description:** If set to `"True"`, applies lower-memory settings (e.g. smaller batch size, optional use of llama.cpp). Use on systems with limited GPU memory.
-    * **Default Value:** `"False"`
-
-* **`USE_LLAMA_CPP`**
-    * **Description:** If set to `"True"`, use llama.cpp for local LLM inference. When `LOW_VRAM_SYSTEM` is true, this defaults to `"True"`. Not fully supported in all flows.
-    * **Default Value:** `"False"` (or `"True"` when `LOW_VRAM_SYSTEM` is true).
-
 * **`REASONING_SUFFIX`**
-    * **Description:** Suffix added to prompts for reasoning-capable models (e.g. `"Reasoning: low"` for gpt-oss-20b, `"/nothink"` for Qwen 3 4B to disable chain-of-thought). Model-specific; see config for defaults.
+    * **Description:** Suffix added to prompts for reasoning-capable models (e.g. `"Reasoning: low"` for GPT-OSS 20B, `"/nothink"` for Qwen 3 4B to disable chain-of-thought). Model-specific; see config for defaults.
     * **Default Value:** Model-dependent (e.g. `"Reasoning: low"` or `"/nothink"` or `''`).
 
-* **LLM generation parameters:** **`LLM_TEMPERATURE`** (default `0.6`), **`LLM_TOP_K`** (`64`), **`LLM_MIN_P`** (`0`), **`LLM_TOP_P`** (`0.95`), **`LLM_REPETITION_PENALTY`** (`1.0`), **`LLM_MAX_NEW_TOKENS`** (`4096`), **`LLM_CONTEXT_LENGTH`** (`16384`), **`LLM_SEED`** (`42`), **`LLM_STREAM`** (`True`), **`LLM_SAMPLE`** (`True`), **`LLM_MAX_GPU_LAYERS`** (`-1`), and related **`LLM_*`** variables in `tools/config.py` control local/transformers LLM generation. **`LLM_PII_TEMPERATURE`**, **`LLM_PII_MAX_TOKENS`**, **`LLM_PII_NUMBER_OF_RETRY_ATTEMPTS`** (`3`), and **`LLM_PII_TIMEOUT_WAIT`** (`5`) control PII detection LLM calls and retries.
+* **LLM generation parameters:** **`LLM_TEMPERATURE`** (default `0.1`), **`LLM_TOP_K`** (`64`), **`LLM_MIN_P`** (`0`), **`LLM_TOP_P`** (`0.95`), **`LLM_REPETITION_PENALTY`** (`1.0`), **`LLM_MAX_NEW_TOKENS`** (`4096`), **`LLM_CONTEXT_LENGTH`** (`32768`), **`LLM_SEED`** (`42`), **`LLM_RESET`** (`False`), **`LLM_STREAM`** (`True`), **`LLM_STOP_STRINGS`**, **`LLM_THREADS`** (`-1`), **`SPECULATIVE_DECODING`** (`False`), **`ASSISTANT_MODEL`**, **`LLM_MODEL_DTYPE`** (`bfloat16`), and other **`LLM_*`** / related variables in `tools/config.py` control local/transformers LLM generation in `tools/llm_funcs.py`. **`LLM_TEMPERATURE`** and **`LLM_MAX_NEW_TOKENS`** also control PII detection LLM calls and retries.
 
 * **`SHOW_INFERENCE_SERVER_VLM_OPTIONS`**
     * **Description:** If set to `"True"`, allows the user to select inference-server-related options from the UI.
@@ -619,6 +675,10 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Description:** Maximum DPI for images passed to VLM. Images with higher DPI will be resized accordingly.
     * **Default Value:** `300.0`
 
+* **`VLM_DISABLE_QWEN3_5_THINKING`**
+    * **Description:** If set to `"True"`, disables Qwen3.5 "thinking" mode for VLM OCR.
+    * **Default Value:** `"False"`
+
 * **`MAX_NEW_TOKENS`**
     * **Description:** Maximum number of tokens to generate for VLM responses.
     * **Default Value:** `4096`
@@ -639,6 +699,10 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Description:** If set to `"True"`, saves input images sent to VLM OCR for debugging purposes.
     * **Default Value:** `"False"`
 
+* **`ADD_VLM_BOUNDING_BOX_RULES`**
+    * **Description:** If set to `"True"`, adds bounding box rules to the VLM prompt (e.g. coordinate format or output constraints for OCR).
+    * **Default Value:** `"False"`
+
 * **`HYBRID_OCR_MAX_NEW_TOKENS`**
     * **Description:** Maximum number of tokens to generate for hybrid OCR operations.
     * **Default Value:** `30`
@@ -654,6 +718,10 @@ Configurations related to text extraction, PII detection, and the redaction proc
 * **`CLOUD_VLM_MODEL_CHOICE`**
     * **Description:** Default model choice for cloud VLM OCR (AWS Bedrock, Gemini, or Azure/OpenAI). Used when cloud VLM options are enabled.
     * **Default Value:** `"qwen.qwen3-vl-235b-a22b"` (or first available cloud model if empty)
+
+* **`CUSTOM_VLM_BACKEND`**
+    * **Description:** Backend used for CUSTOM_VLM_PERSON and CUSTOM_VLM_SIGNATURE (face and signature detection) when those entities are selected for redaction. One of: `"transformers_vlm"` (local transformers VLM), `"inference_vlm"` (inference-server VLM), or `"bedrock_vlm"` (AWS Bedrock VLM). Applies regardless of the PII identification method (Local, AWS Comprehend, or LLM). Value is case-insensitive; invalid values fall back to `"bedrock_vlm"`.
+    * **Default Value:** `"bedrock_vlm"`
 
 * **`CLOUD_LLM_PII_MODEL_CHOICE`**
     * **Description:** Default AWS Bedrock (or cloud) model for LLM-based PII detection when `SHOW_AWS_BEDROCK_LLM_MODELS` (or other cloud LLM options) is enabled. Used by `tools/llm_entity_detection.py`.
@@ -736,7 +804,7 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Default Value:** `[]`
 
 * **`HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS`**
-    * **Description:** Full list of available options for Textract's handwriting and signature detection. Can include `'Extract handwriting'`, `'Extract signatures'`, and optionally `'Extract forms'`, `'Extract layout'`, `'Extract tables'` if the corresponding include options are enabled.
+    * **Description:** Full list of available options for Textract's handwriting and signature detection. Can include `'Extract handwriting'`, `'Extract signatures'`, and optionally `'Extract forms'`, `'Extract layout'`, `'Extract tables'`, and `'Face detection'` if the corresponding include options are enabled.
     * **Default Value:** `['Extract handwriting', 'Extract signatures']`
 
 * **`INCLUDE_FORM_EXTRACTION_TEXTRACT_OPTION`**
@@ -744,6 +812,10 @@ Configurations related to text extraction, PII detection, and the redaction proc
 * **`INCLUDE_TABLE_EXTRACTION_TEXTRACT_OPTION`**
     * **Description:** Booleans (`"True"`/`"False"`) to include Forms, Layout, and Tables as selectable options for Textract analysis.
     * **Default Value:** `"False"` for all.
+
+* **`INCLUDE_FACE_IDENTIFICATION_TEXTRACT_OPTION`**
+    * **Description:** When set to `"True"`, adds "Face detection" as a selectable option in the handwriting/signature checkbox group. When enabled with AWS Bedrock VLM OCR, a second VLM pass per page is run to identify faces (cost and time estimates account for this).
+    * **Default Value:** `"False"`
 
 ### Tabular Data Options
 
@@ -1052,6 +1124,18 @@ Settings for running the application from the command line (Direct Mode) or as a
 * **`ENFORCE_COST_CODES`**
     * **Description:** If set to `'True'`, makes the selection of a cost code mandatory.
     * **Default Value:** `'False'`
+
+### Session default cost code (no extra environment variables)
+
+When cost codes are enabled (`GET_COST_CODES` or `ENFORCE_COST_CODES`), users can save a **default cost code** for their session via the "Set default cost code" button. This uses the **existing** cost code and AWS settings; no additional environment variables are required.
+
+* **Behaviour:**
+    * The chosen cost code is stored in a CSV file (`session_default_cost_codes.csv`) with columns `session_hash`, `default_cost_code`, and `saved_at` (ISO timestamp). Duplicate `session_hash` rows are deduplicated on save, keeping only the latest.
+    * **Local save location:** The CSV is written under the app’s **input folder** (the value of the input folder at save time, e.g. from `INPUT_FOLDER` or the session’s `input_folder_textbox`).
+    * **S3 (optional):** If `S3_COST_CODES_PATH` is set and `RUN_AWS_FUNCTIONS` and `DOCUMENT_REDACTION_BUCKET` are set, the same file is also uploaded to `DOCUMENT_REDACTION_BUCKET` in the same key “folder” as the cost codes file (e.g. `config/session_default_cost_codes.csv`).
+    * **Email-only:** Saves and S3 upload only run when the session identifier is a valid **email address** (e.g. when users are signed in via Cognito). If the session identifier is not an email (e.g. when running locally with a Gradio session hash), the default is not written to the CSV and not uploaded to S3. On load, the app does not download the session default cost codes file from S3 when the session identifier is not an email.
+
+* **Relevant existing variables:** `GET_COST_CODES`, `ENFORCE_COST_CODES`, `COST_CODES_PATH`, `S3_COST_CODES_PATH`, `DOCUMENT_REDACTION_BUCKET`, `RUN_AWS_FUNCTIONS`, and the app input folder (e.g. `INPUT_FOLDER` / `GRADIO_INPUT_FOLDER`).
 
 ## Whole Document API Options (Textract Async)
 

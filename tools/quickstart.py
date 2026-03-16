@@ -41,9 +41,23 @@ def is_data_file_type_walkthrough(files):
 
 
 def route_walkthrough_files(files):
-    """Route files from walkthrough to appropriate component and determine if data file."""
+    """Route files from walkthrough to appropriate component and determine if data file.
+
+    Also returns visibility updates for step 2 text extraction components: when the
+    upload is CSV/Excel (data file), those are hidden; when it is a document, they
+    follow SHOW_OCR_GUI_OPTIONS (radio) and accordions are left unchanged.
+    """
     if not files:
-        return None, None, False, gr.Walkthrough(selected=2)
+        show_text_extract = SHOW_OCR_GUI_OPTIONS
+        return (
+            None,
+            None,
+            False,
+            gr.Walkthrough(selected=2),
+            gr.update(visible=show_text_extract),
+            gr.update(),
+            gr.update(),
+        )
 
     is_data = is_data_file_type_walkthrough(files)
     doc_files = []
@@ -60,11 +74,26 @@ def route_walkthrough_files(files):
             else:
                 doc_files.append(file)
 
-    # Return files for appropriate component (None for the other)
+    # Hide text extraction options on step 2 when CSV/Excel (data file) was uploaded
+    show_text_extract = (not is_data) and SHOW_OCR_GUI_OPTIONS
     if is_data:
-        return None, data_files, True, gr.Walkthrough(selected=2)
+        text_extract_updates = (
+            gr.update(visible=False),
+            gr.update(visible=False),
+            gr.update(visible=False),
+        )
     else:
-        return doc_files, None, False, gr.Walkthrough(selected=2)
+        # Document: show radio if enabled; leave accordions unchanged (they follow radio selection)
+        text_extract_updates = (
+            gr.update(visible=show_text_extract),
+            gr.update(),
+            gr.update(),
+        )
+
+    if is_data:
+        return None, data_files, True, gr.Walkthrough(selected=2), *text_extract_updates
+    else:
+        return doc_files, None, False, gr.Walkthrough(selected=2), *text_extract_updates
 
 
 def handle_step_2_next(
@@ -102,15 +131,40 @@ def handle_step_2_next(
         else:
             main_excel_sheets_update = excel_sheets_dropdown
 
+        # Preserve user's column selection in walkthrough_colnames; do not overwrite with colnames_dropdown
+        # (colnames_dropdown has value=all columns, which would reset a one-column selection to all four)
+        if (
+            walkthrough_colnames_val
+            and len(walkthrough_colnames_val) > 0
+            and walkthrough_colnames_val[0] != "Choose columns to anonymise"
+        ):
+            walkthrough_colnames_update = gr.update(
+                value=walkthrough_colnames_val, visible=True
+            )
+        else:
+            walkthrough_colnames_update = colnames_dropdown
+
+        # Preserve user's sheet selection in walkthrough_excel_sheets when they have made one
+        if (
+            walkthrough_excel_sheets_val
+            and len(walkthrough_excel_sheets_val) > 0
+            and walkthrough_excel_sheets_val[0] != "Choose Excel sheets to anonymise"
+        ):
+            walkthrough_excel_sheets_update = gr.update(
+                value=walkthrough_excel_sheets_val, visible=True
+            )
+        else:
+            walkthrough_excel_sheets_update = excel_sheets_dropdown
+
         # Return updates for both walkthrough and main components, and advance walkthrough
         # Note: walkthrough_local_ocr_method_radio and walkthrough_handwrite_signature_checkbox visibility
         # are controlled by event handler on walkthrough_text_extract_method_radio
         # Note: Step 3 PII components visibility is controlled by event handler on walkthrough_redaction_method_dropdown
         return (
-            colnames_dropdown,  # walkthrough_colnames
-            excel_sheets_dropdown,  # walkthrough_excel_sheets
+            walkthrough_colnames_update,  # walkthrough_colnames
+            walkthrough_excel_sheets_update,  # walkthrough_excel_sheets
             main_colnames_update,  # in_colnames
-            main_excel_sheets_update,  # in_excel_sheets (defined in "Word or Excel/csv files" tab)
+            main_excel_sheets_update,  # in_excel_sheets (defined in "Word or Excel/CSV files" tab)
             gr.Radio(
                 visible=show_text_extract_method
             ),  # walkthrough_text_extract_method_radio
@@ -133,77 +187,141 @@ def handle_step_2_next(
         )
 
 
-def update_step_2_on_data_file_upload(files, is_data_file):
-    """Update Step 2 components when data files are uploaded."""
+def _data_files_fingerprint(files):
+    """Return a stable key for the current file list to detect redundant updates."""
+    if not files:
+        return ()
+    return tuple(getattr(f, "name", str(f)) for f in files if f is not None)
+
+
+def update_step_2_on_data_file_upload(files, is_data_file, last_processed_keys=None):
+    """Update Step 2 components when data files are uploaded.
+
+    When last_processed_keys is provided (from gr.State), returns (colnames, sheets, new_keys)
+    and skips recomputation if files are unchanged to avoid Gradio re-firing change and
+    causing an infinite loading loop on the column dropdown.
+    """
+    keys = _data_files_fingerprint(files)
+    if last_processed_keys is not None and keys == last_processed_keys:
+        return gr.update(), gr.update(), last_processed_keys
+
     if is_data_file and files:
-        # Use put_columns_in_df to populate dropdowns
         colnames_dropdown, excel_sheets_dropdown = put_columns_in_df(files)
-        return colnames_dropdown, excel_sheets_dropdown
+        if last_processed_keys is not None:
+            return colnames_dropdown, excel_sheets_dropdown, keys
+        return colnames_dropdown, excel_sheets_dropdown, keys
     else:
-        return gr.Dropdown(visible=False), gr.Dropdown(visible=False)
+        no_op = gr.Dropdown(visible=False), gr.Dropdown(visible=False), keys
+        if last_processed_keys is not None:
+            return *no_op, () if not keys else keys
+        return no_op
 
 
-def handle_text_extract_method_selection(text_extract_method):
+def handle_text_extract_method_selection(text_extract_method: str):
     """Handle text extraction method selection - show local OCR radio only if Local OCR model is selected,
-    and show AWS Textract settings only if AWS Textract is selected."""
+    and show AWS Textract settings only if AWS Textract is selected.
+
+    Args:
+        text_extract_method: Selected text extraction method
+
+    Returns:
+        Tuple of visibility updates for local OCR radio, and AWS Textract accordion
+    """
+    # Normalize (Gradio can send None when .change() fires before sync); default so something stays visible
+    if isinstance(text_extract_method, str):
+        text_extract_method = text_extract_method.strip()
+    if text_extract_method is None or text_extract_method == "":
+        text_extract_method = TESSERACT_TEXT_EXTRACT_OPTION
+
     # Show local OCR method radio only if "Local OCR model - PDFs without selectable text" is selected
     # When "AWS Bedrock VLM OCR" is selected, the local OCR method is automatically set to "bedrock-vlm" but the component is hidden
     show_local_ocr = text_extract_method == TESSERACT_TEXT_EXTRACT_OPTION
-    # Show AWS Textract settings only if "AWS Textract service - all PDF types" is selected
-    show_aws_textract = text_extract_method == TEXTRACT_TEXT_EXTRACT_OPTION
+    # Show AWS Textract settings accordion only if "AWS Textract service - all PDF types" is selected
+    show_aws_textract = (
+        text_extract_method == TEXTRACT_TEXT_EXTRACT_OPTION
+        and SHOW_AWS_TEXT_EXTRACTION_OPTIONS
+    )
 
     return (
-        gr.Radio(visible=show_local_ocr),  # walkthrough_local_ocr_method_radio
-        gr.CheckboxGroup(
+        gr.update(visible=show_local_ocr),  # walkthrough_local_ocr_method_radio
+        gr.update(
             visible=show_aws_textract
         ),  # walkthrough_handwrite_signature_checkbox
     )
 
 
-def handle_redaction_method_selection(redaction_method):
+def handle_redaction_method_selection(redaction_method: str, pii_method: str):
     """Handle redaction method selection in Step 3 - show appropriate components based on selection."""
+    # Normalize inputs (Gradio can send whitespace or None when .change() fires before sync)
+    if isinstance(redaction_method, str):
+        redaction_method = redaction_method.strip()
+    if redaction_method is None or redaction_method == "":
+        redaction_method = "Redact all PII"
+    if isinstance(pii_method, str):
+        pii_method = pii_method.strip()
+    if pii_method is None or pii_method == "":
+        pii_method = DEFAULT_PII_DETECTION_MODEL
+
     # Check which redaction method is selected
     is_redact_all_pii = redaction_method == "Redact all PII"
     is_redact_selected_terms = redaction_method == "Redact selected terms"
+    is_redact_all_pii_or_selected_terms = is_redact_all_pii or is_redact_selected_terms
+    is_extract_text_only = (
+        isinstance(redaction_method, str)
+        and redaction_method.strip() == "Extract text only"
+    )
+
+    # When switching from "Extract text only", the PII dropdown may still be
+    # NO_REDACTION_PII_OPTION; use DEFAULT_PII_DETECTION_MODEL so exactly one
+    # entity dropdown is visible and the UI doesn’t show all three or none.
+    pii_method_for_visibility = pii_method
+    if is_redact_all_pii_or_selected_terms and pii_method == NO_REDACTION_PII_OPTION:
+        pii_method_for_visibility = DEFAULT_PII_DETECTION_MODEL
 
     # Show PII detection settings if "Redact all PII" OR "Redact selected terms" is selected
     # Both options need PII detection method to determine what to redact
     show_pii_method = (
-        is_redact_all_pii or is_redact_selected_terms
+        is_redact_all_pii_or_selected_terms
     ) and SHOW_PII_IDENTIFICATION_OPTIONS
 
-    # Show deny/allow/fully redacted lists only if "Redact selected terms" is selected
-    # These lists are essential for "Redact selected terms" mode, so show them regardless of SHOW_PII_IDENTIFICATION_OPTIONS
-    show_selected_terms_lists = is_redact_selected_terms
-
-    # Determine initial visibility of entity dropdowns based on default PII method
-    default_pii_method = DEFAULT_PII_DETECTION_MODEL
+    # Determine visibility of entity dropdowns based on PII method
     show_local_entities_init = show_pii_method and (
-        default_pii_method == LOCAL_PII_OPTION
+        pii_method_for_visibility == LOCAL_PII_OPTION
     )
     show_comprehend_entities_init = show_pii_method and (
-        default_pii_method == AWS_PII_OPTION
+        pii_method_for_visibility == AWS_PII_OPTION
     )
     is_llm_method_init = show_pii_method and (
-        default_pii_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION
-        or default_pii_method == INFERENCE_SERVER_PII_OPTION
-        or default_pii_method == AWS_LLM_PII_OPTION
+        pii_method_for_visibility == LOCAL_TRANSFORMERS_LLM_PII_OPTION
+        or pii_method_for_visibility == INFERENCE_SERVER_PII_OPTION
+        or pii_method_for_visibility == AWS_LLM_PII_OPTION
     )
 
     # For "Extract text only", hide all components
     # For "Redact all PII", show PII detection components
     # For "Redact selected terms", show both PII detection components AND deny/allow/fully redacted list components
 
+    # When we overrode pii_method for visibility, also update the PII dropdown value
+    pii_drop_value = None
+    if is_redact_all_pii_or_selected_terms and pii_method == NO_REDACTION_PII_OPTION:
+        pii_drop_value = DEFAULT_PII_DETECTION_MODEL
+
     # Set entity values based on redaction method
     if is_redact_selected_terms:
         # For "Redact selected terms", only show CUSTOM entity
-        local_entities_update = gr.update(
+        local_entities_update = gr.Dropdown(
             visible=show_local_entities_init, value=["CUSTOM"]
         )
-        comprehend_entities_update = gr.update(
+        comprehend_entities_update = gr.Dropdown(
             visible=show_comprehend_entities_init, value=["CUSTOM"]
         )
-        llm_entities_update = gr.update(visible=is_llm_method_init, value=["CUSTOM"])
+        llm_entities_update = gr.Dropdown(visible=is_llm_method_init, value=["CUSTOM"])
+        walkthrough_pii_identification_method_drop_update = (
+            gr.update(visible=show_pii_method, value=pii_drop_value)
+            if pii_drop_value is not None
+            else gr.update(visible=show_pii_method)
+        )
+
     elif is_redact_all_pii:
         # For "Redact all PII", use default entities
         # Ensure entities are lists (they should already be parsed in config.py)
@@ -220,61 +338,144 @@ def handle_redaction_method_selection(redaction_method):
         llm_entities_val = (
             CHOSEN_LLM_ENTITIES if isinstance(CHOSEN_LLM_ENTITIES, list) else ["CUSTOM"]
         )
-        local_entities_update = gr.update(
+        local_entities_update = gr.Dropdown(
             visible=show_local_entities_init, value=local_entities_val
         )
-        comprehend_entities_update = gr.update(
+        comprehend_entities_update = gr.Dropdown(
             visible=show_comprehend_entities_init, value=comprehend_entities_val
         )
-        llm_entities_update = gr.update(
+        llm_entities_update = gr.Dropdown(
             visible=is_llm_method_init, value=llm_entities_val
         )
-    else:
+        walkthrough_pii_identification_method_drop_update = (
+            gr.update(visible=show_pii_method, value=pii_drop_value)
+            if pii_drop_value is not None
+            else gr.update(visible=show_pii_method)
+        )
+    elif is_extract_text_only:
         # For "Extract text only", just update visibility without changing value
-        local_entities_update = gr.update(visible=show_local_entities_init)
-        comprehend_entities_update = gr.update(visible=show_comprehend_entities_init)
-        llm_entities_update = gr.update(visible=is_llm_method_init)
+        local_entities_update = gr.Dropdown(visible=show_local_entities_init)
+        comprehend_entities_update = gr.Dropdown(visible=show_comprehend_entities_init)
+        llm_entities_update = gr.Dropdown(visible=is_llm_method_init)
+        walkthrough_pii_identification_method_drop_update = gr.update(
+            visible=show_pii_method, value=NO_REDACTION_PII_OPTION
+        )
 
     return (
-        gr.update(
-            visible=show_pii_method
-        ),  # walkthrough_pii_identification_method_drop
+        walkthrough_pii_identification_method_drop_update,  # walkthrough_pii_identification_method_drop
         local_entities_update,  # walkthrough_in_redact_entities
         comprehend_entities_update,  # walkthrough_in_redact_comprehend_entities
+        gr.update(visible=is_llm_method_init),  # walkthrough_llm_entities_accordion
         llm_entities_update,  # walkthrough_in_redact_llm_entities
         gr.update(
-            visible=is_llm_method_init
-        ),  # walkthrough_custom_llm_instructions_textbox
-        gr.update(visible=show_selected_terms_lists),  # walkthrough_deny_list_state
-        gr.update(visible=show_selected_terms_lists),  # walkthrough_allow_list_state
+            visible=is_redact_all_pii_or_selected_terms
+        ),  # walkthrough_list_accordion
         gr.update(
-            visible=show_selected_terms_lists
-        ),  # walkthrough_fully_redacted_list_state
+            visible=is_redact_all_pii_or_selected_terms
+        ),  # walkthrough_max_fuzzy_spelling_mistakes_num
     )
 
 
-def handle_pii_method_selection(pii_method):
+# Update visibility of PII-related components and accordions when general redaction method is selected
+def handle_main_redaction_method_selection(redaction_method, pii_method):
+    """Wrapper that applies handle_redaction_method_selection and updates accordion visibility.
+
+    handle_redaction_method_selection returns (for walkthrough): pii_drop, local_entities,
+    comprehend_entities, llm_accordion_visible, llm_entities, list_accordion, checkbox, num.
+    The main app expects: pii_drop, local_entities, comprehend_entities, llm_entities,
+    custom_llm_instructions_textbox, list_accordion, checkbox, num, entity_accordion, terms_accordion.
+    So we remap: use inner[4] for in_redact_llm_entities and insert gr.update() for
+    custom_llm_instructions_textbox (avoid applying the Dropdown value ["CUSTOM"] to the textbox).
+    """
+    raw = list(handle_redaction_method_selection(redaction_method, pii_method))
+    is_redact_all_pii = redaction_method == "Redact all PII"
+    is_redact_selected_terms = redaction_method == "Redact selected terms"
+    is_extract_text_only = (
+        isinstance(redaction_method, str)
+        and redaction_method.strip() == "Extract text only"
+    )
+    show_pii_method = (
+        is_redact_all_pii or is_redact_selected_terms
+    ) and SHOW_PII_IDENTIFICATION_OPTIONS
+    show_selected_terms_lists = is_redact_selected_terms
+    # Map to main app outputs: pii_drop, local_entities, comprehend_entities, llm_entities,
+    # custom_llm_instructions_textbox (no value change), list_accordion, checkbox, num,
+    # then entity/terms accordions, then only_extract_text_radio.
+    # raw[3] is llm_accordion visibility (unused here); raw[4] is llm_entities.
+    # When "Extract text only" is selected, force "Only extract text (no redaction)" checkbox to True.
+    results = [
+        raw[0],  # pii_identification_method_drop
+        raw[1],  # in_redact_entities
+        raw[2],  # in_redact_comprehend_entities
+        raw[
+            4
+        ],  # in_redact_llm_entities (was wrongly going to textbox as str(["CUSTOM"]) -> "['CUSTOM']")
+        gr.update(),  # custom_llm_instructions_textbox - leave value unchanged
+        raw[5],  # walkthrough_list_accordion
+        raw[6],  # max_fuzzy_spelling_mistakes_num
+        gr.update(visible=show_pii_method),  # entity_types_to_redact_accordion
+        gr.update(visible=show_selected_terms_lists),  # terms_accordion
+        gr.update(value=is_extract_text_only),  # only_extract_text_radio
+    ]
+    return results
+
+
+def handle_pii_method_selection(pii_method: str):
     """Handle PII method selection - show appropriate entity dropdowns."""
-    # Check if method is Local
-    show_local_entities = pii_method == LOCAL_PII_OPTION
-    # Check if method is AWS Comprehend
-    show_comprehend_entities = pii_method == AWS_PII_OPTION
-    # Check if method is an LLM option
-    is_llm_method = (
-        pii_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION
-        or pii_method == INFERENCE_SERVER_PII_OPTION
-        or pii_method == AWS_LLM_PII_OPTION
-    )
+    # When value is None/empty (e.g. first .change() after loading an example sets the
+    # component programmatically), avoid hiding all entity selectors by defaulting to Local.
+    if pii_method is None or (isinstance(pii_method, str) and not pii_method.strip()):
+        show_local_entities = True
+        show_comprehend_entities = False
+        is_llm_method = False
+    else:
+        # Check if method is Local
+        show_local_entities = pii_method == LOCAL_PII_OPTION
+        # Check if method is AWS Comprehend
+        show_comprehend_entities = pii_method == AWS_PII_OPTION
+        # Check if method is an LLM option
+        is_llm_method = (
+            pii_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION
+            or pii_method == INFERENCE_SERVER_PII_OPTION
+            or pii_method == AWS_LLM_PII_OPTION
+        )
 
+    # Use gr.update(visible=...) only to avoid value resets that can trigger change
+    # events on the target components and cause loading loops (e.g. tabular PII -> LLM).
+    # Only return to the two entity dropdowns and the accordion; components inside the
+    # accordion (walkthrough_in_redact_llm_entities, walkthrough_custom_llm_instructions_textbox)
+    # are shown/hidden by the accordion visibility.
     return (
-        gr.Dropdown(visible=show_local_entities),  # walkthrough_in_redact_entities
-        gr.Dropdown(
+        gr.update(visible=show_local_entities),  # walkthrough_in_redact_entities
+        gr.update(
             visible=show_comprehend_entities
         ),  # walkthrough_in_redact_comprehend_entities
-        gr.Dropdown(visible=is_llm_method),  # walkthrough_in_redact_llm_entities
-        gr.Textbox(
-            visible=is_llm_method
-        ),  # walkthrough_custom_llm_instructions_textbox
+        gr.update(visible=is_llm_method),  # walkthrough_llm_entities_accordion
+    )
+
+
+def handle_pii_method_selection_tabular(pii_method: str):
+    """Handle tabular PII method selection. Updates only accordion visibility for the
+    LLM block; leaves walkthrough_in_redact_llm_entities and
+    walkthrough_custom_llm_instructions_textbox as no-ops to avoid loading spinners
+    hanging on those nested components when switching to LLM (AWS Bedrock).
+    """
+    if pii_method is None or (isinstance(pii_method, str) and not pii_method.strip()):
+        show_local_entities = True
+        show_comprehend_entities = False
+        is_llm_method = False
+    else:
+        show_local_entities = pii_method == LOCAL_PII_OPTION
+        show_comprehend_entities = pii_method == AWS_PII_OPTION
+        is_llm_method = (
+            pii_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION
+            or pii_method == INFERENCE_SERVER_PII_OPTION
+            or pii_method == AWS_LLM_PII_OPTION
+        )
+    return (
+        gr.update(visible=show_local_entities),
+        gr.update(visible=show_comprehend_entities),
+        gr.update(visible=is_llm_method),  # accordion controls visibility of LLM block
     )
 
 
@@ -564,15 +765,23 @@ def sync_walkthrough_tabular_outputs_to_original(summary_text, output_file_value
 
 
 def update_step_3_tabular_visibility(is_data_file):
-    """Update visibility of Step 3 tabular components based on file type.
+    """Update visibility of Step 3 components based on file type.
+
+    When a data file (CSV/Excel) is chosen: show tabular options, hide document-only options.
+    When a document is chosen: show document options (PII method, duplicate pages, etc.), hide tabular options.
 
     Args:
         is_data_file: Boolean indicating if uploaded file is a data file
 
     Returns:
-        Tuple of visibility updates for tabular components
+        Tuple of visibility updates for document-only and tabular components
     """
+    show_doc = not is_data_file
     return (
+        gr.update(visible=show_doc),  # walkthrough_local_ocr_method_radio
+        gr.update(visible=show_doc),  # walkthrough_pii_identification_method_drop
+        gr.update(visible=show_doc),  # walkthrough_fully_redacted_list_state
+        gr.update(visible=show_doc),  # walkthrough_redact_duplicate_pages_checkbox
         gr.update(
             visible=is_data_file
         ),  # walkthrough_pii_identification_method_drop_tabular
@@ -598,7 +807,7 @@ def update_step_4_visibility(is_data_file):
     )
 
 
-def handle_main_text_extract_method_selection(text_extract_method):
+def handle_main_text_extract_method_selection(text_extract_method: str):
     """Handle text extraction method selection for main components - show local OCR options only if Local OCR model is selected,
     and show AWS Textract settings only if AWS Textract is selected.
 
@@ -608,6 +817,12 @@ def handle_main_text_extract_method_selection(text_extract_method):
     Returns:
         Tuple of visibility updates for local OCR accordion, inference server accordion, and AWS Textract accordion
     """
+    # Normalize (Gradio can send None when .change() fires before sync); default so something stays visible
+    if isinstance(text_extract_method, str):
+        text_extract_method = text_extract_method.strip()
+    if text_extract_method is None or text_extract_method == "":
+        text_extract_method = TESSERACT_TEXT_EXTRACT_OPTION
+
     # Show local OCR method accordion only if "Local OCR model - PDFs without selectable text" is selected
     # When "AWS Bedrock VLM OCR" is selected, the local OCR method is automatically set to "bedrock-vlm" but the component is hidden
     show_local_ocr = text_extract_method == TESSERACT_TEXT_EXTRACT_OPTION
@@ -641,15 +856,24 @@ def handle_main_pii_method_selection(pii_method):
         Tuple of visibility updates for PII method dropdown, local entities accordion, comprehend entities accordion,
         LLM entities accordion, and LLM custom instructions accordion
     """
+    # Normalize string (Gradio can send whitespace)
+    if isinstance(pii_method, str):
+        pii_method = pii_method.strip()
+    # When value is None/empty (e.g. .change() fired before component synced), default to Local so at least one section is visible (e.g. when user clicked Local)
+    if pii_method is None or pii_method == "":
+        return (
+            gr.update(visible=True),  #  local_entities
+            gr.update(visible=False),  # comprehend_entities
+            gr.update(visible=False),  # llm_entities
+            gr.update(visible=False),  # llm_custom_instructions
+        )
+
     # Check if "No PII redaction" is selected
     is_no_redaction = pii_method == NO_REDACTION_PII_OPTION
 
     # If no redaction, hide all PII-related components
     if is_no_redaction:
         return (
-            gr.update(
-                visible=True
-            ),  # pii_identification_method_drop (keep visible so user can change selection)
             gr.update(visible=False),  # local_entities
             gr.update(visible=False),  # comprehend_entities
             gr.update(visible=False),  # llm_entities
@@ -668,9 +892,8 @@ def handle_main_pii_method_selection(pii_method):
     )
 
     return (
-        gr.update(visible=True),  # pii_identification_method_drop
-        gr.update(visible=show_local_entities),  # local_entities_accordion
-        gr.update(visible=show_comprehend_entities),  # comprehend_entities_accordion
-        gr.update(visible=is_llm_method),  # llm_entities_accordion
-        gr.update(visible=is_llm_method),  # llm_custom_instructions_accordion
+        gr.update(visible=show_local_entities),  # local_entities
+        gr.update(visible=show_comprehend_entities),  # comprehend_entities
+        gr.update(visible=is_llm_method),  # llm_entities
+        gr.update(visible=is_llm_method),  # llm_custom_instructions
     )

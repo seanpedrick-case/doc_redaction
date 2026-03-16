@@ -12,6 +12,7 @@ from tools.config import (
     MAX_SPACES_GPU_RUN_TIME,
     PRINT_TRANSFORMERS_USER_PROMPT,
     REPORT_LLM_OUTPUTS_TO_GUI,
+    VLM_DEFAULT_DO_SAMPLE,
 )
 
 # Import mock patches if in test mode
@@ -57,14 +58,6 @@ full_text = (
     ""  # Define dummy source text (full text) just to enable highlight function to load
 )
 
-# Global variables for model and tokenizer
-# Note: These are kept for backward compatibility but are no longer used.
-# All model loading now uses the PII globals (_pii_model, _pii_tokenizer, _pii_assistant_model)
-# via get_pii_model(), get_pii_tokenizer(), etc.
-# _model = None
-# _tokenizer = None
-# _assistant_model = None
-
 # Global variables for PII detection model and tokenizer
 # These are now used for all LLM model loading (both general and PII-specific)
 _pii_model = None
@@ -75,48 +68,38 @@ _pii_assistant_model = None
 # This allows llm_funcs.py to work even if some config variables don't exist
 from tools.config import (
     ASSISTANT_MODEL,
-    BATCH_SIZE_DEFAULT,
     COMPILE_MODE,
     COMPILE_TRANSFORMERS,
-    DEDUPLICATION_THRESHOLD,
     HF_TOKEN,
     INT8_WITH_OFFLOAD_TO_CPU,
-    LLM_BATCH_SIZE,
     LLM_CONTEXT_LENGTH,
-    LLM_LAST_N_TOKENS,
-    LLM_MAX_GPU_LAYERS,
     LLM_MAX_NEW_TOKENS,
     LLM_MIN_P,
+    LLM_MODEL_DTYPE,
     LLM_REPETITION_PENALTY,
     LLM_RESET,
-    LLM_SAMPLE,
+    LLM_RETRY_ATTEMPTS,
     LLM_SEED,
     LLM_STOP_STRINGS,
     LLM_STREAM,
     LLM_TEMPERATURE,
     LLM_THREADS,
+    LLM_TIMEOUT_WAIT,
     LLM_TOP_K,
     LLM_TOP_P,
     LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START,
     LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
-    LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE,
-    LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER,
     LOCAL_TRANSFORMERS_LLM_PII_REPO_ID,
-    MAX_COMMENT_CHARS,
-    MAX_TIME_FOR_LOOP,
-    MODEL_DTYPE,
     MULTIMODAL_PROMPT_FORMAT,
-    NUM_PRED_TOKENS,
-    NUMBER_OF_RETRY_ATTEMPTS,
     QUANTISE_TRANSFORMERS_LLM_MODELS,
     REASONING_SUFFIX,
     SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL,
     SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS,
     SPECULATIVE_DECODING,
-    TIMEOUT_WAIT,
-    USE_LLAMA_CPP,
     USE_LLAMA_SWAP,
-    USE_TRANFORMERS_VLM_MODEL_AS_LLM,
+    USE_TRANSFORMERS_VLM_MODEL_AS_LLM,
+    VLM_DISABLE_QWEN3_5_THINKING,
+    VLM_QWEN3_5_NOTHINK_SUFFIX,
 )
 
 
@@ -133,89 +116,52 @@ def _report_llm_output_to_gui(text: str) -> None:
         pass
 
 
-if isinstance(NUM_PRED_TOKENS, str):
-    NUM_PRED_TOKENS = int(NUM_PRED_TOKENS)
-if isinstance(LLM_MAX_GPU_LAYERS, str):
-    LLM_MAX_GPU_LAYERS = int(LLM_MAX_GPU_LAYERS)
 if isinstance(LLM_THREADS, str):
     LLM_THREADS = int(LLM_THREADS)
 
 max_tokens = LLM_MAX_NEW_TOKENS
-timeout_wait = TIMEOUT_WAIT
-number_of_api_retry_attempts = NUMBER_OF_RETRY_ATTEMPTS
-max_time_for_loop = MAX_TIME_FOR_LOOP
-batch_size_default = BATCH_SIZE_DEFAULT
-deduplication_threshold = DEDUPLICATION_THRESHOLD
-max_comment_character_length = MAX_COMMENT_CHARS
 
 temperature = LLM_TEMPERATURE
 top_k = LLM_TOP_K
 top_p = LLM_TOP_P
 min_p = LLM_MIN_P
 repetition_penalty = LLM_REPETITION_PENALTY
-last_n_tokens = LLM_LAST_N_TOKENS
 LLM_MAX_NEW_TOKENS: int = LLM_MAX_NEW_TOKENS
 seed: int = LLM_SEED
 reset: bool = LLM_RESET
 stream: bool = LLM_STREAM
-batch_size: int = LLM_BATCH_SIZE
 context_length: int = LLM_CONTEXT_LENGTH
-sample = LLM_SAMPLE
-stop_strings = LLM_STOP_STRINGS
 speculative_decoding = SPECULATIVE_DECODING
-if LLM_MAX_GPU_LAYERS != 0:
-    gpu_layers = int(LLM_MAX_GPU_LAYERS)
-    torch_device = "cuda"
-else:
-    gpu_layers = 0
-    torch_device = "cpu"
 
 if not LLM_THREADS:
     threads = 1
 else:
     threads = LLM_THREADS
 
+timeout_wait = LLM_TIMEOUT_WAIT
+number_of_api_retry_attempts = LLM_RETRY_ATTEMPTS
 
-class llama_cpp_init_config_gpu:
-    def __init__(
-        self,
-        last_n_tokens=last_n_tokens,
-        seed=seed,
-        n_threads=threads,
-        n_batch=batch_size,
-        n_ctx=context_length,
-        n_gpu_layers=gpu_layers,
-        reset=reset,
-    ):
 
-        self.last_n_tokens = last_n_tokens
-        self.seed = seed
-        self.n_threads = n_threads
-        self.n_batch = n_batch
+class LocalLLMContextConfig:
+    """Holds context length and GPU layer count for local transformers model loading."""
+
+    def __init__(self, n_ctx: int = context_length, n_gpu_layers: int = -1):
         self.n_ctx = n_ctx
         self.n_gpu_layers = n_gpu_layers
-        self.reset = reset
-        # self.stop: list[str] = field(default_factory=lambda: [stop_string])
 
-    def update_gpu(self, new_value):
+    def update_gpu(self, new_value: int) -> None:
         self.n_gpu_layers = new_value
 
-    def update_context(self, new_value):
+    def update_context(self, new_value: int) -> None:
         self.n_ctx = new_value
 
 
-class llama_cpp_init_config_cpu(llama_cpp_init_config_gpu):
-    def __init__(self):
-        super().__init__()
-        self.n_gpu_layers = gpu_layers
-        self.n_ctx = context_length
+# GPU and CPU context configs for load_model (CPU uses 0 GPU layers).
+local_gpu_context = LocalLLMContextConfig(n_ctx=context_length, n_gpu_layers=-1)
+local_cpu_context = LocalLLMContextConfig(n_ctx=context_length, n_gpu_layers=0)
 
 
-gpu_config = llama_cpp_init_config_gpu()
-cpu_config = llama_cpp_init_config_cpu()
-
-
-class LlamaCPPGenerationConfig:
+class LocalLLMGenerationConfig:
     def __init__(
         self,
         temperature=temperature,
@@ -255,8 +201,8 @@ class ResponseObject:
 
 def get_model_path(
     repo_id=LOCAL_TRANSFORMERS_LLM_PII_REPO_ID,
-    model_filename=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE,
-    model_dir=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER,
+    model_filename="",
+    model_dir="",
     hf_token=HF_TOKEN,
 ):
     # Construct the expected local path
@@ -294,16 +240,16 @@ def get_model_path(
 
 def load_model(
     local_model_type: str = None,
-    gpu_layers: int = gpu_layers,
+    gpu_layers: int = -1,
     max_context_length: int = context_length,
-    gpu_config: llama_cpp_init_config_gpu = gpu_config,
-    cpu_config: llama_cpp_init_config_cpu = cpu_config,
-    torch_device: str = torch_device,
+    gpu_context: LocalLLMContextConfig = local_gpu_context,
+    cpu_context: LocalLLMContextConfig = local_cpu_context,
+    torch_device: str = "cpu",
     repo_id=LOCAL_TRANSFORMERS_LLM_PII_REPO_ID,
-    model_filename=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE,
-    model_dir=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER,
+    model_filename="",
+    model_dir="",
     compile_mode=COMPILE_MODE,
-    model_dtype=MODEL_DTYPE,
+    model_dtype=LLM_MODEL_DTYPE,
     hf_token=HF_TOKEN,
     speculative_decoding=speculative_decoding,
     model=None,
@@ -311,15 +257,15 @@ def load_model(
     assistant_model=None,
 ):
     """
-    Load in a model from Hugging Face hub via the transformers package, or using llama_cpp_python by downloading a GGUF file from Huggingface Hub.
+    Load a model from Hugging Face Hub via the transformers package.
 
     Args:
-        local_model_type (str): The type of local model to load (e.g., "llama-cpp").
-        gpu_layers (int): The number of GPU layers to offload to the GPU.
+        local_model_type (str): The type of local model to load.
+        gpu_layers (int): The number of GPU layers to offload to the GPU (-1 for default).
         max_context_length (int): The maximum context length for the model.
-        gpu_config (llama_cpp_init_config_gpu): Configuration object for GPU-specific Llama.cpp parameters.
-        cpu_config (llama_cpp_init_config_cpu): Configuration object for CPU-specific Llama.cpp parameters.
-        torch_device (str): The device to load the model on ("cuda" for GPU, "cpu" for CPU).
+        gpu_context (LocalLLMContextConfig): Context config for GPU (n_ctx, n_gpu_layers).
+        cpu_context (LocalLLMContextConfig): Context config for CPU.
+        torch_device (str): The device to load the model on ("cuda" or "cpu").
         repo_id (str): The Hugging Face repository ID where the model is located.
         model_filename (str): The specific filename of the model to download from the repository.
         model_dir (str): The local directory where the model will be stored or downloaded.
@@ -327,14 +273,11 @@ def load_model(
         model_dtype (str): The data type to use for the model.
         hf_token (str): The Hugging Face token to use for the model.
         speculative_decoding (bool): Whether to use speculative decoding.
-        model (Llama/transformers model): The model to load.
-        tokenizer (list/transformers tokenizer): The tokenizer to load.
-        assistant_model (transformers model): The assistant model for speculative decoding.
+        model (transformers model): Optional pre-loaded model (skips loading if provided).
+        tokenizer (transformers tokenizer): Optional pre-loaded tokenizer.
+        assistant_model (transformers model): Optional assistant model for speculative decoding.
     Returns:
-        tuple: A tuple containing:
-            - model (Llama/transformers model): The loaded Llama.cpp/transformers model instance.
-            - tokenizer (list/transformers tokenizer): An empty list (tokenizer is not used with Llama.cpp directly in this setup), or a transformers tokenizer.
-            - assistant_model (transformers model): The assistant model for speculative decoding (if speculative_decoding is True).
+        tuple: (model, tokenizer, assistant_model).
     """
 
     # If model is provided, validate that tokenizer is also provided and compatible
@@ -377,7 +320,6 @@ def load_model(
     print("Is a CUDA device available on this computer?", torch.backends.cudnn.enabled)
     if torch.cuda.is_available():
         torch_device = "cuda"
-        gpu_layers = int(LLM_MAX_GPU_LAYERS)
         print("CUDA version:", torch.version.cuda)
         # try:
         #    os.system("nvidia-smi")
@@ -399,8 +341,8 @@ def load_model(
     # GPU mode
     if torch_device == "cuda":
         torch.cuda.empty_cache()
-        gpu_config.update_gpu(gpu_layers)
-        gpu_config.update_context(max_context_length)
+        gpu_context.update_gpu(gpu_layers)
+        gpu_context.update_context(max_context_length)
 
         from transformers import (
             AutoModelForCausalLM,
@@ -414,7 +356,7 @@ def load_model(
         # 1. Set Data Type (dtype)
         # For H200/Hopper: 'bfloat16'
         # For RTX 3060/Ampere: 'float16'
-        dtype_str = model_dtype  # os.environ.get("MODEL_DTYPE", "bfloat16").lower()
+        dtype_str = model_dtype  # os.environ.get("LLM_MODEL_DTYPE", "bfloat16").lower()
         if dtype_str == "bfloat16":
             torch_dtype = torch.bfloat16
         elif dtype_str == "float16":
@@ -542,9 +484,9 @@ def load_model(
 
         print(
             "Loading with",
-            gpu_config.n_gpu_layers,
+            gpu_context.n_gpu_layers,
             "model layers sent to GPU and a maximum context length of",
-            gpu_config.n_ctx,
+            gpu_context.n_ctx,
         )
 
     # CPU mode
@@ -563,21 +505,16 @@ def load_model(
             )
             if not tokenizer.pad_token:
                 tokenizer.pad_token = tokenizer.eos_token
-            print(
-                f"Loaded tokenizer from {model_id} for compatibility (llama-cpp handles tokenization internally)"
-            )
+            print(f"Loaded tokenizer from {model_id} for compatibility")
         except Exception as e:
-            print(f"Warning: Could not load tokenizer for llama-cpp model: {e}")
-            print(
-                "Note: llama-cpp models handle tokenization internally, so tokenizer may not be needed"
-            )
+            print(f"Warning: Could not load tokenizer: {e}")
             tokenizer = None
 
         print(
             "Loading with",
-            cpu_config.n_gpu_layers,
+            cpu_context.n_gpu_layers,
             "model layers sent to GPU and a maximum context length of",
-            cpu_config.n_ctx,
+            cpu_context.n_ctx,
         )
 
     print("Finished loading model:", local_model_type)
@@ -679,128 +616,6 @@ def load_model(
     return model, tokenizer, assistant_model
 
 
-# def # get_assistant_model():
-#     """Get the globally loaded assistant model. Load it if not already loaded."""
-#     global _pii_model, _pii_tokenizer, _pii_assistant_model
-#     # Use PII globals to match get_pii_model() behavior
-#     if _pii_assistant_model is None:
-#         # Ensure model and tokenizer are loaded first
-#         get_pii_model()
-#         get_pii_tokenizer()
-#     return _pii_assistant_model
-
-
-# def set_model(model, tokenizer, assistant_model=None):
-#     """Set the global model, tokenizer, and assistant model.
-
-#     Note: This function now sets the PII globals to maintain consistency.
-#     """
-#     global _pii_model, _pii_tokenizer, _pii_assistant_model
-#     _pii_model = model
-#     _pii_tokenizer = tokenizer
-#     _pii_assistant_model = assistant_model
-
-
-# def get_pii_model():
-#     """Get the globally loaded PII detection model. Load it if not already loaded."""
-#     global _pii_model, _pii_tokenizer, _pii_assistant_model
-
-#     # Check if model is already loaded
-#     if _pii_model is not None:
-#         print("PII model already loaded, reusing existing model instance.")
-#         return _pii_model
-
-#     # Determine which repo_id, model_file, and model_folder to use
-#     # If PII-specific config is set, use it; otherwise fall back to general local model config
-#     if LOCAL_TRANSFORMERS_LLM_PII_REPO_ID:
-#         pii_repo_id = LOCAL_TRANSFORMERS_LLM_PII_REPO_ID
-#         pii_model_file = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
-#         pii_model_folder = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
-#     else:
-#         raise ValueError(
-#             "LOCAL_TRANSFORMERS_LLM_PII_REPO_ID is not set. "
-#             "Please configure the PII model repository ID."
-#         )
-
-#     print("Loading PII model for the first time...")
-#     _pii_model, _pii_tokenizer, _pii_assistant_model = load_model(
-#         local_model_type=LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
-#         gpu_layers=gpu_layers,
-#         max_context_length=context_length,
-#         gpu_config=gpu_config,
-#         cpu_config=cpu_config,
-#         torch_device=torch_device,
-#         repo_id=pii_repo_id,
-#         model_filename=pii_model_file,
-#         model_dir=pii_model_folder,
-#         compile_mode=COMPILE_MODE,
-#         model_dtype=MODEL_DTYPE,
-#         hf_token=HF_TOKEN,
-#         model=_pii_model,
-#         tokenizer=_pii_tokenizer,
-#         assistant_model=_pii_assistant_model,
-#     )
-#     print("PII model loaded successfully.")
-#     return _pii_model
-
-
-# def get_pii_tokenizer():
-#     """Get the globally loaded PII detection tokenizer. Load it if not already loaded."""
-#     global _pii_model, _pii_tokenizer, _pii_assistant_model
-
-#     # Check if tokenizer is already loaded
-#     if _pii_tokenizer is not None:
-#         print("PII tokenizer already loaded, reusing existing tokenizer instance.")
-#         return _pii_tokenizer
-
-#     # Determine which repo_id, model_file, and model_folder to use
-#     # If PII-specific config is set, use it; otherwise fall back to general local model config
-#     if LOCAL_TRANSFORMERS_LLM_PII_REPO_ID:
-#         pii_repo_id = LOCAL_TRANSFORMERS_LLM_PII_REPO_ID
-#         pii_model_file = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE
-#         pii_model_folder = LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER
-#     else:
-#         raise ValueError(
-#             "LOCAL_TRANSFORMERS_LLM_PII_REPO_ID is not set. "
-#             "Please configure the PII model repository ID."
-#         )
-
-#     print("Loading PII tokenizer for the first time...")
-#     _pii_model, _pii_tokenizer, _pii_assistant_model = load_model(
-#         local_model_type=LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
-#         gpu_layers=gpu_layers,
-#         max_context_length=context_length,
-#         gpu_config=gpu_config,
-#         cpu_config=cpu_config,
-#         torch_device=torch_device,
-#         repo_id=pii_repo_id,
-#         model_filename=pii_model_file,
-#         model_dir=pii_model_folder,
-#         compile_mode=COMPILE_MODE,
-#         model_dtype=MODEL_DTYPE,
-#         hf_token=HF_TOKEN,
-#         model=_pii_model,
-#         tokenizer=_pii_tokenizer,
-#         assistant_model=_pii_assistant_model,
-#     )
-#     print("PII tokenizer loaded successfully.")
-#     return _pii_tokenizer, _pii_tokenizer, _pii_assistant_model
-
-# def get_model_and_tokenizer():
-#     """Get both the globally loaded model and tokenizer together.
-
-#     This is the recommended way to get both when you need them, as it ensures
-#     they're loaded atomically from the same source and prevents mismatches.
-
-#     Returns:
-#         tuple: (model, tokenizer) - Both loaded and guaranteed to be from the same source
-#     """
-#     # Use PII versions which have better error handling
-#     model = get_pii_model()
-#     tokenizer = get_pii_tokenizer()
-#     return model, tokenizer
-
-
 # Initialize PII model at startup if configured (even if SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS is False)
 # This allows PII model to be loaded independently for PII detection tasks
 if (
@@ -811,16 +626,14 @@ if (
         print("Loading local PII model:", LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE)
         _pii_model, _pii_tokenizer, _pii_assistant_model = load_model(
             local_model_type=LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
-            gpu_layers=gpu_layers,
             max_context_length=context_length,
-            gpu_config=gpu_config,
-            cpu_config=cpu_config,
-            torch_device=torch_device,
+            gpu_context=local_gpu_context,
+            cpu_context=local_cpu_context,
             repo_id=LOCAL_TRANSFORMERS_LLM_PII_REPO_ID,
-            model_filename=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE,
-            model_dir=LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER,
+            model_filename="",
+            model_dir="",
             compile_mode=COMPILE_MODE,
-            model_dtype=MODEL_DTYPE,
+            model_dtype=LLM_MODEL_DTYPE,
             hf_token=HF_TOKEN,
             model=_pii_model,
             tokenizer=_pii_tokenizer,
@@ -835,12 +648,12 @@ if (
 def call_transformers_model(
     prompt: str,
     system_prompt: str,
-    gen_config: LlamaCPPGenerationConfig,
+    gen_config: LocalLLMGenerationConfig,
     model=_pii_model,
     tokenizer=_pii_tokenizer,
     assistant_model=_pii_assistant_model,
     speculative_decoding=speculative_decoding,
-    use_vlm_safe_generation=False,
+    use_vlm_safe_generation=VLM_DEFAULT_DO_SAMPLE,
 ):
     """
     This function sends a request to a transformers model with the given prompt, system prompt, and generation configuration.
@@ -892,6 +705,21 @@ def call_transformers_model(
     if REASONING_SUFFIX and REASONING_SUFFIX.strip():
         prompt = f"{prompt} {REASONING_SUFFIX}".strip()
 
+    # When using VLM as LLM with Qwen3.5 thinking disabled, we append <think></think> after the generation
+    # prompt so the model continues with the answer (avoids continue_final_message which can fail
+    # when the chat template does not include the final assistant message in the rendered string).
+    add_nothink_assistant_turn = (
+        VLM_DISABLE_QWEN3_5_THINKING
+        and "Qwen 3.5" in LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+    ) or (
+        VLM_DISABLE_QWEN3_5_THINKING
+        and USE_TRANSFORMERS_VLM_MODEL_AS_LLM
+        and (
+            "Qwen 3.5" in SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+            or "Qwen3.5" in SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+        )
+    )
+
     # 1. Define the conversation as a list of dictionaries
     # Note: The multimodal format [{"type": "text", "text": text}] is only needed for actual multimodal models
     # with images/videos. For text-only content, even multimodal models expect plain strings.
@@ -936,14 +764,18 @@ def call_transformers_model(
     try:
         # Try applying chat template with system prompt (if present)
         # Create inputs dict like VLM does - this allows model to handle device placement automatically
-        input_ids = tokenizer.apply_chat_template(
+        # From transformers v5, apply_chat_template returns BatchEncoding; extract input_ids tensor
+        _encoded = tokenizer.apply_chat_template(
             conversation,
             add_generation_prompt=True,
             tokenize=True,
             return_tensors="pt",
-        ).to(
-            device
-        )  # Ensure inputs match model device
+        )
+        input_ids = (
+            _encoded["input_ids"].to(device)
+            if hasattr(_encoded, "keys")
+            else _encoded.to(device)
+        )
 
         if PRINT_TRANSFORMERS_USER_PROMPT:
             print("Input IDs:", input_ids)
@@ -965,12 +797,17 @@ def call_transformers_model(
             # Try again with only user prompt
             user_only_conversation = [{"role": "user", "content": str(prompt)}]
             try:
-                input_ids = tokenizer.apply_chat_template(
+                _encoded = tokenizer.apply_chat_template(
                     user_only_conversation,
                     add_generation_prompt=True,
                     tokenize=True,
                     return_tensors="pt",
-                ).to(device)
+                )
+                input_ids = (
+                    _encoded["input_ids"].to(device)
+                    if hasattr(_encoded, "keys")
+                    else _encoded.to(device)
+                )
 
                 if PRINT_TRANSFORMERS_USER_PROMPT:
                     print("Input IDs:", input_ids)
@@ -990,18 +827,20 @@ def call_transformers_model(
                 full_prompt = (
                     f"{system_prompt}\n\n{prompt}" if has_system_prompt else prompt
                 )
-                # Tokenize manually with special tokens
-                input_ids = tokenizer(
+                # Tokenize manually with special tokens (tokenizer() returns BatchEncoding; extract tensor)
+                encoded = tokenizer(
                     full_prompt, return_tensors="pt", add_special_tokens=True
-                ).to(device)
+                )
+                input_ids = encoded["input_ids"].to(device)
 
         else:
             # No system prompt, but chat template still failed - use manual tokenization
             print(f"Chat template failed ({e}), using manual tokenization")
             full_prompt = str(prompt)
-            input_ids = tokenizer(
+            encoded = tokenizer(
                 full_prompt, return_tensors="pt", add_special_tokens=True
-            ).to(device)
+            )
+            input_ids = encoded["input_ids"].to(device)
 
     except Exception as e:
         print("Error applying chat template:", e)
@@ -1012,7 +851,28 @@ def call_transformers_model(
 
     attention_mask = torch.ones_like(input_ids).to(device)
 
-    # Map LlamaCPP parameters to transformers parameters.
+    # When disabling Qwen3.5 thinking, append suffix to prompt so model continues with the answer (same as run_vlm).
+    if add_nothink_assistant_turn:
+        nothink_tokens = tokenizer.encode(
+            VLM_QWEN3_5_NOTHINK_SUFFIX, add_special_tokens=False, return_tensors="pt"
+        )
+        if nothink_tokens.dim() == 1:
+            nothink_tokens = nothink_tokens.unsqueeze(0)
+        nothink_tokens = nothink_tokens.to(device)
+        input_ids = torch.cat([input_ids, nothink_tokens], dim=1)
+        attention_mask = torch.cat(
+            [
+                attention_mask,
+                torch.ones(
+                    (attention_mask.shape[0], nothink_tokens.shape[1]),
+                    device=device,
+                    dtype=attention_mask.dtype,
+                ),
+            ],
+            dim=1,
+        )
+
+    # Map generation config to transformers parameters.
     # When use_vlm_safe_generation (VLM model used for LLM tasks), use greedy decoding to avoid
     # "probability tensor contains inf/nan or element < 0" errors in torch.multinomial on some setups.
     if use_vlm_safe_generation:
@@ -1319,7 +1179,7 @@ def send_request(
     elif "AWS" in model_source:
         for i in progress_bar:
             try:
-                print("Calling AWS Bedrock model, attempt", i + 1)
+                # print("Calling AWS Bedrock model, attempt", i + 1)
                 response = call_aws_bedrock(
                     prompt,
                     system_prompt,
@@ -1411,10 +1271,10 @@ def send_request(
                     num_transformer_generated_tokens,
                 )
     elif "Local" in model_source:
-        # This is the local model. When USE_TRANFORMERS_VLM_MODEL_AS_LLM and model_choice is the VLM model, use the loaded VLM model/tokenizer.
+        # This is the local model. When USE_TRANSFORMERS_VLM_MODEL_AS_LLM and model_choice is the VLM model, use the loaded VLM model/tokenizer.
         vlm_model, vlm_tokenizer = None, None
         if (
-            USE_TRANFORMERS_VLM_MODEL_AS_LLM
+            USE_TRANSFORMERS_VLM_MODEL_AS_LLM
             and model_choice == SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
         ):
             try:
@@ -1423,17 +1283,17 @@ def send_request(
                 vlm_model, vlm_tokenizer = get_loaded_vlm_model_and_tokenizer()
             except Exception as e:
                 print(
-                    f"Could not get VLM model for LLM task (USE_TRANFORMERS_VLM_MODEL_AS_LLM): {e}"
+                    f"Could not get VLM model for LLM task (USE_TRANSFORMERS_VLM_MODEL_AS_LLM): {e}"
                 )
 
         for i in progress_bar:
             try:
                 print("Calling local model, attempt", i + 1)
 
-                gen_config = LlamaCPPGenerationConfig()
+                gen_config = LocalLLMGenerationConfig()
                 gen_config.update_temp(temperature)
 
-                # Call transformers model; use VLM model/tokenizer when USE_TRANFORMERS_VLM_MODEL_AS_LLM and available
+                # Call transformers model; use VLM model/tokenizer when USE_TRANSFORMERS_VLM_MODEL_AS_LLM and available
                 if vlm_model is not None and vlm_tokenizer is not None:
                     (
                         response,
@@ -1445,7 +1305,7 @@ def send_request(
                         gen_config,
                         model=vlm_model,
                         tokenizer=vlm_tokenizer,
-                        use_vlm_safe_generation=True,
+                        use_vlm_safe_generation=VLM_DEFAULT_DO_SAMPLE,
                     )
                 else:
                     (
@@ -1491,7 +1351,7 @@ def send_request(
                         "api_url is required when model_source is 'inference-server'"
                     )
 
-                gen_config = LlamaCPPGenerationConfig()
+                gen_config = LocalLLMGenerationConfig()
                 gen_config.update_temp(temperature)
 
                 response = call_inference_server_api(
@@ -1697,13 +1557,8 @@ def process_requests(
                 output_tokens = response.usage_metadata.get("outputTokens", 0)
 
             elif "Local" in model_source:
-                if USE_LLAMA_CPP == "True":
-                    output_tokens = response["usage"].get("completion_tokens", 0)
-                    input_tokens = response["usage"].get("prompt_tokens", 0)
-
-                if USE_LLAMA_CPP == "False":
-                    input_tokens = num_transformer_input_tokens
-                    output_tokens = num_transformer_generated_tokens
+                input_tokens = num_transformer_input_tokens
+                output_tokens = num_transformer_generated_tokens
 
             elif "inference-server" in model_source:
                 # inference-server returns the same format as llama-cpp
@@ -1736,31 +1591,31 @@ def process_requests(
 def call_inference_server_api(
     formatted_string: str,
     system_prompt: str,
-    gen_config: LlamaCPPGenerationConfig,
+    gen_config: LocalLLMGenerationConfig,
     api_url: str = "http://localhost:8080",
     model_name: str = None,
     use_llama_swap: bool = USE_LLAMA_SWAP,
 ):
     """
     Calls a inference-server API endpoint with a formatted user message and system prompt,
-    using generation parameters from the LlamaCPPGenerationConfig object.
+    using generation parameters from the LocalLLMGenerationConfig object.
 
-    This function provides the same interface as call_llama_cpp_chatmodel but calls
+    This function provides the same interface as call_transformers_model but calls
     a remote inference-server instance instead of a local model.
 
     Args:
         formatted_string (str): The formatted input text for the user's message.
         system_prompt (str): The system-level instructions for the model.
-        gen_config (LlamaCPPGenerationConfig): An object containing generation parameters.
+        gen_config (LocalLLMGenerationConfig): An object containing generation parameters.
         api_url (str): The base URL of the inference-server API (default: "http://localhost:8080").
         model_name (str): Optional model name to use. If None, uses the default model.
         use_llama_swap (bool): Whether to use llama-swap for the model.
     Returns:
-        dict: Response in the same format as call_llama_cpp_chatmodel
+        dict: Response in the same format as the inference-server chat completions API
 
     Example:
         # Create generation config
-        gen_config = LlamaCPPGenerationConfig(temperature=0.7, max_tokens=100)
+        gen_config = LocalLLMGenerationConfig(temperature=0.7, max_tokens=100)
 
         # Call the API
         response = call_inference_server_api(
@@ -2014,9 +1869,11 @@ def call_aws_bedrock(
     model_choice: str,
     bedrock_runtime: boto3.Session.client,
     assistant_prefill: str = "",
+    max_retries: int = 5,
+    retry_delay_seconds: float = 2.0,
 ) -> ResponseObject:
     """
-    This function sends a request to AWS Claude with the following parameters:
+    This function sends a request to AWS Bedrock with the following parameters:
     - prompt: The user's input prompt to be processed by the model.
     - system_prompt: A system-defined prompt that provides context or instructions for the model.
     - temperature: A value that controls the randomness of the model's output, with higher values resulting in more diverse responses.
@@ -2024,13 +1881,14 @@ def call_aws_bedrock(
     - model_choice: The specific model to use for processing the request.
     - bedrock_runtime: The client object for boto3 Bedrock runtime
     - assistant_prefill: A string indicating the text that the response should start with.
+    - max_retries: Maximum number of retry attempts on failure (default 5).
+    - retry_delay_seconds: Delay in seconds between retries (default 2.0).
 
     The function constructs the request configuration, invokes the model, extracts the response text, and returns a ResponseObject containing the text and metadata.
     """
 
     inference_config = {
         "maxTokens": max_tokens,
-        "topP": 0.999,
         "temperature": temperature,
     }
 
@@ -2063,41 +1921,59 @@ def call_aws_bedrock(
 
     system_prompt_list = [{"text": system_prompt}]
 
-    # The converse API call.
-    api_response = bedrock_runtime.converse(
-        modelId=model_choice,
-        messages=messages,
-        system=system_prompt_list,
-        inferenceConfig=inference_config,
-    )
+    last_error = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            # The converse API call.
+            api_response = bedrock_runtime.converse(
+                modelId=model_choice,
+                messages=messages,
+                system=system_prompt_list,
+                inferenceConfig=inference_config,
+            )
 
-    output_message = api_response["output"]["message"]
+            output_message = api_response["output"]["message"]
 
-    if "reasoningContent" in output_message["content"][0]:
-        # Extract the reasoning text
-        output_message["content"][0]["reasoningContent"]["reasoningText"]["text"]
+            if "reasoningContent" in output_message["content"][0]:
+                # Extract the reasoning text
+                output_message["content"][0]["reasoningContent"]["reasoningText"][
+                    "text"
+                ]
 
-        # Extract the output text
-        if assistant_prefill_added:
-            text = assistant_prefill + output_message["content"][1]["text"]
-        else:
-            text = output_message["content"][1]["text"]
-    else:
-        if assistant_prefill_added:
-            text = assistant_prefill + output_message["content"][0]["text"]
-        else:
-            text = output_message["content"][0]["text"]
+                # Extract the output text
+                if assistant_prefill_added:
+                    text = assistant_prefill + output_message["content"][1]["text"]
+                else:
+                    text = output_message["content"][1]["text"]
+            else:
+                if assistant_prefill_added:
+                    text = assistant_prefill + output_message["content"][0]["text"]
+                else:
+                    text = output_message["content"][0]["text"]
 
-    # The usage statistics are neatly provided in the 'usage' key.
-    usage = api_response["usage"]
+            # The usage statistics are neatly provided in the 'usage' key.
+            usage = api_response["usage"]
 
-    # The full API response metadata is in 'ResponseMetadata' if you still need it.
-    api_response["ResponseMetadata"]
+            # The full API response metadata is in 'ResponseMetadata' if you still need it.
+            api_response["ResponseMetadata"]
 
-    # Create ResponseObject with the cleanly extracted data.
-    response = ResponseObject(text=text, usage_metadata=usage)
+            # Create ResponseObject with the cleanly extracted data.
+            response = ResponseObject(text=text, usage_metadata=usage)
 
-    return response
+            return response
+
+        except Exception as e:
+            last_error = e
+            if attempt < max_retries:
+                print(
+                    f"Bedrock converse API attempt {attempt}/{max_retries} failed: {e}. "
+                    f"Retrying in {retry_delay_seconds}s..."
+                )
+                time.sleep(retry_delay_seconds)
+            else:
+                raise RuntimeError(
+                    f"Failed to call Bedrock API after {max_retries} attempts: {str(last_error)}"
+                ) from last_error
 
 
 def calculate_tokens_from_metadata(

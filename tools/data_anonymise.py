@@ -3,6 +3,7 @@ import os
 import secrets
 import time
 import unicodedata
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
@@ -29,18 +30,20 @@ from tools.config import (
     AWS_LLM_PII_OPTION,
     AWS_REGION,
     AWS_SECRET_KEY,
+    CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE,
     CLOUD_LLM_PII_MODEL_CHOICE,  # Legacy alias for CLOUD_LLM_PII_MODEL_CHOICE
     CUSTOM_ENTITIES,
     DEFAULT_LANGUAGE,
     DO_INITIAL_TABULAR_DATA_CLEAN,
     INFERENCE_SERVER_PII_OPTION,
-    LLM_PII_MAX_TOKENS,
-    LLM_PII_TEMPERATURE,
+    LLM_MAX_NEW_TOKENS,
+    LLM_TEMPERATURE,
     LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
     LOCAL_TRANSFORMERS_LLM_PII_OPTION,
     MAX_SIMULTANEOUS_FILES,
     MAX_TABLE_COLUMNS,
     MAX_TABLE_ROWS,
+    MAX_WORKERS,
     OUTPUT_FOLDER,
     PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS,
     RUN_AWS_FUNCTIONS,
@@ -62,11 +65,60 @@ from tools.load_spacy_model_custom_recognisers import (
 )
 
 # Use custom version of analyze_dict to be able to track progress
-from tools.presidio_analyzer_custom import analyze_dict
+from tools.presidio_analyzer_custom import analyze_dict, analyze_iterator_custom
 from tools.secure_path_utils import secure_join
 
 # AWS Comprehend billing: 1 unit = 100 characters (entity recognition, PII, etc.)
 COMPREHEND_CHARACTERS_PER_UNIT = 100
+
+# Max concurrent API calls for Bedrock/LLM (avoid rate limits; Comprehend uses MAX_WORKERS)
+LLM_PII_MAX_CONCURRENT_REQUESTS = min(MAX_WORKERS, 10)
+
+
+def _comprehend_one_cell(
+    comprehend_client: BaseClient,
+    text_str: str,
+    language: str,
+    chosen_redact_comprehend_entities: List[str],
+    in_allow_list_flat: List[str],
+    max_retries: int = 3,
+    retry_delay: int = 3,
+) -> Tuple[List[RecognizerResult], int]:
+    """Call AWS Comprehend for one text cell. Returns (recognizer_results, query_units)."""
+    query_units = (
+        len(text_str.strip()) + COMPREHEND_CHARACTERS_PER_UNIT - 1
+    ) // COMPREHEND_CHARACTERS_PER_UNIT
+    for attempt in range(max_retries):
+        try:
+            response = comprehend_client.detect_pii_entities(
+                Text=text_str, LanguageCode=language
+            )
+            results = []
+            for entity in response["Entities"]:
+                if entity.get("Type") not in chosen_redact_comprehend_entities:
+                    continue
+                entity_text = text_str[entity["BeginOffset"] : entity["EndOffset"]]
+                if in_allow_list_flat:
+                    allow_list_normalized = [
+                        item.strip().lower() for item in in_allow_list_flat if item
+                    ]
+                    if entity_text.strip().lower() in allow_list_normalized:
+                        continue
+                results.append(
+                    RecognizerResult(
+                        entity_type=entity["Type"],
+                        start=entity["BeginOffset"],
+                        end=entity["EndOffset"],
+                        score=entity["Score"],
+                    )
+                )
+            return (results, query_units)
+        except Exception:
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(retry_delay)
+    return ([], query_units)
+
 
 custom_entities = CUSTOM_ENTITIES
 
@@ -390,6 +442,9 @@ def handle_docx_anonymisation(
         decision_log,
         comprehend_query_number,
         decision_process_output_df,
+        llm_total_input_tokens,
+        llm_total_output_tokens,
+        llm_model_name,
     ) = anonymise_script(
         df=df_to_anonymise,
         anon_strategy=anon_strategy,
@@ -403,6 +458,7 @@ def handle_docx_anonymisation(
         comprehend_query_number=comprehend_query_number,
         comprehend_client=comprehend_client,
         nlp_analyser=nlp_analyser,
+        output_folder=output_folder,
     )
 
     anonymised_texts = anonymised_df["text_to_redact"].tolist()
@@ -445,7 +501,13 @@ def handle_docx_anonymisation(
 
     out_file_paths.append(log_file_path)
 
-    return out_file_paths, comprehend_query_number
+    return (
+        out_file_paths,
+        comprehend_query_number,
+        llm_total_input_tokens,
+        llm_total_output_tokens,
+        llm_model_name,
+    )
 
 
 def anonymise_files_with_open_text(
@@ -473,6 +535,8 @@ def anonymise_files_with_open_text(
     do_initial_clean: bool = DO_INITIAL_TABULAR_DATA_CLEAN,
     language: Optional[str] = None,
     progress: Progress = Progress(track_tqdm=True),
+    custom_llm_instructions: str = "",
+    chosen_llm_entities: Optional[List[str]] = None,
 ):
     """
     This function anonymises data files based on the provided parameters.
@@ -503,11 +567,22 @@ def anonymise_files_with_open_text(
     - language (str, optional): The language of the text to anonymise.
     - progress (Progress, optional): A Progress object to track progress. Defaults to a Progress object with track_tqdm=True.
     - do_initial_clean (bool, optional): Whether to perform an initial cleaning of the text. Defaults to True.
+    - custom_llm_instructions (str, optional): Custom instructions for LLM entity detection (tabular). Defaults to "".
+    - chosen_llm_entities (List[str], optional): Entity types to detect when using LLM PII method (tabular). Defaults to None (uses chosen_redact_comprehend_entities).
     """
 
     tic = time.perf_counter()
     comprehend_client = ""
     out_message_out = ""
+    llm_total_input_tokens = 0
+    llm_total_output_tokens = 0
+    llm_model_name = ""
+
+    # Normalise LLM params (Gradio may send None or single value)
+    if custom_llm_instructions is None:
+        custom_llm_instructions = ""
+    if chosen_llm_entities is not None and not isinstance(chosen_llm_entities, list):
+        chosen_llm_entities = [chosen_llm_entities] if chosen_llm_entities else None
 
     # If output folder doesn't end with a forward slash, add one
     if not output_folder.endswith("/"):
@@ -584,6 +659,38 @@ def anonymise_files_with_open_text(
             out_message = "Cannot connect to AWS Comprehend service. Please provide access keys under Textract settings on the Redaction settings tab, or choose another PII identification method."
             raise (out_message)
 
+    # Create Bedrock runtime client when using LLM-based PII detection with AWS Bedrock
+    bedrock_runtime = None
+    if pii_identification_method == AWS_LLM_PII_OPTION:
+        if RUN_AWS_FUNCTIONS and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:
+            print("Connecting to Bedrock via existing SSO connection")
+            bedrock_runtime = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+        elif aws_access_key_textbox and aws_secret_key_textbox:
+            print(
+                "Connecting to Bedrock using AWS access key and secret keys from user input."
+            )
+            bedrock_runtime = boto3.client(
+                "bedrock-runtime",
+                aws_access_key_id=aws_access_key_textbox,
+                aws_secret_access_key=aws_secret_key_textbox,
+                region_name=AWS_REGION,
+            )
+        elif RUN_AWS_FUNCTIONS:
+            print("Connecting to Bedrock via existing SSO connection")
+            bedrock_runtime = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+        elif AWS_ACCESS_KEY and AWS_SECRET_KEY:
+            print("Getting Bedrock credentials from environment variables")
+            bedrock_runtime = boto3.client(
+                "bedrock-runtime",
+                aws_access_key_id=AWS_ACCESS_KEY,
+                aws_secret_access_key=AWS_SECRET_KEY,
+                region_name=AWS_REGION,
+            )
+        else:
+            out_message = "Cannot connect to AWS Bedrock service. Please provide access keys under Textract settings on the Redaction settings tab, or choose another PII identification method."
+            print(out_message)
+            raise Exception(out_message)
+
     # Check if files and text exist
     if not file_paths:
         if in_text:
@@ -618,6 +725,9 @@ def anonymise_files_with_open_text(
             log_files_output_paths,
             actual_time_taken_number,
             comprehend_query_number,
+            llm_total_input_tokens,
+            llm_total_output_tokens,
+            llm_model_name,
         )
 
     file_path_loop = [file_paths[int(latest_file_completed)]]
@@ -645,6 +755,9 @@ def anonymise_files_with_open_text(
                 key_string,
                 log_files_output_paths,
                 comprehend_query_number,
+                tbl_llm_in,
+                tbl_llm_out,
+                tbl_llm_model,
             ) = tabular_anonymise_wrapper_func(
                 file_path,
                 anon_df,
@@ -666,18 +779,31 @@ def anonymise_files_with_open_text(
                 chosen_redact_comprehend_entities,
                 comprehend_query_number,
                 comprehend_client,
-                output_folder=OUTPUT_FOLDER,
+                output_folder=output_folder,
                 do_initial_clean=do_initial_clean,
+                bedrock_runtime=bedrock_runtime,
+                custom_llm_instructions=custom_llm_instructions,
+                chosen_llm_entities=chosen_llm_entities,
             )
+            llm_total_input_tokens += tbl_llm_in
+            llm_total_output_tokens += tbl_llm_out
+            if tbl_llm_model and not llm_model_name:
+                llm_model_name = tbl_llm_model
         else:
             # If file is an xlsx, we are going to run through all the Excel sheets to anonymise them separately.
             file_type = detect_file_type(file_path)
-            print("File type is:", file_type)
+            # print("File type is:", file_type)
 
             out_file_part = get_file_name_without_type(file_path)
 
             if file_type == "docx":
-                out_file_paths, comprehend_query_number = handle_docx_anonymisation(
+                (
+                    out_file_paths,
+                    comprehend_query_number,
+                    docx_llm_in,
+                    docx_llm_out,
+                    docx_llm_model,
+                ) = handle_docx_anonymisation(
                     file_path=file_path,
                     output_folder=output_folder,
                     anon_strategy=anon_strategy,
@@ -692,9 +818,13 @@ def anonymise_files_with_open_text(
                     language=language,
                     out_file_paths=out_file_paths,
                 )
+                llm_total_input_tokens += docx_llm_in
+                llm_total_output_tokens += docx_llm_out
+                if docx_llm_model and not llm_model_name:
+                    llm_model_name = docx_llm_model
 
             elif file_type == "xlsx":
-                print("Running through all xlsx sheets")
+                # print("Running through all xlsx sheets")
                 if not in_excel_sheets:
                     out_message.append(
                         "No Excel sheets selected. Please select at least one to anonymise."
@@ -723,6 +853,9 @@ def anonymise_files_with_open_text(
                         key_string,
                         log_files_output_paths,
                         comprehend_query_number,
+                        tbl_llm_in,
+                        tbl_llm_out,
+                        tbl_llm_model,
                     ) = tabular_anonymise_wrapper_func(
                         anon_file,
                         anon_df,
@@ -747,7 +880,14 @@ def anonymise_files_with_open_text(
                         comprehend_client,
                         output_folder=output_folder,
                         do_initial_clean=do_initial_clean,
+                        bedrock_runtime=bedrock_runtime,
+                        custom_llm_instructions=custom_llm_instructions,
+                        chosen_llm_entities=chosen_llm_entities,
                     )
+                    llm_total_input_tokens += tbl_llm_in
+                    llm_total_output_tokens += tbl_llm_out
+                    if tbl_llm_model and not llm_model_name:
+                        llm_model_name = tbl_llm_model
 
             else:
                 sheet_name = ""
@@ -760,6 +900,9 @@ def anonymise_files_with_open_text(
                     key_string,
                     log_files_output_paths,
                     comprehend_query_number,
+                    tbl_llm_in,
+                    tbl_llm_out,
+                    tbl_llm_model,
                 ) = tabular_anonymise_wrapper_func(
                     anon_file,
                     anon_df,
@@ -784,7 +927,14 @@ def anonymise_files_with_open_text(
                     comprehend_client,
                     output_folder=output_folder,
                     do_initial_clean=do_initial_clean,
+                    bedrock_runtime=bedrock_runtime,
+                    custom_llm_instructions=custom_llm_instructions,
+                    chosen_llm_entities=chosen_llm_entities,
                 )
+                llm_total_input_tokens += tbl_llm_in
+                llm_total_output_tokens += tbl_llm_out
+                if tbl_llm_model and not llm_model_name:
+                    llm_model_name = tbl_llm_model
 
         out_message_out = ""
 
@@ -799,6 +949,7 @@ def anonymise_files_with_open_text(
         print(out_time)
 
         actual_time_taken_number += out_time_float
+        actual_time_taken_number = round(actual_time_taken_number, 1)
 
         if isinstance(out_message, str):
             out_message = [out_message]
@@ -832,6 +983,9 @@ def anonymise_files_with_open_text(
         log_files_output_paths,
         actual_time_taken_number,
         comprehend_query_number,
+        llm_total_input_tokens,
+        llm_total_output_tokens,
+        llm_model_name,
     )
 
 
@@ -860,6 +1014,9 @@ def tabular_anonymise_wrapper_func(
     nlp_analyser: AnalyzerEngine = nlp_analyser,
     output_folder: str = OUTPUT_FOLDER,
     do_initial_clean: bool = DO_INITIAL_TABULAR_DATA_CLEAN,
+    bedrock_runtime=None,
+    custom_llm_instructions: str = "",
+    chosen_llm_entities: Optional[List[str]] = None,
 ):
     """
     This function wraps the anonymisation process for a given dataframe. It filters the dataframe based on chosen columns, applies the specified anonymisation strategy using the anonymise_script function, and exports the anonymised data to a file.
@@ -965,6 +1122,9 @@ def tabular_anonymise_wrapper_func(
         decision_process_output_str,
         comprehend_query_number,
         decision_process_output_df,
+        llm_total_input_tokens,
+        llm_total_output_tokens,
+        llm_model_name,
     ) = anonymise_script(
         anon_df_part,
         anon_strategy,
@@ -979,12 +1139,24 @@ def tabular_anonymise_wrapper_func(
         comprehend_client,
         nlp_analyser=nlp_analyser,
         do_initial_clean=do_initial_clean,
+        bedrock_runtime=bedrock_runtime,
+        file_name=out_file_part,
+        sheet_name=excel_sheet_name if excel_sheet_name else None,
+        output_folder=output_folder,
+        custom_llm_instructions=custom_llm_instructions,
+        chosen_llm_entities=chosen_llm_entities,
     )
 
     anon_df_part_out.replace("^nan$", "", regex=True, inplace=True)
 
     # Rejoin the dataframe together
     anon_df_out = pd.concat([anon_df_part_out, anon_df_remain], axis=1)
+    # Reorder to match original column order; add any missing columns as empty
+    # (avoids KeyError when e.g. chosen_cols referred to columns from another sheet/file)
+    missing_cols = [c for c in all_cols_original_order if c not in anon_df_out.columns]
+    if missing_cols:
+        for c in missing_cols:
+            anon_df_out[c] = ""
     anon_df_out = anon_df_out[all_cols_original_order]
 
     # Export file
@@ -1055,6 +1227,9 @@ def tabular_anonymise_wrapper_func(
         key_string,
         log_files_output_paths,
         comprehend_query_number,
+        llm_total_input_tokens,
+        llm_total_output_tokens,
+        llm_model_name,
     )
 
 
@@ -1079,6 +1254,8 @@ def anonymise_script(
     custom_llm_instructions: str = "",
     chosen_llm_entities: List[str] = None,
     file_name: Optional[str] = None,
+    sheet_name: Optional[str] = None,
+    output_folder: Optional[str] = None,
     **text_analyzer_kwargs,
 ):
     """
@@ -1105,11 +1282,17 @@ def anonymise_script(
         custom_llm_instructions (str, optional): Custom instructions for LLM entity detection. Defaults to empty string.
         chosen_llm_entities (List[str], optional): List of entity types to detect using LLM. Defaults to None (uses chosen_redact_comprehend_entities).
         file_name (Optional[str], optional): File name for logging purposes. Defaults to None.
+        output_folder (Optional[str], optional): Folder for LLM prompt/response logs. When None, uses OUTPUT_FOLDER from config. Pass the session output folder (e.g. from output_folder_textbox) so logs go to the same place as other outputs.
         **text_analyzer_kwargs: Additional keyword arguments for text analyzer (e.g., temperature, max_tokens, inference_method).
     """
 
     print("Identifying personal information")
     analyse_tic = time.perf_counter()
+
+    # LLM token counts (used when pii_identification_method is an LLM option)
+    llm_total_input_tokens = 0
+    llm_total_output_tokens = 0
+    llm_model_name = ""
 
     # Initialize analyzer_results as an empty dictionary to store results by column
     results_by_column = dict()
@@ -1197,27 +1380,68 @@ def anonymise_script(
 
     if do_initial_clean:
         progress(0.2, desc="Cleaning text")
-        for col in progress.tqdm(df.columns, desc="Cleaning text", unit="Columns"):
-            df[col] = initial_clean(df[col])
+        columns = list(df.columns)
+        max_workers = min(MAX_WORKERS, len(columns))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            cleaned = list(
+                progress.tqdm(
+                    executor.map(lambda col: (col, initial_clean(df[col])), columns),
+                    total=len(columns),
+                    desc="Cleaning text",
+                    unit="Columns",
+                )
+            )
+        for col, cleaned_series in cleaned:
+            df[col] = cleaned_series
 
     # DataFrame to dict
     df_dict = df.to_dict(orient="list")
 
     if pii_identification_method == "Local":
 
-        # Use custom analyzer to be able to track progress with Gradio
-        custom_results = analyze_dict(
-            batch_analyzer,
-            df_dict,
-            language=language,
-            entities=chosen_redact_entities,
-            score_threshold=score_threshold,
-            return_decision_process=True,
-            allow_list=in_allow_list_flat,
-        )
+        # Run Local (Presidio) analysis in parallel over columns
+        def _analyze_one_column_local(item):
+            column_name, texts = item
+            if not texts or (isinstance(texts, (list, tuple)) and len(texts) == 0):
+                return DictAnalyzerResult(
+                    key=column_name, value=texts, recognizer_results=[]
+                )
+            if not isinstance(texts, (list, tuple)):
+                texts = [texts]
+            try:
+                results = analyze_iterator_custom(
+                    batch_analyzer,
+                    texts=texts,
+                    language=language,
+                    list_length=len(texts),
+                    context=[column_name],
+                    entities=chosen_redact_entities,
+                    score_threshold=score_threshold,
+                    return_decision_process=True,
+                    allow_list=in_allow_list_flat,
+                )
+                return DictAnalyzerResult(
+                    key=column_name, value=texts, recognizer_results=results
+                )
+            except Exception as e:
+                return (column_name, None, e)
 
-        # Initialize results_by_column with custom entity results
-        for result in custom_results:
+        local_tasks = list(df_dict.items())
+        max_workers = min(MAX_WORKERS, len(local_tasks)) if local_tasks else 1
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            local_results = list(
+                progress.tqdm(
+                    executor.map(_analyze_one_column_local, local_tasks),
+                    total=len(local_tasks),
+                    desc="Analyzing text (Local PII).",
+                    unit="columns",
+                )
+            )
+
+        for result in local_results:
+            if isinstance(result, tuple) and len(result) == 3 and result[2] is not None:
+                _, _, err = result
+                raise err
             results_by_column[result.key] = result
 
         # Convert the dictionary of results back to a list
@@ -1252,85 +1476,58 @@ def anonymise_script(
         max_retries = 3
         retry_delay = 3
 
-        # Process each text column in the dictionary
-        for column_name, texts in progress.tqdm(
-            df_dict.items(), desc="Querying AWS Comprehend service.", unit="Columns"
-        ):
-            # Get or create DictAnalyzerResult for this column
+        # Build list of (column_name, text_idx, text_str) for all cells
+        comprehend_tasks = []
+        for column_name, texts in df_dict.items():
             if column_name in results_by_column:
                 column_results = results_by_column[column_name]
             else:
                 column_results = DictAnalyzerResult(
                     recognizer_results=[[] for _ in texts], key=column_name, value=texts
                 )
-
-            # Process each text in the column
-            for text_idx, text in progress.tqdm(
-                enumerate(texts), desc="Querying AWS Comprehend service.", unit="Row"
-            ):
-                # Convert text to string once for consistency
-                text_str = str(text) if text else ""
-
-                for attempt in range(max_retries):
-                    try:
-                        response = comprehend_client.detect_pii_entities(
-                            Text=text_str, LanguageCode=language
-                        )
-
-                        comprehend_query_number += (
-                            len(text_str.strip()) + COMPREHEND_CHARACTERS_PER_UNIT - 1
-                        ) // COMPREHEND_CHARACTERS_PER_UNIT
-
-                        # Add all entities from this text to the column's recognizer_results
-                        for entity in response["Entities"]:
-                            if (
-                                entity.get("Type")
-                                not in chosen_redact_comprehend_entities
-                            ):
-                                continue
-
-                            # Extract entity text to check against allow_list
-                            entity_text = text_str[
-                                entity["BeginOffset"] : entity["EndOffset"]
-                            ]
-
-                            # Filter by allow_list (case-insensitive)
-                            # If allow_list contains this text, skip adding it as a PII entity
-                            # This allows allow_list terms to "overrule" AWS Comprehend PII detection
-                            if in_allow_list_flat:
-                                # Normalize for case-insensitive matching
-                                allow_list_normalized = [
-                                    item.strip().lower()
-                                    for item in in_allow_list_flat
-                                    if item
-                                ]
-                                entity_text_normalized = entity_text.strip().lower()
-                                if entity_text_normalized in allow_list_normalized:
-                                    continue
-
-                            recognizer_result = RecognizerResult(
-                                entity_type=entity["Type"],
-                                start=entity["BeginOffset"],
-                                end=entity["EndOffset"],
-                                score=entity["Score"],
-                            )
-                            column_results.recognizer_results[text_idx].append(
-                                recognizer_result
-                            )
-
-                        break  # Success, exit retry loop
-
-                    except Exception as e:
-                        if attempt == max_retries - 1:
-                            print(
-                                f"AWS Comprehend calls failed for text: {text[:100]}... due to",
-                                e,
-                            )
-                            raise
-                        time.sleep(retry_delay)
-
-            # Store or update the column results
             results_by_column[column_name] = column_results
+            for text_idx, text in enumerate(texts):
+                text_str = str(text) if text else ""
+                comprehend_tasks.append((column_name, text_idx, text_str))
+
+        def _run_comprehend_task(item):
+            column_name, text_idx, text_str = item
+            try:
+                recognizer_list, units = _comprehend_one_cell(
+                    comprehend_client,
+                    text_str,
+                    language,
+                    chosen_redact_comprehend_entities,
+                    in_allow_list_flat,
+                    max_retries=max_retries,
+                    retry_delay=retry_delay,
+                )
+                return (column_name, text_idx, recognizer_list, units, None)
+            except Exception as e:
+                return (column_name, text_idx, [], 0, e)
+
+        max_workers = min(MAX_WORKERS, len(comprehend_tasks)) if comprehend_tasks else 1
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            completed = list(
+                progress.tqdm(
+                    executor.map(_run_comprehend_task, comprehend_tasks),
+                    total=len(comprehend_tasks),
+                    desc="Querying AWS Comprehend service.",
+                    unit="cells",
+                )
+            )
+
+        for column_name, text_idx, recognizer_list, units, err in completed:
+            if err is not None:
+                print(
+                    f"AWS Comprehend calls failed for cell ({column_name}, {text_idx}) due to",
+                    err,
+                )
+                raise err
+            comprehend_query_number += units
+            results_by_column[column_name].recognizer_results[
+                text_idx
+            ] = recognizer_list
 
         # Convert the dictionary of results back to a list
         analyzer_results = list(results_by_column.values())
@@ -1340,7 +1537,6 @@ def anonymise_script(
 
     # LLM-based entity detection
     elif pii_identification_method == AWS_LLM_PII_OPTION:
-
         if not bedrock_runtime and text_analyzer_kwargs.get("inference_method") not in [
             "local",
             "inference-server",
@@ -1350,6 +1546,18 @@ def anonymise_script(
             raise ValueError(
                 "bedrock_runtime is required when using LLM-based PII detection with AWS Bedrock"
             )
+        # Set inference method to aws-bedrock if not already set
+        if text_analyzer_kwargs.get("inference_method") is None:
+            text_analyzer_kwargs["inference_method"] = "aws-bedrock"
+        # Set model choice if not already set
+        if text_analyzer_kwargs.get("model_choice") is None:
+            text_analyzer_kwargs["model_choice"] = (
+                model_choice or CLOUD_LLM_PII_MODEL_CHOICE
+            )
+        # Default chosen_llm_entities to chosen_redact_comprehend_entities if not provided
+        if chosen_llm_entities is None:
+            chosen_llm_entities = chosen_redact_comprehend_entities
+
     elif pii_identification_method == INFERENCE_SERVER_PII_OPTION:
         # LLM-based entity detection using inference server
         from tools.config import (
@@ -1387,40 +1595,17 @@ def anonymise_script(
                 LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
             )
 
-        # Load PII-specific model and tokenizer if not already provided
-        # if (
-        #     text_analyzer_kwargs.get("local_model") is None
-        #     and text_analyzer_kwargs.get("inference_method") == "local"
-        # ):
-        #     from tools.llm_funcs import USE_LLAMA_CPP, get_pii_model
-
-        #     try:
-        #         text_analyzer_kwargs["local_model"] = get_pii_model()
-        #     except Exception as e:
-        #         print(
-        #             f"Warning: Failed to load PII model: {e}. "
-        #             f"Will attempt to load model on-demand."
-        #         )
-        # if (
-        #     text_analyzer_kwargs.get("tokenizer") is None
-        #     and text_analyzer_kwargs.get("inference_method") == "local"
-        #     and USE_LLAMA_CPP != "True"
-        # ):
-        #     from tools.llm_funcs import get_pii_tokenizer
-
-        #     try:
-        #         text_analyzer_kwargs["tokenizer"] = get_pii_tokenizer()
-        #     except Exception as e:
-        #         print(
-        #             f"Warning: Failed to load PII tokenizer: {e}. "
-        #             f"Will attempt to load tokenizer on-demand."
-        #         )
-
         # Use the same logic as AWS_LLM_PII_OPTION for the rest
         # Default chosen_llm_entities to chosen_redact_comprehend_entities if not provided
         if chosen_llm_entities is None:
             chosen_llm_entities = chosen_redact_comprehend_entities
 
+    # Shared LLM column/cell detection for AWS Bedrock, Inference Server, and Local Transformers
+    if pii_identification_method in (
+        AWS_LLM_PII_OPTION,
+        INFERENCE_SERVER_PII_OPTION,
+        LOCAL_TRANSFORMERS_LLM_PII_OPTION,
+    ):
         # Handle custom entities first (same as AWS Comprehend)
         if custom_entities:
             custom_redact_entities = [
@@ -1484,11 +1669,28 @@ def anonymise_script(
         max_retries = 3
         retry_delay = 3
 
-        # Process each text column in the dictionary
-        for column_name, texts in progress.tqdm(
-            df_dict.items(), desc="Querying LLM service.", unit="Columns"
+        # Use model_choice from kwargs when set (e.g. by INFERENCE_SERVER or LOCAL_TRANSFORMERS branches)
+        effective_model_choice = text_analyzer_kwargs.get("model_choice", model_choice)
+        llm_total_input_tokens = 0
+        llm_total_output_tokens = 0
+        # Report the model actually used: upgraded to custom-instructions model when applicable
+        custom_instructions_model = (
+            CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE.strip()
+            if isinstance(CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE, str)
+            and CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE.strip()
+            else ""
+        )
+        if (
+            (custom_llm_instructions or "").strip()
+            and effective_model_choice == CLOUD_LLM_PII_MODEL_CHOICE
+            and custom_instructions_model
         ):
-            # Get or create DictAnalyzerResult for this column
+            llm_model_name = custom_instructions_model
+        else:
+            llm_model_name = effective_model_choice or ""
+        # Build list of (task_idx, column_name, text_idx, text_str) for non-empty cells
+        llm_tasks = []
+        for column_name, texts in df_dict.items():
             if column_name in results_by_column:
                 column_results = results_by_column[column_name]
             else:
@@ -1497,106 +1699,124 @@ def anonymise_script(
                     key=column_name,
                     value=texts,
                 )
-
-            # Process each text in the column
-            for text_idx, text in progress.tqdm(
-                enumerate(texts), desc="Querying LLM service.", unit="Row"
-            ):
+            results_by_column[column_name] = column_results
+            for text_idx, text in enumerate(texts):
                 text_str = str(text) if text else ""
-
                 if not text_str.strip():
                     continue
+                llm_tasks.append((len(llm_tasks), column_name, text_idx, text_str))
 
-                for attempt in range(max_retries):
-                    try:
-                        # Call LLM for entity detection
-                        entities = call_llm_for_entity_detection(
+        def _run_llm_task(item):
+            task_idx, column_name, text_idx, text_str = item
+            for attempt in range(max_retries):
+                try:
+                    entities, batch_input_tokens, batch_output_tokens = (
+                        call_llm_for_entity_detection(
                             text=text_str,
                             entities_to_detect=llm_chosen_redact_entities,
                             language=language,
                             bedrock_runtime=bedrock_runtime,
-                            model_choice=model_choice,
+                            model_choice=effective_model_choice,
                             temperature=text_analyzer_kwargs.get(
-                                "temperature", LLM_PII_TEMPERATURE
+                                "temperature", LLM_TEMPERATURE
                             ),
                             max_tokens=text_analyzer_kwargs.get(
-                                "max_tokens", LLM_PII_MAX_TOKENS
+                                "max_tokens", LLM_MAX_NEW_TOKENS
                             ),
-                            output_folder=OUTPUT_FOLDER,
-                            batch_number=comprehend_query_number + 1,
+                            output_folder=(
+                                output_folder
+                                if output_folder is not None
+                                else OUTPUT_FOLDER
+                            ),
+                            batch_number=task_idx + 1,
                             custom_instructions=custom_llm_instructions,
                             file_name=file_name,
-                            page_number=None,  # Not applicable for tabular data
+                            page_number=None,
+                            sheet_name=sheet_name,
+                            column_name=column_name,
+                            row_number=text_idx + 1,
                             inference_method=text_analyzer_kwargs.get(
                                 "inference_method"
                             ),
-                            # local_model=text_analyzer_kwargs.get("local_model"),
-                            # tokenizer=text_analyzer_kwargs.get("tokenizer"),
-                            # assistant_model=text_analyzer_kwargs.get(
-                            #     "assistant_model"
-                            # ),
                             client=text_analyzer_kwargs.get("client"),
                             client_config=text_analyzer_kwargs.get("client_config"),
                             api_url=text_analyzer_kwargs.get("api_url"),
                         )
+                    )
+                    return (
+                        column_name,
+                        text_idx,
+                        text_str,
+                        entities,
+                        batch_input_tokens,
+                        batch_output_tokens,
+                        None,
+                    )
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        return (column_name, text_idx, text_str, [], 0, 0, e)
+                    time.sleep(retry_delay)
+            return (column_name, text_idx, text_str, [], 0, 0, None)
 
-                        comprehend_query_number += 1
+        max_llm_workers = (
+            min(LLM_PII_MAX_CONCURRENT_REQUESTS, len(llm_tasks)) if llm_tasks else 1
+        )
+        with ThreadPoolExecutor(max_workers=max_llm_workers) as executor:
+            llm_results = list(
+                progress.tqdm(
+                    executor.map(_run_llm_task, llm_tasks),
+                    total=len(llm_tasks),
+                    desc="Querying LLM service.",
+                    unit="cells",
+                )
+            )
 
-                        # Convert LLM entity results to RecognizerResult format
-                        for entity in entities:
-                            # Extract entity information (format: Type, BeginOffset, EndOffset, Score, Text)
-                            entity_type = entity.get("Type", "")
-                            begin_offset = entity.get("BeginOffset", 0)
-                            end_offset = entity.get("EndOffset", 0)
-                            entity_text = entity.get(
-                                "Text", text_str[begin_offset:end_offset]
-                            )
-
-                            # Filter by allow_list (case-insensitive)
-                            # If allow_list contains this text, skip adding it as a PII entity
-                            # This allows allow_list terms to "overrule" LLM PII detection
-                            if in_allow_list_flat:
-                                # Normalize for case-insensitive matching
-                                allow_list_normalized = [
-                                    item.strip().lower()
-                                    for item in in_allow_list_flat
-                                    if item
-                                ]
-                                entity_text_normalized = entity_text.strip().lower()
-                                if entity_text_normalized in allow_list_normalized:
-                                    continue
-
-                            # Only add entities that are in the chosen list (if we have entities)
-                            # If no entities but custom instructions, accept all returned entities
-                            if (
-                                llm_chosen_redact_entities
-                                and entity_type not in llm_chosen_redact_entities
-                            ):
-                                continue
-
-                            recognizer_result = RecognizerResult(
-                                entity_type=entity_type,
-                                start=begin_offset,
-                                end=end_offset,
-                                score=entity.get("Score", 0.0),
-                            )
-                            column_results.recognizer_results[text_idx].append(
-                                recognizer_result
-                            )
-
-                        break  # Success, exit retry loop
-
-                    except Exception as e:
-                        if attempt == max_retries - 1:
-                            print(
-                                f"LLM entity detection failed for text: {text_str[:100]}... due to",
-                                e,
-                            )
-                            raise
-                        time.sleep(retry_delay)
-
-            # Store or update the column results
-            results_by_column[column_name] = column_results
+        for (
+            column_name,
+            text_idx,
+            text_str,
+            entities,
+            batch_input_tokens,
+            batch_output_tokens,
+            err,
+        ) in llm_results:
+            if err is not None:
+                print(
+                    f"LLM entity detection failed for text: {text_str[:100]}... due to",
+                    err,
+                )
+                raise err
+            llm_total_input_tokens += batch_input_tokens
+            llm_total_output_tokens += batch_output_tokens
+            column_results = results_by_column[column_name]
+            for entity in entities:
+                if not isinstance(entity, dict):
+                    continue
+                entity_type = entity.get("Type", "")
+                begin_offset = entity.get("BeginOffset", 0)
+                end_offset = entity.get("EndOffset", 0)
+                entity_text = entity.get("Text", text_str[begin_offset:end_offset])
+                if in_allow_list_flat:
+                    allow_list_normalized = [
+                        item.strip().lower() for item in in_allow_list_flat if item
+                    ]
+                    if entity_text.strip().lower() in allow_list_normalized:
+                        continue
+                if (
+                    llm_chosen_redact_entities
+                    and entity_type not in llm_chosen_redact_entities
+                ):
+                    if not (
+                        custom_llm_instructions and str(custom_llm_instructions).strip()
+                    ):
+                        continue
+                recognizer_result = RecognizerResult(
+                    entity_type=entity_type,
+                    start=begin_offset,
+                    end=end_offset,
+                    score=entity.get("Score", 0.0),
+                )
+                column_results.recognizer_results[text_idx].append(recognizer_result)
 
         # Convert the dictionary of results back to a list
         analyzer_results = list(results_by_column.values())
@@ -1676,4 +1896,7 @@ def anonymise_script(
         decision_process_output_str,
         comprehend_query_number,
         decision_process_output_df,
+        llm_total_input_tokens,
+        llm_total_output_tokens,
+        llm_model_name,
     )

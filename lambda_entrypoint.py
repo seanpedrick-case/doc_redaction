@@ -23,7 +23,10 @@ from tools.config import (
     DEFAULT_MIN_WORD_COUNT,
     DEFAULT_PAGE_MAX,
     DEFAULT_PAGE_MIN,
+    EFFICIENT_OCR,
+    EFFICIENT_OCR_MIN_WORDS,
     GEMINI_API_KEY,
+    HYBRID_TEXTRACT_BEDROCK_VLM,
     IMAGES_DPI,
     INFERENCE_SERVER_API_URL,
     LAMBDA_DEFAULT_USERNAME,
@@ -31,8 +34,8 @@ from tools.config import (
     LAMBDA_MAX_POLL_ATTEMPTS,
     LAMBDA_POLL_INTERVAL,
     LAMBDA_PREPARE_IMAGES,
-    LLM_PII_MAX_TOKENS,
-    LLM_PII_TEMPERATURE,
+    LLM_MAX_NEW_TOKENS,
+    LLM_TEMPERATURE,
     OCR_FIRST_PASS_MAX_WORKERS,
     SUMMARY_PAGE_GROUP_MAX_WORKERS,
 )
@@ -296,6 +299,12 @@ def lambda_handler(event, context):
     # This dictionary should mirror the one in your app.py's "direct mode"
     # If we loaded a .env file, use environment variables as defaults
 
+    # Note: For task "combine_review_pdfs" the CLI expects multiple input file paths.
+    # Lambda currently passes a single file (the S3-triggered object). To support
+    # combine_review_pdfs here, the event would need to supply multiple keys or
+    # arguments["input_files"] (list of S3 URIs) and download each before calling cli_main.
+    # For task "summarise", PDF input is supported: the CLI extracts text via ocr_method
+    # then summarises (same as direct mode and CLI --task summarise --input_file file.pdf).
     cli_args = {
         # Task Selection
         "task": arguments.get("task", os.getenv("DIRECT_MODE_TASK", "redact")),
@@ -478,6 +487,25 @@ def lambda_handler(event, context):
                 ),
             )
         ),
+        "efficient_ocr": convert_string_to_boolean(
+            arguments.get(
+                "efficient_ocr", os.getenv("EFFICIENT_OCR", str(EFFICIENT_OCR))
+            )
+        ),
+        "efficient_ocr_min_words": int(
+            arguments.get(
+                "efficient_ocr_min_words",
+                os.getenv("EFFICIENT_OCR_MIN_WORDS", str(EFFICIENT_OCR_MIN_WORDS)),
+            )
+        ),
+        "hybrid_textract_bedrock_vlm": convert_string_to_boolean(
+            arguments.get(
+                "hybrid_textract_bedrock_vlm",
+                os.getenv(
+                    "HYBRID_TEXTRACT_BEDROCK_VLM", str(HYBRID_TEXTRACT_BEDROCK_VLM)
+                ),
+            )
+        ),
         # LLM PII Detection Arguments
         # Note: The actual model used is determined by pii_identification_method in the downstream code
         # This is just the default - it will be overridden based on the selected PII method
@@ -500,13 +528,13 @@ def lambda_handler(event, context):
         "llm_temperature": float(
             arguments.get(
                 "llm_temperature",
-                os.getenv("LLM_PII_TEMPERATURE", LLM_PII_TEMPERATURE),
+                os.getenv("LLM_TEMPERATURE", LLM_TEMPERATURE),
             )
         ),
         "llm_max_tokens": int(
             arguments.get(
                 "llm_max_tokens",
-                os.getenv("LLM_PII_MAX_TOKENS", LLM_PII_MAX_TOKENS),
+                os.getenv("LLM_MAX_NEW_TOKENS", LLM_MAX_NEW_TOKENS),
             )
         ),
         "llm_redact_entities": _get_env_list(
