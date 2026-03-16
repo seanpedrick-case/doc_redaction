@@ -1125,6 +1125,18 @@ Settings for running the application from the command line (Direct Mode) or as a
     * **Description:** If set to `'True'`, makes the selection of a cost code mandatory.
     * **Default Value:** `'False'`
 
+### Session default cost code (no extra environment variables)
+
+When cost codes are enabled (`GET_COST_CODES` or `ENFORCE_COST_CODES`), users can save a **default cost code** for their session via the "Set default cost code" button. This uses the **existing** cost code and AWS settings; no additional environment variables are required.
+
+* **Behaviour:**
+    * The chosen cost code is stored in a CSV file (`session_default_cost_codes.csv`) with columns `session_hash`, `default_cost_code`, and `saved_at` (ISO timestamp). Duplicate `session_hash` rows are deduplicated on save, keeping only the latest.
+    * **Local save location:** The CSV is written under the app’s **input folder** (the value of the input folder at save time, e.g. from `INPUT_FOLDER` or the session’s `input_folder_textbox`).
+    * **S3 (optional):** If `S3_COST_CODES_PATH` is set and `RUN_AWS_FUNCTIONS` and `DOCUMENT_REDACTION_BUCKET` are set, the same file is also uploaded to `DOCUMENT_REDACTION_BUCKET` in the same key “folder” as the cost codes file (e.g. `config/session_default_cost_codes.csv`).
+    * **Email-only:** Saves and S3 upload only run when the session identifier is a valid **email address** (e.g. when users are signed in via Cognito). If the session identifier is not an email (e.g. when running locally with a Gradio session hash), the default is not written to the CSV and not uploaded to S3. On load, the app does not download the session default cost codes file from S3 when the session identifier is not an email.
+
+* **Relevant existing variables:** `GET_COST_CODES`, `ENFORCE_COST_CODES`, `COST_CODES_PATH`, `S3_COST_CODES_PATH`, `DOCUMENT_REDACTION_BUCKET`, `RUN_AWS_FUNCTIONS`, and the app input folder (e.g. `INPUT_FOLDER` / `GRADIO_INPUT_FOLDER`).
+
 ## Whole Document API Options (Textract Async)
 
 * **`SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS`**

@@ -5,6 +5,7 @@ import random
 import re
 import string
 import sys
+import tempfile
 import unicodedata
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -24,6 +25,7 @@ from botocore.exceptions import (
 )
 from fastapi import FastAPI
 
+from tools.aws_functions import download_file_from_s3, upload_file_to_s3
 from tools.config import (
     AWS_LLM_PII_OPTION,
     AWS_PII_OPTION,
@@ -37,9 +39,11 @@ from tools.config import (
     BEDROCK_VLM_PIXELS_PER_INPUT_TOKEN,
     BEDROCK_VLM_TEXT_EXTRACT_OPTION,
     CHOSEN_LOCAL_OCR_MODEL,
+    COST_CODES_PATH,
     CUSTOM_HEADER,
     CUSTOM_HEADER_VALUE,
     DEFAULT_LANGUAGE,
+    DOCUMENT_REDACTION_BUCKET,
     INFERENCE_SERVER_PII_OPTION,
     INPUT_FOLDER,
     LANGUAGE_CHOICES,
@@ -48,7 +52,10 @@ from tools.config import (
     LOCAL_PII_OPTION,
     LOCAL_TRANSFORMERS_LLM_PII_OPTION,
     NO_REDACTION_PII_OPTION,
+    OUTPUT_COST_CODES_PATH,
     OUTPUT_FOLDER,
+    RUN_AWS_FUNCTIONS,
+    S3_COST_CODES_PATH,
     S3_OUTPUTS_FOLDER,
     SAVE_OUTPUTS_TO_S3,
     SELECTABLE_TEXT_EXTRACT_OPTION,
@@ -290,6 +297,249 @@ def update_cost_code_dataframe_from_dropdown_select(
         cost_code_df.iloc[:, 0] == cost_dropdown_selection, :
     ]
     return cost_code_df
+
+
+SESSION_DEFAULT_COST_CODES_FILENAME = "session_default_cost_codes.csv"
+
+# Reasonable email pattern for validating session_hash (saves/upload require email format)
+_EMAIL_PATTERN = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+
+
+def _is_valid_session_hash_email(session_hash: str) -> bool:
+    """Return True if session_hash is in valid email format (required for saving defaults)."""
+    if not session_hash or not isinstance(session_hash, str):
+        return False
+    return bool(_EMAIL_PATTERN.match(session_hash.strip()))
+
+
+def _dedupe_session_default_cost_codes(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Remove duplicate session_hashes, keeping only the latest row by saved_at.
+    If saved_at is missing or empty, those rows are treated as oldest.
+    """
+    if df.empty or "session_hash" not in df.columns:
+        return df
+    if "saved_at" not in df.columns:
+        return df.drop_duplicates(subset=["session_hash"], keep="last")
+    # Sort so latest saved_at is last; empty string sorts last in ascending order
+    df = df.sort_values("saved_at", ascending=True, na_position="last")
+    return df.drop_duplicates(subset=["session_hash"], keep="last")
+
+
+def _get_session_default_cost_codes_s3_key_prefix():
+    """
+    Return the S3 key prefix (folder) for the session default cost codes file,
+    same bucket and folder as S3_COST_CODES_PATH. Empty string if no S3 path.
+    """
+    if not S3_COST_CODES_PATH or not str(S3_COST_CODES_PATH).strip():
+        return ""
+    # Use forward slash for S3; path can be "config/COST_CENTRES.csv" or "file.csv"
+    parts = S3_COST_CODES_PATH.replace("\\", "/").rstrip("/").split("/")
+    if len(parts) <= 1:
+        return ""
+    return "/".join(parts[:-1]) + "/"
+
+
+def get_session_default_cost_codes_csv_path(folder: str | None = None):
+    """
+    Return the path to the CSV file that stores session_hash -> default_cost_code.
+    If folder is provided (e.g. input folder path), use that. Otherwise use the
+    same folder as cost codes (COST_CODES_PATH or OUTPUT_COST_CODES_PATH).
+    """
+    if folder is not None and str(folder).strip():
+        base = str(folder).strip()
+        return os.path.join(base, SESSION_DEFAULT_COST_CODES_FILENAME)
+    if COST_CODES_PATH:
+        folder = os.path.dirname(COST_CODES_PATH)
+    else:
+        folder = os.path.dirname(OUTPUT_COST_CODES_PATH)
+    if not folder:
+        folder = "."
+    return os.path.join(folder, SESSION_DEFAULT_COST_CODES_FILENAME)
+
+
+def save_default_cost_code_for_session(
+    session_hash: str,
+    cost_code_choice: str,
+    cost_code_df: pd.DataFrame,
+    output_folder: str | None = None,
+) -> str:
+    """
+    Validate cost_code_choice against cost_code_df 'Cost code' column; if valid,
+    save or update session_hash -> default_cost_code in the session defaults CSV.
+    If output_folder is provided (e.g. input folder path), save there; else use
+    cost codes folder. Returns a message string for the user.
+    """
+    if not session_hash or not str(session_hash).strip():
+        return "No session identifier available."
+    if not _is_valid_session_hash_email(session_hash):
+        return (
+            "Default cost code can only be saved when the session identifier is an "
+            "email address (e.g. when signed in with Cognito)."
+        )
+    if not cost_code_choice or not str(cost_code_choice).strip():
+        return "Please choose a cost code first."
+    if cost_code_df is None or cost_code_df.empty:
+        return "No cost codes loaded for validation."
+    valid_codes = list(cost_code_df.iloc[:, 0].astype(str).unique())
+    if cost_code_choice not in valid_codes:
+        return "Selected cost code not in the list. Choose a cost code from the table."
+    csv_path = get_session_default_cost_codes_csv_path(output_folder)
+    ensure_folder_exists(os.path.dirname(csv_path))
+    saved_at = datetime.now().isoformat()
+    row = {
+        "session_hash": session_hash,
+        "default_cost_code": cost_code_choice,
+        "saved_at": saved_at,
+    }
+    if os.path.exists(csv_path):
+        existing = pd.read_csv(csv_path)
+        if (
+            "session_hash" in existing.columns
+            and "default_cost_code" in existing.columns
+        ):
+            if "saved_at" not in existing.columns:
+                existing["saved_at"] = ""
+            # Replace any existing row for this session (one row per session_hash)
+            existing = existing[
+                existing["session_hash"].astype(str) != str(session_hash)
+            ]
+            updated = pd.concat([existing, pd.DataFrame([row])], ignore_index=True)
+        else:
+            updated = pd.DataFrame([row])
+    else:
+        updated = pd.DataFrame([row])
+    # Remove duplicate session_hashes, keeping only the latest by saved_at
+    updated = _dedupe_session_default_cost_codes(updated)
+    updated.to_csv(csv_path, index=False)
+
+    # If S3 cost codes path is set, save to the same bucket and folder in S3
+    if (
+        S3_COST_CODES_PATH
+        and str(S3_COST_CODES_PATH).strip()
+        and RUN_AWS_FUNCTIONS
+        and DOCUMENT_REDACTION_BUCKET
+    ):
+        s3_prefix = _get_session_default_cost_codes_s3_key_prefix()
+        s3_full_key = s3_prefix + SESSION_DEFAULT_COST_CODES_FILENAME
+        upload_result = upload_file_to_s3(
+            local_file_paths=[csv_path],
+            s3_key=s3_prefix,
+            s3_bucket=DOCUMENT_REDACTION_BUCKET,
+            RUN_AWS_FUNCTIONS=RUN_AWS_FUNCTIONS,
+        )
+        if upload_result and "successfully" in upload_result.lower():
+            print(
+                f"Session default cost codes CSV uploaded to "
+                f"s3://{DOCUMENT_REDACTION_BUCKET}/{s3_full_key}"
+            )
+        else:
+            print(
+                f"Session default cost codes S3 upload issue "
+                f"(target s3://{DOCUMENT_REDACTION_BUCKET}/{s3_full_key}): {upload_result!r}"
+            )
+
+    return "Default cost code saved"
+
+
+def _read_session_default_from_csv_path(csv_path: str, session_hash: str) -> str:
+    """Read CSV at csv_path and return default_cost_code for session_hash, or "".
+    If saved_at exists, uses the latest row by saved_at for that session_hash.
+    """
+    if not os.path.exists(csv_path):
+        return ""
+    try:
+        df = pd.read_csv(csv_path)
+        if "session_hash" not in df.columns or "default_cost_code" not in df.columns:
+            return ""
+        match = df[df["session_hash"].astype(str) == str(session_hash)]
+        if match.empty:
+            return ""
+        if "saved_at" in match.columns:
+            match = match.sort_values("saved_at", ascending=True, na_position="last")
+        return str(match.iloc[-1]["default_cost_code"]).strip()
+    except Exception:
+        return ""
+
+
+def load_session_default_cost_code(
+    session_hash: str, input_folder: str | None = None
+) -> str:
+    """
+    Load the default cost code for the given session_hash from the session defaults CSV.
+    If S3_COST_CODES_PATH is set, tries the same bucket and folder in S3 first, then local.
+    If input_folder is provided, tries that path first for local file, then fallback.
+    Returns the default cost code string if found, else "".
+    """
+    if not session_hash or not str(session_hash).strip():
+        return ""
+
+    # Only download from S3 when session_hash is an email (same rule as for saves)
+    if _is_valid_session_hash_email(session_hash) and (
+        S3_COST_CODES_PATH
+        and str(S3_COST_CODES_PATH).strip()
+        and RUN_AWS_FUNCTIONS
+        and DOCUMENT_REDACTION_BUCKET
+    ):
+        s3_prefix = _get_session_default_cost_codes_s3_key_prefix()
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".csv", delete=False
+            ) as tmp:
+                tmp_path = tmp.name
+            download_file_from_s3(
+                bucket_name=DOCUMENT_REDACTION_BUCKET,
+                key=s3_prefix + SESSION_DEFAULT_COST_CODES_FILENAME,
+                local_file_path_and_name=tmp_path,
+                RUN_AWS_FUNCTIONS=RUN_AWS_FUNCTIONS,
+            )
+            if tmp_path and os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
+                result = _read_session_default_from_csv_path(tmp_path, session_hash)
+                if result:
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
+                    return result
+        except Exception:
+            pass
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    # Local: try input_folder first if provided, then default cost codes folder
+    if input_folder is not None and str(input_folder).strip():
+        csv_path = get_session_default_cost_codes_csv_path(input_folder)
+        result = _read_session_default_from_csv_path(csv_path, session_hash)
+        if result:
+            return result
+    csv_path = get_session_default_cost_codes_csv_path()
+    return _read_session_default_from_csv_path(csv_path, session_hash)
+
+
+def apply_session_default_cost_code(
+    session_hash: str,
+    cost_code_dataframe: pd.DataFrame,
+    input_folder: str | None = None,
+) -> tuple[str, str]:
+    """
+    Look up the saved default cost code for session_hash. If found and valid in
+    cost_code_dataframe, return (default_cost_code, default_cost_code) for
+    default_cost_code_textbox and cost_code_choice_drop. Otherwise ("", "").
+    If input_folder is provided, local CSV is read from that folder first.
+    """
+    default_code = load_session_default_cost_code(session_hash, input_folder)
+    if not default_code:
+        return "", ""
+    if cost_code_dataframe is None or cost_code_dataframe.empty:
+        return default_code, default_code
+    choices = list(cost_code_dataframe.iloc[:, 0].astype(str).unique())
+    if default_code not in choices:
+        return "", ""
+    return default_code, default_code
 
 
 def ensure_folder_exists(output_folder: str):
@@ -1018,8 +1268,8 @@ def calculate_time_taken(
     local_ocr_output_found_checkbox: bool,
     handwrite_signature_checkbox: List[str],
     convert_page_time: float = 0.3,
-    textract_page_time: float = 0.6,
-    comprehend_page_time: float = 0.6,
+    textract_page_time: float = 0.4,
+    comprehend_page_time: float = 0.4,
     local_text_extraction_page_time: float = 0.2,
     local_pii_redaction_page_time: float = 0.4,
     local_ocr_extraction_page_time: float = 1.5,
@@ -1447,6 +1697,7 @@ def show_info_box_on_click_ocr_examples(
     handwrite_signature_checkbox,
     prepared_pdf_state,
     doc_full_file_name_textbox,
+    doc_file_name_no_extension_textbox,
     total_pdf_page_count,
     page_min,
     page_max,

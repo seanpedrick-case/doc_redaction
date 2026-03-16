@@ -897,11 +897,13 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     _abs_min = 65536
     effective_max_pixels_at_load = max(_abs_min, _eff_max)
     effective_min_pixels_at_load = min(VLM_MIN_IMAGE_SIZE, effective_max_pixels_at_load)
-    print(
-        f"VLM context cap: MAX_INPUT_TOKEN_LENGTH={MAX_INPUT_TOKEN_LENGTH}, "
-        f"effective max_pixels={effective_max_pixels_at_load}, min_pixels={effective_min_pixels_at_load} "
-        f"(VLM_MAX_IMAGE_SIZE={VLM_MAX_IMAGE_SIZE}, VLM_MIN_IMAGE_SIZE={VLM_MIN_IMAGE_SIZE})"
-    )
+
+    if SHOW_VLM_MODEL_OPTIONS:
+        print(
+            f"VLM context cap: MAX_INPUT_TOKEN_LENGTH={MAX_INPUT_TOKEN_LENGTH}, "
+            f"effective max_pixels={effective_max_pixels_at_load}, min_pixels={effective_min_pixels_at_load} "
+            f"(VLM_MAX_IMAGE_SIZE={VLM_MAX_IMAGE_SIZE}, VLM_MIN_IMAGE_SIZE={VLM_MIN_IMAGE_SIZE})"
+        )
 
     # Store at module level for USE_TRANSFORMERS_VLM_MODEL_AS_LLM (no global needed at module level)
     _loaded_vlm_model = model

@@ -227,6 +227,7 @@ from tools.find_duplicate_tabular import (
 from tools.helper_functions import (
     _file_name_from_pdf_path,
     all_outputs_file_download_fn,
+    apply_session_default_cost_code,
     auto_set_local_ocr_for_bedrock_vlm,
     calculate_aws_costs,
     calculate_time_taken,
@@ -253,6 +254,7 @@ from tools.helper_functions import (
     reset_review_vars,
     reset_state_vars,
     reveal_feedback_buttons,
+    save_default_cost_code_for_session,
     show_duplicate_info_box_on_click,
     show_info_box_on_click,
     show_info_box_on_click_ocr_examples,
@@ -741,6 +743,10 @@ cost_code_choice_drop = gr.Dropdown(
     label="Choose cost code for analysis",
     choices=[DEFAULT_COST_CODE],
     allow_custom_value=False,
+    visible=GET_COST_CODES or ENFORCE_COST_CODES,
+)
+set_default_cost_code_button = gr.Button(
+    value="Set default cost code",
     visible=GET_COST_CODES or ENFORCE_COST_CODES,
 )
 
@@ -2026,6 +2032,12 @@ with blocks:
                                         allow_custom_value=False,
                                         visible=show_cost_codes,
                                     )
+                                    walkthrough_set_default_cost_code_button = (
+                                        gr.Button(
+                                            value="Set default cost code",
+                                            visible=show_cost_codes,
+                                        )
+                                    )
 
                         with gr.Row():
                             step_4_back_btn = gr.Button("Back", variant="secondary")
@@ -2230,6 +2242,23 @@ with blocks:
                     reset_base_dataframe,
                     inputs=[cost_code_dataframe_base],
                     outputs=[walkthrough_cost_code_dataframe],
+                )
+
+                def _walkthrough_save_default_cost_code(sh, choice, df, output_folder):
+                    msg = save_default_cost_code_for_session(
+                        sh, choice, df, output_folder
+                    )
+                    gr.Info(msg)
+
+                walkthrough_set_default_cost_code_button.click(
+                    _walkthrough_save_default_cost_code,
+                    inputs=[
+                        session_hash_textbox,
+                        walkthrough_cost_code_choice_drop,
+                        walkthrough_cost_code_dataframe,
+                        input_folder_textbox,
+                    ],
+                    outputs=[],
                 )
 
             # Update Step 4 component visibility based on file type
@@ -2454,10 +2483,12 @@ with blocks:
                                     reset_cost_code_dataframe_button.render()
                             with gr.Column():
                                 cost_code_choice_drop.render()
+                                set_default_cost_code_button.render()
                 else:
                     cost_code_dataframe.render()
                     cost_code_choice_drop.render()
                     reset_cost_code_dataframe_button.render()
+                    set_default_cost_code_button.render()
 
                 if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS:
                     with gr.Accordion(
@@ -4147,6 +4178,25 @@ with blocks:
             update_cost_code_dataframe_from_dropdown_select,
             inputs=[cost_code_choice_drop, cost_code_dataframe_base],
             outputs=[cost_code_dataframe],
+        )
+
+        def _save_default_cost_code_and_notify(
+            session_hash, cost_code_choice, cost_code_df, output_folder
+        ):
+            msg = save_default_cost_code_for_session(
+                session_hash, cost_code_choice, cost_code_df, output_folder
+            )
+            gr.Info(msg)
+
+        set_default_cost_code_button.click(
+            _save_default_cost_code_and_notify,
+            inputs=[
+                session_hash_textbox,
+                cost_code_choice_drop,
+                cost_code_dataframe,
+                input_folder_textbox,
+            ],
+            outputs=[],
         )
 
     # Uploading a file writes to state variables
@@ -9234,6 +9284,18 @@ with blocks:
             )
         else:
             print("Could not load in cost code data")
+
+    # When session hash becomes available, apply saved default cost code (once)
+    if GET_COST_CODES and (COST_CODES_PATH or S3_COST_CODES_PATH):
+        session_hash_textbox.change(
+            apply_session_default_cost_code,
+            inputs=[
+                session_hash_textbox,
+                cost_code_dataframe,
+                input_folder_textbox,
+            ],
+            outputs=[default_cost_code_textbox, cost_code_choice_drop],
+        )
 
     ###
     # LOGGING

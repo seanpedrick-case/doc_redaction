@@ -3127,9 +3127,14 @@ def choose_and_run_redactor(
             all_page_line_level_ocr_results_with_words_df["line_text"] = ""
             # Keep line_x0, line_x1, line_y0, line_y1 so downstream can clip word boxes to line
 
-            all_page_line_level_ocr_results_with_words_df.sort_values(
-                ["page", "line", "word_x0"], inplace=True
-            )
+            sort_cols = ["page", "line", "word_x0"]
+            if not all_page_line_level_ocr_results_with_words_df.empty and all(
+                c in all_page_line_level_ocr_results_with_words_df.columns
+                for c in sort_cols
+            ):
+                all_page_line_level_ocr_results_with_words_df.sort_values(
+                    sort_cols, inplace=True
+                )
             all_page_line_level_ocr_results_with_words_df_file_path = (
                 all_page_line_level_ocr_results_with_words_json_file_path.replace(
                     ".json", ".csv"
@@ -3741,6 +3746,22 @@ def convert_pikepdf_decision_output_to_image_coords(
     return pikepdf_decision_ouput_data
 
 
+def _rect_display_to_unrotated(page: Page, rect: Rect) -> Rect:
+    """
+    Convert a rectangle from display (page.rect) space to unrotated page space.
+    PyMuPDF requires coordinates in unrotated space for add_redact_annot etc.;
+    we build rects by scaling image coords to page.rect, which is in display space when the page is rotated.
+    """
+    try:
+        derot = getattr(page, "derotation_matrix", None)
+        if derot is not None:
+            rect = rect * derot
+            rect = rect.normalize()
+    except Exception:
+        pass
+    return rect
+
+
 def convert_image_coords_to_pymupdf(
     pymupdf_page: Document, annot: dict, image: Image, type: str = "image_recognizer"
 ):
@@ -3918,7 +3939,8 @@ def prepare_custom_image_recogniser_result_annotation_box(
 
     rect = Rect(
         pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2
-    )  # Create the PyMuPDF Rect
+    )  # Create the PyMuPDF Rect (in display space when built from image)
+    rect = _rect_display_to_unrotated(page, rect)
 
     # Now creating image annotation object
     image_x1 = annot.left
@@ -3977,6 +3999,9 @@ def convert_pikepdf_annotations_to_result_annotation_box(
         )
 
     rect = Rect(pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2)
+    if not convert_pikepdf_to_pymupdf_coords:
+        # Coords from image are in display space when page is rotated
+        rect = _rect_display_to_unrotated(page, rect)
 
     # If an image is provided, convert PyMuPDF coordinates to image coordinates
     # for the annotation box (used in review PDF)
@@ -4669,6 +4694,7 @@ def redact_page_with_pymupdf(
                     pymupdf_x2 = rect_width - whole_page_border
                     pymupdf_y2 = rect_height - whole_page_border
                     rect = Rect(pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2)
+                    rect = _rect_display_to_unrotated(page, rect)
                 else:
                     box_coordinates = (
                         img_annotation_box["xmin"],
@@ -4711,7 +4737,8 @@ def redact_page_with_pymupdf(
 
                     rect = Rect(
                         pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2
-                    )  # Create the PyMuPDF Rect
+                    )  # Create the PyMuPDF Rect (display space when from image/gradio)
+                    rect = _rect_display_to_unrotated(page, rect)
 
             # Else should be CustomImageRecognizerResult
             elif isinstance(annot, CustomImageRecognizerResult):
