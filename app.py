@@ -3550,14 +3550,14 @@ with blocks:
                             label="Fully redacted page list load status"
                         )
 
-                    with gr.Row():
-                        with gr.Column(scale=2):
-                            markdown_placeholder = gr.Markdown("")
-                        with gr.Column(scale=1):
-                            apply_fully_redacted_list_btn = gr.Button(
-                                value="Apply whole page redaction list to document currently under review",
-                                variant="secondary",
-                            )
+                with gr.Row():
+                    with gr.Column(scale=2):
+                        markdown_placeholder = gr.Markdown("")
+                    with gr.Column(scale=1):
+                        apply_fully_redacted_list_btn = gr.Button(
+                            value="Apply whole page redaction list to document currently under review",
+                            variant="secondary",
+                        )
 
             with gr.Accordion(
                 "Select entity types to redact", open=True, visible=False
@@ -3580,31 +3580,33 @@ with blocks:
                 with gr.Row(equal_height=True):
                     with gr.Column(scale=2):
                         gr.Markdown(
-                            "When enabled, PDFs are processed per page: selectable text extraction is tried first; only pages with too little text use OCR (Tesseract/Textract/VLM), saving time and cost."
+                            "Efficient OCR: When enabled, PDFs are processed per page - selectable text extraction is tried first; only pages with too little text use OCR (Tesseract/Textract/VLM), saving time and cost.",
+                            visible=False,
                         )
 
-                        efficient_ocr_checkbox = gr.Checkbox(
-                            label="Use efficient OCR (try text first, OCR only when needed)",
-                            value=EFFICIENT_OCR,
-                        )
-                        efficient_ocr_min_words_number = gr.Number(
-                            label="Minimum words on page for text-only route (below this use OCR)",
-                            value=EFFICIENT_OCR_MIN_WORDS,
-                            precision=0,
-                            minimum=0,
-                            step=1,
+                        with gr.Row():
+                            efficient_ocr_checkbox = gr.Checkbox(
+                                label="Use efficient OCR (try text extraction first, OCR only when needed)",
+                                value=EFFICIENT_OCR,
+                            )
+                            efficient_ocr_min_words_number = gr.Number(
+                                label="Minimum words on page to run text-only extraction with efficient OCR",
+                                value=EFFICIENT_OCR_MIN_WORDS,
+                                precision=0,
+                                minimum=0,
+                                step=1,
+                            )
+                    with gr.Column(scale=1):
+                        overwrite_existing_ocr_checkbox = gr.Checkbox(
+                            label="Always overwrite existing OCR results for new redaction tasks",
+                            value=OVERWRITE_EXISTING_OCR_RESULTS,
                         )
                     with gr.Column(scale=1):
                         high_quality_textract_ocr_checkbox = gr.Checkbox(
-                            label="High-quality Textract OCR (re-run low-confidence lines with Bedrock VLM)",
+                            label="High-quality Textract OCR (re-run low-confidence lines with Bedrock VLM for higher quality)",
                             value=HYBRID_TEXTRACT_BEDROCK_VLM,
                             visible=SHOW_AWS_TEXT_EXTRACTION_OPTIONS
                             and SHOW_HYBRID_TEXTRACT_BEDROCK_CHECKBOX,
-                        )
-                    with gr.Column(scale=1):
-                        overwrite_existing_ocr_checkbox = gr.Checkbox(
-                            label="Overwrite existing OCR results for new redaction task",
-                            value=OVERWRITE_EXISTING_OCR_RESULTS,
                         )
 
             with gr.Accordion(
