@@ -3796,25 +3796,45 @@ def prepare_custom_image_recogniser_result_annotation_box(
 
     else:
         # --- Calculate coordinates when no image is present ---
-        # Assumes annot coords are normalized relative to MediaBox (top-left origin)
+        # CustomImageRecognizerResult from OCR/deny-list have coords in image pixel space.
+        # If we have image_width/image_height in page_sizes_df, scale from pixels to PDF.
+        # Otherwise assume annot coords are relative to MediaBox (text-path/legacy).
         try:
-            # 1. Get MediaBox dimensions from the DataFrame
             page_info = page_sizes_df.loc[page_num_one_based]
-            mb_width = page_info["mediabox_width"]
-            mb_height = page_info["mediabox_height"]
-            x_offset = page_info["cropbox_x_offset"]
-            y_offset = page_info["cropbox_y_offset_from_top"]
-
-            # Check for invalid dimensions
-            if mb_width <= 0 or mb_height <= 0:
-                print(
-                    f"Warning: Invalid MediaBox dimensions ({mb_width}x{mb_height}) for page {page_num_one_based}. Setting coords to 0."
-                )
+            rect_width = page.rect.width
+            rect_height = page.rect.height
+            img_w = page_info.get("image_width")
+            img_h = page_info.get("image_height")
+            if (
+                img_w is not None
+                and img_h is not None
+                and pd.notna(img_w)
+                and pd.notna(img_h)
+                and float(img_w) > 0
+                and float(img_h) > 0
+            ):
+                # Image pixel coords (from OCR/CUSTOM) -> scale to PDF
+                scale_x = rect_width / float(img_w)
+                scale_y = rect_height / float(img_h)
+                pymupdf_x1 = annot.left * scale_x
+                pymupdf_y1 = annot.top * scale_y
+                pymupdf_x2 = (annot.left + annot.width) * scale_x
+                pymupdf_y2 = (annot.top + annot.height) * scale_y
             else:
-                pymupdf_x1 = annot.left - x_offset
-                pymupdf_x2 = annot.left + annot.width - x_offset
-                pymupdf_y1 = annot.top - y_offset
-                pymupdf_y2 = annot.top + annot.height - y_offset
+                # MediaBox-relative (top-left origin), e.g. text-path
+                mb_width = page_info["mediabox_width"]
+                mb_height = page_info["mediabox_height"]
+                x_offset = page_info["cropbox_x_offset"]
+                y_offset = page_info["cropbox_y_offset_from_top"]
+                if mb_width <= 0 or mb_height <= 0:
+                    print(
+                        f"Warning: Invalid MediaBox dimensions ({mb_width}x{mb_height}) for page {page_num_one_based}. Setting coords to 0."
+                    )
+                else:
+                    pymupdf_x1 = annot.left - x_offset
+                    pymupdf_x2 = annot.left + annot.width - x_offset
+                    pymupdf_y1 = annot.top - y_offset
+                    pymupdf_y2 = annot.top + annot.height - y_offset
 
         except KeyError:
             print(
@@ -4471,9 +4491,11 @@ def redact_page_with_pymupdf(
         if not image_dimensions_override and not os.path.exists(image_path):
             image.save(image_path)
     elif isinstance(image, str):
-        # Normalize and validate path safety before checking existence
+        # Normalize and validate path safety before checking existence.
+        # Use input_folder (caller's) so page images under output_folder can be loaded
+        # when the caller passes a folder that contains them (e.g. second redaction run).
         normalized_path = os.path.normpath(os.path.abspath(image))
-        if validate_path_containment(normalized_path, INPUT_FOLDER):
+        if validate_path_containment(normalized_path, input_folder):
             image_path = normalized_path
             image = Image.open(image_path)
         elif "image_path" in page_sizes_df.columns:
@@ -5337,6 +5359,27 @@ def redact_image_pdf(
     all_pages_decision_process_list = list()
     selection_element_results_list = list()
     form_key_value_results_list = list()
+
+    # Track which pages already have line-level OCR outputs so we don't duplicate rows
+    # when we rebuild from cached Textract `ocr_results_with_words` entries.
+    existing_line_level_pages_1based = set()
+    if (
+        isinstance(all_page_line_level_ocr_results_df, pd.DataFrame)
+        and not all_page_line_level_ocr_results_df.empty
+        and "page" in all_page_line_level_ocr_results_df.columns
+    ):
+        try:
+            existing_line_level_pages_1based = set(
+                pd.to_numeric(
+                    all_page_line_level_ocr_results_df["page"], errors="coerce"
+                )
+                .dropna()
+                .astype(int)
+                .unique()
+                .tolist()
+            )
+        except Exception:
+            existing_line_level_pages_1based = set()
 
     if not all_page_line_level_ocr_results_df.empty:
         all_line_level_ocr_results_list.extend(
@@ -6449,6 +6492,44 @@ def redact_image_pdf(
                     all_page_line_level_ocr_results_with_words.append(
                         page_line_level_ocr_results_with_words
                     )
+                    # Ensure the line-level OCR outputs table is populated for cached pages too.
+                    # Otherwise the UI `all_page_line_level_ocr_results_df_base` can remain empty
+                    # even though `ocr_results_with_words` loaded successfully.
+                    try:
+                        page_1based = int(
+                            page_line_level_ocr_results.get("page", page_no + 1)
+                        )
+                    except Exception:
+                        page_1based = page_no + 1
+                    if page_1based not in existing_line_level_pages_1based:
+                        try:
+                            _line_results = (
+                                page_line_level_ocr_results.get("results", []) or []
+                            )
+                            page_text_ocr_outputs = pd.DataFrame(
+                                [
+                                    {
+                                        "page": page_1based,
+                                        "text": getattr(r, "text", ""),
+                                        "left": getattr(r, "left", None),
+                                        "top": getattr(r, "top", None),
+                                        "width": getattr(r, "width", None),
+                                        "height": getattr(r, "height", None),
+                                        "line": getattr(r, "line", None),
+                                        "conf": getattr(r, "conf", None),
+                                    }
+                                    for r in _line_results
+                                ]
+                            )
+                            if not page_text_ocr_outputs.empty:
+                                all_line_level_ocr_results_list.append(
+                                    page_text_ocr_outputs
+                                )
+                                existing_line_level_pages_1based.add(page_1based)
+                        except Exception as _e:
+                            print(
+                                f"Warning: Could not rebuild line-level OCR dataframe from cached Textract results for page {page_1based}: {_e}"
+                            )
                     if page_no >= page_min and page_no < page_max:
                         ocr_results_by_page[page_no] = {
                             "page_line_level_ocr_results": page_line_level_ocr_results,
@@ -8632,9 +8713,41 @@ def redact_image_pdf(
                 all_page_line_level_ocr_results_with_words_json_file_path
             )
 
-    all_pages_decision_process_table = pd.DataFrame(all_pages_decision_process_list)
+    # Build outputs as DataFrames (lists can contain either DataFrames or dict rows).
+    # Some code paths append per-page DataFrames; others append dict records.
+    if all_pages_decision_process_list:
+        _dp_dfs = [
+            x for x in all_pages_decision_process_list if isinstance(x, pd.DataFrame)
+        ]
+        _dp_rows = [x for x in all_pages_decision_process_list if isinstance(x, dict)]
+        if _dp_dfs and _dp_rows:
+            all_pages_decision_process_table = pd.concat(
+                _dp_dfs + [pd.DataFrame(_dp_rows)], ignore_index=True
+            )
+        elif _dp_dfs:
+            all_pages_decision_process_table = pd.concat(_dp_dfs, ignore_index=True)
+        else:
+            all_pages_decision_process_table = pd.DataFrame(_dp_rows)
+    else:
+        all_pages_decision_process_table = pd.DataFrame()
 
-    all_line_level_ocr_results_df = pd.DataFrame(all_line_level_ocr_results_list)
+    if all_line_level_ocr_results_list:
+        _ocr_dfs = [
+            x for x in all_line_level_ocr_results_list if isinstance(x, pd.DataFrame)
+        ]
+        _ocr_rows = [x for x in all_line_level_ocr_results_list if isinstance(x, dict)]
+        if _ocr_dfs and _ocr_rows:
+            all_line_level_ocr_results_df = pd.concat(
+                _ocr_dfs + [pd.DataFrame(_ocr_rows)], ignore_index=True
+            )
+        elif _ocr_dfs:
+            all_line_level_ocr_results_df = pd.concat(_ocr_dfs, ignore_index=True)
+        else:
+            all_line_level_ocr_results_df = pd.DataFrame(_ocr_rows)
+    else:
+        all_line_level_ocr_results_df = pd.DataFrame(
+            columns=["page", "text", "left", "top", "width", "height", "line", "conf"]
+        )
 
     # Convert decision table and ocr results to relative coordinates
     _pages_pdf_pts = set(pages_in_pdf_points) if pages_in_pdf_points else None

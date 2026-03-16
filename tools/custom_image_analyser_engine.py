@@ -8639,11 +8639,12 @@ class CustomImageAnalyzerEngine:
                                 aws_comprehend_entities,
                                 all_text_line_results,
                             )
-                            comprehend_query_number += (
-                                len(current_batch.strip())
-                                + COMPREHEND_CHARACTERS_PER_UNIT
-                                - 1
-                            ) // COMPREHEND_CHARACTERS_PER_UNIT
+                            if aws_comprehend_entities:
+                                comprehend_query_number += (
+                                    len(current_batch.strip())
+                                    + COMPREHEND_CHARACTERS_PER_UNIT
+                                    - 1
+                                ) // COMPREHEND_CHARACTERS_PER_UNIT
 
                             # Reset batch
                             current_batch = ""
@@ -8707,11 +8708,12 @@ class CustomImageAnalyzerEngine:
                                 aws_comprehend_entities,
                                 all_text_line_results,
                             )
-                            comprehend_query_number += (
-                                len(current_batch.strip())
-                                + COMPREHEND_CHARACTERS_PER_UNIT
-                                - 1
-                            ) // COMPREHEND_CHARACTERS_PER_UNIT
+                            if aws_comprehend_entities:
+                                comprehend_query_number += (
+                                    len(current_batch.strip())
+                                    + COMPREHEND_CHARACTERS_PER_UNIT
+                                    - 1
+                                ) // COMPREHEND_CHARACTERS_PER_UNIT
 
                             # Reset batch
                             current_batch = ""
@@ -8754,9 +8756,10 @@ class CustomImageAnalyzerEngine:
                     aws_comprehend_entities,
                     all_text_line_results,
                 )
-                comprehend_query_number += (
-                    len(current_batch.strip()) + COMPREHEND_CHARACTERS_PER_UNIT - 1
-                ) // COMPREHEND_CHARACTERS_PER_UNIT
+                if aws_comprehend_entities:
+                    comprehend_query_number += (
+                        len(current_batch.strip()) + COMPREHEND_CHARACTERS_PER_UNIT - 1
+                    ) // COMPREHEND_CHARACTERS_PER_UNIT
 
         elif pii_identification_method == AWS_LLM_PII_OPTION:
             # LLM-based entity detection using AWS Bedrock
@@ -10605,11 +10608,12 @@ def run_page_text_redaction(
                             aws_comprehend_entities,
                             all_text_line_results,
                         )
-                        comprehend_query_number += (
-                            len(current_batch.strip())
-                            + COMPREHEND_CHARACTERS_PER_UNIT
-                            - 1
-                        ) // COMPREHEND_CHARACTERS_PER_UNIT
+                        if aws_comprehend_entities:
+                            comprehend_query_number += (
+                                len(current_batch.strip())
+                                + COMPREHEND_CHARACTERS_PER_UNIT
+                                - 1
+                            ) // COMPREHEND_CHARACTERS_PER_UNIT
 
                         # Reset batch
                         current_batch = ""
@@ -10670,11 +10674,12 @@ def run_page_text_redaction(
                             aws_comprehend_entities,
                             all_text_line_results,
                         )
-                        comprehend_query_number += (
-                            len(current_batch.strip())
-                            + COMPREHEND_CHARACTERS_PER_UNIT
-                            - 1
-                        ) // COMPREHEND_CHARACTERS_PER_UNIT
+                        if aws_comprehend_entities:
+                            comprehend_query_number += (
+                                len(current_batch.strip())
+                                + COMPREHEND_CHARACTERS_PER_UNIT
+                                - 1
+                            ) // COMPREHEND_CHARACTERS_PER_UNIT
 
                         # Reset batch
                         current_batch = ""
@@ -10714,9 +10719,10 @@ def run_page_text_redaction(
                 aws_comprehend_entities,
                 all_text_line_results,
             )
-            comprehend_query_number += (
-                len(current_batch.strip()) + COMPREHEND_CHARACTERS_PER_UNIT - 1
-            ) // COMPREHEND_CHARACTERS_PER_UNIT
+            if aws_comprehend_entities:
+                comprehend_query_number += (
+                    len(current_batch.strip()) + COMPREHEND_CHARACTERS_PER_UNIT - 1
+                ) // COMPREHEND_CHARACTERS_PER_UNIT
 
     elif pii_identification_method == AWS_LLM_PII_OPTION:
         # LLM-based entity detection using AWS Bedrock
