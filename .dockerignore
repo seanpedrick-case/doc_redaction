@@ -1,6 +1,7 @@
 *.url
 *.ipynb
 *.pyc
+.venv/*
 examples/*
 processing/*
 tools/__pycache__/*

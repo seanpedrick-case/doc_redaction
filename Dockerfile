@@ -1,5 +1,5 @@
 # Stage 1: Build dependencies and download models
-FROM public.ecr.aws/docker/library/python:3.12.11-slim-trixie AS builder
+FROM public.ecr.aws/docker/library/python:3.12.13-slim-trixie AS builder
 
 # Install system dependencies
 RUN apt-get update \
@@ -34,15 +34,15 @@ ENV INSTALL_VLM=${INSTALL_VLM}
 
 # Optionally install VLM if the INSTALL_VLM environment variable is set to True. Use index-url https://download.pytorch.org/whl/cu129 for GPU version of PyTorch.
 RUN if [ "$INSTALL_VLM" = "True" ]; then \
-    pip install --verbose --no-cache-dir --target=/install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu; \
+    pip install --verbose --no-cache-dir --target=/install torch==2.9.1 --index-url https://download.pytorch.org/whl/cpu; \
     pip install --verbose --no-cache-dir --target=/install torchvision --index-url https://download.pytorch.org/whl/cpu; \
-    pip install --verbose --no-cache-dir --target=/install transformers<=4.57.2 accelerate<=1.11.0 bitsandbytes<=0.48.1 sentencepiece==0.2.1; \
+    pip install --verbose --no-cache-dir --target=/install transformers<=5.30.0 accelerate<=1.13.0 bitsandbytes<=0.49.2 sentencepiece==0.2.1; \
 fi
 
 # ===================================================================
 # Stage 2: A common 'base' for both Lambda and Gradio
 # ===================================================================
-FROM public.ecr.aws/docker/library/python:3.12.11-slim-trixie AS base
+FROM public.ecr.aws/docker/library/python:3.12.13-slim-trixie AS base
 
 # Set build-time and runtime environment variable for whether to run in Gradio mode or Lambda mode
 ARG APP_MODE=gradio
@@ -79,8 +79,7 @@ ENV GRADIO_TEMP_DIR=/tmp/gradio_tmp/ \
     PYTHONDONTWRITEBYTECODE=1 \
     GRADIO_ALLOW_FLAGGING=never \
     GRADIO_NUM_PORTS=1 \    
-    GRADIO_ANALYTICS_ENABLED=False \
-    DEFAULT_CONCURRENCY_LIMIT=3
+    GRADIO_ANALYTICS_ENABLED=False
 
 # Copy Python packages from the builder stage
 COPY --from=builder /install /usr/local/lib/python3.12/site-packages/

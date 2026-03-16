@@ -1,14 +1,7 @@
 """
 Prompts for LLM-based entity detection.
 These prompts are designed to extract PII entities with character positions.
-Text passed to the LLM is chunked using the same limits as AWS Comprehend batching:
-up to BATCH_CHAR_LIMIT characters or BATCH_WORD_LIMIT words, with boundaries at
-phrase-ending punctuation, newlines, or end of page (never mid-sentence).
 """
-
-# Must match custom_image_analyser_engine.DEFAULT_NEW_BATCH_* so prompts describe actual chunking
-BATCH_CHAR_LIMIT = 1000
-BATCH_WORD_LIMIT = 200
 
 
 def create_entity_detection_prompt(

@@ -3,12 +3,15 @@ import base64
 import copy
 import io
 import json
+import math
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
+from functools import partial
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import botocore
@@ -26,6 +29,7 @@ from presidio_analyzer import AnalyzerEngine, RecognizerResult
 from tools.config import (
     AWS_LLM_PII_OPTION,
     AWS_PII_OPTION,
+    CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE,
     CLOUD_LLM_PII_MODEL_CHOICE,
     CONVERT_LINE_TO_WORD_LEVEL,
     DEFAULT_INFERENCE_SERVER_VLM_MODEL,
@@ -39,14 +43,17 @@ from tools.config import (
     INFERENCE_SERVER_MODEL_NAME,
     INFERENCE_SERVER_PII_OPTION,
     INFERENCE_SERVER_TIMEOUT,
-    LLM_PII_MAX_TOKENS,
-    LLM_PII_TEMPERATURE,
+    LLM_MAX_NEW_TOKENS,
+    LLM_TEMPERATURE,
     LOAD_PADDLE_AT_STARTUP,
     LOCAL_OCR_MODEL_OPTIONS,
     LOCAL_PII_OPTION,
     LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
     LOCAL_TRANSFORMERS_LLM_PII_OPTION,
+    MAX_NEW_TOKENS,
     MAX_SPACES_GPU_RUN_TIME,
+    MAX_WORKERS,
+    MERGE_BOUNDING_BOXES,
     OUTPUT_FOLDER,
     PADDLE_DET_DB_UNCLIP_RATIO,
     PADDLE_FONT_PATH,
@@ -57,13 +64,15 @@ from tools.config import (
     SAVE_EXAMPLE_HYBRID_IMAGES,
     SAVE_PAGE_OCR_VISUALISATIONS,
     SAVE_PREPROCESS_IMAGES,
+    SAVE_TEXTRACT_BEDROCK_HYBRID_EXAMPLES,
     SAVE_VLM_INPUT_IMAGES,
     SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL,
     TESSERACT_SEGMENTATION_LEVEL,
     TESSERACT_WORD_LEVEL_OCR,
     USE_LLAMA_SWAP,
-    USE_TRANFORMERS_VLM_MODEL_AS_LLM,
+    USE_TRANSFORMERS_VLM_MODEL_AS_LLM,
     VLM_MAX_IMAGE_SIZE,
+    VLM_MIN_IMAGE_SIZE,
 )
 from tools.helper_functions import clean_unicode_text, get_system_font_path
 from tools.load_spacy_model_custom_recognisers import custom_entities
@@ -91,14 +100,19 @@ from tools.word_segmenter import AdaptiveSegmenter
 # Batch limits for AWS Comprehend and LLM entity detection. Batches are cut at the nearest
 # phrase-ending punctuation (PHRASE_ENDING_PUNCTUATION), newline, or end of page so text
 # is never cut mid-sentence.
-DEFAULT_NEW_BATCH_CHAR_COUNT = 1000
-DEFAULT_NEW_BATCH_WORD_COUNT = 200
+DEFAULT_NEW_BATCH_CHAR_COUNT = 2500
+DEFAULT_NEW_BATCH_WORD_COUNT = 500
 
 # AWS Comprehend billing: 1 unit = 100 characters (entity recognition, PII, etc.)
 COMPREHEND_CHARACTERS_PER_UNIT = 100
 
 # Phrase-ending punctuation marks (batch boundaries)
 PHRASE_ENDING_PUNCTUATION = {".", "!", "?", ";", ":"}
+
+# When Bedrock VLM word count differs from Textract by this many or less, we still
+# accept Bedrock text and derive word-level boxes from the Textract line bbox via
+# line-to-word segmentation.
+MAX_WORD_COUNT_DIFF_FOR_LINE_DERIVED_WORDS = 6
 
 
 def ends_with_phrase_punctuation(word: str) -> bool:
@@ -646,6 +660,8 @@ def save_vlm_prompt_response(
     top_p: Optional[float] = None,
     model_type: str = "VLM",
     task_suffix: Optional[str] = None,
+    input_tokens: Optional[int] = None,
+    output_tokens: Optional[int] = None,
 ) -> str:
     """
     Save VLM prompt and response to a text file for traceability.
@@ -656,12 +672,14 @@ def save_vlm_prompt_response(
         output_folder: Output folder path
         model_choice: Model used
         image_name: Optional image name (without extension) for the filename
-        page_number: Optional page number for the filename
+        page_number: Optional page number (0-based) for the filename; displayed in log as 1-based.
         temperature: Temperature used (if applicable)
         max_new_tokens: Max tokens used (if applicable)
         top_p: Top-p parameter used (if applicable)
         model_type: Type of model (e.g., "VLM", "Bedrock", "Inference Server", "Gemini", "Azure/OpenAI")
         task_suffix: Optional suffix to add to filename (e.g., "_person", "_sig") to distinguish task types
+        input_tokens: Optional input token count from the VLM call
+        output_tokens: Optional output token count from the VLM call
 
     Returns:
         Path to the saved file
@@ -708,7 +726,11 @@ def save_vlm_prompt_response(
         if image_name:
             f.write(f"Image: {image_name}\n")
         if page_number is not None:
-            f.write(f"Page: {page_number}\n")
+            f.write(f"Page: {page_number + 1}\n")
+        if input_tokens is not None:
+            f.write(f"Input tokens: {input_tokens}\n")
+        if output_tokens is not None:
+            f.write(f"Output tokens: {output_tokens}\n")
         f.write(f"Model: {model_choice}\n")
         f.write(f"Model Type: {model_type}\n")
         if temperature is not None:
@@ -762,7 +784,7 @@ def _prepare_image_for_vlm(
     #     # Skip resizing for AWS Bedrock VLM OCR
     #     return image
 
-    # Override VLM_MAX_IMAGE_SIZE for AWS Bedrock VLM OCR. This is a multiple of 32*32 for Qwen3-VL.
+    # Override VLM_MAX_IMAGE_SIZE for AWS Bedrock VLM OCR (multiple of 32*32 for model compatibility).
     if ocr_method and "bedrock" in ocr_method.lower():
         max_image_size = 33554432  # 32*32*32*1024 = 33554432
         # print("Overriding VLM_MAX_IMAGE_SIZE for AWS Bedrock VLM OCR to 33554432")
@@ -834,6 +856,48 @@ def _prepare_image_for_vlm(
     return image
 
 
+def _pad_image_for_vlm_aspect_ratio(
+    image: Image.Image,
+    max_aspect: float = 10.0,
+) -> Image.Image:
+    """
+    Pad image so aspect ratio max(w/h, h/w) <= max_aspect (e.g. 10:1).
+    Used for Bedrock, inference-server, and transformers VLM to avoid API errors
+    on very long/thin hybrid crops. Returns RGB image.
+    """
+    if image is None:
+        return image
+    try:
+        w, h = image.size
+        if w < 1 or h < 1:
+            return image.convert("RGB") if image.mode != "RGB" else image
+        current = max(w / float(h), h / float(w))
+        if current <= max_aspect:
+            return image.convert("RGB") if image.mode != "RGB" else image
+        img = image.convert("RGB") if image.mode != "RGB" else image
+        if w >= h:
+            new_h = max(int(math.ceil(w / max_aspect)), 1)
+            new_w, new_h = w, new_h
+        else:
+            new_w = max(int(math.ceil(h / max_aspect)), 1)
+            new_w, new_h = new_w, h
+        canvas = Image.new("RGB", (new_w, new_h), color=(255, 255, 255))
+        scale = min(new_w / float(w), new_h / float(h))
+        if scale < 1.0:
+            rw = max(1, int(round(w * scale)))
+            rh = max(1, int(round(h * scale)))
+            paste_img = img.resize((rw, rh), Image.Resampling.LANCZOS)
+        else:
+            paste_img = img
+            rw, rh = w, h
+        ox = max((new_w - rw) // 2, 0)
+        oy = max((new_h - rh) // 2, 0)
+        canvas.paste(paste_img, (ox, oy))
+        return canvas
+    except Exception:
+        return image.convert("RGB") if image.mode != "RGB" else image
+
+
 def _call_inference_server_vlm_api(
     image: Image.Image,
     prompt: str,
@@ -893,6 +957,14 @@ def _call_inference_server_vlm_api(
     if timeout is None:
         timeout = INFERENCE_SERVER_TIMEOUT
 
+    # Pad image so aspect ratio <= 10:1 (same as Bedrock); hybrid crops can be very long/thin
+    try:
+        image = _pad_image_for_vlm_aspect_ratio(image, max_aspect=10.0)
+    except Exception as e:
+        print(
+            f"Warning: could not pad image for inference-server VLM aspect ratio: {e}"
+        )
+
     # Convert PIL Image to base64
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
@@ -923,8 +995,22 @@ def _call_inference_server_vlm_api(
         payload["model"] = model_name
     if do_sample is not None:
         payload["do_sample"] = do_sample
+    if temperature is not None:
+        payload["temperature"] = temperature
+    if top_p is not None:
+        payload["top_p"] = top_p
+    if top_k is not None:
+        payload["top_k"] = top_k
+    if repetition_penalty is not None:
+        payload["repeat_penalty"] = repetition_penalty
+    if presence_penalty is not None:
+        payload["presence_penalty"] = presence_penalty
+    if max_new_tokens is not None:
+        payload["max_tokens"] = max_new_tokens
+    if seed is not None:
+        payload["seed"] = seed
 
-    # Handle deterministic (greedy) vs non-deterministic (sampling) generation
+    # Handle deterministic (greedy) generation
     if do_sample is False:
         # Greedy decoding (deterministic): always pick the highest probability token
         # This emulates transformers' do_sample=False behavior
@@ -933,34 +1019,7 @@ def _call_inference_server_vlm_api(
         payload["top_p"] = 1.0  # Consider all tokens (but top_k=1 overrides this)
         payload["min_p"] = 0.0  # Minimum probability threshold for token sampling.
         payload["presence_penalty"] = 1.0  # Penalty for token presence.
-        # Don't set min_p for greedy decoding - it's a sampling parameter
-        # Use repetition_penalty=1.0 (no penalty) for deterministic generation
-        # If a repetition_penalty was provided, use it; otherwise default to 1.0
-        if repetition_penalty is not None:
-            payload["repeat_penalty"] = repetition_penalty
-        else:
-            payload["repeat_penalty"] = 1.0  # No penalty for deterministic
-    else:
-        # Sampling (non-deterministic): use provided sampling parameters
-        if temperature is not None:
-            payload["temperature"] = temperature
-        if top_p is not None:
-            payload["top_p"] = top_p
-        if min_p is not None:
-            payload["min_p"] = min_p
-        if top_k is not None:
-            payload["top_k"] = top_k
-        if repetition_penalty is not None:
-            payload["repeat_penalty"] = repetition_penalty
-        if presence_penalty is not None:
-            payload["presence_penalty"] = presence_penalty
-
-    if max_new_tokens is not None:
-        payload["max_tokens"] = max_new_tokens
-    if seed is not None:
-        payload["seed"] = seed
-
-    # print(f"Payload: {payload}")
+        payload["repeat_penalty"] = 1.0  # No penalty for deterministic
 
     endpoint = f"{api_url}/v1/chat/completions"
 
@@ -1105,6 +1164,8 @@ def _call_bedrock_vlm_api(
     temperature: float = None,
     top_p: float = None,
     timeout: int = 60,
+    max_retries: int = 5,
+    retry_delay_seconds: float = 2.0,
 ) -> Tuple[str, int, int]:
     """
     Calls AWS Bedrock API with an image and text prompt for vision models.
@@ -1118,12 +1179,14 @@ def _call_bedrock_vlm_api(
         temperature: Sampling temperature
         top_p: Nucleus sampling parameter
         timeout: Request timeout in seconds
+        max_retries: Maximum number of retry attempts on failure (default 5)
+        retry_delay_seconds: Delay in seconds between retries (default 2.0)
 
     Returns:
         Tuple[str, int, int]: The generated text response, input tokens, output tokens
 
     Raises:
-        ConnectionError: If the API request fails
+        ConnectionError: If the API request fails after all retries
         ValueError: If the response format is invalid
     """
     if bedrock_runtime is None:
@@ -1131,7 +1194,27 @@ def _call_bedrock_vlm_api(
     if model_choice is None:
         raise ValueError("model_choice is required for Bedrock VLM calls")
 
-    # Convert PIL Image to base64
+    # Bedrock Converse API requires image aspect ratio <= 20:1. Pad to 10:1 for hybrid crops.
+    try:
+        image = _pad_image_for_vlm_aspect_ratio(image, max_aspect=10.0)
+    except Exception as aspect_error:
+        print(
+            f"Warning: could not adjust image aspect ratio for Bedrock VLM: {aspect_error}"
+        )
+    # Final safeguard: never send aspect > 20:1
+    try:
+        w, h = image.size
+        if w > 0 and h > 0:
+            aspect = max(w / float(h), h / float(w))
+            if aspect > 20.0:
+                image = _pad_image_for_vlm_aspect_ratio(image, max_aspect=19.5)
+                print(
+                    f"Bedrock VLM: re-padded image to satisfy aspect ratio (was {aspect:.1f}:1)."
+                )
+    except Exception:
+        pass
+
+    # Encode the (possibly padded) image and send to Bedrock
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     image_bytes = buffer.getvalue()
@@ -1158,41 +1241,53 @@ def _call_bedrock_vlm_api(
     if top_p is not None:
         inference_config["topP"] = top_p
 
-    try:
-        # Call Bedrock converse API
-        api_response = bedrock_runtime.converse(
-            modelId=model_choice,
-            messages=messages,
-            inferenceConfig=inference_config,
-        )
+    last_error = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            # Call Bedrock converse API
+            api_response = bedrock_runtime.converse(
+                modelId=model_choice,
+                messages=messages,
+                inferenceConfig=inference_config,
+            )
 
-        # Extract response text
-        output_message = api_response["output"]["message"]
-        if "content" in output_message and len(output_message["content"]) > 0:
-            # Handle reasoning content if present
-            if "reasoningContent" in output_message["content"][0]:
-                # Extract the output text (skip reasoning)
-                if len(output_message["content"]) > 1:
-                    text = output_message["content"][1]["text"]
+            # Extract response text
+            output_message = api_response["output"]["message"]
+            if "content" in output_message and len(output_message["content"]) > 0:
+                # Handle reasoning content if present
+                if "reasoningContent" in output_message["content"][0]:
+                    # Extract the output text (skip reasoning)
+                    if len(output_message["content"]) > 1:
+                        text = output_message["content"][1]["text"]
+                    else:
+                        text = ""
                 else:
-                    text = ""
+                    text = output_message["content"][0]["text"]
             else:
-                text = output_message["content"][0]["text"]
-        else:
-            raise ValueError("No content in Bedrock response")
+                raise ValueError("No content in Bedrock response")
 
-        # Extract token usage from API response
-        input_tokens = 0
-        output_tokens = 0
-        if "usage" in api_response:
-            usage = api_response["usage"]
-            input_tokens = usage.get("inputTokens", 0)
-            output_tokens = usage.get("outputTokens", 0)
+            # Extract token usage from API response
+            input_tokens = 0
+            output_tokens = 0
+            if "usage" in api_response:
+                usage = api_response["usage"]
+                input_tokens = usage.get("inputTokens", 0)
+                output_tokens = usage.get("outputTokens", 0)
 
-        return text, input_tokens, output_tokens
+            return text, input_tokens, output_tokens
 
-    except Exception as e:
-        raise ConnectionError(f"Failed to call Bedrock API: {str(e)}")
+        except Exception as e:
+            last_error = e
+            if attempt < max_retries:
+                print(
+                    f"Bedrock API attempt {attempt}/{max_retries} failed: {e}. "
+                    f"Retrying in {retry_delay_seconds}s..."
+                )
+                time.sleep(retry_delay_seconds)
+            else:
+                raise ConnectionError(
+                    f"Failed to call Bedrock API after {max_retries} attempts: {str(last_error)}"
+                ) from last_error
 
 
 def _call_gemini_vlm_api(
@@ -1403,6 +1498,105 @@ def _call_azure_openai_vlm_api(
         raise ConnectionError(f"Failed to call Azure/OpenAI API: {str(e)}")
 
 
+def _extract_last_text_dict_from_vlm_response(raw: str) -> Optional[Dict[str, Any]]:
+    """
+    Extract the last JSON object that contains a "text" key from a VLM response.
+    Handles thinking blocks (e.g. <think>...</think>) that may contain multiple dicts;
+    the final answer is assumed to be the last valid dict in correct format.
+
+    Returns:
+        The parsed dict with "text" (and optionally "confidence"), or None if none found.
+    """
+    if not raw or not isinstance(raw, str):
+        return None
+    last_valid = None
+    i = 0
+    while i < len(raw):
+        start = raw.find("{", i)
+        if start == -1:
+            break
+        depth = 1
+        j = start + 1
+        while j < len(raw) and depth > 0:
+            if raw[j] == "{":
+                depth += 1
+            elif raw[j] == "}":
+                depth -= 1
+            j += 1
+        if depth != 0:
+            i = start + 1
+            continue
+        snippet = raw[start:j]
+        try:
+            obj = json.loads(snippet)
+            if isinstance(obj, dict) and "text" in obj:
+                last_valid = obj
+        except (json.JSONDecodeError, TypeError):
+            pass
+        i = j
+    return last_valid
+
+
+def _extract_and_combine_text_dicts_from_vlm_response(
+    raw: str,
+) -> Optional[Dict[str, Any]]:
+    """
+    Extract all JSON objects that contain a "text" key from a VLM response, then combine them.
+    If the VLM returns each word in its own dict (e.g. [{"text": "Hello", "confidence": 0.9}, ...]),
+    the text from each entry is joined with spaces and confidence values are averaged.
+
+    Returns:
+        A single dict with "text" (combined) and "confidence" (average), or None if no valid dict found.
+    """
+    if not raw or not isinstance(raw, str):
+        return None
+    collected = []
+    i = 0
+    while i < len(raw):
+        start = raw.find("{", i)
+        if start == -1:
+            break
+        depth = 1
+        j = start + 1
+        while j < len(raw) and depth > 0:
+            if raw[j] == "{":
+                depth += 1
+            elif raw[j] == "}":
+                depth -= 1
+            j += 1
+        if depth != 0:
+            i = start + 1
+            continue
+        snippet = raw[start:j]
+        try:
+            obj = json.loads(snippet)
+            if isinstance(obj, dict) and "text" in obj:
+                collected.append(obj)
+        except (json.JSONDecodeError, TypeError):
+            pass
+        i = j
+    if not collected:
+        return None
+    if len(collected) == 1:
+        return collected[0]
+    # Multiple entries: combine text and average confidence
+    texts = []
+    confidences = []
+    for entry in collected:
+        t = entry.get("text")
+        if t is not None and isinstance(t, str) and t.strip():
+            texts.append(t.strip())
+        c = entry.get("confidence", entry.get("conf"))
+        if c is not None:
+            try:
+                confidences.append(float(c))
+            except (TypeError, ValueError):
+                pass
+    combined_text = " ".join(texts)
+    avg_confidence = sum(confidences) / len(confidences) if confidences else 1.0
+    return {"text": combined_text, "confidence": avg_confidence}
+
+
 def _vlm_ocr_predict(
     image: Image.Image,
     prompt: str = model_default_prompt,
@@ -1454,14 +1648,19 @@ def _vlm_ocr_predict(
             print(f"VLM OCR error: Could not prepare image for VLM: {prep_error}")
             return {"rec_texts": [], "rec_scores": []}
 
+        # Pad so aspect ratio <= 10:1 for hybrid line crops (same as Bedrock/inference-server)
+        try:
+            image = _pad_image_for_vlm_aspect_ratio(image, max_aspect=10.0)
+        except Exception:
+            pass
+
         # Use the VLM to extract text
         # Pass None for parameters to prioritize model-specific defaults from run_vlm.py
         # If model defaults are not available, general defaults will be used (matching current values)
-        # print(f"Calling extract_text_from_image_vlm with image size: {width}x{height}")
         extracted_text, _, _ = extract_text_from_image_vlm(
             text=prompt,
             image=image,
-            max_new_tokens=HYBRID_OCR_MAX_NEW_TOKENS,  # Use model default if available, otherwise MAX_NEW_TOKENS from config
+            max_new_tokens=None,  # Use model default if available, otherwise MAX_NEW_TOKENS from config
             temperature=None,  # Use model default if available, otherwise 0.7
             top_p=None,  # Use model default if available, otherwise 0.9
             min_p=None,  # Use model default if available, otherwise 0.0
@@ -1479,33 +1678,39 @@ def _vlm_ocr_predict(
             # print(f"VLM OCR warning: extract_text_from_image_vlm returned unexpected type: {type(extracted_text)}")
             return {"rec_texts": [], "rec_scores": []}
 
-        if extracted_text.strip():
-
-            # Clean the text
-
-            cleaned_text = re.sub(r"[\r\n]+", " ", extracted_text)
-            cleaned_text = cleaned_text.strip()
-
-            # Split into words for compatibility with PaddleOCR format
-            words = cleaned_text.split()
-
-            # If text has more than 30 words, assume something went wrong and skip it
-            if len(words) > 30:
-                print(
-                    f"VLM OCR warning: Extracted text has {len(words)} words, which exceeds the 30 word limit. Skipping."
-                )
-                return {"rec_texts": [], "rec_scores": []}
-
-            # Create PaddleOCR-compatible result
-            result = {
-                "rec_texts": words,
-                "rec_scores": [1.0] * len(words),  # High confidence for VLM results
-            }
-
-            return result
-        else:
+        if not extracted_text.strip():
             # print("VLM OCR warning: Extracted text is empty after stripping")
             return {"rec_texts": [], "rec_scores": []}
+
+        # Parse VLM response: expect dictionary format {"text": "...", "confidence": ...}
+        # If VLM returns multiple dicts (e.g. one per word), combine text and average confidence
+        parsed = _extract_and_combine_text_dicts_from_vlm_response(extracted_text)
+        if parsed is None:
+            return {"rec_texts": [], "rec_scores": []}
+
+        text_content = parsed.get("text")
+        confidence = parsed.get("confidence")
+        if text_content is None or not isinstance(text_content, str):
+            return {"rec_texts": [], "rec_scores": []}
+        # Clamp confidence to [0, 1]; default 1.0 if missing or invalid
+        try:
+            score = float(confidence) if confidence is not None else 1.0
+            score = max(0.0, min(1.0, score))
+        except (TypeError, ValueError):
+            score = 1.0
+
+        cleaned_text = re.sub(r"[\r\n]+", " ", text_content).strip()
+        words = cleaned_text.split()
+
+        # Enforce output length below HYBRID_OCR_MAX_NEW_TOKENS (truncate if over)
+        if len(words) > HYBRID_OCR_MAX_NEW_TOKENS:
+            words = words[:HYBRID_OCR_MAX_NEW_TOKENS]
+
+        result = {
+            "rec_texts": words,
+            "rec_scores": [score] * len(words),
+        }
+        return result
 
     except Exception:
         # print(f"VLM OCR error: {e}")
@@ -1897,6 +2102,588 @@ def _process_page_result_with_hybrid_vlm_ocr(
     return page_results
 
 
+def _convert_single_line_to_word_level_standalone(
+    line_text: str,
+    line_left: int,
+    line_top: int,
+    line_width: int,
+    line_height: int,
+    line_conf: float,
+    image: Image.Image,
+    image_width: int,
+    image_height: int,
+    output_folder: str,
+    image_name: str = None,
+    line_model: str = "Bedrock VLM",
+) -> Dict[str, List]:
+    """
+    Converts a single line (text + line bbox) to word-level bounding boxes using
+    AdaptiveSegmenter. Used by the hybrid Textract+Bedrock path when word count
+    differs by <= MAX_WORD_COUNT_DIFF_FOR_LINE_DERIVED_WORDS so we keep Bedrock
+    text but derive word boxes from the line.
+
+    Returns dict with keys "text", "left", "top", "width", "height", "conf", "model"
+    (all lists, coordinates in full image space).
+    """
+    output = {
+        "text": [],
+        "left": [],
+        "top": [],
+        "width": [],
+        "height": [],
+        "conf": [],
+        "model": [],
+    }
+    if not (line_text or "").strip():
+        return output
+    if image is None or output_folder is None:
+        return output
+
+    if hasattr(image, "size"):
+        image_np = np.array(image)
+        if len(image_np.shape) == 3:
+            image_np = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
+        elif len(image_np.shape) == 2:
+            image_np = cv2.cvtColor(image_np, cv2.COLOR_GRAY2BGR)
+    else:
+        image_np = image.copy()
+        if len(image_np.shape) == 2:
+            image_np = cv2.cvtColor(image_np, cv2.COLOR_GRAY2BGR)
+
+    actual_height, actual_width = image_np.shape[:2]
+    if actual_width != image_width or actual_height != image_height:
+        image_width = actual_width
+        image_height = actual_height
+
+    line_left = int(max(0, min(line_left, image_width - 1)))
+    line_top = int(max(0, min(line_top, image_height - 1)))
+    line_width = int(max(1, min(line_width, image_width - line_left)))
+    line_height = int(max(1, min(line_height, image_height - line_top)))
+    if line_left >= image_width or line_top >= image_height:
+        return output
+    if line_left + line_width > image_width:
+        line_width = image_width - line_left
+    if line_top + line_height > image_height:
+        line_height = image_height - line_top
+    if line_width <= 0 or line_height <= 0:
+        return output
+
+    try:
+        line_image = image_np[
+            line_top : line_top + line_height,
+            line_left : line_left + line_width,
+        ]
+    except IndexError:
+        return output
+    if line_image is None or line_image.size == 0 or len(line_image.shape) < 2:
+        return output
+
+    conf_val = line_conf if isinstance(line_conf, (int, float)) else 100
+    try:
+        conf_val = max(0, min(100, float(conf_val)))
+    except (TypeError, ValueError):
+        conf_val = 100
+
+    single_line_data = {
+        "text": [line_text],
+        "left": [0],
+        "top": [0],
+        "width": [line_width],
+        "height": [line_height],
+        "conf": [conf_val],
+        "line": [0],
+    }
+    segmenter = AdaptiveSegmenter(output_folder=output_folder)
+    try:
+        word_output, _ = segmenter.segment(
+            single_line_data, line_image, image_name=image_name
+        )
+    except Exception:
+        word_output = None
+
+    if not word_output or not word_output.get("text"):
+        words = line_text.split()
+        if words:
+            num_chars = len("".join(words))
+            num_spaces = len(words) - 1
+            char_space_ratio = 2.0
+            denom = (num_chars * char_space_ratio + num_spaces) or 1
+            estimated_space_width = line_width / denom
+            avg_char_width = estimated_space_width * char_space_ratio
+            current_left = 0
+            for word in words:
+                word_width = len(word) * avg_char_width
+                clamped_left = max(0, min(current_left, line_width))
+                clamped_width = max(0, min(word_width, line_width - clamped_left))
+                output["text"].append(word)
+                output["left"].append(line_left + clamped_left)
+                output["top"].append(line_top)
+                output["width"].append(clamped_width)
+                output["height"].append(line_height)
+                output["conf"].append(conf_val)
+                output["model"].append(line_model)
+                current_left += word_width + estimated_space_width
+        return output
+
+    for j in range(len(word_output["text"])):
+        output["text"].append(word_output["text"][j])
+        output["left"].append(line_left + word_output["left"][j])
+        output["top"].append(line_top + word_output["top"][j])
+        output["width"].append(word_output["width"][j])
+        output["height"].append(word_output["height"][j])
+        output["conf"].append(
+            word_output["conf"][j]
+            if j < len(word_output.get("conf") or [])
+            else conf_val
+        )
+        output["model"].append(line_model)
+    return output
+
+
+def _process_textract_page_with_hybrid_bedrock_vlm(
+    page_line_level_ocr_results: Dict[str, Any],
+    page_line_level_ocr_results_with_words: Dict[str, Any],
+    image: Image.Image,
+    img_width: int,
+    img_height: int,
+    confidence_threshold: float,
+    padding: int,
+    bedrock_runtime: Any,
+    model_choice: str,
+    output_folder: str,
+    image_name: str,
+) -> Tuple[Dict[str, Any], int, int, str]:
+    """
+    For a single page's Textract results, re-run Bedrock VLM on lines whose
+    line-level confidence is below the threshold. Uses the actual line-level
+    page OCR object (page_line_level_ocr_results) for confidence and bbox;
+    the ocr results with words object is updated only at the end when mapping
+    back corrected text/confidence/words for successfully re-OCR'd lines.
+
+    Returns:
+        Tuple of (page_line_level_ocr_results_with_words, vlm_input_tokens,
+        vlm_output_tokens, vlm_model_name) for usage logging.
+    """
+    _empty_return = (page_line_level_ocr_results_with_words, 0, 0, model_choice or "")
+    if image is None or not page_line_level_ocr_results_with_words:
+        print("Image is None or no page line level OCR results with words found")
+        return _empty_return
+    results = page_line_level_ocr_results_with_words.get("results") or {}
+    if not results:
+        print("No results found")
+        return _empty_return
+    if bedrock_runtime is None or not model_choice:
+        print("Bedrock runtime is None or model choice is not set")
+        print(f"Bedrock runtime: {bedrock_runtime}")
+        print(f"Model choice: {model_choice}")
+        return _empty_return
+    line_level_results = page_line_level_ocr_results.get("results") or []
+    if not line_level_results:
+        return _empty_return
+
+    # Build line-level items from the actual line-level OCR (OCRResult list)
+    # Match by result.line -> key "text_line_{line}" in the with_words dict
+    line_level_items = []
+    for result in line_level_results:
+        line_num = (
+            getattr(result, "line", None)
+            if hasattr(result, "line")
+            else result.get("line") if isinstance(result, dict) else None
+        )
+        if line_num is None or line_num < 1:
+            continue
+        key = f"text_line_{line_num}"
+        if key not in results:
+            continue
+        if isinstance(result, dict):
+            conf = result.get("conf", result.get("confidence"))
+        else:
+            conf = getattr(result, "conf", None)
+        if conf is None:
+            conf = 0
+        try:
+            line_conf = float(conf)
+        except (TypeError, ValueError):
+            line_conf = 0
+        if isinstance(result, dict):
+            left = result.get("left", 0)
+            top = result.get("top", 0)
+            w = result.get("width", 0)
+            h = result.get("height", 0)
+        else:
+            left = getattr(result, "left", 0)
+            top = getattr(result, "top", 0)
+            w = getattr(result, "width", 0)
+            h = getattr(result, "height", 0)
+        bbox = (left, top, left + w, top + h)
+        line_level_items.append((key, line_conf, bbox))
+
+    # Ensure RGB for Bedrock
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+
+    # Optional: folder and log file for saving example images and prompt/response (when config set)
+    save_examples = SAVE_TEXTRACT_BEDROCK_HYBRID_EXAMPLES
+    hybrid_examples_folder = None
+    inference_log_path = None
+    if save_examples and output_folder and image_name:
+        normalized_image_name = os.path.normpath(
+            image_name + "_textract_bedrock_hybrid"
+        )
+        if (
+            ".." in normalized_image_name
+            or "/" in normalized_image_name
+            or "\\" in normalized_image_name
+        ):
+            normalized_image_name = "safe_image"
+        hybrid_examples_folder = os.path.join(
+            output_folder, "textract_bedrock_hybrid_examples", normalized_image_name
+        )
+        if validate_folder_containment(hybrid_examples_folder, OUTPUT_FOLDER):
+            if not os.path.exists(hybrid_examples_folder):
+                os.makedirs(hybrid_examples_folder)
+            page_no = page_line_level_ocr_results_with_words.get("page", "?")
+            inference_log_path = os.path.join(
+                hybrid_examples_folder, f"page_{page_no}_inference_log.jsonl"
+            )
+        else:
+            save_examples = False
+
+    # Build list of (key, line_conf, bbox, cropped) for lines below threshold
+    tasks = []
+    for key, line_conf, bbox in line_level_items:
+        if line_conf > confidence_threshold:
+            continue
+        left, top, right, bottom = bbox
+        crop_left = max(0, int(left) - padding)
+        crop_top = max(0, int(top) - padding)
+        crop_right = min(img_width, int(right) + padding)
+        crop_bottom = min(img_height, int(bottom) + padding)
+        if crop_right <= crop_left or crop_bottom <= crop_top:
+            continue
+        cropped = image.crop((crop_left, crop_top, crop_right, crop_bottom))
+        if cropped.size[0] < 10 or cropped.size[1] < 10:
+            continue
+        tasks.append((key, line_conf, bbox, cropped))
+
+    def _run_one_line_vlm(
+        task: Tuple[str, float, Tuple, Image.Image],
+    ) -> Dict[str, Any]:
+        """Run Bedrock VLM on one line crop. Returns dict with key, line_conf, bbox, cropped, and either vlm_result or error."""
+        key, line_conf, bbox, cropped = task
+        prompt_used = model_default_prompt
+        try:
+            vlm_result = _bedrock_vlm_ocr_predict(
+                cropped,
+                model_choice=model_choice,
+                bedrock_runtime=bedrock_runtime,
+                return_prompt_and_response=save_examples,
+            )
+            if save_examples:
+                prompt_used = vlm_result.get("prompt", prompt_used)
+            return {
+                "key": key,
+                "line_conf": line_conf,
+                "bbox": bbox,
+                "cropped": cropped,
+                "vlm_result": vlm_result,
+                "prompt_used": prompt_used,
+                "raw_response": (
+                    vlm_result.get("raw_response") if save_examples else None
+                ),
+                "error": None,
+            }
+        except Exception as e:
+            return {
+                "key": key,
+                "line_conf": line_conf,
+                "bbox": bbox,
+                "cropped": cropped,
+                "vlm_result": None,
+                "prompt_used": prompt_used,
+                "raw_response": None,
+                "error": str(e),
+            }
+
+    # Run VLM inference in parallel for all low-confidence lines
+    hybrid_vlm_input_tokens = 0
+    hybrid_vlm_output_tokens = 0
+    updates = []
+    vlm_results_list = []
+    if tasks:
+        max_workers_hybrid = min(MAX_WORKERS, len(tasks))
+        with ThreadPoolExecutor(max_workers=max_workers_hybrid) as executor:
+            vlm_results_list = list(executor.map(_run_one_line_vlm, tasks))
+
+    # Process each VLM result (post-processing and optional logging on main thread)
+    for res in vlm_results_list:
+        key = res["key"]
+        line_conf = res["line_conf"]
+        bbox = res["bbox"]
+        cropped = res["cropped"]
+        prompt_used = res["prompt_used"]
+        raw_response = res["raw_response"]
+        if res["error"] is not None:
+            print(f"Hybrid Textract-Bedrock VLM failed for line {key}: {res['error']}")
+            if save_examples and hybrid_examples_folder and inference_log_path:
+                try:
+                    safe_name = (
+                        f"{safe_sanitize_text(key)}_conf_{int(line_conf)}_error.png"
+                    )
+                    crop_path = os.path.join(hybrid_examples_folder, safe_name)
+                    cropped.save(crop_path)
+                    log_entry = {
+                        "key": key,
+                        "line_conf": line_conf,
+                        "prompt": prompt_used,
+                        "error": res["error"],
+                        "raw_response": None,
+                    }
+                    with open(inference_log_path, "a", encoding="utf-8") as log_f:
+                        log_f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+                except Exception as save_err:
+                    print(f"Could not save hybrid example for {key}: {save_err}")
+            continue
+
+        vlm_result = res["vlm_result"]
+        hybrid_vlm_input_tokens += vlm_result.get("vlm_input_tokens", 0)
+        hybrid_vlm_output_tokens += vlm_result.get("vlm_output_tokens", 0)
+        rec_texts = vlm_result.get("rec_texts", [])
+        rec_scores = vlm_result.get("rec_scores", [])
+        if not rec_texts or not rec_scores:
+            if save_examples and hybrid_examples_folder and inference_log_path:
+                try:
+                    safe_name = f"{safe_sanitize_text(key)}_conf_{int(line_conf)}.png"
+                    crop_path = os.path.join(hybrid_examples_folder, safe_name)
+                    cropped.save(crop_path)
+                    log_entry = {
+                        "key": key,
+                        "line_conf": line_conf,
+                        "prompt": prompt_used,
+                        "raw_response": raw_response,
+                        "error": None,
+                        "parsed_rec_texts": [],
+                    }
+                    with open(inference_log_path, "a", encoding="utf-8") as log_f:
+                        log_f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+                except Exception as save_err:
+                    print(f"Could not save hybrid example for {key}: {save_err}")
+            continue
+
+        if save_examples and hybrid_examples_folder and inference_log_path:
+            try:
+                safe_name = f"{safe_sanitize_text(key)}_conf_{int(line_conf)}.png"
+                crop_path = os.path.join(hybrid_examples_folder, safe_name)
+                cropped.save(crop_path)
+                log_entry = {
+                    "key": key,
+                    "line_conf": line_conf,
+                    "prompt": prompt_used,
+                    "raw_response": raw_response,
+                    "error": None,
+                    "parsed_rec_texts": rec_texts,
+                    "parsed_rec_scores": rec_scores,
+                }
+                with open(inference_log_path, "a", encoding="utf-8") as log_f:
+                    log_f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+            except Exception as save_err:
+                print(f"Could not save hybrid example for {key}: {save_err}")
+
+        # Textract may have split punctuation into separate words (SPLIT_PUNCTUATION_FROM_WORDS),
+        # while the VLM returns punctuation attached (e.g. "ACTION."). Expand VLM words to match
+        # original word count by splitting trailing punctuation when the next original word is punct-only.
+        line_data_for_words = results.get(key) or {}
+        original_words_list = line_data_for_words.get("words") or []
+        original_word_count = len(original_words_list)
+        expanded_texts = []
+        expanded_scores = []
+        j = 0
+        i = 0
+        while i < original_word_count and j < len(rec_texts):
+            word = rec_texts[j]
+            score = rec_scores[j] if j < len(rec_scores) else rec_scores[-1]
+            next_orig = (
+                original_words_list[i + 1] if i + 1 < original_word_count else None
+            )
+            next_orig_text = (
+                (next_orig.get("text", "") or "") if isinstance(next_orig, dict) else ""
+            )
+            next_is_punct_only = bool(next_orig_text) and not re.search(
+                r"[\w]", next_orig_text
+            )
+            word_has_trailing_punct = bool(word) and bool(re.search(r"[^\w\s]$", word))
+            if next_is_punct_only and word_has_trailing_punct and len(word) > 1:
+                match = re.search(r"^(.*?)([^\w\s]+)$", word)
+                if match:
+                    main, trail = match.group(1), match.group(2)
+                    expanded_texts.append(main)
+                    expanded_scores.append(score)
+                    expanded_texts.append(trail)
+                    expanded_scores.append(score)
+                    i += 2
+                    j += 1
+                else:
+                    expanded_texts.append(word)
+                    expanded_scores.append(score)
+                    i += 1
+                    j += 1
+            else:
+                expanded_texts.append(word)
+                expanded_scores.append(score)
+                i += 1
+                j += 1
+        same_word_count = len(expanded_texts) == original_word_count and j == len(
+            rec_texts
+        )
+        if same_word_count:
+            rec_texts = expanded_texts
+            rec_scores = expanded_scores
+
+        new_text = " ".join(rec_texts)
+        # rec_scores from Bedrock are 0-1; store as 0-100 to match Textract
+        # Use original word-level bounding boxes so replacement is shown per word, not per line
+        new_words = []
+        for i, txt in enumerate(rec_texts):
+            score = rec_scores[i] if i < len(rec_scores) else rec_scores[-1]
+            try:
+                sc = float(score)
+                if 0 <= sc <= 1:
+                    sc = sc * 100
+                sc = max(0, min(100, sc))
+            except (TypeError, ValueError):
+                sc = 100
+            # Retain original word bounding box when available (word-level replacement boxes)
+            word_bbox = bbox
+            if i < len(original_words_list):
+                orig_word = original_words_list[i]
+                if isinstance(orig_word, dict):
+                    orig_bbox = orig_word.get("bounding_box")
+                    if isinstance(orig_bbox, (list, tuple)) and len(orig_bbox) == 4:
+                        word_bbox = orig_bbox
+            new_words.append(
+                {
+                    "text": txt,
+                    "confidence": round(sc, 0),
+                    "bounding_box": word_bbox,
+                    "model": "Bedrock VLM",
+                }
+            )
+        avg_conf = (sum(rec_scores) / len(rec_scores)) * 100 if rec_scores else 100
+        avg_conf = max(0, min(100, avg_conf))
+        # Accept VLM result if: (1) word count matches and conf > 50, or
+        # (2) word count differs by <= MAX_WORD_COUNT_DIFF and conf > 50 — then use
+        # Bedrock text + Textract line bbox and derive word-level boxes via line-to-word.
+        vlm_conf_above_50 = avg_conf > 50
+        word_count_diff = abs(original_word_count - len(rec_texts))
+        use_line_derived_words = (
+            not same_word_count
+            and vlm_conf_above_50
+            and word_count_diff <= MAX_WORD_COUNT_DIFF_FOR_LINE_DERIVED_WORDS
+        )
+
+        if same_word_count and vlm_conf_above_50:
+            updates.append((key, new_text, avg_conf, new_words, line_conf))
+        elif use_line_derived_words:
+            # Use Bedrock text and Textract line bbox; derive word-level boxes.
+            left, top, right, bottom = bbox
+            line_w = max(1, int(right) - int(left))
+            line_h = max(1, int(bottom) - int(top))
+            word_level = _convert_single_line_to_word_level_standalone(
+                new_text,
+                int(left),
+                int(top),
+                line_w,
+                line_h,
+                avg_conf,
+                image,
+                img_width,
+                img_height,
+                output_folder,
+                image_name=image_name,
+                line_model="Bedrock VLM",
+            )
+            derived_words = []
+            for idx in range(len(word_level.get("text") or [])):
+                left = word_level["left"][idx]
+                top = word_level["top"][idx]
+                width = word_level["width"][idx]
+                height = word_level["height"][idx]
+                confidence = (
+                    word_level["conf"][idx]
+                    if idx < len(word_level.get("conf") or [])
+                    else avg_conf
+                )
+                try:
+                    confidence = max(0, min(100, float(confidence)))
+                except (TypeError, ValueError):
+                    confidence = avg_conf
+                derived_words.append(
+                    {
+                        "text": word_level["text"][idx],
+                        "confidence": round(confidence, 0),
+                        "bounding_box": (left, top, left + width, top + height),
+                        "model": "Bedrock VLM",
+                    }
+                )
+            if derived_words:
+                updates.append((key, new_text, avg_conf, derived_words, line_conf))
+            else:
+                print(
+                    f"  Skipping VLM result for {key}: line-to-word returned no words (original={original_word_count}, VLM={len(rec_texts)}). Keeping Textract."
+                )
+        else:
+            if not same_word_count and not use_line_derived_words:
+                print(
+                    f"  Skipping VLM result for {key}: word count mismatch (original={original_word_count}, VLM={len(expanded_texts)}). Keeping Textract."
+                )
+            elif not vlm_conf_above_50:
+                print(
+                    f"  Skipping VLM result for {key}: VLM confidence {avg_conf:.0f} not above 50. Keeping Textract."
+                )
+
+    # Map back into ocr results with words and update line-level OCRResult objects
+    line_level_results = page_line_level_ocr_results.get("results") or []
+    for key, new_text, avg_conf, new_words, line_conf in updates:
+        line_data = results.get(key)
+        if line_data is not None and isinstance(line_data, dict):
+            line_data["text"] = new_text
+            line_data["confidence"] = round(avg_conf, 0)
+            line_data["words"] = new_words
+            line_data["model"] = "Bedrock VLM"
+            # Update corresponding line-level OCRResult (by line number from key "text_line_N")
+            try:
+                line_num = int(key.replace("text_line_", ""))
+                idx = line_num - 1
+                if 0 <= idx < len(line_level_results):
+                    line_result = line_level_results[idx]
+                    if hasattr(line_result, "text"):
+                        line_result.text = new_text
+                        line_result.conf = round(avg_conf, 0)
+                        line_result.model = "Bedrock VLM"
+                    elif isinstance(line_result, dict):
+                        line_result["text"] = new_text
+                        line_result["conf"] = round(avg_conf, 0)
+                        line_result["model"] = "Bedrock VLM"
+            except (ValueError, TypeError):
+                pass
+            print(
+                f"  Re-OCR'd line (Textract conf: {line_conf:.0f}) -> '{new_text}' (conf: {avg_conf:.0f}) [Bedrock VLM]"
+            )
+
+    if len(updates) == 0:
+        page_no = page_line_level_ocr_results_with_words.get("page", "?")
+        print(
+            f"  Hybrid Textract + Bedrock VLM: no lines on page {page_no} met the low-confidence criteria (threshold={confidence_threshold:.0f}); no Bedrock VLM inference run for this page."
+        )
+
+    return (
+        page_line_level_ocr_results_with_words,
+        hybrid_vlm_input_tokens,
+        hybrid_vlm_output_tokens,
+        model_choice or "",
+    )
+
+
 def _inference_server_ocr_predict(
     image: Image.Image,
     prompt: str = model_default_prompt,
@@ -1911,6 +2698,7 @@ def _inference_server_ocr_predict(
         image: PIL Image to process
         prompt: Text prompt for the VLM
         max_retries: Maximum number of retry attempts for API calls (default: 5)
+        model_name: Name of the inference-server model to use
 
     Returns:
         Dictionary in PaddleOCR format with 'rec_texts' and 'rec_scores'
@@ -1977,24 +2765,22 @@ def _inference_server_ocr_predict(
                         else None
                     )
 
-                extracted_text = _call_inference_server_vlm_api(
-                    image=image,
-                    prompt=prompt,
-                    model_name=final_model_name,
-                    max_new_tokens=HYBRID_OCR_MAX_NEW_TOKENS,
-                    temperature=model_default_temperature,
-                    top_p=model_default_top_p,
-                    top_k=model_default_top_k,
-                    repetition_penalty=model_default_repetition_penalty,
-                    seed=(
-                        int(model_default_seed)
-                        if model_default_seed is not None
-                        else None
-                    ),
-                    do_sample=model_default_do_sample,
-                    min_p=model_default_min_p,
-                    presence_penalty=model_default_presence_penalty,
-                    use_llama_swap=USE_LLAMA_SWAP,
+                extracted_text, _vlm_input_tokens, _vlm_output_tokens = (
+                    _call_inference_server_vlm_api(
+                        image=image,
+                        prompt=prompt,
+                        model_name=final_model_name,
+                        max_new_tokens=HYBRID_OCR_MAX_NEW_TOKENS,
+                        temperature=None,
+                        top_p=None,
+                        top_k=None,
+                        repetition_penalty=None,
+                        seed=None,
+                        do_sample=model_default_do_sample,
+                        min_p=None,
+                        presence_penalty=None,
+                        use_llama_swap=USE_LLAMA_SWAP,
+                    )
                 )
                 # If we get here, the API call succeeded
                 break
@@ -2017,25 +2803,41 @@ def _inference_server_ocr_predict(
             return {"rec_texts": [], "rec_scores": []}
 
         if extracted_text.strip():
-            # Clean the text
-            cleaned_text = re.sub(r"[\r\n]+", " ", extracted_text)
-            cleaned_text = cleaned_text.strip()
+            # Try to parse VLM/LLM response for {"text": "...", "confidence": ...} or "conf"
+            # If multiple dicts (e.g. one per word), combine text and average confidence
+            parsed = _extract_and_combine_text_dicts_from_vlm_response(extracted_text)
+            if parsed is not None and isinstance(parsed.get("text"), str):
+                text_content = parsed.get("text")
+                # Prefer "confidence", fallback to "conf" (VLM may use either)
+                confidence = parsed.get("confidence", parsed.get("conf"))
+                try:
+                    score = float(confidence) if confidence is not None else 1.0
+                    # Normalise: if > 1 assume percentage (0–100), else 0–1
+                    if score > 1.0:
+                        score = score / 100.0
+                    score = max(0.0, min(1.0, score))
+                except (TypeError, ValueError):
+                    score = 1.0
+                cleaned_text = re.sub(r"[\r\n]+", " ", text_content).strip()
+            else:
+                # No parseable dict: use raw text and default confidence
+                cleaned_text = re.sub(r"[\r\n]+", " ", extracted_text).strip()
+                score = 1.0
 
             # Split into words for compatibility with PaddleOCR format
             words = cleaned_text.split()
 
-            # If text has more than 30 words, assume something went wrong and skip it
-            if len(words) > 30:
+            # If text has more than HYBRID_OCR_MAX_NEW_TOKENS words, assume something went wrong and skip it
+            if len(words) > HYBRID_OCR_MAX_NEW_TOKENS:
                 print(
-                    f"Inference-server OCR warning: Extracted text has {len(words)} words, which exceeds the 30 word limit. Skipping."
+                    f"Inference-server OCR warning: Extracted text has {len(words)} words, which exceeds the {HYBRID_OCR_MAX_NEW_TOKENS} word limit. Skipping."
                 )
                 return {"rec_texts": [], "rec_scores": []}
 
-            # Create PaddleOCR-compatible result
+            # Create PaddleOCR-compatible result; use VLM/LLM confidence when available
             result = {
                 "rec_texts": words,
-                "rec_scores": [1.0]
-                * len(words),  # High confidence for inference-server results
+                "rec_scores": [score] * len(words),
             }
 
             return result
@@ -2059,7 +2861,8 @@ def _bedrock_vlm_ocr_predict(
     prompt: str = model_default_prompt,
     model_choice: str = None,
     bedrock_runtime=None,
-    max_retries: int = 5,
+    max_retries: int = 10,
+    return_prompt_and_response: bool = False,
 ) -> Dict[str, Any]:
     """
     Bedrock VLM OCR prediction function that mimics PaddleOCR's interface.
@@ -2070,15 +2873,30 @@ def _bedrock_vlm_ocr_predict(
         model_choice: Bedrock model ID
         bedrock_runtime: boto3 Bedrock runtime client
         max_retries: Maximum number of retry attempts for API calls (default: 5)
+        return_prompt_and_response: If True, add "prompt" and "raw_response" to the
+            returned dict for logging (raw_response is the raw API text before parsing).
 
     Returns:
         Dictionary in PaddleOCR format with 'rec_texts' and 'rec_scores'
+        (and optionally 'prompt', 'raw_response' when return_prompt_and_response is True).
     """
+    extracted_text = None
+    vlm_input_tokens_used = 0
+    vlm_output_tokens_used = 0
+
+    def _add_prompt_response(d: Dict[str, Any]) -> Dict[str, Any]:
+        if return_prompt_and_response:
+            d["prompt"] = prompt
+            d["raw_response"] = extracted_text
+        d["vlm_input_tokens"] = vlm_input_tokens_used
+        d["vlm_output_tokens"] = vlm_output_tokens_used
+        return d
+
     try:
         # Validate image exists and is not None
         if image is None:
             print("Bedrock VLM OCR error: Image is None")
-            return {"rec_texts": [], "rec_scores": []}
+            return _add_prompt_response({"rec_texts": [], "rec_scores": []})
 
         # Validate image has valid size (at least 10x10 pixels)
         try:
@@ -2087,10 +2905,10 @@ def _bedrock_vlm_ocr_predict(
                 print(
                     f"Bedrock VLM OCR error: Image is too small ({width}x{height} pixels). Minimum size is 10x10."
                 )
-                return {"rec_texts": [], "rec_scores": []}
+                return _add_prompt_response({"rec_texts": [], "rec_scores": []})
         except Exception as size_error:
             print(f"Bedrock VLM OCR error: Could not get image size: {size_error}")
-            return {"rec_texts": [], "rec_scores": []}
+            return _add_prompt_response({"rec_texts": [], "rec_scores": []})
 
         # Ensure image is in RGB mode (convert if needed)
         try:
@@ -2101,7 +2919,7 @@ def _bedrock_vlm_ocr_predict(
             print(
                 f"Bedrock VLM OCR error: Could not convert image to RGB: {convert_error}"
             )
-            return {"rec_texts": [], "rec_scores": []}
+            return _add_prompt_response({"rec_texts": [], "rec_scores": []})
 
         # Check and resize image if it exceeds maximum size or DPI limits
         # Skip resizing for AWS Bedrock VLM OCR
@@ -2116,22 +2934,24 @@ def _bedrock_vlm_ocr_predict(
             print(
                 f"Bedrock VLM OCR error: Could not prepare image for VLM: {prep_error}"
             )
-            return {"rec_texts": [], "rec_scores": []}
+            return _add_prompt_response({"rec_texts": [], "rec_scores": []})
 
         # Use the Bedrock API to extract text with retry logic
-        extracted_text = None
-
         for attempt in range(1, max_retries + 1):
             try:
-                extracted_text = _call_bedrock_vlm_api(
-                    image=image,
-                    prompt=prompt,
-                    model_choice=model_choice,
-                    bedrock_runtime=bedrock_runtime,
-                    max_new_tokens=HYBRID_OCR_MAX_NEW_TOKENS,
-                    temperature=model_default_temperature,
-                    top_p=model_default_top_p,
+                extracted_text, _vlm_input_tokens, _vlm_output_tokens = (
+                    _call_bedrock_vlm_api(
+                        image=image,
+                        prompt=prompt,
+                        model_choice=model_choice,
+                        bedrock_runtime=bedrock_runtime,
+                        max_new_tokens=MAX_NEW_TOKENS,
+                        temperature=model_default_temperature,
+                        top_p=model_default_top_p,
+                    )
                 )
+                vlm_input_tokens_used = _vlm_input_tokens
+                vlm_output_tokens_used = _vlm_output_tokens
                 # If we get here, the API call succeeded
                 break
             except Exception as api_error:
@@ -2145,42 +2965,140 @@ def _bedrock_vlm_ocr_predict(
 
         # Check if extracted_text is None or empty
         if extracted_text is None:
-            return {"rec_texts": [], "rec_scores": []}
+            return _add_prompt_response({"rec_texts": [], "rec_scores": []})
 
         if not isinstance(extracted_text, str):
-            return {"rec_texts": [], "rec_scores": []}
+            return _add_prompt_response({"rec_texts": [], "rec_scores": []})
 
         if extracted_text.strip():
-            # Clean the text
+            # If Bedrock returns multiple dicts (e.g. one per word) {"text": "...", "confidence": ...}, combine and average (same as local VLM / inference server)
+            parsed = _extract_and_combine_text_dicts_from_vlm_response(extracted_text)
+            if parsed is not None and isinstance(parsed.get("text"), str):
+                text_content = parsed.get("text", "").strip()
+                conf = parsed.get("confidence", parsed.get("conf"))
+                try:
+                    score = float(conf) if conf is not None else 1.0
+                    if score > 1.0:
+                        score = score / 100.0
+                    score = max(0.0, min(1.0, score))
+                except (TypeError, ValueError):
+                    score = 1.0
+                if text_content:
+                    words = re.sub(r"[\r\n]+", " ", text_content).strip().split()
+                    if len(words) <= HYBRID_OCR_MAX_NEW_TOKENS:
+                        return _add_prompt_response(
+                            {
+                                "rec_texts": words,
+                                "rec_scores": [score] * len(words),
+                            }
+                        )
+                # Reject parsed result with empty text or zero confidence (e.g. {"text": "", "conf": 0.0})
+                if not text_content or score <= 0.0:
+                    return _add_prompt_response({"rec_texts": [], "rec_scores": []})
+
+            # Try to parse VLM JSON response [{'bbox': [...], 'text': '...', 'conf': 0-1}, ...]
+            lines_data = None
+            text = extracted_text.strip()
+            try:
+                text = _fix_malformed_bbox_in_json_string(text)
+            except Exception:
+                pass
+
+            try:
+                lines_data = json.loads(text)
+            except json.JSONDecodeError:
+                pass
+
+            if lines_data is None:
+                json_match = re.search(r"```(?:json)?\s*(\[.*?\])", text, re.DOTALL)
+                if json_match:
+                    try:
+                        lines_data = json.loads(json_match.group(1))
+                    except json.JSONDecodeError:
+                        pass
+
+            if lines_data is None and "[" in text:
+                start_idx = text.find("[")
+                bracket_count = 0
+                end_idx = start_idx
+                for i in range(start_idx, len(text)):
+                    if text[i] == "[":
+                        bracket_count += 1
+                    elif text[i] == "]":
+                        bracket_count -= 1
+                        if bracket_count == 0:
+                            end_idx = i
+                            break
+                if end_idx > start_idx:
+                    try:
+                        lines_data = json.loads(text[start_idx : end_idx + 1])
+                    except json.JSONDecodeError:
+                        pass
+
+            if lines_data is None:
+                try:
+                    python_data = ast.literal_eval(text)
+                    if isinstance(python_data, list):
+                        lines_data = python_data
+                except Exception:
+                    pass
+
+            if isinstance(lines_data, list) and len(lines_data) > 0:
+                rec_texts = []
+                rec_scores = []
+                for line_item in lines_data:
+                    if not isinstance(line_item, dict):
+                        continue
+                    line_text = line_item.get("text_content") or line_item.get(
+                        "text", ""
+                    )
+                    if line_text is None:
+                        line_text = ""
+                    line_text = str(line_text).strip()
+                    if not line_text:
+                        continue
+                    conf = line_item.get("confidence", line_item.get("conf"))
+                    try:
+                        score = float(conf) if conf is not None else 1.0
+                        if score > 1.0:
+                            score = score / 100.0
+                        score = max(0.0, min(1.0, score))
+                    except (TypeError, ValueError):
+                        score = 1.0
+                    rec_texts.append(line_text)
+                    rec_scores.append(score)
+                if rec_texts:
+                    return _add_prompt_response(
+                        {"rec_texts": rec_texts, "rec_scores": rec_scores}
+                    )
+
+            # Fallback: treat response as plain text (e.g. different prompt)
             cleaned_text = re.sub(r"[\r\n]+", " ", extracted_text)
             cleaned_text = cleaned_text.strip()
 
-            # Split into words for compatibility with PaddleOCR format
             words = cleaned_text.split()
 
-            # If text has more than 30 words, assume something went wrong and skip it
-            if len(words) > 30:
+            if len(words) > HYBRID_OCR_MAX_NEW_TOKENS:
                 print(
-                    f"Bedrock VLM OCR warning: Extracted text has {len(words)} words, which exceeds the 30 word limit. Skipping."
+                    f"Bedrock VLM OCR warning: Extracted text has {len(words)} words, which exceeds the {HYBRID_OCR_MAX_NEW_TOKENS} word limit. Skipping."
                 )
-                return {"rec_texts": [], "rec_scores": []}
+                return _add_prompt_response({"rec_texts": [], "rec_scores": []})
 
-            # Create PaddleOCR-compatible result
             result = {
                 "rec_texts": words,
-                "rec_scores": [1.0] * len(words),  # High confidence for Bedrock results
+                "rec_scores": [1.0] * len(words),
             }
 
-            return result
+            return _add_prompt_response(result)
         else:
-            return {"rec_texts": [], "rec_scores": []}
+            return _add_prompt_response({"rec_texts": [], "rec_scores": []})
 
     except Exception as e:
         print(f"Bedrock VLM OCR error: {e}")
         import traceback
 
         print(f"Bedrock VLM OCR error traceback: {traceback.format_exc()}")
-        return {"rec_texts": [], "rec_scores": []}
+        return _add_prompt_response({"rec_texts": [], "rec_scores": []})
 
 
 def _gemini_vlm_ocr_predict(
@@ -2255,7 +3173,7 @@ def _gemini_vlm_ocr_predict(
                     client=client,
                     config=config,
                     model_choice=model_choice,
-                    max_new_tokens=HYBRID_OCR_MAX_NEW_TOKENS,
+                    max_new_tokens=MAX_NEW_TOKENS,
                     temperature=model_default_temperature,
                 )
                 # If we get here, the API call succeeded
@@ -2277,24 +3195,95 @@ def _gemini_vlm_ocr_predict(
             return {"rec_texts": [], "rec_scores": []}
 
         if extracted_text.strip():
-            # Clean the text
+            # Try to parse VLM JSON response [{'bbox': [...], 'text': '...', 'conf': 0-1}, ...]
+            lines_data = None
+            text = extracted_text.strip()
+            try:
+                text = _fix_malformed_bbox_in_json_string(text)
+            except Exception:
+                pass
+
+            try:
+                lines_data = json.loads(text)
+            except json.JSONDecodeError:
+                pass
+
+            if lines_data is None:
+                json_match = re.search(r"```(?:json)?\s*(\[.*?\])", text, re.DOTALL)
+                if json_match:
+                    try:
+                        lines_data = json.loads(json_match.group(1))
+                    except json.JSONDecodeError:
+                        pass
+
+            if lines_data is None and "[" in text:
+                start_idx = text.find("[")
+                bracket_count = 0
+                end_idx = start_idx
+                for i in range(start_idx, len(text)):
+                    if text[i] == "[":
+                        bracket_count += 1
+                    elif text[i] == "]":
+                        bracket_count -= 1
+                        if bracket_count == 0:
+                            end_idx = i
+                            break
+                if end_idx > start_idx:
+                    try:
+                        lines_data = json.loads(text[start_idx : end_idx + 1])
+                    except json.JSONDecodeError:
+                        pass
+
+            if lines_data is None:
+                try:
+                    python_data = ast.literal_eval(text)
+                    if isinstance(python_data, list):
+                        lines_data = python_data
+                except Exception:
+                    pass
+
+            if isinstance(lines_data, list) and len(lines_data) > 0:
+                rec_texts = []
+                rec_scores = []
+                for line_item in lines_data:
+                    if not isinstance(line_item, dict):
+                        continue
+                    line_text = line_item.get("text_content") or line_item.get(
+                        "text", ""
+                    )
+                    if line_text is None:
+                        line_text = ""
+                    line_text = str(line_text).strip()
+                    if not line_text:
+                        continue
+                    conf = line_item.get("confidence", line_item.get("conf"))
+                    try:
+                        score = float(conf) if conf is not None else 1.0
+                        if score > 1.0:
+                            score = score / 100.0
+                        score = max(0.0, min(1.0, score))
+                    except (TypeError, ValueError):
+                        score = 1.0
+                    rec_texts.append(line_text)
+                    rec_scores.append(score)
+                if rec_texts:
+                    return {"rec_texts": rec_texts, "rec_scores": rec_scores}
+
+            # Fallback: treat response as plain text (e.g. different prompt)
             cleaned_text = re.sub(r"[\r\n]+", " ", extracted_text)
             cleaned_text = cleaned_text.strip()
 
-            # Split into words for compatibility with PaddleOCR format
             words = cleaned_text.split()
 
-            # If text has more than 30 words, assume something went wrong and skip it
-            if len(words) > 30:
+            if len(words) > HYBRID_OCR_MAX_NEW_TOKENS:
                 print(
-                    f"Gemini VLM OCR warning: Extracted text has {len(words)} words, which exceeds the 30 word limit. Skipping."
+                    f"Gemini VLM OCR warning: Extracted text has {len(words)} words, which exceeds the {HYBRID_OCR_MAX_NEW_TOKENS} word limit. Skipping."
                 )
                 return {"rec_texts": [], "rec_scores": []}
 
-            # Create PaddleOCR-compatible result
             result = {
                 "rec_texts": words,
-                "rec_scores": [1.0] * len(words),  # High confidence for Gemini results
+                "rec_scores": [1.0] * len(words),
             }
 
             return result
@@ -2378,7 +3367,7 @@ def _azure_openai_vlm_ocr_predict(
                     prompt=prompt,
                     client=client,
                     model_choice=model_choice,
-                    max_new_tokens=HYBRID_OCR_MAX_NEW_TOKENS,
+                    max_new_tokens=MAX_NEW_TOKENS,
                     temperature=model_default_temperature,
                 )
                 # If we get here, the API call succeeded
@@ -2400,25 +3389,95 @@ def _azure_openai_vlm_ocr_predict(
             return {"rec_texts": [], "rec_scores": []}
 
         if extracted_text.strip():
-            # Clean the text
+            # Try to parse VLM JSON response [{'bbox': [...], 'text': '...', 'conf': 0-1}, ...]
+            lines_data = None
+            text = extracted_text.strip()
+            try:
+                text = _fix_malformed_bbox_in_json_string(text)
+            except Exception:
+                pass
+
+            try:
+                lines_data = json.loads(text)
+            except json.JSONDecodeError:
+                pass
+
+            if lines_data is None:
+                json_match = re.search(r"```(?:json)?\s*(\[.*?\])", text, re.DOTALL)
+                if json_match:
+                    try:
+                        lines_data = json.loads(json_match.group(1))
+                    except json.JSONDecodeError:
+                        pass
+
+            if lines_data is None and "[" in text:
+                start_idx = text.find("[")
+                bracket_count = 0
+                end_idx = start_idx
+                for i in range(start_idx, len(text)):
+                    if text[i] == "[":
+                        bracket_count += 1
+                    elif text[i] == "]":
+                        bracket_count -= 1
+                        if bracket_count == 0:
+                            end_idx = i
+                            break
+                if end_idx > start_idx:
+                    try:
+                        lines_data = json.loads(text[start_idx : end_idx + 1])
+                    except json.JSONDecodeError:
+                        pass
+
+            if lines_data is None:
+                try:
+                    python_data = ast.literal_eval(text)
+                    if isinstance(python_data, list):
+                        lines_data = python_data
+                except Exception:
+                    pass
+
+            if isinstance(lines_data, list) and len(lines_data) > 0:
+                rec_texts = []
+                rec_scores = []
+                for line_item in lines_data:
+                    if not isinstance(line_item, dict):
+                        continue
+                    line_text = line_item.get("text_content") or line_item.get(
+                        "text", ""
+                    )
+                    if line_text is None:
+                        line_text = ""
+                    line_text = str(line_text).strip()
+                    if not line_text:
+                        continue
+                    conf = line_item.get("confidence", line_item.get("conf"))
+                    try:
+                        score = float(conf) if conf is not None else 1.0
+                        if score > 1.0:
+                            score = score / 100.0
+                        score = max(0.0, min(1.0, score))
+                    except (TypeError, ValueError):
+                        score = 1.0
+                    rec_texts.append(line_text)
+                    rec_scores.append(score)
+                if rec_texts:
+                    return {"rec_texts": rec_texts, "rec_scores": rec_scores}
+
+            # Fallback: treat response as plain text (e.g. different prompt)
             cleaned_text = re.sub(r"[\r\n]+", " ", extracted_text)
             cleaned_text = cleaned_text.strip()
 
-            # Split into words for compatibility with PaddleOCR format
             words = cleaned_text.split()
 
-            # If text has more than 30 words, assume something went wrong and skip it
-            if len(words) > 30:
+            if len(words) > HYBRID_OCR_MAX_NEW_TOKENS:
                 print(
-                    f"Azure/OpenAI VLM OCR warning: Extracted text has {len(words)} words, which exceeds the 30 word limit. Skipping."
+                    f"Azure/OpenAI VLM OCR warning: Extracted text has {len(words)} words, which exceeds the {HYBRID_OCR_MAX_NEW_TOKENS} word limit. Skipping."
                 )
                 return {"rec_texts": [], "rec_scores": []}
 
-            # Create PaddleOCR-compatible result
             result = {
                 "rec_texts": words,
-                "rec_scores": [1.0]
-                * len(words),  # High confidence for Azure/OpenAI results
+                "rec_scores": [1.0] * len(words),
             }
 
             return result
@@ -2457,7 +3516,6 @@ def plot_text_bounding_boxes(
     # Load the image
     img = image
     width, height = img.size
-    print(img.size)
     # Create a drawing object
     draw = ImageDraw.Draw(img)
 
@@ -2715,7 +3773,7 @@ def _vlm_page_ocr_predict(
         image: PIL Image to process (full page)
         image_name: Name of the image for debugging
         normalised_coords_range: If set, bounding boxes are assumed to be in normalized coordinates
-            from 0 to this value (e.g., 999, default for Qwen3-VL). Coordinates will be rescaled to match the processed image size. If None, coordinates are assumed to be in absolute pixel coordinates.
+            from 0 to this value (e.g., 999 as used in the full-page VLM prompt). Coordinates will be rescaled to match the processed image size. If None, coordinates are assumed to be in absolute pixel coordinates.
         output_folder: The folder where output images will be saved
     Returns:
         Dictionary with 'text', 'left', 'top', 'width', 'height', 'conf', 'model' keys
@@ -2789,6 +3847,10 @@ def _vlm_page_ocr_predict(
         try:
             original_width, original_height = image.size
             processed_image = _prepare_image_for_vlm(image)
+            # Pad so aspect ratio <= 10:1 (same as Bedrock/inference-server) for hybrid/long pages
+            processed_image = _pad_image_for_vlm_aspect_ratio(
+                processed_image, max_aspect=10.0
+            )
             processed_width, processed_height = processed_image.size
 
             # Use float division to avoid rounding errors
@@ -3142,9 +4204,8 @@ def _vlm_page_ocr_predict(
                 or line_item.get("bbox", [])
                 or line_item.get("bb", [])
             )
-            confidence = line_item.get(
-                "confidence", 100
-            )  # Default to 100 if not provided
+            # Accept "confidence" or fallback to "conf" (VLM may use either); default 100 if neither provided
+            confidence = line_item.get("confidence", line_item.get("conf", 100))
 
             # Attempt to fix malformed bounding boxes (e.g., string instead of array)
             fixed_bbox = _fix_malformed_bbox(bbox)
@@ -3214,9 +4275,11 @@ def _vlm_page_ocr_predict(
             width = int(round(x2 - x1))
             height = int(round(y2 - y1))
 
-            # Ensure confidence is in valid range (0-100)
+            # Ensure confidence is in valid range (0-100). VLM may return 0-1; scale to 0-100.
             try:
                 confidence = float(confidence)
+                if 0 <= confidence <= 1:
+                    confidence = confidence * 100
                 confidence = max(0, min(100, confidence))  # Clamp to 0-100
             except (ValueError, TypeError):
                 confidence = 100  # Default if invalid
@@ -3277,7 +4340,7 @@ def _inference_server_page_ocr_predict(
         image: PIL Image to process (full page)
         image_name: Name of the image for debugging
         normalised_coords_range: If set, bounding boxes are assumed to be in normalized coordinates
-            from 0 to this value (e.g., 999, default for Qwen3-VL). Coordinates will be rescaled to match the processed image size. If None, coordinates are assumed to be in absolute pixel coordinates.
+            from 0 to this value (e.g., 999 as used in the full-page VLM prompt). Coordinates will be rescaled to match the processed image size. If None, coordinates are assumed to be in absolute pixel coordinates.
         output_folder: The folder where output images will be saved
     Returns:
         Dictionary with 'text', 'left', 'top', 'width', 'height', 'conf', 'model' keys
@@ -3461,14 +4524,14 @@ def _inference_server_page_ocr_predict(
                 prompt=prompt,
                 model_name=final_model_name,
                 max_new_tokens=model_default_max_new_tokens,
-                temperature=model_default_temperature,
-                top_p=model_default_top_p,
-                top_k=model_default_top_k,
-                repetition_penalty=model_default_repetition_penalty,
-                seed=model_default_seed,
+                temperature=None,
+                top_p=None,
+                top_k=None,
+                repetition_penalty=None,
+                seed=None,
                 do_sample=model_default_do_sample,
-                min_p=model_default_min_p,
-                presence_penalty=model_default_presence_penalty,
+                min_p=None,
+                presence_penalty=None,
                 use_llama_swap=USE_LLAMA_SWAP,
             )
         )
@@ -3719,9 +4782,8 @@ def _inference_server_page_ocr_predict(
                 or line_item.get("bbox", [])
                 or line_item.get("bb", [])
             )
-            confidence = line_item.get(
-                "confidence", 100
-            )  # Default to 100 if not provided
+            # Accept "confidence" or fallback to "conf" (VLM may use either); default 100 if neither provided
+            confidence = line_item.get("confidence", line_item.get("conf", 100))
 
             # Attempt to fix malformed bounding boxes (e.g., string instead of array)
             fixed_bbox = _fix_malformed_bbox(bbox)
@@ -3762,11 +4824,8 @@ def _inference_server_page_ocr_predict(
                 continue
 
             # If coordinates are normalized (0 to normalised_coords_range), rescale directly to processed image dimensions
-            # This matches the Qwen 3-VL approach: direct normalization to image size using /999 * dimension
             if normalised_coords_range is not None and normalised_coords_range > 0:
-                # Direct normalization: match ocr.ipynb approach exactly
-                # Formula: (coord / normalised_coords_range) * image_dimension
-                # Note: Qwen 3-VL uses 999, but we allow configurable range
+                # Formula: (coord / normalised_coords_range) * image_dimension (e.g. 999 from full-page VLM prompt)
                 x1 = (x1 / float(normalised_coords_range)) * processed_width
                 y1 = (y1 / float(normalised_coords_range)) * processed_height
                 x2 = (x2 / float(normalised_coords_range)) * processed_width
@@ -3789,9 +4848,11 @@ def _inference_server_page_ocr_predict(
             width = int(round(x2 - x1))
             height = int(round(y2 - y1))
 
-            # Ensure confidence is in valid range (0-100)
+            # Ensure confidence is in valid range (0-100). VLM may return 0-1; scale to 0-100.
             try:
                 confidence = float(confidence)
+                if 0 <= confidence <= 1:
+                    confidence = confidence * 100
                 confidence = max(0, min(100, confidence))  # Clamp to 0-100
             except (ValueError, TypeError):
                 confidence = 50  # Default if invalid
@@ -3802,7 +4863,7 @@ def _inference_server_page_ocr_predict(
             result["width"].append(width)
             result["height"].append(height)
             result["conf"].append(int(round(confidence)))
-            result["model"].append("Inference server")
+            result["model"].append("Inference Server")
 
         # Get model name for tracking
         vlm_model_name = final_model_name or "Inference Server"
@@ -3970,7 +5031,8 @@ def _parse_vlm_page_ocr_response(
             or line_item.get("bbox", [])
             or line_item.get("bb", [])
         )
-        confidence = line_item.get("confidence", 100)
+        # Accept "confidence" or fallback to "conf" (VLM may use either); default 100 if neither provided
+        confidence = line_item.get("confidence", line_item.get("conf", 100))
 
         fixed_bbox = _fix_malformed_bbox(bbox)
         if fixed_bbox is not None:
@@ -4019,6 +5081,8 @@ def _parse_vlm_page_ocr_response(
 
         try:
             confidence = float(confidence)
+            if 0 <= confidence <= 1:
+                confidence = confidence * 100
             confidence = max(0, min(100, confidence))
         except (ValueError, TypeError):
             confidence = 100
@@ -4052,7 +5116,7 @@ def _bedrock_page_ocr_predict(
         image: PIL Image to process (full page)
         image_name: Name of the image for debugging
         normalised_coords_range: If set, bounding boxes are assumed to be in normalized coordinates
-            from 0 to this value (e.g., 999 for Qwen3-VL models). Coordinates will be rescaled to match the processed image size. If None, coordinates are assumed to be in absolute pixel coordinates.
+            from 0 to this value (e.g., 999 as used in the full-page VLM prompt). Coordinates will be rescaled to match the processed image size. If None, coordinates are assumed to be in absolute pixel coordinates.
         output_folder: The folder where output images will be saved
         detect_people_only: If True, only detect people in images
         detect_signatures_only: If True, only detect signatures in images
@@ -4120,28 +5184,52 @@ def _bedrock_page_ocr_predict(
                 "model": [],
             }
 
+        # Resize image to respect VLM_MAX_IMAGE_SIZE and VLM_MIN_IMAGE_SIZE (aspect ratio
+        # preserved). Bounding box coordinates are scaled back to the original image space
+        # via scale_x/scale_y so they match the image used in choose_and_run_redactor /
+        # redact_image_pdf (e.g. image_annotator).
         scale_x = 1.0
         scale_y = 1.0
         try:
+            if image.mode != "RGB":
+                image = image.convert("RGB")
             original_width, original_height = image.size
-            # Skip resizing for AWS Bedrock VLM OCR
-            from tools.config import BEDROCK_VLM_TEXT_EXTRACT_OPTION
+            total_pixels = original_width * original_height
+            size_scale = 1.0
 
-            processed_image = _prepare_image_for_vlm(
-                image, ocr_method=BEDROCK_VLM_TEXT_EXTRACT_OPTION
-            )
-            processed_width, processed_height = processed_image.size
+            if total_pixels > VLM_MAX_IMAGE_SIZE:
+                size_scale = (VLM_MAX_IMAGE_SIZE / total_pixels) ** 0.5
+                # print(
+                #     f"Bedrock page OCR: Image has {total_pixels:,} pixels ({original_width}x{original_height}), "
+                #     f"exceeds VLM_MAX_IMAGE_SIZE {VLM_MAX_IMAGE_SIZE:,}. Resizing by factor {size_scale:.3f}"
+                # )
+            elif total_pixels < VLM_MIN_IMAGE_SIZE and VLM_MIN_IMAGE_SIZE > 0:
+                size_scale = (VLM_MIN_IMAGE_SIZE / total_pixels) ** 0.5
+                # print(
+                #     f"Bedrock page OCR: Image has {total_pixels:,} pixels ({original_width}x{original_height}), "
+                #     f"below VLM_MIN_IMAGE_SIZE {VLM_MIN_IMAGE_SIZE:,}. Resizing by factor {size_scale:.3f}"
+                # )
 
-            scale_x = (
-                float(original_width) / float(processed_width)
-                if processed_width > 0
-                else 1.0
-            )
-            scale_y = (
-                float(original_height) / float(processed_height)
-                if processed_height > 0
-                else 1.0
-            )
+            if size_scale != 1.0:
+                new_width = max(1, int(original_width * size_scale))
+                new_height = max(1, int(original_height * size_scale))
+                processed_image = image.resize(
+                    (new_width, new_height), Image.Resampling.LANCZOS
+                )
+                processed_width, processed_height = new_width, new_height
+                scale_x = (
+                    float(original_width) / float(processed_width)
+                    if processed_width > 0
+                    else 1.0
+                )
+                scale_y = (
+                    float(original_height) / float(processed_height)
+                    if processed_height > 0
+                    else 1.0
+                )
+            else:
+                processed_image = image
+                processed_width, processed_height = original_width, original_height
         except Exception as prep_error:
             print(f"Bedrock page OCR error: Could not prepare image: {prep_error}")
             return {
@@ -4243,8 +5331,8 @@ def _bedrock_page_ocr_predict(
             top_p=model_default_top_p,
         )
 
-        # Save prompt and response to file
-        if extracted_text and isinstance(extracted_text, str) and output_folder:
+        # Save prompt and response to file (including when response is empty, e.g. no faces/signatures)
+        if extracted_text is not None and output_folder:
             try:
                 # Extract page number from image_name if present
                 page_number = None
@@ -4267,9 +5355,14 @@ def _bedrock_page_ocr_predict(
                 elif detect_signatures_only:
                     task_suffix = "sig"
 
+                response_str = (
+                    extracted_text
+                    if isinstance(extracted_text, str)
+                    else str(extracted_text or "")
+                )
                 saved_file = save_vlm_prompt_response(
                     prompt=prompt,
-                    response_text=extracted_text,
+                    response_text=response_str,
                     output_folder=output_folder,
                     model_choice=model_choice or "unknown",
                     image_name=image_name,
@@ -4279,6 +5372,8 @@ def _bedrock_page_ocr_predict(
                     top_p=model_default_top_p,
                     model_type="Bedrock",
                     task_suffix=task_suffix,
+                    input_tokens=vlm_input_tokens,
+                    output_tokens=vlm_output_tokens,
                 )
                 print(f"Saved Bedrock VLM prompt/response to: {saved_file}")
             except Exception as save_error:
@@ -4503,8 +5598,8 @@ def _gemini_page_ocr_predict(
             temperature=model_default_temperature,
         )
 
-        # Save prompt and response to file
-        if extracted_text and isinstance(extracted_text, str) and output_folder:
+        # Save prompt and response to file (including when response is empty, e.g. no faces/signatures)
+        if extracted_text is not None and output_folder:
             try:
                 # Extract page number from image_name if present
                 page_number = None
@@ -4527,9 +5622,14 @@ def _gemini_page_ocr_predict(
                 elif detect_signatures_only:
                     task_suffix = "sig"
 
+                response_str = (
+                    extracted_text
+                    if isinstance(extracted_text, str)
+                    else str(extracted_text or "")
+                )
                 saved_file = save_vlm_prompt_response(
                     prompt=prompt,
-                    response_text=extracted_text,
+                    response_text=response_str,
                     output_folder=output_folder,
                     model_choice=model_choice or "unknown",
                     image_name=image_name,
@@ -4538,6 +5638,8 @@ def _gemini_page_ocr_predict(
                     max_new_tokens=model_default_max_new_tokens,
                     model_type="Gemini",
                     task_suffix=task_suffix,
+                    input_tokens=vlm_input_tokens,
+                    output_tokens=vlm_output_tokens,
                 )
                 print(f"Saved Gemini VLM prompt/response to: {saved_file}")
             except Exception as save_error:
@@ -4740,8 +5842,8 @@ def _azure_openai_page_ocr_predict(
             )
         )
 
-        # Save prompt and response to file
-        if extracted_text and isinstance(extracted_text, str) and output_folder:
+        # Save prompt and response to file (including when response is empty, e.g. no faces/signatures)
+        if extracted_text is not None and output_folder:
             try:
                 # Extract page number from image_name if present
                 page_number = None
@@ -4764,9 +5866,14 @@ def _azure_openai_page_ocr_predict(
                 elif detect_signatures_only:
                     task_suffix = "sig"
 
+                response_str = (
+                    extracted_text
+                    if isinstance(extracted_text, str)
+                    else str(extracted_text or "")
+                )
                 saved_file = save_vlm_prompt_response(
                     prompt=prompt,
-                    response_text=extracted_text,
+                    response_text=response_str,
                     output_folder=output_folder,
                     model_choice=model_choice or "unknown",
                     image_name=image_name,
@@ -4775,6 +5882,8 @@ def _azure_openai_page_ocr_predict(
                     max_new_tokens=model_default_max_new_tokens,
                     model_type="Azure/OpenAI",
                     task_suffix=task_suffix,
+                    input_tokens=vlm_input_tokens,
+                    output_tokens=vlm_output_tokens,
                 )
                 print(f"Saved Azure/OpenAI VLM prompt/response to: {saved_file}")
             except Exception as save_error:
@@ -5251,9 +6360,9 @@ class CustomImageAnalyzerEngine:
             # Second pass: convert coordinates using relative coordinate approach
             # Use default "Paddle" if rec_models is not available or doesn't match length
             if len(rec_models) != len(rec_texts):
-                print(
-                    f"Warning: rec_models length ({len(rec_models)}) doesn't match rec_texts length ({len(rec_texts)}). Using default 'Paddle' for all."
-                )
+                # print(
+                #     f"Warning: rec_models length ({len(rec_models)}) doesn't match rec_texts length ({len(rec_texts)}). Using default 'Paddle' for all."
+                # )
                 rec_models = ["Paddle"] * len(rec_texts)
                 # Update page_result to keep it consistent
                 page_result["rec_models"] = rec_models
@@ -5340,6 +6449,97 @@ class CustomImageAnalyzerEngine:
 
         return output
 
+    @staticmethod
+    def _process_one_line_to_words(
+        task: Tuple,
+        output_folder: str,
+        image_name: Optional[str],
+    ) -> Tuple[int, Dict[str, List]]:
+        """
+        Process a single line to word-level bounding boxes. Used by
+        _convert_line_to_word_level for parallel execution.
+
+        Args:
+            task: (line_index, line_image, line_text, line_conf, line_model,
+                  line_left, line_top, line_width, line_height)
+            output_folder: Passed to AdaptiveSegmenter
+            image_name: Passed to segmenter.segment()
+        Returns:
+            (line_index, word_dict) with word_dict having keys text, left, top,
+            width, height, conf, model (all lists).
+        """
+        (
+            i,
+            line_image,
+            line_text,
+            line_conf,
+            line_model,
+            line_left,
+            line_top,
+            line_width,
+            line_height,
+        ) = task
+        word_dict = {
+            "text": [],
+            "left": [],
+            "top": [],
+            "width": [],
+            "height": [],
+            "conf": [],
+            "model": [],
+        }
+        segmenter = AdaptiveSegmenter(output_folder=output_folder)
+        single_line_data = {
+            "text": [line_text],
+            "left": [0],
+            "top": [0],
+            "width": [line_width],
+            "height": [line_height],
+            "conf": [line_conf],
+            "line": [i],
+        }
+        word_output, _ = segmenter.segment(
+            single_line_data, line_image, image_name=image_name
+        )
+        if not word_output or not word_output.get("text"):
+            words = line_text.split()
+            if words:
+                num_chars = len("".join(words))
+                num_spaces = len(words) - 1
+                if num_chars > 0:
+                    char_space_ratio = 2.0
+                    estimated_space_width = (
+                        line_width / (num_chars * char_space_ratio + num_spaces)
+                        if (num_chars * char_space_ratio + num_spaces) > 0
+                        else line_width / num_chars
+                    )
+                    avg_char_width = estimated_space_width * char_space_ratio
+                    current_left = 0
+                    for word in words:
+                        word_width = len(word) * avg_char_width
+                        clamped_left = max(0, min(current_left, line_width))
+                        clamped_width = max(
+                            0, min(word_width, line_width - clamped_left)
+                        )
+                        word_dict["text"].append(word)
+                        word_dict["left"].append(line_left + clamped_left)
+                        word_dict["top"].append(line_top)
+                        word_dict["width"].append(clamped_width)
+                        word_dict["height"].append(line_height)
+                        word_dict["conf"].append(line_conf)
+                        word_dict["model"].append(line_model)
+                        current_left += word_width + estimated_space_width
+            return (i, word_dict)
+        for j in range(len(word_output["text"])):
+            word_dict["text"].append(word_output["text"][j])
+            word_dict["left"].append(line_left + word_output["left"][j])
+            word_dict["top"].append(line_top + word_output["top"][j])
+            word_dict["width"].append(word_output["width"][j])
+            word_dict["height"].append(word_output["height"][j])
+            word_dict["conf"].append(word_output["conf"][j])
+            word_dict["model"].append(line_model)
+        return (i, word_dict)
+
     def _convert_line_to_word_level(
         self,
         line_data: Dict[str, List],
@@ -5351,6 +6551,7 @@ class CustomImageAnalyzerEngine:
         """
         Converts line-level OCR results to word-level using AdaptiveSegmenter.segment().
         This method processes each line individually using the adaptive segmentation algorithm.
+        Lines are processed in parallel with ThreadPoolExecutor when there is more than one.
 
         Args:
             line_data: Dictionary with keys "text", "left", "top", "width", "height", "conf" (all lists)
@@ -5403,45 +6604,32 @@ class CustomImageAnalyzerEngine:
             print(
                 f"Warning: Image dimension mismatch! Expected {image_width}x{image_height}, but got {actual_width}x{actual_height}"
             )
-            # print(f"Using actual dimensions: {actual_width}x{actual_height}")
-            # Update to use actual dimensions
             image_width = actual_width
             image_height = actual_height
 
-        print("segmenting line-level OCR results to word-level...")
-
-        segmenter = AdaptiveSegmenter(output_folder=self.output_folder)
-
-        # Process each line
+        # Build list of tasks: one per valid line (crop and validate on main thread)
+        tasks = []
         for i in range(len(line_data["text"])):
             line_text = line_data["text"][i]
             line_conf = line_data["conf"][i]
-            # Extract model, defaulting to "Paddle" if not available
             if "model" in line_data and len(line_data["model"]) > i:
                 line_model = line_data["model"][i]
             else:
                 line_model = "Paddle"
 
-            # Get the float values
             f_left = float(line_data["left"][i])
             f_top = float(line_data["top"][i])
             f_width = float(line_data["width"][i])
             f_height = float(line_data["height"][i])
-
-            # A simple heuristic to check if coords are normalized
-            # If any value is > 1.0, assume they are already pixels
             is_normalized = (
                 f_left <= 1.0 and f_top <= 1.0 and f_width <= 1.0 and f_height <= 1.0
             )
-
             if is_normalized:
-                # Convert from normalized (0.0-1.0) to absolute pixels
                 line_left = float(round(f_left * image_width))
                 line_top = float(round(f_top * image_height))
                 line_width = float(round(f_width * image_width))
                 line_height = float(round(f_height * image_height))
             else:
-                # They are already pixels, just convert to int
                 line_left = float(round(f_left))
                 line_top = float(round(f_top))
                 line_width = float(round(f_width))
@@ -5450,120 +6638,61 @@ class CustomImageAnalyzerEngine:
             if not line_text.strip():
                 continue
 
-            # Clamp bounding box to image boundaries
             line_left = int(max(0, min(line_left, image_width - 1)))
             line_top = int(max(0, min(line_top, image_height - 1)))
             line_width = int(max(1, min(line_width, image_width - line_left)))
             line_height = int(max(1, min(line_height, image_height - line_top)))
 
-            # Validate crop coordinates are within bounds
             if line_left >= image_width or line_top >= image_height:
-                # print(f"Warning: Line coordinates out of bounds. Skipping line '{line_text[:50]}...'")
                 continue
-
             if line_left + line_width > image_width:
                 line_width = image_width - line_left
-                # print(f"Warning: Adjusted line_width to {line_width} to fit within image")
-
             if line_top + line_height > image_height:
                 line_height = image_height - line_top
-                # print(f"Warning: Adjusted line_height to {line_height} to fit within image")
-
-            # Ensure we have valid dimensions
             if line_width <= 0 or line_height <= 0:
-                # print(f"Warning: Invalid line dimensions ({line_width}x{line_height}). Skipping line '{line_text[:50]}...'")
                 continue
 
-            # Crop the line image from the full image
             try:
                 line_image = image_np[
                     line_top : line_top + line_height,
                     line_left : line_left + line_width,
-                ]
+                ].copy()
             except IndexError:
-                # print(f"Error cropping line image: {e}")
-                # print(f"Attempted to crop: [{line_top}:{line_top + line_height}, {line_left}:{line_left + line_width}]")
-                # print(f"Image_np shape: {image_np.shape}")
+                continue
+            if line_image.size == 0 or len(line_image.shape) < 2:
                 continue
 
-            if line_image is None or line_image.size == 0:
-                # print(f"Warning: Cropped line_image is None or empty. Skipping line '{line_text[:50]}...'")
-                continue
-
-            # Validate line_image has valid shape
-            if len(line_image.shape) < 2:
-                # print(f"Warning: line_image has invalid shape {line_image.shape}. Skipping line '{line_text[:50]}...'")
-                continue
-
-            # Create single-line data structure for segment method
-            single_line_data = {
-                "text": [line_text],
-                "left": [0],  # Relative to cropped image
-                "top": [0],
-                "width": [line_width],
-                "height": [line_height],
-                "conf": [line_conf],
-                "line": [i],
-            }
-
-            # Validate line_image before passing to segmenter
-            if line_image is None:
-                # print(f"Error: line_image is None for line '{line_text[:50]}...'")
-                continue
-
-            # Use AdaptiveSegmenter.segment() to segment this line
-            try:
-                word_output, _ = segmenter.segment(
-                    single_line_data, line_image, image_name=image_name
+            tasks.append(
+                (
+                    i,
+                    line_image,
+                    line_text,
+                    line_conf,
+                    line_model,
+                    line_left,
+                    line_top,
+                    line_width,
+                    line_height,
                 )
-            except Exception:
-                # print(f"Error in segmenter.segment for line '{line_text[:50]}...': {e}")
-                # print(f"line_image shape: {line_image.shape if line_image is not None else 'None'}")
-                raise
+            )
 
-            if not word_output or not word_output.get("text"):
-                # If segmentation failed, fall back to proportional estimation
-                words = line_text.split()
-                if words:
-                    num_chars = len("".join(words))
-                    num_spaces = len(words) - 1
-                    if num_chars > 0:
-                        char_space_ratio = 2.0
-                        estimated_space_width = (
-                            line_width / (num_chars * char_space_ratio + num_spaces)
-                            if (num_chars * char_space_ratio + num_spaces) > 0
-                            else line_width / num_chars
-                        )
-                        avg_char_width = estimated_space_width * char_space_ratio
-                        current_left = 0
-                        for word in words:
-                            word_width = len(word) * avg_char_width
-                            clamped_left = max(0, min(current_left, line_width))
-                            clamped_width = max(
-                                0, min(word_width, line_width - clamped_left)
-                            )
-                            output["text"].append(word)
-                            output["left"].append(
-                                line_left + clamped_left
-                            )  # Add line offset
-                            output["top"].append(line_top)
-                            output["width"].append(clamped_width)
-                            output["height"].append(line_height)
-                            output["conf"].append(line_conf)
-                            output["model"].append(line_model)
-                            current_left += word_width + estimated_space_width
-                continue
+        if not tasks:
+            return output
 
-            # Adjust coordinates back to full image coordinates
-            for j in range(len(word_output["text"])):
-                output["text"].append(word_output["text"][j])
-                output["left"].append(line_left + word_output["left"][j])
-                output["top"].append(line_top + word_output["top"][j])
-                output["width"].append(word_output["width"][j])
-                output["height"].append(word_output["height"][j])
-                output["conf"].append(word_output["conf"][j])
-                # Preserve the model from the line-level data
-                output["model"].append(line_model)
+        # Process lines in parallel (or single line in thread)
+        max_workers = min(MAX_WORKERS, len(tasks))
+        process_one = partial(
+            CustomImageAnalyzerEngine._process_one_line_to_words,
+            output_folder=self.output_folder,
+            image_name=image_name,
+        )
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            results = list(executor.map(process_one, tasks))
+
+        # Merge results in line order to preserve document order
+        for _i, word_dict in sorted(results, key=lambda x: x[0]):
+            for key in output:
+                output[key].extend(word_dict[key])
 
         return output
 
@@ -5664,7 +6793,26 @@ class CustomImageAnalyzerEngine:
         output_path = os.path.join(tesseract_viz_folder, filename)
 
         # Save the image
-        cv2.imwrite(output_path, image_cv)
+        max_filesize = 500 * 1024  # 500kb in bytes
+        quality = 95  # Start high, OpenCV JPEG quality range is 0-100
+
+        # Try lowering JPEG quality until file is below size limit
+        is_saved = False
+        while quality >= 10:
+            cv2.imwrite(output_path, image_cv, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+            if (
+                os.path.exists(output_path)
+                and os.path.getsize(output_path) <= max_filesize
+            ):
+                is_saved = True
+                break
+            quality -= 5
+
+        if not is_saved:
+            # Save as lowest acceptable quality if cannot get under 500kb, or raise warning
+            cv2.imwrite(output_path, image_cv, [int(cv2.IMWRITE_JPEG_QUALITY), 10])
+            # Optionally log warning here that file could not be compressed below 500kb
+
         print(f"Tesseract visualization saved to: {output_path}")
 
     def _add_confidence_legend(
@@ -6053,8 +7201,42 @@ class CustomImageAnalyzerEngine:
         if input_image_height is None:
             input_image_height = img_height
 
-        # Create a deep copy of paddle_results to modify
-        copied_paddle_results = copy.deepcopy(paddle_results)
+        # Convert PaddleOCR result objects to plain dictionaries for pickling
+        # The @spaces.GPU decorator requires picklable arguments, but PaddleOCR
+        # result objects contain CopyableWeakMethod references that can't be pickled
+        def _paddle_result_to_plain_dict(result):
+            """Convert PaddleOCR result object to a plain dictionary."""
+            plain_dict = {}
+            # Extract all standard keys as plain Python types
+            for key in ["rec_texts", "rec_scores", "rec_polys", "rec_models"]:
+                if key in result or hasattr(result, key):
+                    value = (
+                        result.get(key, [])
+                        if hasattr(result, "get")
+                        else getattr(result, key, [])
+                    )
+                    if value is not None:
+                        # Convert to list to ensure it's a plain Python type
+                        plain_dict[key] = (
+                            list(value)
+                            if hasattr(value, "__iter__") and not isinstance(value, str)
+                            else value
+                        )
+            # Also extract dimension info if present
+            for key in ["image_width", "image_height"]:
+                if key in result or hasattr(result, key):
+                    value = (
+                        result.get(key)
+                        if hasattr(result, "get")
+                        else getattr(result, key, None)
+                    )
+                    if value is not None:
+                        plain_dict[key] = value
+            return plain_dict
+
+        copied_paddle_results = [
+            _paddle_result_to_plain_dict(result) for result in paddle_results
+        ]
 
         modified_paddle_results = _process_page_result_with_hybrid_vlm_ocr(
             copied_paddle_results,
@@ -6096,6 +7278,7 @@ class CustomImageAnalyzerEngine:
             image_name: Name of the image for logging/debugging
             input_image_width: Original image width (before preprocessing)
             input_image_height: Original image height (before preprocessing)
+            model_name: Name of the inference-server model to use
 
         Returns:
             Modified paddle_results with inference-server replacements for low-confidence lines
@@ -6204,6 +7387,7 @@ class CustomImageAnalyzerEngine:
                     threshold will be replaced using the inference server.
                 image_name (str): The name of the source image, used for logging/debugging.
                 instance_self (object): The enclosing class instance to access inference invocation.
+                padding (int): Padding to add around line crops.
 
             Returns:
                 None. Modifies page_results in place with higher-confidence text replacements when possible.
@@ -6366,6 +7550,10 @@ class CustomImageAnalyzerEngine:
                         inference_server_rec_texts = []
                         inference_server_rec_scores = []
 
+                        print(
+                            f"  Line {i + 1}/{num_lines}: Sending to inference server "
+                            f"(Paddle conf: {line_conf:.1f}%, words: {paddle_word_count})"
+                        )
                         try:
                             inference_server_result = _inference_server_ocr_predict(
                                 cropped_image,
@@ -6390,9 +7578,27 @@ class CustomImageAnalyzerEngine:
                             inference_server_rec_texts = []
                             inference_server_rec_scores = []
 
+                        if not (
+                            inference_server_rec_texts and inference_server_rec_scores
+                        ):
+                            # Inference server returned empty or no results - keep Paddle
+                            print(
+                                f"  Line {i + 1}/{num_lines}: Inference server returned no results "
+                                f"(Paddle conf: {line_conf:.1f}%, text: '{line_text[:40]}{'...' if len(line_text) > 40 else ''}'), keeping Paddle result."
+                            )
+
                         if inference_server_rec_texts and inference_server_rec_scores:
                             # Combine inference-server words into a single text string
                             inference_server_text = " ".join(inference_server_rec_texts)
+
+                            ### If text starts with "Cannot read", then skip this line
+                            if inference_server_text.startswith('""'):
+                                print(
+                                    "Inference server text starts with '"
+                                    "', skipping line {i + 1} of {num_lines}"
+                                )
+                                continue
+
                             inference_server_word_count = len(
                                 inference_server_rec_texts
                             )
@@ -6401,7 +7607,7 @@ class CustomImageAnalyzerEngine:
                             )  # Keep as 0-1 range for paddle format
 
                             # Only replace if word counts match
-                            word_count_allowed_difference = 4
+                            word_count_allowed_difference = 7
                             if (
                                 inference_server_word_count - paddle_word_count
                                 <= word_count_allowed_difference
@@ -6628,11 +7834,8 @@ class CustomImageAnalyzerEngine:
                 vlm_model_choice if vlm_model_choice else CLOUD_VLM_MODEL_CHOICE
             )
 
-            # Qwen 3-VL models on Bedrock return normalized coordinates (0-999 range)
-            # Other Bedrock models typically return absolute pixel coordinates
-            normalised_coords_range = None
-            if model_choice and "qwen" in model_choice.lower():
-                normalised_coords_range = 999
+            # Full-page VLM prompt instructs all models to use 0-999 coordinates; convert for any model_choice
+            normalised_coords_range = 999
 
             ocr_data, vlm_input_tokens, vlm_output_tokens, vlm_model_name = (
                 _bedrock_page_ocr_predict(
@@ -6666,7 +7869,7 @@ class CustomImageAnalyzerEngine:
                 _gemini_page_ocr_predict(
                     gemini_image,
                     image_name=image_name,
-                    normalised_coords_range=None,  # Gemini typically returns absolute coordinates
+                    normalised_coords_range=999,  # Full-page prompt uses 0-999 coordinates
                     output_folder=self.output_folder,
                     model_choice=model_choice,
                     client=gemini_client,
@@ -6695,7 +7898,7 @@ class CustomImageAnalyzerEngine:
                 _azure_openai_page_ocr_predict(
                     azure_image,
                     image_name=image_name,
-                    normalised_coords_range=None,  # Azure/OpenAI typically returns absolute coordinates
+                    normalised_coords_range=999,  # Full-page prompt uses 0-999 coordinates
                     output_folder=self.output_folder,
                     model_choice=model_choice,
                     client=azure_openai_client,
@@ -6928,7 +8131,28 @@ class CustomImageAnalyzerEngine:
                     filename = f"initial_bounding_boxes_{timestamp}.jpg"
 
                 output_path = os.path.join(paddle_viz_folder, filename)
-                cv2.imwrite(output_path, image_cv)
+                max_filesize = 500 * 1024  # 500kb in bytes
+                quality = 95  # Start high, OpenCV JPEG quality range is 0-100
+
+                # Try lowering JPEG quality until file is below size limit
+                is_saved = False
+                while quality >= 10:
+                    cv2.imwrite(
+                        output_path, image_cv, [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+                    )
+                    if (
+                        os.path.exists(output_path)
+                        and os.path.getsize(output_path) <= max_filesize
+                    ):
+                        is_saved = True
+                        break
+                    quality -= 5
+
+                if not is_saved:
+                    # Save as lowest acceptable quality if cannot get under 500kb, or raise warning
+                    cv2.imwrite(
+                        output_path, image_cv, [int(cv2.IMWRITE_JPEG_QUALITY), 10]
+                    )
 
         else:
             raise RuntimeError(f"Unsupported OCR engine: {self.ocr_engine}")
@@ -7085,8 +8309,10 @@ class CustomImageAnalyzerEngine:
         ]
 
         # Determine default model based on OCR engine if model field is not present
-        if "model" in ocr_result:
-            # Model field exists and has correct length - use it
+        if "model" in ocr_result and len(ocr_result["model"]) == len(
+            ocr_result["text"]
+        ):
+            # Model field exists and has correct length - use it (preserves VLM/inference-server replacements)
             def get_model_name(idx):
                 return ocr_result["model"][idx]
 
@@ -7205,10 +8431,12 @@ class CustomImageAnalyzerEngine:
             if not entity.startswith("CUSTOM_VLM_")
         ]
 
-        # Validate: if no standard entities and no custom instructions, raise error
+        # If only CUSTOM_VLM_* entities (and no custom instructions), skip LLM analysis and return blank
         if not filtered_llm_entities and (
             not custom_llm_instructions or not custom_llm_instructions.strip()
         ):
+            if pii_identification_method == AWS_LLM_PII_OPTION:
+                return (list(), 0, "", 0, 0)
             raise ValueError(
                 "No standard entities selected for LLM PII detection and no custom instructions provided. "
                 "Please select at least one entity type (excluding CUSTOM_VLM_* entities) or provide custom instructions."
@@ -7411,11 +8639,12 @@ class CustomImageAnalyzerEngine:
                                 aws_comprehend_entities,
                                 all_text_line_results,
                             )
-                            comprehend_query_number += (
-                                len(current_batch.strip())
-                                + COMPREHEND_CHARACTERS_PER_UNIT
-                                - 1
-                            ) // COMPREHEND_CHARACTERS_PER_UNIT
+                            if aws_comprehend_entities:
+                                comprehend_query_number += (
+                                    len(current_batch.strip())
+                                    + COMPREHEND_CHARACTERS_PER_UNIT
+                                    - 1
+                                ) // COMPREHEND_CHARACTERS_PER_UNIT
 
                             # Reset batch
                             current_batch = ""
@@ -7479,11 +8708,12 @@ class CustomImageAnalyzerEngine:
                                 aws_comprehend_entities,
                                 all_text_line_results,
                             )
-                            comprehend_query_number += (
-                                len(current_batch.strip())
-                                + COMPREHEND_CHARACTERS_PER_UNIT
-                                - 1
-                            ) // COMPREHEND_CHARACTERS_PER_UNIT
+                            if aws_comprehend_entities:
+                                comprehend_query_number += (
+                                    len(current_batch.strip())
+                                    + COMPREHEND_CHARACTERS_PER_UNIT
+                                    - 1
+                                ) // COMPREHEND_CHARACTERS_PER_UNIT
 
                             # Reset batch
                             current_batch = ""
@@ -7526,9 +8756,10 @@ class CustomImageAnalyzerEngine:
                     aws_comprehend_entities,
                     all_text_line_results,
                 )
-                comprehend_query_number += (
-                    len(current_batch.strip()) + COMPREHEND_CHARACTERS_PER_UNIT - 1
-                ) // COMPREHEND_CHARACTERS_PER_UNIT
+                if aws_comprehend_entities:
+                    comprehend_query_number += (
+                        len(current_batch.strip()) + COMPREHEND_CHARACTERS_PER_UNIT - 1
+                    ) // COMPREHEND_CHARACTERS_PER_UNIT
 
         elif pii_identification_method == AWS_LLM_PII_OPTION:
             # LLM-based entity detection using AWS Bedrock
@@ -7557,8 +8788,21 @@ class CustomImageAnalyzerEngine:
                     "model_choice", CLOUD_LLM_PII_MODEL_CHOICE
                 )
 
-            # Set LLM model name for tracking
-            llm_model_name = model_choice or ""
+            # Set LLM model name for tracking (use custom-instructions model when applicable)
+            custom_instructions_model = (
+                CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE.strip()
+                if isinstance(CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE, str)
+                and CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE.strip()
+                else ""
+            )
+            if (
+                (custom_llm_instructions or "").strip()
+                and model_choice == CLOUD_LLM_PII_MODEL_CHOICE
+                and custom_instructions_model
+            ):
+                llm_model_name = custom_instructions_model
+            else:
+                llm_model_name = model_choice or ""
 
             # Handle custom entities first (same as AWS Comprehend)
             # Include CUSTOM/CUSTOM_FUZZY (deny list) so deny-list words are redacted when CUSTOM is selected
@@ -7686,10 +8930,10 @@ class CustomImageAnalyzerEngine:
                                 all_text_line_results=all_text_line_results,
                                 model_choice=model_choice,
                                 temperature=text_analyzer_kwargs.get(
-                                    "temperature", LLM_PII_TEMPERATURE
+                                    "temperature", LLM_TEMPERATURE
                                 ),
                                 max_tokens=text_analyzer_kwargs.get(
-                                    "max_tokens", LLM_PII_MAX_TOKENS
+                                    "max_tokens", LLM_MAX_NEW_TOKENS
                                 ),
                                 output_folder=getattr(self, "output_folder", None),
                                 batch_number=comprehend_query_number + 1,
@@ -7788,10 +9032,10 @@ class CustomImageAnalyzerEngine:
                                 all_text_line_results=all_text_line_results,
                                 model_choice=model_choice,
                                 temperature=text_analyzer_kwargs.get(
-                                    "temperature", LLM_PII_TEMPERATURE
+                                    "temperature", LLM_TEMPERATURE
                                 ),
                                 max_tokens=text_analyzer_kwargs.get(
-                                    "max_tokens", LLM_PII_MAX_TOKENS
+                                    "max_tokens", LLM_MAX_NEW_TOKENS
                                 ),
                                 output_folder=getattr(self, "output_folder", None),
                                 batch_number=comprehend_query_number + 1,
@@ -7865,10 +9109,10 @@ class CustomImageAnalyzerEngine:
                         all_text_line_results=all_text_line_results,
                         model_choice=model_choice,
                         temperature=text_analyzer_kwargs.get(
-                            "temperature", LLM_PII_TEMPERATURE
+                            "temperature", LLM_TEMPERATURE
                         ),
                         max_tokens=text_analyzer_kwargs.get(
-                            "max_tokens", LLM_PII_MAX_TOKENS
+                            "max_tokens", LLM_MAX_NEW_TOKENS
                         ),
                         output_folder=getattr(self, "output_folder", None),
                         batch_number=comprehend_query_number + 1,
@@ -8047,10 +9291,10 @@ class CustomImageAnalyzerEngine:
                                 all_text_line_results=all_text_line_results,
                                 model_choice=model_choice,
                                 temperature=text_analyzer_kwargs.get(
-                                    "temperature", LLM_PII_TEMPERATURE
+                                    "temperature", LLM_TEMPERATURE
                                 ),
                                 max_tokens=text_analyzer_kwargs.get(
-                                    "max_tokens", LLM_PII_MAX_TOKENS
+                                    "max_tokens", LLM_MAX_NEW_TOKENS
                                 ),
                                 output_folder=getattr(self, "output_folder", None),
                                 batch_number=comprehend_query_number + 1,
@@ -8149,10 +9393,10 @@ class CustomImageAnalyzerEngine:
                                 all_text_line_results=all_text_line_results,
                                 model_choice=model_choice,
                                 temperature=text_analyzer_kwargs.get(
-                                    "temperature", LLM_PII_TEMPERATURE
+                                    "temperature", LLM_TEMPERATURE
                                 ),
                                 max_tokens=text_analyzer_kwargs.get(
-                                    "max_tokens", LLM_PII_MAX_TOKENS
+                                    "max_tokens", LLM_MAX_NEW_TOKENS
                                 ),
                                 output_folder=getattr(self, "output_folder", None),
                                 batch_number=comprehend_query_number + 1,
@@ -8226,10 +9470,10 @@ class CustomImageAnalyzerEngine:
                         all_text_line_results=all_text_line_results,
                         model_choice=model_choice,
                         temperature=text_analyzer_kwargs.get(
-                            "temperature", LLM_PII_TEMPERATURE
+                            "temperature", LLM_TEMPERATURE
                         ),
                         max_tokens=text_analyzer_kwargs.get(
-                            "max_tokens", LLM_PII_MAX_TOKENS
+                            "max_tokens", LLM_MAX_NEW_TOKENS
                         ),
                         output_folder=getattr(self, "output_folder", None),
                         batch_number=comprehend_query_number + 1,
@@ -8264,11 +9508,11 @@ class CustomImageAnalyzerEngine:
             if text_analyzer_kwargs.get("inference_method") is None:
                 text_analyzer_kwargs["inference_method"] = "local"
 
-            # Set model choice if not already set - use VLM model when USE_TRANFORMERS_VLM_MODEL_AS_LLM else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+            # Set model choice if not already set - use VLM model when USE_TRANSFORMERS_VLM_MODEL_AS_LLM else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
             if text_analyzer_kwargs.get("model_choice") is None:
                 text_analyzer_kwargs["model_choice"] = (
                     SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
-                    if USE_TRANFORMERS_VLM_MODEL_AS_LLM
+                    if USE_TRANSFORMERS_VLM_MODEL_AS_LLM
                     else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
                 )
 
@@ -8277,39 +9521,10 @@ class CustomImageAnalyzerEngine:
                 "model_choice",
                 (
                     SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
-                    if USE_TRANFORMERS_VLM_MODEL_AS_LLM
+                    if USE_TRANSFORMERS_VLM_MODEL_AS_LLM
                     else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
                 ),
             )
-
-            # # Load PII-specific model and tokenizer if not already provided
-            # if (
-            #     text_analyzer_kwargs.get("local_model") is None
-            #     and text_analyzer_kwargs.get("inference_method") == "local"
-            # ):
-            #     from tools.llm_funcs import USE_LLAMA_CPP, get_pii_model
-
-            #     try:
-            #         text_analyzer_kwargs["local_model"] = get_pii_model()
-            #     except Exception as e:
-            #         print(
-            #             f"Warning: Failed to load PII model: {e}. "
-            #             f"Will attempt to load model on-demand."
-            #         )
-            # if (
-            #     text_analyzer_kwargs.get("tokenizer") is None
-            #     and text_analyzer_kwargs.get("inference_method") == "local"
-            #     and USE_LLAMA_CPP != "True"
-            # ):
-            #     from tools.llm_funcs import get_pii_tokenizer
-
-            #     try:
-            #         text_analyzer_kwargs["tokenizer"] = get_pii_tokenizer()
-            #     except Exception as e:
-            #         print(
-            #             f"Warning: Failed to load PII tokenizer: {e}. "
-            #             f"Will attempt to load tokenizer on-demand."
-            #         )
 
             # Handle custom entities first (same as AWS Comprehend)
             # Include CUSTOM/CUSTOM_FUZZY (deny list) so deny-list words are redacted when CUSTOM is selected
@@ -8437,10 +9652,10 @@ class CustomImageAnalyzerEngine:
                                 all_text_line_results=all_text_line_results,
                                 model_choice=model_choice,
                                 temperature=text_analyzer_kwargs.get(
-                                    "temperature", LLM_PII_TEMPERATURE
+                                    "temperature", LLM_TEMPERATURE
                                 ),
                                 max_tokens=text_analyzer_kwargs.get(
-                                    "max_tokens", LLM_PII_MAX_TOKENS
+                                    "max_tokens", LLM_MAX_NEW_TOKENS
                                 ),
                                 output_folder=getattr(self, "output_folder", None),
                                 batch_number=comprehend_query_number + 1,
@@ -8539,10 +9754,10 @@ class CustomImageAnalyzerEngine:
                                 all_text_line_results=all_text_line_results,
                                 model_choice=model_choice,
                                 temperature=text_analyzer_kwargs.get(
-                                    "temperature", LLM_PII_TEMPERATURE
+                                    "temperature", LLM_TEMPERATURE
                                 ),
                                 max_tokens=text_analyzer_kwargs.get(
-                                    "max_tokens", LLM_PII_MAX_TOKENS
+                                    "max_tokens", LLM_MAX_NEW_TOKENS
                                 ),
                                 output_folder=getattr(self, "output_folder", None),
                                 batch_number=comprehend_query_number + 1,
@@ -8616,10 +9831,10 @@ class CustomImageAnalyzerEngine:
                         all_text_line_results=all_text_line_results,
                         model_choice=model_choice,
                         temperature=text_analyzer_kwargs.get(
-                            "temperature", LLM_PII_TEMPERATURE
+                            "temperature", LLM_TEMPERATURE
                         ),
                         max_tokens=text_analyzer_kwargs.get(
-                            "max_tokens", LLM_PII_MAX_TOKENS
+                            "max_tokens", LLM_MAX_NEW_TOKENS
                         ),
                         output_folder=getattr(self, "output_folder", None),
                         batch_number=comprehend_query_number + 1,
@@ -8680,6 +9895,97 @@ class CustomImageAnalyzerEngine:
         )
 
     @staticmethod
+    def _map_one_ocr_result_to_bboxes(
+        redaction_relevant_ocr_result: OCRResult,
+        text_analyzer_results: List[RecognizerResult],
+        ocr_results_with_words_child_info: Dict[str, Dict],
+        allow_list: List[str],
+    ) -> List[CustomImageRecognizerResult]:
+        """Map one OCR result to bounding boxes; safe to run in a thread."""
+        bboxes = []
+        line_text = ocr_results_with_words_child_info["text"]
+        line_length = len(line_text)
+        redaction_text = redaction_relevant_ocr_result.text
+
+        for redaction_result in text_analyzer_results:
+            if allow_list:
+                allow_list_normalized = [
+                    item.strip().lower() for item in allow_list if item
+                ]
+                redaction_text_normalized = redaction_text.strip().lower()
+                is_in_allow_list = redaction_text_normalized in allow_list_normalized
+            else:
+                is_in_allow_list = False
+
+            if not is_in_allow_list:
+                start_in_line = max(0, redaction_result.start)
+                end_in_line = min(line_length, redaction_result.end)
+                matched_text = line_text[start_in_line:end_in_line]
+                matched_text.split()
+
+                matching_word_boxes = []
+                current_position = 0
+                for word_info in ocr_results_with_words_child_info.get("words", []):
+                    word_text = word_info["text"]
+                    word_length = len(word_text)
+                    word_start = current_position
+                    word_end = current_position + word_length
+                    current_position += word_length + 1
+                    if word_start < end_in_line and word_end > start_in_line:
+                        matching_word_boxes.append(word_info["bounding_box"])
+
+                if matching_word_boxes:
+                    left = min(box[0] for box in matching_word_boxes)
+                    top = min(box[1] for box in matching_word_boxes)
+                    right = max(box[2] for box in matching_word_boxes)
+                    bottom = max(box[3] for box in matching_word_boxes)
+                    bboxes.append(
+                        CustomImageRecognizerResult(
+                            entity_type=redaction_result.entity_type,
+                            start=start_in_line,
+                            end=end_in_line,
+                            score=round(redaction_result.score, 2),
+                            left=left,
+                            top=top,
+                            width=right - left,
+                            height=bottom - top,
+                            text=matched_text,
+                        )
+                    )
+                else:
+                    line_left = redaction_relevant_ocr_result.left
+                    line_top = redaction_relevant_ocr_result.top
+                    line_width = redaction_relevant_ocr_result.width
+                    line_height = redaction_relevant_ocr_result.height
+                    if line_length > 0:
+                        text_proportion = len(matched_text) / line_length
+                        char_width_estimate = line_width / line_length
+                        estimated_left_offset = start_in_line * char_width_estimate
+                        left = line_left + estimated_left_offset
+                        top = line_top
+                        width = text_proportion * line_width
+                        height = line_height
+                    else:
+                        left = line_left
+                        top = line_top
+                        width = line_width
+                        height = line_height
+                    bboxes.append(
+                        CustomImageRecognizerResult(
+                            entity_type=redaction_result.entity_type,
+                            start=start_in_line,
+                            end=end_in_line,
+                            score=round(redaction_result.score, 2),
+                            left=left,
+                            top=top,
+                            width=width,
+                            height=height,
+                            text=matched_text,
+                        )
+                    )
+        return bboxes
+
+    @staticmethod
     def map_analyzer_results_to_bounding_boxes(
         text_analyzer_results: List[RecognizerResult],
         redaction_relevant_ocr_results: List[OCRResult],
@@ -8687,123 +9993,24 @@ class CustomImageAnalyzerEngine:
         allow_list: List[str],
         ocr_results_with_words_child_info: Dict[str, Dict],
     ) -> List[CustomImageRecognizerResult]:
-        redaction_bboxes = list()
+        if not redaction_relevant_ocr_results:
+            return []
 
-        for redaction_relevant_ocr_result in redaction_relevant_ocr_results:
-
-            line_text = ocr_results_with_words_child_info["text"]
-            line_length = len(line_text)
-            redaction_text = redaction_relevant_ocr_result.text
-
-            for redaction_result in text_analyzer_results:
-                # Check if the redaction text is not in the allow list (case-insensitive)
-                # Normalize for case-insensitive matching
-                if allow_list:
-                    allow_list_normalized = [
-                        item.strip().lower() for item in allow_list if item
-                    ]
-                    redaction_text_normalized = redaction_text.strip().lower()
-                    is_in_allow_list = (
-                        redaction_text_normalized in allow_list_normalized
-                    )
-                else:
-                    is_in_allow_list = False
-
-                if not is_in_allow_list:
-
-                    # Adjust start and end to be within line bounds
-                    start_in_line = max(0, redaction_result.start)
-                    end_in_line = min(line_length, redaction_result.end)
-
-                    # Get the matched text from this line
-                    matched_text = line_text[start_in_line:end_in_line]
-                    matched_text.split()
-
-                    # Find the corresponding words in the OCR results
-                    matching_word_boxes = list()
-
-                    current_position = 0
-
-                    for word_info in ocr_results_with_words_child_info.get("words", []):
-                        word_text = word_info["text"]
-                        word_length = len(word_text)
-
-                        word_start = current_position
-                        word_end = current_position + word_length
-
-                        # Update current position for the next word
-                        current_position += (
-                            word_length + 1
-                        )  # +1 for the space after the word
-
-                        # Include words that overlap the PII range (not only fully contained).
-                        # This fixes cases where PII strips a suffix (e.g. "Hyde" from "Hyde's"):
-                        # the word "Hyde's" was excluded by the strict containment check, leading
-                        # to a too-small proportional fallback box (e.g. only covering "Hyd").
-                        if word_start < end_in_line and word_end > start_in_line:
-                            matching_word_boxes.append(word_info["bounding_box"])
-
-                    if matching_word_boxes:
-                        # Calculate the combined bounding box for all matching words
-                        left = min(box[0] for box in matching_word_boxes)
-                        top = min(box[1] for box in matching_word_boxes)
-                        right = max(box[2] for box in matching_word_boxes)
-                        bottom = max(box[3] for box in matching_word_boxes)
-
-                        redaction_bboxes.append(
-                            CustomImageRecognizerResult(
-                                entity_type=redaction_result.entity_type,
-                                start=start_in_line,
-                                end=end_in_line,
-                                score=round(redaction_result.score, 2),
-                                left=left,
-                                top=top,
-                                width=right - left,
-                                height=bottom - top,
-                                text=matched_text,
-                            )
-                        )
-                    else:
-                        # Fallback: Use line-level bounding box when word-level boxes aren't available
-                        # This happens when OCR only provides line-level results (e.g., VLM OCR)
-                        # Calculate proportional bounding box based on character positions
-                        line_left = redaction_relevant_ocr_result.left
-                        line_top = redaction_relevant_ocr_result.top
-                        line_width = redaction_relevant_ocr_result.width
-                        line_height = redaction_relevant_ocr_result.height
-
-                        # Calculate proportional width based on text length
-                        if line_length > 0:
-                            text_proportion = len(matched_text) / line_length
-                            # Estimate left offset based on start position
-                            char_width_estimate = line_width / line_length
-                            estimated_left_offset = start_in_line * char_width_estimate
-
-                            left = line_left + estimated_left_offset
-                            top = line_top
-                            width = text_proportion * line_width
-                            height = line_height
-                        else:
-                            # If line_length is 0, use the full line box
-                            left = line_left
-                            top = line_top
-                            width = line_width
-                            height = line_height
-
-                        redaction_bboxes.append(
-                            CustomImageRecognizerResult(
-                                entity_type=redaction_result.entity_type,
-                                start=start_in_line,
-                                end=end_in_line,
-                                score=round(redaction_result.score, 2),
-                                left=left,
-                                top=top,
-                                width=width,
-                                height=height,
-                                text=matched_text,
-                            )
-                        )
-
+        n = len(redaction_relevant_ocr_results)
+        max_workers = min(MAX_WORKERS, n)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            results = list(
+                executor.map(
+                    lambda ocr_result: CustomImageAnalyzerEngine._map_one_ocr_result_to_bboxes(
+                        ocr_result,
+                        text_analyzer_results,
+                        ocr_results_with_words_child_info,
+                        allow_list,
+                    ),
+                    redaction_relevant_ocr_results,
+                )
+            )
+        redaction_bboxes = [bbox for bbox_list in results for bbox in bbox_list]
         return redaction_bboxes
 
     @staticmethod
@@ -9076,16 +10283,35 @@ def do_aws_comprehend_call(
     allow_list: List[str],
     chosen_redact_comprehend_entities: List[str],
     all_text_line_results: List[Tuple],
+    max_retries: int = 10,
+    retry_delay: int = 1,
 ):
+    """
+    Uses AWS Comprehend to detect PII entities in a text batch and maps the results
+    back to the original lines for further processing.
+
+    Args:
+        current_batch (str): The concatenated text being analysed for PII.
+        current_batch_mapping (List[Tuple]): Mapping from batch offsets back to
+            individual line offsets and line indices for result mapping.
+        comprehend_client (botocore.client.BaseClient): AWS Comprehend boto3 client for making API calls.
+        language (str): The ISO language code for the text (e.g. "en").
+        allow_list (List[str]): List of lowercased phrases or words which, if detected,
+            should not be flagged/redacted even if AWS returns them as PII.
+        chosen_redact_comprehend_entities (List[str]): List of PII entity types (from AWS) enabled for detection/redaction.
+        all_text_line_results (List[Tuple]): Existing recognition results by line; this will be updated in-place and returned.
+        max_retries (int, optional): Maximum number of times to retry the AWS API in case of failure. Default is 10.
+        retry_delay (int, optional): Number of seconds to wait between retries. Default is 1.
+
+    Returns:
+        List[Tuple]: Updated list of recognition results by text line, with AWS detected PII mapped back to their source.
+    """
     if not current_batch:
         return all_text_line_results
     # Guard: if no relevant AWS entity types are selected, skip AWS entirely.
     # (CUSTOM/CUSTOM_FUZZY and other local-only entities are handled via Presidio.)
     if not chosen_redact_comprehend_entities:
         return all_text_line_results
-
-    max_retries = 3
-    retry_delay = 3
 
     for attempt in range(max_retries):
         try:
@@ -9205,50 +10431,60 @@ def run_page_text_redaction(
             chosen_redact_entities, valid_language_entities, language
         )
 
+        # When only CUSTOM_VLM_* entities are chosen, local PII has nothing to do;
+        # allow progress so image/VLM analysis can run.
+        only_custom_vlm = chosen_redact_entities and all(
+            str(e).startswith("CUSTOM_VLM_") for e in (chosen_redact_entities or [])
+        )
+
         if language_supported_entities:
             text_analyzer_kwargs["entities"] = language_supported_entities
+        elif only_custom_vlm:
+            # Skip local PII; leave all_text_line_results empty so pipeline continues to VLM
+            pass
         else:
             out_message = f"No relevant entities supported for language: {language}"
             print(out_message)
             raise Warning(out_message)
 
-        # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
-        # Also exclude allow_list since we pass it explicitly
-        presidio_kwargs = {
-            k: v
-            for k, v in text_analyzer_kwargs.items()
-            if k
-            not in [
-                "inference_method",
-                "model_choice",
-                "api_url",
-                "local_model",
-                "tokenizer",
-                "assistant_model",
-                "client",
-                "client_config",
-                "temperature",
-                "max_tokens",
-                "custom_instructions",
-                "allow_list",
-            ]
-        }
+        if language_supported_entities:
+            # Filter out LLM-specific parameters that Presidio AnalyzerEngine doesn't accept
+            # Also exclude allow_list since we pass it explicitly
+            presidio_kwargs = {
+                k: v
+                for k, v in text_analyzer_kwargs.items()
+                if k
+                not in [
+                    "inference_method",
+                    "model_choice",
+                    "api_url",
+                    "local_model",
+                    "tokenizer",
+                    "assistant_model",
+                    "client",
+                    "client_config",
+                    "temperature",
+                    "max_tokens",
+                    "custom_instructions",
+                    "allow_list",
+                ]
+            }
 
-        page_analyser_result = nlp_analyser.analyze(
-            text=page_text,
-            language=language,
-            score_threshold=score_threshold,
-            return_decision_process=True,
-            allow_list=allow_list,
-            **presidio_kwargs,
-        )
+            page_analyser_result = nlp_analyser.analyze(
+                text=page_text,
+                language=language,
+                score_threshold=score_threshold,
+                return_decision_process=True,
+                allow_list=allow_list,
+                **presidio_kwargs,
+            )
 
-        all_text_line_results = map_back_entity_results(
-            page_analyser_result,
-            page_text_mapping,
-            all_text_line_results,
-            allow_list=allow_list,
-        )
+            all_text_line_results = map_back_entity_results(
+                page_analyser_result,
+                page_text_mapping,
+                all_text_line_results,
+                allow_list=allow_list,
+            )
 
     elif pii_identification_method == AWS_PII_OPTION:
 
@@ -9372,11 +10608,12 @@ def run_page_text_redaction(
                             aws_comprehend_entities,
                             all_text_line_results,
                         )
-                        comprehend_query_number += (
-                            len(current_batch.strip())
-                            + COMPREHEND_CHARACTERS_PER_UNIT
-                            - 1
-                        ) // COMPREHEND_CHARACTERS_PER_UNIT
+                        if aws_comprehend_entities:
+                            comprehend_query_number += (
+                                len(current_batch.strip())
+                                + COMPREHEND_CHARACTERS_PER_UNIT
+                                - 1
+                            ) // COMPREHEND_CHARACTERS_PER_UNIT
 
                         # Reset batch
                         current_batch = ""
@@ -9437,11 +10674,12 @@ def run_page_text_redaction(
                             aws_comprehend_entities,
                             all_text_line_results,
                         )
-                        comprehend_query_number += (
-                            len(current_batch.strip())
-                            + COMPREHEND_CHARACTERS_PER_UNIT
-                            - 1
-                        ) // COMPREHEND_CHARACTERS_PER_UNIT
+                        if aws_comprehend_entities:
+                            comprehend_query_number += (
+                                len(current_batch.strip())
+                                + COMPREHEND_CHARACTERS_PER_UNIT
+                                - 1
+                            ) // COMPREHEND_CHARACTERS_PER_UNIT
 
                         # Reset batch
                         current_batch = ""
@@ -9481,9 +10719,10 @@ def run_page_text_redaction(
                 aws_comprehend_entities,
                 all_text_line_results,
             )
-            comprehend_query_number += (
-                len(current_batch.strip()) + COMPREHEND_CHARACTERS_PER_UNIT - 1
-            ) // COMPREHEND_CHARACTERS_PER_UNIT
+            if aws_comprehend_entities:
+                comprehend_query_number += (
+                    len(current_batch.strip()) + COMPREHEND_CHARACTERS_PER_UNIT - 1
+                ) // COMPREHEND_CHARACTERS_PER_UNIT
 
     elif pii_identification_method == AWS_LLM_PII_OPTION:
         # LLM-based entity detection using AWS Bedrock
@@ -9512,8 +10751,21 @@ def run_page_text_redaction(
                 "model_choice", CLOUD_LLM_PII_MODEL_CHOICE
             )
 
-        # Set LLM model name for tracking
-        llm_model_name = model_choice or ""
+        # Set LLM model name for tracking (use custom-instructions model when applicable)
+        custom_instructions_model = (
+            CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE.strip()
+            if isinstance(CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE, str)
+            and CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE.strip()
+            else ""
+        )
+        if (
+            (custom_llm_instructions or "").strip()
+            and model_choice == CLOUD_LLM_PII_MODEL_CHOICE
+            and custom_instructions_model
+        ):
+            llm_model_name = custom_instructions_model
+        else:
+            llm_model_name = model_choice or ""
 
         # Handle custom entities first (same as AWS Comprehend)
         # Include CUSTOM/CUSTOM_FUZZY (deny list) so deny-list words are redacted when CUSTOM is selected
@@ -9637,10 +10889,10 @@ def run_page_text_redaction(
                             all_text_line_results=all_text_line_results,
                             model_choice=model_choice,
                             temperature=text_analyzer_kwargs.get(
-                                "temperature", LLM_PII_TEMPERATURE
+                                "temperature", LLM_TEMPERATURE
                             ),
                             max_tokens=text_analyzer_kwargs.get(
-                                "max_tokens", LLM_PII_MAX_TOKENS
+                                "max_tokens", LLM_MAX_NEW_TOKENS
                             ),
                             output_folder=output_folder,
                             batch_number=comprehend_query_number + 1,
@@ -9731,10 +10983,10 @@ def run_page_text_redaction(
                             all_text_line_results=all_text_line_results,
                             model_choice=model_choice,
                             temperature=text_analyzer_kwargs.get(
-                                "temperature", LLM_PII_TEMPERATURE
+                                "temperature", LLM_TEMPERATURE
                             ),
                             max_tokens=text_analyzer_kwargs.get(
-                                "max_tokens", LLM_PII_MAX_TOKENS
+                                "max_tokens", LLM_MAX_NEW_TOKENS
                             ),
                             output_folder=output_folder,
                             batch_number=comprehend_query_number + 1,
@@ -9797,10 +11049,10 @@ def run_page_text_redaction(
                     all_text_line_results=all_text_line_results,
                     model_choice=model_choice,
                     temperature=text_analyzer_kwargs.get(
-                        "temperature", LLM_PII_TEMPERATURE
+                        "temperature", LLM_TEMPERATURE
                     ),
                     max_tokens=text_analyzer_kwargs.get(
-                        "max_tokens", LLM_PII_MAX_TOKENS
+                        "max_tokens", LLM_MAX_NEW_TOKENS
                     ),
                     output_folder=output_folder,
                     batch_number=comprehend_query_number + 1,
@@ -9973,10 +11225,10 @@ def run_page_text_redaction(
                             all_text_line_results=all_text_line_results,
                             model_choice=model_choice,
                             temperature=text_analyzer_kwargs.get(
-                                "temperature", LLM_PII_TEMPERATURE
+                                "temperature", LLM_TEMPERATURE
                             ),
                             max_tokens=text_analyzer_kwargs.get(
-                                "max_tokens", LLM_PII_MAX_TOKENS
+                                "max_tokens", LLM_MAX_NEW_TOKENS
                             ),
                             output_folder=output_folder,
                             batch_number=comprehend_query_number + 1,
@@ -10067,10 +11319,10 @@ def run_page_text_redaction(
                             all_text_line_results=all_text_line_results,
                             model_choice=model_choice,
                             temperature=text_analyzer_kwargs.get(
-                                "temperature", LLM_PII_TEMPERATURE
+                                "temperature", LLM_TEMPERATURE
                             ),
                             max_tokens=text_analyzer_kwargs.get(
-                                "max_tokens", LLM_PII_MAX_TOKENS
+                                "max_tokens", LLM_MAX_NEW_TOKENS
                             ),
                             output_folder=output_folder,
                             batch_number=comprehend_query_number + 1,
@@ -10133,10 +11385,10 @@ def run_page_text_redaction(
                     all_text_line_results=all_text_line_results,
                     model_choice=model_choice,
                     temperature=text_analyzer_kwargs.get(
-                        "temperature", LLM_PII_TEMPERATURE
+                        "temperature", LLM_TEMPERATURE
                     ),
                     max_tokens=text_analyzer_kwargs.get(
-                        "max_tokens", LLM_PII_MAX_TOKENS
+                        "max_tokens", LLM_MAX_NEW_TOKENS
                     ),
                     output_folder=output_folder,
                     batch_number=comprehend_query_number + 1,
@@ -10171,11 +11423,11 @@ def run_page_text_redaction(
         if text_analyzer_kwargs.get("inference_method") is None:
             text_analyzer_kwargs["inference_method"] = "local"
 
-        # Set model choice if not already set - use VLM model when USE_TRANFORMERS_VLM_MODEL_AS_LLM else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+        # Set model choice if not already set - use VLM model when USE_TRANSFORMERS_VLM_MODEL_AS_LLM else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
         if text_analyzer_kwargs.get("model_choice") is None:
             text_analyzer_kwargs["model_choice"] = (
                 SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
-                if USE_TRANFORMERS_VLM_MODEL_AS_LLM
+                if USE_TRANSFORMERS_VLM_MODEL_AS_LLM
                 else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
             )
 
@@ -10184,39 +11436,10 @@ def run_page_text_redaction(
             "model_choice",
             (
                 SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
-                if USE_TRANFORMERS_VLM_MODEL_AS_LLM
+                if USE_TRANSFORMERS_VLM_MODEL_AS_LLM
                 else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
             ),
         )
-
-        # Load PII-specific model and tokenizer if not already provided
-        # if (
-        #     text_analyzer_kwargs.get("local_model") is None
-        #     and text_analyzer_kwargs.get("inference_method") == "local"
-        # ):
-        #     # from tools.llm_funcs import USE_LLAMA_CPP, get_pii_model
-
-        #     try:
-        #         text_analyzer_kwargs["local_model"] = get_pii_model()
-        #     except Exception as e:
-        #         print(
-        #             f"Warning: Failed to load PII model: {e}. "
-        #             f"Will attempt to load model on-demand."
-        #         )
-        # if (
-        #     text_analyzer_kwargs.get("tokenizer") is None
-        #     and text_analyzer_kwargs.get("inference_method") == "local"
-        #     and USE_LLAMA_CPP != "True"
-        # ):
-        #     from tools.llm_funcs import get_pii_tokenizer
-
-        #     try:
-        #         text_analyzer_kwargs["tokenizer"] = get_pii_tokenizer()
-        #     except Exception as e:
-        #         print(
-        #             f"Warning: Failed to load PII tokenizer: {e}. "
-        #             f"Will attempt to load tokenizer on-demand."
-        #         )
 
         # Handle custom entities first (same as AWS Comprehend)
         # Include CUSTOM/CUSTOM_FUZZY (deny list) so deny-list words are redacted when CUSTOM is selected
@@ -10340,10 +11563,10 @@ def run_page_text_redaction(
                             all_text_line_results=all_text_line_results,
                             model_choice=model_choice,
                             temperature=text_analyzer_kwargs.get(
-                                "temperature", LLM_PII_TEMPERATURE
+                                "temperature", LLM_TEMPERATURE
                             ),
                             max_tokens=text_analyzer_kwargs.get(
-                                "max_tokens", LLM_PII_MAX_TOKENS
+                                "max_tokens", LLM_MAX_NEW_TOKENS
                             ),
                             output_folder=output_folder,
                             batch_number=comprehend_query_number + 1,
@@ -10434,10 +11657,10 @@ def run_page_text_redaction(
                             all_text_line_results=all_text_line_results,
                             model_choice=model_choice,
                             temperature=text_analyzer_kwargs.get(
-                                "temperature", LLM_PII_TEMPERATURE
+                                "temperature", LLM_TEMPERATURE
                             ),
                             max_tokens=text_analyzer_kwargs.get(
-                                "max_tokens", LLM_PII_MAX_TOKENS
+                                "max_tokens", LLM_MAX_NEW_TOKENS
                             ),
                             output_folder=output_folder,
                             batch_number=comprehend_query_number + 1,
@@ -10500,10 +11723,10 @@ def run_page_text_redaction(
                     all_text_line_results=all_text_line_results,
                     model_choice=model_choice,
                     temperature=text_analyzer_kwargs.get(
-                        "temperature", LLM_PII_TEMPERATURE
+                        "temperature", LLM_TEMPERATURE
                     ),
                     max_tokens=text_analyzer_kwargs.get(
-                        "max_tokens", LLM_PII_MAX_TOKENS
+                        "max_tokens", LLM_MAX_NEW_TOKENS
                     ),
                     output_folder=output_folder,
                     batch_number=comprehend_query_number + 1,
@@ -10546,14 +11769,38 @@ def run_page_text_redaction(
     )
 
 
+def _char_bbox_and_text(char: Any) -> Tuple[Optional[List[float]], str]:
+    """
+    Get bbox and text from a character object. Supports both pdfminer LTChar
+    and PyMuPDF dict format {"text": ..., "bbox": [x0,y0,x1,y1], ...}.
+    Returns (bbox_list or None, text_str).
+    """
+    if isinstance(char, LTChar):
+        return (
+            getattr(char, "bbox", None),
+            getattr(char, "_text", None)
+            or (char.get_text() if callable(getattr(char, "get_text", None)) else "")
+            or "",
+        )
+    if isinstance(char, dict) and "bbox" in char:
+        bbox = char["bbox"]
+        text = char.get("text", "")
+        return (
+            bbox if isinstance(bbox, (list, tuple)) and len(bbox) >= 4 else None,
+            text,
+        )
+    return (None, "")
+
+
 def merge_text_bounding_boxes(
     analyser_results: dict,
-    characters: List[LTChar],
+    characters: List[Any],
     combine_pixel_dist: int = 20,
     vertical_padding: int = 0,
 ):
     """
-    Merge identified bounding boxes containing PII that are very close to one another
+    Merge identified bounding boxes containing PII that are very close to one another.
+    Supports both pdfminer LTChar objects and PyMuPDF-style dicts with "bbox" and "text" keys.
     """
     analysed_bounding_boxes = list()
     original_bounding_boxes = list()  # List to hold original bounding boxes
@@ -10562,16 +11809,13 @@ def merge_text_bounding_boxes(
         # Extract bounding box coordinates for sorting
         bounding_boxes = list()
         for result in analyser_results:
-            char_boxes = [
-                char.bbox
-                for char in characters[result.start : result.end]
-                if isinstance(char, LTChar)
-            ]
-            char_text = [
-                char._text
-                for char in characters[result.start : result.end]
-                if isinstance(char, LTChar)
-            ]
+            char_boxes = []
+            char_text = []
+            for char in characters[result.start : result.end]:
+                bbox, text = _char_bbox_and_text(char)
+                if bbox is not None:
+                    char_boxes.append(bbox)
+                    char_text.append(text)
             if char_boxes:
                 # Calculate the bounding box that encompasses all characters
                 left = min(box[0] for box in char_boxes)
@@ -10591,74 +11835,81 @@ def merge_text_bounding_boxes(
                         "result": copy.deepcopy(result),
                     }
                 )
-                # print("Original bounding boxes:", original_bounding_boxes)
 
         # Sort the results by y-coordinate and then by x-coordinate
         bounding_boxes.sort()
 
-        merged_bounding_boxes = list()
-        current_box = None
-        current_y = None
-        current_result = None
-        current_text = list()
+        if MERGE_BOUNDING_BOXES:
+            merged_bounding_boxes = list()
+            current_box = None
+            current_y = None
+            current_result = None
+            current_text = list()
 
-        for y, x, result, next_box, text in bounding_boxes:
-            if current_y is None or current_box is None:
-                # Initialize the first bounding box
-                current_box = next_box
-                current_y = next_box[1]
-                current_result = result
-                current_text = list(text)
-            else:
-                vertical_diff_bboxes = abs(next_box[1] - current_y)
-                horizontal_diff_bboxes = abs(next_box[0] - current_box[2])
-
-                if (
-                    vertical_diff_bboxes <= 5
-                    and horizontal_diff_bboxes <= combine_pixel_dist
-                ):
-                    # Merge bounding boxes
-                    # print("Merging boxes")
-                    merged_box = current_box.copy()
-                    merged_result = current_result
-                    merged_text = current_text.copy()
-
-                    merged_box[2] = next_box[2]  # Extend horizontally
-                    merged_box[3] = max(current_box[3], next_box[3])  # Adjust the top
-                    merged_result.end = max(
-                        current_result.end, result.end
-                    )  # Extend text range
-                    try:
-                        if current_result.entity_type != result.entity_type:
-                            merged_result.entity_type = (
-                                current_result.entity_type + " - " + result.entity_type
-                            )
-                        else:
-                            merged_result.entity_type = current_result.entity_type
-                    except Exception as e:
-                        print("Unable to combine result entity types:", e)
-                    if current_text:
-                        merged_text.append(" ")  # Add space between texts
-                    merged_text.extend(text)
-
-                    merged_bounding_boxes.append(
-                        {
-                            "text": "".join(merged_text),
-                            "boundingBox": merged_box,
-                            "result": merged_result,
-                        }
-                    )
-
-                else:
-                    # Start a new bounding box
+            for y, x, result, next_box, text in bounding_boxes:
+                if current_y is None or current_box is None:
+                    # Initialize the first bounding box
                     current_box = next_box
                     current_y = next_box[1]
                     current_result = result
                     current_text = list(text)
+                else:
+                    vertical_diff_bboxes = abs(next_box[1] - current_y)
+                    horizontal_diff_bboxes = abs(next_box[0] - current_box[2])
 
-        # Combine original and merged bounding boxes
-        analysed_bounding_boxes.extend(original_bounding_boxes)
-        analysed_bounding_boxes.extend(merged_bounding_boxes)
+                    if (
+                        vertical_diff_bboxes <= 5
+                        and horizontal_diff_bboxes <= combine_pixel_dist
+                    ):
+                        # Merge bounding boxes
+                        # print("Merging boxes")
+                        merged_box = current_box.copy()
+                        merged_result = current_result
+                        merged_text = current_text.copy()
+
+                        merged_box[2] = next_box[2]  # Extend horizontally
+                        merged_box[3] = max(
+                            current_box[3], next_box[3]
+                        )  # Adjust the top
+                        merged_result.end = max(
+                            current_result.end, result.end
+                        )  # Extend text range
+                        try:
+                            if current_result.entity_type != result.entity_type:
+                                merged_result.entity_type = (
+                                    current_result.entity_type
+                                    + " - "
+                                    + result.entity_type
+                                )
+                            else:
+                                merged_result.entity_type = current_result.entity_type
+                        except Exception as e:
+                            print("Unable to combine result entity types:", e)
+                        if current_text:
+                            merged_text.append(" ")  # Add space between texts
+                        merged_text.extend(text)
+
+                        merged_bounding_boxes.append(
+                            {
+                                "text": "".join(merged_text),
+                                "boundingBox": merged_box,
+                                "result": merged_result,
+                            }
+                        )
+
+                    else:
+                        # Start a new bounding box
+                        current_box = next_box
+                        current_y = next_box[1]
+                        current_result = result
+                        current_text = list(text)
+
+            # Combine original and merged bounding boxes
+            analysed_bounding_boxes.extend(original_bounding_boxes)
+            analysed_bounding_boxes.extend(merged_bounding_boxes)
+        else:
+            # Keep boxes without merging
+            analysed_bounding_boxes.extend(original_bounding_boxes)
 
         # print("Analysed bounding boxes:", analysed_bounding_boxes)
 
@@ -10680,12 +11931,14 @@ def recreate_page_line_level_ocr_results_with_page(
         text = line_data["text"]
         if line_data["line"]:
             line_number = line_data["line"]
-        if "conf" in line_data["words"][0]:
-            conf = sum(word["conf"] for word in line_data["words"]) / len(
-                line_data["words"]
-            )
+        # Support both "confidence" (Textract) and "conf" (other OCR)
+        if line_data["words"]:
+            conf = sum(
+                word.get("confidence", word.get("conf", 0.0))
+                for word in line_data["words"]
+            ) / len(line_data["words"])
         else:
-            conf = 0.0
+            conf = line_data.get("confidence", line_data.get("conf", 0.0))
 
         # Recreate the OCRResult
         line_result = OCRResult(
@@ -10764,6 +12017,7 @@ def split_words_and_punctuation_from_line(
                     width=punc_width,
                     height=word_result.height,
                     conf=word_result.conf,
+                    model=word_result.model,
                 )
             )
             current_left += punc_width
@@ -10779,6 +12033,7 @@ def split_words_and_punctuation_from_line(
                     width=core_width,
                     height=word_result.height,
                     conf=word_result.conf,
+                    model=word_result.model,
                 )
             )
             current_left += core_width
@@ -10794,6 +12049,7 @@ def split_words_and_punctuation_from_line(
                     width=punc_width,
                     height=word_result.height,
                     conf=word_result.conf,
+                    model=word_result.model,
                 )
             )
 

@@ -42,6 +42,7 @@ def analyse_page_with_textract(
     aws_secret_question_textbox: str = AWS_SECRET_KEY,
     RUN_AWS_FUNCTIONS: bool = RUN_AWS_FUNCTIONS,
     PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS: bool = PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS,
+    textract_max_retries: int = 10,
 ):
     """
     Analyzes a single page of a document using AWS Textract to extract text and other features.
@@ -70,6 +71,8 @@ def analyse_page_with_textract(
                                                                  to prioritize AWS SSO credentials
                                                                  over environment variables.
                                                                  Defaults to True.
+        textract_max_retries (int, optional): Maximum number of attempts for each Textract API call.
+                                             Defaults to 2.
 
     Returns:
         Tuple[List[Dict], str]: A tuple containing:
@@ -137,16 +140,21 @@ def analyse_page_with_textract(
             feature_types.append("LAYOUT")
         if "Extract tables" in handwrite_signature_checkbox:
             feature_types.append("TABLES")
-        try:
-            response = client.analyze_document(
-                Document={"Bytes": pdf_page_bytes}, FeatureTypes=feature_types
-            )
-        except Exception as e:
-            print("Textract call failed due to:", e, "trying again in 3 seconds.")
-            time.sleep(3)
-            response = client.analyze_document(
-                Document={"Bytes": pdf_page_bytes}, FeatureTypes=feature_types
-            )
+        for attempt in range(textract_max_retries):
+            try:
+                response = client.analyze_document(
+                    Document={"Bytes": pdf_page_bytes}, FeatureTypes=feature_types
+                )
+                break
+            except Exception as e:
+                if attempt == textract_max_retries - 1:
+                    raise
+                print(
+                    "Textract call failed due to:",
+                    e,
+                    f"trying again in 1 second (attempt {attempt + 1}/{textract_max_retries}).",
+                )
+                time.sleep(1)
 
     if (
         "Extract signatures" not in handwrite_signature_checkbox
@@ -155,12 +163,21 @@ def analyse_page_with_textract(
         and "Extract tables" not in handwrite_signature_checkbox
     ):
         # Call detect_document_text to extract plain text
-        try:
-            response = client.detect_document_text(Document={"Bytes": pdf_page_bytes})
-        except Exception as e:
-            print("Textract call failed due to:", e, "trying again in 5 seconds.")
-            time.sleep(5)
-            response = client.detect_document_text(Document={"Bytes": pdf_page_bytes})
+        for attempt in range(textract_max_retries):
+            try:
+                response = client.detect_document_text(
+                    Document={"Bytes": pdf_page_bytes}
+                )
+                break
+            except Exception as e:
+                if attempt == textract_max_retries - 1:
+                    raise
+                print(
+                    "Textract call failed due to:",
+                    e,
+                    f"trying again in 1 second (attempt {attempt + 1}/{textract_max_retries}).",
+                )
+                time.sleep(1)
 
     # Add the 'Page' attribute to each block
     if "Blocks" in response:
@@ -854,7 +871,7 @@ def restructure_textract_output(textract_output: dict, page_sizes_df: pd.DataFra
     # Convert pages dictionary to a sorted list
     structured_output = {
         "DocumentMetadata": document_metadata,  # Store metadata separately
-        "pages": [pages_dict[page] for page in sorted(pages_dict.questions())],
+        "pages": [pages_dict[page] for page in sorted(pages_dict.keys())],
     }
 
     return structured_output

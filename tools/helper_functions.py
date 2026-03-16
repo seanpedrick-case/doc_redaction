@@ -1,9 +1,13 @@
+import logging
 import os
 import platform
 import random
 import re
 import string
+import sys
+import tempfile
 import unicodedata
+from contextlib import asynccontextmanager
 from datetime import datetime
 from math import ceil
 from pathlib import Path
@@ -19,19 +23,40 @@ from botocore.exceptions import (
     NoCredentialsError,
     PartialCredentialsError,
 )
-from gradio_image_annotation import image_annotator
+from fastapi import FastAPI
 
+from tools.aws_functions import download_file_from_s3, upload_file_to_s3
 from tools.config import (
+    AWS_LLM_PII_OPTION,
     AWS_PII_OPTION,
     AWS_USER_POOL_ID,
+    BEDROCK_LLM_INPUT_COST,
+    BEDROCK_LLM_INPUT_TOKENS_PER_PAGE,
+    BEDROCK_LLM_OUTPUT_COST,
+    BEDROCK_LLM_OUTPUT_TOKENS_PER_PAGE,
+    BEDROCK_VLM_INPUT_COST,
+    BEDROCK_VLM_OUTPUT_COST,
+    BEDROCK_VLM_PIXELS_PER_INPUT_TOKEN,
+    BEDROCK_VLM_TEXT_EXTRACT_OPTION,
+    CHOSEN_LOCAL_OCR_MODEL,
+    COST_CODES_PATH,
     CUSTOM_HEADER,
     CUSTOM_HEADER_VALUE,
+    DEFAULT_COST_CODE,
     DEFAULT_LANGUAGE,
+    DOCUMENT_REDACTION_BUCKET,
+    INFERENCE_SERVER_PII_OPTION,
     INPUT_FOLDER,
     LANGUAGE_CHOICES,
     LANGUAGE_MAP,
+    LOCAL_OCR_MODEL_OPTIONS,
+    LOCAL_PII_OPTION,
+    LOCAL_TRANSFORMERS_LLM_PII_OPTION,
     NO_REDACTION_PII_OPTION,
+    OUTPUT_COST_CODES_PATH,
     OUTPUT_FOLDER,
+    RUN_AWS_FUNCTIONS,
+    S3_COST_CODES_PATH,
     S3_OUTPUTS_FOLDER,
     SAVE_OUTPUTS_TO_S3,
     SELECTABLE_TEXT_EXTRACT_OPTION,
@@ -43,6 +68,7 @@ from tools.config import (
     TEXTRACT_TEXT_EXTRACT_OPTION,
     TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER,
     TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER,
+    VLM_MAX_IMAGE_SIZE,
     aws_comprehend_language_choices,
     convert_string_to_boolean,
     textract_language_choices,
@@ -57,17 +83,7 @@ def reset_state_vars():
         pd.DataFrame(),
         0,
         "",
-        image_annotator(
-            label="Modify redaction boxes",
-            label_list=["Redaction"],
-            label_colors=[(0, 0, 0)],
-            show_label=False,
-            sources=None,  # ["upload"],
-            show_clear_button=False,
-            show_share_button=False,
-            show_remove_button=False,
-            interactive=False,
-        ),
+        None,
         [],
         [],
         pd.DataFrame(),
@@ -80,6 +96,10 @@ def reset_state_vars():
         [],
         [],
         0,  # latest_file_completed_num: reset to 0 at start of document redaction
+        0,  # LLM total input tokens
+        0,  # LLM total output tokens
+        0,  # VLM total input tokens
+        0,  # VLM total output tokens
     )
 
 
@@ -96,7 +116,7 @@ def reset_data_vars():
 
 
 def reset_aws_call_vars():
-    return 0, 0
+    return 0, 0, 0, 0, 0, 0, "", ""
 
 
 ### functions related to summarisation ###
@@ -197,6 +217,19 @@ def get_file_name_no_ext(file_path: str):
     return filename_without_extension
 
 
+def _file_name_from_pdf_path(full_file_name):
+    """Derive a safe file_name prefix from a PDF path (for summary output naming)."""
+    if not full_file_name or not str(full_file_name).strip():
+        return "document"
+    basename = os.path.basename(full_file_name)
+    name_without_ext, _ = os.path.splitext(basename)
+    filename_prefix = (name_without_ext or "document")[:20]
+    invalid_chars = '<>:"/\\|?*'
+    for char in invalid_chars:
+        filename_prefix = filename_prefix.replace(char, "_")
+    return filename_prefix if filename_prefix else "document"
+
+
 ###
 
 
@@ -221,8 +254,16 @@ def load_in_default_cost_codes(cost_codes_path: str, default_cost_code: str = ""
     if "" not in dropdown_choices:
         dropdown_choices.insert(0, "")
 
+    # Use passed default if in choices, else fall back to DEFAULT_COST_CODE so dropdown shows app default on load
+    if default_cost_code and default_cost_code in dropdown_choices:
+        value = default_cost_code
+    elif DEFAULT_COST_CODE and DEFAULT_COST_CODE in dropdown_choices:
+        value = DEFAULT_COST_CODE
+    else:
+        value = ""
+
     out_dropdown = gr.Dropdown(
-        value=default_cost_code if default_cost_code in dropdown_choices else "",
+        value=value,
         label="Choose cost code for analysis",
         choices=dropdown_choices,
         allow_custom_value=False,
@@ -267,15 +308,271 @@ def update_cost_code_dataframe_from_dropdown_select(
     return cost_code_df
 
 
+SESSION_DEFAULT_COST_CODES_FILENAME = "session_default_cost_codes.csv"
+
+# Reasonable email pattern for validating session_hash (saves/upload require email format)
+_EMAIL_PATTERN = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+
+
+def _is_valid_session_hash_email(session_hash: str) -> bool:
+    """Return True if session_hash is in valid email format (required for saving defaults)."""
+    if not session_hash or not isinstance(session_hash, str):
+        return False
+    return bool(_EMAIL_PATTERN.match(session_hash.strip()))
+
+
+def _dedupe_session_default_cost_codes(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Remove duplicate session_hashes, keeping only the latest row by saved_at.
+    If saved_at is missing or empty, those rows are treated as oldest.
+    """
+    if df.empty or "session_hash" not in df.columns:
+        return df
+    if "saved_at" not in df.columns:
+        return df.drop_duplicates(subset=["session_hash"], keep="last")
+    # Sort so latest saved_at is last; empty string sorts last in ascending order
+    df = df.sort_values("saved_at", ascending=True, na_position="last")
+    return df.drop_duplicates(subset=["session_hash"], keep="last")
+
+
+def _get_session_default_cost_codes_s3_key_prefix():
+    """
+    Return the S3 key prefix (folder) for the session default cost codes file,
+    same bucket and folder as S3_COST_CODES_PATH. Empty string if no S3 path.
+    """
+    if not S3_COST_CODES_PATH or not str(S3_COST_CODES_PATH).strip():
+        return ""
+    # Use forward slash for S3; path can be "config/COST_CENTRES.csv" or "file.csv"
+    parts = S3_COST_CODES_PATH.replace("\\", "/").rstrip("/").split("/")
+    if len(parts) <= 1:
+        return ""
+    return "/".join(parts[:-1]) + "/"
+
+
+def get_session_default_cost_codes_csv_path(folder: str | None = None):
+    """
+    Return the path to the CSV file that stores session_hash -> default_cost_code.
+    If folder is provided (e.g. input folder path), use that. Otherwise use the
+    same folder as cost codes (COST_CODES_PATH or OUTPUT_COST_CODES_PATH).
+    """
+    if folder is not None and str(folder).strip():
+        base = str(folder).strip()
+        return os.path.join(base, SESSION_DEFAULT_COST_CODES_FILENAME)
+    if COST_CODES_PATH:
+        folder = os.path.dirname(COST_CODES_PATH)
+    else:
+        folder = os.path.dirname(OUTPUT_COST_CODES_PATH)
+    if not folder:
+        folder = "."
+    return os.path.join(folder, SESSION_DEFAULT_COST_CODES_FILENAME)
+
+
+def save_default_cost_code_for_session(
+    session_hash: str,
+    cost_code_choice: str,
+    cost_code_df: pd.DataFrame,
+    output_folder: str | None = None,
+) -> str:
+    """
+    Validate cost_code_choice against cost_code_df 'Cost code' column; if valid,
+    save or update session_hash -> default_cost_code in the session defaults CSV.
+    If output_folder is provided (e.g. input folder path), save there; else use
+    cost codes folder. Returns a message string for the user.
+    """
+    if not session_hash or not str(session_hash).strip():
+        return "No session identifier available."
+    if not _is_valid_session_hash_email(session_hash):
+        return (
+            "Default cost code can only be saved when the session identifier is an "
+            "email address (e.g. when signed in with Cognito)."
+        )
+    if not cost_code_choice or not str(cost_code_choice).strip():
+        return "Please choose a cost code first."
+    if cost_code_df is None or cost_code_df.empty:
+        return "No cost codes loaded for validation."
+    valid_codes = list(cost_code_df.iloc[:, 0].astype(str).unique())
+    if cost_code_choice not in valid_codes:
+        return "Selected cost code not in the list. Choose a cost code from the table."
+    csv_path = get_session_default_cost_codes_csv_path(output_folder)
+    ensure_folder_exists(os.path.dirname(csv_path))
+    saved_at = datetime.now().isoformat()
+    row = {
+        "session_hash": session_hash,
+        "default_cost_code": cost_code_choice,
+        "saved_at": saved_at,
+    }
+    if os.path.exists(csv_path):
+        existing = pd.read_csv(csv_path)
+        if (
+            "session_hash" in existing.columns
+            and "default_cost_code" in existing.columns
+        ):
+            if "saved_at" not in existing.columns:
+                existing["saved_at"] = ""
+            # Replace any existing row for this session (one row per session_hash)
+            existing = existing[
+                existing["session_hash"].astype(str) != str(session_hash)
+            ]
+            updated = pd.concat([existing, pd.DataFrame([row])], ignore_index=True)
+        else:
+            updated = pd.DataFrame([row])
+    else:
+        updated = pd.DataFrame([row])
+    # Remove duplicate session_hashes, keeping only the latest by saved_at
+    updated = _dedupe_session_default_cost_codes(updated)
+    updated.to_csv(csv_path, index=False)
+
+    # If S3 cost codes path is set, save to the same bucket and folder in S3
+    if (
+        S3_COST_CODES_PATH
+        and str(S3_COST_CODES_PATH).strip()
+        and RUN_AWS_FUNCTIONS
+        and DOCUMENT_REDACTION_BUCKET
+    ):
+        # Ensure the file exists before upload (e.g. in case of path or write edge cases)
+        if not os.path.exists(csv_path):
+            ensure_folder_exists(os.path.dirname(csv_path))
+            updated.to_csv(csv_path, index=False)
+        s3_prefix = _get_session_default_cost_codes_s3_key_prefix()
+        s3_full_key = s3_prefix + SESSION_DEFAULT_COST_CODES_FILENAME
+        upload_result = upload_file_to_s3(
+            local_file_paths=[csv_path],
+            s3_key=s3_prefix,
+            s3_bucket=DOCUMENT_REDACTION_BUCKET,
+            RUN_AWS_FUNCTIONS=RUN_AWS_FUNCTIONS,
+        )
+        if upload_result and "successfully" in upload_result.lower():
+            print(
+                f"Session default cost codes CSV uploaded to "
+                f"s3://{DOCUMENT_REDACTION_BUCKET}/{s3_full_key}"
+            )
+        else:
+            print(
+                f"Session default cost codes S3 upload issue "
+                f"(target s3://{DOCUMENT_REDACTION_BUCKET}/{s3_full_key}): {upload_result!r}"
+            )
+
+    return "Default cost code saved"
+
+
+def _read_session_default_from_csv_path(csv_path: str, session_hash: str) -> str:
+    """Read CSV at csv_path and return default_cost_code for session_hash, or "".
+    If saved_at exists, uses the latest row by saved_at for that session_hash.
+    """
+    if not os.path.exists(csv_path):
+        return ""
+    try:
+        df = pd.read_csv(csv_path)
+        if "session_hash" not in df.columns or "default_cost_code" not in df.columns:
+            return ""
+        match = df[df["session_hash"].astype(str) == str(session_hash)]
+        if match.empty:
+            return ""
+        if "saved_at" in match.columns:
+            match = match.sort_values("saved_at", ascending=True, na_position="last")
+        return str(match.iloc[-1]["default_cost_code"]).strip()
+    except Exception:
+        return ""
+
+
+def load_session_default_cost_code(
+    session_hash: str, input_folder: str | None = None
+) -> str:
+    """
+    Load the default cost code for the given session_hash from the session defaults CSV.
+    If S3_COST_CODES_PATH is set, tries the same bucket and folder in S3 first, then local.
+    If input_folder is provided, tries that path first for local file, then fallback.
+    Returns the default cost code string if found, else "".
+    """
+    if not session_hash or not str(session_hash).strip():
+        return ""
+
+    # Only download from S3 when session_hash is an email (same rule as for saves)
+    if _is_valid_session_hash_email(session_hash) and (
+        S3_COST_CODES_PATH
+        and str(S3_COST_CODES_PATH).strip()
+        and RUN_AWS_FUNCTIONS
+        and DOCUMENT_REDACTION_BUCKET
+    ):
+        s3_prefix = _get_session_default_cost_codes_s3_key_prefix()
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".csv", delete=False
+            ) as tmp:
+                tmp_path = tmp.name
+            download_file_from_s3(
+                bucket_name=DOCUMENT_REDACTION_BUCKET,
+                key=s3_prefix + SESSION_DEFAULT_COST_CODES_FILENAME,
+                local_file_path_and_name=tmp_path,
+                RUN_AWS_FUNCTIONS=RUN_AWS_FUNCTIONS,
+            )
+            if tmp_path and os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
+                result = _read_session_default_from_csv_path(tmp_path, session_hash)
+                if result:
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
+                    return result
+        except Exception:
+            pass
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    # Local: try input_folder first if provided, then default cost codes folder
+    if input_folder is not None and str(input_folder).strip():
+        csv_path = get_session_default_cost_codes_csv_path(input_folder)
+        result = _read_session_default_from_csv_path(csv_path, session_hash)
+        if result:
+            return result
+    csv_path = get_session_default_cost_codes_csv_path()
+    return _read_session_default_from_csv_path(csv_path, session_hash)
+
+
+def apply_session_default_cost_code(
+    session_hash: str,
+    cost_code_dataframe: pd.DataFrame,
+    input_folder: str | None = None,
+    current_default_cost_code: str | None = None,
+    current_dropdown_value: str | None = None,
+) -> tuple[str, str]:
+    """
+    Look up the saved default cost code for session_hash. If found and valid in
+    cost_code_dataframe, return (default_cost_code, default_cost_code) for
+    default_cost_code_textbox and cost_code_choice_drop. When no saved default
+    applies, return (current_default_cost_code, current_dropdown_value) so the
+    dropdown keeps showing e.g. DEFAULT_COST_CODE instead of being cleared.
+    """
+    default_code = load_session_default_cost_code(session_hash, input_folder)
+    if not default_code:
+        # Preserve current values so we don't overwrite with "" on app load
+        cur = current_default_cost_code if current_default_cost_code is not None else ""
+        drop = current_dropdown_value if current_dropdown_value is not None else ""
+        return cur, drop
+    if cost_code_dataframe is None or cost_code_dataframe.empty:
+        return default_code, default_code
+    choices = list(cost_code_dataframe.iloc[:, 0].astype(str).unique())
+    if default_code not in choices:
+        cur = current_default_cost_code if current_default_cost_code is not None else ""
+        drop = current_dropdown_value if current_dropdown_value is not None else ""
+        return cur, drop
+    return default_code, default_code
+
+
 def ensure_folder_exists(output_folder: str):
     """Checks if the specified folder exists, creates it if not."""
 
     if not os.path.exists(output_folder):
         # Create the folder if it doesn't exist
         os.makedirs(output_folder, exist_ok=True)
-        print(f"Created the {output_folder} folder.")
+        # print(f"Created the {output_folder} folder.")
     else:
-        print(f"The {output_folder} folder already exists.")
+        # print(f"The {output_folder} folder already exists.")
+        pass
 
 
 def update_dataframe(df_or_list):
@@ -414,12 +711,11 @@ def put_columns_in_df(in_file: List[str]):
     for file in in_file:
         file_name = file.name
         file_type = detect_file_type(file_name)
-        print("File type is:", file_type)
+        # print("File type is:", file_type)
 
         if (file_type == "xlsx") | (file_type == "xls"):
             number_of_excel_files += 1
             new_choices = []
-            print("Running through all xlsx sheets")
             anon_xlsx = pd.ExcelFile(file_name)
             new_sheet_names = anon_xlsx.sheet_names
             # Iterate through the sheet names
@@ -523,7 +819,7 @@ def check_for_relevant_ocr_output_with_words(
     elif text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
         file_ending = "_ocr_results_with_words_textract.json"
     else:
-        print("No valid text extraction method found. Returning False")
+        # print("No valid text extraction method found. Returning False")
         return False
 
     doc_file_with_ending = doc_file_name_no_extension_textbox + file_ending
@@ -736,9 +1032,9 @@ async def get_connection_params(
         s3_outputs_folder = s3_outputs_folder.rstrip("/") + "/" + today_suffix
 
     if not os.path.exists(output_folder):
-        os.mkdir(output_folder)
+        os.makedirs(output_folder, exist_ok=True)
     if not os.path.exists(input_folder):
-        os.mkdir(input_folder)
+        os.makedirs(input_folder, exist_ok=True)
 
     return (
         out_session_hash,
@@ -866,12 +1162,27 @@ def calculate_aws_costs(
     usd_gbp_conversion_rate: float = 0.76,
     textract_page_cost: float = 1.5 / 1000,
     textract_signature_cost: float = 2.0 / 1000,
+    textract_forms_cost: float = 50.0 / 1000,
+    textract_layout_cost: float = 4.0 / 1000,
+    textract_tables_cost: float = 15.0 / 1000,
     comprehend_unit_cost: float = 0.0001,
     comprehend_size_unit_average: float = 250,
     average_characters_per_page: float = 2000,
+    bedrock_vlm_output_token_ratio: float = 0.08,
+    bedrock_vlm_face_output_token_ratio: float = 0.03,
     TEXTRACT_TEXT_EXTRACT_OPTION: str = TEXTRACT_TEXT_EXTRACT_OPTION,
+    BEDROCK_VLM_TEXT_EXTRACT_OPTION: str = BEDROCK_VLM_TEXT_EXTRACT_OPTION,
     NO_REDACTION_PII_OPTION: str = NO_REDACTION_PII_OPTION,
     AWS_PII_OPTION: str = AWS_PII_OPTION,
+    AWS_LLM_PII_OPTION: str = AWS_LLM_PII_OPTION,
+    VLM_MAX_IMAGE_SIZE: int = VLM_MAX_IMAGE_SIZE,
+    BEDROCK_VLM_INPUT_COST: float = BEDROCK_VLM_INPUT_COST,
+    BEDROCK_VLM_OUTPUT_COST: float = BEDROCK_VLM_OUTPUT_COST,
+    BEDROCK_VLM_PIXELS_PER_INPUT_TOKEN: int = BEDROCK_VLM_PIXELS_PER_INPUT_TOKEN,
+    BEDROCK_LLM_INPUT_COST: float = BEDROCK_LLM_INPUT_COST,
+    BEDROCK_LLM_OUTPUT_COST: float = BEDROCK_LLM_OUTPUT_COST,
+    BEDROCK_LLM_INPUT_TOKENS_PER_PAGE: int = BEDROCK_LLM_INPUT_TOKENS_PER_PAGE,
+    BEDROCK_LLM_OUTPUT_TOKENS_PER_PAGE: int = BEDROCK_LLM_OUTPUT_TOKENS_PER_PAGE,
 ):
     """
     Calculate the approximate cost of submitting a document to AWS Textract and/or AWS Comprehend, assuming that Textract outputs do not already exist in the output folder.
@@ -886,12 +1197,21 @@ def calculate_aws_costs(
     - usd_gbp_conversion_rate (float, optional): Conversion rate used for USD to GBP. Last changed 14th April 2025.
     - textract_page_cost (float, optional): AWS pricing for Textract text extraction per page ($).
     - textract_signature_cost (float, optional): Additional AWS cost above standard AWS Textract extraction for extracting signatures.
+    - textract_forms_cost (float, optional): AWS Textract cost per page for "Extract forms" ($50/1000 pages).
+    - textract_layout_cost (float, optional): AWS Textract cost per page for "Extract layout" ($4/1000 pages).
+    - textract_tables_cost (float, optional): AWS Textract cost per page for "Extract tables" ($15/1000 pages).
     - comprehend_unit_cost (float, optional): Cost per 'unit' (300 character minimum) for identifying PII in text with AWS Comprehend.
     - comprehend_size_unit_average (float, optional): Average size of a 'unit' of text passed to AWS Comprehend by the app through the batching process
     - average_characters_per_page (float, optional): Average number of characters on an A4 page.
+    - bedrock_vlm_output_token_ratio (float, optional): Ratio of output to input tokens for Bedrock VLM OCR (~0.08 in practice).
+    - bedrock_vlm_face_output_token_ratio (float, optional): Ratio of output to input tokens for the face-identification second run (~0.03 in practice).
     - TEXTRACT_TEXT_EXTRACT_OPTION (str, optional): String label for the text_extract_method_radio button for AWS Textract.
+    - BEDROCK_VLM_TEXT_EXTRACT_OPTION (str, optional): String label for AWS Bedrock VLM OCR text extraction.
     - NO_REDACTION_PII_OPTION (str, optional): String label for pii_identification_method_drop for no redaction.
     - AWS_PII_OPTION (str, optional): String label for pii_identification_method_drop for AWS Comprehend.
+    - AWS_LLM_PII_OPTION (str, optional): String label for PII identification via LLM (AWS Bedrock).
+    - VLM_MAX_IMAGE_SIZE, BEDROCK_VLM_*: used for Bedrock VLM OCR cost estimate.
+    - BEDROCK_LLM_*: used for Bedrock LLM (e.g. PII detection) cost estimate when that method is selected (2000 input / 250 output tokens per page).
     """
     text_extraction_cost = 0
     pii_identification_cost = 0
@@ -904,6 +1224,35 @@ def calculate_aws_costs(
 
             if "Extract signatures" in handwrite_signature_checkbox:
                 text_extraction_cost += textract_signature_cost * number_of_pages
+            if "Extract forms" in handwrite_signature_checkbox:
+                text_extraction_cost += textract_forms_cost * number_of_pages
+            if "Extract layout" in handwrite_signature_checkbox:
+                text_extraction_cost += textract_layout_cost * number_of_pages
+            if "Extract tables" in handwrite_signature_checkbox:
+                text_extraction_cost += textract_tables_cost * number_of_pages
+
+        elif text_extract_method_radio == BEDROCK_VLM_TEXT_EXTRACT_OPTION:
+            # Estimate input tokens per page from max image size; output tokens ~8% of input
+            input_tokens_per_page = ceil(
+                VLM_MAX_IMAGE_SIZE / BEDROCK_VLM_PIXELS_PER_INPUT_TOKEN
+            )
+            output_tokens_per_page = (
+                input_tokens_per_page * bedrock_vlm_output_token_ratio
+            )
+            total_input_tokens = number_of_pages * input_tokens_per_page
+            total_output_tokens = number_of_pages * output_tokens_per_page
+            text_extraction_cost = total_input_tokens * (
+                BEDROCK_VLM_INPUT_COST / 1_000_000
+            ) + total_output_tokens * (BEDROCK_VLM_OUTPUT_COST / 1_000_000)
+            # Face detection does a second run per page: same input tokens, output ~3% of input
+            if "Face detection" in handwrite_signature_checkbox:
+                face_input_tokens = total_input_tokens
+                face_output_tokens = int(
+                    total_input_tokens * bedrock_vlm_face_output_token_ratio
+                )
+                text_extraction_cost += face_input_tokens * (
+                    BEDROCK_VLM_INPUT_COST / 1_000_000
+                ) + face_output_tokens * (BEDROCK_VLM_OUTPUT_COST / 1_000_000)
 
     if pii_identification_method != NO_REDACTION_PII_OPTION:
         if pii_identification_method == AWS_PII_OPTION:
@@ -912,6 +1261,14 @@ def calculate_aws_costs(
                 * comprehend_unit_cost
             )
             pii_identification_cost = comprehend_page_cost * number_of_pages
+
+        elif pii_identification_method == AWS_LLM_PII_OPTION:
+            # Bedrock LLM (e.g. PII detection): 2000 input tokens, 250 output tokens per page
+            llm_input_tokens = number_of_pages * BEDROCK_LLM_INPUT_TOKENS_PER_PAGE
+            llm_output_tokens = number_of_pages * BEDROCK_LLM_OUTPUT_TOKENS_PER_PAGE
+            pii_identification_cost = llm_input_tokens * (
+                BEDROCK_LLM_INPUT_COST / 1_000_000
+            ) + llm_output_tokens * (BEDROCK_LLM_OUTPUT_COST / 1_000_000)
 
     calculated_aws_cost = (
         calculated_aws_cost + text_extraction_cost + pii_identification_cost
@@ -930,17 +1287,20 @@ def calculate_time_taken(
     textract_output_found_checkbox: bool,
     only_extract_text_radio: bool,
     local_ocr_output_found_checkbox: bool,
+    handwrite_signature_checkbox: List[str],
     convert_page_time: float = 0.3,
-    textract_page_time: float = 0.6,
-    comprehend_page_time: float = 0.6,
-    local_text_extraction_page_time: float = 0.3,
-    local_pii_redaction_page_time: float = 0.5,
+    textract_page_time: float = 0.4,
+    comprehend_page_time: float = 0.4,
+    local_text_extraction_page_time: float = 0.2,
+    local_pii_redaction_page_time: float = 0.4,
     local_ocr_extraction_page_time: float = 1.5,
     TEXTRACT_TEXT_EXTRACT_OPTION: str = TEXTRACT_TEXT_EXTRACT_OPTION,
+    BEDROCK_VLM_TEXT_EXTRACT_OPTION: str = BEDROCK_VLM_TEXT_EXTRACT_OPTION,
     SELECTABLE_TEXT_EXTRACT_OPTION: str = SELECTABLE_TEXT_EXTRACT_OPTION,
     local_ocr_option: str = TESSERACT_TEXT_EXTRACT_OPTION,
     NO_REDACTION_PII_OPTION: str = NO_REDACTION_PII_OPTION,
     AWS_PII_OPTION: str = AWS_PII_OPTION,
+    AWS_LLM_PII_OPTION: str = AWS_LLM_PII_OPTION,
 ):
     """
     Calculate the approximate time to redact a document.
@@ -951,7 +1311,8 @@ def calculate_time_taken(
     - textract_output_found_checkbox (bool, optional): Boolean indicating if AWS Textract text extraction outputs have been found.
     - only_extract_text_radio (bool, optional): Option to only extract text from the document rather than redact.
     - local_ocr_output_found_checkbox (bool, optional): Boolean indicating if local OCR text extraction outputs have been found.
-    - textract_page_time (float, optional): Approximate time to query AWS Textract.
+    - handwrite_signature_checkbox: List of selected options (e.g. "Face detection"); when Face detection is selected with Bedrock VLM, extraction time is doubled.
+    - textract_page_time (float, optional): Approximate time to query AWS Textract (also used for Bedrock VLM OCR).
     - comprehend_page_time (float, optional): Approximate time to query text on a page with AWS Comprehend.
     - local_text_redaction_page_time (float, optional): Approximate time to extract text on a page with the local text redaction option.
     - local_pii_redaction_page_time (float, optional): Approximate time to redact text on a page with the local text redaction option.
@@ -961,6 +1322,7 @@ def calculate_time_taken(
     - local_ocr_option (str, optional): String label for text_extract_method_radio for local OCR.
     - NO_REDACTION_PII_OPTION (str, optional): String label for pii_identification_method_drop for no redaction.
     - AWS_PII_OPTION (str, optional): String label for pii_identification_method_drop for AWS Comprehend.
+    - BEDROCK_VLM_TEXT_EXTRACT_OPTION, AWS_LLM_PII_OPTION (str, optional): Labels for Bedrock VLM OCR and LLM PII; times match Textract and Comprehend respectively.
     """
     calculated_time_taken = 0
     page_conversion_time_taken = 0
@@ -979,6 +1341,11 @@ def calculate_time_taken(
     if text_extract_method_radio == TEXTRACT_TEXT_EXTRACT_OPTION:
         if textract_output_found_checkbox is not True:
             page_extraction_time_taken = number_of_pages * textract_page_time
+    elif text_extract_method_radio == BEDROCK_VLM_TEXT_EXTRACT_OPTION:
+        if textract_output_found_checkbox is not True:
+            page_extraction_time_taken = number_of_pages * textract_page_time
+            if "Face detection" in (handwrite_signature_checkbox or []):
+                page_extraction_time_taken *= 2
     elif text_extract_method_radio == local_ocr_option:
         if local_ocr_output_found_checkbox is not True:
             page_extraction_time_taken = (
@@ -987,9 +1354,9 @@ def calculate_time_taken(
     elif text_extract_method_radio == SELECTABLE_TEXT_EXTRACT_OPTION:
         page_conversion_time_taken = number_of_pages * local_text_extraction_page_time
 
-    # Page redaction time
+    # Page redaction time (Bedrock LLM PII uses same time as AWS Comprehend)
     if pii_identification_method != NO_REDACTION_PII_OPTION:
-        if pii_identification_method == AWS_PII_OPTION:
+        if pii_identification_method in (AWS_PII_OPTION, AWS_LLM_PII_OPTION):
             page_redaction_time_taken = number_of_pages * comprehend_page_time
         else:
             page_redaction_time_taken = number_of_pages * local_pii_redaction_page_time
@@ -1018,6 +1385,22 @@ def reset_ocr_with_words_base_dataframe(
     df: pd.DataFrame, page_entity_dropdown_redaction_value: str
 ):
 
+    if "page" not in df.columns:
+        print("df does not contain page column")
+        df_out = pd.DataFrame(
+            columns=[
+                "page",
+                "line",
+                "word_text",
+                "word_x0",
+                "word_y0",
+                "word_x1",
+                "word_y1",
+                "index",
+            ]
+        )
+        return df_out, df_out
+
     df["index"] = df.index
     output_df = df.copy()
 
@@ -1029,10 +1412,10 @@ def reset_ocr_with_words_base_dataframe(
             "page",
             "line",
             "word_text",
-            "word_x0",
-            "word_y0",
-            "word_x1",
-            "word_y1",
+            # "word_x0",
+            # "word_y0",
+            # "word_x1",
+            # "word_y1",
             "index",
         ],
     ]
@@ -1134,3 +1517,305 @@ def get_system_font_path():
                 return font_path
 
     return None
+
+
+# Custom logging filter to remove logs from healthiness/readiness endpoints so they don't fill up application log flow
+class EndpointFilter(logging.Filter):
+    def __init__(self, path: str, *args, **kwargs):
+        self._path = path
+        super().__init__(*args, **kwargs)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.getMessage().find(self._path) == -1
+
+
+# 2. Define the lifespan context manager
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- STARTUP LOGIC ---
+    # Filter out /health logging to declutter ECS logs
+    uvicorn_access_logger = logging.getLogger("uvicorn.access")
+    uvicorn_access_logger.addFilter(EndpointFilter(path="/health"))
+
+    # Yield control back to the application
+    yield
+
+    pass
+
+
+def check_duplicate_pages_checkbox(redact_duplicate_pages_checkbox_value: bool):
+    if not redact_duplicate_pages_checkbox_value:
+        # Silently raise an error to avoid showing a popup
+        return
+    if redact_duplicate_pages_checkbox_value:
+        print("Identifying duplicates")
+        sys.tracebacklimit = 0  # Suppress traceback
+        gr.Info("Redact duplicate pages checkbox is enabled, Identifying duplicates")
+        raise gr.Error(
+            message="Redact duplicate pages checkbox is enabled, identifying duplicates.",
+            title="Finding duplicates...",
+            visible=False,
+            print_exception=False,
+        )
+
+
+# Tab switch functions
+def change_tab_to_tabular_or_document_redactions(is_data_file):
+    if is_data_file:
+        return gr.Tabs(selected=5)
+    else:
+        return gr.Tabs(selected=1)
+
+
+def change_tab_to_review_redactions():
+    return gr.Tabs(selected=2)
+
+
+### Examples functions
+def show_info_box_on_click(
+    in_doc_files,
+    text_extract_method_radio,
+    pii_identification_method_drop,
+    handwrite_signature_checkbox,
+    in_redact_entities,
+    in_redact_comprehend_entities,
+    prepared_pdf_state,
+    doc_full_file_name_textbox,
+    doc_file_name_no_extension_textbox,
+    in_deny_list,
+    in_deny_list_state,
+    in_fully_redacted_list,
+    in_fully_redacted_list_state,
+    total_pdf_page_count,
+):
+    gr.Info(
+        "Example data loaded. Now click on 'Extract text and redact document' on the Redact PDFs/images tab to run the example redaction."
+    )
+
+    # Convert deny_list_state, allow_list_state, and fully_redacted_list_state to lists if they are DataFrames
+    # Handle deny_list_state
+    deny_list_walkthrough = []
+    if isinstance(in_deny_list_state, pd.DataFrame):
+        # Explicitly convert empty DataFrame to empty list
+        if in_deny_list_state.empty:
+            deny_list_walkthrough = []
+        else:
+            deny_list_walkthrough = (
+                in_deny_list_state.iloc[:, 0].dropna().astype(str).tolist()
+            )
+    elif isinstance(in_deny_list_state, list):
+        deny_list_walkthrough = (
+            [str(item) for item in in_deny_list_state if item]
+            if in_deny_list_state
+            else []
+        )
+    else:
+        # Default to empty list for any other type
+        deny_list_walkthrough = []
+
+    # Handle fully_redacted_list_state
+    fully_redacted_list_walkthrough = []
+    if isinstance(in_fully_redacted_list_state, pd.DataFrame):
+        # Explicitly convert empty DataFrame to empty list
+        if in_fully_redacted_list_state.empty:
+            fully_redacted_list_walkthrough = []
+        else:
+            fully_redacted_list_walkthrough = (
+                in_fully_redacted_list_state.iloc[:, 0].dropna().astype(str).tolist()
+            )
+    elif isinstance(in_fully_redacted_list_state, list):
+        fully_redacted_list_walkthrough = (
+            [str(item) for item in in_fully_redacted_list_state if item]
+            if in_fully_redacted_list_state
+            else []
+        )
+    else:
+        # Default to empty list for any other type
+        fully_redacted_list_walkthrough = []
+
+    # Allow list is not in examples, so always set to empty list
+    allow_list_walkthrough = []
+
+    # Use default local OCR method - examples don't set this directly
+    local_ocr_method = CHOSEN_LOCAL_OCR_MODEL
+
+    # Update visibility of main PII entity components based on selected PII method
+    # This ensures visibility is correct even when clicking examples with the same PII method
+    # Determine visibility based on PII method (same logic as handle_main_pii_method_selection)
+    is_no_redaction = pii_identification_method_drop == NO_REDACTION_PII_OPTION
+    show_local_entities = (
+        not is_no_redaction and pii_identification_method_drop == LOCAL_PII_OPTION
+    )
+    show_comprehend_entities = (
+        not is_no_redaction and pii_identification_method_drop == AWS_PII_OPTION
+    )
+    is_llm_method = not is_no_redaction and (
+        pii_identification_method_drop == LOCAL_TRANSFORMERS_LLM_PII_OPTION
+        or pii_identification_method_drop == INFERENCE_SERVER_PII_OPTION
+        or pii_identification_method_drop == AWS_LLM_PII_OPTION
+    )
+
+    # Create updates with both value and visibility for main components
+    main_local_entities_update = gr.update(
+        value=in_redact_entities,
+        visible=show_local_entities,
+    )
+    main_comprehend_entities_update = gr.update(
+        value=in_redact_comprehend_entities,
+        visible=show_comprehend_entities,
+    )
+    main_llm_entities_update = gr.update(
+        visible=is_llm_method,
+    )
+    main_llm_instructions_update = gr.update(
+        visible=is_llm_method,
+    )
+
+    # Set visibility on walkthrough entity dropdowns so they match PII method after example load
+    walkthrough_local_update = gr.update(
+        value=in_redact_entities, visible=show_local_entities
+    )
+    walkthrough_comprehend_update = gr.update(
+        value=in_redact_comprehend_entities, visible=show_comprehend_entities
+    )
+
+    return (
+        gr.File(value=in_doc_files, visible=True),  # walkthrough_file_input
+        walkthrough_local_update,  # walkthrough_in_redact_entities
+        walkthrough_comprehend_update,  # walkthrough_in_redact_comprehend_entities
+        gr.Radio(
+            value=text_extract_method_radio, visible=True
+        ),  # walkthrough_text_extract_method_radio
+        gr.Radio(
+            value=local_ocr_method, visible=True
+        ),  # walkthrough_local_ocr_method_radio
+        gr.CheckboxGroup(
+            value=handwrite_signature_checkbox, visible=True
+        ),  # walkthrough_handwrite_signature_checkbox
+        gr.Radio(
+            value=pii_identification_method_drop, visible=True
+        ),  # walkthrough_pii_identification_method_drop
+        gr.Dropdown(
+            value=allow_list_walkthrough, visible=True
+        ),  # walkthrough_allow_list_state
+        gr.Dropdown(
+            value=deny_list_walkthrough, visible=True
+        ),  # walkthrough_deny_list_state
+        gr.Dropdown(
+            value=fully_redacted_list_walkthrough, visible=True
+        ),  # walkthrough_fully_redacted_list_state
+        main_local_entities_update,  # in_redact_entities (main component)
+        main_comprehend_entities_update,  # in_redact_comprehend_entities (main component)
+        main_llm_entities_update,  # in_redact_llm_entities (main component)
+        main_llm_instructions_update,  # custom_llm_instructions_textbox (main component)
+    )
+
+
+def show_info_box_on_click_ocr_examples(
+    in_doc_files,
+    text_extract_method_radio,
+    pii_identification_method_drop,
+    handwrite_signature_checkbox,
+    prepared_pdf_state,
+    doc_full_file_name_textbox,
+    doc_file_name_no_extension_textbox,
+    total_pdf_page_count,
+    page_min,
+    page_max,
+    local_ocr_method_radio,
+    in_redact_entities,
+    in_redact_llm_entities,
+    custom_llm_instructions_textbox,
+):
+    gr.Info(
+        "Example OCR data loaded. Now click on 'Extract text and redact document' on the Redact PDFs/images tab to run the OCR analysis."
+    )
+
+    is_no_redaction = pii_identification_method_drop == NO_REDACTION_PII_OPTION
+    show_local_entities = (
+        not is_no_redaction and pii_identification_method_drop == LOCAL_PII_OPTION
+    )
+    is_llm_method = not is_no_redaction and (
+        pii_identification_method_drop == LOCAL_TRANSFORMERS_LLM_PII_OPTION
+        or pii_identification_method_drop == INFERENCE_SERVER_PII_OPTION
+        or pii_identification_method_drop == AWS_LLM_PII_OPTION
+    )
+
+    main_local_entities_update = gr.update(
+        value=in_redact_entities,
+        visible=show_local_entities,
+    )
+
+    main_llm_entities_update = gr.update(
+        value=in_redact_llm_entities,
+        visible=is_llm_method,
+    )
+    main_llm_instructions_update = gr.update(
+        value=custom_llm_instructions_textbox,
+        visible=is_llm_method,
+    )
+
+    return (
+        gr.File(value=in_doc_files, visible=True),  # walkthrough_file_input
+        main_local_entities_update,  # walkthrough_in_redact_entities
+        gr.Radio(
+            value=text_extract_method_radio, visible=True
+        ),  # walkthrough_text_extract_method_radio
+        gr.Radio(
+            value=local_ocr_method_radio, visible=True
+        ),  # walkthrough_local_ocr_method_radio
+        gr.CheckboxGroup(
+            value=handwrite_signature_checkbox, visible=True
+        ),  # walkthrough_handwrite_signature_checkbox
+        gr.Radio(
+            value=pii_identification_method_drop, visible=True
+        ),  # walkthrough_pii_identification_method_drop
+        main_llm_entities_update,  # walkthrough_in_redact_llm_entities
+        main_llm_instructions_update,  # walkthrough_custom_llm_instructions_textbox
+        main_llm_entities_update,  # in_redact_llm_entities (main component)
+        main_llm_instructions_update,  # custom_llm_instructions_textbox (main component)
+    )
+
+
+def show_duplicate_info_box_on_click(
+    in_duplicate_pages,
+    duplicate_threshold_input,
+    min_word_count_input,
+    combine_page_text_for_duplicates_bool,
+):
+    gr.Info(
+        "Example data loaded. Now click on 'Identify duplicate pages/subdocuments' on the Identify duplicate pages tab to run the example duplicate detection."
+    )
+
+
+def show_tabular_info_box_on_click(
+    in_data_files,
+    in_colnames,
+    pii_identification_method_drop_tabular,
+    anon_strategy,
+    in_tabular_duplicate_files,
+    tabular_text_columns,
+    tabular_min_word_count,
+):
+    gr.Info(
+        "Example data loaded. Now click on 'Redact text/data files' or 'Find duplicate cells/rows' on the Word or Excel/CSV files tab to run the example."
+    )
+
+    return (
+        gr.File(value=in_data_files),  # walkthrough_file_input
+        gr.Radio(
+            value=pii_identification_method_drop_tabular
+        ),  # walkthrough_pii_identification_method_drop_tabular
+        gr.Radio(value=anon_strategy),  # walkthrough_anon_strategy
+    )
+
+
+# Dynamic visibility handlers for main redaction tab (run regardless of SHOW_COSTS)
+# Automatically set local_ocr_method_radio to "bedrock-vlm" when AWS Bedrock VLM is selected
+def auto_set_local_ocr_for_bedrock_vlm(text_extract_method):
+    """Automatically set local OCR method to bedrock-vlm when AWS Bedrock VLM is selected."""
+    if text_extract_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION:
+        # Only set if "bedrock-vlm" is a valid option
+        if "bedrock-vlm" in LOCAL_OCR_MODEL_OPTIONS:
+            return gr.update(value="bedrock-vlm")
+    return gr.update()

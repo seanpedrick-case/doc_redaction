@@ -18,29 +18,23 @@ from tools.config import (
     AWS_LLM_PII_OPTION,
     AWS_REGION,
     AWS_SECRET_KEY,
-    BATCH_SIZE_DEFAULT,
     CLOUD_LLM_PII_MODEL_CHOICE,
     CLOUD_SUMMARISATION_MODEL_CHOICE,
-    DEDUPLICATION_THRESHOLD,
     DEFAULT_INFERENCE_SERVER_PII_MODEL,
     INFERENCE_SERVER_PII_OPTION,
     LLM_CONTEXT_LENGTH,
     LLM_MAX_NEW_TOKENS,
     LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
     LOCAL_TRANSFORMERS_LLM_PII_OPTION,
-    MAX_COMMENT_CHARS,
     MAX_SPACES_GPU_RUN_TIME,
-    MAX_TIME_FOR_LOOP,
-    NUMBER_OF_RETRY_ATTEMPTS,
     OUTPUT_FOLDER,
     PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS,
     REASONING_SUFFIX,
     RUN_AWS_FUNCTIONS,
     SUMMARY_PAGE_GROUP_MAX_WORKERS,
-    TIMEOUT_WAIT,
     model_name_map,
 )
-from tools.file_conversion import word_level_ocr_df_to_line_level_ocr_df
+from tools.file_conversion import is_pdf, word_level_ocr_df_to_line_level_ocr_df
 from tools.helper_functions import (
     clean_column_name,
     create_batch_file_path_details,
@@ -55,12 +49,6 @@ from tools.llm_funcs import (
 )
 
 max_tokens = LLM_MAX_NEW_TOKENS
-timeout_wait = TIMEOUT_WAIT
-number_of_api_retry_attempts = NUMBER_OF_RETRY_ATTEMPTS
-max_time_for_loop = MAX_TIME_FOR_LOOP
-batch_size_default = BATCH_SIZE_DEFAULT
-deduplication_threshold = DEDUPLICATION_THRESHOLD
-max_comment_character_length = MAX_COMMENT_CHARS
 reasoning_suffix = REASONING_SUFFIX
 max_text_length = 500
 
@@ -110,14 +98,37 @@ Table to summarise:
 
 Summary:"""
 
-# comprehensive_summary_format_prompt = "Return a comprehensive summary that covers all the important topics and themes described in the summaries below. Structure the summary with Main issues as headings, with significant topics described in bullet points below them in order of relative significance. Format the output for Excel display using: **bold text** for main headings, • bullet points for sub-items, and line breaks between sections. Avoid markdown symbols like # or ##."
 
-# comprehensive_summary_format_prompt_by_group = "Return a comprehensive summary that covers all the important topics and themes described in the summaries below. Structure the summary with main issues as headings, with significant Subtopics described in bullet points below them in order of relative significance. Compare and contrast differences between the topics and themes from each Group. Format the output for Excel display using: **bold text** for main headings, • bullet points for sub-items, and line breaks between sections. Avoid markdown symbols like # or ##."
+def _summarisation_upload_to_paths(file_upload):
+    """Normalise Gradio file input to a list of file paths (str, list, or dict with 'name')."""
+    if not file_upload:
+        return []
+    paths = []
+    if isinstance(file_upload, str):
+        paths.append(file_upload)
+    elif isinstance(file_upload, list):
+        for item in file_upload:
+            if isinstance(item, str):
+                paths.append(item)
+            elif isinstance(item, dict):
+                paths.append(item.get("name") or item.get("path") or "")
+            elif hasattr(item, "name"):
+                paths.append(item.name)
+            elif hasattr(item, "path"):
+                paths.append(item.path)
+    elif isinstance(file_upload, dict):
+        paths.append(file_upload.get("name") or file_upload.get("path") or "")
+    elif hasattr(file_upload, "name"):
+        paths.append(file_upload.name)
+    elif hasattr(file_upload, "path"):
+        paths.append(file_upload.path)
+    return [p for p in paths if p and str(p).strip()]
 
-# # Alternative Excel formatting options
-# excel_rich_text_format_prompt = "Return a comprehensive summary that covers all the important topics and themes described in the summaries below. Structure the summary with main issues as headings, with significant topics described in bullet points below them in order of relative significance. Format for Excel using: BOLD for main headings, bullet points (•) for sub-items, and line breaks between sections. Use simple text formatting that Excel can interpret."
 
-# excel_plain_text_format_prompt = "Return a comprehensive summary that covers all the important topics and themes described in the summaries below. Structure the summary with main issues as headings, with significant topics described in bullet points below them in order of relative significance. Format as plain text with clear structure: use ALL CAPS for main headings, bullet points (•) for sub-items, and line breaks between sections. Avoid any special formatting symbols."
+def _upload_contains_pdf(file_upload):
+    """Return True if the summarisation upload contains any PDF file."""
+    paths = _summarisation_upload_to_paths(file_upload)
+    return any(is_pdf(p) for p in paths)
 
 
 ###

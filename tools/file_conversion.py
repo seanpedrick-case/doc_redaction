@@ -9,11 +9,12 @@ import zipfile
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import gradio as gr
 import numpy as np
 import pandas as pd
+import polars as pl
 import pymupdf
 from gradio import Progress
 from pdf2image import convert_from_path, pdfinfo_from_path
@@ -30,6 +31,7 @@ from tools.config import (
     LOAD_TRUNCATED_IMAGES,
     MAX_IMAGE_PIXELS,
     MAX_SIMULTANEOUS_FILES,
+    MAX_WORKERS,
     OUTPUT_FOLDER,
     SELECTABLE_TEXT_EXTRACT_OPTION,
     TESSERACT_TEXT_EXTRACT_OPTION,
@@ -240,9 +242,10 @@ def convert_pdf_to_images(
     page_max: int = 0,
     create_images: bool = True,
     image_dpi: float = image_dpi,
-    num_threads: int = 8,
+    num_threads: Optional[int] = None,
     input_folder: str = INPUT_FOLDER,
     progress: Progress = Progress(track_tqdm=True),
+    page_numbers: Optional[List[int]] = None,
 ):
     """
     Converts a PDF document into a series of images, processing each page concurrently.
@@ -254,41 +257,52 @@ def convert_pdf_to_images(
         page_max (int, optional): The ending page number (exclusive, 0-indexed) for conversion. If 0, uses the last page of the document. Defaults to 0.
         create_images (bool, optional): If True, images are created and saved to disk. Defaults to True.
         image_dpi (float, optional): The DPI (dots per inch) to use for converting PDF pages to images. Defaults to the global `image_dpi`.
-        num_threads (int, optional): The number of threads to use for concurrent page processing. Defaults to 8.
+        num_threads (int, optional): The number of threads to use for concurrent page processing. Defaults to MAX_WORKERS from config/env.
         input_folder (str, optional): The base input folder, used for determining output paths. Defaults to `INPUT_FOLDER`.
+        page_numbers (list, optional): If provided, only these 0-indexed page numbers are converted; page_min/page_max are ignored.
 
     Returns:
         list: A list of tuples, where each tuple contains (page_num, image_path, width, height) for successfully processed pages.
               For failed pages, it returns (page_num, placeholder_path, pd.NA, pd.NA).
     """
+    if num_threads is None:
+        num_threads = MAX_WORKERS
 
     # If preparing for review, just load the first page (not currently used)
     if prepare_for_review is True:
         page_count = pdfinfo_from_path(pdf_path)["Pages"]  # 1
         page_min = 0
         page_max = page_count
+        page_numbers = None
     else:
         page_count = pdfinfo_from_path(pdf_path)["Pages"]
 
-    print(f"Creating images. Number of pages in PDF: {page_count}")
+    if page_numbers is not None:
+        pages_to_convert = sorted(
+            set(int(p) for p in page_numbers if 0 <= p < page_count)
+        )
+        total_pages = len(pages_to_convert)
+        if total_pages == 0:
+            return [], [], [], []
+        print(f"Creating images for {total_pages} page(s) (EFFICIENT_OCR).")
+    else:
+        print(f"Creating images. Number of pages in PDF: {page_count}")
+        # Handle special cases for page range
+        if page_min == 0:
+            page_min = 0
+        else:
+            page_min = page_min - 1
+        if page_max == 0:
+            page_max = page_count
+        pages_to_convert = list(range(page_min, page_max))
+        total_pages = len(pages_to_convert)
+
     progress(0.1, desc="Creating images")
 
-    # Handle special cases for page range
-    # If page_min is 0, use the first page (0-indexed)
-    if page_min == 0:
-        page_min = 0  # First page is 0-indexed
-    else:
-        page_min = page_min - 1
-
-    # If page_max is 0, use the last page of the document
-    if page_max == 0:
-        page_max = page_count
-
     results = list()
-    total_pages = page_max - page_min
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
         futures = list()
-        for page_num in range(page_min, page_max):
+        for page_num in pages_to_convert:
             futures.append(
                 executor.submit(
                     process_single_page_for_image_conversion,
@@ -414,6 +428,49 @@ def process_file_for_image_creation(
     return img_path, image_sizes_width, image_sizes_height, all_img_details
 
 
+def _process_one_input_file(
+    file: Any,
+    source_document_only: bool,
+    source_document_extensions: tuple,
+) -> Tuple[str, str, str, bool, bool, int]:
+    """
+    Process a single file for get_input_file_names; safe to run in a thread.
+    Returns (file_path_without_ext, file_extension, file_path, acceptable, is_source, page_count).
+    """
+    file_path = file if isinstance(file, str) else file.name
+    file_path_without_ext = get_file_name_without_type(file_path)
+    file_path_without_ext_lower = (file_path_without_ext or "").lower()
+    file_extension = os.path.splitext(file_path)[1].lower()
+    is_excluded_name = (
+        "review_file" in file_path_without_ext_lower
+        or "ocr_output" in file_path_without_ext_lower
+        or "ocr_results_with_words" in file_path_without_ext_lower
+    )
+    acceptable = (
+        file_extension
+        in (".jpg", ".jpeg", ".png", ".pdf", ".xlsx", ".csv", ".parquet", ".docx")
+        and not is_excluded_name
+    )
+    if file_extension == ".pdf":
+        try:
+            pdf_document = pymupdf.open(file_path)
+            page_count = pdf_document.page_count
+            pdf_document.close()
+        except Exception:
+            page_count = 1
+    else:
+        page_count = 1
+    is_source = not source_document_only or file_extension in source_document_extensions
+    return (
+        file_path_without_ext,
+        file_extension,
+        file_path,
+        acceptable,
+        is_source,
+        page_count,
+    )
+
+
 def get_input_file_names(
     file_input: List[str],
     source_document_only: bool = False,
@@ -426,13 +483,10 @@ def get_input_file_names(
     for outputs like review CSVs or OCR CSVs. This keeps doc_full_file_name_textbox
     referring to the document being redacted (PDF or image).
     """
-
     all_relevant_files = list()
     file_name_with_extension = ""
     full_file_name = ""
     total_pdf_page_count = 0
-
-    # Only treat these as "source document" for full_file_name when source_document_only
     source_document_extensions = (".pdf", ".jpg", ".jpeg", ".png", ".docx")
 
     if isinstance(file_input, dict):
@@ -443,61 +497,43 @@ def get_input_file_names(
     else:
         file_input_list = file_input
 
-    for file in file_input_list:
-        if isinstance(file, str):
-            file_path = file
-        else:
-            file_path = file.name
-
-        file_path_without_ext = get_file_name_without_type(file_path)
-        file_path_without_ext_lower = (file_path_without_ext or "").lower()
-
-        file_extension = os.path.splitext(file_path)[1].lower()
-
-        # Exclude review/OCR output files (case-insensitive)
-        is_excluded_name = (
-            "review_file" in file_path_without_ext_lower
-            or "ocr_output" in file_path_without_ext_lower
-            or "ocr_results_with_words" in file_path_without_ext_lower
+    if not file_input_list:
+        return (
+            ", ".join(all_relevant_files),
+            file_name_with_extension,
+            full_file_name,
+            all_relevant_files,
+            total_pdf_page_count,
         )
 
-        # Check if the file is in acceptable types
-        if (
-            file_extension
-            in [
-                ".jpg",
-                ".jpeg",
-                ".png",
-                ".pdf",
-                ".xlsx",
-                ".csv",
-                ".parquet",
-                ".docx",
-            ]
-        ) and not is_excluded_name:
+    max_workers = min(MAX_WORKERS, len(file_input_list))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = list(
+            executor.map(
+                lambda f: _process_one_input_file(
+                    f, source_document_only, source_document_extensions
+                ),
+                file_input_list,
+            )
+        )
+
+    for (
+        file_path_without_ext,
+        file_extension,
+        file_path,
+        acceptable,
+        is_source,
+        page_count,
+    ) in results:
+        total_pdf_page_count += page_count
+        if acceptable:
             all_relevant_files.append(file_path_without_ext)
             file_name_with_extension = file_path_without_ext + file_extension
-            # Only set full_file_name for source documents (PDF/image/docx) when
-            # source_document_only, so doc_full_file_name_textbox never refers to a CSV
-            if not source_document_only or file_extension in source_document_extensions:
+            if is_source:
                 full_file_name = file_path
 
-        # If PDF, get number of pages
-        if file_extension in [".pdf"]:
-            # Open the PDF file
-            pdf_document = pymupdf.open(file_path)
-            # Get the number of pages
-            page_count = pdf_document.page_count
-
-            # Close the document
-            pdf_document.close()
-        else:
-            page_count = 1
-
-        total_pdf_page_count += page_count
-
     all_relevant_files_str = ", ".join(all_relevant_files)
-
+    print("file_name_with_extension on document upload:", file_name_with_extension)
     return (
         all_relevant_files_str,
         file_name_with_extension,
@@ -705,6 +741,69 @@ def create_page_size_objects(
     return page_sizes, original_cropboxes
 
 
+def prepare_images_for_pages(
+    file_path: str,
+    pages_1based: List[int],
+    input_folder: str,
+    pymupdf_doc: Document,
+    page_sizes: List[dict],
+    progress: Progress = Progress(track_tqdm=True),
+) -> Tuple[List[str], List[dict]]:
+    """
+    Create images only for the given pages (e.g. EFFICIENT_OCR pages that need OCR).
+    Updates page_sizes in place and returns a full-length pdf_image_file_paths list
+    (real paths only for the requested pages, empty string for others).
+
+    Args:
+        file_path: Path to the PDF.
+        pages_1based: 1-based page numbers to convert to images.
+        input_folder: Folder used for image output paths.
+        pymupdf_doc: Open PyMuPDF document (used for page count).
+        page_sizes: List of page size dicts (one per page), updated in place.
+        progress: Progress callback.
+
+    Returns:
+        (pdf_image_file_paths, page_sizes) where pdf_image_file_paths has length
+        len(pymupdf_doc) with real path at index (p-1) for each p in pages_1based.
+    """
+    if not pages_1based:
+        return [""] * len(pymupdf_doc), page_sizes
+
+    page_numbers_0based = [p - 1 for p in pages_1based if 1 <= p <= len(pymupdf_doc)]
+    if not page_numbers_0based:
+        return [""] * len(pymupdf_doc), page_sizes
+
+    _, _, _, results = convert_pdf_to_images(
+        file_path,
+        prepare_for_review=False,
+        create_images=True,
+        input_folder=input_folder,
+        progress=progress,
+        page_numbers=page_numbers_0based,
+    )
+
+    num_pages = len(pymupdf_doc)
+    pdf_image_file_paths = [""] * num_pages
+    for page_num, img_path, width, height in results:
+        if (
+            0 <= page_num < num_pages
+            and img_path
+            and "placeholder" not in str(img_path)
+        ):
+            pdf_image_file_paths[page_num] = img_path
+            page_sizes[page_num]["image_path"] = img_path
+            if pd.notna(width) and pd.notna(height):
+                page_sizes[page_num]["image_width"] = width
+                page_sizes[page_num]["image_height"] = height
+
+    return pdf_image_file_paths, page_sizes
+
+
+def _get_bbox(d: dict) -> list:
+    """Get bounding box list from dict; support both 'bounding_box' and 'boundingBox'."""
+    return d.get("bounding_box") or d.get("boundingBox") or [0, 0, 0, 0]
+
+
 def word_level_ocr_output_to_dataframe(ocr_results: dict) -> pd.DataFrame:
     """
     Convert a json of ocr results to a dataframe
@@ -725,27 +824,28 @@ def word_level_ocr_output_to_dataframe(ocr_results: dict) -> pd.DataFrame:
         for line_key, line_data in ocr_result["results"].items():
 
             line_number = int(line_data["line"])
-            if "conf" not in line_data:
-                line_data["conf"] = 100.0
+            # Support both "confidence" (Textract/json_to_ocrresult) and "conf" (other OCR)
+            line_conf = line_data.get("confidence", line_data.get("conf", 100.0))
+            line_bbox = _get_bbox(line_data)
             for word in line_data["words"]:
-                if "conf" not in word:
-                    word["conf"] = 100.0
+                word_conf = word.get("confidence", word.get("conf", 100.0))
+                word_bbox = _get_bbox(word)
                 rows.append(
                     {
                         "page": page_number,
                         "line": line_number,
                         "word_text": word["text"],
-                        "word_x0": word["bounding_box"][0],
-                        "word_y0": word["bounding_box"][1],
-                        "word_x1": word["bounding_box"][2],
-                        "word_y1": word["bounding_box"][3],
-                        "word_conf": word["conf"],
+                        "word_x0": word_bbox[0],
+                        "word_y0": word_bbox[1],
+                        "word_x1": word_bbox[2],
+                        "word_y1": word_bbox[3],
+                        "word_conf": word_conf,
                         "line_text": "",  # line_data['text'], # This data is too large to include
-                        "line_x0": line_data["bounding_box"][0],
-                        "line_y0": line_data["bounding_box"][1],
-                        "line_x1": line_data["bounding_box"][2],
-                        "line_y1": line_data["bounding_box"][3],
-                        "line_conf": line_data["conf"],
+                        "line_x0": line_bbox[0],
+                        "line_y0": line_bbox[1],
+                        "line_x1": line_bbox[2],
+                        "line_y1": line_bbox[3],
+                        "line_conf": line_conf,
                     }
                 )
 
@@ -1019,6 +1119,219 @@ def extract_redactions(
     return annotations_all_pages_divide, doc
 
 
+def _rects_match(rect_a, rect_b, tolerance: float = 0.5) -> bool:
+    """Return True if two PyMuPDF rects are the same within tolerance (in points)."""
+    return (
+        abs(rect_a.x0 - rect_b.x0) <= tolerance
+        and abs(rect_a.y0 - rect_b.y0) <= tolerance
+        and abs(rect_a.x1 - rect_b.x1) <= tolerance
+        and abs(rect_a.y1 - rect_b.y1) <= tolerance
+    )
+
+
+def _dst_page_has_duplicate_redact(dst_page, rect, title: str, content: str) -> bool:
+    """Return True if dst_page already has a redaction annot with same rect, title, and content."""
+    title = (title or "").strip()
+    content = (content or "").strip()
+    for existing in dst_page.annots():
+        if existing.type[0] != pymupdf.PDF_ANNOT_REDACT:
+            continue
+        if not _rects_match(rect, existing.rect):
+            continue
+        info = existing.info or {}
+        existing_title = (info.get("title") or "").strip()
+        existing_content = (info.get("content") or "").strip()
+        if existing_title == title and existing_content == content:
+            return True
+    return False
+
+
+def _get_base_name_from_review_pdf_path(file_path: str) -> str:
+    """
+    Extract the base file name from a '_redactions_for_review...' path.
+    E.g. 'mydoc_redactions_for_review.pdf' -> 'mydoc',
+         'mydoc_redactions_for_review_pages_1-2.pdf' -> 'mydoc'.
+    """
+    basename = os.path.basename(file_path)
+    name_without_ext = os.path.splitext(basename)[0]
+    suffix = "_redactions_for_review"
+    if suffix in name_without_ext:
+        return name_without_ext.split(suffix)[0]
+    return name_without_ext
+
+
+def _parse_review_pdf_page_suffix(
+    file_path: str,
+) -> Tuple[bool, Optional[int], Optional[int]]:
+    """
+    If the review PDF path ends with a page-range suffix _N_M (e.g. _2_4), return
+    (True, N, M). Otherwise return (False, None, None).
+    E.g. 'mydoc_redactions_for_review_2_4.pdf' -> (True, 2, 4)
+         'mydoc_redactions_for_review.pdf' -> (False, None, None)
+    """
+    basename = os.path.basename(file_path)
+    name_without_ext = os.path.splitext(basename)[0]
+    match = re.search(r"_(\d+)_(\d+)$", name_without_ext)
+    if match:
+        return True, int(match.group(1)), int(match.group(2))
+    return False, None, None
+
+
+def _get_review_pdf_combined_output_base(file_path: str) -> str:
+    """
+    From a review PDF path, get the base for the combined output filename:
+    everything up to and including '_redactions_for_review', excluding any
+    text after that (e.g. " (1)", " (2)", "_2_4").
+    E.g. 'file_redactions_for_review (1).pdf' -> 'file_redactions_for_review'
+         'file_FINAL_redactions_for_review.pdf' -> 'file_FINAL_redactions_for_review'
+    """
+    basename = os.path.basename(file_path)
+    name_without_ext = os.path.splitext(basename)[0]
+    suffix = "_redactions_for_review"
+    if suffix in name_without_ext:
+        idx = name_without_ext.index(suffix) + len(suffix)
+        return name_without_ext[:idx]
+    return name_without_ext
+
+
+def combine_review_pdf_files(file_list, output_folder: str = OUTPUT_FOLDER):
+    """
+    Combine redaction comments from multiple '_redactions_for_review' PDFs into one PDF.
+
+    Only validates that all files have the same number of pages. File names may
+    differ (e.g. file_redactions_for_review (1).pdf, file_redactions_for_review (2).pdf,
+    or file_FINAL_redactions_for_review.pdf). The output filename is derived from
+    the first input file: the name up to and including 'redactions_for_review' is
+    taken (anything after that is dropped), then '_combined' is appended, e.g.
+    file_redactions_for_review_combined.pdf.
+
+    Args:
+        file_list: List of file paths or Gradio FileData-like objects with .name.
+        output_folder: Folder to write the combined PDF.
+
+    Returns:
+        List containing the path to the combined PDF for use as gr.File output.
+        On validation error, raises ValueError (e.g. page count mismatch).
+    """
+    if not file_list:
+        return []
+
+    # Normalise to paths (Gradio may pass FileData with .name or dict with "name")
+    paths = []
+    for f in file_list:
+        p = (
+            getattr(f, "name", None)
+            or (f.get("name") if isinstance(f, dict) else None)
+            or f
+        )
+        if isinstance(p, str):
+            paths.append(p)
+    if not paths:
+        return []
+
+    output_base = _get_review_pdf_combined_output_base(paths[0])
+    first_doc = pymupdf.open(paths[0])
+    page_count = len(first_doc)
+
+    for p in paths[1:]:
+        other_doc = pymupdf.open(p)
+        if len(other_doc) != page_count:
+            other_doc.close()
+            first_doc.close()
+            raise ValueError(
+                f"All files must have the same number of pages. "
+                f"'{os.path.basename(paths[0])}' has {page_count} pages but "
+                f"'{os.path.basename(p)}' has {len(other_doc)} pages."
+            )
+        # Copy redaction annotations from each page of other_doc into first_doc
+        for page_num in range(page_count):
+            src_page = other_doc[page_num]
+            dst_page = first_doc[page_num]
+            # Collect annots so we don't modify while iterating
+            annots = list(src_page.annots())
+            for annot in annots:
+                if annot.type[0] != pymupdf.PDF_ANNOT_REDACT:
+                    continue
+                rect = annot.rect
+                annot_colors = annot.colors or {}
+                annot_info = annot.info or {}
+                title = annot_info.get("title", "Redaction")
+                content = annot_info.get("content", "")
+                # Skip duplicate: same position and same label/text content
+                if _dst_page_has_duplicate_redact(dst_page, rect, title, content):
+                    continue
+                stroke = annot_colors.get("stroke", (0, 0, 0))
+                fill = annot_colors.get("fill", (0, 0, 0))
+                new_annot = dst_page.add_redact_annot(rect)
+                new_annot.set_colors(stroke=stroke, fill=fill, colors=fill)
+                new_annot.set_name(title)
+                new_annot.set_info(
+                    info=title,
+                    title=title,
+                    subject=annot_info.get("subject", "Redaction"),
+                    content=content,
+                    creationDate=annot_info.get("creationDate", ""),
+                )
+                new_annot.update(opacity=0.5, cross_out=False)
+        other_doc.close()
+
+    out_path = os.path.join(output_folder, output_base + "_combined.pdf")
+    first_doc.save(out_path, clean=True)
+    first_doc.close()
+    return [out_path]
+
+
+def prepare_image_or_pdf_with_efficient_ocr(
+    file_paths,
+    text_extract_method,
+    all_page_line_level_ocr_results_df_base,
+    all_page_line_level_ocr_results_with_words_df_base,
+    latest_file_completed_num,
+    out_message,
+    first_loop_state,
+    number_of_pages,
+    all_annotations_object,
+    prepare_for_review,
+    in_fully_redacted_list,
+    output_folder,
+    input_folder,
+    efficient_ocr,
+    prepare_images_bool_false,
+    page_sizes,
+    pymupdf_doc,
+    page_min,
+    page_max,
+):
+    """When EFFICIENT_OCR is enabled, skip loading all images; they are created later only for pages that need OCR."""
+    prepare_images = (
+        False
+        if efficient_ocr
+        else (
+            prepare_images_bool_false if prepare_images_bool_false is not None else True
+        )
+    )
+    return prepare_image_or_pdf(
+        file_paths,
+        text_extract_method,
+        all_page_line_level_ocr_results_df_base,
+        all_page_line_level_ocr_results_with_words_df_base,
+        latest_file_completed_num,
+        out_message,
+        first_loop_state,
+        number_of_pages,
+        all_annotations_object,
+        prepare_for_review,
+        in_fully_redacted_list,
+        output_folder,
+        input_folder,
+        prepare_images,
+        page_sizes,
+        pymupdf_doc,
+        page_min,
+        page_max,
+    )
+
+
 def prepare_image_or_pdf(
     file_paths: List[str],
     text_extract_method: str,
@@ -1147,11 +1460,20 @@ def prepare_image_or_pdf(
 
     progress(0.1, desc="Preparing file")
 
+    def _file_item_to_path(item):
+        """Normalize Gradio file input (str, dict with 'name'/'path', or object with .name/.path) to path string."""
+        if isinstance(item, str):
+            return item
+        if isinstance(item, dict):
+            return item.get("name") or item.get("path") or ""
+        return getattr(item, "name", None) or getattr(item, "path", None) or ""
+
     if isinstance(file_paths, str):
         file_paths_list = [file_paths]
         file_paths_loop = file_paths_list
     else:
-        file_paths_list = file_paths
+        file_paths_list = [_file_item_to_path(f) for f in file_paths if f is not None]
+        file_paths_list = [p for p in file_paths_list if p and str(p).strip()]
         file_paths_loop = sorted(
             file_paths_list,
             key=lambda x: (
@@ -1165,10 +1487,7 @@ def prepare_image_or_pdf(
         converted_file_path = list()
         image_file_path = list()
 
-        if isinstance(file, str):
-            file_path = file
-        else:
-            file_path = file.name
+        file_path = file if isinstance(file, str) else _file_item_to_path(file)
         file_path_without_ext = get_file_name_without_type(file_path)
         file_name_with_ext = os.path.basename(file_path)
 
@@ -1294,6 +1613,15 @@ def prepare_image_or_pdf(
                 pymupdf_doc, image_sizes_width, image_sizes_height, image_file_paths
             )
 
+            # Create base version of the annotation object for review (same as PDF branch)
+            if (not all_annotations_object) and (prepare_for_review is True):
+                all_annotations_object = list()
+                for image_path in image_file_paths:
+                    annotation = dict()
+                    annotation["image"] = image_path
+                    annotation["boxes"] = list()
+                    all_annotations_object.append(annotation)
+
             converted_file_path = output_folder + file_name_with_ext
 
             pymupdf_doc.save(converted_file_path, garbage=4, deflate=True, clean=True)
@@ -1418,6 +1746,10 @@ def prepare_image_or_pdf(
                         )
                     )
 
+                    # Use mediabox for division when loading text-extraction output (PDF-point coords)
+                    coords_in_pdf_points = file_path.endswith(
+                        "_ocr_results_with_words_local_text.json"
+                    )
                     all_page_line_level_ocr_results_with_words_df = (
                         divide_coordinates_by_page_sizes(
                             all_page_line_level_ocr_results_with_words_df,
@@ -1426,6 +1758,7 @@ def prepare_image_or_pdf(
                             xmax="word_x1",
                             ymin="word_y0",
                             ymax="word_y1",
+                            coordinates_in_pdf_points=coords_in_pdf_points,
                         )
                     )
                     all_page_line_level_ocr_results_with_words_df = (
@@ -1436,6 +1769,7 @@ def prepare_image_or_pdf(
                             xmax="line_x1",
                             ymin="line_y0",
                             ymax="line_y1",
+                            coordinates_in_pdf_points=coords_in_pdf_points,
                         )
                     )
 
@@ -1560,18 +1894,16 @@ def prepare_image_or_pdf(
             out_message = list()
 
         out_message.append(out_time)
-        if not combined_out_message:
-            combined_out_message = ""
-        combined_out_message = "\n".join(out_message)
+        combined_out_message = "\n".join(out_message).strip() if out_message else ""
 
     if not page_sizes:
         number_of_pages = 1
     else:
         number_of_pages = len(page_sizes)
 
-    print(f"Finished loading in {file_path_number} file(s)")
-
-    gr.Info(f"Finished loading in {file_path_number} file(s)")
+    if first_loop_state is True:
+        print(f"Finished loading in {file_path_number} file(s)")
+        gr.Info(f"Finished loading in {file_path_number} file(s)")
 
     return (
         combined_out_message,
@@ -1686,11 +2018,21 @@ def save_pdf_with_or_without_compression(
     Save a pymupdf document with basic cleaning or with full compression options. Can be useful for low memory systems to do minimal cleaning to avoid crashing with large PDFs.
     """
     if COMPRESS_REDACTED_PDF is True:
-        pymupdf_doc.save(
-            out_redacted_pdf_file_path, garbage=4, deflate=True, clean=True
-        )
+        try:
+            pymupdf_doc.save(
+                out_redacted_pdf_file_path, garbage=4, deflate=True, clean=True
+            )
+        except Exception as e:
+            print(
+                f"Error saving PDF with compression: {e}, trying again without compression"
+            )
+            pymupdf_doc.save(out_redacted_pdf_file_path, clean=True)
     else:
-        pymupdf_doc.save(out_redacted_pdf_file_path, garbage=1, clean=True)
+        try:
+            pymupdf_doc.save(out_redacted_pdf_file_path, garbage=1, clean=True)
+        except Exception as e:
+            print(f"Error saving PDF without compression: {e}, trying again")
+            pymupdf_doc.save(out_redacted_pdf_file_path, clean=True)
 
 
 def join_values_within_threshold(df1: pd.DataFrame, df2: pd.DataFrame):
@@ -1729,34 +2071,245 @@ def join_values_within_threshold(df1: pd.DataFrame, df2: pd.DataFrame):
     final_df = final_df.drop(columns=["key"])
 
 
+def _pick_one_item_per_image(image: str, items: List[dict]) -> dict:
+    """Choose one item per image (prefer non-empty boxes); safe to run in a thread."""
+    non_empty_boxes = [item for item in items if item.get("boxes")]
+    return non_empty_boxes[0] if non_empty_boxes else items[0]
+
+
 def remove_duplicate_images_with_blank_boxes(data: List[dict]) -> List[dict]:
     """
     Remove items from the annotator object where the same page exists twice.
     """
-    # Group items by 'image'
     image_groups = defaultdict(list)
     for item in data:
         image_groups[item["image"]].append(item)
 
-    # Process each group to prioritize items with non-empty boxes
-    result = list()
-    for image, items in image_groups.items():
-        # Filter items with non-empty boxes
-        non_empty_boxes = [item for item in items if item.get("boxes")]
+    if not image_groups:
+        return []
 
-        # Remove 'text' elements from boxes (deprecated)
-        # for item in non_empty_boxes:
-        #    if 'boxes' in item:
-        #        item['boxes'] = [{k: v for k, v in box.items() if k != 'text'} for box in item['boxes']]
-
-        if non_empty_boxes:
-            # Keep the first entry with non-empty boxes
-            result.append(non_empty_boxes[0])
-        else:
-            # If all items have empty or missing boxes, keep the first item
-            result.append(items[0])
-
+    groups_list = list(image_groups.items())
+    max_workers = min(MAX_WORKERS, len(groups_list))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        result = list(
+            executor.map(
+                lambda pair: _pick_one_item_per_image(pair[0], pair[1]),
+                groups_list,
+            )
+        )
     return result
+
+
+def divide_coordinates_by_page_sizes_pl(
+    df: pl.DataFrame,
+    page_sizes_df: pd.DataFrame,
+    xmin: str = "xmin",
+    xmax: str = "xmax",
+    ymin: str = "ymin",
+    ymax: str = "ymax",
+    coordinates_in_pdf_points: bool = False,
+    pages_in_pdf_points: Optional[Set[int]] = None,
+) -> pl.DataFrame:
+    """
+    Polars-only coordinate division: absolute coords (>1) to relative (<=1).
+    Expects df to have numeric coord columns. Returns pl.DataFrame.
+    """
+    coord_cols = [xmin, xmax, ymin, ymax]
+    for col in coord_cols:
+        if col in df.columns:
+            df = df.with_columns(pl.col(col).cast(pl.Float64, strict=False))
+
+    # Clip to 0 and round
+    df = df.with_columns(
+        [
+            pl.col(c).clip(0, float("inf")).round(6)
+            for c in coord_cols
+            if c in df.columns
+        ]
+    )
+
+    # Identify absolute coordinates (any coord > 1 and not null)
+    is_absolute = (
+        (pl.col(xmin) > 1) & pl.col(xmin).is_not_nan()
+        | (pl.col(xmax) > 1) & pl.col(xmax).is_not_nan()
+        | (pl.col(ymin) > 1) & pl.col(ymin).is_not_nan()
+        | (pl.col(ymax) > 1) & pl.col(ymax).is_not_nan()
+    )
+    df_rel = df.filter(~is_absolute)
+    df_abs = df.filter(is_absolute)
+
+    if not df_abs.is_empty() and not page_sizes_df.empty:
+        merge_cols = [
+            "page",
+            "image_width",
+            "image_height",
+            "mediabox_width",
+            "mediabox_height",
+        ]
+        available = [c for c in merge_cols if c in page_sizes_df.columns]
+        if "page" in available:
+            ps = pl.from_pandas(page_sizes_df[available].copy())
+            for c in [
+                "page",
+                "image_width",
+                "image_height",
+                "mediabox_width",
+                "mediabox_height",
+            ]:
+                if c in ps.columns:
+                    # Cast page to Int64 so join key matches df_abs; cast sizes to Float64
+                    dtype = pl.Int64 if c == "page" else pl.Float64
+                    ps = ps.with_columns(pl.col(c).cast(dtype, strict=False))
+            df_abs = df_abs.join(ps, on="page", how="left")
+
+        if "mediabox_width" in df_abs.columns and "mediabox_height" in df_abs.columns:
+            if coordinates_in_pdf_points:
+                df_abs = df_abs.with_columns(
+                    pl.col("mediabox_width").alias("image_width"),
+                    pl.col("mediabox_height").alias("image_height"),
+                )
+            elif pages_in_pdf_points is not None:
+                # Normalize to int set so 1-based page matches (e.g. 1.0 -> 1)
+                _pdf_pts = {int(p) for p in pages_in_pdf_points}
+                use_mediabox = (
+                    pl.col("page").cast(pl.Int64, strict=False).is_in(list(_pdf_pts))
+                )
+                img_w = pl.col("mediabox_width")
+                img_h = pl.col("mediabox_height")
+                if "image_width" in df_abs.columns:
+                    img_w = pl.col("image_width").fill_null(pl.col("mediabox_width"))
+                if "image_height" in df_abs.columns:
+                    img_h = pl.col("image_height").fill_null(pl.col("mediabox_height"))
+                # For pages_in_pdf_points always use mediabox so text-path coords (PDF points) divide correctly
+                df_abs = df_abs.with_columns(
+                    pl.when(use_mediabox)
+                    .then(pl.col("mediabox_width"))
+                    .otherwise(img_w)
+                    .alias("image_width"),
+                    pl.when(use_mediabox)
+                    .then(pl.col("mediabox_height"))
+                    .otherwise(img_h)
+                    .alias("image_height"),
+                )
+                # If join missed (nulls), fall back to mediabox for those pages so we don't divide by image pixels
+                df_abs = df_abs.with_columns(
+                    pl.when(use_mediabox & pl.col("image_width").is_null())
+                    .then(pl.col("mediabox_width"))
+                    .otherwise(pl.col("image_width"))
+                    .alias("image_width"),
+                    pl.when(use_mediabox & pl.col("image_height").is_null())
+                    .then(pl.col("mediabox_height"))
+                    .otherwise(pl.col("image_height"))
+                    .alias("image_height"),
+                )
+            elif "image_width" not in df_abs.columns:
+                df_abs = df_abs.with_columns(
+                    pl.col("mediabox_width").alias("image_width"),
+                    pl.col("mediabox_height").alias("image_height"),
+                )
+            else:
+                df_abs = df_abs.with_columns(
+                    pl.col("image_width")
+                    .fill_null(pl.col("mediabox_width"))
+                    .alias("image_width"),
+                    pl.col("image_height")
+                    .fill_null(pl.col("mediabox_height"))
+                    .alias("image_height"),
+                )
+
+        if "image_width" in df_abs.columns and "image_height" in df_abs.columns:
+            df_abs = df_abs.with_columns(
+                (pl.col(xmin) / pl.col("image_width")).round(6).alias(xmin),
+                (pl.col(xmax) / pl.col("image_width")).round(6).alias(xmax),
+                (pl.col(ymin) / pl.col("image_height")).round(6).alias(ymin),
+                (pl.col(ymax) / pl.col("image_height")).round(6).alias(ymax),
+            )
+            df_abs = df_abs.with_columns(
+                [
+                    pl.when(pl.col(c).is_in([float("inf"), float("-inf")]))
+                    .then(pl.lit(None).cast(pl.Float64))
+                    .otherwise(pl.col(c))
+                    .alias(c)
+                    for c in coord_cols
+                ]
+            )
+        else:
+            print(
+                "Skipping coordinate division due to missing or non-numeric dimension columns."
+            )
+
+    if df_rel.is_empty() and df_abs.is_empty():
+        print(
+            "Warning: Both relative and absolute splits resulted in empty DataFrames."
+        )
+        return df_rel
+    # Drop dimension columns from df_abs so concat matches df_rel schema (Polars requires same width)
+    for c in ["image_width", "image_height", "mediabox_width", "mediabox_height"]:
+        if c in df_abs.columns:
+            df_abs = df_abs.drop(c)
+    out = pl.concat([df_rel, df_abs])
+
+    if not out.is_empty():
+        out = out.sort(["page", ymin, xmin], nulls_last=True)
+
+        # Clamp to [0,1] while preserving box dimensions.
+        # Cap ymax at 1 - 1e-6 so no box spans the full bottom (avoids single-char words with ymax=1).
+        _ymax_cap = 1.0 - 1e-6
+        out = out.with_columns(
+            pl.col(ymin).alias("_ymin_orig"),
+            pl.col(ymax).alias("_ymax_orig"),
+            pl.col(xmin).alias("_xmin_orig"),
+            pl.col(xmax).alias("_xmax_orig"),
+        )
+        out = out.with_columns(
+            pl.col(ymin).clip(0, float("inf")).alias(ymin),
+            pl.col(xmin).clip(0, float("inf")).alias(xmin),
+            pl.col(xmax).clip(float("-inf"), 1).alias(xmax),
+            pl.col(ymax).clip(float("-inf"), _ymax_cap).alias(ymax),
+        )
+        # Preserve height/width when clamping
+        out = out.with_columns(
+            pl.when(pl.col("_ymax_orig") > 1)
+            .then(
+                (pl.col(ymin) + (pl.col("_ymax_orig") - pl.col("_ymin_orig"))).clip(
+                    float("-inf"), _ymax_cap
+                )
+            )
+            .otherwise(pl.col(ymax))
+            .alias(ymax),
+            pl.when(pl.col("_xmax_orig") > 1)
+            .then(
+                (pl.col(xmin) + (pl.col("_xmax_orig") - pl.col("_xmin_orig"))).clip(
+                    float("-inf"), 1
+                )
+            )
+            .otherwise(pl.col(xmax))
+            .alias(xmax),
+        )
+        out = out.with_columns(
+            pl.when(pl.col("_ymin_orig") < 0)
+            .then(
+                (pl.col(ymax) - (pl.col("_ymax_orig") - pl.col("_ymin_orig"))).clip(
+                    0, float("inf")
+                )
+            )
+            .otherwise(pl.col(ymin))
+            .alias(ymin),
+            pl.when(pl.col("_xmin_orig") < 0)
+            .then(
+                (pl.col(xmax) - (pl.col("_xmax_orig") - pl.col("_xmin_orig"))).clip(
+                    0, float("inf")
+                )
+            )
+            .otherwise(pl.col(xmin))
+            .alias(xmin),
+        )
+        out = out.drop(["_ymin_orig", "_ymax_orig", "_xmin_orig", "_xmax_orig"])
+        out = out.with_columns(
+            [pl.col(c).round(6) for c in coord_cols if c in out.columns]
+        )
+
+    return out
 
 
 def divide_coordinates_by_page_sizes(
@@ -1766,6 +2319,8 @@ def divide_coordinates_by_page_sizes(
     xmax="xmax",
     ymin="ymin",
     ymax="ymax",
+    coordinates_in_pdf_points: bool = False,
+    pages_in_pdf_points: Optional[Set[int]] = None,
 ) -> pd.DataFrame:
     """
     Optimized function to convert absolute image coordinates (>1) to relative coordinates (<=1).
@@ -1778,179 +2333,56 @@ def divide_coordinates_by_page_sizes(
         page_sizes_df: DataFrame with page dimensions ('page', 'image_width',
                        'image_height', 'mediabox_width', 'mediabox_height').
         xmin, xmax, ymin, ymax: Names of the coordinate columns.
+        coordinates_in_pdf_points: If True, coordinates are in PDF space (points);
+            use mediabox_width/mediabox_height for division regardless of
+            image_width/image_height (e.g. when called from redact_text_pdf).
+        pages_in_pdf_points: If set, page numbers (1-based) whose coordinates are in PDF
+            points; all other pages use image dimensions. Used when EFFICIENT_OCR mixes
+            text-extracted pages (PDF points) and OCR pages (image pixels). Ignored if
+            coordinates_in_pdf_points is True for the whole dataframe.
 
     Returns:
         DataFrame with coordinates converted to relative system, sorted.
     """
     if review_file_df.empty or xmin not in review_file_df.columns:
-        return review_file_df  # Return early if empty or key column missing
+        return review_file_df
 
-    # --- Initial Type Conversion ---
     coord_cols = [xmin, xmax, ymin, ymax]
     cols_to_convert = coord_cols + ["page"]
-    temp_df = review_file_df.copy()  # Work on a copy initially
-
     for col in cols_to_convert:
-        if col in temp_df.columns:
-            temp_df[col] = pd.to_numeric(temp_df[col], errors="coerce")
-        else:
-            # If essential 'page' or coord column missing, cannot proceed meaningfully
+        if col not in review_file_df.columns:
             if col == "page" or col in coord_cols:
                 print(
                     f"Warning: Required column '{col}' not found in review_file_df. Returning original DataFrame."
                 )
                 return review_file_df
 
-    # If any coordinate is less than 0, set it to 0
-    temp_df[xmin] = temp_df[xmin].apply(lambda x: 0 if x < 0 else x)
-    temp_df[xmax] = temp_df[xmax].apply(lambda x: 0 if x < 0 else x)
-    temp_df[ymin] = temp_df[ymin].apply(lambda x: 0 if x < 0 else x)
-    temp_df[ymax] = temp_df[ymax].apply(lambda x: 0 if x < 0 else x)
-
-    # Round all coordinates to 6 decimal places
-    temp_df[xmin] = temp_df[xmin].round(6)
-    temp_df[xmax] = temp_df[xmax].round(6)
-    temp_df[ymin] = temp_df[ymin].round(6)
-    temp_df[ymax] = temp_df[ymax].round(6)
-
-    # --- Identify Absolute Coordinates ---
-    # Create mask for rows where *all* coordinates are potentially absolute (> 1)
-    # Handle potential NaNs introduced by to_numeric - treat NaN as not absolute.
-    is_absolute_mask = (
-        ((temp_df[xmin] > 1) & (temp_df[xmin].notna()))
-        | ((temp_df[xmax] > 1) & (temp_df[xmax].notna()))
-        | ((temp_df[ymin] > 1) & (temp_df[ymin].notna()))
-        | ((temp_df[ymax] > 1) & (temp_df[ymax].notna()))
+    temp_pd = review_file_df.copy()
+    for col in cols_to_convert:
+        if col in temp_pd.columns:
+            temp_pd[col] = pd.to_numeric(temp_pd[col], errors="coerce")
+    for col in temp_pd.columns:
+        if col not in cols_to_convert and temp_pd[col].dtype == object:
+            temp_pd[col] = temp_pd[col].astype(str)
+    df = pl.from_pandas(temp_pd)
+    out = divide_coordinates_by_page_sizes_pl(
+        df,
+        page_sizes_df,
+        xmin=xmin,
+        xmax=xmax,
+        ymin=ymin,
+        ymax=ymax,
+        coordinates_in_pdf_points=coordinates_in_pdf_points,
+        pages_in_pdf_points=pages_in_pdf_points,
     )
-
-    # --- Separate DataFrames ---
-    df_rel = temp_df[
-        ~is_absolute_mask
-    ]  # Rows already relative or with NaN/mixed coords
-    df_abs = temp_df[
-        is_absolute_mask
-    ].copy()  # Absolute rows - COPY here to allow modifications
-
-    # --- Process Absolute Coordinates ---
-    if not df_abs.empty:
-        # Merge page sizes if necessary
-        if "image_width" not in df_abs.columns and not page_sizes_df.empty:
-            ps_df_copy = page_sizes_df.copy()  # Work on a copy of page sizes
-
-            # Ensure page is numeric for merge key matching
-            ps_df_copy["page"] = pd.to_numeric(ps_df_copy["page"], errors="coerce")
-
-            # Columns to merge from page_sizes
-            merge_cols = [
-                "page",
-                "image_width",
-                "image_height",
-                "mediabox_width",
-                "mediabox_height",
-            ]
-            available_merge_cols = [
-                col for col in merge_cols if col in ps_df_copy.columns
-            ]
-
-            # Prepare dimension columns in the copy
-            for col in [
-                "image_width",
-                "image_height",
-                "mediabox_width",
-                "mediabox_height",
-            ]:
-                if col in ps_df_copy.columns:
-                    # Replace "<NA>" string if present
-                    if ps_df_copy[col].dtype == "object":
-                        ps_df_copy[col] = ps_df_copy[col].replace("<NA>", pd.NA)
-                    # Convert to numeric
-                    ps_df_copy[col] = pd.to_numeric(ps_df_copy[col], errors="coerce")
-
-            # Perform the merge
-            if "page" in available_merge_cols:  # Check if page exists for merging
-                df_abs = df_abs.merge(
-                    ps_df_copy[available_merge_cols], on="page", how="left"
-                )
-            else:
-                print(
-                    "Warning: 'page' column not found in page_sizes_df. Cannot merge dimensions."
-                )
-
-        # Fallback to mediabox dimensions when image dimensions are missing (e.g. unvisited
-        # pages when only the first page image was loaded). Ensures all pages get relative
-        # (0-1) coordinates so they display correctly when the user navigates to them later.
-        if "image_width" in df_abs.columns and "mediabox_width" in df_abs.columns:
-            df_abs["image_width"] = df_abs["image_width"].fillna(
-                df_abs["mediabox_width"]
-            )
-            df_abs["image_height"] = df_abs["image_height"].fillna(
-                df_abs["mediabox_height"]
-            )
-
-        # Ensure divisor columns are numeric before division
-        divisors_numeric = True
-        for col in ["image_width", "image_height"]:
-            if col in df_abs.columns:
-                df_abs[col] = pd.to_numeric(df_abs[col], errors="coerce")
-            else:
-                print(
-                    f"Warning: Dimension column '{col}' missing. Cannot perform division."
-                )
-                divisors_numeric = False
-
-        # Perform division if dimensions are available and numeric
-        if (
-            divisors_numeric
-            and "image_width" in df_abs.columns
-            and "image_height" in df_abs.columns
-        ):
-            # Use np.errstate to suppress warnings about division by zero or NaN if desired
-            with np.errstate(divide="ignore", invalid="ignore"):
-                df_abs[xmin] = round(df_abs[xmin] / df_abs["image_width"], 6)
-                df_abs[xmax] = round(df_abs[xmax] / df_abs["image_width"], 6)
-                df_abs[ymin] = round(df_abs[ymin] / df_abs["image_height"], 6)
-                df_abs[ymax] = round(df_abs[ymax] / df_abs["image_height"], 6)
-                # Replace potential infinities with NaN (optional, depending on desired outcome)
-                df_abs.replace([np.inf, -np.inf], np.nan, inplace=True)
-        else:
-            print(
-                "Skipping coordinate division due to missing or non-numeric dimension columns."
-            )
-
-    # --- Combine Relative and Processed Absolute DataFrames ---
-    dfs_to_concat = [df for df in [df_rel, df_abs] if not df.empty]
-
-    if dfs_to_concat:
-        final_df = pd.concat(dfs_to_concat, ignore_index=True)
-    else:
-        # If both splits were empty, return an empty DF with original columns
-        print(
-            "Warning: Both relative and absolute splits resulted in empty DataFrames."
-        )
-        final_df = pd.DataFrame(columns=review_file_df.columns)
-
-    # --- Final Sort ---
-    required_sort_columns = {"page", xmin, ymin}
-    if not final_df.empty and required_sort_columns.issubset(final_df.columns):
-        # Ensure sort columns are numeric before sorting
-        final_df["page"] = pd.to_numeric(final_df["page"], errors="coerce")
-        final_df[ymin] = pd.to_numeric(final_df[ymin], errors="coerce")
-        final_df[xmin] = pd.to_numeric(final_df[xmin], errors="coerce")
-        # Sort by page, ymin, xmin (note order compared to multiply function)
-        final_df.sort_values(["page", ymin, xmin], inplace=True, na_position="last")
-
-    # --- Clean Up Columns ---
-    # Correctly drop columns and reassign the result
-    cols_to_drop = ["image_width", "image_height", "mediabox_width", "mediabox_height"]
-    final_df = final_df.drop(columns=cols_to_drop, errors="ignore")
-
-    # If ymin and xmin are less than 0, or xmax and ymax are greater than 1, set them to 0 or 1 respectively
-    final_df[ymin] = final_df[ymin].apply(lambda x: 0 if x < 0 else x)
-    final_df[xmin] = final_df[xmin].apply(lambda x: 0 if x < 0 else x)
-    final_df[xmax] = final_df[xmax].apply(lambda x: 1 if x > 1 else x)
-    final_df[ymax] = final_df[ymax].apply(lambda x: 1 if x > 1 else x)
-
-    return final_df
+    result = out.to_pandas()
+    if "page" in result.columns and not result.empty:
+        result["page"] = pd.to_numeric(result["page"], errors="coerce")
+        result["page"] = result["page"].astype("Int64")
+    for c in coord_cols:
+        if c in result.columns:
+            result[c] = result[c].astype(float)
+    return result
 
 
 def multiply_coordinates_by_page_sizes(
@@ -1966,100 +2398,100 @@ def multiply_coordinates_by_page_sizes(
 
     Separates relative (<=1) and absolute (>1) coordinates, merges page sizes
     for relative coordinates, calculates absolute pixel values, and recombines.
+    Implemented with Polars for performance; returns pandas DataFrame.
     """
     if review_file_df.empty or xmin not in review_file_df.columns:
         return review_file_df  # Return early if empty or key column missing
 
     coord_cols = [xmin, xmax, ymin, ymax]
-    # Initial type conversion for coordinates and page
-    for col in coord_cols + ["page"]:
-        if col in review_file_df.columns:
-            # Use astype for potentially faster conversion if confident,
-            # but to_numeric is safer for mixed types/errors
-            review_file_df[col] = pd.to_numeric(review_file_df[col], errors="coerce")
+    df = pl.from_pandas(review_file_df)
 
-    # --- Identify relative coordinates ---
-    # Create mask for rows where *all* coordinates are potentially relative (<= 1)
-    # Handle potential NaNs introduced by to_numeric - treat NaN as not relative here.
-    is_relative_mask = (
-        (review_file_df[xmin].le(1) & review_file_df[xmin].notna())
-        & (review_file_df[xmax].le(1) & review_file_df[xmax].notna())
-        & (review_file_df[ymin].le(1) & review_file_df[ymin].notna())
-        & (review_file_df[ymax].le(1) & review_file_df[ymax].notna())
+    # Cast coordinates and page to numeric (single with_columns for less overhead)
+    cast_cols = [c for c in coord_cols + ["page"] if c in df.columns]
+    if cast_cols:
+        df = df.with_columns(
+            [pl.col(c).cast(pl.Float64, strict=False) for c in cast_cols]
+        )
+
+    # Identify relative coordinates (all <= 1 and not null)
+    is_relative = (
+        pl.col(xmin).le(1)
+        & pl.col(xmin).is_not_nan()
+        & pl.col(xmax).le(1)
+        & pl.col(xmax).is_not_nan()
+        & pl.col(ymin).le(1)
+        & pl.col(ymin).is_not_nan()
+        & pl.col(ymax).le(1)
+        & pl.col(ymax).is_not_nan()
     )
+    df_abs = df.filter(~is_relative)
+    df_rel = df.filter(is_relative)
 
-    # Separate DataFrames (minimal copies)
-    df_abs = review_file_df[~is_relative_mask].copy()  # Keep absolute rows separately
-    df_rel = review_file_df[is_relative_mask].copy()  # Work only with relative rows
+    if df_rel.is_empty():
+        if not df_abs.is_empty() and {"page", xmin, ymin}.issubset(df_abs.columns):
+            df_abs = df_abs.sort(["page", xmin, ymin], nulls_last=True)
+        result_early = df_abs.to_pandas()
+        for c in coord_cols:
+            if c in result_early.columns:
+                result_early[c] = result_early[c].astype(float)
+        return result_early
 
-    if df_rel.empty:
-        # If no relative coordinates, just sort and return absolute ones (if any)
-        if not df_abs.empty and {"page", xmin, ymin}.issubset(df_abs.columns):
-            df_abs.sort_values(["page", xmin, ymin], inplace=True, na_position="last")
-        return df_abs
-
-    # --- Process relative coordinates ---
-    if "image_width" not in df_rel.columns and not page_sizes_df.empty:
-        # Prepare page_sizes_df for merge
-        page_sizes_df = page_sizes_df.copy()  # Avoid modifying original page_sizes_df
-        page_sizes_df["page"] = pd.to_numeric(page_sizes_df["page"], errors="coerce")
-        # Ensure proper NA handling for image dimensions
-        page_sizes_df[["image_width", "image_height"]] = page_sizes_df[
-            ["image_width", "image_height"]
-        ].replace("<NA>", pd.NA)
-        page_sizes_df["image_width"] = pd.to_numeric(
-            page_sizes_df["image_width"], errors="coerce"
+    # Join page sizes for relative rows
+    if (
+        not page_sizes_df.empty
+        and "image_width" in page_sizes_df.columns
+        and "image_height" in page_sizes_df.columns
+    ):
+        ps = pl.from_pandas(
+            page_sizes_df[["page", "image_width", "image_height"]].copy()
         )
-        page_sizes_df["image_height"] = pd.to_numeric(
-            page_sizes_df["image_height"], errors="coerce"
+        ps = ps.with_columns(
+            pl.col("page").cast(pl.Float64, strict=False),
+            pl.col("image_width").cast(pl.Float64, strict=False),
+            pl.col("image_height").cast(pl.Float64, strict=False),
         )
+        df_rel = df_rel.join(ps, on="page", how="left")
 
-        # Merge page sizes
-        df_rel = df_rel.merge(
-            page_sizes_df[["page", "image_width", "image_height"]],
-            on="page",
-            how="left",
-        )
+    # Multiply coordinates where dimensions exist
+    has_size = pl.col("image_width").is_not_nan() & pl.col("image_height").is_not_nan()
+    df_rel = df_rel.with_columns(
+        [
+            pl.when(has_size)
+            .then((pl.col(xmin) * pl.col("image_width")).round(6))
+            .otherwise(pl.col(xmin))
+            .alias(xmin),
+            pl.when(has_size)
+            .then((pl.col(xmax) * pl.col("image_width")).round(6))
+            .otherwise(pl.col(xmax))
+            .alias(xmax),
+            pl.when(has_size)
+            .then((pl.col(ymin) * pl.col("image_height")).round(6))
+            .otherwise(pl.col(ymin))
+            .alias(ymin),
+            pl.when(has_size)
+            .then((pl.col(ymax) * pl.col("image_height")).round(6))
+            .otherwise(pl.col(ymax))
+            .alias(ymax),
+        ]
+    )
+    drop_cols = [c for c in ["image_width", "image_height"] if c in df_rel.columns]
+    if drop_cols:
+        df_rel = df_rel.drop(drop_cols)
 
-    # Multiply coordinates where image dimensions are available
-    if "image_width" in df_rel.columns:
-        # Create mask for rows in df_rel that have valid image dimensions
-        has_size_mask = df_rel["image_width"].notna() & df_rel["image_height"].notna()
-
-        # Apply multiplication using .loc and the mask (vectorized and efficient)
-        df_rel.loc[has_size_mask, xmin] *= df_rel.loc[has_size_mask, "image_width"]
-        df_rel.loc[has_size_mask, xmax] *= df_rel.loc[has_size_mask, "image_width"]
-        df_rel.loc[has_size_mask, ymin] *= df_rel.loc[has_size_mask, "image_height"]
-        df_rel.loc[has_size_mask, ymax] *= df_rel.loc[has_size_mask, "image_height"]
-
-    # --- Combine absolute and processed relative DataFrames ---
-    # Use list comprehension to handle potentially empty DataFrames
-    dfs_to_concat = [df for df in [df_abs, df_rel] if not df.empty]
-
-    if not dfs_to_concat:
-        return pd.DataFrame()  # Return empty if both are empty
-
-    final_df = pd.concat(dfs_to_concat, ignore_index=True)
-
-    # --- Final Sort ---
-    required_sort_columns = {"page", xmin, ymin}
-    if not final_df.empty and required_sort_columns.issubset(final_df.columns):
-        # Handle potential NaNs in sort columns gracefully
-        final_df.sort_values(["page", xmin, ymin], inplace=True, na_position="last")
-
-    # Round coordinates to 6 decimal places
-    final_df[xmin] = final_df[xmin].round(6)
-    final_df[xmax] = final_df[xmax].round(6)
-    final_df[ymin] = final_df[ymin].round(6)
-    final_df[ymax] = final_df[ymax].round(6)
-
-    # Convert any negative coordinates to 0
-    final_df[xmin] = final_df[xmin].apply(lambda x: 0 if x < 0 else x)
-    final_df[xmax] = final_df[xmax].apply(lambda x: 0 if x < 0 else x)
-    final_df[ymin] = final_df[ymin].apply(lambda x: 0 if x < 0 else x)
-    final_df[ymax] = final_df[ymax].apply(lambda x: 0 if x < 0 else x)
-
-    return final_df
+    out = pl.concat([df_abs, df_rel])
+    out = out.sort(["page", xmin, ymin], nulls_last=True)
+    out = out.with_columns(
+        [
+            pl.col(c).clip(0, float("inf")).round(6)
+            for c in coord_cols
+            if c in out.columns
+        ]
+    )
+    result = out.to_pandas()
+    for c in coord_cols:
+        if c in result.columns:
+            result[c] = result[c].astype(float)
+    return result
 
 
 def do_proximity_match_by_page_for_text(df1: pd.DataFrame, df2: pd.DataFrame):
@@ -2213,10 +2645,10 @@ def _extract_page_number(image_path: Any) -> int:
 
 def convert_annotation_data_to_dataframe(all_annotations: List[Dict[str, Any]]):
     """
-    Convert annotation list to DataFrame using Pandas explode and json_normalize.
+    Convert annotation list to DataFrame using Polars for performance.
+    Returns a pandas DataFrame with columns image, page, label, color, xmin, xmax, ymin, ymax, text, id.
     """
     if not all_annotations:
-        # Return an empty DataFrame with the expected schema if input is empty
         print("No annotations found, returning empty dataframe")
         return pd.DataFrame(
             columns=[
@@ -2233,93 +2665,129 @@ def convert_annotation_data_to_dataframe(all_annotations: List[Dict[str, Any]]):
             ]
         )
 
-    # 1. Create initial DataFrame from the list of annotations
-    # Use list comprehensions with .get() for robustness
-    df = pd.DataFrame(
-        {
-            "image": [anno.get("image") for anno in all_annotations],
-            # Ensure 'boxes' defaults to an empty list if missing or None
-            "boxes": [
-                (
-                    anno.get("boxes")
-                    if isinstance(anno.get("boxes"), list)
-                    else (
-                        [anno.get("boxes")]
-                        if isinstance(anno.get("boxes"), dict)
-                        else []
-                    )
+    records = []
+    for anno in all_annotations:
+        image = anno.get("image")
+        page_from_image = _extract_page_number(image)
+        boxes = anno.get("boxes")
+        if not isinstance(boxes, list):
+            boxes = [boxes] if isinstance(boxes, dict) else []
+        # Do not add a placeholder box when boxes is empty; that created blank annotations
+        # in review_file_state when changing page or saving.
+        for box in boxes:
+            if isinstance(box, dict):
+                # Skip blank/zero-area boxes (e.g. from image_annotator with 0,0,0,0 or None).
+                def _num(v):
+                    if v is None:
+                        return None
+                    try:
+                        return float(v)
+                    except (TypeError, ValueError):
+                        return None
+
+                xmin, ymin, xmax, ymax = (
+                    _num(box.get("xmin")),
+                    _num(box.get("ymin")),
+                    _num(box.get("xmax")),
+                    _num(box.get("ymax")),
                 )
-                for anno in all_annotations
-            ],
-        }
-    )
+                if xmin is None and ymin is None and xmax is None and ymax is None:
+                    continue
+                if (xmin or 0) == (xmax or 0) and (ymin or 0) == (ymax or 0):
+                    continue
+                if (xmin or 0) >= (xmax or 0) or (ymin or 0) >= (ymax or 0):
+                    continue
 
-    # 2. Calculate the page number using the helper function
-    df["page"] = df["image"].apply(_extract_page_number)
+                # Use per-box page when present (e.g. text-path with empty image so all don't become page 1).
+                # Reject 0 or negative (UI/state use 1-based pages); fall back to page_from_image.
+                box_page = box.get("page")
+                if box_page is not None:
+                    try:
+                        p = int(float(box_page))
+                        page = p if p >= 1 else page_from_image
+                    except (TypeError, ValueError):
+                        page = page_from_image
+                else:
+                    page = page_from_image
+                row = {"image": image, "page": page}
+                for k, v in box.items():
+                    if k != "page" and k != "image":
+                        # Normalise colour to list so Polars gets a consistent schema
+                        # (some boxes have color as list [r,g,b], tuple, or string)
+                        if k == "color" and v is not None:
+                            if isinstance(v, (list, tuple)) and len(v) >= 3:
+                                v = [int(float(x)) for x in v[:3]]
+                            elif isinstance(v, str):
+                                s = v.strip("()").replace(" ", "")
+                                # e.g. "(128,128,128)" or "128,128,128"
+                                parts = s.split(",")
+                                if len(parts) >= 3:
+                                    v = [int(float(p)) for p in parts[:3]]
+                                elif s.startswith("#") and len(s) in (4, 7):
+                                    # Hex #rgb or #rrggbb (from gradio_image_annotation label_colors)
+                                    hex_s = s[1:]
+                                    if len(hex_s) == 3:
+                                        v = [
+                                            int(hex_s[i : i + 1] * 2, 16)
+                                            for i in (0, 1, 2)
+                                        ]
+                                    else:
+                                        v = [
+                                            int(hex_s[i : i + 2], 16) for i in (0, 2, 4)
+                                        ]
+                                else:
+                                    v = [0, 0, 0]
+                            else:
+                                v = [0, 0, 0]
+                        elif k == "color" and v is None:
+                            v = [0, 0, 0]
+                        if k == "color":
+                            # Store as string "(r, g, b)" so column survives Polars/pandas
+                            # round-trip (list columns can be lost or corrupted)
+                            v = (
+                                f"({int(v[0])}, {int(v[1])}, {int(v[2])})"
+                                if isinstance(v, (list, tuple)) and len(v) >= 3
+                                else "(0, 0, 0)"
+                            )
+                        row[k] = v
+                if "color" not in row:
+                    row["color"] = "(0, 0, 0)"
+                records.append(row)
 
-    # 3. Handle empty 'boxes' lists *before* exploding.
-    # Explode removes rows where the list is empty. We want to keep them
-    # as rows with NA values. Replace empty lists with a list containing
-    # a single placeholder dictionary.
-    placeholder_box = {
-        "xmin": pd.NA,
-        "xmax": pd.NA,
-        "ymin": pd.NA,
-        "ymax": pd.NA,
-        "text": pd.NA,
-        "id": pd.NA,
-    }
-    df["boxes"] = df["boxes"].apply(lambda x: x if x else [placeholder_box])
+    if not records:
+        return pd.DataFrame(
+            columns=[
+                "image",
+                "page",
+                "label",
+                "color",
+                "xmin",
+                "xmax",
+                "ymin",
+                "ymax",
+                "text",
+                "id",
+            ]
+        )
 
-    # 4. Explode the 'boxes' column. Each item in the list becomes a new row.
-    df_exploded = df.explode("boxes", ignore_index=True)
-
-    # 5. Normalize the 'boxes' column (which now contains dictionaries or the placeholder)
-    # This turns the dictionaries into separate columns.
-    # Check for NaNs or non-dict items just in case, though placeholder handles most cases.
-    mask = df_exploded["boxes"].notna() & df_exploded["boxes"].apply(
-        isinstance, args=(dict,)
-    )
-    normalized_boxes = pd.json_normalize(df_exploded.loc[mask, "boxes"])
-
-    # 6. Combine the base data (image, page) with the normalized box data
-    # Use the index of the exploded frame (where mask is True) to ensure correct alignment
-    final_df = (
-        df_exploded.loc[mask, ["image", "page"]]
-        .reset_index(drop=True)
-        .join(normalized_boxes)
-    )
-
-    # --- Optional: Handle rows that might have had non-dict items in 'boxes' ---
-    # If there were rows filtered out by 'mask', you might want to add them back
-    # with NA values for box columns. However, the placeholder strategy usually
-    # prevents this from being necessary.
-
-    # 7. Ensure essential columns exist and set column order
+    df = pl.from_dicts(records)
     essential_box_cols = ["xmin", "xmax", "ymin", "ymax", "text", "id", "label"]
     for col in essential_box_cols:
-        if col not in final_df.columns:
-            final_df[col] = pd.NA  # Add column with NA if it wasn't present in any box
-        final_df[col] = final_df[col].replace({None: pd.NA})
-
-    base_cols = ["image"]
-    extra_box_cols = [
-        col
-        for col in final_df.columns
-        if col not in base_cols and col not in essential_box_cols
-    ]
-    final_col_order = base_cols + essential_box_cols + sorted(extra_box_cols)
-
-    # Reindex to ensure consistent column order and presence of essential columns
-    # Using fill_value=pd.NA isn't strictly needed here as we added missing columns above,
-    # but it's good practice if columns could be missing for other reasons.
-    final_df = final_df.reindex(columns=final_col_order, fill_value=pd.NA)
-    final_df = final_df.dropna(
-        subset=["xmin", "xmax", "ymin", "ymax", "text", "id", "label"], how="all"
+        if col not in df.columns:
+            df = df.with_columns(pl.lit(None).alias(col))
+    # Drop rows where all of the essential box fields are null (matches pandas dropna(..., how="all"))
+    null_mask = pl.all_horizontal(
+        [pl.col(c).is_null() for c in essential_box_cols if c in df.columns]
     )
-    final_df.replace({None: pd.NA})
-
-    return final_df
+    df = df.filter(~null_mask)
+    base_cols = ["image"]
+    extra_box_cols = sorted(
+        [c for c in df.columns if c not in base_cols and c not in essential_box_cols]
+    )
+    final_col_order = base_cols + essential_box_cols + extra_box_cols
+    final_col_order = [c for c in final_col_order if c in df.columns]
+    df = df.select(final_col_order)
+    return df.to_pandas()
 
 
 def create_annotation_dicts_from_annotation_df(
@@ -2363,41 +2831,48 @@ def create_annotation_dicts_from_annotation_df(
         return list(image_dict.values())  # Return based on page_sizes only
 
     # 3. Group the DataFrame by image and update the dictionary
-    # Drop rows where essential coordinates might be NA (adjust if NA is meaningful)
     coord_cols = ["xmin", "ymin", "xmax", "ymax"]
     valid_box_df = all_image_annotations_df.dropna(
         subset=[col for col in coord_cols if col in available_cols]
-    ).copy()  # Use .copy() to avoid SettingWithCopyWarning if modifying later
+    ).copy()
 
-    # Check if any valid boxes remain after dropping NAs
     if valid_box_df.empty:
         print(
             "Warning: No valid annotation rows found in DataFrame after dropping NA coordinates."
         )
         return list(image_dict.values())
 
-    # Process groups
-    try:
+    # Ensure every image path in the dataframe has an entry (e.g. EFFICIENT_OCR text-path
+    # pages may use a different path in annotations than in page_sizes, so boxes would be dropped).
+    for image_path in valid_box_df["image"].unique():
+        if image_path and image_path not in image_dict:
+            image_dict[image_path] = {"image": image_path, "boxes": []}
+
+    # Build list of (image_path, group) for all images in the dataframe
+    group_items = [
+        (image_path, group)
         for image_path, group in valid_box_df.groupby(
             "image", observed=True, sort=False
-        ):
-            # Check if this image path exists in our target dictionary (from page_sizes)
-            if image_path in image_dict:
-                # Convert the relevant columns of the group to a list of dicts
-                # Using only columns that are actually available
-                boxes = group[available_cols].to_dict(orient="records")
-                # Update the 'boxes' list in the dictionary
-                image_dict[image_path]["boxes"] = boxes
-            # Else: Image found in DataFrame but not required by page_sizes; ignore it.
-    except KeyError:
-        # This shouldn't happen due to the 'image' column check above, but handle defensively
-        print("Error: Issue grouping DataFrame by 'image'.")
-        return list(image_dict.values())
+        )
+    ]
 
-    # 4. Convert the dictionary values back into the final list format
-    result = list(image_dict.values())
+    if group_items:
+        max_workers = min(MAX_WORKERS, len(group_items))
 
-    return result
+        def _boxes_for_group(item):
+            _image_path, _group = item
+            boxes = _group[available_cols].to_dict(orient="records")
+            return (_image_path, boxes)
+
+        try:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                for image_path, boxes in executor.map(_boxes_for_group, group_items):
+                    image_dict[image_path]["boxes"] = boxes
+        except KeyError:
+            print("Error: Issue grouping DataFrame by 'image'.")
+            return list(image_dict.values())
+
+    return list(image_dict.values())
 
 
 def convert_annotation_json_to_review_df(
@@ -2405,6 +2880,7 @@ def convert_annotation_json_to_review_df(
     redaction_decision_output: pd.DataFrame = pd.DataFrame(),
     page_sizes: List[dict] = list(),
     do_proximity_match: bool = True,
+    prebuilt_df: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     """
     Convert the annotation json data to a dataframe format.
@@ -2413,16 +2889,37 @@ def convert_annotation_json_to_review_df(
 
     Refactored for improved efficiency, prioritizing ID-based join and conditionally applying
     coordinate division and proximity matching.
+
+    When prebuilt_df is provided (e.g. from chunked parallel build), it is used as the initial
+    DataFrame and the annotation-to-DataFrame conversion is skipped.
     """
 
-    # 1. Convert annotations to DataFrame
-    review_file_df = convert_annotation_data_to_dataframe(all_annotations)
+    # 1. Convert annotations to DataFrame (or use prebuilt from chunked parallel build)
+    if prebuilt_df is not None:
+        review_file_df = prebuilt_df.copy()
+    else:
+        review_file_df = convert_annotation_data_to_dataframe(
+            all_annotations if all_annotations else []
+        )
 
     # Only keep rows in review_df where there are coordinates (assuming xmin is representative)
     # Use .notna() for robustness with potential None or NaN values
     review_file_df.dropna(
         subset=["xmin", "ymin", "xmax", "ymax"], how="any", inplace=True
     )
+
+    # Drop blank/zero-area annotations (e.g. image_annotator sometimes sends 0,0,0,0 boxes)
+    if not review_file_df.empty and all(
+        c in review_file_df.columns for c in ["xmin", "ymin", "xmax", "ymax"]
+    ):
+        xmin, ymin, xmax, ymax = (
+            pd.to_numeric(review_file_df["xmin"], errors="coerce"),
+            pd.to_numeric(review_file_df["ymin"], errors="coerce"),
+            pd.to_numeric(review_file_df["xmax"], errors="coerce"),
+            pd.to_numeric(review_file_df["ymax"], errors="coerce"),
+        )
+        zero_area = (xmin >= xmax) | (ymin >= ymax)
+        review_file_df = review_file_df.loc[~zero_area]
 
     # Exit early if the initial conversion results in an empty DataFrame
     if review_file_df.empty:
@@ -3264,65 +3761,53 @@ def convert_review_df_to_annotation_json(
     if not review_file_df.empty:
         # Convert list colors to tuples (important for some downstream uses)
         if "color" in review_file_df.columns:
-            review_file_df["color"] = review_file_df["color"].apply(
-                lambda x: tuple(x) if isinstance(x, list) else x
-            )
+            is_list = review_file_df["color"].apply(lambda x: isinstance(x, list))
+            if is_list.any():
+                review_file_df.loc[is_list, "color"] = review_file_df.loc[
+                    is_list, "color"
+                ].apply(tuple)
         # Ensure page column is nullable integer type for reliable grouping
         if "page" in review_file_df.columns:
             review_file_df["page"] = review_file_df["page"].astype("Int64")
 
     # --- Group Annotations by Page ---
-    if "page" in review_file_df.columns:
-        grouped_annotations = review_file_df.groupby("page")
-        group_keys = set(
-            grouped_annotations.groups.keys()
-        )  # Use set for faster lookups
-    else:
-        # Cannot group if page column is missing
-        print("Error: 'page' column missing, cannot group annotations.")
-        grouped_annotations = None
-        group_keys = set()
-
-    # --- Build JSON Structure ---
-    json_data = list()
     output_cols_for_boxes = [
         col
         for col in ["label", "color", xmin, ymin, xmax, ymax, "id", "text"]
         if col in review_file_df.columns
     ]
 
-    # Iterate through page_sizes_df to define the structure (one entry per image path)
-    for _, row in page_sizes_df.iterrows():
-        page_num = row["page"]  # Already Int64
-        pdf_image_path = row["image_path"]
-        annotation_boxes = list()  # Default to empty list
+    # Ensure coordinate columns are native Python floats (not np.float64) for JSON/dict
+    for c in [xmin, xmax, ymin, ymax]:
+        if c in review_file_df.columns:
+            review_file_df[c] = review_file_df[c].apply(
+                lambda x: float(x) if pd.notna(x) else x
+            )
 
-        # Check if the page exists in the grouped annotations (using the faster set lookup)
-        # Check pd.notna because page_num could be <NA> if conversion failed
-        if pd.notna(page_num) and page_num in group_keys and grouped_annotations:
-            try:
-                page_group_df = grouped_annotations.get_group(page_num)
-                # Convert the group to list of dicts, selecting only needed box properties
-                # Handle potential NaN coordinates before conversion to JSON
-                annotation_boxes = (
-                    page_group_df[output_cols_for_boxes]
+    if "page" in review_file_df.columns:
+        # Build page -> list of box dicts once (avoids iterrows + get_group per page)
+        page_to_boxes = {}
+        for page_num, group in review_file_df.groupby("page"):
+            if pd.notna(page_num):
+                page_to_boxes[page_num] = (
+                    group[output_cols_for_boxes]
                     .replace({np.nan: None})
                     .to_dict(orient="records")
                 )
+    else:
+        print("Error: 'page' column missing, cannot group annotations.")
+        page_to_boxes = {}
 
-                # Optional: Round coordinates here if needed AFTER potential multiplication
-                # for box in annotation_boxes:
-                #     for coord in [xmin, ymin, xmax, ymax]:
-                #         if coord in box and box[coord] is not None:
-                #             box[coord] = round(float(box[coord]), 2) # Example: round to 2 decimals
-
-            except KeyError:
-                print(
-                    f"Warning: Group key {page_num} not found despite being in group_keys (should not happen)."
-                )
-                annotation_boxes = list()  # Keep empty
-
-        # Append the structured data for this image/page
-        json_data.append({"image": pdf_image_path, "boxes": annotation_boxes})
+    # --- Build JSON Structure ---
+    # Iterate page_sizes by column (no iterrows); lookup boxes by page
+    json_data = [
+        {
+            "image": pdf_image_path,
+            "boxes": page_to_boxes.get(page_num, []) if pd.notna(page_num) else [],
+        }
+        for page_num, pdf_image_path in zip(
+            page_sizes_df["page"], page_sizes_df["image_path"]
+        )
+    ]
 
     return json_data
