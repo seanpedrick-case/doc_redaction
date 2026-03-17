@@ -24,7 +24,7 @@ from pdfminer.layout import (
     LTTextLineHorizontal,
 )
 from pikepdf import Dictionary, Name, Pdf
-from PIL import Image, ImageDraw, ImageFile
+from PIL import Image, ImageDraw, ImageFile, ImageFont
 from presidio_analyzer import AnalyzerEngine
 from pymupdf import Document, Page, Rect
 from tqdm import tqdm
@@ -127,6 +127,7 @@ from tools.file_conversion import (
 from tools.helper_functions import (
     clean_unicode_text,
     get_file_name_without_type,
+    get_ocr_visualisation_font_path,
     get_textract_file_suffix,
 )
 from tools.load_spacy_model_custom_recognisers import (
@@ -8990,7 +8991,9 @@ def create_line_level_ocr_results_from_characters(
             continue
 
         # This part handles LTChar objects
-        added_text = clean_unicode_text(char.get_text())
+        added_text = clean_unicode_text(
+            char.get_text(), preserve_international_scripts=True
+        )
         full_text += added_text
 
         x0, y0, x1, y1 = char.bbox
@@ -9075,7 +9078,9 @@ def generate_words_for_line(line_chars: List) -> List[Dict[str, Any]]:
         current_word_bbox = [float("inf"), float("inf"), -1, -1]
 
     for char in text_chars:
-        char_text = clean_unicode_text(char.get_text())
+        char_text = clean_unicode_text(
+            char.get_text(), preserve_international_scripts=True
+        )
 
         # 1. NEW: Check for splitting punctuation first.
         if char_text in PUNCTUATION_TO_SPLIT:
@@ -9344,7 +9349,9 @@ def _words_from_line_chars_pymupdf(
         current_word_bbox = [float("inf"), float("inf"), -1, -1]
 
     for char in sorted_chars:
-        char_text = clean_unicode_text(char["text"])
+        char_text = clean_unicode_text(
+            char["text"], preserve_international_scripts=True
+        )
         bbox = char["bbox"]
         x0, y0, x1, y1 = bbox
         char.get("size", 12.0)
@@ -10288,10 +10295,11 @@ def redact_text_pdf(
                     and pii_identification_method == AWS_PII_OPTION
                     and (chosen_redact_comprehend_entities or chosen_redact_entities)
                 ):
-                    print(
-                        f"EFFICIENT_OCR (text path): No PII bounding boxes for page {reported_page_number}. "
-                        "Check that the page has text and that selected entity types match Comprehend output."
-                    )
+                    # print(
+                    #     f"EFFICIENT_OCR (text path): No PII bounding boxes for page {reported_page_number}. "
+                    #     "Check that the page has text and that selected entity types match Comprehend output."
+                    # )
+                    pass
 
                 # Accumulate LLM token usage across pages
                 llm_total_input_tokens += llm_input_tokens_page
@@ -10647,6 +10655,30 @@ def redact_text_pdf(
     return result
 
 
+def _pil_ocr_viz_text_size(font: ImageFont.ImageFont, text: str) -> Tuple[int, int]:
+    if not text:
+        text = " "
+    if hasattr(font, "getbbox"):
+        left, top, right, bottom = font.getbbox(text)
+        return max(1, right - left), max(1, bottom - top)
+    dr = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    bb = dr.textbbox((0, 0), text, font=font)
+    return max(1, bb[2] - bb[0]), max(1, bb[3] - bb[1])
+
+
+def _pil_ocr_viz_load_font(font_path: Optional[str], size: int) -> ImageFont.ImageFont:
+    if font_path and os.path.isfile(font_path):
+        try:
+            return ImageFont.truetype(font_path, size)
+        except OSError:
+            pass
+    return ImageFont.load_default()
+
+
+def _ocr_viz_bgr_to_rgb(bgr: Tuple[int, int, int]) -> Tuple[int, int, int]:
+    return (int(bgr[2]), int(bgr[1]), int(bgr[0]))
+
+
 def visualise_ocr_words_bounding_boxes(
     image: Union[str, Image.Image],
     ocr_results: Dict[str, Any],
@@ -10899,8 +10931,10 @@ def visualise_ocr_words_bounding_boxes(
             show_model_replacement=show_model_replacement_legend,
         )
 
-    # Create second page with text overlay
-    text_page = np.ones((height, width, 3), dtype=np.uint8) * 255  # White background
+    # Second page: recognised text (PIL + system TTF — OpenCV putText is Latin-only → '?' for Cyrillic/CJK/etc.)
+    viz_font_path = get_ocr_visualisation_font_path()
+    text_page_rgb = Image.new("RGB", (width, height), (255, 255, 255))
+    draw_pil = ImageDraw.Draw(text_page_rgb)
 
     # Process each line's words for text overlay
     for line_key, line_data in ocr_results.items():
@@ -10985,64 +11019,36 @@ def visualise_ocr_words_bounding_boxes(
                 is_replaced = model and model.lower() != base_model_name.lower()
 
                 # Text color always by confidence (replaced words still show confidence; box stays grey)
-                text_color = (0, 0, 180)  # Default to dark red
+                text_color = (0, 0, 180)  # Default to dark red (BGR)
                 for min_conf, max_conf, conf_color, _ in text_confidence_ranges:
                     if min_conf <= conf <= max_conf:
                         text_color = conf_color
                         break
 
-                # Calculate font size to fit text within bounding box
-                font_scale = 0.5
-                font_thickness = 1
-                font = cv2.FONT_HERSHEY_SIMPLEX
-
-                # Get text size and adjust to fit
-                (text_width, text_height), baseline = cv2.getTextSize(
-                    text, font, font_scale, font_thickness
-                )
-
-                # Scale font to fit width (with some padding)
-                if text_width > 0:
-                    width_scale = (box_width * 0.9) / text_width
-                else:
-                    width_scale = 1.0
-
-                # Scale font to fit height (with some padding)
-                if text_height > 0:
-                    height_scale = (box_height * 0.8) / text_height
-                else:
-                    height_scale = 1.0
-
-                # Use the smaller scale to ensure text fits both dimensions
-                font_scale = min(
-                    font_scale * min(width_scale, height_scale), 2.0
-                )  # Cap at 2.0
-
-                # Recalculate text size with adjusted font scale
-                (text_width, text_height), baseline = cv2.getTextSize(
-                    text, font, font_scale, font_thickness
-                )
-
-                # Center text within bounding box
-                text_x = x1 + (box_width - text_width) // 2
-                text_y = y1 + (box_height + text_height) // 2  # Baseline adjustment
-
-                # Draw text
-                cv2.putText(
-                    text_page,
-                    text,
+                max_pt = min(160, max(8, int(box_height * 1.8)))
+                min_pt = 6
+                pil_font = _pil_ocr_viz_load_font(viz_font_path, min_pt)
+                tw, th = 1, 1
+                for pt in range(max_pt, min_pt - 1, -1):
+                    pil_font = _pil_ocr_viz_load_font(viz_font_path, pt)
+                    tw, th = _pil_ocr_viz_text_size(pil_font, text)
+                    if tw <= box_width * 0.9 and th <= box_height * 0.82:
+                        break
+                text_x = x1 + (box_width - tw) // 2
+                text_y = y1 + (box_height - th) // 2
+                draw_pil.text(
                     (text_x, text_y),
-                    font,
-                    font_scale,
-                    text_color,
-                    font_thickness,
-                    cv2.LINE_AA,
+                    text,
+                    font=pil_font,
+                    fill=_ocr_viz_bgr_to_rgb(text_color),
                 )
 
-                # Draw grey bounding box for replaced words on text page
                 if is_replaced:
-                    box_color = (128, 128, 128)  # Grey for model replacements
-                    cv2.rectangle(text_page, (x1, y1), (x2, y2), box_color, 1)
+                    draw_pil.rectangle(
+                        [x1, y1, x2, y2],
+                        outline=(128, 128, 128),
+                        width=1,
+                    )
 
             else:
                 # Multiple words in the same box - arrange them side by side
@@ -11069,104 +11075,52 @@ def visualise_ocr_words_bounding_boxes(
                     word_colors.append(text_color)
                     word_is_replaced.append(is_replaced)
 
-                # Calculate font size to fit all words side by side
-                font_scale = 0.5
-                font_thickness = 1
-                font = cv2.FONT_HERSHEY_SIMPLEX
-
-                # Start with a reasonable font scale and reduce if needed
-                max_font_scale = 2.0
-                min_font_scale = 0.1
-                font_scale = max_font_scale
-
-                # Binary search or iterative approach to find the right font size
-                for _ in range(20):  # Max iterations
-                    # Calculate total width needed for all words with spaces
-                    total_width = 0
-                    max_text_height = 0
-
-                    for i, text in enumerate(word_texts):
-                        (text_width, text_height), baseline = cv2.getTextSize(
-                            text, font, font_scale, font_thickness
-                        )
-                        total_width += text_width
-                        max_text_height = max(max_text_height, text_height)
-
-                        # Add space width between words (except last word)
-                        if i < len(word_texts) - 1:
-                            (space_width, _), _ = cv2.getTextSize(
-                                " ", font, font_scale, font_thickness
-                            )
-                            total_width += space_width
-
-                    # Check if it fits
-                    width_fits = total_width <= box_width * 0.9
-                    height_fits = max_text_height <= box_height * 0.8
-
-                    if width_fits and height_fits:
-                        break
-
-                    # Reduce font scale
-                    font_scale *= 0.9
-                    if font_scale < min_font_scale:
-                        font_scale = min_font_scale
-                        break
-
-                # Recalculate total width and max height with final font scale
+                n = len(word_texts)
+                max_pt = min(160, max(8, int(box_height * 1.8)))
+                min_pt = 6
+                pil_font = _pil_ocr_viz_load_font(viz_font_path, min_pt)
                 total_width = 0
                 max_text_height = 0
-                for i, text in enumerate(word_texts):
-                    (text_width, text_height), baseline = cv2.getTextSize(
-                        text, font, font_scale, font_thickness
-                    )
-                    total_width += text_width
-                    max_text_height = max(max_text_height, text_height)
+                space_w = 1
+                for pt in range(max_pt, min_pt - 1, -1):
+                    pil_font = _pil_ocr_viz_load_font(viz_font_path, pt)
+                    total_width = 0
+                    max_text_height = 0
+                    space_w, _ = _pil_ocr_viz_text_size(pil_font, " ")
+                    for i, wtext in enumerate(word_texts):
+                        tw, th = _pil_ocr_viz_text_size(pil_font, wtext)
+                        total_width += tw
+                        max_text_height = max(max_text_height, th)
+                        if i < n - 1:
+                            total_width += space_w
+                    if (
+                        total_width <= box_width * 0.9
+                        and max_text_height <= box_height * 0.82
+                    ):
+                        break
 
-                    # Add space width between words (except last word)
-                    if i < len(word_texts) - 1:
-                        (space_width, _), _ = cv2.getTextSize(
-                            " ", font, font_scale, font_thickness
-                        )
-                        total_width += space_width
-
-                # Now draw each word side by side
-                current_x = (
-                    x1 + (box_width - total_width) // 2
-                )  # Center the combined text
-                text_y = y1 + (box_height + max_text_height) // 2  # Baseline adjustment
-
-                for i, (text, text_color) in enumerate(zip(word_texts, word_colors)):
-                    # Get text size with final font scale
-                    (text_width, text_height), baseline = cv2.getTextSize(
-                        text, font, font_scale, font_thickness
-                    )
-
-                    # Draw text
-                    cv2.putText(
-                        text_page,
-                        text,
+                current_x = x1 + (box_width - total_width) // 2
+                text_y = y1 + (box_height - max_text_height) // 2
+                for i, (wtext, text_color) in enumerate(zip(word_texts, word_colors)):
+                    draw_pil.text(
                         (int(current_x), text_y),
-                        font,
-                        font_scale,
-                        text_color,
-                        font_thickness,
-                        cv2.LINE_AA,
+                        wtext,
+                        font=pil_font,
+                        fill=_ocr_viz_bgr_to_rgb(text_color),
+                    )
+                    tw, _ = _pil_ocr_viz_text_size(pil_font, wtext)
+                    current_x += tw
+                    if i < n - 1:
+                        current_x += space_w
+
+                if any(word_is_replaced):
+                    draw_pil.rectangle(
+                        [x1, y1, x2, y2],
+                        outline=(128, 128, 128),
+                        width=1,
                     )
 
-                    # Move to next position
-                    current_x += text_width
-
-                    # Add space between words (except last word)
-                    if i < len(word_texts) - 1:
-                        (space_width, _), _ = cv2.getTextSize(
-                            " ", font, font_scale, font_thickness
-                        )
-                        current_x += space_width
-
-                # Draw grey bounding box if any word was replaced
-                if any(word_is_replaced):
-                    box_color = (128, 128, 128)  # Grey for model replacements
-                    cv2.rectangle(text_page, (x1, y1), (x2, y2), box_color, 1)
+    text_page = cv2.cvtColor(np.asarray(text_page_rgb), cv2.COLOR_RGB2BGR)
 
     # Add legend to second page
     if add_legend:

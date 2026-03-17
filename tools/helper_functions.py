@@ -953,7 +953,7 @@ async def get_connection_params(
 
     elif "x-cognito-id" in request.headers:
         out_session_hash = request.headers["x-cognito-id"]
-        # print("Cognito ID found:", out_session_hash)
+        print("Cognito ID found:", out_session_hash)
 
     elif "x-amzn-oidc-identity" in request.headers:
         out_session_hash = request.headers["x-amzn-oidc-identity"]
@@ -1049,7 +1049,19 @@ async def get_connection_params(
     )
 
 
-def clean_unicode_text(text: str):
+def clean_unicode_text(text: str, preserve_international_scripts: bool = False) -> str:
+    """
+    Normalise Unicode (NFKC), replace common smart punctuation with ASCII.
+
+    By default, non-ASCII characters are stripped (legacy behaviour for some pipelines).
+    Set ``preserve_international_scripts=True`` for OCR and extracted document text so
+    Cyrillic, Arabic, CJK, etc. are retained in outputs (CSV, JSON, redaction targets).
+    """
+    if text is None:
+        return ""
+    if not isinstance(text, str):
+        text = str(text)
+
     # Step 1: Normalise unicode characters to decompose any special forms
     normalized_text = unicodedata.normalize("NFKC", text)
 
@@ -1065,18 +1077,15 @@ def clean_unicode_text(text: str):
         "•": "*",
     }
 
-    # Perform replacements
     for old_char, new_char in replacements.items():
         normalized_text = normalized_text.replace(old_char, new_char)
 
-    # Step 3: Optionally remove non-ASCII characters if needed
-    # This regex removes any remaining non-ASCII characters, if desired.
-    # Comment this line if you want to keep all Unicode characters.
+    if preserve_international_scripts:
+        return normalized_text
+
     from tools.secure_regex_utils import safe_remove_non_ascii
 
-    cleaned_text = safe_remove_non_ascii(normalized_text)
-
-    return cleaned_text
+    return safe_remove_non_ascii(normalized_text)
 
 
 # --- Helper Function for ID Generation ---
@@ -1517,6 +1526,54 @@ def get_system_font_path():
                 return font_path
 
     return None
+
+
+def get_ocr_visualisation_font_path():
+    """
+    Path to a TrueType/OpenType font for drawing recognised OCR text on debug images.
+
+    OpenCV's Hershey fonts (cv2.putText) are effectively Latin-only; other scripts show as '?'.
+    PIL + this font supports Cyrillic, CJK, Arabic in typical OS installs (Segoe UI, Noto, etc.).
+    """
+    system = platform.system()
+
+    if system == "Windows":
+        fonts_dir = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
+        for name in (
+            "segoeui.ttf",
+            "calibri.ttf",
+            "msyh.ttc",
+            "simsun.ttc",
+            "arial.ttf",
+            "times.ttf",
+        ):
+            p = os.path.join(fonts_dir, name)
+            if os.path.isfile(p):
+                return p
+
+    elif system == "Darwin":
+        for p in (
+            "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+            "/Library/Fonts/Arial Unicode.ttf",
+            "/System/Library/Fonts/PingFang.ttc",
+            "/System/Library/Fonts/Hiragino Sans GB.ttc",
+            "/System/Library/Fonts/Helvetica.ttc",
+        ):
+            if os.path.isfile(p):
+                return p
+
+    elif system == "Linux":
+        for p in (
+            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ):
+            if os.path.isfile(p):
+                return p
+
+    return get_system_font_path()
 
 
 # Custom logging filter to remove logs from healthiness/readiness endpoints so they don't fill up application log flow

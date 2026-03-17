@@ -10,16 +10,22 @@ format:
 ## Table of contents
 
 ### Getting Started
-- [Built-in example data](#built-in-example-data)
+- [Quickstart - Test the app with built-in examples](#quickstart---test-the-app-with-built-in-examples)
 - [Basic redaction](#basic-redaction)
-- [Customising redaction options](#customising-redaction-options)
-    - [Custom allow, deny, and page redaction lists](#custom-allow-deny-and-page-redaction-lists)
-        - [Allow list example](#allow-list-example)
-        - [Deny list example](#deny-list-example)
-        - [Full page redaction list example](#full-page-redaction-list-example)
-    - [Redacting additional types of personal information](#redacting-additional-types-of-personal-information)
-    - [Redacting only specific pages](#redacting-only-specific-pages)
-    - [Handwriting and signature redaction](#handwriting-and-signature-redaction)
+    - [Upload files to the app](#upload-files-to-the-app)
+    - [Text extraction](#text-extraction)
+    - [AWS Textract signature extraction](#aws-textract-signature-extraction)
+    - [PII redaction method](#pii-redaction-method)
+    - [Duplicate page redaction](#duplicate-page-redaction)
+    - [Allow list, deny list, and whole-page redaction](#allow-list-deny-list-and-whole-page-redaction)
+    - [Cost and time estimation](#cost-and-time-estimation)
+    - [Cost code selection](#cost-code-selection)
+    - [Run redaction](#run-redaction)
+    - [Redaction outputs](#redaction-outputs)
+    - [Additional AWS Textract / local OCR outputs](#additional-aws-textract--local-ocr-outputs)
+    - [Log file outputs and other optional outputs](#log-file-outputs-and-other-optional-outputs)
+    - [Downloading output files from previous redaction tasks](#downloading-output-files-from-previous-redaction-tasks)
+    - [Basic redaction summary](#basic-redaction-summary)
 - [Reviewing and modifying suggested redactions](#reviewing-and-modifying-suggested-redactions)
 - [Redacting Word, tabular data files (CSV/XLSX) or copy and pasted text](#redacting-word-tabular-data-files-xlsxcsv-or-copy-and-pasted-text)
 - [Identifying and redacting duplicate pages](#identifying-and-redacting-duplicate-pages)
@@ -41,11 +47,12 @@ format:
 - [PII identification with LLMs](#pii-identification-with-llms)
 - [Command Line Interface (CLI)](#command-line-interface-cli)
 
-## Built-in example data
 
-The app now includes built-in example files that you can use to quickly test different features. These examples are automatically loaded and can be accessed directly from the interface without needing to download files separately.
+## Quickstart - Test the app with built-in examples
 
-### Using built-in examples
+### PDF document examples
+
+The app provides some built-in examples so you can see how it works before trying one of your own files.
 
 **For PDF/image redaction:** On the 'Redact PDFs/images' tab, you'll see a section titled "Try an example - Click on an example below and then the 'Extract text and redact document' button". Simply click on any of the available examples to load them with pre-configured settings:
 
@@ -57,108 +64,102 @@ The app now includes built-in example files that you can use to quickly test dif
 
 Once you have clicked on an example, you can click the 'Extract text and redact document' button to load the example into the app and redact it.
 
+### CSV/Excel file redaction
+
 **For tabular data:** On the 'Word or Excel/CSV files' tab, you'll find examples for both redaction and duplicate detection:
 
 - **CSV file redaction** - Shows how to redact specific columns in tabular data
 - **Word document redaction** - Demonstrates Word document processing
 - **Excel file duplicate detection** - Shows how to find duplicate rows in spreadsheet data
 
-Once you have clicked on an example, you can click the 'Redact text/data files' button to load the example into the app and redact it. For the duplicate detection example, you can click the 'Find duplicate cells/rows' button to load the example into the app and find duplicates.
-
-**For duplicate page detection:** On the 'Identify duplicate pages' tab, you'll find examples for finding duplicate content in documents:
-
-- **Find duplicate pages of text in document OCR outputs** - Uses page-level analysis with a similarity threshold of 0.95 and minimum word count of 10
-- **Find duplicate text lines in document OCR outputs** - Uses line-level analysis with a similarity threshold of 0.95 and minimum word count of 3
-
-Once you have clicked on an example, you can click the 'Identify duplicate pages/subdocuments' button to load the example into the app and find duplicate content.
-
-### External example files (optional)
-
-If you prefer to use your own example files or want to follow along with specific tutorials, you can still download these external example files:
-
-- [Example of files sent to a professor before applying](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/example_of_emails_sent_to_a_professor_before_applying.pdf)
-- [Example complaint letter (jpg)](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/example_complaint_letter.jpg)
-- [Partnership Agreement Toolkit (for signatures and more advanced usage)](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/Partnership-Agreement-Toolkit_0_0.pdf)
-- [Dummy case note data](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/combined_case_notes.csv)
+Once you have clicked on an example, you can click the 'Redact text/data files' button directly to redact the example file. Once done, you can click the 'Review redactions' button to review and modify suggested redaction boxes.
 
 ## Basic redaction
 
 The document redaction app can detect personally-identifiable information (PII) in documents. Documents can be redacted directly, or suggested redactions can be reviewed and modified using a graphical user interface. Basic document redaction can be performed quickly using the default options.
 
-Download the example PDFs above to your computer. Open the redaction app with the link provided by email.
-
-**Where to work:** All of the main redaction options and the redact button are on the **'Redact PDFs/images'** tab. When the quickstart walkthrough is not shown, this tab opens with a **'Redaction settings'** accordion **open by default**, so you can upload files and adjust options without switching tabs.
+**Where to work:** All of the main redaction options and the redact button are on the **'Redact PDFs/images'** tab.
 
 ![Upload files](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/file_upload_highlight.PNG)
 
 ### Upload files to the app
 
-On the **'Redact PDFs/images'** tab, the **'Redaction settings'** accordion at the top accepts PDFs and image files (JPG, PNG) for redaction. Click on the **'Drop files here or Click to Upload'** area and select one or more [example files](#example-data-files) (store them in the same folder if you want to redact several at once).
+On the **'Redact PDFs/images'** tab, the **'Redaction settings'** accordion at the top accepts PDFs and image files (JPG, PNG) for redaction. Click on the **'Drop files here or Click to Upload'** area, or select from one of the [examples provided](#pdf-document-examples).
 
 ### Text extraction
 
-Inside the same **'Redaction settings'** accordion, open the nested accordion **'Change default text extraction settings'** (it may already be open). If enabled, under **'Change default text extraction OCR method'** you can choose how text is extracted:
+Under **'Redaction settings'** accordion, you can see **'Change default text extraction settings'**. You may have the following options available depending on your configuration - if not, AWS Textract will likely be the default option:
 
-- **'Local model - selectable text'** - Reads text directly from PDFs that have selectable text (using PikePDF). Best for most PDFs; finds nothing if the PDF has no selectable text and is not suitable for handwriting or signatures. Image files are passed to the next option.
-- **'Local OCR model - PDFs without selectable text'** - Uses a local OCR model (Tesseract) to extract text from PDFs/images. Handles most typed text without selectable text but is less reliable for handwriting and signatures; use the AWS option below if you need those.
+- **'Local model - selectable text'** - (optional) Reads text directly from PDFs that have selectable text.
+- **'Local OCR model - PDFs without selectable text'** - (optional) Uses a local OCR model to extract text from PDFs/images. Handles most typed text without selectable text but is less accurate for handwriting and signatures; use the AWS Textract option in this case.
 - **'AWS Textract service - all PDF types'** - Available when the app is configured for AWS. Textract runs in the cloud and is more capable for complex layouts, handwriting, and signatures. It incurs a (relatively small) cost per page.
 
-### Enable AWS Textract signature extraction
+### AWS Textract signature extraction
+
+![Handwriting and signatures redacted example](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/refs/heads/main/review_redactions/Signatures%20and%20handwriting%20found.PNG)
 
 If you select **'AWS Textract service - all PDF types'** as the text extraction method, an accordion **'Enable AWS Textract signature detection (default is off)'** appears. Open it to turn on handwriting and/or signature detection. Enabling signatures has a cost impact (~£2.66 ($3.50) per 1,000 pages vs ~£1.14 ($1.50) per 1,000 pages without signature detection).
 
 ![AWS Textract handwriting and signature options](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/textract_handwriting_signatures.PNG)
 
-**NOTE:** Form, layout, and table extraction with AWS Textract can be enabled by your system administrator in the config; they are off by default.
+**NOTE:** Form, layout, table extraction, or face detection can be enabled if required for specific use cases; they are off by default - please contact your system administrator if you need these features.
 
 ### PII redaction method
 
-At the start of the **'Change PII identification method'** accordion (under **'Change default redaction settings'**) you will see **'Choose redaction method'**, a radio with three options:
-- **'Extract text only'** runs text extraction without redaction—useful when you only need OCR output or want to review text before redacting; when selected.
-- **'Redact all PII'** (the default) uses the chosen PII detection method to find and redact personal information across a range of types that you can customise below.
-- **'Redact selected terms'** shows both accordions and focuses on custom allow/deny lists so you can redact only the terms you specify.
+Next we need to choose our model to identify personally-identifiable information (PII) in the document. Under **'Change PII identification method'** accordion (under **'Change default redaction settings'**) you will see **'Choose redaction method'**, a radio with three options:
+- **'Extract text only'** runs text extraction without redaction — useful when you only need OCR output or want to review text before redacting.
+- **'Redact all PII'** (the default) uses the chosen PII detection method to find and redact personal information across a range of standard entity types, e.g. addresses, names, dates, etc.
+- **'Redact selected terms'** will focus redaction only on the specific terms in the [custom allow/deny lists](#allow-list-deny-list-and-whole-page-redaction) below.
 
-Still under **'Change default redaction settings'**, you may see the **'Change PII identification model'** section, if enabled, which lets you choose how PII is detected. You may have the choice of the following options:
+Still under **'Change default redaction settings'**, you may see the **'Change PII identification model'** section, if enabled, which lets you choose how PII is detected. You may have the choice of the following options. If not, AWS Comprehend will likely be the default option:
 
-- **'Local'** - Uses a local model (e.g. spaCy) to detect PII at no extra cost. Often enough when you mainly care about custom terms (see [Customising redaction options](#customising-redaction-options)).
+- **'Local'** - (optional) Uses a local model (e.g. spaCy) to detect PII at no extra cost, but with less accuracy than the alternative options. 
 - **'AWS Comprehend'** - Uses AWS Comprehend for PII detection when the app is configured for AWS; typically more accurate but incurs a cost (around £0.0075 ($0.01) per 10,000 characters).
 - Other options may be available depending on the app settings (e.g. AWS Bedrock, local LLM models).
 
-Under **'Select entity types to redact'** you can choose which types of PII to redact (e.g. names, emails, dates). The dropdown label varies by method (Local, AWS Comprehend, or LLM); click in the box or near the dropdown arrow to see the full list.
+Under **'Select entity types to redact'** you can choose which types of PII to redact (e.g. names, emails, dates). Click in the box or near the dropdown arrow to see the full list. Any entity type that remains in the box will be searched for during the redaction process.
+
+
+![Redacting additional types of information dropdown](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/additional_entities/additional_entities_select.PNG)
+
+### Duplicate page redaction
+
+Alongside the 'Change PII identification method' section, you will see 'Redact duplicate pages'. If this is enabled, following the main redaction process, the app will identify pages with duplicate text in the document and redact them in the same run. If you want to modify the duplicate page detection settings, you can do so on the **Identify duplicate pages** tab - please refer to the [Identifying and redacting duplicate pages](#identifying-and-redacting-duplicate-pages) section for more details.
 
 ### Allow list, deny list, and whole-page redaction
 
-On the same **'Redaction settings'** accordion you will see **'Terms to always include or exclude in redactions, and whole page redaction'**. Here you can:
+Underneath you will see **'Terms to always include or exclude in redactions, and whole page redaction'**. Here you can:
 
-- **Allow list** – Terms that should never be redacted.
-- **Deny list** – Terms that should always be redacted.
-- **Fully redact these pages** – Page numbers that should be fully redacted.
-- **Redact duplicate pages** – Checkbox: when enabled, the app identifies duplicate pages and redacts them in the same run (see [Identifying and redacting duplicate pages](#identifying-and-redacting-duplicate-pages)).
-- **Maximum spelling mistakes for matching deny list terms** – Number (0–9) used for [fuzzy matching](#fuzzy-search-and-redaction) when **CUSTOM_FUZZY** is selected in the entity list.
+- **Allow list** – Terms that if found, will never be redacted. To use, ensure that CUSTOM is selected in the **'Select entity types to redact'** dropdown.
+- **Deny list** – Terms that if found, will always be redacted. To use, ensure that CUSTOM is selected in the **'Select entity types to redact'** dropdown.
+- **Fully redact these pages** – Page numbers that will be fully redacted with a box that covers the entire page.
+- **Maximum spelling mistakes for matching deny list terms** – Number (0–9) used for [fuzzy matching](#fuzzy-search-and-redaction) for terms in the Deny list when **CUSTOM_FUZZY** is selected in the entity list. For example, if this is set to 1, then all terms set in the Deny list will be matched with up to 1 spelling mistake. Note that setting this value greater than 0 will increase the time taken to redact the document.
+
+To add items to the allow list, deny list, or fully redacted pages list, you can do so by typing the item into the box and pressing enter. You can also remove items by clicking the **'x'** next to the item, or pressing the backspace key when the box is selected.
 
 You can add or remove terms directly in these controls. To load many terms from a file (e.g. a CSV), use the **Settings** tab; see [Custom allow, deny, and page redaction lists](#custom-allow-deny-and-page-redaction-lists).
 
-### Optional - costs and time estimation
+### Cost and time estimation
 
-If your administrator has enabled it (in the config), an **'Estimated costs and time taken'** section appears on the **'Redact PDFs/images'** tab. **'Existing Textract output file found'** (or **'Existing local OCR output file found'**) is ticked automatically when previous extraction output exists in the output folder or was [uploaded by you](#aws-textract-outputs), which can save time and cost.
+If enabled, an **'Estimated costs and time taken'** section appears on the **'Redact PDFs/images'** tab. **'Existing Textract output file found'** (or **'Existing local OCR output file found'**) is ticked automatically when previous extraction output for the same document already exists in the output folder or was [uploaded by you](#aws-textract-outputs), which indicates that the text extraction process will not be repeated for future redaction tasks.
 
 ![Cost and time estimation](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/costs_and_time.PNG)
 
-### Optional - cost code selection
+### Cost code selection
 
-If cost codes are enabled, an **'Assign task to cost code'** section appears on the same tab. Choose a cost code before running redaction. You can search the table or type in the **'Choose cost code for analysis'** dropdown to filter.
+If cost codes are enabled, an **'Assign task to cost code'** section appears on the same tab. Choose a cost code before running redaction. You can search the table or type in the **'Choose cost code for analysis'** dropdown to filter. You can then set a default cost code for future redaction tasks with your login by clicking on the **'Set default cost code'** button.
 
 ![Cost code selection](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/cost_code_selection.PNG)
 
-### Optional - Submit whole documents to Textract API
+### Redacting only specific pages
 
-If enabled by your administrator, an accordion **'Submit whole document to AWS Textract API (quickest text extraction for large documents)'** appears on the **'Redact PDFs/images'** tab. This sends whole documents to Textract for fast extraction, separate from the main redaction flow. Details are in the [advanced user guide](#using-the-aws-textract-document-api).
+To redact only a subset of pages (e.g. only page 1), go to the **Settings** tab and open the **'Redact only selected pages'** accordion. Set **'Lowest page to redact (set to 0 to redact from the first page)'** and **'Highest page to redact (set to 0 to redact to the last page)'** (e.g. both 1 for only page 1). The next redaction run will only process that range; output filenames will include a suffix like **'..._1_1.pdf'**.
 
-![Textract document API](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/textract_document_api.PNG)
+![Selecting specific pages to redact](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/select_pages.PNG)
 
 ### Run redaction
 
-At the bottom of the **'Redact PDFs/images'** tab, open the **'Extract text and redact document'** accordion and click **'Extract text and redact document'**. The app will process the document (typically around 30 pages per minute, depending on options). When finished, a message will indicate completion and output files will appear in the **'Output files'** area. Use **'Review and modify redactions'** to open the review tab.
+Once all the above settings have been prepared, at the bottom of the **'Redact PDFs/images'** tab, open the **'Extract text and redact document'** accordion and click **'Extract text and redact document'**. The app will process the document (typically around 30 pages per minute, depending on options). When finished, a message will indicate completion and output files will appear in the **'Output files'** area. Use **'Review and modify redactions'** to open the review tab.
 
 ### Redaction outputs
 
@@ -168,16 +169,16 @@ After you click **'Extract text and redact document'**, the **'Output files'** a
 
 - **'...redacted.pdf'** – The original PDF with suggested redactions applied (text removed and replaced by a black box).
 - **'...redactions_for_review.pdf'** – The original PDF with redaction boxes overlaid but text still visible. Use this in Adobe Acrobat or other PDF viewers to review suggested redactions before finalising.
-- **'...ocr_results.csv'** – Line-by-line extracted text from the document (useful for searching in Excel or similar).
+- **'...ocr_outputs.csv'** – Line-by-line extracted text from the document (useful for searching text in Excel or similar).
+- **'...ocr_outputs_with_words.csv'** – Word-level extracted text from the document with bounding boxes .
 - **'...review_file.csv'** – Details and locations of all suggested redactions; required for the [review process](#reviewing-and-modifying-suggested-redactions).
 
-### Additional AWS Textract / local OCR outputs
+#### Additional AWS Textract / local OCR outputs
 
-If you used **AWS Textract** for text extraction, you may also see a **'..._textract.json'** file. You can keep this and upload it later with your input document to skip calling Textract again for the same document:
+You may also see a **'..._textract.json'** file, and/or a **'...ocr_outputs_with_words.json'** file. You can save this to your computer, and upload it later alongside your input document to skip calling Textract again for the same document:
 
 ![Document upload alongside Textract](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/document_upload_with_textract.PNG)
 
-Similarly, if you used local OCR you may see a **'..._ocr_results_with_words... .json'** file, which can be uploaded with the input document to save time on future runs.
 
 #### Log file outputs and other optional outputs
 
@@ -187,82 +188,13 @@ On the **Settings** tab, open the **'Log file outputs'** accordion to access log
 
 ### Downloading output files from previous redaction tasks
 
-If you are logged in via AWS Cognito and lose the app page (e.g. after a crash or reload), you may still recover output files if the server has not been restarted. When enabled, open the **Settings** tab and use **'View and download all output files from this session'** at the bottom. Click **'Refresh files in output folder'**, then tick the box next to a file to display and download it.
+If you are logged in via AWS Cognito and lose the app page (e.g. after a crash or reload), you may still be able to recover output files if the server has not been restarted. When enabled, open the **Settings** tab and use **'View and download all output files from this session'** at the bottom. Click **'Refresh files in output folder'**, then tick the box next to a file to display and download it.
 
 ![View all output files](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/view_all_output_files.PNG)
 
-### Basic redaction summary
-
-You can redact documents using the options on the **'Redact PDFs/images'** tab. The **'...redacted.pdf'** output may be sufficient, or you may want to [customise redaction options](#customising-redaction-options) (allow/deny lists, entity types, page range, etc.) as described below. 
-
-## Customising redaction options
-
-Most options are on the **'Redact PDFs/images'** tab inside the **'Redaction settings'** accordion. A few options (loading allow/deny/page lists from files, page range, efficient OCR, language, API keys) are on the **Settings** tab.
-
-### Custom allow, deny, and page redaction lists
-
-**On the 'Redact PDFs/images' tab:** Inside **'Redaction settings'**, the accordion **'Terms to always include or exclude in redactions, and whole page redaction'** contains the **Allow list**, **Deny list**, and **Fully redact these pages** controls. You can add or remove terms directly there. There is also **'Maximum spelling mistakes for matching deny list terms'** for fuzzy matching.
-
-**To load many terms from a file:** Go to the **Settings** tab and open **'Custom allow, deny, and full page redaction lists'**. Use **'Import allow list file'**, **'Import custom deny list'**, or **'Import fully redacted pages list'** to load a CSV (one column, no header). After loading, return to the **'Redact PDFs/images'** tab and click **'Extract text and redact document'**; the loaded terms apply to the next run.
-
-![Custom allow, deny, and page redaction lists](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/allow_deny_full_page_list.PNG)
-
-#### Allow list example
-
-In the redacted outputs of the 'Example of files sent to a professor before applying' PDF, the app may redact references to Dr Hyde's lab. If those are not personal information in your context, add them to the allow list.You can exclude these terms from redaction in one of two ways:
-1. On the Redact PDFs/images tab, go to 'Allow list'. Type in 'Hyde' in the box and press enter. The next redaction task should will exclude this term from redaction. You can add other terms here. 
-2. Create a CSV with one term per row in the first column (e.g. 'Hyde', 'Muller glia'); an example is [here](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/allow_list/allow_list.csv). On the **Settings** tab, open **'Custom allow, deny, and full page redaction lists'**, click **'Import allow list file'**, and select your CSV. Then go back to the **'Redact PDFs/images'** tab and click **'Extract text and redact document'**. This will then apply the loaded list to the allow list on the Redact PDFs/images tab
-
-#### Deny list example
-
-Say you wanted to remove specific terms from a document. In this app you can do this by providing a custom deny list as a csv. Like for the allow list described above, this should be a one-column csv without a column header. The app will suggest each individual term in the list with exact spelling as whole words. So it won't select text from within words. You must have **'CUSTOM'** (or equivalent) included in **'Select entity types to redact'** on the **'Redact PDFs/images'** tab; see [Redacting additional types of personal information](#redacting-additional-types-of-personal-information). As for the allow list above, you can add new deny list terms in one of two ways. Either 1. type them manually into the Deny list box on the Redact PDFs/images tab, or 2. load in a custom deny list csv file on the **Settings** tab (see above for Allow list). NOTE: You can also provide deny list terms in your csv file as regex patterns.
-
-Here is an example using the [Partnership Agreement Toolkit file](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/Partnership-Agreement-Toolkit_0_0.pdf). This is an [example of a custom deny list file](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/allow_list/partnership_toolkit_redact_custom_deny_list.csv). 'Sister', 'Sister City'
-'Sister Cities', 'Friendship City' have been listed as specific terms to redact. You can see the outputs of this redaction process on the review page:
-
-![Deny list redaction Partnership file](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/deny_list_partnership_example.PNG). 
-
-You can see that the app has highlighted all instances of these terms on the page shown. You can then consider each of these terms for modification or removal on the review page [explained here](#reviewing-and-modifying-suggested-redactions).
-
-#### Full page redaction list example
-
-To fully redact specific pages, provide a one-column CSV of page numbers (no header), e.g. [this example](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/allow_list/partnership_toolkit_redact_some_pages.csv). On the **Settings** tab, open **'Custom allow, deny, and full page redaction lists'** and use **'Import fully redacted pages list'**. Alternatively, add page numbers in the **'Fully redact these pages'** box on the **'Redact PDFs/images'** tab.
-
-![Whole page partnership redaction](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/whole_page_partnership_example.PNG).
-
-Using the above approaches to allow, deny, and full page redaction lists will give you an output [like this](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/allow_list/Partnership-Agreement-Toolkit_0_0_redacted.pdf).
-
-### Redacting additional types of personal information
-
-On the **'Redact PDFs/images'** tab, open **'Redaction settings'** and then **'Change default redaction settings'**. Under **'Change PII identification method'**, open **'Select entity types to redact'**. The dropdown shown depends on your PII method (Local, AWS Comprehend, or LLM); its label may be **'Local PII identification model (click empty space in box for full list)'**, **'AWS Comprehend PII identification model...'**, or similar. Click in the empty box or near the dropdown arrow to see the full list of entity types (e.g. DATE_TIME, NAME, EMAIL). Select the types you want to redact; they appear in the list. Click the **'x'** next to an item to remove it.
-
-Example: to also redact dates in the example complaint letter, add **'DATE_TIME'** here, then click **'Extract text and redact document'**. You should get a redacted version of 'Example complaint letter' with dates and times removed. To start with different files or a clean slate, refresh the browser to begin a new session.
-
-![Redacting additional types of information dropdown](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/additional_entities/additional_entities_select.PNG)
-
-### Redacting only specific pages
-
-To redact only a subset of pages (e.g. only page 1), go to the **Settings** tab and open the **'Redact only selected pages'** accordion. Set **'Lowest page to redact (set to 0 to redact from the first page)'** and **'Highest page to redact (set to 0 to redact to the last page)'** (e.g. both 1 for only page 1). The next redaction run will only process that range; output filenames will include a suffix like **'..._1_1.pdf'**.
-
-![Selecting specific pages to redact](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/select_pages.PNG)
-
-### Handwriting and signature redaction
-
-The [Partnership Agreement Toolkit](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/Partnership-Agreement-Toolkit_0_0.pdf) is a good example for testing AWS Textract with signatures. On the **'Redact PDFs/images'** tab, follow the steps below. 
-
-1. In **'Redaction settings'** → **'Change default redaction settings'**, set the text extraction method to **'AWS Textract service - all PDF types'**.
-2. An accordion **'Enable AWS Textract signature detection (default is off)'** will appear. Open it and enable handwriting and/or signatures as needed.
-3. If you only want signatures/handwriting redacted, under **'Select entity types to redact'** you can clear other entity types (click the **'x'** next to each) so that only the signature/handwriting options apply.
-
-![Handwriting and signatures](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/textract_handwriting_signatures.PNG)
-
-Run **'Extract text and redact document'**. Handwriting and signatures (e.g. on pages 5–7) will be redacted and can be reviewed on the **'Review redactions'** tab.
-
-![Handwriting and signatures redacted example](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/refs/heads/main/review_redactions/Signatures%20and%20handwriting%20found.PNG)
-
 ## Reviewing and modifying suggested redactions
 
-Sometimes the app will suggest redactions that are incorrect, or will miss personal information entirely. The app allows you to review and modify suggested redactions to compensate for this. You can do this on the 'Review redactions' tab.
+Sometimes the app will suggest redactions that are incorrect, or will miss phrases with personal information. The app allows you to review and modify suggested redactions to compensate for this. You can do this on the 'Review redactions' tab.
 
 We will go through ways to review suggested redactions with an example. On the **'Redact PDFs/images'** tab, upload the ['Example of files sent to a professor before applying.pdf'](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/example_of_emails_sent_to_a_professor_before_applying.pdf) file. Keep the default 'Local model - selectable text' option and click **'Extract text and redact document'**. Once the outputs are created, go to the **'Review redactions'** tab.
 
@@ -272,7 +204,7 @@ On the 'Review redactions' tab you have a visual interface that allows you to in
 
 ### Uploading documents for review
 
-The top area has a file upload area where you can upload documents to review redactions. In the left box (1.), upload the original PDF file. If you have a document that you have previously redacted, you can also upload the '...redactions_for_review.pdf' file that is produced by the redaction process, which will load in the previous redactions.
+The top area has a file upload area where you can upload documents to review redactions. If you have just done a redaction task, these boxes should already be filled with the relevant files. In the left box (1.), upload the original PDF file. If you have a document that you have previously redacted, you can also upload the '...redactions_for_review.pdf' file that is produced by the redaction process, which will load in the previous redactions.
 
 In the second input file box to the right (2.), you can upload a '..._ocr_result_with_words' file, that will allow you to search through the text and easily [add new redactions based on word search](#searching-and-adding-custom-redactions). You can also upload one of the '..._ocr_output.csv' file here that comes out of a redaction task, so that you can navigate the extracted text from the document. Click the button '2. Upload Review or OCR csv files' load in these files.
 
@@ -280,39 +212,30 @@ Now you can review and modify the suggested redactions using the interface descr
 
 ![Search extracted text](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/search_extracted_text.PNG)
 
-You can upload the three review files in the box (unredacted document, '..._review_file.csv' and '..._ocr_output.csv' file) before clicking '**Review redactions based on original PDF...**', as in the image below:
-
-![Upload three files for review](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/upload_three_files.PNG)
-
-**NOTE:** ensure you upload the ***unredacted*** document here and not the redacted version, otherwise you will be checking over a document that already has redaction boxes applied!
-
 ### Page navigation
 
 You can change the page viewed either by clicking 'Previous page' or 'Next page', or by typing a specific page number in the 'Current page' box and pressing Enter on your keyboard. Each time you switch page, it will save redactions you have made on the page you are moving from, so you will not lose changes you have made.
 
 You can also navigate to different pages by clicking on rows in the tables under 'Search suggested redactions' to the right, or 'search all extracted text' (if enabled) beneath that.
 
-### The document viewer pane
+### Document viewer
 
-On the selected page, each redaction is highlighted with a box next to its suggested redaction label (e.g. person, email).
+In the centre left of the tab, you will see the first page of the document. On the selected page, each redaction is highlighted with a box next to its suggested redaction label (e.g. person, email). To zoom in and out of the page, use your mouse wheel. When selected, press spacebar to go back to the default zoom. 
 
 ![Document view pane](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/document_viewer_pane.PNG)
 
-There are a number of different options to add and modify redaction boxes and page on the document viewer pane. To zoom in and out of the page, use your mouse wheel. To move around the page while zoomed, you need to be in modify mode. Scroll to the bottom of the document viewer to see the relevant controls. You should see a box icon, a hand icon, and two arrows pointing counter-clockwise and clockwise.
+There are a number of different options to add and modify redaction boxes and page on the document viewer pane. At the top and bottom of the document viewer, you will see controls to add and modify redaction boxes. You should see a box icon, a hand icon, and two arrows pointing counter-clockwise and clockwise (details below).
 
 ![Change redaction mode](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/change_review_mode.PNG)
 
-Click on the hand icon to go into modify mode. When you click and hold on the document viewer, This will allow you to move around the page when zoomed in. To rotate the page, you can click on either of the round arrow buttons to turn in that direction. 
-
-**NOTE:** When you switch page, the viewer will stay in your selected orientation, so if it looks strange, just rotate the page again and hopefully it will look correct!
 
 #### Modify existing redactions (hand icon)
 
-After clicking on the hand icon, the interface allows you to modify existing redaction boxes. When in this mode, you can click and hold on an existing box to move it. 
+After clicking on the hand icon (or press 'd' on your keyboard when the document viewer is selected), the interface allows you to modify existing redaction boxes. When in this mode, you can click and hold on an existing box to move it. Click on one of the small boxes at the edges to change the size of the box. Double click on a box to enter the menu to change label, colour, or remove the box.
 
 ![Modify existing redaction box](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/modify_existing_redaction_box.PNG)
 
-Click on one of the small boxes at the edges to change the size of the box. To delete a box, click on it to highlight it, then press delete on your keyboard. Alternatively, double click on a box and click 'Remove' on the box that appears.
+To delete a box, click on it to highlight it, then press delete on your keyboard. Alternatively, double click on a box and click 'Remove' on the box that appears.
 
 ![Remove existing redaction box](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/existing_redaction_box_remove.PNG)
 
@@ -332,13 +255,13 @@ You can now add new redaction boxes without a popup appearing. If you want to ch
 
 ### Apply redactions to PDF and Save changes on current page
 
-Once you have reviewed all the redactions in your document and you are happy with the outputs, you can click 'Apply revised redactions to PDF' to create a new '_redacted.pdf' output alongside a new '_review_file.csv' output.
+If you are working on a page and you have created boxes manually or modified existing boxes, you are advised to click on the 'Save changes on current page to file' to ensure that they are saved to your output files.
 
-If you are working on a page and haven't saved for a while, you can click 'Save changes on current page to file' to ensure that they are saved to an updated 'review_file.csv' output.
+Once you have reviewed all the redactions in your document and you are happy with the outputs, you can click 'Apply revised redactions to PDF' to create a new '_redacted.pdf' and '_redactions_for_review.pdf' outputs.
 
 ![Review modified outputs](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/review_mod_outputs.PNG)
 
-### Selecting and removing redaction boxes using the 'Search suggested redactions' table
+### Modify existing redactions
 
 The table shows a list of all the suggested redactions in the document alongside the page, label, and text (if available).
 
@@ -356,7 +279,7 @@ To filter the 'Search suggested redactions' table you can:
 
 Once you have filtered the table, or selected a row from the table, you have a few options underneath on what you can do with the filtered rows:
 
-- Click the **Exclude all redactions in table** button to remove all redactions visible in the table from the document. **Important:** ensure that you have clicked the blue tick icon next to the search box before doing this, or you will remove all redactions from the document. If you do end up doing this, click the 'Undo last element removal' button below to restore the redactions.
+- Click the **Exclude all redactions in table** button to remove all redactions visible in the table from the document. **Important:** ensure that you have clicked the blue tick icon next to the search box before doing this to first filter the table, or you will remove all redactions from the document. If you do end up doing this, click the 'Undo last element removal' button below to restore the redactions.
 - Click the **Exclude specific redaction row** button to remove only the redaction from the last row you clicked on from the document. The currently selected row is visible below.
 - Click the **Exclude all redactions with the same text as selected row** button to remove all redactions from the document that are exactly the same as the selected row text.
 
@@ -364,27 +287,20 @@ Once you have filtered the table, or selected a row from the table, you have a f
 
 If you made a mistake, click the 'Undo last element removal' button to restore the Search suggested redactions table to its previous state (can only undo the last action).
 
-### Searching and Adding Custom Redactions
+### Search text and redact
 
 After a document has been processed, you may need to redact specific terms, names, or phrases that the automatic PII (Personally Identifiable Information) detection might have missed. The **"Search text and redact"** tab gives you the power to find and redact any text within your document manually.
 
-#### How to Use the Search and Redact Feature
-
-The workflow is designed to be simple: **Search → Select → Redact**.
-
----
-
 #### **Step 1: Search for Text**
 
-1.  Navigate to the **"Search text and redact"** tab.
-2.  The main table will initially be populated with all the text extracted from the document for a page, broken down by word.
-3.  To narrow this down, use the **"Multi-word text search"** box to type the word or phrase you want to find (this will search the whole document). If you want to do a regex-based search, tick the 'Enable regex pattern matching' box under 'Search options' below.
-4.  Click the **"Search"** button or press Enter.
-5.  The table below will update to show only the rows containing text that matches your search query.
+1.  Navigate to the **"Search text and redact"** tab to the right of the **'Review redactions'** tab, under the 'Apply redactions to PDF' and 'Save changes on current page to file' buttons.
+2.  The main table will initially be populated with all the text extracted from the document for a page, broken down by word. Use the page selector to view a specific page, or 'ALL' to see all words.
+3.  To find specific words or phrases to redact, use the **"Multi-word text search"** box to type the word or phrase you want to find (this will search the whole document).
+4.  If you want to do a regex-based search, tick the 'Enable regex pattern matching' box under 'Search options' below.
+5.  Click the **"Search"** button or press Enter.
+6.  The table below will update to show only the rows containing text that matches your search query.
 
-> **Tip:** You can also filter the results by page number using the **"Page"** dropdown. To clear all filters and see the full text again, click the **"Reset table to original state"** button.
-
----
+> **Tip:** If you make a mistake during the search, to clear all filters and see the full text again, click the **"Reset table to original state"** button. You can also click the 'Undo latest redaction' button to remove the latest redaction item.
 
 #### **Step 2: Select and Review a Match**
 
@@ -393,39 +309,32 @@ When you click on any row in the search results table:
 *   The document preview on the left will automatically jump to that page, allowing you to see the word in its original context.
 *   The details of your selection will appear in the smaller **"Selected row"** table for confirmation.
 
----
-
 #### **Step 3: Choose Your Redaction Method**
 
-You have several powerful options for redacting the text you've found:
+You have several options for redacting the text you've found:
 
-*   **Redact a Single, Specific Instance:**
+*   **Redact a single, specific instance of the phrase:**
     *   Click on the exact row in the table you want to redact.
     *   Click the **`Redact specific text row`** button.
     *   Only that single instance will be redacted.
 
-*   **Redact All Instances of a Word/Phrase:**
-    *   Let's say you want to redact the project name "Project Alpha" everywhere it appears.
-    *   Find and select one instance of "Project Alpha" in the table.
+*   **Redact all instances of a word/phrase:**
+    *   Let's say you want to redact the project name "John Smith" everywhere it appears.
+    *   Find and select one instance of "John Smith" in the table.
     *   Click the **`Redact all words with same text as selected row`** button.
-    *   The application will find and redact every single occurrence of "Project Alpha" throughout the entire document.
+    *   The application will find and redact every single occurrence of "John Smith" throughout the entire document.
 
-*   **Redact All Current Search Results:**
+*   **Redact all current search results:**
     *   Perform a search (e.g., for a specific person's name).
     *   If you are confident that every result shown in the filtered table should be redacted, click the **`Redact all text in table`** button.
-    *   This will apply a redaction to all currently visible items in the table in one go.
+    *   This will apply a redaction to all currently visible items in the table in one go, across all relevant pages in the document.
 
----
-
-#### **Customising Your New Redactions**
+#### **Customising new redaction boxes**
 
 Before you click one of the redact buttons, you can customize the appearance and label of the new redactions under the **"Search options"** accordion:
 
 *   **Label for new redactions:** Change the text that appears on the redaction box (default is "Redaction"). You could change this to "CONFIDENTIAL" or "CUSTOM".
-*   **Colour for labels:** Set a custom color for the redaction box by providing an RGB value. The format must be three numbers (0-255) in parentheses, for example:
-    *   ` (255, 0, 0) ` for Red
-    *   ` (0, 0, 0) ` for Black
-    *   ` (255, 255, 0) ` for Yellow
+*   **Colour for labels:** Set a custom color for the redaction boxes. You can use the colour picker interface that pops up to select a colour.
 
 #### **Undoing a Mistake**
 
@@ -435,9 +344,9 @@ If you make a mistake, you can reverse the last redaction action you performed o
 
 > **Important:** This undo button only works for the *most recent* action. It maintains a single backup state, so it cannot undo actions that are two or more steps in the past.
 
-### Navigating through the document using the 'Search all extracted text' 
+### Navigating through the document using 'View text'
 
-The 'search all extracted text' table will contain text if you have just redacted a document, or if you have uploaded a '..._ocr_output.csv' file alongside a document file and review file on the Review redactions tab as [described above](#uploading-documents-for-review). 
+The 'View text' table will contain text if you have just redacted a document, or if you have uploaded a '..._ocr_output.csv' file alongside a document file on the Review redactions tab as [described above](#uploading-documents-for-review). If you have just completed a redaction task, you should see this table already filled in.
 
 You can navigate through the document using this table. When you click on a row, the Document viewer pane to the left will change to the selected page. 
 
@@ -451,7 +360,7 @@ You can search through the extracted text by using the search bar just above the
 
 ### Word or tabular data files (XLSX/CSV)
 
-The app can be used to redact Word (.docx), or tabular data files such as xlsx or csv files. For this to work properly, your data file needs to be in a simple table format, with a single table starting from the first cell (A1), and no other information in the sheet. Similarly for .xlsx files, each sheet in the file that you want to redact should be in this simple format.
+The app can be used to redact Word (.docx), or tabular data files such as xlsx or csv files. For this to work properly, your data file (CSV, Excel) needs to be in a simple table format, with a single table starting from the first cell (A1), and no other information in the sheet. Similarly for .xlsx files, each sheet in the file that you want to redact should be in this simple format.
 
 To demonstrate this, we can use [the example csv file 'combined_case_notes.csv'](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/combined_case_notes.csv), which is a small dataset of dummy social care case notes. Go to the 'Open text or Excel/csv files' tab. Drop the file into the upload area. After the file is loaded, you should see the suggested columns for redaction in the box underneath. You can select and deselect columns to redact as you wish from this list.
 
@@ -474,12 +383,14 @@ You can also choose the anonymisation format of your output results.  Open the t
 - mask: Replace with stars '*'.
 
 ### Redacting copy and pasted text
-You can also write open text into an input box and redact that using the same methods as described above. To do this, write or paste text into the 'Enter open text' box that appears when you open the 'Redact open text' tab. Then select a redaction method, and an anonymisation output format as described above. The redacted text will be printed in the output textbox, and will also be saved to a simple csv file in the output file box.  
+You can also write open text into an input box and redact that using the same methods as described above. To do this, write or paste text into the 'Enter open text' box that appears when you open the 'Redact open text' tab. Then select a redaction method, and an anonymisation output format as described above. The redacted text will be printed in the output textbox, and will also be saved to a simple csv file in the output file box. 
+
+You can test this by copy and pasting the text "John Smith is a person" into the input box, and selecting the **replace with 'REDACTED'** option. After pressing Redact text/data files, you should see the text "REDACTED" in the output textbox, and a csv file with the redacted text in the output file box.
 
 ![Text analysis output](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/tabular_files/text_anonymisation_outputs.PNG)
 
 ### Redaction log outputs
-A list of the suggested redaction outputs from the tabular data / open text data redaction is available on the **Settings** tab under **'Log file outputs'**.
+A list of the suggested redaction outputs from tabular data / Word/ open text data redaction is also provided in the output box with the name '..._log.csv'. This file gives a tabular breakdown of the specific redactions applied, the entity type, position, and underlying text.
 
 
 ## Identifying and redacting duplicate pages
@@ -490,7 +401,14 @@ Some redaction tasks involve removing duplicate pages of text that may exist acr
 
 ### Duplicate page detection in documents
 
-This section covers finding duplicate pages across PDF documents using OCR output files.
+This section covers finding duplicate pages across PDF documents using OCR output files. For a quick introduction to this functionality, you could run one of the following examples:
+
+**For duplicate page detection:** On the 'Identify duplicate pages' tab, you'll find examples for finding duplicate content in documents:
+
+- **Find duplicate pages of text in document OCR outputs** - Uses page-level analysis with a similarity threshold of 0.95 and minimum word count of 10
+- **Find duplicate text lines in document OCR outputs** - Uses line-level analysis with a similarity threshold of 0.95 and minimum word count of 3
+
+Once you have clicked on an example, you can click the 'Identify duplicate pages/subdocuments' button to load the example into the app and find duplicate content.
 
 ![Example duplicate page inputs](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/duplicate_page_find_in_app/img/duplicate_page_input_interface_new.PNG)
 
@@ -650,7 +568,9 @@ When you click the 'convert .xfdf comment file to review_file.csv' button, the a
 
 ## Using the AWS Textract document API
 
-This option can be enabled by your system admin, in the config file ('SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS' environment variable, and subsequent variables). Using this, you will have the option to submit whole documents in quick succession to the AWS Textract service to get extracted text outputs quickly (faster than using the **'Extract text and redact document'** process described here).
+If enabled by your administrator, an accordion **'Submit whole document to AWS Textract API (quickest text extraction for large documents)'** appears on the **'Redact PDFs/images'** tab. This sends whole documents to Textract for fast extraction, separate from the main redaction flow. Details are in the [advanced user guide](#using-the-aws-textract-document-api).
+
+![Textract document API](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/textract_document_api.PNG)
 
 ### Starting a new Textract API job
 

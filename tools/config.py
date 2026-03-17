@@ -931,9 +931,6 @@ MAX_INPUT_TOKEN_LENGTH = int(
     get_or_create_env_var("MAX_INPUT_TOKEN_LENGTH", "8192")
 )  # VLM only: maximum input/context tokens for vision-language models. Controls tokenizer cap, model max_position_embeddings (KV cache), and effective max_pixels (image size) so image+text fit. Set lower (e.g. 4096) to reduce VRAM. Separate from LLM_CONTEXT_LENGTH.
 
-VLM_MAX_IMAGE_SIZE = int(
-    get_or_create_env_var("VLM_MAX_IMAGE_SIZE", "819200")
-)  # Maximum total pixels (width * height) for images passed to VLM, as a multiple of 32*32 for Qwen3-VL. Images with more pixels will be resized while maintaining aspect ratio. Default is 819200 (800*32*32).
 
 ADD_VLM_BOUNDING_BOX_RULES = convert_string_to_boolean(
     get_or_create_env_var("ADD_VLM_BOUNDING_BOX_RULES", "False")
@@ -968,13 +965,26 @@ BEDROCK_LLM_OUTPUT_TOKENS_PER_PAGE = int(
     get_or_create_env_var("BEDROCK_LLM_OUTPUT_TOKENS_PER_PAGE", "250")
 )  # Estimated output tokens per page for Bedrock LLM cost calculation.
 
+VLM_HYBRID_MIN_IMAGE_SIZE = int(
+    get_or_create_env_var("VLM_HYBRID_MIN_IMAGE_SIZE", "153600")
+)  # Min pixels (width*height) for hybrid VLM line/crop OCR via _prepare_image_for_vlm(hybrid_vlm=True). Upscaled if below. Default 153600.
+
+
 VLM_MIN_IMAGE_SIZE = int(
     get_or_create_env_var("VLM_MIN_IMAGE_SIZE", "614400")
-)  # Minimum total pixels (width * height) for images passed to VLM, as a multiple of 32*32 for Qwen3-VL. Images with less pixels will be resized while maintaining aspect ratio. Default is 614400 (600*32*32).
+)  # Min pixels for full-page VLM via _prepare_image_for_vlm(hybrid_vlm=False). Upscaled if below. Default 614400. Hybrid crops use VLM_HYBRID_MIN_IMAGE_SIZE.
+
+VLM_MAX_IMAGE_SIZE = int(
+    get_or_create_env_var("VLM_MAX_IMAGE_SIZE", "819200")
+)  # Maximum total pixels (width * height) for images passed to VLM, as a multiple of 32*32 for Qwen3-VL. Images with more pixels will be resized while maintaining aspect ratio. Default is 819200 (800*32*32).
+
+VLM_MIN_DPI = float(
+    get_or_create_env_var("VLM_MIN_DPI", "300.0")
+)  # _prepare_image_for_vlm: reported DPI below this implies upscale (effective DPI = reported_dpi * scale).
 
 VLM_MAX_DPI = float(
     get_or_create_env_var("VLM_MAX_DPI", "300.0")
-)  # Maximum DPI for images passed to VLM. Images with higher DPI will be resized accordingly.
+)  # _prepare_image_for_vlm: reported DPI above this implies downscale. Bounds apply together with min/max pixels.
 
 USE_FLASH_ATTENTION = convert_string_to_boolean(
     get_or_create_env_var("USE_FLASH_ATTENTION", "False")
@@ -1930,6 +1940,13 @@ APPLY_REDACTIONS_TEXT = int(
 # If you don't want to redact the text, but instead just draw a box over it, set this to True
 RETURN_PDF_FOR_REVIEW = convert_string_to_boolean(
     get_or_create_env_var("RETURN_PDF_FOR_REVIEW", "True")
+)
+
+# When True (and RETURN_PDF_FOR_REVIEW), write _redacted.pdf then _redactions_for_review.pdf
+# using two sequential full-document passes instead of two simultaneous PyMuPDF Document
+# objects. Cuts peak RAM (~halves PDF working set); roughly doubles apply time for those outputs.
+TWO_PASS_REVIEW_PDF_LOW_MEMORY = convert_string_to_boolean(
+    get_or_create_env_var("TWO_PASS_REVIEW_PDF_LOW_MEMORY", "False")
 )
 
 RETURN_REDACTED_PDF = convert_string_to_boolean(
