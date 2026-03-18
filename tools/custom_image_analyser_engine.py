@@ -862,6 +862,25 @@ def _best_effort_pil_dpi(image: Image.Image, fallback: float = 72.0) -> float:
     except Exception:
         pass
 
+    # No DPI metadata found (or parse failed) across known PIL/JFIF/EXIF/TIFF fields.
+    # Make this explicit in logs so "reported DPI" isn't mistaken for a detected value.
+    try:
+        w, h = image.size
+    except Exception:
+        w, h = None, None
+    try:
+        img_format = getattr(image, "format", None)
+    except Exception:
+        img_format = None
+    print(
+        "VLM image preparation: DPI metadata not found; "
+        f"using fallback {fallback:.1f} DPI"
+        + (
+            f" ({w}x{h}{', ' + str(img_format) if img_format else ''})"
+            if w and h
+            else ""
+        )
+    )
     return fallback
 
 
@@ -898,7 +917,9 @@ def _prepare_image_for_vlm(
         return image
 
     if ocr_method and "bedrock" in ocr_method.lower():
-        max_image_size = 33554432
+        max_image_size = min(
+            33554432, VLM_MAX_IMAGE_SIZE
+        )  # Bedrock has a specific max pixel budget - it will fail if exceeded
 
     if max_image_size is None or max_image_size <= 0:
         max_image_size = VLM_MAX_IMAGE_SIZE
@@ -914,9 +935,9 @@ def _prepare_image_for_vlm(
     if area <= 0:
         return image
 
-    current_dpi = _best_effort_pil_dpi(image, fallback=72.0)
+    current_dpi = _best_effort_pil_dpi(image, fallback=float(VLM_MIN_DPI))
     if current_dpi <= 0:
-        current_dpi = 72.0
+        current_dpi = float(VLM_MIN_DPI)
 
     # Effective DPI after uniform scale s is current_dpi * s.
     s_min_dpi = dpi_lo / current_dpi
@@ -948,19 +969,19 @@ def _prepare_image_for_vlm(
 
     new_w = max(1, int(round(width * s)))
     new_h = max(1, int(round(height * s)))
-    new_dpi = current_dpi * s
-    new_dpi = min(dpi_hi, max(dpi_lo, new_dpi))
+    achieved_dpi = current_dpi * s
+    metadata_dpi = min(dpi_hi, max(dpi_lo, achieved_dpi))
 
     if abs(s - 1.0) > 0.02:
         print(
             f"VLM image preparation: {width}x{height} ({int(area):,} px, ~{current_dpi:.1f} DPI) "
-            f"-> {new_w}x{new_h} (~{new_dpi:.1f} DPI), scale {s:.4f}"
+            f"-> {new_w}x{new_h} (achieved ~{achieved_dpi:.1f} DPI, config requirement ~{metadata_dpi:.1f} DPI), scale {s:.4f}"
         )
 
     resample = Image.Resampling.LANCZOS if s < 1.0 else Image.Resampling.BICUBIC
     image = image.resize((new_w, new_h), resample)
     try:
-        image.info["dpi"] = (new_dpi, new_dpi)
+        image.info["dpi"] = (metadata_dpi, metadata_dpi)
     except Exception:
         pass
     return image
@@ -6475,10 +6496,10 @@ class CustomImageAnalyzerEngine:
             ):
                 # Coordinates are already in input space, no conversion needed
                 use_relative_coords = False
-                print(
-                    f"PaddleOCR coordinates are in input image space ({input_image_width}x{input_image_height}). "
-                    f"Using coordinates directly without conversion."
-                )
+                # print(
+                #     f"PaddleOCR coordinates are in input image space ({input_image_width}x{input_image_height}). "
+                #     f"Using coordinates directly without conversion."
+                # )
 
             # Second pass: convert coordinates using relative coordinate approach
             # Use default "Paddle" if rec_models is not available or doesn't match length
@@ -7862,7 +7883,16 @@ class CustomImageAnalyzerEngine:
             image, preprocessing_metadata = self.image_preprocessor.preprocess_image(
                 image
             )
-            if SAVE_PREPROCESS_IMAGES:
+            # Only export preprocessed images when they are actually used as OCR input.
+            # Full-page VLM-style OCR paths use the original image for coordinate consistency.
+            save_preprocessed_for_engine = self.ocr_engine not in (
+                "vlm",
+                "inference-server",
+                "bedrock-vlm",
+                "gemini-vlm",
+                "azure-openai-vlm",
+            )
+            if SAVE_PREPROCESS_IMAGES and save_preprocessed_for_engine:
                 # print("Saving pre-processed image...")
                 image_basename = os.path.basename(image_name)
                 output_path = os.path.join(
@@ -12087,6 +12117,9 @@ def recreate_page_line_level_ocr_results_with_page(
     return page_line_level_ocr_results_with_page
 
 
+_PUNCTUATION_SPLIT_RE = re.compile(r"([(\[{]*)(.*?)_?([.,?!:;)\}\]]*)$")
+
+
 def split_words_and_punctuation_from_line(
     line_of_words: List[OCRResult],
 ) -> List[OCRResult]:
@@ -12104,9 +12137,10 @@ def split_words_and_punctuation_from_line(
     for word_result in line_of_words:
         word_text = word_result.text
 
-        # This regex finds a central "core" word, and captures leading and trailing punctuation
+        # This regex finds a central "core" word, and captures leading and trailing punctuation.
+        # Compiled once to avoid re-parsing the regex on every line.
         # Handles cases like "(word)." -> group1='(', group2='word', group3='.'
-        match = re.match(r"([(\[{]*)(.*?)_?([.,?!:;)\}\]]*)$", word_text)
+        match = _PUNCTUATION_SPLIT_RE.match(word_text)
 
         # Handle words with internal hyphens that might confuse the regex
         if "-" in word_text and not match.group(2):

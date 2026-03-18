@@ -81,6 +81,7 @@ from tools.config import (
     OCR_FIRST_PASS_MAX_WORKERS,
     OUTPUT_FOLDER,
     OVERWRITE_EXISTING_OCR_RESULTS,
+    PADDLE_MAX_WORKERS,
     PAGE_BREAK_VALUE,
     PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS,
     RETURN_PDF_FOR_REVIEW,
@@ -88,6 +89,7 @@ from tools.config import (
     RUN_AWS_FUNCTIONS,
     SAVE_PAGE_OCR_VISUALISATIONS,
     SELECTABLE_TEXT_EXTRACT_OPTION,
+    TESSERACT_MAX_WORKERS,
     TESSERACT_TEXT_EXTRACT_OPTION,
     TEXTRACT_TEXT_EXTRACT_OPTION,
     USE_GUI_BOX_COLOURS_FOR_OUTPUTS,
@@ -3066,6 +3068,10 @@ def choose_and_run_redactor(
         else:
             out_file_paths.append(ocr_file_path[0])
 
+        # Set when word-level OCR JSON/CSV is written; required below even if list is empty
+        # (e.g. parallel Tesseract produced no merged results).
+        all_page_line_level_ocr_results_with_words_df_file_path = None
+
         if all_page_line_level_ocr_results_with_words:
             all_page_line_level_ocr_results_with_words = merge_page_results(
                 all_page_line_level_ocr_results_with_words
@@ -3151,6 +3157,27 @@ def choose_and_run_redactor(
                     page_max,
                 )
             )
+            # For rows where the subset columns are duplicated (i.e., all fields identical within the subset),
+            # set their values to empty values in those columns except for the first occurrence.
+            subset_cols = [
+                "line_text",
+                "line_x0",
+                "line_y0",
+                "line_x1",
+                "line_y1",
+                "line_conf",
+            ]
+            # Identify duplicated rows (excluding the first occurrence)
+            dupes_mask = all_page_line_level_ocr_results_with_words_df.duplicated(
+                subset=subset_cols, keep="first"
+            )
+            # Set these columns to empty for duplicated rows
+            for col in subset_cols:
+                all_page_line_level_ocr_results_with_words_df.loc[dupes_mask, col] = (
+                    ""
+                    if all_page_line_level_ocr_results_with_words_df[col].dtype == "O"
+                    else None
+                )
             all_page_line_level_ocr_results_with_words_df.to_csv(
                 all_page_line_level_ocr_results_with_words_df_file_path,
                 index=None,
@@ -5611,17 +5638,25 @@ def redact_image_pdf(
         ocr_progress_bar = tqdm(
             page_loop_pages,
             unit="pages",
-            desc="Performing image-based OCR",
+            desc="Performing image-based processing",
         )
     else:
         ocr_progress_bar = tqdm(
             range(page_loop_start, page_loop_end),
             unit="pages",
-            desc="Performing image-based OCR",
+            desc="Performing image-based processing",
         )
+    _ocr_gui_total_pages = (
+        len(page_loop_pages)
+        if page_loop_pages is not None
+        else max(0, page_loop_end - page_loop_start)
+    )
+    _ocr_gui_total_str = str(_ocr_gui_total_pages) if _ocr_gui_total_pages > 0 else "?"
 
     # Parallel Bedrock VLM page OCR: run perform_ocr for all pages that need it, then use results in the loop.
     ocr_results_from_parallel = {}
+    # Parallel local page OCR (Tesseract / Paddle / etc.): perform_ocr per page, then use in loop.
+    ocr_results_from_parallel_local_ocr = {}
     if (
         text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
         and bedrock_runtime is not None
@@ -5705,10 +5740,149 @@ def redact_image_pdf(
                 ):
                     ocr_results_from_parallel[pno] = result
 
+    if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION:
+        _local_ocr_tasks = []
+        _pages_iter = (
+            list(page_loop_pages)
+            if page_loop_pages is not None
+            else list(range(page_loop_start, page_loop_end))
+        )
+        for _pno in _pages_iter:
+            if all_page_line_level_ocr_results_with_words:
+                _reported = str(_pno + 1)
+                _match = next(
+                    (
+                        item
+                        for item in all_page_line_level_ocr_results_with_words
+                        if int(item.get("page", -1)) == int(_reported)
+                    ),
+                    None,
+                )
+                if _match:
+                    continue
+            try:
+                _img_path = page_sizes_df.loc[
+                    page_sizes_df["page"] == (_pno + 1), "image_path"
+                ].iloc[0]
+            except Exception:
+                _img_path = (
+                    pdf_image_file_paths[_pno]
+                    if _pno < len(pdf_image_file_paths)
+                    else ""
+                )
+            _actual = _img_path
+            if isinstance(_img_path, str) and (
+                "placeholder_image" in _img_path or "image_placeholder" in _img_path
+            ):
+                try:
+                    _, _created, _, _ = process_single_page_for_image_conversion(
+                        pdf_path=file_path,
+                        page_num=_pno,
+                        image_dpi=IMAGES_DPI,
+                        create_images=True,
+                        input_folder=input_folder,
+                    )
+                    if os.path.exists(_created):
+                        _actual = _created
+                        if not page_sizes_df.empty:
+                            page_sizes_df.loc[
+                                page_sizes_df["page"] == (_pno + 1),
+                                "image_path",
+                            ] = _created
+                except Exception:
+                    pass
+            _local_ocr_tasks.append((_pno, _actual))
+
+        if _local_ocr_tasks:
+
+            def _run_local_page_ocr(task):
+                pno, actual_path = task
+                (
+                    page_word_level_ocr_results,
+                    page_vlm_input_tokens,
+                    page_vlm_output_tokens,
+                    page_vlm_model_name,
+                ) = image_analyser.perform_ocr(actual_path)
+
+                # Pre-compute line-level OCR structures here so the main loop can
+                # skip the expensive combine_ocr_results step.
+                (
+                    page_line_level_ocr_results,
+                    page_line_level_ocr_results_with_words,
+                ) = combine_ocr_results(page_word_level_ocr_results, page=str(pno + 1))
+
+                return (
+                    pno,
+                    (
+                        page_word_level_ocr_results,
+                        page_vlm_input_tokens,
+                        page_vlm_output_tokens,
+                        page_vlm_model_name,
+                        page_line_level_ocr_results,
+                        page_line_level_ocr_results_with_words,
+                    ),
+                )
+
+            if chosen_local_ocr_model == "paddle":
+                _max_workers = min(PADDLE_MAX_WORKERS, len(_local_ocr_tasks))
+                _parallel_label = "Paddle"
+            elif chosen_local_ocr_model == "tesseract":
+                _max_workers = min(TESSERACT_MAX_WORKERS, len(_local_ocr_tasks))
+                _parallel_label = "Tesseract"
+            else:
+                # hybrid-paddle, VLM hybrids, local VLM, etc. (same cap as before Tesseract split)
+                _max_workers = min(TESSERACT_MAX_WORKERS, len(_local_ocr_tasks))
+                _parallel_label = "local OCR"
+
+            _n_local = len(_local_ocr_tasks)
+            print(
+                f"Parallel {_parallel_label} page OCR: processing {_n_local} page(s) "
+                f"with {int(_max_workers)} worker(s)."
+            )
+            # Progress slice for this phase (first pass OCR); main page loop uses tqdm after this.
+            _prog_lo, _prog_hi = 0.0, 1.0
+            try:
+                progress(
+                    _prog_lo,
+                    desc=f"Parallel {_parallel_label} OCR (0/{_n_local} pages)",
+                )
+            except Exception:
+                pass
+            _completed_local = 0
+            with ThreadPoolExecutor(max_workers=_max_workers) as executor:
+                future_to_pno = {
+                    executor.submit(_run_local_page_ocr, task): task[0]
+                    for task in _local_ocr_tasks
+                }
+                for fut in as_completed(future_to_pno):
+                    pno = future_to_pno[fut]
+                    try:
+                        res_pno, result = fut.result()
+                        ocr_results_from_parallel_local_ocr[res_pno] = result
+                    except Exception as _e:
+                        print(f"Parallel local OCR failed for page {pno + 1}: {_e}")
+                    _completed_local += 1
+                    try:
+                        frac = _prog_lo + (_prog_hi - _prog_lo) * (
+                            _completed_local / max(_n_local, 1)
+                        )
+                        progress(
+                            frac,
+                            desc=(
+                                f"Parallel {_parallel_label} OCR "
+                                f"({_completed_local}/{_n_local} pages)"
+                            ),
+                        )
+                    except Exception:
+                        pass
+
     for page_no in ocr_progress_bar:
 
         reported_page_number = str(page_no + 1)
-        # print(f"OCR preparation - Current page: {reported_page_number}")
+        # print(
+        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+        #     "start iteration (init lists, entity flags)"
+        # )
 
         # Define once per iteration so they are always set before use at _include_vlm_boxes_in_outputs (line ~7610)
         _person_selected = (
@@ -5740,6 +5914,17 @@ def redact_image_pdf(
 
         page_image_annotations = {"image": image_path, "boxes": []}
         pymupdf_page = pymupdf_doc.load_page(page_no)
+        # print(
+        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+        #     "PyMuPDF load_page"
+        # )
+
+        if not (page_no >= page_min and page_no < page_max):
+            # print(
+            #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+            #     "outside page_min/page_max — skipping OCR block for this page"
+            # )
+            continue
 
         if page_no >= page_min and page_no < page_max:
             # Need image size to convert OCR outputs to the correct sizes
@@ -5921,6 +6106,12 @@ def redact_image_pdf(
             except Exception:
                 pass
 
+            # print(
+            #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+            #     f"page image ready (size {int(page_width)}x{int(page_height)}, "
+            #     f"PIL image loaded={image is not None})"
+            # )
+
             # Step 1: Perform OCR. Either with Tesseract, cloud VLM, or with AWS Textract
             # If using Tesseract or cloud VLM (all image-based OCR methods)
             if (
@@ -5952,23 +6143,54 @@ def redact_image_pdf(
                     # print(
                     #     "Found OCR results for page in existing OCR with words object"
                     # )
+                    # print(
+                    #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                    #     "OCR source — existing loaded JSON (recreate_page_line_level_ocr_results_with_page)"
+                    # )
 
                     page_line_level_ocr_results = (
                         recreate_page_line_level_ocr_results_with_page(
                             page_line_level_ocr_results_with_words
                         )
                     )
+                    # print(
+                    #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                    #     "OCR JSON path — line-level recreated (aggregate list unchanged here)"
+                    # )
 
                 else:
+                    cached_precombined = False
                     # Use pre-computed result from parallel Bedrock OCR if available
                     if page_no in ocr_results_from_parallel:
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     "OCR source — parallel Bedrock VLM cache"
+                        # )
                         (
                             page_word_level_ocr_results,
                             page_vlm_input_tokens,
                             page_vlm_output_tokens,
                             page_vlm_model_name,
                         ) = ocr_results_from_parallel[page_no]
+                    elif page_no in ocr_results_from_parallel_local_ocr:
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     "OCR source — parallel local OCR cache (pre-combined line structure)"
+                        # )
+                        (
+                            page_word_level_ocr_results,
+                            page_vlm_input_tokens,
+                            page_vlm_output_tokens,
+                            page_vlm_model_name,
+                            page_line_level_ocr_results,
+                            page_line_level_ocr_results_with_words,
+                        ) = ocr_results_from_parallel_local_ocr[page_no]
+                        cached_precombined = True
                     else:
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     "OCR source — inline perform_ocr (no parallel/cache hit)"
+                        # )
                         # Check if image_path is a placeholder and create the actual image if needed
                         actual_image_path = image_path
                         if isinstance(image_path, str) and (
@@ -6011,6 +6233,10 @@ def redact_image_pdf(
                                 # Fall back to using the placeholder path (will likely fail, but preserves original behavior)
                                 actual_image_path = image_path
 
+                        print(
+                            f"Performing OCR on page {page_no + 1} from {actual_image_path}"
+                        )
+
                         (
                             page_word_level_ocr_results,
                             page_vlm_input_tokens,
@@ -6036,12 +6262,14 @@ def redact_image_pdf(
                     if page_vlm_model_name and not vlm_model_name:
                         vlm_model_name = page_vlm_model_name
 
-                    (
-                        page_line_level_ocr_results,
-                        page_line_level_ocr_results_with_words,
-                    ) = combine_ocr_results(
-                        page_word_level_ocr_results, page=reported_page_number
-                    )
+                    if not cached_precombined:
+                        (
+                            page_line_level_ocr_results,
+                            page_line_level_ocr_results_with_words,
+                        ) = combine_ocr_results(
+                            page_word_level_ocr_results, page=reported_page_number
+                        )
+                    # else: line/word structures already set from parallel local OCR worker
 
                     if all_page_line_level_ocr_results_with_words is None:
                         all_page_line_level_ocr_results_with_words = list()
@@ -6049,6 +6277,10 @@ def redact_image_pdf(
                     all_page_line_level_ocr_results_with_words.append(
                         page_line_level_ocr_results_with_words
                     )
+                    # print(
+                    #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                    #     "appended page OCR to aggregate list"
+                    # )
 
                 # Optional additional Bedrock VLM pass to detect people
                 # and inject [PERSON] entries into the word-level OCR structure for AWS Bedrock VLM OCR.
@@ -6070,6 +6302,10 @@ def redact_image_pdf(
                     and bedrock_runtime is not None
                 ):
                     try:
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     "optional — Bedrock VLM person detection"
+                        # )
                         image_name = (
                             os.path.basename(image_path)
                             if isinstance(image_path, str)
@@ -6200,6 +6436,10 @@ def redact_image_pdf(
                     and bedrock_runtime is not None
                 ):
                     try:
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     "optional — Bedrock VLM signature detection"
+                        # )
                         image_name = (
                             os.path.basename(image_path)
                             if isinstance(image_path, str)
@@ -6325,6 +6565,10 @@ def redact_image_pdf(
                     and image is not None
                 ):
                     try:
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     f"optional — local VLM/inference person detection ({chosen_local_ocr_model})"
+                        # )
                         image_name = (
                             os.path.basename(image_path)
                             if isinstance(image_path, str)
@@ -6454,6 +6698,10 @@ def redact_image_pdf(
                     and image is not None
                 ):
                     try:
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     f"optional — local VLM/inference signature detection ({chosen_local_ocr_model})"
+                        # )
                         image_name = (
                             os.path.basename(image_path)
                             if isinstance(image_path, str)
@@ -6567,6 +6815,10 @@ def redact_image_pdf(
 
             # Check if page exists in existing textract data. If not, send to service to analyse
             if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
+                # print(
+                #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                #     "Textract branch — entering page processing"
+                # )
                 # Use existing Textract ocr_results_with_words file if this page is present:
                 # load as page_line_level_ocr_results_with_words, recreate page_line_level_ocr_results,
                 # store in ocr_results_by_page, and skip all OCR (including hybrid textract-bedrock).
@@ -6574,6 +6826,10 @@ def redact_image_pdf(
                     textract_ocr_by_page_1based is not None
                     and (page_no + 1) in textract_ocr_by_page_1based
                 ):
+                    # print(
+                    #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                    #     "Textract — using cached per-page ocr_results_with_words (no API)"
+                    # )
                     page_line_level_ocr_results_with_words = (
                         textract_ocr_by_page_1based[page_no + 1]
                     )
@@ -6640,7 +6896,16 @@ def redact_image_pdf(
                             "image": image,
                             "reported_page_number": reported_page_number,
                         }
-                    continue
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     "Textract cached — stored ocr_results_by_page for second pass"
+                        # )
+                    else:
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     "Textract cached — page outside selected range, skipped ocr_results_by_page store"
+                        # )
+                        continue
 
                 text_blocks = list()
                 page_exists = False
@@ -6695,9 +6960,22 @@ def redact_image_pdf(
                         }
                     )
                     ocr_pymupdf_pages_textract[page_no] = pymupdf_page
+                    _tb_note = (
+                        "cached blocks"
+                        if cached_text_blocks is not None
+                        else "will call Textract API in parallel batch"
+                    )
+                    # print(
+                    #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                    #     f"Textract — queued for parallel pass ({_tb_note})"
+                    # )
                     continue
 
                 if not textract_data:
+                    # print(
+                    #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                    #     "Textract sequential — calling analyse_page_with_textract (no JSON loaded yet)"
+                    # )
                     try:
                         # print(f"Image object: {image}")
                         # Convert the image_path to bytes using an in-memory buffer
@@ -6744,6 +7022,10 @@ def redact_image_pdf(
                         print(
                             f"Page number {reported_page_number} not found in existing Textract data. Analysing."
                         )
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     "Textract sequential — page not in JSON, calling analyse_page_with_textract"
+                        # )
 
                         try:
                             if not image:
@@ -6809,6 +7091,10 @@ def redact_image_pdf(
                         textract_request_metadata.append(new_textract_request_metadata)
 
                     else:
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     "Textract sequential — reusing text_blocks from loaded Textract JSON"
+                        # )
                         # If the page exists, retrieve the data
                         text_blocks = next(
                             page["data"]
@@ -6821,6 +7107,10 @@ def redact_image_pdf(
                 textract_page_width = page_width
                 textract_page_height = page_height
 
+                # print(
+                #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                #     "Textract — json_to_ocrresult (blocks → line/word structures)"
+                # )
                 (
                     page_line_level_ocr_results,
                     handwriting_or_signature_boxes,
@@ -6844,9 +7134,12 @@ def redact_image_pdf(
                     and bedrock_runtime is not None
                     and CLOUD_VLM_MODEL_CHOICE
                 ):
-                    print(
-                        f"Hybrid Textract + Bedrock VLM: re-running low-confidence lines for page {reported_page_number} (threshold={HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD}, padding={HYBRID_TEXTRACT_BEDROCK_VLM_PADDING})"
-                    )
+                    # print(
+                    #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                    #     f"Textract hybrid — Bedrock VLM on low-confidence lines "
+                    #     f"(threshold={HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD}, "
+                    #     f"padding={HYBRID_TEXTRACT_BEDROCK_VLM_PADDING})"
+                    # )
                     image_name_seq = (
                         os.path.basename(image_path)
                         if isinstance(image_path, str)
@@ -6893,6 +7186,10 @@ def redact_image_pdf(
                 all_page_line_level_ocr_results_with_words.append(
                     page_line_level_ocr_results_with_words
                 )
+                # print(
+                #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                #     "Textract — appended page to aggregate ocr_results_with_words list"
+                # )
 
                 # Optional additional Bedrock VLM pass to detect people
                 # and inject [PERSON] entries into the word-level OCR structure for AWS Textract.
@@ -6904,6 +7201,10 @@ def redact_image_pdf(
                     and image is not None
                 ):
                     try:
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     "Textract optional — Bedrock VLM person detection"
+                        # )
                         image_name = (
                             os.path.basename(image_path)
                             if isinstance(image_path, str)
@@ -7019,6 +7320,10 @@ def redact_image_pdf(
                     and image is not None
                 ):
                     try:
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     "Textract optional — Bedrock VLM signature detection"
+                        # )
                         image_name = (
                             os.path.basename(image_path)
                             if isinstance(image_path, str)
@@ -7131,6 +7436,10 @@ def redact_image_pdf(
 
             # Convert to DataFrame and add to ongoing logging table
             # Only process if page_line_level_ocr_results is initialized and has results
+            # print(
+            #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+            #     "tail — line-level DataFrame for logging table"
+            # )
             try:
                 if (
                     page_line_level_ocr_results
@@ -7161,6 +7470,10 @@ def redact_image_pdf(
                 all_line_level_ocr_results_list.extend(
                     line_level_ocr_results_df.to_dict("records")
                 )
+                # print(
+                #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                #     f"tail — extended all_line_level_ocr_results_list ({len(line_level_ocr_results_df)} rows)"
+                # )
 
             # Save OCR visualization with bounding boxes (works for all OCR methods)
             if (
@@ -7199,6 +7512,10 @@ def redact_image_pdf(
 
                     # Only proceed if we have a valid image or image path
                     if image_for_visualization is not None:
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     "tail — visualise_ocr_words_bounding_boxes"
+                        # )
                         # Store the length before the call to detect new additions
                         log_files_output_paths_length_before = len(
                             log_files_output_paths
@@ -7231,6 +7548,10 @@ def redact_image_pdf(
 
             # Store OCR results and page metadata for second pass (PII detection)
             if page_no >= page_min and page_no < page_max:
+                # print(
+                #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                #     "tail — storing ocr_results_by_page for second pass"
+                # )
                 ocr_results_by_page[page_no] = {
                     "page_line_level_ocr_results": page_line_level_ocr_results,
                     "page_line_level_ocr_results_with_words": page_line_level_ocr_results_with_words,
@@ -7245,6 +7566,11 @@ def redact_image_pdf(
                     "image": image,
                     "reported_page_number": reported_page_number,
                 }
+            # else:
+            #     print(
+            #         f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+            #         "tail — page outside range, skipped ocr_results_by_page"
+            #     )
 
             # Skip PII detection and redaction in first pass - we'll do it in second pass
             # Continue to next page for OCR

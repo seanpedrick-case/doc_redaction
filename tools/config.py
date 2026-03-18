@@ -660,6 +660,20 @@ OCR_FIRST_PASS_MAX_WORKERS = max(
     1,
     int(get_or_create_env_var("OCR_FIRST_PASS_MAX_WORKERS", str(MAX_WORKERS))),
 )
+
+# Maximum parallel workers for local Tesseract OCR. Keep this lower than MAX_WORKERS
+# to avoid saturating CPU/RAM when running many pages concurrently.
+TESSERACT_MAX_WORKERS = max(
+    1,
+    int(get_or_create_env_var("TESSERACT_MAX_WORKERS", "4")),
+)
+
+# Maximum parallel workers for local PaddleOCR page OCR. Often GPU-bound; keep low to
+# avoid saturating VRAM or contending on a single PaddleOCR model instance.
+PADDLE_MAX_WORKERS = max(
+    1,
+    int(get_or_create_env_var("PADDLE_MAX_WORKERS", "2")),
+)
 # Max threads for page-group summarisation in summarise_document (1 = sequential). Use 1 for local models.
 SUMMARY_PAGE_GROUP_MAX_WORKERS = max(
     1,
@@ -966,20 +980,22 @@ BEDROCK_LLM_OUTPUT_TOKENS_PER_PAGE = int(
 )  # Estimated output tokens per page for Bedrock LLM cost calculation.
 
 VLM_HYBRID_MIN_IMAGE_SIZE = int(
-    get_or_create_env_var("VLM_HYBRID_MIN_IMAGE_SIZE", "153600")
-)  # Min pixels (width*height) for hybrid VLM line/crop OCR via _prepare_image_for_vlm(hybrid_vlm=True). Upscaled if below. Default 153600.
+    get_or_create_env_var(
+        "VLM_HYBRID_MIN_IMAGE_SIZE", "307200"
+    )  # Equivalent to 300 pixels.
+)  # Min pixels (width*height) for hybrid VLM line/crop OCR via _prepare_image_for_vlm(hybrid_vlm=True). Upscaled if below. Default 307200.
 
 
 VLM_MIN_IMAGE_SIZE = int(
-    get_or_create_env_var("VLM_MIN_IMAGE_SIZE", "614400")
-)  # Min pixels for full-page VLM via _prepare_image_for_vlm(hybrid_vlm=False). Upscaled if below. Default 614400. Hybrid crops use VLM_HYBRID_MIN_IMAGE_SIZE.
+    get_or_create_env_var("VLM_MIN_IMAGE_SIZE", "819200")
+)  # Min pixels for full-page VLM via _prepare_image_for_vlm(hybrid_vlm=False). Upscaled if below. Default 819200. Hybrid crops use VLM_HYBRID_MIN_IMAGE_SIZE.
 
 VLM_MAX_IMAGE_SIZE = int(
-    get_or_create_env_var("VLM_MAX_IMAGE_SIZE", "819200")
-)  # Maximum total pixels (width * height) for images passed to VLM, as a multiple of 32*32 for Qwen3-VL. Images with more pixels will be resized while maintaining aspect ratio. Default is 819200 (800*32*32).
+    get_or_create_env_var("VLM_MAX_IMAGE_SIZE", "3072000")
+)  # Maximum total pixels (width * height) for images passed to VLM, as a multiple of 32*32 for Qwen3.5. Images with more pixels will be resized while maintaining aspect ratio. Default is 3072000 (300*32*32).
 
 VLM_MIN_DPI = float(
-    get_or_create_env_var("VLM_MIN_DPI", "300.0")
+    get_or_create_env_var("VLM_MIN_DPI", "150.0")
 )  # _prepare_image_for_vlm: reported DPI below this implies upscale (effective DPI = reported_dpi * scale).
 
 VLM_MAX_DPI = float(
