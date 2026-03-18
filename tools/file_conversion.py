@@ -94,7 +94,9 @@ def _render_pdf_page_to_png_pymupdf_mediabox(
     old_rot = page.rotation
     try:
         page.set_cropbox(page.mediabox)
-        page.set_rotation(0)
+        # Preserve the PDF's intrinsic rotation (e.g. 180deg pages).
+        # Downstream coordinate logic assumes the rendered image matches PyMuPDF's display space.
+        page.set_rotation(old_rot)
         pix = page.get_pixmap(
             dpi=int(dpi) if dpi is not None else None,
             colorspace=pymupdf.csGRAY,
@@ -103,7 +105,11 @@ def _render_pdf_page_to_png_pymupdf_mediabox(
         )
         # Fast path: write PNG via MuPDF, then load with PIL for downstream resizing.
         pix.save(out_path)
-        return Image.open(out_path)
+        # Embed DPI in PNG (MuPDF write does not set pHYs); matches IMAGES_DPI render scale.
+        _dpi = max(1, int(round(float(dpi))))
+        _pil = Image.open(out_path)
+        _pil.save(out_path, format="PNG", dpi=(_dpi, _dpi))
+        return _pil
     finally:
         page.set_cropbox(old_crop)
         if old_rot != 0:
@@ -178,7 +184,8 @@ def check_image_size_and_reduce(out_path: str, image: Image):
             image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
             # Save the resized image
-            image.save(out_path, format="PNG", optimize=True)
+            _dp = max(1, int(round(float(image_dpi))))
+            image.save(out_path, format="PNG", optimize=True, dpi=(_dp, _dp))
 
             # Update the file size
             file_size = os.path.getsize(out_path)
@@ -263,7 +270,8 @@ def process_single_page_for_image_conversion(
                 or pdf_path.lower().endswith(".jpeg")
             ):
                 image = Image.open(pdf_path)
-                image.save(out_path, format="PNG")
+                _dp = max(1, int(round(float(image_dpi))))
+                image.save(out_path, format="PNG", dpi=(_dp, _dp))
             else:
                 raise Warning("Could not create image.")
 

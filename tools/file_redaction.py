@@ -2231,6 +2231,13 @@ def choose_and_run_redactor(
                 print(
                     f"EFFICIENT_OCR: Processing {len(pages_needing_ocr_1based)} page(s) with OCR ({ocr_method_label})."
                 )
+                _defer_inline_vlm_detection_for_post_pass = (
+                    _run_vlm_pass_after_all_pages
+                    and (
+                        CUSTOM_VLM_BACKEND != "bedrock_vlm"
+                        or bedrock_runtime is not None
+                    )
+                )
                 # When both text and OCR paths run, pass an empty decision table so the image path
                 # only returns OCR rows; we then merge with the saved text-path table (no overwrite).
                 _decision_table_for_ocr = (
@@ -2311,6 +2318,7 @@ def choose_and_run_redactor(
                     pages_in_pdf_points=pages_with_text_1based,
                     hybrid_textract_bedrock_vlm=hybrid_textract_bedrock_vlm,
                     overwrite_existing_ocr_results=overwrite_existing_ocr_results,
+                    defer_inline_custom_vlm_detection_pass=_defer_inline_vlm_detection_for_post_pass,
                 )
                 out_file_paths = out_file_paths.copy()
                 vlm_total_input_tokens += vlm_total_input_tokens_page
@@ -2437,6 +2445,16 @@ def choose_and_run_redactor(
                             ["page"]
                         ].apply(pd.to_numeric, errors="coerce")
                     entities_for_vlm = list(chosen_redact_entities or [])
+                    for _vlm_src in (
+                        chosen_redact_comprehend_entities or [],
+                        chosen_llm_entities or [],
+                    ):
+                        for _e in _vlm_src:
+                            if (
+                                str(_e).startswith("CUSTOM_VLM")
+                                and _e not in entities_for_vlm
+                            ):
+                                entities_for_vlm.append(_e)
                     if (
                         "Face detection" in (handwrite_signature_checkbox or [])
                         and "CUSTOM_VLM_PERSON" not in entities_for_vlm
@@ -2672,6 +2690,17 @@ def choose_and_run_redactor(
                     "CUSTOM_VLM entity (face/signature/etc.) selected with simple text extraction: "
                     "running VLM detection on page images and merging with text-based redactions."
                 )
+                _entities_vlm_selectable = list(chosen_redact_entities or [])
+                for _vlm_src in (
+                    chosen_redact_comprehend_entities or [],
+                    chosen_llm_entities or [],
+                ):
+                    for _e in _vlm_src:
+                        if (
+                            str(_e).startswith("CUSTOM_VLM")
+                            and _e not in _entities_vlm_selectable
+                        ):
+                            _entities_vlm_selectable.append(_e)
                 (
                     vlm_in,
                     vlm_out,
@@ -2683,7 +2712,7 @@ def choose_and_run_redactor(
                     pdf_image_file_paths,
                     pymupdf_doc,
                     page_sizes_df,
-                    chosen_redact_entities,
+                    _entities_vlm_selectable,
                     bedrock_runtime,
                     output_folder,
                     input_folder,
@@ -5246,6 +5275,7 @@ def redact_image_pdf(
     ocr_first_pass_max_workers: Optional[int] = None,
     pages_in_pdf_points: Optional[List[int]] = None,
     progress=Progress(track_tqdm=True),
+    defer_inline_custom_vlm_detection_pass: bool = False,
 ):
     # Initialize LLM token tracking variables
     llm_total_input_tokens = 0
@@ -5323,6 +5353,10 @@ def redact_image_pdf(
             chosen_redact_comprehend_entities.append("CUSTOM_VLM_PERSON")
         if "CUSTOM_VLM_PERSON" not in chosen_llm_entities:
             chosen_llm_entities.append("CUSTOM_VLM_PERSON")
+
+    # When True, skip per-page VLM face/signature detection; run_custom_vlm_only_pass
+    # (after OCR in efficient-OCR flow) handles each once per page on full images.
+    _skip_inline_custom_vlm_detection = defer_inline_custom_vlm_detection_pass
 
     tic = time.perf_counter()
 
@@ -5832,7 +5866,7 @@ def redact_image_pdf(
             else:
                 # hybrid-paddle, VLM hybrids, local VLM, etc. (same cap as before Tesseract split)
                 _max_workers = min(TESSERACT_MAX_WORKERS, len(_local_ocr_tasks))
-                _parallel_label = "local OCR"
+                _parallel_label = "local model"
 
             _n_local = len(_local_ocr_tasks)
             print(
@@ -6289,7 +6323,8 @@ def redact_image_pdf(
                 # or text_extraction_only).
                 # (_run_face_pass, _textract_face_identification set at start of loop)
                 if (
-                    (
+                    not _skip_inline_custom_vlm_detection
+                    and (
                         text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
                         or text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
                         or pii_identification_method == AWS_PII_OPTION
@@ -6423,7 +6458,8 @@ def redact_image_pdf(
                     or "CUSTOM_VLM_SIGNATURE" in (chosen_llm_entities or [])
                 )
                 if (
-                    (
+                    not _skip_inline_custom_vlm_detection
+                    and (
                         text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
                         or text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
                         or pii_identification_method == AWS_PII_OPTION
@@ -6551,7 +6587,8 @@ def redact_image_pdf(
                 # and inject [PERSON] entries into the word-level OCR structure.
                 # Supports pure and hybrid VLM/inference-server local OCR models.
                 if (
-                    chosen_local_ocr_model
+                    not _skip_inline_custom_vlm_detection
+                    and chosen_local_ocr_model
                     in [
                         "vlm",
                         "inference-server",
@@ -6684,7 +6721,8 @@ def redact_image_pdf(
                 # and inject [SIGNATURE] entries into the word-level OCR structure.
                 # Supports pure and hybrid VLM/inference-server local OCR models.
                 if (
-                    chosen_local_ocr_model
+                    not _skip_inline_custom_vlm_detection
+                    and chosen_local_ocr_model
                     in [
                         "vlm",
                         "inference-server",
@@ -7194,7 +7232,8 @@ def redact_image_pdf(
                 # Optional additional Bedrock VLM pass to detect people
                 # and inject [PERSON] entries into the word-level OCR structure for AWS Textract.
                 if (
-                    text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+                    not _skip_inline_custom_vlm_detection
+                    and text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
                     and "CUSTOM_VLM_PERSON" in chosen_redact_entities
                     and isinstance(page_line_level_ocr_results_with_words, dict)
                     and page_line_level_ocr_results_with_words.get("results")
@@ -7313,7 +7352,8 @@ def redact_image_pdf(
                 # Optional additional Bedrock VLM pass to detect signatures
                 # and inject [SIGNATURE] entries into the word-level OCR structure for AWS Textract.
                 if (
-                    text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+                    not _skip_inline_custom_vlm_detection
+                    and text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
                     and "CUSTOM_VLM_SIGNATURE" in chosen_redact_entities
                     and isinstance(page_line_level_ocr_results_with_words, dict)
                     and page_line_level_ocr_results_with_words.get("results")
@@ -7797,7 +7837,8 @@ def redact_image_pdf(
 
             # Textract person/signature VLM injection (same logic as sequential path)
             if (
-                text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+                not _skip_inline_custom_vlm_detection
+                and text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
                 and "CUSTOM_VLM_PERSON" in chosen_redact_entities
                 and isinstance(page_line_level_ocr_results_with_words, dict)
                 and page_line_level_ocr_results_with_words.get("results")
@@ -7896,7 +7937,8 @@ def redact_image_pdf(
                     )
 
             if (
-                text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+                not _skip_inline_custom_vlm_detection
+                and text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
                 and "CUSTOM_VLM_SIGNATURE" in chosen_redact_entities
                 and isinstance(page_line_level_ocr_results_with_words, dict)
                 and page_line_level_ocr_results_with_words.get("results")
@@ -8334,7 +8376,8 @@ def redact_image_pdf(
                     # Optional additional Bedrock VLM pass to detect people
                     # and inject [PERSON] entries into the word-level OCR structure for AWS Comprehend.
                     if (
-                        pii_identification_method == AWS_PII_OPTION
+                        not _skip_inline_custom_vlm_detection
+                        and pii_identification_method == AWS_PII_OPTION
                         and "CUSTOM_VLM_PERSON" in chosen_redact_comprehend_entities
                         and isinstance(page_line_level_ocr_results_with_words, dict)
                         and page_line_level_ocr_results_with_words.get("results")
@@ -8450,10 +8493,10 @@ def redact_image_pdf(
 
                     # Optional additional Bedrock VLM pass to detect signatures
                     # and inject [SIGNATURE] entries into the word-level OCR structure for AWS Comprehend.
-                    # This must happen BEFORE analyze_text so the entries are included in the analysis.
-                    # bedrock_runtime is guaranteed to be available if CUSTOM_VLM_SIGNATURE is selected with AWS Comprehend
+                    # Skipped when defer_inline_custom_vlm_detection_pass: post-pass covers PDF/decision table.
                     if (
-                        pii_identification_method == AWS_PII_OPTION
+                        not _skip_inline_custom_vlm_detection
+                        and pii_identification_method == AWS_PII_OPTION
                         and "CUSTOM_VLM_SIGNATURE" in chosen_redact_comprehend_entities
                         and isinstance(page_line_level_ocr_results_with_words, dict)
                         and page_line_level_ocr_results_with_words.get("results")

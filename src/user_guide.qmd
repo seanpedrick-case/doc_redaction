@@ -73,9 +73,9 @@ The app provides some built-in examples so you can see how it works before tryin
 - **Image redaction with local OCR** - Processes an image file using OCR
 - **PDF redaction with custom entities** - Demonstrates custom entity selection (Titles, Person, Dates)
 - **PDF redaction with AWS services and signature detection** - Shows AWS Textract with signature extraction (if AWS is enabled)
-- **PDF redaction with custom deny list and whole page redaction** - Demonstrates advanced redaction features
+- **PDF redaction with custom deny list and whole page redaction** - Demonstrates the use of redacting specific named terms and whole pages
 
-Once you have clicked on an example, you can click the 'Extract text and redact document' button to load the example into the app and redact it.
+Once you have clicked on an example, you can click the 'Extract text and redact document' button to redact the document. You can then click the 'Review and modify redactions' button below this to review and modify suggested redactions. See the 'Basic redaction' section below for more details on redacting your own documents.
 
 ### CSV/Excel file examples
 
@@ -400,19 +400,17 @@ To check the previous OCR result upload has been successful, lower down the page
 
 ## Document summarisation
 
-When summarisation is enabled, a **Document summarisation** tab is shown in the app. It lets you generate LLM-based summaries from PDFs, or from OCR output CSVs (e.g. from a previous redaction run).
+When summarisation is enabled, a **Document summarisation** tab is shown in the app. It lets you generate LLM-based summaries from PDFs, or from OCR output CSVs (e.g. from a previous redaction run). Here is how you can summarise a document:
 
-**How to use the Document summarisation tab**
-
-1.a **Upload PDF files**: In the summarisation tab, use "Upload one or multiple PDF files to summarise" to attach one or more PDF files.
-1.b **Upload OCR output files**: In the summarisation tab, use "Upload one or multiple 'ocr_output.csv' files to summarise" to attach one or more `*_ocr_output.csv` files (produced by the redaction pipeline when you extract text from PDFs/images).
-2. **Summarisation settings** (accordion):
-   - **Choose LLM inference method for summarisation**: Choose from the LLM options available in the app settings.
-   - **Max pages per page-group summary**: Limits how many pages are summarised together before recursive summarisation.
-   - **Summary format**: **Concise** (key themes only) or **Detailed** (as much detail as possible).
-   - **Additional summary instructions (optional)**: e.g. "Focus on key obligations and termination clauses".
-3. **Generate summary**: Click **"Generate summary"** to run the summarisation. The app groups pages, calls the LLM for each group, and creates a combined summary.
-4. **Outputs**: When finished, you can download summary files and view the summary the appears below. You can copy this summary to the clipboard by clicking the button in the top right of the summary box.
+1. **Upload Files:** * **1.a Upload PDF files:** In the summarisation tab, use "Upload one or multiple PDF files to summarise" to attach one or more PDF files, or
+   * **1.b Upload OCR output files:** In the summarisation tab, use "Upload one or multiple 'ocr_output.csv' files to summarise" to attach one or more `*_ocr_output.csv` files.
+2. **Summarisation settings (accordion):**
+   * **Choose LLM inference method for summarisation**: Choose from the LLM options available in the app settings.
+   * **Max pages per page-group summary**: Limits how many pages are summarised together.
+   * **Summary format**: **Concise** or **Detailed**.
+   * **Additional summary instructions (optional)**: e.g. "Focus on key obligations."
+3. **Generate summary:** Click **"Generate summary"** to run the summarisation.
+4. **Outputs:** When finished, you can download summary files and view the summary that appears below.
 
 ## Redacting Word, tabular data files (XLSX/CSV) or open text
 
@@ -433,7 +431,9 @@ Once you have chosen your input file and data, you can choose the redaction meth
 When you click Redact text/data files, you will see the progress of the redaction task by file and sheet, and you will receive a CSV output with the redacted data.
 
 ### Choosing output anonymisation format
-You can also choose the anonymisation format of your output results.  Open the tab 'Anonymisation output format' to see the options. By default, any detected PII will be replaced with the word 'REDACTED' in the cell. You can choose one of the following options as the form of replacement for the redacted text:
+
+You can also choose the anonymisation format of your output results. Open the tab 'Anonymisation output format' to see the options. By default, any detected PII will be replaced with the word 'REDACTED' in the cell. You can choose one of the following options as the form of replacement for the redacted text:
+
 - **replace with 'REDACTED'**: Replaced by the word 'REDACTED' (default)
 - **replace with <ENTITY_NAME>**: Replaced by e.g. 'PERSON' for people, 'EMAIL_ADDRESS' for emails etc.
 - **redact completely**: Text is removed completely and replaced by nothing.

@@ -2022,8 +2022,8 @@ def apply_redactions_to_review_df_and_files(
     output_folder: str = OUTPUT_FOLDER,
     save_pdf: bool = True,
     page_sizes: List[dict] = list(),
-    COMPRESS_REDACTED_PDF: bool = COMPRESS_REDACTED_PDF,
     input_folder: str = INPUT_FOLDER,
+    COMPRESS_REDACTED_PDF: bool = COMPRESS_REDACTED_PDF,
     progress=gr.Progress(track_tqdm=True),
 ):
     """
@@ -2047,10 +2047,10 @@ def apply_redactions_to_review_df_and_files(
         page_sizes (List[dict], optional): A list of dictionaries, each containing size
                                            information (e.g., width, height) for a page.
                                            Defaults to an empty list.
-        COMPRESS_REDACTED_PDF (bool, optional): If True, the output PDF will be compressed.
-                                                Defaults to COMPRESS_REDACTED_PDF.
         input_folder (str, optional): The directory where input files are located and where
                                      page images should be saved. Defaults to INPUT_FOLDER.
+        COMPRESS_REDACTED_PDF (bool, optional): If True, the output PDF will be compressed.
+                                                Defaults to COMPRESS_REDACTED_PDF.
         progress (gr.Progress, optional): Gradio progress object for tracking task progress.
                                           Defaults to gr.Progress(track_tqdm=True).
 

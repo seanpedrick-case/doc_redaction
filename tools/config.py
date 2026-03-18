@@ -985,14 +985,22 @@ VLM_HYBRID_MIN_IMAGE_SIZE = int(
     )  # Equivalent to 300 pixels.
 )  # Min pixels (width*height) for hybrid VLM line/crop OCR via _prepare_image_for_vlm(hybrid_vlm=True). Upscaled if below. Default 307200.
 
+# When True, for hybrid PaddleOCR->VLM routes, resize/pad the full page to satisfy
+# VLM hybrid min/max pixel and DPI constraints *before* running PaddleOCR.
+# This makes Paddle's output bboxes align with the prepared page and reduces
+# per-line VLM crop resizing work.
+PREPARE_PAGE_FOR_HYBRID_VLM_BEFORE_PADDLE = convert_string_to_boolean(
+    get_or_create_env_var("PREPARE_PAGE_FOR_HYBRID_VLM_BEFORE_PADDLE", "True")
+)
+
 
 VLM_MIN_IMAGE_SIZE = int(
     get_or_create_env_var("VLM_MIN_IMAGE_SIZE", "819200")
 )  # Min pixels for full-page VLM via _prepare_image_for_vlm(hybrid_vlm=False). Upscaled if below. Default 819200. Hybrid crops use VLM_HYBRID_MIN_IMAGE_SIZE.
 
 VLM_MAX_IMAGE_SIZE = int(
-    get_or_create_env_var("VLM_MAX_IMAGE_SIZE", "3072000")
-)  # Maximum total pixels (width * height) for images passed to VLM, as a multiple of 32*32 for Qwen3.5. Images with more pixels will be resized while maintaining aspect ratio. Default is 3072000 (300*32*32).
+    get_or_create_env_var("VLM_MAX_IMAGE_SIZE", "1536000")
+)  # Maximum total pixels (width * height) for images passed to VLM, as a multiple of 32*32 for Qwen3.5. Images with more pixels will be resized while maintaining aspect ratio. Default is 1536000 (1500*32*32).
 
 VLM_MIN_DPI = float(
     get_or_create_env_var("VLM_MIN_DPI", "150.0")
