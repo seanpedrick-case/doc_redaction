@@ -2,7 +2,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
 
 <meta charset="utf-8">
-<meta name="generator" content="quarto-1.8.26">
+<meta name="generator" content="quarto-1.8.27">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
@@ -37,7 +37,7 @@ ul.task-list li input[type="checkbox"] {
 <script src="../site_libs/quarto-html/tippy.umd.min.js"></script>
 <script src="../site_libs/quarto-html/anchor.min.js"></script>
 <link href="../site_libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-587c61ba64f3a5504c4d52d930310e48.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-ed96de9b727972fe78a7b5d16c58bf87.css" rel="stylesheet" id="quarto-text-highlighting-styles">
 <script src="../site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
 <link href="../site_libs/bootstrap/bootstrap-e31584831b205ffbb2d98406f31c2a5b.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
@@ -149,8 +149,6 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
   <li><a href="#redaction-pii-options" id="toc-redaction-pii-options" class="nav-link" data-scroll-target="#redaction-pii-options">Redaction &amp; PII Options</a>
   <ul class="collapse">
   <li><a href="#ui-and-model-selection" id="toc-ui-and-model-selection" class="nav-link" data-scroll-target="#ui-and-model-selection">UI and Model Selection</a></li>
-  <li><a href="#hybrid-textract-bedrock-vlm" id="toc-hybrid-textract-bedrock-vlm" class="nav-link" data-scroll-target="#hybrid-textract-bedrock-vlm">Hybrid Textract + Bedrock VLM</a></li>
-  <li><a href="#bedrock-vlm-and-llm-cost-estimation" id="toc-bedrock-vlm-and-llm-cost-estimation" class="nav-link" data-scroll-target="#bedrock-vlm-and-llm-cost-estimation">Bedrock VLM and LLM cost estimation</a></li>
   <li><a href="#external-tool-paths" id="toc-external-tool-paths" class="nav-link" data-scroll-target="#external-tool-paths">External Tool Paths</a></li>
   <li><a href="#local-ocr-tesseract-paddleocr" id="toc-local-ocr-tesseract-paddleocr" class="nav-link" data-scroll-target="#local-ocr-tesseract-paddleocr">Local OCR (Tesseract &amp; PaddleOCR)</a></li>
   <li><a href="#vision-language-model-vlm-options" id="toc-vision-language-model-vlm-options" class="nav-link" data-scroll-target="#vision-language-model-vlm-options">Vision Language Model (VLM) Options</a></li>
@@ -167,10 +165,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
   <li><a href="#lambda-configuration" id="toc-lambda-configuration" class="nav-link" data-scroll-target="#lambda-configuration">Lambda Configuration</a></li>
   </ul></li>
   <li><a href="#allow-deny-whole-page-redaction-lists" id="toc-allow-deny-whole-page-redaction-lists" class="nav-link" data-scroll-target="#allow-deny-whole-page-redaction-lists">Allow, Deny, &amp; Whole Page Redaction Lists</a></li>
-  <li><a href="#cost-code-options" id="toc-cost-code-options" class="nav-link" data-scroll-target="#cost-code-options">Cost Code Options</a>
-  <ul class="collapse">
-  <li><a href="#session-default-cost-code-no-extra-environment-variables" id="toc-session-default-cost-code-no-extra-environment-variables" class="nav-link" data-scroll-target="#session-default-cost-code-no-extra-environment-variables">Session default cost code (no extra environment variables)</a></li>
-  </ul></li>
+  <li><a href="#cost-code-options" id="toc-cost-code-options" class="nav-link" data-scroll-target="#cost-code-options">Cost Code Options</a></li>
   <li><a href="#whole-document-api-options-textract-async" id="toc-whole-document-api-options-textract-async" class="nav-link" data-scroll-target="#whole-document-api-options-textract-async">Whole Document API Options (Textract Async)</a></li>
   </ul>
 </nav>
@@ -306,11 +301,6 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <ul>
 <li><strong>Description:</strong> Sets the maximum number of pixels for an image that the application will process. Leave blank for no limit. This can help prevent issues with very large images.</li>
 <li><strong>Default Value:</strong> <code>''</code></li>
-</ul></li>
-<li><strong><code>MERGE_BOUNDING_BOXES</code></strong>
-<ul>
-<li><strong>Description:</strong> When enabled (<code>'True'</code>), merges nearby bounding boxes (reconstruction, grouping, and horizontal merge). Affects OCR/Textract result processing.</li>
-<li><strong>Default Value:</strong> <code>'True'</code></li>
 </ul></li>
 <li><strong><code>MAX_SPACES_GPU_RUN_TIME</code></strong>
 <ul>
@@ -616,97 +606,15 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <li><strong>Description:</strong> Minimum number of extractable words on a page to use the text-only route when <code>EFFICIENT_OCR</code> is enabled; below this threshold the page uses OCR.</li>
 <li><strong>Default Value:</strong> <code>20</code></li>
 </ul></li>
-<li><strong><code>MAX_WORKERS</code></strong>
-<ul>
-<li><strong>Description:</strong> Default maximum number of worker threads for parallel processing across the app. Used as the default or cap for thread pools in review (saving redacted pages, loading page images), file conversion (PDF-to-images, input file listing, annotation processing), file redaction (text extraction, merge/summary, pikepdf annotations), custom image analyser (mapping analyzer results to bounding boxes), and data anonymisation (initial column cleaning). When not set, <code>OCR_FIRST_PASS_MAX_WORKERS</code> and <code>SUMMARY_PAGE_GROUP_MAX_WORKERS</code> default to this value; set those explicitly to override for OCR or summarisation only.</li>
-<li><strong>Default Value:</strong> <code>8</code></li>
-</ul></li>
 <li><strong><code>OCR_FIRST_PASS_MAX_WORKERS</code></strong>
 <ul>
-<li><strong>Description:</strong> Maximum number of threads for the OCR first pass in image-based PDF redaction (e.g.&nbsp;when using AWS Textract). Set to <code>1</code> for sequential processing; use a value greater than <code>1</code> to run OCR on multiple pages in parallel. Only applies when the OCR method supports parallel calls (e.g.&nbsp;Textract). Defaults to <code>MAX_WORKERS</code> if not set. Can be overridden via CLI <code>--ocr_first_pass_max_workers</code> or direct-mode/Lambda env.</li>
-<li><strong>Default Value:</strong> Same as <code>MAX_WORKERS</code> (e.g.&nbsp;<code>8</code>)</li>
-</ul></li>
-<li><strong><code>TESSERACT_MAX_WORKERS</code></strong>
-<ul>
-<li><strong>Description:</strong> Maximum number of worker threads used to run local Tesseract OCR on multiple pages in parallel (page-level parallelism). Keep this lower than <code>MAX_WORKERS</code> to avoid saturating CPU/RAM; increase gradually if you have spare CPU and want faster OCR.</li>
-<li><strong>Default Value:</strong> <code>4</code></li>
-</ul></li>
-<li><strong><code>PADDLE_MAX_WORKERS</code></strong>
-<ul>
-<li><strong>Description:</strong> Maximum number of worker threads used to run local PaddleOCR on multiple pages in parallel when <strong>Paddle</strong> is the chosen local OCR model. Paddle is often GPU-bound and shares one model instance; keep this low (e.g.&nbsp;<code>1</code>–<code>2</code>) to avoid VRAM contention or errors. Set to <code>1</code> for effectively sequential Paddle OCR per document.</li>
-<li><strong>Default Value:</strong> <code>2</code></li>
+<li><strong>Description:</strong> Maximum number of threads for the OCR first pass in image-based PDF redaction (e.g.&nbsp;when using AWS Textract). Set to <code>1</code> for sequential processing; use a value greater than <code>1</code> to run OCR on multiple pages in parallel. Only applies when the OCR method supports parallel calls (e.g.&nbsp;Textract). Can be overridden via CLI <code>--ocr_first_pass_max_workers</code> or direct-mode/Lambda env.</li>
+<li><strong>Default Value:</strong> <code>3</code></li>
 </ul></li>
 <li><strong><code>SUMMARY_PAGE_GROUP_MAX_WORKERS</code></strong>
 <ul>
-<li><strong>Description:</strong> Maximum number of threads for page-group summarisation in document summarisation. Set to <code>1</code> for sequential processing (recommended for local LLM models); use a value greater than <code>1</code> to summarise multiple page groups in parallel (typically for API-based models). Defaults to <code>MAX_WORKERS</code> if not set. Can be overridden via CLI <code>--summary_page_group_max_workers</code> or direct-mode/Lambda env.</li>
-<li><strong>Default Value:</strong> Same as <code>MAX_WORKERS</code> (e.g.&nbsp;<code>8</code>)</li>
-</ul></li>
-</ul>
-</section>
-<section id="hybrid-textract-bedrock-vlm" class="level3">
-<h3 class="anchored" data-anchor-id="hybrid-textract-bedrock-vlm">Hybrid Textract + Bedrock VLM</h3>
-<p>When AWS Textract is selected for text extraction, these options allow lines with low confidence to be re-extracted using Bedrock VLM and the result to replace the Textract output for those lines.</p>
-<ul>
-<li><strong><code>SHOW_HYBRID_TEXTRACT_BEDROCK_CHECKBOX</code></strong>
-<ul>
-<li><strong>Description:</strong> When set to <code>'True'</code>, the “High-quality Textract OCR (re-run low-confidence lines with Bedrock VLM)” checkbox is shown in the GUI when AWS Textract options are visible. Set to <code>'False'</code> to hide this option from the UI.</li>
-<li><strong>Default Value:</strong> <code>'False'</code></li>
-</ul></li>
-<li><strong><code>HYBRID_TEXTRACT_BEDROCK_VLM</code></strong>
-<ul>
-<li><strong>Description:</strong> When set to <code>'True'</code> and AWS Textract is selected, lines whose average confidence is below <code>HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD</code> are re-analyzed with Bedrock VLM and the extracted text replaces the Textract result for those lines.</li>
-<li><strong>Default Value:</strong> <code>'False'</code></li>
-</ul></li>
-<li><strong><code>HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD</code></strong>
-<ul>
-<li><strong>Description:</strong> Line average confidence (0–100) below this value triggers Bedrock VLM re-extraction when <code>HYBRID_TEXTRACT_BEDROCK_VLM</code> is enabled.</li>
-<li><strong>Default Value:</strong> <code>97</code></li>
-</ul></li>
-<li><strong><code>HYBRID_TEXTRACT_BEDROCK_VLM_PADDING</code></strong>
-<ul>
-<li><strong>Description:</strong> Padding in pixels around the line crop when calling Bedrock VLM for re-extraction.</li>
-<li><strong>Default Value:</strong> <code>5</code></li>
-</ul></li>
-</ul>
-</section>
-<section id="bedrock-vlm-and-llm-cost-estimation" class="level3">
-<h3 class="anchored" data-anchor-id="bedrock-vlm-and-llm-cost-estimation">Bedrock VLM and LLM cost estimation</h3>
-<p>These variables are used by the app to estimate AWS cost when “AWS Bedrock VLM OCR - all PDF types” or “LLM (AWS Bedrock)” PII detection is selected. Estimates are shown in the UI (e.g.&nbsp;estimated cost and time).</p>
-<ul>
-<li><strong><code>BEDROCK_VLM_INPUT_COST</code></strong>
-<ul>
-<li><strong>Description:</strong> USD per million input tokens for Bedrock VLM OCR cost estimate.</li>
-<li><strong>Default Value:</strong> <code>3.0</code></li>
-</ul></li>
-<li><strong><code>BEDROCK_VLM_OUTPUT_COST</code></strong>
-<ul>
-<li><strong>Description:</strong> USD per million output tokens for Bedrock VLM OCR cost estimate.</li>
-<li><strong>Default Value:</strong> <code>15.0</code></li>
-</ul></li>
-<li><strong><code>BEDROCK_VLM_PIXELS_PER_INPUT_TOKEN</code></strong>
-<ul>
-<li><strong>Description:</strong> Pixels (width × height) per input token; used with <code>VLM_MAX_IMAGE_SIZE</code> to estimate input tokens per page for VLM cost calculation.</li>
-<li><strong>Default Value:</strong> <code>2500</code></li>
-</ul></li>
-<li><strong><code>BEDROCK_LLM_INPUT_COST</code></strong>
-<ul>
-<li><strong>Description:</strong> USD per million input tokens for Bedrock LLM (e.g.&nbsp;PII detection) cost estimate.</li>
-<li><strong>Default Value:</strong> <code>3.0</code></li>
-</ul></li>
-<li><strong><code>BEDROCK_LLM_OUTPUT_COST</code></strong>
-<ul>
-<li><strong>Description:</strong> USD per million output tokens for Bedrock LLM cost estimate.</li>
-<li><strong>Default Value:</strong> <code>15.0</code></li>
-</ul></li>
-<li><strong><code>BEDROCK_LLM_INPUT_TOKENS_PER_PAGE</code></strong>
-<ul>
-<li><strong>Description:</strong> Estimated input tokens per page used for Bedrock LLM cost calculation.</li>
-<li><strong>Default Value:</strong> <code>2000</code></li>
-</ul></li>
-<li><strong><code>BEDROCK_LLM_OUTPUT_TOKENS_PER_PAGE</code></strong>
-<ul>
-<li><strong>Description:</strong> Estimated output tokens per page used for Bedrock LLM cost calculation.</li>
-<li><strong>Default Value:</strong> <code>250</code></li>
+<li><strong>Description:</strong> Maximum number of threads for page-group summarisation in document summarisation. Set to <code>1</code> for sequential processing (recommended for local LLM models); use a value greater than <code>1</code> to summarise multiple page groups in parallel (typically for API-based models). Can be overridden via CLI <code>--summary_page_group_max_workers</code> or direct-mode/Lambda env.</li>
+<li><strong>Default Value:</strong> <code>1</code></li>
 </ul></li>
 <li><strong><code>SHOW_BEDROCK_VLM_MODELS</code></strong>, <strong><code>SHOW_GEMINI_VLM_MODELS</code></strong>, <strong><code>SHOW_AZURE_OPENAI_VLM_MODELS</code></strong>
 <ul>
@@ -831,11 +739,6 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <section id="local-ocr-tesseract-paddleocr" class="level3">
 <h3 class="anchored" data-anchor-id="local-ocr-tesseract-paddleocr">Local OCR (Tesseract &amp; PaddleOCR)</h3>
 <ul>
-<li><p><strong><code>SHOW_OCR_GUI_OPTIONS</code></strong></p>
-<ul>
-<li><strong>Description:</strong> If set to <code>"True"</code>, OCR-related options (e.g.&nbsp;local OCR model, Paddle options) are shown in the UI.</li>
-<li><strong>Default Value:</strong> <code>"True"</code></li>
-</ul></li>
 <li><p><strong><code>CHOSEN_LOCAL_OCR_MODEL</code></strong></p>
 <ul>
 <li><strong>Description:</strong> Choose the engine for local OCR: <code>"tesseract"</code>, <code>"paddle"</code>, <code>"hybrid-paddle"</code>, <code>"hybrid-vlm"</code>, <code>"hybrid-paddle-vlm"</code>, <code>"hybrid-paddle-inference-server"</code>, <code>"vlm"</code>, or <code>"inference-server"</code>.</li>
@@ -927,20 +830,20 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <li><strong>Description:</strong> If set to <code>"True"</code>, loads the PaddleOCR model at application startup.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
-<li><p><strong><code>USE_TRANSFORMERS_VLM_MODEL_AS_LLM</code></strong></p>
+<li><p><strong><code>USE_TRANFORMERS_VLM_MODEL_AS_LLM</code></strong></p>
 <ul>
 <li><strong>Description:</strong> When set to <code>"True"</code>, use the same local transformers VLM model (e.g.&nbsp;Qwen3-VL-4B-Instruct) for LLM tasks (e.g.&nbsp;PII entity detection in <code>tools/llm_entity_detection.py</code>) as for VLM/OCR. Overrides <code>LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE</code> when local transformers LLM is selected. The VLM model must be loaded first (e.g.&nbsp;by running VLM OCR); otherwise the standard PII model is used.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
 <li><p><strong><code>LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE</code></strong></p>
 <ul>
-<li><strong>Description:</strong> Identifier for the local transformers LLM used for PII detection (e.g.&nbsp;<code>"gemma-3-4b"</code>, <code>"qwen-3-4b"</code>). Used for display and to select the correct repo/file/folder. Supported values include gemma-3-4b, gemma-3-12b, gemma-2, qwen-3-4b, GPT-OSS 20B, granite-4-tiny, granite-4-micro. Ignored for local LLM when <code>USE_TRANSFORMERS_VLM_MODEL_AS_LLM</code> is <code>"True"</code> (the VLM model is used instead).</li>
+<li><strong>Description:</strong> Identifier for the local transformers LLM used for PII detection (e.g.&nbsp;<code>"gemma-3-4b"</code>, <code>"qwen-3-4b"</code>). Used for display and to select the correct repo/file/folder. Supported values include gemma-3-4b, gemma-3-12b, gemma-2, qwen-3-4b, gpt-oss-20b, granite-4-tiny, granite-4-micro. Ignored for local LLM when <code>USE_TRANFORMERS_VLM_MODEL_AS_LLM</code> is <code>"True"</code> (the VLM model is used instead).</li>
 <li><strong>Default Value:</strong> <code>"gemma-3-4b"</code></li>
 </ul></li>
 <li><p><strong><code>LOCAL_TRANSFORMERS_LLM_PII_REPO_ID</code></strong>, <strong><code>LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE</code></strong>, <strong><code>LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER</code></strong></p>
 <ul>
-<li><strong>Description:</strong> Hugging Face repo ID, for the local transformers PII detection model. Can be overridden automatically based on <code>LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE</code>.</li>
-<li><strong>Default Values:</strong> e.g.&nbsp;<code>"unsloth/gemma-3-4b-it-bnb-4bit"</code>.</li>
+<li><strong>Description:</strong> Hugging Face repo ID, optional model filename, and local folder for the local transformers PII detection model. Can be overridden automatically based on <code>LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE</code>.</li>
+<li><strong>Default Values:</strong> e.g.&nbsp;<code>"unsloth/gemma-3-4b-it-bnb-4bit"</code>, <code>"gemma-3-4b-it-qat-UD-Q4_K_XL.gguf"</code>, <code>"model/gemma3_4b"</code>.</li>
 </ul></li>
 <li><p><strong><code>LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START</code></strong></p>
 <ul>
@@ -952,12 +855,22 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <li><strong>Description:</strong> If set to <code>"True"</code>, uses multimodal prompt format for the local LLM. Set automatically for some model choices (e.g.&nbsp;Gemma 3 4B/12B).</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
+<li><p><strong><code>LOW_VRAM_SYSTEM</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, applies lower-memory settings (e.g.&nbsp;smaller batch size, optional use of llama.cpp). Use on systems with limited GPU memory.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><p><strong><code>USE_LLAMA_CPP</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, use llama.cpp for local LLM inference. When <code>LOW_VRAM_SYSTEM</code> is true, this defaults to <code>"True"</code>. Not fully supported in all flows.</li>
+<li><strong>Default Value:</strong> <code>"False"</code> (or <code>"True"</code> when <code>LOW_VRAM_SYSTEM</code> is true).</li>
+</ul></li>
 <li><p><strong><code>REASONING_SUFFIX</code></strong></p>
 <ul>
-<li><strong>Description:</strong> Suffix added to prompts for reasoning-capable models (e.g.&nbsp;<code>"Reasoning: low"</code> for GPT-OSS 20B, <code>"/nothink"</code> for Qwen 3 4B to disable chain-of-thought). Model-specific; see config for defaults.</li>
+<li><strong>Description:</strong> Suffix added to prompts for reasoning-capable models (e.g.&nbsp;<code>"Reasoning: low"</code> for gpt-oss-20b, <code>"/nothink"</code> for Qwen 3 4B to disable chain-of-thought). Model-specific; see config for defaults.</li>
 <li><strong>Default Value:</strong> Model-dependent (e.g.&nbsp;<code>"Reasoning: low"</code> or <code>"/nothink"</code> or <code>''</code>).</li>
 </ul></li>
-<li><p><strong>LLM generation parameters:</strong> <strong><code>LLM_TEMPERATURE</code></strong> (default <code>0.1</code>), <strong><code>LLM_TOP_K</code></strong> (<code>64</code>), <strong><code>LLM_MIN_P</code></strong> (<code>0</code>), <strong><code>LLM_TOP_P</code></strong> (<code>0.95</code>), <strong><code>LLM_REPETITION_PENALTY</code></strong> (<code>1.0</code>), <strong><code>LLM_MAX_NEW_TOKENS</code></strong> (<code>4096</code>), <strong><code>LLM_CONTEXT_LENGTH</code></strong> (<code>32768</code>), <strong><code>LLM_SEED</code></strong> (<code>42</code>), <strong><code>LLM_RESET</code></strong> (<code>False</code>), <strong><code>LLM_STREAM</code></strong> (<code>True</code>), <strong><code>LLM_STOP_STRINGS</code></strong>, <strong><code>LLM_THREADS</code></strong> (<code>-1</code>), <strong><code>SPECULATIVE_DECODING</code></strong> (<code>False</code>), <strong><code>ASSISTANT_MODEL</code></strong>, <strong><code>LLM_MODEL_DTYPE</code></strong> (<code>bfloat16</code>), and other <strong><code>LLM_*</code></strong> / related variables in <code>tools/config.py</code> control local/transformers LLM generation in <code>tools/llm_funcs.py</code>. <strong><code>LLM_TEMPERATURE</code></strong> and <strong><code>LLM_MAX_NEW_TOKENS</code></strong> also control PII detection LLM calls and retries.</p></li>
+<li><p><strong>LLM generation parameters:</strong> <strong><code>LLM_TEMPERATURE</code></strong> (default <code>0.6</code>), <strong><code>LLM_TOP_K</code></strong> (<code>64</code>), <strong><code>LLM_MIN_P</code></strong> (<code>0</code>), <strong><code>LLM_TOP_P</code></strong> (<code>0.95</code>), <strong><code>LLM_REPETITION_PENALTY</code></strong> (<code>1.0</code>), <strong><code>LLM_MAX_NEW_TOKENS</code></strong> (<code>4096</code>), <strong><code>LLM_CONTEXT_LENGTH</code></strong> (<code>16384</code>), <strong><code>LLM_SEED</code></strong> (<code>42</code>), <strong><code>LLM_STREAM</code></strong> (<code>True</code>), <strong><code>LLM_SAMPLE</code></strong> (<code>True</code>), <strong><code>LLM_MAX_GPU_LAYERS</code></strong> (<code>-1</code>), and related <strong><code>LLM_*</code></strong> variables in <code>tools/config.py</code> control local/transformers LLM generation. <strong><code>LLM_PII_TEMPERATURE</code></strong>, <strong><code>LLM_PII_MAX_TOKENS</code></strong>, <strong><code>LLM_PII_NUMBER_OF_RETRY_ATTEMPTS</code></strong> (<code>3</code>), and <strong><code>LLM_PII_TIMEOUT_WAIT</code></strong> (<code>5</code>) control PII detection LLM calls and retries.</p></li>
 <li><p><strong><code>SHOW_INFERENCE_SERVER_VLM_OPTIONS</code></strong></p>
 <ul>
 <li><strong>Description:</strong> If set to <code>"True"</code>, allows the user to select inference-server-related options from the UI.</li>
@@ -1028,11 +941,6 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <li><strong>Description:</strong> If set to <code>"True"</code>, the VLM models will be quantized using 4-bit quantisation (bitsandbytes).</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
-<li><strong><code>OVERRIDE_VLM_REPO_ID</code></strong>
-<ul>
-<li><strong>Description:</strong> If non-empty, overrides the Hugging Face repo ID or local path used for the selected local transformers VLM (<code>SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL</code>). Use to point at a different checkpoint or a local folder. Leave empty for no override.</li>
-<li><strong>Default Value:</strong> <code>''</code> (empty)</li>
-</ul></li>
 <li><strong><code>USE_FLASH_ATTENTION</code></strong>
 <ul>
 <li><strong>Description:</strong> If set to <code>"True"</code>, uses flash attention for the VLM, which can improve performance (not possible on Windows).</li>
@@ -1040,33 +948,18 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 </ul></li>
 <li><strong><code>VLM_MAX_IMAGE_SIZE</code></strong>
 <ul>
-<li><strong>Description:</strong> Upper bound on total pixels (width × height) for images sent to the VLM after preparation (<code>_prepare_image_for_vlm</code>). Larger images are downscaled (aspect ratio preserved). For AWS Bedrock VLM paths, the effective cap is raised automatically (much larger budget) so this variable mainly limits local/inference-server/Gemini/Azure full-page and hybrid crops unless Bedrock is used. Multiples of 32×32 align with Qwen3-VL-style tiling.</li>
-<li><strong>Default Value:</strong> <code>819200</code></li>
+<li><strong>Description:</strong> Maximum total pixels (width * height) for images passed to VLM. Images with more pixels will be resized while maintaining aspect ratio. A multiple of 32*32 for Qwen3-VL.</li>
+<li><strong>Default Value:</strong> <code>819200</code> (approximately 800x800)</li>
 </ul></li>
 <li><strong><code>VLM_MIN_IMAGE_SIZE</code></strong>
 <ul>
-<li><strong>Description:</strong> Minimum total pixels for <strong>full-page</strong> VLM OCR (local transformers, inference-server, Gemini, Azure/OpenAI, Bedrock page). Smaller pages are upscaled (aspect preserved). Does <strong>not</strong> apply to hybrid line/crop VLM passes—those use <code>VLM_HYBRID_MIN_IMAGE_SIZE</code>. Preparation combines this with <code>VLM_MIN_DPI</code> / <code>VLM_MAX_DPI</code>; if constraints conflict, max pixel/DPI caps win (see console warning).</li>
-<li><strong>Default Value:</strong> <code>614400</code></li>
-</ul></li>
-<li><strong><code>VLM_HYBRID_MIN_IMAGE_SIZE</code></strong>
-<ul>
-<li><strong>Description:</strong> Minimum total pixels for <strong>hybrid</strong> VLM crops (second pass on line regions: local VLM, inference-server, Bedrock, Gemini, Azure in hybrid modes). Smaller crops are upscaled. Full-page VLM uses <code>VLM_MIN_IMAGE_SIZE</code> instead. Subject to the same DPI and max-pixel logic as other VLM images.</li>
-<li><strong>Default Value:</strong> <code>153600</code></li>
-</ul></li>
-<li><strong><code>VLM_MIN_DPI</code></strong>
-<ul>
-<li><strong>Description:</strong> Minimum effective DPI after preparation. Uses the image’s reported DPI from metadata (<code>image.info["dpi"]</code>), defaulting to <strong>72</strong> if absent. If reported DPI is below this value, the image is upscaled so that <strong>reported_dpi × scale</strong> falls within <code>[VLM_MIN_DPI, VLM_MAX_DPI]</code> (together with min/max pixel limits).</li>
-<li><strong>Default Value:</strong> <code>200.0</code></li>
+<li><strong>Description:</strong> Minimum total pixels (width * height) for images passed to VLM. Images with less pixels will be resized while maintaining aspect ratio. A multiple of 32*32 for Qwen3-VL.</li>
+<li><strong>Default Value:</strong> <code>614400</code> (approximately 600x600)</li>
 </ul></li>
 <li><strong><code>VLM_MAX_DPI</code></strong>
 <ul>
-<li><strong>Description:</strong> Maximum effective DPI after preparation. High-DPI scans are downscaled so effective DPI (see <code>VLM_MIN_DPI</code>) does not exceed this value, subject to <code>VLM_MAX_IMAGE_SIZE</code> (and hybrid/full-page min pixel settings).</li>
+<li><strong>Description:</strong> Maximum DPI for images passed to VLM. Images with higher DPI will be resized accordingly.</li>
 <li><strong>Default Value:</strong> <code>300.0</code></li>
-</ul></li>
-<li><strong><code>VLM_DISABLE_QWEN3_5_THINKING</code></strong>
-<ul>
-<li><strong>Description:</strong> If set to <code>"True"</code>, disables Qwen3.5 “thinking” mode for VLM OCR.</li>
-<li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
 <li><strong><code>MAX_NEW_TOKENS</code></strong>
 <ul>
@@ -1093,25 +986,10 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <li><strong>Description:</strong> If set to <code>"True"</code>, saves input images sent to VLM OCR for debugging purposes.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
-<li><strong><code>ADD_VLM_BOUNDING_BOX_RULES</code></strong>
-<ul>
-<li><strong>Description:</strong> If set to <code>"True"</code>, adds bounding box rules to the VLM prompt (e.g.&nbsp;coordinate format or output constraints for OCR).</li>
-<li><strong>Default Value:</strong> <code>"False"</code></li>
-</ul></li>
 <li><strong><code>HYBRID_OCR_MAX_NEW_TOKENS</code></strong>
 <ul>
 <li><strong>Description:</strong> Maximum number of tokens to generate for hybrid OCR operations.</li>
 <li><strong>Default Value:</strong> <code>30</code></li>
-</ul></li>
-<li><strong><code>VLM_OCR_INTRO_TEXT</code></strong>
-<ul>
-<li><strong>Description:</strong> UI intro text when the local OCR option <strong>vlm</strong> (full-page vision-language OCR) is shown. Customise for your deployment.</li>
-<li><strong>Default Value:</strong> <code>"vlm" will call the chosen vision model (VLM) to return a structured json output that is then parsed into word-level bounding boxes.</code></li>
-</ul></li>
-<li><strong><code>VLM_OCR_HYBRID_INTRO_TEXT</code></strong>
-<ul>
-<li><strong>Description:</strong> UI intro text for <strong>hybrid-vlm</strong> (Tesseract first pass + VLM on selected lines/regions).</li>
-<li><strong>Default Value:</strong> <code>"hybrid-vlm" is a combination of Tesseract for OCR, and a second pass with the chosen vision model (VLM).</code></li>
 </ul></li>
 <li><strong><code>REPORT_VLM_OUTPUTS_TO_GUI</code></strong>
 <ul>
@@ -1127,11 +1005,6 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <ul>
 <li><strong>Description:</strong> Default model choice for cloud VLM OCR (AWS Bedrock, Gemini, or Azure/OpenAI). Used when cloud VLM options are enabled.</li>
 <li><strong>Default Value:</strong> <code>"qwen.qwen3-vl-235b-a22b"</code> (or first available cloud model if empty)</li>
-</ul></li>
-<li><strong><code>CUSTOM_VLM_BACKEND</code></strong>
-<ul>
-<li><strong>Description:</strong> Backend used for CUSTOM_VLM_PERSON and CUSTOM_VLM_SIGNATURE (face and signature detection) when those entities are selected for redaction. One of: <code>"transformers_vlm"</code> (local transformers VLM), <code>"inference_vlm"</code> (inference-server VLM), or <code>"bedrock_vlm"</code> (AWS Bedrock VLM). Applies regardless of the PII identification method (Local, AWS Comprehend, or LLM). Value is case-insensitive; invalid values fall back to <code>"bedrock_vlm"</code>.</li>
-<li><strong>Default Value:</strong> <code>"bedrock_vlm"</code></li>
 </ul></li>
 <li><strong><code>CLOUD_LLM_PII_MODEL_CHOICE</code></strong>
 <ul>
@@ -1240,7 +1113,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 </ul></li>
 <li><strong><code>HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS</code></strong>
 <ul>
-<li><strong>Description:</strong> Full list of available options for Textract’s handwriting and signature detection. Can include <code>'Extract handwriting'</code>, <code>'Extract signatures'</code>, and optionally <code>'Extract forms'</code>, <code>'Extract layout'</code>, <code>'Extract tables'</code>, and <code>'Face detection'</code> if the corresponding include options are enabled.</li>
+<li><strong>Description:</strong> Full list of available options for Textract’s handwriting and signature detection. Can include <code>'Extract handwriting'</code>, <code>'Extract signatures'</code>, and optionally <code>'Extract forms'</code>, <code>'Extract layout'</code>, <code>'Extract tables'</code> if the corresponding include options are enabled.</li>
 <li><strong>Default Value:</strong> <code>['Extract handwriting', 'Extract signatures']</code></li>
 </ul></li>
 <li><strong><code>INCLUDE_FORM_EXTRACTION_TEXTRACT_OPTION</code></strong></li>
@@ -1249,11 +1122,6 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <ul>
 <li><strong>Description:</strong> Booleans (<code>"True"</code>/<code>"False"</code>) to include Forms, Layout, and Tables as selectable options for Textract analysis.</li>
 <li><strong>Default Value:</strong> <code>"False"</code> for all.</li>
-</ul></li>
-<li><strong><code>INCLUDE_FACE_IDENTIFICATION_TEXTRACT_OPTION</code></strong>
-<ul>
-<li><strong>Description:</strong> When set to <code>"True"</code>, adds “Face detection” as a selectable option in the handwriting/signature checkbox group. When enabled with AWS Bedrock VLM OCR, a second VLM pass per page is run to identify faces (cost and time estimates account for this).</li>
-<li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
 </ul>
 </section>
@@ -1659,20 +1527,6 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <li><strong>Default Value:</strong> <code>'False'</code></li>
 </ul></li>
 </ul>
-<section id="session-default-cost-code-no-extra-environment-variables" class="level3">
-<h3 class="anchored" data-anchor-id="session-default-cost-code-no-extra-environment-variables">Session default cost code (no extra environment variables)</h3>
-<p>When cost codes are enabled (<code>GET_COST_CODES</code> or <code>ENFORCE_COST_CODES</code>), users can save a <strong>default cost code</strong> for their session via the “Set default cost code” button. This uses the <strong>existing</strong> cost code and AWS settings; no additional environment variables are required.</p>
-<ul>
-<li><strong>Behaviour:</strong>
-<ul>
-<li>The chosen cost code is stored in a CSV file (<code>session_default_cost_codes.csv</code>) with columns <code>session_hash</code>, <code>default_cost_code</code>, and <code>saved_at</code> (ISO timestamp). Duplicate <code>session_hash</code> rows are deduplicated on save, keeping only the latest.</li>
-<li><strong>Local save location:</strong> The CSV is written under the app’s <strong>input folder</strong> (the value of the input folder at save time, e.g.&nbsp;from <code>INPUT_FOLDER</code> or the session’s <code>input_folder_textbox</code>).</li>
-<li><strong>S3 (optional):</strong> If <code>S3_COST_CODES_PATH</code> is set and <code>RUN_AWS_FUNCTIONS</code> and <code>DOCUMENT_REDACTION_BUCKET</code> are set, the same file is also uploaded to <code>DOCUMENT_REDACTION_BUCKET</code> in the same key “folder” as the cost codes file (e.g.&nbsp;<code>config/session_default_cost_codes.csv</code>).</li>
-<li><strong>Email-only:</strong> Saves and S3 upload only run when the session identifier is a valid <strong>email address</strong> (e.g.&nbsp;when users are signed in via Cognito). If the session identifier is not an email (e.g.&nbsp;when running locally with a Gradio session hash), the default is not written to the CSV and not uploaded to S3. On load, the app does not download the session default cost codes file from S3 when the session identifier is not an email.</li>
-</ul></li>
-<li><strong>Relevant existing variables:</strong> <code>GET_COST_CODES</code>, <code>ENFORCE_COST_CODES</code>, <code>COST_CODES_PATH</code>, <code>S3_COST_CODES_PATH</code>, <code>DOCUMENT_REDACTION_BUCKET</code>, <code>RUN_AWS_FUNCTIONS</code>, and the app input folder (e.g.&nbsp;<code>INPUT_FOLDER</code> / <code>GRADIO_INPUT_FOLDER</code>).</li>
-</ul>
-</section>
 </section>
 <section id="whole-document-api-options-textract-async" class="level2">
 <h2 class="anchored" data-anchor-id="whole-document-api-options-textract-async">Whole Document API Options (Textract Async)</h2>
