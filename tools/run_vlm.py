@@ -1264,9 +1264,10 @@ if ADD_VLM_BOUNDING_BOX_RULES:
         or ("qwen" in str(CLOUD_VLM_MODEL_CHOICE).lower() and SHOW_BEDROCK_VLM_MODELS)
     ):
         additional_bounding_box_rules = """- Bounding boxes should fit within the coordinate extents of the image: 0, 0 is the top left corner of the image, and 999, 999 is the bottom right corner of the image"""
+    else:
+        additional_bounding_box_rules = ""
 else:
     additional_bounding_box_rules = ""
-
 
 full_page_ocr_vlm_prompt = f"""Spot all the text in the image at line-level, and output in JSON format as [{{'bbox': [x1, y1, x2, y2], 'text': 'identified text', 'conf': 'confidence score 0-1'}}, ...].
 
