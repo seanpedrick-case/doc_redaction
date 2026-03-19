@@ -1282,7 +1282,7 @@ TESSERACT_SEGMENTATION_LEVEL = int(
 )  # Tesseract segmentation level: PSM level to use for Tesseract OCR
 
 CONVERT_LINE_TO_WORD_LEVEL = convert_string_to_boolean(
-    get_or_create_env_var("CONVERT_LINE_TO_WORD_LEVEL", "False")
+    get_or_create_env_var("CONVERT_LINE_TO_WORD_LEVEL", "True")
 )  # Whether to convert paddle line-level OCR results to word-level for better precision
 
 LOAD_PADDLE_AT_STARTUP = convert_string_to_boolean(
@@ -1416,10 +1416,25 @@ GEMMA3_27B_REPO_ID = get_or_create_env_var(
 )
 GPT_OSS_REPO_ID = get_or_create_env_var("GPT_OSS_REPO_ID", "openai/GPT-OSS 20B")
 
+MINISTRAL_3_14B_INST_REPO_ID = get_or_create_env_var(
+    "MINISTRAL_3_14B_INST_REPO_TRANSFORMERS_ID",
+    "mistralai/Ministral-3-14B-Instruct-2512",
+)
+
 # Qwen 3.5 model repo IDs (9B through 122B, from run_vlm.py)
+QWEN35_08B_REPO_ID = get_or_create_env_var(
+    "QWEN35_08B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-0.8B"
+)
+QWEN35_2B_REPO_ID = get_or_create_env_var(
+    "QWEN35_2B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-2B"
+)
+QWEN35_4B_REPO_ID = get_or_create_env_var(
+    "QWEN35_4B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-4B"
+)
 QWEN35_9B_REPO_ID = get_or_create_env_var(
     "QWEN35_9B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-9B"
 )
+
 QWEN35_27B_REPO_ID = get_or_create_env_var(
     "QWEN35_27B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-27B"
 )
@@ -1451,6 +1466,21 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
     elif "gpt-oss" in model_choice_lower:
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GPT_OSS_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "GPT-OSS 20B"
+    elif (
+        "ministral-3-14b-instruct" in model_choice_lower
+        or "ministral3-14b-instruct" in model_choice_lower
+    ):
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = MINISTRAL_3_14B_INST_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Ministral 3 14B Instruct"
+    elif "qwen3.5-0.8b" in model_choice_lower or "qwen-3.5-0.8b" in model_choice_lower:
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_08B_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 0.8B"
+    elif "qwen3.5-2b" in model_choice_lower or "qwen-3.5-2b" in model_choice_lower:
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_2B_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 2B"
+    elif "qwen3.5-4b" in model_choice_lower or "qwen-3.5-4b" in model_choice_lower:
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_4B_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 4B"
     elif "qwen3.5-9b" in model_choice_lower or "qwen-3.5-9b" in model_choice_lower:
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_9B_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 9B"
@@ -1490,6 +1520,10 @@ if (
 if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE in [
     "Gemma 3 12B",
     "Gemma 3 27B",
+    "Ministral 3 14B Instruct",
+    "Qwen 3.5 0.8B",
+    "Qwen 3.5 2B",
+    "Qwen 3.5 4B",
     "Qwen 3.5 9B",
     "Qwen 3.5 27B (4-bit)",
     "Qwen 3.5 27B",
