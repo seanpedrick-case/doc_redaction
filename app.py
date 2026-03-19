@@ -2631,7 +2631,7 @@ with blocks:
                     "Clear all redactions on page", visible=False
                 )
 
-            with gr.Accordion(label="View and edit review file data", open=False):
+            with gr.Accordion(label="View review file data", open=False):
                 review_file_df = gr.Dataframe(
                     value=pd.DataFrame(),
                     headers=[
@@ -6019,6 +6019,7 @@ with blocks:
             output_folder_textbox,
             do_not_save_pdf_state,
             page_sizes,
+            input_folder_textbox,
         ],
         outputs=[
             pdf_doc_state,
@@ -6092,6 +6093,7 @@ with blocks:
             output_folder_textbox,
             do_not_save_pdf_state,
             page_sizes,
+            input_folder_textbox,
         ],
         outputs=[
             pdf_doc_state,
@@ -6165,6 +6167,7 @@ with blocks:
             output_folder_textbox,
             do_not_save_pdf_state,
             page_sizes,
+            input_folder_textbox,
         ],
         outputs=[
             pdf_doc_state,
@@ -6238,6 +6241,7 @@ with blocks:
             output_folder_textbox,
             do_not_save_pdf_state,
             page_sizes,
+            input_folder_textbox,
         ],
         outputs=[
             pdf_doc_state,
@@ -6311,6 +6315,7 @@ with blocks:
             output_folder_textbox,
             do_not_save_pdf_state,
             page_sizes,
+            input_folder_textbox,
         ],
         outputs=[
             pdf_doc_state,
@@ -6383,6 +6388,7 @@ with blocks:
             output_folder_textbox,
             do_not_save_pdf_state,
             page_sizes,
+            input_folder_textbox,
         ],
         outputs=[
             pdf_doc_state,
@@ -6452,6 +6458,7 @@ with blocks:
             output_folder_textbox,
             save_pdf_state,
             page_sizes,
+            input_folder_textbox,
         ],
         outputs=[
             pdf_doc_state,
@@ -6522,6 +6529,7 @@ with blocks:
             output_folder_textbox,
             do_not_save_pdf_state,
             page_sizes,
+            input_folder_textbox,
         ],
         outputs=[
             pdf_doc_state,
@@ -6655,6 +6663,7 @@ with blocks:
             output_folder_textbox,
             do_not_save_pdf_state,
             page_sizes,
+            input_folder_textbox,
         ],
         outputs=[
             pdf_doc_state,
@@ -6793,6 +6802,7 @@ with blocks:
             output_folder_textbox,
             do_not_save_pdf_state,
             page_sizes,
+            input_folder_textbox,
         ],
         outputs=[
             pdf_doc_state,
@@ -6909,6 +6919,7 @@ with blocks:
             output_folder_textbox,
             do_not_save_pdf_state,
             page_sizes,
+            input_folder_textbox,
         ],
         outputs=[
             pdf_doc_state,
@@ -7018,6 +7029,7 @@ with blocks:
             output_folder_textbox,
             do_not_save_pdf_state,
             page_sizes,
+            input_folder_textbox,
         ],
         outputs=[
             pdf_doc_state,
@@ -7098,6 +7110,7 @@ with blocks:
             output_folder_textbox,
             do_not_save_pdf_state,
             page_sizes,
+            input_folder_textbox,
         ],
         outputs=[
             pdf_doc_state,
@@ -7331,6 +7344,7 @@ with blocks:
             output_folder_textbox,
             do_not_save_pdf_state,
             page_sizes,
+            input_folder_textbox,
         ],
         outputs=[
             pdf_doc_state,
@@ -7447,6 +7461,7 @@ with blocks:
             output_folder_textbox,
             do_not_save_pdf_state,
             page_sizes,
+            input_folder_textbox,
         ],
         outputs=[
             pdf_doc_state,
@@ -7557,6 +7572,7 @@ with blocks:
             output_folder_textbox,
             do_not_save_pdf_state,
             page_sizes,
+            input_folder_textbox,
         ],
         outputs=[
             pdf_doc_state,
@@ -7637,6 +7653,7 @@ with blocks:
             output_folder_textbox,
             do_not_save_pdf_state,
             page_sizes,
+            input_folder_textbox,
         ],
         outputs=[
             pdf_doc_state,
@@ -8810,6 +8827,18 @@ with blocks:
         )
 
     summarise_btn.click(
+        reset_aws_call_vars,
+        outputs=[
+            comprehend_query_number,
+            textract_query_number,
+            vlm_total_input_tokens_number,
+            vlm_total_output_tokens_number,
+            llm_total_input_tokens_number,
+            llm_total_output_tokens_number,
+            llm_model_name_textbox,
+            vlm_model_name_textbox,
+        ],
+    ).success(
         fn=enforce_cost_codes,
         inputs=[
             enforce_cost_code_textbox,

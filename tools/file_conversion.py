@@ -4,6 +4,7 @@ import random
 import re
 import shutil
 import string
+import threading
 import time
 import zipfile
 from collections import defaultdict
@@ -17,7 +18,6 @@ import pandas as pd
 import polars as pl
 import pymupdf
 from gradio import Progress
-from pdf2image import convert_from_path, pdfinfo_from_path
 from PIL import Image, ImageFile
 from pymupdf import Document, Page
 from scipy.spatial import cKDTree
@@ -52,6 +52,68 @@ else:
     Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 
 ImageFile.LOAD_TRUNCATED_IMAGES = LOAD_TRUNCATED_IMAGES
+
+
+_PDF_DOC_CACHE = threading.local()
+
+
+def _get_threadlocal_pymupdf_doc(pdf_path: str) -> Document:
+    """
+    Cache a PyMuPDF Document per thread to avoid reopening the same PDF for each page.
+
+    ThreadPoolExecutor threads are long-lived for the duration of the pool, so this
+    cuts overhead significantly when processing many pages.
+    """
+    cache = getattr(_PDF_DOC_CACHE, "docs", None)
+    if cache is None:
+        cache = {}
+        _PDF_DOC_CACHE.docs = cache
+    doc = cache.get(pdf_path)
+    if doc is None:
+        doc = pymupdf.open(pdf_path)
+        cache[pdf_path] = doc
+    return doc
+
+
+def _render_pdf_page_to_png_pymupdf_mediabox(
+    pdf_path: str,
+    page_num: int,
+    out_path: str,
+    dpi: float,
+) -> Image.Image:
+    """
+    Render a single PDF page to a grayscale PNG using PyMuPDF, ensuring MediaBox render.
+
+    PyMuPDF's Page.get_pixmap() respects the CropBox; to render the MediaBox we
+    temporarily set CropBox=MediaBox and restore it afterwards.
+    """
+    doc = _get_threadlocal_pymupdf_doc(pdf_path)
+    page = doc.load_page(page_num)
+
+    old_crop = page.cropbox
+    old_rot = page.rotation
+    try:
+        page.set_cropbox(page.mediabox)
+        # Preserve the PDF's intrinsic rotation (e.g. 180deg pages).
+        # Downstream coordinate logic assumes the rendered image matches PyMuPDF's display space.
+        page.set_rotation(old_rot)
+        pix = page.get_pixmap(
+            dpi=int(dpi) if dpi is not None else None,
+            colorspace=pymupdf.csGRAY,
+            alpha=False,
+            annots=True,
+        )
+        # Fast path: write PNG via MuPDF, then load with PIL for downstream resizing.
+        pix.save(out_path)
+        # Embed DPI in PNG (MuPDF write does not set pHYs); matches IMAGES_DPI render scale.
+        _dpi = max(1, int(round(float(dpi))))
+        _pil = Image.open(out_path)
+        _pil.save(out_path, format="PNG", dpi=(_dpi, _dpi))
+        return _pil
+    finally:
+        page.set_cropbox(old_crop)
+        if old_rot != 0:
+            page.set_rotation(old_rot)
 
 
 def is_pdf_or_image(filename):
@@ -122,7 +184,8 @@ def check_image_size_and_reduce(out_path: str, image: Image):
             image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
             # Save the resized image
-            image.save(out_path, format="PNG", optimize=True)
+            _dp = max(1, int(round(float(image_dpi))))
+            image.save(out_path, format="PNG", optimize=True, dpi=(_dp, _dp))
 
             # Update the file size
             file_size = os.path.getsize(out_path)
@@ -193,26 +256,22 @@ def process_single_page_for_image_conversion(
                 # Load existing image
                 image = Image.open(out_path)
             elif pdf_path.lower().endswith(".pdf"):
-                # Convert PDF page to image
-                image_l = convert_from_path(
-                    pdf_path,
-                    first_page=page_num + 1,
-                    last_page=page_num + 1,
+                # Convert PDF page to image (MediaBox) using PyMuPDF for speed.
+                # We render directly as grayscale and save as PNG.
+                image = _render_pdf_page_to_png_pymupdf_mediabox(
+                    pdf_path=pdf_path,
+                    page_num=page_num,
+                    out_path=out_path,
                     dpi=image_dpi,
-                    use_cropbox=False,
-                    use_pdftocairo=False,
                 )
-                image = image_l[0]
-                image = image.convert("L")
-
-                image.save(out_path, format="PNG")
             elif (
                 pdf_path.lower().endswith(".jpg")
                 or pdf_path.lower().endswith(".png")
                 or pdf_path.lower().endswith(".jpeg")
             ):
                 image = Image.open(pdf_path)
-                image.save(out_path, format="PNG")
+                _dp = max(1, int(round(float(image_dpi))))
+                image.save(out_path, format="PNG", dpi=(_dp, _dp))
             else:
                 raise Warning("Could not create image.")
 
@@ -268,14 +327,21 @@ def convert_pdf_to_images(
     if num_threads is None:
         num_threads = MAX_WORKERS
 
+    # Page count via PyMuPDF (faster + avoids Poppler dependency for this step)
+    try:
+        _count_doc = pymupdf.open(pdf_path)
+        page_count = len(_count_doc)
+    finally:
+        try:
+            _count_doc.close()
+        except Exception:
+            pass
+
     # If preparing for review, just load the first page (not currently used)
     if prepare_for_review is True:
-        page_count = pdfinfo_from_path(pdf_path)["Pages"]  # 1
         page_min = 0
         page_max = page_count
         page_numbers = None
-    else:
-        page_count = pdfinfo_from_path(pdf_path)["Pages"]
 
     if page_numbers is not None:
         pages_to_convert = sorted(
@@ -1683,17 +1749,10 @@ def prepare_image_or_pdf(
             ) and "_textract" in file_path_without_ext:  # (prepare_for_review != True):
                 print("Saving Textract output")
                 # Copy it to the output folder so it can be used later.
-                # Check if file already has a textract suffix pattern (e.g., _sig_textract.json, _form_textract.json, etc.)
-                # Pattern matches: _textract.json or _*_textract.json
-                # Fixed ReDoS vulnerability: use pattern that requires at least one letter to avoid catastrophic backtracking
-                # Pattern ensures at least one letter (not just underscores) appears before _textract
-                textract_pattern = re.compile(
-                    r"_textract\.json$|_[a-z]+(?:_[a-z]+)*_textract\.json$"
-                )
-                if textract_pattern.search(file_path):
+                # If the path already ends with _textract.json (e.g. _sig_textract.json), preserve the basename;
+                # otherwise append _textract.json. Use endswith instead of regex to avoid ReDoS (CodeQL py/polynomial-redos).
+                if file_path.endswith("_textract.json"):
                     # File already has a textract suffix, preserve it
-                    output_textract_json_file_name = file_path_without_ext + ".json"
-                elif file_path.endswith("_textract.json"):
                     output_textract_json_file_name = file_path_without_ext + ".json"
                 else:
                     # No textract suffix found, add default one

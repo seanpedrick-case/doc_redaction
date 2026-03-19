@@ -1708,7 +1708,27 @@ class HybridWordSegmenter:
         # --- PRE-PROCESSING: The "Bulldozer" Approach ---
         # 1. Gaussian Blur: Suppress high-frequency speckle noise that confuses the main segmenter
         # We accept slight edge blurring for the sake of noise reduction.
-        blurred_gray = cv2.GaussianBlur(gray, (5, 5), 0)
+        # OpenCV can intermittently throw low-information C++ exceptions on some
+        # page crops (often due to dtype/range/nan/inf issues). If that happens,
+        # fall back to the non-image-based word conversion to keep OCR flowing.
+        try:
+            # Guard against NaN/Inf propagating into OpenCV internals.
+            if gray.dtype.kind in ("f", "c"):
+                gray = np.nan_to_num(gray, nan=0.0, posinf=255.0, neginf=0.0)
+
+            # GaussianBlur is most stable on uint8 or float32. If we have another
+            # dtype (e.g. int16/float64/object), normalize and cast.
+            if gray.dtype != np.uint8 and gray.dtype != np.float32:
+                # Normalize to 0..255 if range looks unusual.
+                gmin = float(np.min(gray)) if gray.size else 0.0
+                gmax = float(np.max(gray)) if gray.size else 255.0
+                if gmax > 255.0 or gmin < 0.0:
+                    gray = cv2.normalize(gray, None, 0, 255, cv2.NORM_MINMAX)
+                gray = np.clip(gray, 0, 255).astype(np.uint8)
+
+            blurred_gray = cv2.GaussianBlur(gray, (5, 5), 0)
+        except Exception:
+            return self.convert_line_to_word_level(line_data, img_w, img_h)
 
         # 2. Aggressive Thresholding
         # We use a larger block size here to be less sensitive to local texture variations

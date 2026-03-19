@@ -351,6 +351,14 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Description:** Maximum number of threads for the OCR first pass in image-based PDF redaction (e.g. when using AWS Textract). Set to `1` for sequential processing; use a value greater than `1` to run OCR on multiple pages in parallel. Only applies when the OCR method supports parallel calls (e.g. Textract). Defaults to `MAX_WORKERS` if not set. Can be overridden via CLI `--ocr_first_pass_max_workers` or direct-mode/Lambda env.
     * **Default Value:** Same as `MAX_WORKERS` (e.g. `8`)
 
+* **`TESSERACT_MAX_WORKERS`**
+    * **Description:** Maximum number of worker threads used to run local Tesseract OCR on multiple pages in parallel (page-level parallelism). Keep this lower than `MAX_WORKERS` to avoid saturating CPU/RAM; increase gradually if you have spare CPU and want faster OCR.
+    * **Default Value:** `4`
+
+* **`PADDLE_MAX_WORKERS`**
+    * **Description:** Maximum number of worker threads used to run local PaddleOCR on multiple pages in parallel when **Paddle** is the chosen local OCR model. Paddle is often GPU-bound and shares one model instance; keep this low (e.g. `1`–`2`) to avoid VRAM contention or errors. Set to `1` for effectively sequential Paddle OCR per document.
+    * **Default Value:** `2`
+
 * **`SUMMARY_PAGE_GROUP_MAX_WORKERS`**
     * **Description:** Maximum number of threads for page-group summarisation in document summarisation. Set to `1` for sequential processing (recommended for local LLM models); use a value greater than `1` to summarise multiple page groups in parallel (typically for API-based models). Defaults to `MAX_WORKERS` if not set. Can be overridden via CLI `--summary_page_group_max_workers` or direct-mode/Lambda env.
     * **Default Value:** Same as `MAX_WORKERS` (e.g. `8`)
@@ -659,20 +667,32 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
     * **Description:** If set to `"True"`, the VLM models will be quantized using 4-bit quantisation (bitsandbytes).
     * **Default Value:** `"False"`
 
+* **`OVERRIDE_VLM_REPO_ID`**
+    * **Description:** If non-empty, overrides the Hugging Face repo ID or local path used for the selected local transformers VLM (`SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL`). Use to point at a different checkpoint or a local folder. Leave empty for no override.
+    * **Default Value:** `''` (empty)
+
 * **`USE_FLASH_ATTENTION`**
     * **Description:** If set to `"True"`, uses flash attention for the VLM, which can improve performance (not possible on Windows).
     * **Default Value:** `"False"`
 
 * **`VLM_MAX_IMAGE_SIZE`**
-    * **Description:** Maximum total pixels (width * height) for images passed to VLM. Images with more pixels will be resized while maintaining aspect ratio. A multiple of 32*32 for Qwen3-VL.
-    * **Default Value:** `819200` (approximately 800x800)
+    * **Description:** Upper bound on total pixels (width × height) for images sent to the VLM after preparation (`_prepare_image_for_vlm`). Larger images are downscaled (aspect ratio preserved). For AWS Bedrock VLM paths, the effective cap is raised automatically (much larger budget) so this variable mainly limits local/inference-server/Gemini/Azure full-page and hybrid crops unless Bedrock is used. Multiples of 32×32 align with Qwen3-VL-style tiling.
+    * **Default Value:** `819200`
 
 * **`VLM_MIN_IMAGE_SIZE`**
-    * **Description:** Minimum total pixels (width * height) for images passed to VLM. Images with less pixels will be resized while maintaining aspect ratio. A multiple of 32*32 for Qwen3-VL.
-    * **Default Value:** `614400` (approximately 600x600)
+    * **Description:** Minimum total pixels for **full-page** VLM OCR (local transformers, inference-server, Gemini, Azure/OpenAI, Bedrock page). Smaller pages are upscaled (aspect preserved). Does **not** apply to hybrid line/crop VLM passes—those use `VLM_HYBRID_MIN_IMAGE_SIZE`. Preparation combines this with `VLM_MIN_DPI` / `VLM_MAX_DPI`; if constraints conflict, max pixel/DPI caps win (see console warning).
+    * **Default Value:** `614400`
+
+* **`VLM_HYBRID_MIN_IMAGE_SIZE`**
+    * **Description:** Minimum total pixels for **hybrid** VLM crops (second pass on line regions: local VLM, inference-server, Bedrock, Gemini, Azure in hybrid modes). Smaller crops are upscaled. Full-page VLM uses `VLM_MIN_IMAGE_SIZE` instead. Subject to the same DPI and max-pixel logic as other VLM images.
+    * **Default Value:** `153600`
+
+* **`VLM_MIN_DPI`**
+    * **Description:** Minimum effective DPI after preparation. Uses the image’s reported DPI from metadata (`image.info["dpi"]`), defaulting to **72** if absent. If reported DPI is below this value, the image is upscaled so that **reported_dpi × scale** falls within `[VLM_MIN_DPI, VLM_MAX_DPI]` (together with min/max pixel limits).
+    * **Default Value:** `200.0`
 
 * **`VLM_MAX_DPI`**
-    * **Description:** Maximum DPI for images passed to VLM. Images with higher DPI will be resized accordingly.
+    * **Description:** Maximum effective DPI after preparation. High-DPI scans are downscaled so effective DPI (see `VLM_MIN_DPI`) does not exceed this value, subject to `VLM_MAX_IMAGE_SIZE` (and hybrid/full-page min pixel settings).
     * **Default Value:** `300.0`
 
 * **`VLM_DISABLE_QWEN3_5_THINKING`**
@@ -706,6 +726,14 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
 * **`HYBRID_OCR_MAX_NEW_TOKENS`**
     * **Description:** Maximum number of tokens to generate for hybrid OCR operations.
     * **Default Value:** `30`
+
+* **`VLM_OCR_INTRO_TEXT`**
+    * **Description:** UI intro text when the local OCR option **vlm** (full-page vision-language OCR) is shown. Customise for your deployment.
+    * **Default Value:** `"vlm" will call the chosen vision model (VLM) to return a structured json output that is then parsed into word-level bounding boxes.`
+
+* **`VLM_OCR_HYBRID_INTRO_TEXT`**
+    * **Description:** UI intro text for **hybrid-vlm** (Tesseract first pass + VLM on selected lines/regions).
+    * **Default Value:** `"hybrid-vlm" is a combination of Tesseract for OCR, and a second pass with the chosen vision model (VLM).`
 
 * **`REPORT_VLM_OUTPUTS_TO_GUI`**
     * **Description:** If set to `"True"`, reports VLM outputs to the GUI with info boxes as they are processed.
