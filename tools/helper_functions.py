@@ -71,9 +71,10 @@ from tools.config import (
     VLM_MAX_IMAGE_SIZE,
     aws_comprehend_language_choices,
     convert_string_to_boolean,
+    ensure_folder_within_app_directory,
     textract_language_choices,
 )
-from tools.secure_path_utils import secure_join
+from tools.secure_path_utils import sanitize_filename, secure_path_join
 
 
 def reset_state_vars():
@@ -352,12 +353,18 @@ def _get_session_default_cost_codes_s3_key_prefix():
 def get_session_default_cost_codes_csv_path(folder: str | None = None):
     """
     Return the path to the CSV file that stores session_hash -> default_cost_code.
-    If folder is provided (e.g. input folder path), use that. Otherwise use the
-    same folder as cost codes (COST_CODES_PATH or OUTPUT_COST_CODES_PATH).
+    If folder is provided (e.g. input folder path), resolve it under the configured
+    INPUT_FOLDER via secure_path_join (CodeQL / path-injection). If that fails,
+    fall back to the same folder as cost codes (COST_CODES_PATH or OUTPUT_COST_CODES_PATH).
     """
     if folder is not None and str(folder).strip():
         base = str(folder).strip()
-        return os.path.join(base, SESSION_DEFAULT_COST_CODES_FILENAME)
+        try:
+            safe_base = secure_path_join(INPUT_FOLDER, base)
+            return os.path.join(str(safe_base), SESSION_DEFAULT_COST_CODES_FILENAME)
+        except (ValueError, PermissionError, OSError):
+            # Cannot constrain user folder under INPUT_FOLDER; use defaults below.
+            pass
     if COST_CODES_PATH:
         folder = os.path.dirname(COST_CODES_PATH)
     else:
@@ -564,15 +571,28 @@ def apply_session_default_cost_code(
 
 
 def ensure_folder_exists(output_folder: str):
-    """Checks if the specified folder exists, creates it if not."""
+    """Checks if the specified folder exists, creates it if not.
 
-    if not os.path.exists(output_folder):
-        # Create the folder if it doesn't exist
-        os.makedirs(output_folder, exist_ok=True)
-        # print(f"Created the {output_folder} folder.")
-    else:
-        # print(f"The {output_folder} folder already exists.")
-        pass
+    Resolves ``output_folder`` under the app directory via
+    ``ensure_folder_within_app_directory`` so user-influenced paths cannot escape
+    the workspace (CodeQL py/path-injection).
+    """
+    if output_folder is None or not str(output_folder).strip():
+        return
+    try:
+        safe_folder = ensure_folder_within_app_directory(str(output_folder).strip())
+    except (ValueError, PermissionError, OSError) as e:
+        logging.getLogger(__name__).warning(
+            "ensure_folder_exists: refused or could not normalize path %r: %s",
+            output_folder,
+            e,
+        )
+        return
+    if not safe_folder or not str(safe_folder).strip():
+        return
+
+    if not os.path.exists(safe_folder):
+        os.makedirs(safe_folder, exist_ok=True)
 
 
 def update_dataframe(df_or_list):
@@ -795,11 +815,14 @@ def check_for_existing_textract_file(
 ):
     # Generate suffix based on checkbox options
     suffix = get_textract_file_suffix(handwrite_signature_checkbox)
-    textract_output_path = secure_join(
-        output_folder, doc_file_name_no_extension_textbox + suffix + "_textract.json"
-    )
+    try:
+        safe_stem = sanitize_filename(doc_file_name_no_extension_textbox)
+        filename = safe_stem + suffix + "_textract.json"
+        textract_output_path = secure_path_join(output_folder, filename)
+    except (ValueError, PermissionError, OSError):
+        return False
 
-    if os.path.exists(textract_output_path):
+    if textract_output_path.exists():
         # print("Existing Textract analysis output file found.")
         return True
 
@@ -822,11 +845,14 @@ def check_for_relevant_ocr_output_with_words(
         # print("No valid text extraction method found. Returning False")
         return False
 
-    doc_file_with_ending = doc_file_name_no_extension_textbox + file_ending
+    try:
+        safe_stem = sanitize_filename(doc_file_name_no_extension_textbox)
+        doc_file_with_ending = safe_stem + file_ending
+        local_ocr_output_path = secure_path_join(output_folder, doc_file_with_ending)
+    except (ValueError, PermissionError, OSError):
+        return False
 
-    local_ocr_output_path = secure_join(output_folder, doc_file_with_ending)
-
-    if os.path.exists(local_ocr_output_path):
+    if local_ocr_output_path.exists():
         print("Existing OCR with words analysis output file found.")
         return True
     else:
@@ -953,7 +979,7 @@ async def get_connection_params(
 
     elif "x-cognito-id" in request.headers:
         out_session_hash = request.headers["x-cognito-id"]
-        # print("Cognito ID found:", out_session_hash)
+        print("Cognito ID found:", out_session_hash)
 
     elif "x-amzn-oidc-identity" in request.headers:
         out_session_hash = request.headers["x-amzn-oidc-identity"]
@@ -1049,7 +1075,19 @@ async def get_connection_params(
     )
 
 
-def clean_unicode_text(text: str):
+def clean_unicode_text(text: str, preserve_international_scripts: bool = False) -> str:
+    """
+    Normalise Unicode (NFKC), replace common smart punctuation with ASCII.
+
+    By default, non-ASCII characters are stripped (legacy behaviour for some pipelines).
+    Set ``preserve_international_scripts=True`` for OCR and extracted document text so
+    Cyrillic, Arabic, CJK, etc. are retained in outputs (CSV, JSON, redaction targets).
+    """
+    if text is None:
+        return ""
+    if not isinstance(text, str):
+        text = str(text)
+
     # Step 1: Normalise unicode characters to decompose any special forms
     normalized_text = unicodedata.normalize("NFKC", text)
 
@@ -1065,18 +1103,15 @@ def clean_unicode_text(text: str):
         "•": "*",
     }
 
-    # Perform replacements
     for old_char, new_char in replacements.items():
         normalized_text = normalized_text.replace(old_char, new_char)
 
-    # Step 3: Optionally remove non-ASCII characters if needed
-    # This regex removes any remaining non-ASCII characters, if desired.
-    # Comment this line if you want to keep all Unicode characters.
+    if preserve_international_scripts:
+        return normalized_text
+
     from tools.secure_regex_utils import safe_remove_non_ascii
 
-    cleaned_text = safe_remove_non_ascii(normalized_text)
-
-    return cleaned_text
+    return safe_remove_non_ascii(normalized_text)
 
 
 # --- Helper Function for ID Generation ---
@@ -1376,6 +1411,7 @@ def reset_base_dataframe(df: pd.DataFrame):
 
 def reset_ocr_base_dataframe(df: pd.DataFrame):
     if df.empty:
+        print("OCR base dataframe is empty, returning empty dataframe")
         return pd.DataFrame(columns=["page", "line", "text"])
     else:
         return df.loc[:, ["page", "line", "text"]]
@@ -1384,9 +1420,23 @@ def reset_ocr_base_dataframe(df: pd.DataFrame):
 def reset_ocr_with_words_base_dataframe(
     df: pd.DataFrame, page_entity_dropdown_redaction_value: str
 ):
+    """
+    Resets and prepares the OCR dataframe with word-level details for a specific page.
+
+    Args:
+        df (pd.DataFrame): The original dataframe that may contain word-level OCR results,
+                           with at least a 'page' column.
+        page_entity_dropdown_redaction_value (str): The currently selected page value
+            to filter the dataframe on, for redaction view.
+
+    Returns:
+        Tuple[pd.DataFrame, pd.DataFrame]: A tuple of (filtered dataframe for selected page, full dataframe after processing).
+    """
 
     if "page" not in df.columns:
-        print("df does not contain page column")
+        print(
+            "OCR with words dataframe does not contain page column, returning empty dataframe"
+        )
         df_out = pd.DataFrame(
             columns=[
                 "page",
@@ -1399,10 +1449,23 @@ def reset_ocr_with_words_base_dataframe(
                 "index",
             ]
         )
-        return df_out, df_out
+        df_filtered_out = pd.DataFrame(
+            columns=[
+                "page",
+                "line",
+                "word_text",
+                "index",
+            ]
+        )
+        return df_filtered_out, df_out
 
+    df.reset_index(drop=True, inplace=True)
     df["index"] = df.index
-    output_df = df.copy()
+
+    output_df_base = df.copy()
+
+    if output_df_base.empty:
+        print("OCR with words dataframe is empty, returning empty dataframe")
 
     df["page"] = df["page"].astype(str)
 
@@ -1412,14 +1475,14 @@ def reset_ocr_with_words_base_dataframe(
             "page",
             "line",
             "word_text",
-            # "word_x0",
-            # "word_y0",
-            # "word_x1",
-            # "word_y1",
             "index",
         ],
     ]
-    return output_df_filtered, output_df
+
+    if output_df_filtered.empty:
+        print("No OCR results found for page, returning empty dataframe")
+
+    return output_df_filtered, output_df_base
 
 
 def update_language_dropdown(
@@ -1517,6 +1580,54 @@ def get_system_font_path():
                 return font_path
 
     return None
+
+
+def get_ocr_visualisation_font_path():
+    """
+    Path to a TrueType/OpenType font for drawing recognised OCR text on debug images.
+
+    OpenCV's Hershey fonts (cv2.putText) are effectively Latin-only; other scripts show as '?'.
+    PIL + this font supports Cyrillic, CJK, Arabic in typical OS installs (Segoe UI, Noto, etc.).
+    """
+    system = platform.system()
+
+    if system == "Windows":
+        fonts_dir = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
+        for name in (
+            "segoeui.ttf",
+            "calibri.ttf",
+            "msyh.ttc",
+            "simsun.ttc",
+            "arial.ttf",
+            "times.ttf",
+        ):
+            p = os.path.join(fonts_dir, name)
+            if os.path.isfile(p):
+                return p
+
+    elif system == "Darwin":
+        for p in (
+            "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+            "/Library/Fonts/Arial Unicode.ttf",
+            "/System/Library/Fonts/PingFang.ttc",
+            "/System/Library/Fonts/Hiragino Sans GB.ttc",
+            "/System/Library/Fonts/Helvetica.ttc",
+        ):
+            if os.path.isfile(p):
+                return p
+
+    elif system == "Linux":
+        for p in (
+            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ):
+            if os.path.isfile(p):
+                return p
+
+    return get_system_font_path()
 
 
 # Custom logging filter to remove logs from healthiness/readiness endpoints so they don't fill up application log flow

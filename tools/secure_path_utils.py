@@ -212,17 +212,21 @@ def validate_path_safety(
             if pattern in path_str:
                 return False
 
-        # If base path is provided, ensure the path is within it
+        # If base path is provided, ensure the path is within it.
+        # Do not call Path.resolve() (or join Path objects) on untrusted input — CodeQL
+        # py/path-injection; use normpath + commonpath containment instead.
         if base_path:
-            base_path = Path(base_path).resolve()
-            # For relative paths, join with base_path before resolving
-            if not path.is_absolute():
-                path = (base_path / path).resolve()
+            base_norm = os.path.normpath(os.path.abspath(str(base_path)))
+            user_norm = os.path.normpath(path_str)
+            if os.path.isabs(user_norm):
+                candidate = os.path.normpath(os.path.abspath(user_norm))
             else:
-                path = path.resolve()
+                candidate = os.path.normpath(os.path.join(base_norm, user_norm))
             try:
-                path.relative_to(base_path)
+                common = os.path.commonpath([candidate, base_norm])
             except ValueError:
+                return False
+            if common != base_norm:
                 return False
 
         return True

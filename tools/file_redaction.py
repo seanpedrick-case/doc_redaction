@@ -24,7 +24,7 @@ from pdfminer.layout import (
     LTTextLineHorizontal,
 )
 from pikepdf import Dictionary, Name, Pdf
-from PIL import Image, ImageDraw, ImageFile
+from PIL import Image, ImageDraw, ImageFile, ImageFont
 from presidio_analyzer import AnalyzerEngine
 from pymupdf import Document, Page, Rect
 from tqdm import tqdm
@@ -81,6 +81,7 @@ from tools.config import (
     OCR_FIRST_PASS_MAX_WORKERS,
     OUTPUT_FOLDER,
     OVERWRITE_EXISTING_OCR_RESULTS,
+    PADDLE_MAX_WORKERS,
     PAGE_BREAK_VALUE,
     PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS,
     RETURN_PDF_FOR_REVIEW,
@@ -88,6 +89,7 @@ from tools.config import (
     RUN_AWS_FUNCTIONS,
     SAVE_PAGE_OCR_VISUALISATIONS,
     SELECTABLE_TEXT_EXTRACT_OPTION,
+    TESSERACT_MAX_WORKERS,
     TESSERACT_TEXT_EXTRACT_OPTION,
     TEXTRACT_TEXT_EXTRACT_OPTION,
     USE_GUI_BOX_COLOURS_FOR_OUTPUTS,
@@ -127,6 +129,7 @@ from tools.file_conversion import (
 from tools.helper_functions import (
     clean_unicode_text,
     get_file_name_without_type,
+    get_ocr_visualisation_font_path,
     get_textract_file_suffix,
 )
 from tools.load_spacy_model_custom_recognisers import (
@@ -2228,6 +2231,13 @@ def choose_and_run_redactor(
                 print(
                     f"EFFICIENT_OCR: Processing {len(pages_needing_ocr_1based)} page(s) with OCR ({ocr_method_label})."
                 )
+                _defer_inline_vlm_detection_for_post_pass = (
+                    _run_vlm_pass_after_all_pages
+                    and (
+                        CUSTOM_VLM_BACKEND != "bedrock_vlm"
+                        or bedrock_runtime is not None
+                    )
+                )
                 # When both text and OCR paths run, pass an empty decision table so the image path
                 # only returns OCR rows; we then merge with the saved text-path table (no overwrite).
                 _decision_table_for_ocr = (
@@ -2308,6 +2318,7 @@ def choose_and_run_redactor(
                     pages_in_pdf_points=pages_with_text_1based,
                     hybrid_textract_bedrock_vlm=hybrid_textract_bedrock_vlm,
                     overwrite_existing_ocr_results=overwrite_existing_ocr_results,
+                    defer_inline_custom_vlm_detection_pass=_defer_inline_vlm_detection_for_post_pass,
                 )
                 out_file_paths = out_file_paths.copy()
                 vlm_total_input_tokens += vlm_total_input_tokens_page
@@ -2434,6 +2445,16 @@ def choose_and_run_redactor(
                             ["page"]
                         ].apply(pd.to_numeric, errors="coerce")
                     entities_for_vlm = list(chosen_redact_entities or [])
+                    for _vlm_src in (
+                        chosen_redact_comprehend_entities or [],
+                        chosen_llm_entities or [],
+                    ):
+                        for _e in _vlm_src:
+                            if (
+                                str(_e).startswith("CUSTOM_VLM")
+                                and _e not in entities_for_vlm
+                            ):
+                                entities_for_vlm.append(_e)
                     if (
                         "Face detection" in (handwrite_signature_checkbox or [])
                         and "CUSTOM_VLM_PERSON" not in entities_for_vlm
@@ -2669,6 +2690,17 @@ def choose_and_run_redactor(
                     "CUSTOM_VLM entity (face/signature/etc.) selected with simple text extraction: "
                     "running VLM detection on page images and merging with text-based redactions."
                 )
+                _entities_vlm_selectable = list(chosen_redact_entities or [])
+                for _vlm_src in (
+                    chosen_redact_comprehend_entities or [],
+                    chosen_llm_entities or [],
+                ):
+                    for _e in _vlm_src:
+                        if (
+                            str(_e).startswith("CUSTOM_VLM")
+                            and _e not in _entities_vlm_selectable
+                        ):
+                            _entities_vlm_selectable.append(_e)
                 (
                     vlm_in,
                     vlm_out,
@@ -2680,7 +2712,7 @@ def choose_and_run_redactor(
                     pdf_image_file_paths,
                     pymupdf_doc,
                     page_sizes_df,
-                    chosen_redact_entities,
+                    _entities_vlm_selectable,
                     bedrock_runtime,
                     output_folder,
                     input_folder,
@@ -3065,6 +3097,10 @@ def choose_and_run_redactor(
         else:
             out_file_paths.append(ocr_file_path[0])
 
+        # Set when word-level OCR JSON/CSV is written; required below even if list is empty
+        # (e.g. parallel Tesseract produced no merged results).
+        all_page_line_level_ocr_results_with_words_df_file_path = None
+
         if all_page_line_level_ocr_results_with_words:
             all_page_line_level_ocr_results_with_words = merge_page_results(
                 all_page_line_level_ocr_results_with_words
@@ -3150,9 +3186,30 @@ def choose_and_run_redactor(
                     page_max,
                 )
             )
+            # For rows where the subset columns are duplicated (i.e., all fields identical within the subset),
+            # set their values to empty values in those columns except for the first occurrence.
+            subset_cols = [
+                "line_text",
+                "line_x0",
+                "line_y0",
+                "line_x1",
+                "line_y1",
+                "line_conf",
+            ]
+            # Identify duplicated rows (excluding the first occurrence)
+            dupes_mask = all_page_line_level_ocr_results_with_words_df.duplicated(
+                subset=subset_cols, keep="first"
+            )
+            # Set these columns to empty for duplicated rows
+            for col in subset_cols:
+                all_page_line_level_ocr_results_with_words_df.loc[dupes_mask, col] = (
+                    ""
+                    if all_page_line_level_ocr_results_with_words_df[col].dtype == "O"
+                    else None
+                )
             all_page_line_level_ocr_results_with_words_df.to_csv(
                 all_page_line_level_ocr_results_with_words_df_file_path,
-                index=None,
+                index=False,
                 encoding="utf-8-sig",
             )
 
@@ -5218,6 +5275,7 @@ def redact_image_pdf(
     ocr_first_pass_max_workers: Optional[int] = None,
     pages_in_pdf_points: Optional[List[int]] = None,
     progress=Progress(track_tqdm=True),
+    defer_inline_custom_vlm_detection_pass: bool = False,
 ):
     # Initialize LLM token tracking variables
     llm_total_input_tokens = 0
@@ -5295,6 +5353,10 @@ def redact_image_pdf(
             chosen_redact_comprehend_entities.append("CUSTOM_VLM_PERSON")
         if "CUSTOM_VLM_PERSON" not in chosen_llm_entities:
             chosen_llm_entities.append("CUSTOM_VLM_PERSON")
+
+    # When True, skip per-page VLM face/signature detection; run_custom_vlm_only_pass
+    # (after OCR in efficient-OCR flow) handles each once per page on full images.
+    _skip_inline_custom_vlm_detection = defer_inline_custom_vlm_detection_pass
 
     tic = time.perf_counter()
 
@@ -5411,21 +5473,52 @@ def redact_image_pdf(
             output_folder + file_name + "_ocr_results_with_words_local_ocr.json"
         )
 
+        # Preserve any pre-existing word-level OCR results passed in (e.g. from
+        # EFFICIENT_OCR's selectable-text path). This prevents us from accidentally
+        # dropping those pages when we load/recompute OCR-needed pages.
+        pre_existing_word_results = (
+            list(all_page_line_level_ocr_results_with_words or [])
+            if all_page_line_level_ocr_results_with_words is not None
+            else []
+        )
+
         if overwrite_existing_ocr_results:
-            # Skip loading existing results, start fresh
-            all_page_line_level_ocr_results_with_words = []
+            # Skip loading existing cached results. Keep any pre-existing word
+            # results for pages outside `pages_to_process` so we don't erase
+            # selectable-text path output in efficient-ocr mixed mode.
+            if pages_to_process:
+                pages_to_process_set = set(pages_to_process)
+
+                def _page_in_to_process(item) -> bool:
+                    try:
+                        return int(item.get("page")) in pages_to_process_set
+                    except Exception:
+                        return False
+
+                pre_existing_word_results = [
+                    item
+                    for item in pre_existing_word_results
+                    if not _page_in_to_process(item)
+                ]
+
+            all_page_line_level_ocr_results_with_words = list(pre_existing_word_results)
             is_missing = True
             print("overwriting existing OCR results with words")
         elif os.path.exists(all_page_line_level_ocr_results_with_words_json_file_path):
             print("Loading existing OCR results with words for local OCR analysis")
+            cached_word_results = []
             (
-                all_page_line_level_ocr_results_with_words,
-                is_missing,
+                cached_word_results,
+                _is_missing,
                 log_files_output_paths,
             ) = load_and_convert_ocr_results_with_words_json(
                 all_page_line_level_ocr_results_with_words_json_file_path,
                 log_files_output_paths,
                 page_sizes_df,
+            )
+
+            all_page_line_level_ocr_results_with_words = merge_page_results(
+                list(pre_existing_word_results) + list(cached_word_results)
             )
 
         original_all_page_line_level_ocr_results_with_words = (
@@ -5610,17 +5703,25 @@ def redact_image_pdf(
         ocr_progress_bar = tqdm(
             page_loop_pages,
             unit="pages",
-            desc="Performing image-based OCR",
+            desc="Performing image-based processing",
         )
     else:
         ocr_progress_bar = tqdm(
             range(page_loop_start, page_loop_end),
             unit="pages",
-            desc="Performing image-based OCR",
+            desc="Performing image-based processing",
         )
+    _ocr_gui_total_pages = (
+        len(page_loop_pages)
+        if page_loop_pages is not None
+        else max(0, page_loop_end - page_loop_start)
+    )
+    _ocr_gui_total_str = str(_ocr_gui_total_pages) if _ocr_gui_total_pages > 0 else "?"
 
     # Parallel Bedrock VLM page OCR: run perform_ocr for all pages that need it, then use results in the loop.
     ocr_results_from_parallel = {}
+    # Parallel local page OCR (Tesseract / Paddle / etc.): perform_ocr per page, then use in loop.
+    ocr_results_from_parallel_local_ocr = {}
     if (
         text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
         and bedrock_runtime is not None
@@ -5704,10 +5805,149 @@ def redact_image_pdf(
                 ):
                     ocr_results_from_parallel[pno] = result
 
+    if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION:
+        _local_ocr_tasks = []
+        _pages_iter = (
+            list(page_loop_pages)
+            if page_loop_pages is not None
+            else list(range(page_loop_start, page_loop_end))
+        )
+        for _pno in _pages_iter:
+            if all_page_line_level_ocr_results_with_words:
+                _reported = str(_pno + 1)
+                _match = next(
+                    (
+                        item
+                        for item in all_page_line_level_ocr_results_with_words
+                        if int(item.get("page", -1)) == int(_reported)
+                    ),
+                    None,
+                )
+                if _match:
+                    continue
+            try:
+                _img_path = page_sizes_df.loc[
+                    page_sizes_df["page"] == (_pno + 1), "image_path"
+                ].iloc[0]
+            except Exception:
+                _img_path = (
+                    pdf_image_file_paths[_pno]
+                    if _pno < len(pdf_image_file_paths)
+                    else ""
+                )
+            _actual = _img_path
+            if isinstance(_img_path, str) and (
+                "placeholder_image" in _img_path or "image_placeholder" in _img_path
+            ):
+                try:
+                    _, _created, _, _ = process_single_page_for_image_conversion(
+                        pdf_path=file_path,
+                        page_num=_pno,
+                        image_dpi=IMAGES_DPI,
+                        create_images=True,
+                        input_folder=input_folder,
+                    )
+                    if os.path.exists(_created):
+                        _actual = _created
+                        if not page_sizes_df.empty:
+                            page_sizes_df.loc[
+                                page_sizes_df["page"] == (_pno + 1),
+                                "image_path",
+                            ] = _created
+                except Exception:
+                    pass
+            _local_ocr_tasks.append((_pno, _actual))
+
+        if _local_ocr_tasks:
+
+            def _run_local_page_ocr(task):
+                pno, actual_path = task
+                (
+                    page_word_level_ocr_results,
+                    page_vlm_input_tokens,
+                    page_vlm_output_tokens,
+                    page_vlm_model_name,
+                ) = image_analyser.perform_ocr(actual_path)
+
+                # Pre-compute line-level OCR structures here so the main loop can
+                # skip the expensive combine_ocr_results step.
+                (
+                    page_line_level_ocr_results,
+                    page_line_level_ocr_results_with_words,
+                ) = combine_ocr_results(page_word_level_ocr_results, page=str(pno + 1))
+
+                return (
+                    pno,
+                    (
+                        page_word_level_ocr_results,
+                        page_vlm_input_tokens,
+                        page_vlm_output_tokens,
+                        page_vlm_model_name,
+                        page_line_level_ocr_results,
+                        page_line_level_ocr_results_with_words,
+                    ),
+                )
+
+            if chosen_local_ocr_model == "paddle":
+                _max_workers = min(PADDLE_MAX_WORKERS, len(_local_ocr_tasks))
+                _parallel_label = "Paddle"
+            elif chosen_local_ocr_model == "tesseract":
+                _max_workers = min(TESSERACT_MAX_WORKERS, len(_local_ocr_tasks))
+                _parallel_label = "Tesseract"
+            else:
+                # hybrid-paddle, VLM hybrids, local VLM, etc. (same cap as before Tesseract split)
+                _max_workers = min(TESSERACT_MAX_WORKERS, len(_local_ocr_tasks))
+                _parallel_label = "local model"
+
+            _n_local = len(_local_ocr_tasks)
+            print(
+                f"Parallel {_parallel_label} page OCR: processing {_n_local} page(s) "
+                f"with {int(_max_workers)} worker(s)."
+            )
+            # Progress slice for this phase (first pass OCR); main page loop uses tqdm after this.
+            _prog_lo, _prog_hi = 0.0, 1.0
+            try:
+                progress(
+                    _prog_lo,
+                    desc=f"Parallel {_parallel_label} OCR (0/{_n_local} pages)",
+                )
+            except Exception:
+                pass
+            _completed_local = 0
+            with ThreadPoolExecutor(max_workers=_max_workers) as executor:
+                future_to_pno = {
+                    executor.submit(_run_local_page_ocr, task): task[0]
+                    for task in _local_ocr_tasks
+                }
+                for fut in as_completed(future_to_pno):
+                    pno = future_to_pno[fut]
+                    try:
+                        res_pno, result = fut.result()
+                        ocr_results_from_parallel_local_ocr[res_pno] = result
+                    except Exception as _e:
+                        print(f"Parallel local OCR failed for page {pno + 1}: {_e}")
+                    _completed_local += 1
+                    try:
+                        frac = _prog_lo + (_prog_hi - _prog_lo) * (
+                            _completed_local / max(_n_local, 1)
+                        )
+                        progress(
+                            frac,
+                            desc=(
+                                f"Parallel {_parallel_label} OCR "
+                                f"({_completed_local}/{_n_local} pages)"
+                            ),
+                        )
+                    except Exception:
+                        pass
+
     for page_no in ocr_progress_bar:
 
         reported_page_number = str(page_no + 1)
-        # print(f"OCR preparation - Current page: {reported_page_number}")
+        # print(
+        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+        #     "start iteration (init lists, entity flags)"
+        # )
 
         # Define once per iteration so they are always set before use at _include_vlm_boxes_in_outputs (line ~7610)
         _person_selected = (
@@ -5739,6 +5979,17 @@ def redact_image_pdf(
 
         page_image_annotations = {"image": image_path, "boxes": []}
         pymupdf_page = pymupdf_doc.load_page(page_no)
+        # print(
+        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+        #     "PyMuPDF load_page"
+        # )
+
+        if not (page_no >= page_min and page_no < page_max):
+            # print(
+            #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+            #     "outside page_min/page_max — skipping OCR block for this page"
+            # )
+            continue
 
         if page_no >= page_min and page_no < page_max:
             # Need image size to convert OCR outputs to the correct sizes
@@ -5920,6 +6171,12 @@ def redact_image_pdf(
             except Exception:
                 pass
 
+            # print(
+            #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+            #     f"page image ready (size {int(page_width)}x{int(page_height)}, "
+            #     f"PIL image loaded={image is not None})"
+            # )
+
             # Step 1: Perform OCR. Either with Tesseract, cloud VLM, or with AWS Textract
             # If using Tesseract or cloud VLM (all image-based OCR methods)
             if (
@@ -5951,23 +6208,54 @@ def redact_image_pdf(
                     # print(
                     #     "Found OCR results for page in existing OCR with words object"
                     # )
+                    # print(
+                    #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                    #     "OCR source — existing loaded JSON (recreate_page_line_level_ocr_results_with_page)"
+                    # )
 
                     page_line_level_ocr_results = (
                         recreate_page_line_level_ocr_results_with_page(
                             page_line_level_ocr_results_with_words
                         )
                     )
+                    # print(
+                    #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                    #     "OCR JSON path — line-level recreated (aggregate list unchanged here)"
+                    # )
 
                 else:
+                    cached_precombined = False
                     # Use pre-computed result from parallel Bedrock OCR if available
                     if page_no in ocr_results_from_parallel:
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     "OCR source — parallel Bedrock VLM cache"
+                        # )
                         (
                             page_word_level_ocr_results,
                             page_vlm_input_tokens,
                             page_vlm_output_tokens,
                             page_vlm_model_name,
                         ) = ocr_results_from_parallel[page_no]
+                    elif page_no in ocr_results_from_parallel_local_ocr:
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     "OCR source — parallel local OCR cache (pre-combined line structure)"
+                        # )
+                        (
+                            page_word_level_ocr_results,
+                            page_vlm_input_tokens,
+                            page_vlm_output_tokens,
+                            page_vlm_model_name,
+                            page_line_level_ocr_results,
+                            page_line_level_ocr_results_with_words,
+                        ) = ocr_results_from_parallel_local_ocr[page_no]
+                        cached_precombined = True
                     else:
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     "OCR source — inline perform_ocr (no parallel/cache hit)"
+                        # )
                         # Check if image_path is a placeholder and create the actual image if needed
                         actual_image_path = image_path
                         if isinstance(image_path, str) and (
@@ -6010,6 +6298,10 @@ def redact_image_pdf(
                                 # Fall back to using the placeholder path (will likely fail, but preserves original behavior)
                                 actual_image_path = image_path
 
+                        print(
+                            f"Performing OCR on page {page_no + 1} from {actual_image_path}"
+                        )
+
                         (
                             page_word_level_ocr_results,
                             page_vlm_input_tokens,
@@ -6035,12 +6327,14 @@ def redact_image_pdf(
                     if page_vlm_model_name and not vlm_model_name:
                         vlm_model_name = page_vlm_model_name
 
-                    (
-                        page_line_level_ocr_results,
-                        page_line_level_ocr_results_with_words,
-                    ) = combine_ocr_results(
-                        page_word_level_ocr_results, page=reported_page_number
-                    )
+                    if not cached_precombined:
+                        (
+                            page_line_level_ocr_results,
+                            page_line_level_ocr_results_with_words,
+                        ) = combine_ocr_results(
+                            page_word_level_ocr_results, page=reported_page_number
+                        )
+                    # else: line/word structures already set from parallel local OCR worker
 
                     if all_page_line_level_ocr_results_with_words is None:
                         all_page_line_level_ocr_results_with_words = list()
@@ -6048,6 +6342,10 @@ def redact_image_pdf(
                     all_page_line_level_ocr_results_with_words.append(
                         page_line_level_ocr_results_with_words
                     )
+                    # print(
+                    #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                    #     "appended page OCR to aggregate list"
+                    # )
 
                 # Optional additional Bedrock VLM pass to detect people
                 # and inject [PERSON] entries into the word-level OCR structure for AWS Bedrock VLM OCR.
@@ -6056,7 +6354,8 @@ def redact_image_pdf(
                 # or text_extraction_only).
                 # (_run_face_pass, _textract_face_identification set at start of loop)
                 if (
-                    (
+                    not _skip_inline_custom_vlm_detection
+                    and (
                         text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
                         or text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
                         or pii_identification_method == AWS_PII_OPTION
@@ -6069,6 +6368,10 @@ def redact_image_pdf(
                     and bedrock_runtime is not None
                 ):
                     try:
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     "optional — Bedrock VLM person detection"
+                        # )
                         image_name = (
                             os.path.basename(image_path)
                             if isinstance(image_path, str)
@@ -6186,7 +6489,8 @@ def redact_image_pdf(
                     or "CUSTOM_VLM_SIGNATURE" in (chosen_llm_entities or [])
                 )
                 if (
-                    (
+                    not _skip_inline_custom_vlm_detection
+                    and (
                         text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
                         or text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
                         or pii_identification_method == AWS_PII_OPTION
@@ -6199,6 +6503,10 @@ def redact_image_pdf(
                     and bedrock_runtime is not None
                 ):
                     try:
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     "optional — Bedrock VLM signature detection"
+                        # )
                         image_name = (
                             os.path.basename(image_path)
                             if isinstance(image_path, str)
@@ -6310,7 +6618,8 @@ def redact_image_pdf(
                 # and inject [PERSON] entries into the word-level OCR structure.
                 # Supports pure and hybrid VLM/inference-server local OCR models.
                 if (
-                    chosen_local_ocr_model
+                    not _skip_inline_custom_vlm_detection
+                    and chosen_local_ocr_model
                     in [
                         "vlm",
                         "inference-server",
@@ -6324,6 +6633,10 @@ def redact_image_pdf(
                     and image is not None
                 ):
                     try:
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     f"optional — local VLM/inference person detection ({chosen_local_ocr_model})"
+                        # )
                         image_name = (
                             os.path.basename(image_path)
                             if isinstance(image_path, str)
@@ -6439,7 +6752,8 @@ def redact_image_pdf(
                 # and inject [SIGNATURE] entries into the word-level OCR structure.
                 # Supports pure and hybrid VLM/inference-server local OCR models.
                 if (
-                    chosen_local_ocr_model
+                    not _skip_inline_custom_vlm_detection
+                    and chosen_local_ocr_model
                     in [
                         "vlm",
                         "inference-server",
@@ -6453,6 +6767,10 @@ def redact_image_pdf(
                     and image is not None
                 ):
                     try:
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     f"optional — local VLM/inference signature detection ({chosen_local_ocr_model})"
+                        # )
                         image_name = (
                             os.path.basename(image_path)
                             if isinstance(image_path, str)
@@ -6566,6 +6884,10 @@ def redact_image_pdf(
 
             # Check if page exists in existing textract data. If not, send to service to analyse
             if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
+                # print(
+                #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                #     "Textract branch — entering page processing"
+                # )
                 # Use existing Textract ocr_results_with_words file if this page is present:
                 # load as page_line_level_ocr_results_with_words, recreate page_line_level_ocr_results,
                 # store in ocr_results_by_page, and skip all OCR (including hybrid textract-bedrock).
@@ -6573,6 +6895,10 @@ def redact_image_pdf(
                     textract_ocr_by_page_1based is not None
                     and (page_no + 1) in textract_ocr_by_page_1based
                 ):
+                    # print(
+                    #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                    #     "Textract — using cached per-page ocr_results_with_words (no API)"
+                    # )
                     page_line_level_ocr_results_with_words = (
                         textract_ocr_by_page_1based[page_no + 1]
                     )
@@ -6639,7 +6965,16 @@ def redact_image_pdf(
                             "image": image,
                             "reported_page_number": reported_page_number,
                         }
-                    continue
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     "Textract cached — stored ocr_results_by_page for second pass"
+                        # )
+                    else:
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     "Textract cached — page outside selected range, skipped ocr_results_by_page store"
+                        # )
+                        continue
 
                 text_blocks = list()
                 page_exists = False
@@ -6694,9 +7029,22 @@ def redact_image_pdf(
                         }
                     )
                     ocr_pymupdf_pages_textract[page_no] = pymupdf_page
+                    _tb_note = (
+                        "cached blocks"
+                        if cached_text_blocks is not None
+                        else "will call Textract API in parallel batch"
+                    )
+                    # print(
+                    #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                    #     f"Textract — queued for parallel pass ({_tb_note})"
+                    # )
                     continue
 
                 if not textract_data:
+                    # print(
+                    #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                    #     "Textract sequential — calling analyse_page_with_textract (no JSON loaded yet)"
+                    # )
                     try:
                         # print(f"Image object: {image}")
                         # Convert the image_path to bytes using an in-memory buffer
@@ -6743,6 +7091,10 @@ def redact_image_pdf(
                         print(
                             f"Page number {reported_page_number} not found in existing Textract data. Analysing."
                         )
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     "Textract sequential — page not in JSON, calling analyse_page_with_textract"
+                        # )
 
                         try:
                             if not image:
@@ -6808,6 +7160,10 @@ def redact_image_pdf(
                         textract_request_metadata.append(new_textract_request_metadata)
 
                     else:
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     "Textract sequential — reusing text_blocks from loaded Textract JSON"
+                        # )
                         # If the page exists, retrieve the data
                         text_blocks = next(
                             page["data"]
@@ -6820,6 +7176,10 @@ def redact_image_pdf(
                 textract_page_width = page_width
                 textract_page_height = page_height
 
+                # print(
+                #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                #     "Textract — json_to_ocrresult (blocks → line/word structures)"
+                # )
                 (
                     page_line_level_ocr_results,
                     handwriting_or_signature_boxes,
@@ -6843,9 +7203,12 @@ def redact_image_pdf(
                     and bedrock_runtime is not None
                     and CLOUD_VLM_MODEL_CHOICE
                 ):
-                    print(
-                        f"Hybrid Textract + Bedrock VLM: re-running low-confidence lines for page {reported_page_number} (threshold={HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD}, padding={HYBRID_TEXTRACT_BEDROCK_VLM_PADDING})"
-                    )
+                    # print(
+                    #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                    #     f"Textract hybrid — Bedrock VLM on low-confidence lines "
+                    #     f"(threshold={HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD}, "
+                    #     f"padding={HYBRID_TEXTRACT_BEDROCK_VLM_PADDING})"
+                    # )
                     image_name_seq = (
                         os.path.basename(image_path)
                         if isinstance(image_path, str)
@@ -6892,17 +7255,26 @@ def redact_image_pdf(
                 all_page_line_level_ocr_results_with_words.append(
                     page_line_level_ocr_results_with_words
                 )
+                # print(
+                #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                #     "Textract — appended page to aggregate ocr_results_with_words list"
+                # )
 
                 # Optional additional Bedrock VLM pass to detect people
                 # and inject [PERSON] entries into the word-level OCR structure for AWS Textract.
                 if (
-                    text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+                    not _skip_inline_custom_vlm_detection
+                    and text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
                     and "CUSTOM_VLM_PERSON" in chosen_redact_entities
                     and isinstance(page_line_level_ocr_results_with_words, dict)
                     and page_line_level_ocr_results_with_words.get("results")
                     and image is not None
                 ):
                     try:
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     "Textract optional — Bedrock VLM person detection"
+                        # )
                         image_name = (
                             os.path.basename(image_path)
                             if isinstance(image_path, str)
@@ -7011,13 +7383,18 @@ def redact_image_pdf(
                 # Optional additional Bedrock VLM pass to detect signatures
                 # and inject [SIGNATURE] entries into the word-level OCR structure for AWS Textract.
                 if (
-                    text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+                    not _skip_inline_custom_vlm_detection
+                    and text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
                     and "CUSTOM_VLM_SIGNATURE" in chosen_redact_entities
                     and isinstance(page_line_level_ocr_results_with_words, dict)
                     and page_line_level_ocr_results_with_words.get("results")
                     and image is not None
                 ):
                     try:
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     "Textract optional — Bedrock VLM signature detection"
+                        # )
                         image_name = (
                             os.path.basename(image_path)
                             if isinstance(image_path, str)
@@ -7130,6 +7507,10 @@ def redact_image_pdf(
 
             # Convert to DataFrame and add to ongoing logging table
             # Only process if page_line_level_ocr_results is initialized and has results
+            # print(
+            #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+            #     "tail — line-level DataFrame for logging table"
+            # )
             try:
                 if (
                     page_line_level_ocr_results
@@ -7160,6 +7541,10 @@ def redact_image_pdf(
                 all_line_level_ocr_results_list.extend(
                     line_level_ocr_results_df.to_dict("records")
                 )
+                # print(
+                #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                #     f"tail — extended all_line_level_ocr_results_list ({len(line_level_ocr_results_df)} rows)"
+                # )
 
             # Save OCR visualization with bounding boxes (works for all OCR methods)
             if (
@@ -7198,6 +7583,10 @@ def redact_image_pdf(
 
                     # Only proceed if we have a valid image or image path
                     if image_for_visualization is not None:
+                        # print(
+                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                        #     "tail — visualise_ocr_words_bounding_boxes"
+                        # )
                         # Store the length before the call to detect new additions
                         log_files_output_paths_length_before = len(
                             log_files_output_paths
@@ -7230,6 +7619,10 @@ def redact_image_pdf(
 
             # Store OCR results and page metadata for second pass (PII detection)
             if page_no >= page_min and page_no < page_max:
+                # print(
+                #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+                #     "tail — storing ocr_results_by_page for second pass"
+                # )
                 ocr_results_by_page[page_no] = {
                     "page_line_level_ocr_results": page_line_level_ocr_results,
                     "page_line_level_ocr_results_with_words": page_line_level_ocr_results_with_words,
@@ -7244,6 +7637,11 @@ def redact_image_pdf(
                     "image": image,
                     "reported_page_number": reported_page_number,
                 }
+            # else:
+            #     print(
+            #         f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
+            #         "tail — page outside range, skipped ocr_results_by_page"
+            #     )
 
             # Skip PII detection and redaction in first pass - we'll do it in second pass
             # Continue to next page for OCR
@@ -7470,7 +7868,8 @@ def redact_image_pdf(
 
             # Textract person/signature VLM injection (same logic as sequential path)
             if (
-                text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+                not _skip_inline_custom_vlm_detection
+                and text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
                 and "CUSTOM_VLM_PERSON" in chosen_redact_entities
                 and isinstance(page_line_level_ocr_results_with_words, dict)
                 and page_line_level_ocr_results_with_words.get("results")
@@ -7569,7 +7968,8 @@ def redact_image_pdf(
                     )
 
             if (
-                text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+                not _skip_inline_custom_vlm_detection
+                and text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
                 and "CUSTOM_VLM_SIGNATURE" in chosen_redact_entities
                 and isinstance(page_line_level_ocr_results_with_words, dict)
                 and page_line_level_ocr_results_with_words.get("results")
@@ -8007,7 +8407,8 @@ def redact_image_pdf(
                     # Optional additional Bedrock VLM pass to detect people
                     # and inject [PERSON] entries into the word-level OCR structure for AWS Comprehend.
                     if (
-                        pii_identification_method == AWS_PII_OPTION
+                        not _skip_inline_custom_vlm_detection
+                        and pii_identification_method == AWS_PII_OPTION
                         and "CUSTOM_VLM_PERSON" in chosen_redact_comprehend_entities
                         and isinstance(page_line_level_ocr_results_with_words, dict)
                         and page_line_level_ocr_results_with_words.get("results")
@@ -8123,10 +8524,10 @@ def redact_image_pdf(
 
                     # Optional additional Bedrock VLM pass to detect signatures
                     # and inject [SIGNATURE] entries into the word-level OCR structure for AWS Comprehend.
-                    # This must happen BEFORE analyze_text so the entries are included in the analysis.
-                    # bedrock_runtime is guaranteed to be available if CUSTOM_VLM_SIGNATURE is selected with AWS Comprehend
+                    # Skipped when defer_inline_custom_vlm_detection_pass: post-pass covers PDF/decision table.
                     if (
-                        pii_identification_method == AWS_PII_OPTION
+                        not _skip_inline_custom_vlm_detection
+                        and pii_identification_method == AWS_PII_OPTION
                         and "CUSTOM_VLM_SIGNATURE" in chosen_redact_comprehend_entities
                         and isinstance(page_line_level_ocr_results_with_words, dict)
                         and page_line_level_ocr_results_with_words.get("results")
@@ -8990,7 +9391,9 @@ def create_line_level_ocr_results_from_characters(
             continue
 
         # This part handles LTChar objects
-        added_text = clean_unicode_text(char.get_text())
+        added_text = clean_unicode_text(
+            char.get_text(), preserve_international_scripts=True
+        )
         full_text += added_text
 
         x0, y0, x1, y1 = char.bbox
@@ -9075,7 +9478,9 @@ def generate_words_for_line(line_chars: List) -> List[Dict[str, Any]]:
         current_word_bbox = [float("inf"), float("inf"), -1, -1]
 
     for char in text_chars:
-        char_text = clean_unicode_text(char.get_text())
+        char_text = clean_unicode_text(
+            char.get_text(), preserve_international_scripts=True
+        )
 
         # 1. NEW: Check for splitting punctuation first.
         if char_text in PUNCTUATION_TO_SPLIT:
@@ -9344,7 +9749,9 @@ def _words_from_line_chars_pymupdf(
         current_word_bbox = [float("inf"), float("inf"), -1, -1]
 
     for char in sorted_chars:
-        char_text = clean_unicode_text(char["text"])
+        char_text = clean_unicode_text(
+            char["text"], preserve_international_scripts=True
+        )
         bbox = char["bbox"]
         x0, y0, x1, y1 = bbox
         char.get("size", 12.0)
@@ -10288,10 +10695,11 @@ def redact_text_pdf(
                     and pii_identification_method == AWS_PII_OPTION
                     and (chosen_redact_comprehend_entities or chosen_redact_entities)
                 ):
-                    print(
-                        f"EFFICIENT_OCR (text path): No PII bounding boxes for page {reported_page_number}. "
-                        "Check that the page has text and that selected entity types match Comprehend output."
-                    )
+                    # print(
+                    #     f"EFFICIENT_OCR (text path): No PII bounding boxes for page {reported_page_number}. "
+                    #     "Check that the page has text and that selected entity types match Comprehend output."
+                    # )
+                    pass
 
                 # Accumulate LLM token usage across pages
                 llm_total_input_tokens += llm_input_tokens_page
@@ -10647,6 +11055,30 @@ def redact_text_pdf(
     return result
 
 
+def _pil_ocr_viz_text_size(font: ImageFont.ImageFont, text: str) -> Tuple[int, int]:
+    if not text:
+        text = " "
+    if hasattr(font, "getbbox"):
+        left, top, right, bottom = font.getbbox(text)
+        return max(1, right - left), max(1, bottom - top)
+    dr = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    bb = dr.textbbox((0, 0), text, font=font)
+    return max(1, bb[2] - bb[0]), max(1, bb[3] - bb[1])
+
+
+def _pil_ocr_viz_load_font(font_path: Optional[str], size: int) -> ImageFont.ImageFont:
+    if font_path and os.path.isfile(font_path):
+        try:
+            return ImageFont.truetype(font_path, size)
+        except OSError:
+            pass
+    return ImageFont.load_default()
+
+
+def _ocr_viz_bgr_to_rgb(bgr: Tuple[int, int, int]) -> Tuple[int, int, int]:
+    return (int(bgr[2]), int(bgr[1]), int(bgr[0]))
+
+
 def visualise_ocr_words_bounding_boxes(
     image: Union[str, Image.Image],
     ocr_results: Dict[str, Any],
@@ -10899,8 +11331,10 @@ def visualise_ocr_words_bounding_boxes(
             show_model_replacement=show_model_replacement_legend,
         )
 
-    # Create second page with text overlay
-    text_page = np.ones((height, width, 3), dtype=np.uint8) * 255  # White background
+    # Second page: recognised text (PIL + system TTF — OpenCV putText is Latin-only → '?' for Cyrillic/CJK/etc.)
+    viz_font_path = get_ocr_visualisation_font_path()
+    text_page_rgb = Image.new("RGB", (width, height), (255, 255, 255))
+    draw_pil = ImageDraw.Draw(text_page_rgb)
 
     # Process each line's words for text overlay
     for line_key, line_data in ocr_results.items():
@@ -10985,64 +11419,36 @@ def visualise_ocr_words_bounding_boxes(
                 is_replaced = model and model.lower() != base_model_name.lower()
 
                 # Text color always by confidence (replaced words still show confidence; box stays grey)
-                text_color = (0, 0, 180)  # Default to dark red
+                text_color = (0, 0, 180)  # Default to dark red (BGR)
                 for min_conf, max_conf, conf_color, _ in text_confidence_ranges:
                     if min_conf <= conf <= max_conf:
                         text_color = conf_color
                         break
 
-                # Calculate font size to fit text within bounding box
-                font_scale = 0.5
-                font_thickness = 1
-                font = cv2.FONT_HERSHEY_SIMPLEX
-
-                # Get text size and adjust to fit
-                (text_width, text_height), baseline = cv2.getTextSize(
-                    text, font, font_scale, font_thickness
-                )
-
-                # Scale font to fit width (with some padding)
-                if text_width > 0:
-                    width_scale = (box_width * 0.9) / text_width
-                else:
-                    width_scale = 1.0
-
-                # Scale font to fit height (with some padding)
-                if text_height > 0:
-                    height_scale = (box_height * 0.8) / text_height
-                else:
-                    height_scale = 1.0
-
-                # Use the smaller scale to ensure text fits both dimensions
-                font_scale = min(
-                    font_scale * min(width_scale, height_scale), 2.0
-                )  # Cap at 2.0
-
-                # Recalculate text size with adjusted font scale
-                (text_width, text_height), baseline = cv2.getTextSize(
-                    text, font, font_scale, font_thickness
-                )
-
-                # Center text within bounding box
-                text_x = x1 + (box_width - text_width) // 2
-                text_y = y1 + (box_height + text_height) // 2  # Baseline adjustment
-
-                # Draw text
-                cv2.putText(
-                    text_page,
-                    text,
+                max_pt = min(160, max(8, int(box_height * 1.8)))
+                min_pt = 6
+                pil_font = _pil_ocr_viz_load_font(viz_font_path, min_pt)
+                tw, th = 1, 1
+                for pt in range(max_pt, min_pt - 1, -1):
+                    pil_font = _pil_ocr_viz_load_font(viz_font_path, pt)
+                    tw, th = _pil_ocr_viz_text_size(pil_font, text)
+                    if tw <= box_width * 0.9 and th <= box_height * 0.82:
+                        break
+                text_x = x1 + (box_width - tw) // 2
+                text_y = y1 + (box_height - th) // 2
+                draw_pil.text(
                     (text_x, text_y),
-                    font,
-                    font_scale,
-                    text_color,
-                    font_thickness,
-                    cv2.LINE_AA,
+                    text,
+                    font=pil_font,
+                    fill=_ocr_viz_bgr_to_rgb(text_color),
                 )
 
-                # Draw grey bounding box for replaced words on text page
                 if is_replaced:
-                    box_color = (128, 128, 128)  # Grey for model replacements
-                    cv2.rectangle(text_page, (x1, y1), (x2, y2), box_color, 1)
+                    draw_pil.rectangle(
+                        [x1, y1, x2, y2],
+                        outline=(128, 128, 128),
+                        width=1,
+                    )
 
             else:
                 # Multiple words in the same box - arrange them side by side
@@ -11069,104 +11475,52 @@ def visualise_ocr_words_bounding_boxes(
                     word_colors.append(text_color)
                     word_is_replaced.append(is_replaced)
 
-                # Calculate font size to fit all words side by side
-                font_scale = 0.5
-                font_thickness = 1
-                font = cv2.FONT_HERSHEY_SIMPLEX
-
-                # Start with a reasonable font scale and reduce if needed
-                max_font_scale = 2.0
-                min_font_scale = 0.1
-                font_scale = max_font_scale
-
-                # Binary search or iterative approach to find the right font size
-                for _ in range(20):  # Max iterations
-                    # Calculate total width needed for all words with spaces
-                    total_width = 0
-                    max_text_height = 0
-
-                    for i, text in enumerate(word_texts):
-                        (text_width, text_height), baseline = cv2.getTextSize(
-                            text, font, font_scale, font_thickness
-                        )
-                        total_width += text_width
-                        max_text_height = max(max_text_height, text_height)
-
-                        # Add space width between words (except last word)
-                        if i < len(word_texts) - 1:
-                            (space_width, _), _ = cv2.getTextSize(
-                                " ", font, font_scale, font_thickness
-                            )
-                            total_width += space_width
-
-                    # Check if it fits
-                    width_fits = total_width <= box_width * 0.9
-                    height_fits = max_text_height <= box_height * 0.8
-
-                    if width_fits and height_fits:
-                        break
-
-                    # Reduce font scale
-                    font_scale *= 0.9
-                    if font_scale < min_font_scale:
-                        font_scale = min_font_scale
-                        break
-
-                # Recalculate total width and max height with final font scale
+                n = len(word_texts)
+                max_pt = min(160, max(8, int(box_height * 1.8)))
+                min_pt = 6
+                pil_font = _pil_ocr_viz_load_font(viz_font_path, min_pt)
                 total_width = 0
                 max_text_height = 0
-                for i, text in enumerate(word_texts):
-                    (text_width, text_height), baseline = cv2.getTextSize(
-                        text, font, font_scale, font_thickness
-                    )
-                    total_width += text_width
-                    max_text_height = max(max_text_height, text_height)
+                space_w = 1
+                for pt in range(max_pt, min_pt - 1, -1):
+                    pil_font = _pil_ocr_viz_load_font(viz_font_path, pt)
+                    total_width = 0
+                    max_text_height = 0
+                    space_w, _ = _pil_ocr_viz_text_size(pil_font, " ")
+                    for i, wtext in enumerate(word_texts):
+                        tw, th = _pil_ocr_viz_text_size(pil_font, wtext)
+                        total_width += tw
+                        max_text_height = max(max_text_height, th)
+                        if i < n - 1:
+                            total_width += space_w
+                    if (
+                        total_width <= box_width * 0.9
+                        and max_text_height <= box_height * 0.82
+                    ):
+                        break
 
-                    # Add space width between words (except last word)
-                    if i < len(word_texts) - 1:
-                        (space_width, _), _ = cv2.getTextSize(
-                            " ", font, font_scale, font_thickness
-                        )
-                        total_width += space_width
-
-                # Now draw each word side by side
-                current_x = (
-                    x1 + (box_width - total_width) // 2
-                )  # Center the combined text
-                text_y = y1 + (box_height + max_text_height) // 2  # Baseline adjustment
-
-                for i, (text, text_color) in enumerate(zip(word_texts, word_colors)):
-                    # Get text size with final font scale
-                    (text_width, text_height), baseline = cv2.getTextSize(
-                        text, font, font_scale, font_thickness
-                    )
-
-                    # Draw text
-                    cv2.putText(
-                        text_page,
-                        text,
+                current_x = x1 + (box_width - total_width) // 2
+                text_y = y1 + (box_height - max_text_height) // 2
+                for i, (wtext, text_color) in enumerate(zip(word_texts, word_colors)):
+                    draw_pil.text(
                         (int(current_x), text_y),
-                        font,
-                        font_scale,
-                        text_color,
-                        font_thickness,
-                        cv2.LINE_AA,
+                        wtext,
+                        font=pil_font,
+                        fill=_ocr_viz_bgr_to_rgb(text_color),
+                    )
+                    tw, _ = _pil_ocr_viz_text_size(pil_font, wtext)
+                    current_x += tw
+                    if i < n - 1:
+                        current_x += space_w
+
+                if any(word_is_replaced):
+                    draw_pil.rectangle(
+                        [x1, y1, x2, y2],
+                        outline=(128, 128, 128),
+                        width=1,
                     )
 
-                    # Move to next position
-                    current_x += text_width
-
-                    # Add space between words (except last word)
-                    if i < len(word_texts) - 1:
-                        (space_width, _), _ = cv2.getTextSize(
-                            " ", font, font_scale, font_thickness
-                        )
-                        current_x += space_width
-
-                # Draw grey bounding box if any word was replaced
-                if any(word_is_replaced):
-                    box_color = (128, 128, 128)  # Grey for model replacements
-                    cv2.rectangle(text_page, (x1, y1), (x2, y2), box_color, 1)
+    text_page = cv2.cvtColor(np.asarray(text_page_rgb), cv2.COLOR_RGB2BGR)
 
     # Add legend to second page
     if add_legend:

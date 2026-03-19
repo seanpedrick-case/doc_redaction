@@ -4,7 +4,3 @@
 paddlepaddle>=3.0.0,<=3.2.1
 paddleocr<=3.3.0
 pycocotools==2.0.10
-
-# Additional torch dependencies for faster inference on Hugging Face spaces
-flash-linear-attention
-triton

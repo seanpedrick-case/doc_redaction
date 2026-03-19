@@ -660,6 +660,20 @@ OCR_FIRST_PASS_MAX_WORKERS = max(
     1,
     int(get_or_create_env_var("OCR_FIRST_PASS_MAX_WORKERS", str(MAX_WORKERS))),
 )
+
+# Maximum parallel workers for local Tesseract OCR. Keep this lower than MAX_WORKERS
+# to avoid saturating CPU/RAM when running many pages concurrently.
+TESSERACT_MAX_WORKERS = max(
+    1,
+    int(get_or_create_env_var("TESSERACT_MAX_WORKERS", "4")),
+)
+
+# Maximum parallel workers for local PaddleOCR page OCR. Often GPU-bound; keep low to
+# avoid saturating VRAM or contending on a single PaddleOCR model instance.
+PADDLE_MAX_WORKERS = max(
+    1,
+    int(get_or_create_env_var("PADDLE_MAX_WORKERS", "2")),
+)
 # Max threads for page-group summarisation in summarise_document (1 = sequential). Use 1 for local models.
 SUMMARY_PAGE_GROUP_MAX_WORKERS = max(
     1,
@@ -931,9 +945,6 @@ MAX_INPUT_TOKEN_LENGTH = int(
     get_or_create_env_var("MAX_INPUT_TOKEN_LENGTH", "8192")
 )  # VLM only: maximum input/context tokens for vision-language models. Controls tokenizer cap, model max_position_embeddings (KV cache), and effective max_pixels (image size) so image+text fit. Set lower (e.g. 4096) to reduce VRAM. Separate from LLM_CONTEXT_LENGTH.
 
-VLM_MAX_IMAGE_SIZE = int(
-    get_or_create_env_var("VLM_MAX_IMAGE_SIZE", "819200")
-)  # Maximum total pixels (width * height) for images passed to VLM, as a multiple of 32*32 for Qwen3-VL. Images with more pixels will be resized while maintaining aspect ratio. Default is 819200 (800*32*32).
 
 ADD_VLM_BOUNDING_BOX_RULES = convert_string_to_boolean(
     get_or_create_env_var("ADD_VLM_BOUNDING_BOX_RULES", "False")
@@ -968,13 +979,36 @@ BEDROCK_LLM_OUTPUT_TOKENS_PER_PAGE = int(
     get_or_create_env_var("BEDROCK_LLM_OUTPUT_TOKENS_PER_PAGE", "250")
 )  # Estimated output tokens per page for Bedrock LLM cost calculation.
 
+VLM_HYBRID_MIN_IMAGE_SIZE = int(
+    get_or_create_env_var(
+        "VLM_HYBRID_MIN_IMAGE_SIZE", "307200"
+    )  # Equivalent to 300 pixels.
+)  # Min pixels (width*height) for hybrid VLM line/crop OCR via _prepare_image_for_vlm(hybrid_vlm=True). Upscaled if below. Default 307200.
+
+# When True, for hybrid PaddleOCR->VLM routes, resize/pad the full page to satisfy
+# VLM hybrid min/max pixel and DPI constraints *before* running PaddleOCR.
+# This makes Paddle's output bboxes align with the prepared page and reduces
+# per-line VLM crop resizing work.
+PREPARE_PAGE_FOR_HYBRID_VLM_BEFORE_PADDLE = convert_string_to_boolean(
+    get_or_create_env_var("PREPARE_PAGE_FOR_HYBRID_VLM_BEFORE_PADDLE", "True")
+)
+
+
 VLM_MIN_IMAGE_SIZE = int(
-    get_or_create_env_var("VLM_MIN_IMAGE_SIZE", "614400")
-)  # Minimum total pixels (width * height) for images passed to VLM, as a multiple of 32*32 for Qwen3-VL. Images with less pixels will be resized while maintaining aspect ratio. Default is 614400 (600*32*32).
+    get_or_create_env_var("VLM_MIN_IMAGE_SIZE", "819200")
+)  # Min pixels for full-page VLM via _prepare_image_for_vlm(hybrid_vlm=False). Upscaled if below. Default 819200. Hybrid crops use VLM_HYBRID_MIN_IMAGE_SIZE.
+
+VLM_MAX_IMAGE_SIZE = int(
+    get_or_create_env_var("VLM_MAX_IMAGE_SIZE", "1536000")
+)  # Maximum total pixels (width * height) for images passed to VLM, as a multiple of 32*32 for Qwen3.5. Images with more pixels will be resized while maintaining aspect ratio. Default is 1536000 (1500*32*32).
+
+VLM_MIN_DPI = float(
+    get_or_create_env_var("VLM_MIN_DPI", "150.0")
+)  # _prepare_image_for_vlm: reported DPI below this implies upscale (effective DPI = reported_dpi * scale).
 
 VLM_MAX_DPI = float(
     get_or_create_env_var("VLM_MAX_DPI", "300.0")
-)  # Maximum DPI for images passed to VLM. Images with higher DPI will be resized accordingly.
+)  # _prepare_image_for_vlm: reported DPI above this implies downscale. Bounds apply together with min/max pixels.
 
 USE_FLASH_ATTENTION = convert_string_to_boolean(
     get_or_create_env_var("USE_FLASH_ATTENTION", "False")
@@ -1248,7 +1282,7 @@ TESSERACT_SEGMENTATION_LEVEL = int(
 )  # Tesseract segmentation level: PSM level to use for Tesseract OCR
 
 CONVERT_LINE_TO_WORD_LEVEL = convert_string_to_boolean(
-    get_or_create_env_var("CONVERT_LINE_TO_WORD_LEVEL", "False")
+    get_or_create_env_var("CONVERT_LINE_TO_WORD_LEVEL", "True")
 )  # Whether to convert paddle line-level OCR results to word-level for better precision
 
 LOAD_PADDLE_AT_STARTUP = convert_string_to_boolean(
@@ -1382,10 +1416,25 @@ GEMMA3_27B_REPO_ID = get_or_create_env_var(
 )
 GPT_OSS_REPO_ID = get_or_create_env_var("GPT_OSS_REPO_ID", "openai/GPT-OSS 20B")
 
+MINISTRAL_3_14B_INST_REPO_ID = get_or_create_env_var(
+    "MINISTRAL_3_14B_INST_REPO_TRANSFORMERS_ID",
+    "mistralai/Ministral-3-14B-Instruct-2512",
+)
+
 # Qwen 3.5 model repo IDs (9B through 122B, from run_vlm.py)
+QWEN35_08B_REPO_ID = get_or_create_env_var(
+    "QWEN35_08B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-0.8B"
+)
+QWEN35_2B_REPO_ID = get_or_create_env_var(
+    "QWEN35_2B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-2B"
+)
+QWEN35_4B_REPO_ID = get_or_create_env_var(
+    "QWEN35_4B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-4B"
+)
 QWEN35_9B_REPO_ID = get_or_create_env_var(
     "QWEN35_9B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-9B"
 )
+
 QWEN35_27B_REPO_ID = get_or_create_env_var(
     "QWEN35_27B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-27B"
 )
@@ -1417,6 +1466,21 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
     elif "gpt-oss" in model_choice_lower:
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GPT_OSS_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "GPT-OSS 20B"
+    elif (
+        "ministral-3-14b-instruct" in model_choice_lower
+        or "ministral3-14b-instruct" in model_choice_lower
+    ):
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = MINISTRAL_3_14B_INST_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Ministral 3 14B Instruct"
+    elif "qwen3.5-0.8b" in model_choice_lower or "qwen-3.5-0.8b" in model_choice_lower:
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_08B_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 0.8B"
+    elif "qwen3.5-2b" in model_choice_lower or "qwen-3.5-2b" in model_choice_lower:
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_2B_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 2B"
+    elif "qwen3.5-4b" in model_choice_lower or "qwen-3.5-4b" in model_choice_lower:
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_4B_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 4B"
     elif "qwen3.5-9b" in model_choice_lower or "qwen-3.5-9b" in model_choice_lower:
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_9B_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 9B"
@@ -1456,6 +1520,10 @@ if (
 if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE in [
     "Gemma 3 12B",
     "Gemma 3 27B",
+    "Ministral 3 14B Instruct",
+    "Qwen 3.5 0.8B",
+    "Qwen 3.5 2B",
+    "Qwen 3.5 4B",
     "Qwen 3.5 9B",
     "Qwen 3.5 27B (4-bit)",
     "Qwen 3.5 27B",
@@ -1930,6 +1998,13 @@ APPLY_REDACTIONS_TEXT = int(
 # If you don't want to redact the text, but instead just draw a box over it, set this to True
 RETURN_PDF_FOR_REVIEW = convert_string_to_boolean(
     get_or_create_env_var("RETURN_PDF_FOR_REVIEW", "True")
+)
+
+# When True (and RETURN_PDF_FOR_REVIEW), write _redacted.pdf then _redactions_for_review.pdf
+# using two sequential full-document passes instead of two simultaneous PyMuPDF Document
+# objects. Cuts peak RAM (~halves PDF working set); roughly doubles apply time for those outputs.
+TWO_PASS_REVIEW_PDF_LOW_MEMORY = convert_string_to_boolean(
+    get_or_create_env_var("TWO_PASS_REVIEW_PDF_LOW_MEMORY", "False")
 )
 
 RETURN_REDACTED_PDF = convert_string_to_boolean(

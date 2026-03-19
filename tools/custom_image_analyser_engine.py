@@ -38,6 +38,7 @@ from tools.config import (
     HYBRID_OCR_CONFIDENCE_THRESHOLD,
     HYBRID_OCR_MAX_NEW_TOKENS,
     HYBRID_OCR_PADDING,
+    IMAGES_DPI,
     INFERENCE_SERVER_API_URL,
     INFERENCE_SERVER_LLM_PII_MODEL_CHOICE,
     INFERENCE_SERVER_MODEL_NAME,
@@ -59,6 +60,7 @@ from tools.config import (
     PADDLE_FONT_PATH,
     PADDLE_MODEL_PATH,
     PADDLE_USE_TEXTLINE_ORIENTATION,
+    PREPARE_PAGE_FOR_HYBRID_VLM_BEFORE_PADDLE,
     PREPROCESS_LOCAL_OCR_IMAGES,
     REPORT_VLM_OUTPUTS_TO_GUI,
     SAVE_EXAMPLE_HYBRID_IMAGES,
@@ -71,7 +73,10 @@ from tools.config import (
     TESSERACT_WORD_LEVEL_OCR,
     USE_LLAMA_SWAP,
     USE_TRANSFORMERS_VLM_MODEL_AS_LLM,
+    VLM_HYBRID_MIN_IMAGE_SIZE,
+    VLM_MAX_DPI,
     VLM_MAX_IMAGE_SIZE,
+    VLM_MIN_DPI,
     VLM_MIN_IMAGE_SIZE,
 )
 from tools.helper_functions import clean_unicode_text, get_system_font_path
@@ -662,6 +667,8 @@ def save_vlm_prompt_response(
     task_suffix: Optional[str] = None,
     input_tokens: Optional[int] = None,
     output_tokens: Optional[int] = None,
+    image_width: Optional[int] = None,
+    image_height: Optional[int] = None,
 ) -> str:
     """
     Save VLM prompt and response to a text file for traceability.
@@ -678,8 +685,10 @@ def save_vlm_prompt_response(
         top_p: Top-p parameter used (if applicable)
         model_type: Type of model (e.g., "VLM", "Bedrock", "Inference Server", "Gemini", "Azure/OpenAI")
         task_suffix: Optional suffix to add to filename (e.g., "_person", "_sig") to distinguish task types
-        input_tokens: Optional input token count from the VLM call
-        output_tokens: Optional output token count from the VLM call
+        input_tokens: Input token count (API usage where available; local/estimated for Transformers)
+        output_tokens: Output token count (same)
+        image_width: Pixel width of the image sent to the VLM (after any resize/pad in the pipeline)
+        image_height: Pixel height of the image sent to the VLM
 
     Returns:
         Path to the saved file
@@ -727,10 +736,20 @@ def save_vlm_prompt_response(
             f.write(f"Image: {image_name}\n")
         if page_number is not None:
             f.write(f"Page: {page_number + 1}\n")
-        if input_tokens is not None:
-            f.write(f"Input tokens: {input_tokens}\n")
-        if output_tokens is not None:
-            f.write(f"Output tokens: {output_tokens}\n")
+        if image_width is not None and image_height is not None:
+            f.write(
+                f"Image input size (pixels): {image_width} x {image_height} (width x height)\n"
+            )
+        elif image_width is not None or image_height is not None:
+            f.write(
+                f"Image input size (pixels): width={image_width}, height={image_height}\n"
+            )
+        f.write(
+            f"Input tokens: {input_tokens if input_tokens is not None else '(not reported)'}\n"
+        )
+        f.write(
+            f"Output tokens: {output_tokens if output_tokens is not None else '(not reported)'}\n"
+        )
         f.write(f"Model: {model_choice}\n")
         f.write(f"Model Type: {model_type}\n")
         if temperature is not None:
@@ -754,105 +773,230 @@ def save_vlm_prompt_response(
     return filepath
 
 
+def _exif_resolution_to_float(value: Any) -> Optional[float]:
+    """Convert EXIF/TIFF resolution (RATIONAL) to float."""
+    if value is None:
+        return None
+    try:
+        if hasattr(value, "numerator") and hasattr(value, "denominator"):
+            d = float(value.denominator)
+            if d == 0:
+                return None
+            return float(value.numerator) / d
+        if isinstance(value, tuple) and len(value) == 2:
+            d = float(value[1])
+            if d == 0:
+                return None
+            return float(value[0]) / d
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _best_effort_pil_dpi(image: Image.Image, fallback: float = 72.0) -> float:
+    """
+    Best-effort DPI from PIL metadata before defaulting to ``fallback``.
+
+    Tries, in order: ``info['dpi']``, JPEG JFIF density/unit, EXIF X/Y resolution,
+    TIFF ``tag_v2`` resolution tags.
+    """
+
+    def _positive_max_pair(a: Any, b: Any) -> Optional[float]:
+        try:
+            x = float(a) if a is not None else 0.0
+            y = float(b) if b is not None else 0.0
+            m = max(x, y)
+            return m if m > 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    dpi_raw = image.info.get("dpi")
+    if dpi_raw is not None:
+        if isinstance(dpi_raw, tuple) and len(dpi_raw) >= 2:
+            v = _positive_max_pair(dpi_raw[0], dpi_raw[1])
+            if v is not None:
+                return v
+        else:
+            try:
+                f = float(dpi_raw)
+                if f > 0:
+                    return f
+            except (TypeError, ValueError):
+                pass
+
+    jfif_unit = image.info.get("jfif_unit")
+    jden = image.info.get("jfif_density")
+    if jden is not None and isinstance(jden, (tuple, list)) and len(jden) >= 2:
+        v = _positive_max_pair(jden[0], jden[1])
+        if v is not None:
+            if jfif_unit == 1:
+                return v
+            if jfif_unit == 2:
+                return v * 2.54
+
+    try:
+        exif = image.getexif()
+        if exif:
+            xres = _exif_resolution_to_float(exif.get(282))
+            yres = _exif_resolution_to_float(exif.get(283))
+            if xres is not None and yres is not None and xres > 0 and yres > 0:
+                d = max(xres, yres)
+                unit = exif.get(296, 2)
+                if unit == 2 or unit is None:
+                    return d
+                if unit == 3:
+                    return d * 2.54
+    except Exception:
+        pass
+
+    try:
+        tv = getattr(image, "tag_v2", None)
+        if tv is not None:
+            xres = _exif_resolution_to_float(tv.get(282))
+            yres = _exif_resolution_to_float(tv.get(283))
+            if xres is not None and yres is not None and xres > 0 and yres > 0:
+                d = max(xres, yres)
+                unit = tv.get(296)
+                if unit == 2 or unit is None:
+                    return d
+                if unit == 3:
+                    return d * 2.54
+    except Exception:
+        pass
+
+    # No DPI metadata found (or parse failed) across known PIL/JFIF/EXIF/TIFF fields.
+    # Make this explicit in logs so "reported DPI" isn't mistaken for a detected value.
+    try:
+        w, h = image.size
+    except Exception:
+        w, h = None, None
+    try:
+        img_format = getattr(image, "format", None)
+    except Exception:
+        img_format = None
+    print(
+        "VLM image preparation: DPI metadata not found; "
+        f"using fallback {fallback:.1f} DPI"
+        + (
+            f" ({w}x{h}{', ' + str(img_format) if img_format else ''})"
+            if w and h
+            else ""
+        )
+    )
+    return fallback
+
+
+def _save_image_with_config_dpi(image: Image.Image, path: str, **kwargs: Any) -> None:
+    """
+    Write a PIL image to disk with DPI metadata from ``IMAGES_DPI`` (PNG pHYs, JPEG JFIF).
+    Extra kwargs are forwarded to ``Image.save`` (e.g. format=, optimize=).
+    """
+    _d = max(1, int(round(float(IMAGES_DPI))))
+    kw = dict(kwargs)
+    kw.pop("dpi", None)
+    image.save(path, dpi=(_d, _d), **kw)
+
+
 def _prepare_image_for_vlm(
     image: Image.Image,
     ocr_method: Optional[str] = None,
     max_image_size: Optional[int] = VLM_MAX_IMAGE_SIZE,
+    hybrid_vlm: bool = False,
 ) -> Image.Image:
     """
-    Prepare image for VLM by ensuring it doesn't exceed maximum size and DPI limits.
+    Prepare image for VLM: enforce pixel count and reported DPI bounds.
+
+    Scaling by factor ``s`` updates effective DPI as ``reported_dpi * s`` (same physical
+    document size). Chooses ``s`` so that:
+
+    - ``VLM_MIN_IMAGE_SIZE`` (full page) or ``VLM_HYBRID_MIN_IMAGE_SIZE`` (hybrid crops)
+      <= width*height*s^2 <= ``max_image_size``
+    - ``VLM_MIN_DPI`` <= reported_dpi * s <= ``VLM_MAX_DPI``
+
+    If constraints conflict, caps (max pixels / max DPI) take precedence and a warning is printed.
 
     Args:
         image: PIL Image to prepare
-        ocr_method: Optional OCR method name. If "AWS Bedrock VLM OCR" or contains "Bedrock",
-                    the image will not be resized.
-        max_image_size: Optional maximum image size in pixels. If not provided, the default VLM_MAX_IMAGE_SIZE will be used.
+        ocr_method: If it contains ``bedrock`` (case-insensitive), max pixel budget is
+            raised to 33554432 for Bedrock VLM.
+        max_image_size: Upper bound on total pixels (default ``VLM_MAX_IMAGE_SIZE``).
+        hybrid_vlm: If True, use ``VLM_HYBRID_MIN_IMAGE_SIZE`` as minimum pixels; otherwise
+            ``VLM_MIN_IMAGE_SIZE`` (whole-page VLM).
+
     Returns:
-        PIL Image that has been resized if necessary to meet size and DPI constraints
-        (unless OCR method is AWS Bedrock VLM OCR)
+        Resized RGB-safe image when needed; DPI metadata updated after resize.
     """
     if image is None:
         return image
 
-    # Check if OCR method is AWS Bedrock VLM OCR - if so, skip resizing. NOTE: abandoned as images were exceeding bedrock limits
-    # from tools.config import BEDROCK_VLM_TEXT_EXTRACT_OPTION
-    # if ocr_method and (
-    #     ocr_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
-    #     or "Bedrock" in ocr_method
-    #     or ocr_method == "bedrock-vlm"
-    # ):
-    #     # Skip resizing for AWS Bedrock VLM OCR
-    #     return image
-
-    # Override VLM_MAX_IMAGE_SIZE for AWS Bedrock VLM OCR (multiple of 32*32 for model compatibility).
     if ocr_method and "bedrock" in ocr_method.lower():
-        max_image_size = 33554432  # 32*32*32*1024 = 33554432
-        # print("Overriding VLM_MAX_IMAGE_SIZE for AWS Bedrock VLM OCR to 33554432")
+        max_image_size = min(
+            33554432, VLM_MAX_IMAGE_SIZE
+        )  # Bedrock has a specific max pixel budget - it will fail if exceeded
+
+    if max_image_size is None or max_image_size <= 0:
+        max_image_size = VLM_MAX_IMAGE_SIZE
+
+    min_image_size = VLM_HYBRID_MIN_IMAGE_SIZE if hybrid_vlm else VLM_MIN_IMAGE_SIZE
+    min_image_size = max(0, int(min_image_size))
+
+    dpi_lo = min(VLM_MIN_DPI, VLM_MAX_DPI)
+    dpi_hi = max(VLM_MIN_DPI, VLM_MAX_DPI)
 
     width, height = image.size
+    area = float(width * height)
+    if area <= 0:
+        return image
 
-    # Get DPI information (if available)
-    dpi = image.info.get("dpi", (72, 72))  # Default to 72 DPI if not specified
-    if isinstance(dpi, tuple):
-        dpi_x, dpi_y = dpi
-        # Use the maximum DPI value
-        current_dpi = max(dpi_x, dpi_y)
-    else:
-        current_dpi = float(dpi) if dpi else 72.0
+    current_dpi = _best_effort_pil_dpi(image, fallback=float(IMAGES_DPI))
+    if current_dpi <= 0:
+        current_dpi = float(IMAGES_DPI)
 
-    # Calculate scale factors needed
-    size_scale = 1.0
-    dpi_scale = 1.0
+    # Effective DPI after uniform scale s is current_dpi * s.
+    s_min_dpi = dpi_lo / current_dpi
+    s_max_dpi = dpi_hi / current_dpi
 
-    # Check if total pixels exceed maximum
-    total_pixels = width * height
-    if total_pixels > max_image_size:
-        # Calculate scale factor to reduce total pixels to maximum
-        # Since area scales with scale^2, we need sqrt of the ratio
-        size_scale = (max_image_size / total_pixels) ** 0.5
+    s_min_px = math.sqrt(min_image_size / area) if min_image_size > 0 else 0.0
+    s_max_px = math.sqrt(max_image_size / area) if max_image_size > 0 else float("inf")
+
+    s_lo = max(s_min_dpi, s_min_px)
+    s_hi = min(s_max_dpi, s_max_px)
+
+    if s_lo > s_hi:
         print(
-            f"VLM image size check: Image has {total_pixels:,} pixels ({width}x{height}), exceeds maximum {max_image_size:,} pixels. Will resize by factor {size_scale:.3f}"
+            f"VLM image preparation warning: constraints conflict "
+            f"(DPI {dpi_lo:.1f}-{dpi_hi:.1f}, pixels {min_image_size}-{max_image_size}, "
+            f"reported DPI {current_dpi:.1f}, {width}x{height}). "
+            f"Using scale {s_hi:.4f} (capping size/DPI)."
+        )
+        s = s_hi
+    else:
+        s = 1.0
+        if s < s_lo:
+            s = s_lo
+        elif s > s_hi:
+            s = s_hi
+
+    if abs(s - 1.0) < 1e-6:
+        return image
+
+    new_w = max(1, int(round(width * s)))
+    new_h = max(1, int(round(height * s)))
+    achieved_dpi = current_dpi * s
+    metadata_dpi = min(dpi_hi, max(dpi_lo, achieved_dpi))
+
+    if abs(s - 1.0) > 0.02:
+        print(
+            f"VLM image preparation: {width}x{height} ({int(area):,} px, ~{current_dpi:.1f} DPI) "
+            f"-> {new_w}x{new_h} (achieved ~{achieved_dpi:.1f} DPI, config requirement ~{metadata_dpi:.1f} DPI), scale {s:.4f}"
         )
 
-    # Check if DPI exceeds maximum (Not currently utilised)
-    # if current_dpi > VLM_MAX_DPI:
-    #     dpi_scale = VLM_MAX_DPI / current_dpi
-    # print(
-    #     f"VLM DPI check: Image DPI {current_dpi:.1f} exceeds maximum {VLM_MAX_DPI:.1f} DPI. Will resize by factor {dpi_scale:.3f}"
-    # )
-
-    dpi_scale = 1.0
-
-    # Use the smaller scale factor to ensure both constraints are met
-    final_scale = min(size_scale, dpi_scale)
-
-    # Resize if necessary
-    if final_scale < 1.0:
-        new_width = int(width * final_scale)
-        new_height = int(height * final_scale)
-        # print(
-        #     f"VLM image preparation: Resizing image from {width}x{height} to {new_width}x{new_height} (scale: {final_scale:.3f})"
-        # )
-
-        # Use high-quality resampling for downscaling
-        image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-
-        # Update DPI info if it was set
-        if "dpi" in image.info:
-            new_dpi = (current_dpi * final_scale, current_dpi * final_scale)
-            # Create a copy with updated DPI info
-            image_info = image.info.copy()
-            image_info["dpi"] = new_dpi
-            # Note: PIL doesn't allow direct modification of info dict, so we'll just note it
-            # print(
-            #     f"VLM image preparation: Effective DPI after resize: {new_dpi[0]:.1f}"
-            # )
-    else:
-        total_pixels = width * height
-        # print(
-        #     f"VLM image preparation: Image size {width}x{height} ({total_pixels:,} pixels) and DPI {current_dpi:.1f} are within limits (max pixels: {VLM_MAX_IMAGE_SIZE:,}, max DPI: {VLM_MAX_DPI})"
-        # )
-
+    resample = Image.Resampling.LANCZOS if s < 1.0 else Image.Resampling.BICUBIC
+    image = image.resize((new_w, new_h), resample)
+    try:
+        image.info["dpi"] = (metadata_dpi, metadata_dpi)
+    except Exception:
+        pass
     return image
 
 
@@ -915,7 +1059,7 @@ def _call_inference_server_vlm_api(
     min_p: float = None,
     presence_penalty: float = None,
     use_llama_swap: bool = USE_LLAMA_SWAP,
-) -> Tuple[str, int, int]:
+) -> Tuple[str, int, int, int, int]:
     """
     Calls a inference-server API endpoint with an image and text prompt.
 
@@ -942,7 +1086,8 @@ def _call_inference_server_vlm_api(
         use_llama_swap: Whether to use llama-swap for the model (defaults to USE_LLAMA_SWAP from config).
             If True and model_name is provided, the model name will be included in the payload.
     Returns:
-        Tuple[str, int, int]: The generated text response, input tokens, output tokens
+        Tuple of response text, input tokens, output tokens, and image width/height
+        in pixels (after aspect-ratio padding sent to the API).
 
     Raises:
         ConnectionError: If the API request fails
@@ -1040,7 +1185,10 @@ def _call_inference_server_vlm_api(
                 )
                 response.raise_for_status()
 
-                final_tokens = []
+                # Some OpenAI-compatible servers stream *cumulative* delta.content (full text
+                # generated so far on each chunk). Printing every chunk reprints completed lines.
+                # Others stream incremental tokens only. Support both.
+                accumulated_response = ""
                 output_tokens = 0
                 final_chunk = None
 
@@ -1061,16 +1209,27 @@ def _call_inference_server_vlm_api(
                             if "choices" in chunk and len(chunk["choices"]) > 0:
                                 delta = chunk["choices"][0].get("delta", {})
                                 token = delta.get("content", "")
-                                if token:
+                                if not token:
+                                    continue
+                                if token == accumulated_response:
+                                    continue
+                                if accumulated_response and token.startswith(
+                                    accumulated_response
+                                ):
+                                    new_part = token[len(accumulated_response) :]
+                                    if new_part:
+                                        print(new_part, end="", flush=True)
+                                    accumulated_response = token
+                                else:
                                     print(token, end="", flush=True)
-                                    final_tokens.append(token)
-                                    output_tokens += 1  # Count tokens as they stream in
+                                    accumulated_response += token
+                                output_tokens += 1
                         except json.JSONDecodeError:
                             continue
 
                 print()  # newline after stream finishes
 
-                text = "".join(final_tokens)
+                text = accumulated_response
 
                 # Try to extract token usage from final chunk if available
                 input_tokens = 0
@@ -1091,7 +1250,8 @@ def _call_inference_server_vlm_api(
                     )
                     input_tokens = prompt_word_count + image_tokens_estimate
 
-                return text, input_tokens, output_tokens
+                iw, ih = image.size
+                return text, input_tokens, output_tokens, iw, ih
 
             else:
                 # Handle non-streaming response
@@ -1127,7 +1287,8 @@ def _call_inference_server_vlm_api(
                     input_tokens = usage.get("prompt_tokens", 0)
                     output_tokens = usage.get("completion_tokens", 0)
 
-                return content, input_tokens, output_tokens
+                iw, ih = image.size
+                return content, input_tokens, output_tokens, iw, ih
 
         except (
             requests.exceptions.RequestException,
@@ -1166,7 +1327,7 @@ def _call_bedrock_vlm_api(
     timeout: int = 60,
     max_retries: int = 5,
     retry_delay_seconds: float = 2.0,
-) -> Tuple[str, int, int]:
+) -> Tuple[str, int, int, int, int]:
     """
     Calls AWS Bedrock API with an image and text prompt for vision models.
 
@@ -1183,7 +1344,8 @@ def _call_bedrock_vlm_api(
         retry_delay_seconds: Delay in seconds between retries (default 2.0)
 
     Returns:
-        Tuple[str, int, int]: The generated text response, input tokens, output tokens
+        Response text, input/output tokens, and image width/height in pixels
+        (after aspect-ratio padding sent to the API).
 
     Raises:
         ConnectionError: If the API request fails after all retries
@@ -1274,7 +1436,8 @@ def _call_bedrock_vlm_api(
                 input_tokens = usage.get("inputTokens", 0)
                 output_tokens = usage.get("outputTokens", 0)
 
-            return text, input_tokens, output_tokens
+            iw, ih = image.size
+            return text, input_tokens, output_tokens, iw, ih
 
         except Exception as e:
             last_error = e
@@ -1642,7 +1805,7 @@ def _vlm_ocr_predict(
 
         # Check and resize image if it exceeds maximum size or DPI limits
         try:
-            image = _prepare_image_for_vlm(image)
+            image = _prepare_image_for_vlm(image, hybrid_vlm=True)
             width, height = image.size
         except Exception as prep_error:
             print(f"VLM OCR error: Could not prepare image for VLM: {prep_error}")
@@ -1756,6 +1919,12 @@ def _process_page_result_with_hybrid_vlm_ocr(
     Returns:
         Modified page_results with VLM replacements for low-confidence lines.
     """
+    if len(page_results) > 1:
+        print(
+            f"Hybrid Paddle+VLM: PaddleOCR returned {len(page_results)} result dicts for one image "
+            f"({image_name!r}); applying line-level VLM re-OCR only to the first dict to avoid duplicate VLM calls."
+        )
+    _hybrid_page_iter = page_results[:1] if len(page_results) > 1 else page_results
 
     def _normalize_paddle_result_lists(rec_texts, rec_scores, rec_polys):
         """
@@ -1850,8 +2019,8 @@ def _process_page_result_with_hybrid_vlm_ocr(
 
         return f"{safe_original}_conf_{conf}_to_{safe_new}_conf_{new_conf}"
 
-    # Process each page result in paddle_results
-    for page_result in page_results:
+    # Process each page result in paddle_results (see _hybrid_page_iter when len > 1)
+    for page_result in _hybrid_page_iter:
         # Extract text recognition results from the paddle format
         rec_texts = page_result.get("rec_texts", list())
         rec_scores = page_result.get("rec_scores", list())
@@ -1984,7 +2153,7 @@ def _process_page_result_with_hybrid_vlm_ocr(
                         image_name_shortened = image_name_safe[:20]
                         filename = f"{image_name_shortened}_{line_text_shortened}_hybrid_analysis_input_image.png"
                         filepath = os.path.join(vlm_debug_dir, filename)
-                        cropped_image.save(filepath)
+                        _save_image_with_config_dpi(cropped_image, filepath)
                         # print(f"Saved VLM input image to: {filepath}")
                     except Exception as save_error:
                         print(f"Warning: Could not save VLM input image: {save_error}")
@@ -2073,7 +2242,9 @@ def _process_page_result_with_hybrid_vlm_ocr(
                                 hybrid_ocr_examples_folder + f"/{safe_filename}.png"
                             )
                             # print(f"Saving example image to {output_image_path}")
-                            cropped_image.save(output_image_path)
+                            _save_image_with_config_dpi(
+                                cropped_image, output_image_path
+                            )
 
                         # Replace with VLM result in paddle_results format
                         # Update rec_texts, rec_scores, and rec_models for this line
@@ -2431,7 +2602,7 @@ def _process_textract_page_with_hybrid_bedrock_vlm(
                         f"{safe_sanitize_text(key)}_conf_{int(line_conf)}_error.png"
                     )
                     crop_path = os.path.join(hybrid_examples_folder, safe_name)
-                    cropped.save(crop_path)
+                    _save_image_with_config_dpi(cropped, crop_path)
                     log_entry = {
                         "key": key,
                         "line_conf": line_conf,
@@ -2455,7 +2626,7 @@ def _process_textract_page_with_hybrid_bedrock_vlm(
                 try:
                     safe_name = f"{safe_sanitize_text(key)}_conf_{int(line_conf)}.png"
                     crop_path = os.path.join(hybrid_examples_folder, safe_name)
-                    cropped.save(crop_path)
+                    _save_image_with_config_dpi(cropped, crop_path)
                     log_entry = {
                         "key": key,
                         "line_conf": line_conf,
@@ -2474,7 +2645,7 @@ def _process_textract_page_with_hybrid_bedrock_vlm(
             try:
                 safe_name = f"{safe_sanitize_text(key)}_conf_{int(line_conf)}.png"
                 crop_path = os.path.join(hybrid_examples_folder, safe_name)
-                cropped.save(crop_path)
+                _save_image_with_config_dpi(cropped, crop_path)
                 log_entry = {
                     "key": key,
                     "line_conf": line_conf,
@@ -2737,7 +2908,7 @@ def _inference_server_ocr_predict(
 
         # Check and resize image if it exceeds maximum size or DPI limits
         try:
-            image = _prepare_image_for_vlm(image)
+            image = _prepare_image_for_vlm(image, hybrid_vlm=True)
             width, height = image.size
         except Exception as prep_error:
             print(
@@ -2765,7 +2936,7 @@ def _inference_server_ocr_predict(
                         else None
                     )
 
-                extracted_text, _vlm_input_tokens, _vlm_output_tokens = (
+                extracted_text, _vlm_input_tokens, _vlm_output_tokens, _, _ = (
                     _call_inference_server_vlm_api(
                         image=image,
                         prompt=prompt,
@@ -2927,7 +3098,9 @@ def _bedrock_vlm_ocr_predict(
             from tools.config import BEDROCK_VLM_TEXT_EXTRACT_OPTION
 
             image = _prepare_image_for_vlm(
-                image, ocr_method=BEDROCK_VLM_TEXT_EXTRACT_OPTION
+                image,
+                ocr_method=BEDROCK_VLM_TEXT_EXTRACT_OPTION,
+                hybrid_vlm=True,
             )
             width, height = image.size
         except Exception as prep_error:
@@ -2939,7 +3112,7 @@ def _bedrock_vlm_ocr_predict(
         # Use the Bedrock API to extract text with retry logic
         for attempt in range(1, max_retries + 1):
             try:
-                extracted_text, _vlm_input_tokens, _vlm_output_tokens = (
+                extracted_text, _vlm_input_tokens, _vlm_output_tokens, _, _ = (
                     _call_bedrock_vlm_api(
                         image=image,
                         prompt=prompt,
@@ -3154,7 +3327,7 @@ def _gemini_vlm_ocr_predict(
 
         # Check and resize image if it exceeds maximum size or DPI limits
         try:
-            image = _prepare_image_for_vlm(image)
+            image = _prepare_image_for_vlm(image, hybrid_vlm=True)
             width, height = image.size
         except Exception as prep_error:
             print(
@@ -3349,7 +3522,7 @@ def _azure_openai_vlm_ocr_predict(
 
         # Check and resize image if it exceeds maximum size or DPI limits
         try:
-            image = _prepare_image_for_vlm(image)
+            image = _prepare_image_for_vlm(image, hybrid_vlm=True)
             width, height = image.size
         except Exception as prep_error:
             print(
@@ -3609,7 +3782,7 @@ def plot_text_bounding_boxes(
             f"{image_name_shortened}_initial_bounding_box_output{task_type_suffix}.png"
         )
         filepath = os.path.join(normalized_debug_dir, filename)
-        img.save(filepath)
+        _save_image_with_config_dpi(img, filepath)
     except Exception as e:
         print(f"Error saving image with bounding boxes: {e}")
 
@@ -3912,7 +4085,7 @@ def _vlm_page_ocr_predict(
                 image_name_shortened = image_name_safe[:50]
                 filename = f"{image_name_shortened}_vlm_page_input_image.png"
                 filepath = os.path.join(vlm_debug_dir, filename)
-                processed_image.save(filepath)
+                _save_image_with_config_dpi(processed_image, filepath)
                 # print(f"Saved VLM input image to: {filepath}")
             except Exception as save_error:
                 print(f"Warning: Could not save VLM input image: {save_error}")
@@ -3993,6 +4166,10 @@ def _vlm_page_ocr_predict(
                     top_p=model_default_top_p,
                     model_type="VLM",
                     task_suffix=task_suffix,
+                    input_tokens=vlm_input_tokens,
+                    output_tokens=vlm_output_tokens,
+                    image_width=processed_image.size[0],
+                    image_height=processed_image.size[1],
                 )
                 print(f"Saved VLM prompt/response to: {saved_file}")
             except Exception as save_error:
@@ -4284,7 +4461,9 @@ def _vlm_page_ocr_predict(
             except (ValueError, TypeError):
                 confidence = 100  # Default if invalid
 
-            result["text"].append(clean_unicode_text(text))
+            result["text"].append(
+                clean_unicode_text(text, preserve_international_scripts=True)
+            )
             result["left"].append(left)
             result["top"].append(top)
             result["width"].append(width)
@@ -4482,7 +4661,7 @@ def _inference_server_page_ocr_predict(
                 )
                 filepath = os.path.join(vlm_debug_dir, filename)
                 print(f"Saving inference-server input image to: {filename}")
-                processed_image.save(filepath)
+                _save_image_with_config_dpi(processed_image, filepath)
                 # print(f"Saved VLM input image to: {filepath}")
             except Exception as save_error:
                 print(f"Warning: Could not save VLM input image: {save_error}")
@@ -4518,22 +4697,26 @@ def _inference_server_page_ocr_predict(
                 INFERENCE_SERVER_MODEL_NAME if INFERENCE_SERVER_MODEL_NAME else None
             )
 
-        extracted_text, vlm_input_tokens, vlm_output_tokens = (
-            _call_inference_server_vlm_api(
-                image=processed_image,
-                prompt=prompt,
-                model_name=final_model_name,
-                max_new_tokens=model_default_max_new_tokens,
-                temperature=None,
-                top_p=None,
-                top_k=None,
-                repetition_penalty=None,
-                seed=None,
-                do_sample=model_default_do_sample,
-                min_p=None,
-                presence_penalty=None,
-                use_llama_swap=USE_LLAMA_SWAP,
-            )
+        (
+            extracted_text,
+            vlm_input_tokens,
+            vlm_output_tokens,
+            vlm_sent_w,
+            vlm_sent_h,
+        ) = _call_inference_server_vlm_api(
+            image=processed_image,
+            prompt=prompt,
+            model_name=final_model_name,
+            max_new_tokens=model_default_max_new_tokens,
+            temperature=None,
+            top_p=None,
+            top_k=None,
+            repetition_penalty=None,
+            seed=None,
+            do_sample=model_default_do_sample,
+            min_p=None,
+            presence_penalty=None,
+            use_llama_swap=USE_LLAMA_SWAP,
         )
 
         # Save prompt and response to file
@@ -4572,6 +4755,10 @@ def _inference_server_page_ocr_predict(
                     top_p=model_default_top_p,
                     model_type="Inference Server",
                     task_suffix=task_suffix,
+                    input_tokens=vlm_input_tokens,
+                    output_tokens=vlm_output_tokens,
+                    image_width=vlm_sent_w,
+                    image_height=vlm_sent_h,
                 )
                 print(f"Saved inference-server VLM prompt/response to: {saved_file}")
             except Exception as save_error:
@@ -4857,7 +5044,9 @@ def _inference_server_page_ocr_predict(
             except (ValueError, TypeError):
                 confidence = 50  # Default if invalid
 
-            result["text"].append(clean_unicode_text(text))
+            result["text"].append(
+                clean_unicode_text(text, preserve_international_scripts=True)
+            )
             result["left"].append(left)
             result["top"].append(top)
             result["width"].append(width)
@@ -5087,7 +5276,9 @@ def _parse_vlm_page_ocr_response(
         except (ValueError, TypeError):
             confidence = 100
 
-        result["text"].append(clean_unicode_text(text))
+        result["text"].append(
+            clean_unicode_text(text, preserve_international_scripts=True)
+        )
         result["left"].append(left)
         result["top"].append(top)
         result["width"].append(width)
@@ -5184,52 +5375,28 @@ def _bedrock_page_ocr_predict(
                 "model": [],
             }
 
-        # Resize image to respect VLM_MAX_IMAGE_SIZE and VLM_MIN_IMAGE_SIZE (aspect ratio
-        # preserved). Bounding box coordinates are scaled back to the original image space
-        # via scale_x/scale_y so they match the image used in choose_and_run_redactor /
-        # redact_image_pdf (e.g. image_annotator).
+        # Same preparation as other full-page VLMs: min/max pixels + DPI bounds; Bedrock
+        # gets a higher max pixel budget via ocr_method. scale_x/scale_y map boxes to original.
         scale_x = 1.0
         scale_y = 1.0
         try:
-            if image.mode != "RGB":
-                image = image.convert("RGB")
             original_width, original_height = image.size
-            total_pixels = original_width * original_height
-            size_scale = 1.0
-
-            if total_pixels > VLM_MAX_IMAGE_SIZE:
-                size_scale = (VLM_MAX_IMAGE_SIZE / total_pixels) ** 0.5
-                # print(
-                #     f"Bedrock page OCR: Image has {total_pixels:,} pixels ({original_width}x{original_height}), "
-                #     f"exceeds VLM_MAX_IMAGE_SIZE {VLM_MAX_IMAGE_SIZE:,}. Resizing by factor {size_scale:.3f}"
-                # )
-            elif total_pixels < VLM_MIN_IMAGE_SIZE and VLM_MIN_IMAGE_SIZE > 0:
-                size_scale = (VLM_MIN_IMAGE_SIZE / total_pixels) ** 0.5
-                # print(
-                #     f"Bedrock page OCR: Image has {total_pixels:,} pixels ({original_width}x{original_height}), "
-                #     f"below VLM_MIN_IMAGE_SIZE {VLM_MIN_IMAGE_SIZE:,}. Resizing by factor {size_scale:.3f}"
-                # )
-
-            if size_scale != 1.0:
-                new_width = max(1, int(original_width * size_scale))
-                new_height = max(1, int(original_height * size_scale))
-                processed_image = image.resize(
-                    (new_width, new_height), Image.Resampling.LANCZOS
-                )
-                processed_width, processed_height = new_width, new_height
-                scale_x = (
-                    float(original_width) / float(processed_width)
-                    if processed_width > 0
-                    else 1.0
-                )
-                scale_y = (
-                    float(original_height) / float(processed_height)
-                    if processed_height > 0
-                    else 1.0
-                )
-            else:
-                processed_image = image
-                processed_width, processed_height = original_width, original_height
+            processed_image = _prepare_image_for_vlm(
+                image,
+                ocr_method="AWS Bedrock VLM page OCR",
+                hybrid_vlm=False,
+            )
+            processed_width, processed_height = processed_image.size
+            scale_x = (
+                float(original_width) / float(processed_width)
+                if processed_width > 0
+                else 1.0
+            )
+            scale_y = (
+                float(original_height) / float(processed_height)
+                if processed_height > 0
+                else 1.0
+            )
         except Exception as prep_error:
             print(f"Bedrock page OCR error: Could not prepare image: {prep_error}")
             return {
@@ -5315,13 +5482,19 @@ def _bedrock_page_ocr_predict(
 
                 filepath = os.path.join(vlm_debug_dir, filename)
                 print(f"Saving Bedrock VLM input image to: {filename}")
-                processed_image.save(filepath)
+                _save_image_with_config_dpi(processed_image, filepath)
                 # print(f"Saved Bedrock VLM input image to: {filepath}")
             except Exception as save_error:
                 print(f"Warning: Could not save Bedrock VLM input image: {save_error}")
 
         # Call Bedrock API
-        extracted_text, vlm_input_tokens, vlm_output_tokens = _call_bedrock_vlm_api(
+        (
+            extracted_text,
+            vlm_input_tokens,
+            vlm_output_tokens,
+            vlm_sent_w,
+            vlm_sent_h,
+        ) = _call_bedrock_vlm_api(
             image=processed_image,
             prompt=prompt,
             model_choice=model_choice,
@@ -5374,6 +5547,8 @@ def _bedrock_page_ocr_predict(
                     task_suffix=task_suffix,
                     input_tokens=vlm_input_tokens,
                     output_tokens=vlm_output_tokens,
+                    image_width=vlm_sent_w,
+                    image_height=vlm_sent_h,
                 )
                 print(f"Saved Bedrock VLM prompt/response to: {saved_file}")
             except Exception as save_error:
@@ -5640,6 +5815,8 @@ def _gemini_page_ocr_predict(
                     task_suffix=task_suffix,
                     input_tokens=vlm_input_tokens,
                     output_tokens=vlm_output_tokens,
+                    image_width=processed_image.size[0],
+                    image_height=processed_image.size[1],
                 )
                 print(f"Saved Gemini VLM prompt/response to: {saved_file}")
             except Exception as save_error:
@@ -5884,6 +6061,8 @@ def _azure_openai_page_ocr_predict(
                     task_suffix=task_suffix,
                     input_tokens=vlm_input_tokens,
                     output_tokens=vlm_output_tokens,
+                    image_width=processed_image.size[0],
+                    image_height=processed_image.size[1],
                 )
                 print(f"Saved Azure/OpenAI VLM prompt/response to: {saved_file}")
             except Exception as save_error:
@@ -6352,10 +6531,10 @@ class CustomImageAnalyzerEngine:
             ):
                 # Coordinates are already in input space, no conversion needed
                 use_relative_coords = False
-                print(
-                    f"PaddleOCR coordinates are in input image space ({input_image_width}x{input_image_height}). "
-                    f"Using coordinates directly without conversion."
-                )
+                # print(
+                #     f"PaddleOCR coordinates are in input image space ({input_image_width}x{input_image_height}). "
+                #     f"Using coordinates directly without conversion."
+                # )
 
             # Second pass: convert coordinates using relative coordinate approach
             # Use default "Paddle" if rec_models is not available or doesn't match length
@@ -7119,7 +7298,9 @@ class CustomImageAnalyzerEngine:
                                 hybrid_ocr_examples_folder + f"/{safe_filename}.png"
                             )
                             print(f"Saving example image to {output_image_path}")
-                            cropped_image.save(output_image_path)
+                            _save_image_with_config_dpi(
+                                cropped_image, output_image_path
+                            )
 
                         text = new_text
                         conf = new_conf
@@ -7140,7 +7321,9 @@ class CustomImageAnalyzerEngine:
 
             # Append the final result (either original, replaced, or skipped if empty)
             if text.strip():
-                final_data["text"].append(clean_unicode_text(text))
+                final_data["text"].append(
+                    clean_unicode_text(text, preserve_international_scripts=True)
+                )
                 final_data["left"].append(left)
                 final_data["top"].append(top)
                 final_data["width"].append(width)
@@ -7539,7 +7722,7 @@ class CustomImageAnalyzerEngine:
                                 filepath = os.path.join(
                                     inference_server_debug_dir, filename
                                 )
-                                cropped_image.save(filepath)
+                                _save_image_with_config_dpi(cropped_image, filepath)
                             except Exception as save_error:
                                 print(
                                     f"Warning: Could not save inference-server input image: {save_error}"
@@ -7660,7 +7843,9 @@ class CustomImageAnalyzerEngine:
                                         hybrid_ocr_examples_folder
                                         + f"/{safe_filename}.png"
                                     )
-                                    cropped_image.save(output_image_path)
+                                    _save_image_with_config_dpi(
+                                        cropped_image, output_image_path
+                                    )
 
                                 # Replace with inference-server result in paddle_results format
                                 # Update rec_texts, rec_scores, and rec_models for this line
@@ -7737,7 +7922,16 @@ class CustomImageAnalyzerEngine:
             image, preprocessing_metadata = self.image_preprocessor.preprocess_image(
                 image
             )
-            if SAVE_PREPROCESS_IMAGES:
+            # Only export preprocessed images when they are actually used as OCR input.
+            # Full-page VLM-style OCR paths use the original image for coordinate consistency.
+            save_preprocessed_for_engine = self.ocr_engine not in (
+                "vlm",
+                "inference-server",
+                "bedrock-vlm",
+                "gemini-vlm",
+                "azure-openai-vlm",
+            )
+            if SAVE_PREPROCESS_IMAGES and save_preprocessed_for_engine:
                 # print("Saving pre-processed image...")
                 image_basename = os.path.basename(image_name)
                 output_path = os.path.join(
@@ -7746,7 +7940,7 @@ class CustomImageAnalyzerEngine:
                     image_basename + "_preprocessed_image.png",
                 )
                 os.makedirs(os.path.dirname(output_path), exist_ok=True)
-                image.save(output_path)
+                _save_image_with_config_dpi(image, output_path)
                 # print(f"Pre-processed image saved to {output_path}")
         else:
             preprocessing_metadata = dict()
@@ -7960,45 +8154,109 @@ class CustomImageAnalyzerEngine:
                     f"Error importing PaddleOCR: {e}. Please install it using 'pip install paddleocr paddlepaddle' in your python environment and retry."
                 )
 
-            if not image_path:
-                image_np = np.array(image)  # image_processed
+            prepare_page_for_hybrid_vlm = (
+                PREPARE_PAGE_FOR_HYBRID_VLM_BEFORE_PADDLE
+                and self.ocr_engine
+                in ["hybrid-paddle-vlm", "hybrid-paddle-inference-server"]
+            )
 
-                # Check that sizes are the same
+            paddle_prepared_width = None
+            paddle_prepared_height = None
+            paddle_input_image = image
+
+            if prepare_page_for_hybrid_vlm:
+                # Resize/pad the full page once so that line crops inherit the
+                # VLM-ready pixel density (reduces per-crop VLM resizing work).
+                if paddle_input_image.mode != "RGB":
+                    paddle_input_image = paddle_input_image.convert("RGB")
+                paddle_input_image = _prepare_image_for_vlm(
+                    paddle_input_image,
+                    hybrid_vlm=True,
+                )
+                paddle_prepared_width, paddle_prepared_height = paddle_input_image.size
+                print(
+                    "Hybrid OCR: preparing PaddleOCR input page for VLM constraints "
+                    f"({paddle_prepared_width}x{paddle_prepared_height})."
+                )
+
+            if not image_path:
+                image_np = np.array(
+                    paddle_input_image
+                )  # image_processed (possibly resized)
+
+                # Check that sizes match the PaddleOCR input image we constructed.
                 image_np_height, image_np_width = image_np.shape[:2]
-                if image_np_width != image_width or image_np_height != image_height:
+                expected_w, expected_h = paddle_input_image.size
+                if image_np_width != expected_w or image_np_height != expected_h:
                     raise ValueError(
-                        f"Image size mismatch: {image_np_width}x{image_np_height} != {image_width}x{image_height}"
+                        f"Image size mismatch: {image_np_width}x{image_np_height} != {expected_w}x{expected_h}"
                     )
 
                 # PaddleOCR may need an RGB image. Ensure it has 3 channels.
                 if len(image_np.shape) == 2:
                     image_np = np.stack([image_np] * 3, axis=-1)
                 else:
-                    image_np = np.array(image)
+                    image_np = np.array(paddle_input_image)
 
                 paddle_results = ocr.predict(image_np)
-                # PaddleOCR processed the preprocessed image
+                # PaddleOCR processed the prepared image (not a file-path open)
                 paddle_processed_original = False
 
                 # Store the exact image that PaddleOCR processed (convert numpy array back to PIL Image)
-                # This ensures we crop from the exact same image PaddleOCR analyzed
-                if len(image_np.shape) == 3:
-                    paddle_processed_image = Image.fromarray(image_np.astype(np.uint8))
-                else:
-                    paddle_processed_image = Image.fromarray(image_np.astype(np.uint8))
+                # This ensures we crop from the exact same image PaddleOCR analyzed.
+                paddle_processed_image = Image.fromarray(image_np.astype(np.uint8))
             else:
                 # When using image path, load image to get dimensions
                 temp_image = Image.open(image_path)
 
-                # For file path, use the original dimensions (before preprocessing)
-                # original_image_width and original_image_height are already set above
-                paddle_results = ocr.predict(image_path)
-                # PaddleOCR processed the original image from file path
-                paddle_processed_original = True
-                # Store the original image for cropping
+                # For file path, we still keep the original image for visualization
+                # and for any downstream coordinate scaling.
                 original_image_for_cropping = temp_image.copy()
-                # Store the exact image that PaddleOCR processed (from file path)
-                paddle_processed_image = temp_image.copy()
+
+                if prepare_page_for_hybrid_vlm:
+                    # Run PaddleOCR on the VLM-prepared page (to keep rec_polys
+                    # consistent with the line crops we send to VLM).
+                    paddle_input_image = temp_image
+                    if paddle_input_image.mode != "RGB":
+                        paddle_input_image = paddle_input_image.convert("RGB")
+                    paddle_input_image = _prepare_image_for_vlm(
+                        paddle_input_image,
+                        hybrid_vlm=True,
+                    )
+                    paddle_prepared_width, paddle_prepared_height = (
+                        paddle_input_image.size
+                    )
+
+                    image_np = np.array(paddle_input_image)
+                    if len(image_np.shape) == 2:
+                        image_np = np.stack([image_np] * 3, axis=-1)
+                    paddle_results = ocr.predict(image_np)
+                    paddle_processed_original = False
+                    paddle_processed_image = paddle_input_image.copy()
+                else:
+                    # Use PaddleOCR's file-path loading (original behaviour).
+                    try:
+                        paddle_results = ocr.predict(image_path)
+                    except Exception as ocr_path_exc:
+                        # PaddleOCR's file-path path can hit OpenCV decode issues on
+                        # specific pages. Retry using the already-loaded PIL image
+                        # to avoid the OpenCV "read from disk" path.
+                        print(
+                            f"WARNING: PaddleOCR failed reading image path via OpenCV "
+                            f"for {image_path}. Retrying with in-memory numpy image. "
+                            f"Error: {ocr_path_exc}"
+                        )
+                        paddle_input_image = temp_image
+                        if paddle_input_image.mode != "RGB":
+                            paddle_input_image = paddle_input_image.convert("RGB")
+                        image_np = np.array(paddle_input_image)
+                        if len(image_np.shape) == 2:
+                            image_np = np.stack([image_np] * 3, axis=-1)
+                        paddle_results = ocr.predict(image_np)
+                    # PaddleOCR processed the original image from file path
+                    paddle_processed_original = True
+                    # Store the exact image that PaddleOCR processed (from file path)
+                    paddle_processed_image = temp_image.copy()
 
             # Save PaddleOCR visualization with bounding boxes
             if paddle_results and SAVE_PAGE_OCR_VISUALISATIONS is True:
@@ -8018,6 +8276,24 @@ class CustomImageAnalyzerEngine:
 
                     os.makedirs(paddle_viz_folder, exist_ok=True)
                     res.save_to_img(paddle_viz_folder)
+
+            # If we prepared/resized the page before running PaddleOCR, ensure
+            # each result dict reports the correct coordinate space size.
+            # This lets _convert_paddle_to_tesseract_format scale bboxes back
+            # into the original page pixel space reliably.
+            if (
+                prepare_page_for_hybrid_vlm
+                and paddle_prepared_width
+                and paddle_prepared_height
+                and isinstance(paddle_results, list)
+            ):
+                for res in paddle_results:
+                    try:
+                        if isinstance(res, dict):
+                            res["image_width"] = paddle_prepared_width
+                            res["image_height"] = paddle_prepared_height
+                    except Exception:
+                        pass
 
             if self.ocr_engine == "hybrid-paddle-vlm":
 
@@ -8371,7 +8647,9 @@ class CustomImageAnalyzerEngine:
 
         output = [
             OCRResult(
-                text=clean_unicode_text(ocr_result["text"][i]),
+                text=clean_unicode_text(
+                    ocr_result["text"][i], preserve_international_scripts=True
+                ),
                 left=ocr_result["left"][i],
                 top=ocr_result["top"][i],
                 width=ocr_result["width"][i],
@@ -11960,6 +12238,9 @@ def recreate_page_line_level_ocr_results_with_page(
     return page_line_level_ocr_results_with_page
 
 
+_PUNCTUATION_SPLIT_RE = re.compile(r"([(\[{]*)(.*?)_?([.,?!:;)\}\]]*)$")
+
+
 def split_words_and_punctuation_from_line(
     line_of_words: List[OCRResult],
 ) -> List[OCRResult]:
@@ -11977,9 +12258,10 @@ def split_words_and_punctuation_from_line(
     for word_result in line_of_words:
         word_text = word_result.text
 
-        # This regex finds a central "core" word, and captures leading and trailing punctuation
+        # This regex finds a central "core" word, and captures leading and trailing punctuation.
+        # Compiled once to avoid re-parsing the regex on every line.
         # Handles cases like "(word)." -> group1='(', group2='word', group3='.'
-        match = re.match(r"([(\[{]*)(.*?)_?([.,?!:;)\}\]]*)$", word_text)
+        match = _PUNCTUATION_SPLIT_RE.match(word_text)
 
         # Handle words with internal hyphens that might confuse the regex
         if "-" in word_text and not match.group(2):

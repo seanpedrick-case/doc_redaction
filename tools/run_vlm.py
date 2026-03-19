@@ -42,7 +42,7 @@ from tools.config import (
 )
 from tools.helper_functions import get_system_font_path
 
-text_read_default_prompt = """Read all the text in the centre line of the image, and return the text in the dictionary format {"text":"text content", "confidence":"confidence score from 0-1"}. Ignore cut or obscured words above or below the centre line. Ensure that spaces between words and upper/lower cases are preserved. If you can't read the text, return an empty string ""."""
+text_read_default_prompt = """Read the central line of text in the image, and return the text in the format {"text":"text content", "confidence":"confidence score from 0-1"}. Ignore any text next to the top or bottom of the image. Ensure that spaces between words and upper/lower cases are preserved. If you can't read the text, return an empty string ""."""
 
 if LOAD_PADDLE_AT_STARTUP is True:
     # Set PaddleOCR environment variables BEFORE importing PaddleOCR
@@ -569,6 +569,38 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     ###
     # QWEN 3.5 MODELS
     ###
+    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-0.8B":
+        from transformers import AutoProcessor, Qwen3_5ForConditionalGeneration
+
+        MODEL_ID = "Qwen/Qwen3.5-0.8B"
+        if OVERRIDE_VLM_REPO_ID:
+            MODEL_ID = OVERRIDE_VLM_REPO_ID
+        processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+        load_kwargs = {
+            "attn_implementation": attn_implementation,
+            "device_map": "auto",
+            "trust_remote_code": True,
+            "config": _get_vlm_config_capped_length(MODEL_ID),
+        }
+        if quantization_config is not None:
+            load_kwargs["quantization_config"] = quantization_config
+        else:
+            load_kwargs["dtype"] = "auto"
+
+        model = Qwen3_5ForConditionalGeneration.from_pretrained(MODEL_ID, **load_kwargs)
+
+        model_default_prompt = text_read_default_prompt
+        model_default_do_sample = model_default_do_sample
+        model_default_top_p = 0.8
+        model_default_min_p = 0.0
+        model_default_top_k = 20
+        model_default_temperature = 0.7
+        model_default_repetition_penalty = 1.0
+        model_default_presence_penalty = 1.5
+        model_default_max_new_tokens = MAX_NEW_TOKENS
+        model_supports_presence_penalty = (
+            False  # I found that this doesn't work when using transformers
+        )
 
     elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-2B":
         from transformers import AutoProcessor, Qwen3_5ForConditionalGeneration
@@ -708,7 +740,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             Qwen3_5ForConditionalGeneration,
         )
 
-        MODEL_ID = "skkwowee/Qwen3.5-27B-bnb-4bit"
+        MODEL_ID = "skkwowee/Qwen3.5-27B-bnb-4bit"  # bertbobson/Qwen3.5-27B-bnb-4bit
         if OVERRIDE_VLM_REPO_ID:
             MODEL_ID = OVERRIDE_VLM_REPO_ID
         processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
@@ -1232,9 +1264,10 @@ if ADD_VLM_BOUNDING_BOX_RULES:
         or ("qwen" in str(CLOUD_VLM_MODEL_CHOICE).lower() and SHOW_BEDROCK_VLM_MODELS)
     ):
         additional_bounding_box_rules = """- Bounding boxes should fit within the coordinate extents of the image: 0, 0 is the top left corner of the image, and 999, 999 is the bottom right corner of the image"""
+    else:
+        additional_bounding_box_rules = ""
 else:
     additional_bounding_box_rules = ""
-
 
 full_page_ocr_vlm_prompt = f"""Spot all the text in the image at line-level, and output in JSON format as [{{'bbox': [x1, y1, x2, y2], 'text': 'identified text', 'conf': 'confidence score 0-1'}}, ...].
 
