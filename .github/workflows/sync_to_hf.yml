@@ -10,7 +10,7 @@ jobs:
   sync-to-hub:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1      # Only get the latest state
           lfs: true           # Download actual LFS files so they can be pushed
