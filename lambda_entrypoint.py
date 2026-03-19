@@ -116,7 +116,7 @@ def download_file_from_s3(bucket_name, key, download_path):
     """Download a file from S3 to the local filesystem."""
     try:
         s3_client.download_file(bucket_name, key, download_path)
-        print(f"Successfully downloaded s3://{bucket_name}/{key} to {download_path}")
+        print("Successfully downloaded file from S3")
     except Exception as e:
         print(f"Error downloading from S3: {e}")
         raise
@@ -762,7 +762,6 @@ def lambda_handler(event, context):
     # 5. Execute the main application logic
     try:
         print("--- Starting CLI Redact Main Function ---")
-        print(f"Arguments passed to cli_main: {cli_args}")
         cli_main(direct_mode_args=cli_args)
         print("--- CLI Redact Main Function Finished ---")
     except Exception as e:

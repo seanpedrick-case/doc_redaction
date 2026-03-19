@@ -3,6 +3,7 @@ import os
 import re
 import time
 from typing import List, Tuple
+from urllib.parse import urlparse
 
 import boto3
 import requests
@@ -238,6 +239,27 @@ def get_model_path(
         raise Warning("Error loading model:", e)
 
 
+def _normalize_huggingface_repo_id(repo_id: str) -> str:
+    """
+    If repo_id is an http(s) URL for huggingface.co, return the org/model path segment.
+    Uses parsed host validation (not substring checks) to satisfy CodeQL py/incomplete-url-substring-sanitization.
+    """
+    s = repo_id.strip()
+    lower = s.lower()
+    if not (lower.startswith("https://") or lower.startswith("http://")):
+        return repo_id
+    parsed = urlparse(s)
+    if parsed.scheme.lower() not in ("http", "https"):
+        return repo_id
+    host = (parsed.hostname or "").lower()
+    if host not in ("huggingface.co", "www.huggingface.co"):
+        return repo_id
+    path = parsed.path.strip("/")
+    if not path:
+        return repo_id
+    return path
+
+
 def load_model(
     local_model_type: str = None,
     gpu_layers: int = -1,
@@ -307,6 +329,9 @@ def load_model(
     # Use LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE if local_model_type is not provided
     if local_model_type is None:
         local_model_type = LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+
+    if isinstance(repo_id, str):
+        repo_id = _normalize_huggingface_repo_id(repo_id)
 
     print("Loading model:", local_model_type)
 
@@ -494,11 +519,7 @@ def load_model(
         try:
             from transformers import AutoTokenizer
 
-            model_id = (
-                repo_id.split("https://huggingface.co/")[-1]
-                if "https://huggingface.co/" in repo_id
-                else repo_id
-            )
+            model_id = repo_id
             tokenizer = AutoTokenizer.from_pretrained(
                 model_id,
                 token=hf_token,

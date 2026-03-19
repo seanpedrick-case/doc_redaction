@@ -1749,17 +1749,10 @@ def prepare_image_or_pdf(
             ) and "_textract" in file_path_without_ext:  # (prepare_for_review != True):
                 print("Saving Textract output")
                 # Copy it to the output folder so it can be used later.
-                # Check if file already has a textract suffix pattern (e.g., _sig_textract.json, _form_textract.json, etc.)
-                # Pattern matches: _textract.json or _*_textract.json
-                # Fixed ReDoS vulnerability: use pattern that requires at least one letter to avoid catastrophic backtracking
-                # Pattern ensures at least one letter (not just underscores) appears before _textract
-                textract_pattern = re.compile(
-                    r"_textract\.json$|_[a-z]+(?:_[a-z]+)*_textract\.json$"
-                )
-                if textract_pattern.search(file_path):
+                # If the path already ends with _textract.json (e.g. _sig_textract.json), preserve the basename;
+                # otherwise append _textract.json. Use endswith instead of regex to avoid ReDoS (CodeQL py/polynomial-redos).
+                if file_path.endswith("_textract.json"):
                     # File already has a textract suffix, preserve it
-                    output_textract_json_file_name = file_path_without_ext + ".json"
-                elif file_path.endswith("_textract.json"):
                     output_textract_json_file_name = file_path_without_ext + ".json"
                 else:
                     # No textract suffix found, add default one
