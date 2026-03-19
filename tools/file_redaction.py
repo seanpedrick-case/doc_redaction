@@ -3209,7 +3209,7 @@ def choose_and_run_redactor(
                 )
             all_page_line_level_ocr_results_with_words_df.to_csv(
                 all_page_line_level_ocr_results_with_words_df_file_path,
-                index=None,
+                index=False,
                 encoding="utf-8-sig",
             )
 
@@ -5473,21 +5473,52 @@ def redact_image_pdf(
             output_folder + file_name + "_ocr_results_with_words_local_ocr.json"
         )
 
+        # Preserve any pre-existing word-level OCR results passed in (e.g. from
+        # EFFICIENT_OCR's selectable-text path). This prevents us from accidentally
+        # dropping those pages when we load/recompute OCR-needed pages.
+        pre_existing_word_results = (
+            list(all_page_line_level_ocr_results_with_words or [])
+            if all_page_line_level_ocr_results_with_words is not None
+            else []
+        )
+
         if overwrite_existing_ocr_results:
-            # Skip loading existing results, start fresh
-            all_page_line_level_ocr_results_with_words = []
+            # Skip loading existing cached results. Keep any pre-existing word
+            # results for pages outside `pages_to_process` so we don't erase
+            # selectable-text path output in efficient-ocr mixed mode.
+            if pages_to_process:
+                pages_to_process_set = set(pages_to_process)
+
+                def _page_in_to_process(item) -> bool:
+                    try:
+                        return int(item.get("page")) in pages_to_process_set
+                    except Exception:
+                        return False
+
+                pre_existing_word_results = [
+                    item
+                    for item in pre_existing_word_results
+                    if not _page_in_to_process(item)
+                ]
+
+            all_page_line_level_ocr_results_with_words = list(pre_existing_word_results)
             is_missing = True
             print("overwriting existing OCR results with words")
         elif os.path.exists(all_page_line_level_ocr_results_with_words_json_file_path):
             print("Loading existing OCR results with words for local OCR analysis")
+            cached_word_results = []
             (
-                all_page_line_level_ocr_results_with_words,
-                is_missing,
+                cached_word_results,
+                _is_missing,
                 log_files_output_paths,
             ) = load_and_convert_ocr_results_with_words_json(
                 all_page_line_level_ocr_results_with_words_json_file_path,
                 log_files_output_paths,
                 page_sizes_df,
+            )
+
+            all_page_line_level_ocr_results_with_words = merge_page_results(
+                list(pre_existing_word_results) + list(cached_word_results)
             )
 
         original_all_page_line_level_ocr_results_with_words = (

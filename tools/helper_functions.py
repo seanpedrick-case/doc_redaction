@@ -1411,6 +1411,7 @@ def reset_base_dataframe(df: pd.DataFrame):
 
 def reset_ocr_base_dataframe(df: pd.DataFrame):
     if df.empty:
+        print("OCR base dataframe is empty, returning empty dataframe")
         return pd.DataFrame(columns=["page", "line", "text"])
     else:
         return df.loc[:, ["page", "line", "text"]]
@@ -1419,9 +1420,23 @@ def reset_ocr_base_dataframe(df: pd.DataFrame):
 def reset_ocr_with_words_base_dataframe(
     df: pd.DataFrame, page_entity_dropdown_redaction_value: str
 ):
+    """
+    Resets and prepares the OCR dataframe with word-level details for a specific page.
+
+    Args:
+        df (pd.DataFrame): The original dataframe that may contain word-level OCR results,
+                           with at least a 'page' column.
+        page_entity_dropdown_redaction_value (str): The currently selected page value
+            to filter the dataframe on, for redaction view.
+
+    Returns:
+        Tuple[pd.DataFrame, pd.DataFrame]: A tuple of (filtered dataframe for selected page, full dataframe after processing).
+    """
 
     if "page" not in df.columns:
-        print("df does not contain page column")
+        print(
+            "OCR with words dataframe does not contain page column, returning empty dataframe"
+        )
         df_out = pd.DataFrame(
             columns=[
                 "page",
@@ -1434,10 +1449,23 @@ def reset_ocr_with_words_base_dataframe(
                 "index",
             ]
         )
-        return df_out, df_out
+        df_filtered_out = pd.DataFrame(
+            columns=[
+                "page",
+                "line",
+                "word_text",
+                "index",
+            ]
+        )
+        return df_filtered_out, df_out
 
+    df.reset_index(drop=True, inplace=True)
     df["index"] = df.index
-    output_df = df.copy()
+
+    output_df_base = df.copy()
+
+    if output_df_base.empty:
+        print("OCR with words dataframe is empty, returning empty dataframe")
 
     df["page"] = df["page"].astype(str)
 
@@ -1447,14 +1475,14 @@ def reset_ocr_with_words_base_dataframe(
             "page",
             "line",
             "word_text",
-            # "word_x0",
-            # "word_y0",
-            # "word_x1",
-            # "word_y1",
             "index",
         ],
     ]
-    return output_df_filtered, output_df
+
+    if output_df_filtered.empty:
+        print("No OCR results found for page, returning empty dataframe")
+
+    return output_df_filtered, output_df_base
 
 
 def update_language_dropdown(

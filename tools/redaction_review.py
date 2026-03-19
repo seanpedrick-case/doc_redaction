@@ -70,6 +70,35 @@ REVIEW_CSV_PARALLEL_MIN_PAGES = 20
 REVIEW_CSV_PAGES_PER_CHUNK = 15
 
 
+def _concat_frames_without_all_na_warning(
+    dfs: List[pd.DataFrame], *, ignore_index: bool = True
+) -> pd.DataFrame:
+    """
+    Vertically concat frames while avoiding pandas FutureWarning about concat dtype
+    rules when some inputs have all-NA columns (pandas >= 2.2).
+
+    Skips void frames (no rows and no columns). For 0-row frames that still define
+    columns, does not run dropna(axis=1): on empty DataFrames that would remove
+    every column.
+    """
+    usable = [df for df in dfs if not df.empty or len(df.columns) > 0]
+    if not usable:
+        return pd.DataFrame()
+    # No concat → no dtype FutureWarning; keep a single frame unchanged.
+    if len(usable) == 1:
+        return usable[0].copy()
+
+    union_cols = list(dict.fromkeys(c for df in usable for c in df.columns))
+
+    def _strip_all_na_columns(df: pd.DataFrame) -> pd.DataFrame:
+        if df.empty:
+            return df.copy()
+        return df.dropna(axis=1, how="all")
+
+    cleaned = [_strip_all_na_columns(df) for df in usable]
+    return pd.concat(cleaned, ignore_index=ignore_index).reindex(columns=union_cols)
+
+
 def _ensure_box_colour_string(colour):
     """Ensure colour is a string for gradio_image_annotation (JS expects .startsWith)."""
     if colour is None:
@@ -834,10 +863,9 @@ def get_and_merge_current_page_annotations(
         if not df.empty
     ]
     if dfs_to_concat:
-        if len(dfs_to_concat) == 1:
-            combined = dfs_to_concat[0].copy()
-        else:
-            combined = pd.concat(dfs_to_concat, ignore_index=True)
+        combined = _concat_frames_without_all_na_warning(
+            dfs_to_concat, ignore_index=True
+        )
         if "id" in combined.columns:
             has_id = combined["id"].notna()
             if has_id.any():
@@ -849,9 +877,9 @@ def get_and_merge_current_page_annotations(
                 if len(parts) == 1:
                     updated_df = parts[0].sort_values(by=["page", "xmin", "ymin"])
                 else:
-                    updated_df = pd.concat(parts, ignore_index=True).sort_values(
-                        by=["page", "xmin", "ymin"]
-                    )
+                    updated_df = _concat_frames_without_all_na_warning(
+                        parts, ignore_index=True
+                    ).sort_values(by=["page", "xmin", "ymin"])
             else:
                 updated_df = combined.sort_values(by=["page", "xmin", "ymin"])
         else:
@@ -880,7 +908,7 @@ def get_and_merge_current_page_annotations(
         and "ymax" in updated_df.columns
         and "ymin" in updated_df.columns
     ):
-        ymax_cap = 1.0 - 1e-6
+        ymax_cap = 1.0
         ymax_vals = pd.to_numeric(updated_df["ymax"], errors="coerce")
         need_cap = ymax_vals >= 1.0
         if need_cap.any():
@@ -1218,7 +1246,9 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
                 df for df in [existing_annotations_df, unique_new_df] if not df.empty
             ]
             if dfs_to_concat:
-                updated_annotations_df = pd.concat(dfs_to_concat, ignore_index=True)
+                updated_annotations_df = _concat_frames_without_all_na_warning(
+                    dfs_to_concat, ignore_index=True
+                )
             else:
                 # Return empty DataFrame with expected columns matching existing_annotations_df structure
                 updated_annotations_df = pd.DataFrame(
@@ -2715,7 +2745,9 @@ def apply_redactions_to_review_df_and_files(
                         partial_dfs = list(
                             executor.map(convert_annotation_data_to_dataframe, chunks)
                         )
-                    combined = pd.concat(partial_dfs, ignore_index=True)
+                    combined = _concat_frames_without_all_na_warning(
+                        partial_dfs, ignore_index=True
+                    )
                     del partial_dfs
                     _review_df = convert_annotation_json_to_review_df(
                         all_image_annotations,
