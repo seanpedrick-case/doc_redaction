@@ -93,7 +93,7 @@ paddle = [
 # Extra dependencies for VLM models
 # The following installs the CPU compatible version of pytorch. For torch cuda support you should run manually pip install torch==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cu129 after installation
 vlm = [
-    "torch<=2.10.0",
+    "torch<=2.9.1",
     "torchvision<=0.25.0",
     "transformers<=5.3.0",
     "accelerate<=1.13.0",
@@ -101,6 +101,7 @@ vlm = [
     "sentencepiece<=0.2.1", # Needed for PaddleOCRVL
     "optimum<=2.1.0", # Needed for GPTQ quantised models in transformers
     "GPTQModel<=5.8.0", # Needed for GPTQ quantised models in transformers
+    "flash_attn<=2.8.3", # Faster inference with transformers
 ]
 
 # Run Gradio as an mcp server

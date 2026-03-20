@@ -59,6 +59,7 @@ openai<=2.25.0
 
 # --- PyTorch (CUDA 12.6) ---
 --extra-index-url https://download.pytorch.org/whl/cu129
-torch>=2.5.1,<=2.10.0
+torch>=2.5.1,<=2.8.0
 torchvision>=0.23.0,<=0.25.0
-GPTQModel @ https://github.com/ModelCloud/GPTQModel/releases/download/v5.8.0/gptqmodel-5.8.0+cu128torch2.9-cp310-cp310-linux_x86_64.whl # Need to install from wheel as requirements-based compile fails on Hugging Face spaces
+flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp310-cp310-linux_x86_64.whl
+GPTQModel @ https://github.com/ModelCloud/GPTQModel/releases/download/v5.8.0/gptqmodel-5.8.0+cu126torch2.8-cp310-cp310-linux_x86_64.whl # Need to install from wheel as requirements-based compile fails on Hugging Face spaces
