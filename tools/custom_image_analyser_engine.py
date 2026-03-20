@@ -6254,7 +6254,7 @@ class CustomImageAnalyzerEngine:
 
         elif self.ocr_engine == "hybrid-vlm":
             # VLM-based hybrid OCR - no additional initialization needed
-            # The VLM model is loaded when run_vlm.py is imported
+            # VLM weights load at import if LOAD_TRANSFORMERS_VLM_MODEL_AT_START=True, else on first VLM call
             print(
                 f"Initializing hybrid VLM OCR with model: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}"
             )
@@ -6262,7 +6262,7 @@ class CustomImageAnalyzerEngine:
 
         elif self.ocr_engine == "vlm":
             # VLM page-level OCR - no additional initialization needed
-            # The VLM model is loaded when run_vlm.py is imported
+            # VLM weights load at import if LOAD_TRANSFORMERS_VLM_MODEL_AT_START=True, else on first VLM call
             print(
                 f"Initializing VLM OCR with model: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}"
             )
@@ -6270,7 +6270,7 @@ class CustomImageAnalyzerEngine:
 
         if self.ocr_engine == "hybrid-paddle-vlm":
             # Hybrid PaddleOCR + VLM - requires both PaddleOCR and VLM
-            # The VLM model is loaded when run_vlm.py is imported
+            # VLM weights load at import if LOAD_TRANSFORMERS_VLM_MODEL_AT_START=True, else on first VLM call
             print(
                 f"Initializing hybrid PaddleOCR + VLM OCR with model: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}"
             )

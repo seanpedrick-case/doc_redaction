@@ -1404,6 +1404,10 @@ LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START = convert_string_to_boolean(
     get_or_create_env_var("LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START", "False")
 )
 
+LOAD_TRANSFORMERS_VLM_MODEL_AT_START = convert_string_to_boolean(
+    get_or_create_env_var("LOAD_TRANSFORMERS_VLM_MODEL_AT_START", "True")
+)
+
 MULTIMODAL_PROMPT_FORMAT = convert_string_to_boolean(
     get_or_create_env_var("MULTIMODAL_PROMPT_FORMAT", "False")
 )

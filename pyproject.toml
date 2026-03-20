@@ -38,39 +38,39 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "pdfminer.six==20260107",
-    "pdf2image==1.17.0",
-    "pymupdf==1.27.1",
-    "bleach==6.3.0",
-    "opencv-python==4.13.0.92",
-    "presidio_analyzer==2.2.361",
-    "presidio_anonymizer==2.2.361",
-    "presidio-image-redactor==0.0.57",
-    "pikepdf==10.3.0",
-    #"pdfplumber==0.11.9",
-    "pandas==2.3.3",
+    "pdfminer.six<=20260107",
+    "pdf2image<=1.17.0",
+    "pymupdf<=1.27.1",
+    "bleach<=6.3.0",
+    "opencv-python<=4.13.0.92",
+    "presidio_analyzer<=2.2.361",
+    "presidio_anonymizer<=2.2.361",
+    "presidio-image-redactor<=0.0.57",
+    "pikepdf<=10.3.0",
+    #"pdfplumber<=0.11.9",
+    "pandas<=2.3.3",
     "scikit-learn<=1.8.0",
-    "spacy==3.8.11",
+    "spacy<=3.8.11",
     "en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0.tar.gz",
     "gradio<=6.9.0",
-    "boto3==1.42.61",
-    "pyarrow==21.0.0",
-    "openpyxl==3.1.5",
-    "Faker==40.8.0",
-    "python-levenshtein==0.27.3",
-    "spaczz==0.6.1",
+    "boto3<=1.42.61",
+    "pyarrow<=21.0.0",
+    "openpyxl<=3.1.5",
+    "Faker<=40.8.0",
+    "python-levenshtein<=0.27.3",
+    "spaczz<=0.6.1",
     "gradio_image_annotation @ https://github.com/seanpedrick-case/gradio_image_annotator/releases/download/v0.5.3/gradio_image_annotation-0.5.3-py3-none-any.whl",
-    "rapidfuzz==3.14.3",
-    "python-dotenv==1.0.1",
-    "awslambdaric==3.1.1",
-    "python-docx==1.2.0",
-    "polars==1.38.1",
-    "defusedxml==0.7.1",
+    "rapidfuzz<=3.14.3",
+    "python-dotenv<=1.0.1",
+    "awslambdaric<=3.1.1",
+    "python-docx<=1.2.0",
+    "polars<=1.38.1",
+    "defusedxml<=0.7.1",
     "numpy<=2.4.2",
-    "spaces==0.47.0",
-    "google-genai>=1.66.0",
-    "openai>=2.25.0",
-    "markdown>=3.7"
+    "spaces<=0.47.0",
+    "google-genai<=1.66.0",
+    "openai<=2.25.0",
+    "markdown<=3.7"
 ]
 
 [project.optional-dependencies]
@@ -86,8 +86,8 @@ test = ["pytest", "pytest-cov"]
 paddle = [
     "protobuf<=7.34.0",
     "paddlepaddle>=3.0.0,<=3.2.1", 
-    "paddleocr==3.3.0",
-    "pycocotools==2.0.10",
+    "paddleocr<=3.3.0",
+    "pycocotools<=2.0.10",
 ]
 
 # Extra dependencies for VLM models
@@ -97,8 +97,10 @@ vlm = [
     "torchvision<=0.25.0",
     "transformers<=5.3.0",
     "accelerate<=1.13.0",
-    "bitsandbytes<=0.49.2",
+    "bitsandbytes<=0.49.2", # Needed for on the fly quantisation in transformers
     "sentencepiece<=0.2.1", # Needed for PaddleOCRVL
+    "optimum<=2.1.0", # Needed for GPTQ quantised models in transformers
+    "GPTQModel<=5.8.0", # Needed for GPTQ quantised models in transformers
 ]
 
 # Run Gradio as an mcp server

@@ -383,6 +383,10 @@ When AWS Textract is selected for text extraction, these options allow lines wit
     * **Description:** Padding in pixels around the line crop when calling Bedrock VLM for re-extraction.
     * **Default Value:** `5`
 
+* **`SAVE_TEXTRACT_BEDROCK_HYBRID_EXAMPLES`**
+    * **Description:** If set to `"True"`, saves example images or artefacts from the Textract + Bedrock VLM hybrid re-extraction path for debugging (see `tools/config.py` / hybrid Textract–Bedrock implementation).
+    * **Default Value:** `"False"`
+
 ### Bedrock VLM and LLM cost estimation
 
 These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM OCR - all PDF types" or "LLM (AWS Bedrock)" PII detection is selected. Estimates are shown in the UI (e.g. estimated cost and time).
@@ -588,7 +592,7 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
     * **Default Value:** `"False"`
 
 * **`USE_TRANSFORMERS_VLM_MODEL_AS_LLM`**
-    * **Description:** When set to `"True"`, use the same local transformers VLM model (e.g. Qwen3-VL-4B-Instruct) for LLM tasks (e.g. PII entity detection in `tools/llm_entity_detection.py`) as for VLM/OCR. Overrides `LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE` when local transformers LLM is selected. The VLM model must be loaded first (e.g. by running VLM OCR); otherwise the standard PII model is used.
+    * **Description:** When set to `"True"`, use the same local transformers VLM model (e.g. Qwen3-VL-4B-Instruct) for LLM tasks (e.g. PII entity detection in `tools/llm_entity_detection.py`) as for VLM/OCR. Overrides `LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE` when local transformers LLM is selected. The VLM weights must be loaded first (e.g. **`LOAD_TRANSFORMERS_VLM_MODEL_AT_START=True`**, or by running a VLM OCR task first); otherwise the standard PII model is used.
     * **Default Value:** `"False"`
 
 * **`LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE`**
@@ -610,6 +614,10 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
 * **`REASONING_SUFFIX`**
     * **Description:** Suffix added to prompts for reasoning-capable models (e.g. `"Reasoning: low"` for GPT-OSS 20B, `"/nothink"` for Qwen 3 4B to disable chain-of-thought). Model-specific; see config for defaults.
     * **Default Value:** Model-dependent (e.g. `"Reasoning: low"` or `"/nothink"` or `''`).
+
+* **`PRINT_TRANSFORMERS_USER_PROMPT`**
+    * **Description:** If set to `"True"`, prints the system and user prompts to the console when calling the local transformers LLM (`tools/llm_funcs.py`). Useful for debugging; avoid in production if logs are sensitive.
+    * **Default Value:** `"False"`
 
 * **LLM generation parameters:** **`LLM_TEMPERATURE`** (default `0.1`), **`LLM_TOP_K`** (`64`), **`LLM_MIN_P`** (`0`), **`LLM_TOP_P`** (`0.95`), **`LLM_REPETITION_PENALTY`** (`1.0`), **`LLM_MAX_NEW_TOKENS`** (`4096`), **`LLM_CONTEXT_LENGTH`** (`32768`), **`LLM_SEED`** (`42`), **`LLM_RESET`** (`False`), **`LLM_STREAM`** (`True`), **`LLM_STOP_STRINGS`**, **`LLM_THREADS`** (`-1`), **`SPECULATIVE_DECODING`** (`False`), **`ASSISTANT_MODEL`**, **`LLM_MODEL_DTYPE`** (`bfloat16`), and other **`LLM_*`** / related variables in `tools/config.py` control local/transformers LLM generation in `tools/llm_funcs.py`. **`LLM_TEMPERATURE`** and **`LLM_MAX_NEW_TOKENS`** also control PII detection LLM calls and retries.
 
@@ -658,6 +666,10 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
 * **`SHOW_VLM_MODEL_OPTIONS`**
     * **Description:** If set to `"True"`, VLM (Vision Language Model) options will be shown in the UI.
     * **Default Value:** `"False"`
+
+* **`LOAD_TRANSFORMERS_VLM_MODEL_AT_START`**
+    * **Description:** When `SHOW_VLM_MODEL_OPTIONS` is `"True"`, if set to `"True"`, loads local transformers VLM weights at application startup (same as historical behavior). If `"False"`, weights load on the first VLM OCR call (`tools/run_vlm.py`), reducing startup memory at the cost of a slower first run. Compare with **`LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START`** for the PII LLM (which defaults to `"False"`).
+    * **Default Value:** `"True"`
 
 * **`SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL`**
     * **Description:** Selected vision model for OCR. Choose from: `"Nanonets-OCR2-3B"`, `"Dots.OCR"`, `"Qwen3-VL-2B-Instruct"`, `"Qwen3-VL-4B-Instruct"`, `"Qwen3-VL-8B-Instruct"`, `"Qwen3-VL-30B-A3B-Instruct"`, `"Qwen3-VL-235B-A22B-Instruct"`, `"PaddleOCR-VL"`.
@@ -746,6 +758,10 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
 * **`CLOUD_VLM_MODEL_CHOICE`**
     * **Description:** Default model choice for cloud VLM OCR (AWS Bedrock, Gemini, or Azure/OpenAI). Used when cloud VLM options are enabled.
     * **Default Value:** `"qwen.qwen3-vl-235b-a22b"` (or first available cloud model if empty)
+
+* **`SHOW_CUSTOM_VLM_ENTITIES`**
+    * **Description:** If set to `"True"`, appends **`CUSTOM_VLM_PERSON`** and **`CUSTOM_VLM_SIGNATURE`** to the redaction entity lists when at least one of `SHOW_VLM_MODEL_OPTIONS`, `SHOW_INFERENCE_SERVER_VLM_OPTIONS`, or `SHOW_BEDROCK_VLM_MODELS` is enabled—so users can redact detected faces and signatures from VLM-capable pipelines.
+    * **Default Value:** `"False"`
 
 * **`CUSTOM_VLM_BACKEND`**
     * **Description:** Backend used for CUSTOM_VLM_PERSON and CUSTOM_VLM_SIGNATURE (face and signature detection) when those entities are selected for redaction. One of: `"transformers_vlm"` (local transformers VLM), `"inference_vlm"` (inference-server VLM), or `"bedrock_vlm"` (AWS Bedrock VLM). Applies regardless of the PII identification method (Local, AWS Comprehend, or LLM). Value is case-insensitive; invalid values fall back to `"bedrock_vlm"`.

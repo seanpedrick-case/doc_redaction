@@ -149,7 +149,11 @@ Underneath you will see **'Terms to always include or exclude in redactions, and
 
 To add items to the allow list, deny list, or fully redacted pages list, you can do so by typing the item into the box and pressing enter. You can also remove items by clicking the **'x'** next to the item, or pressing the backspace key when the box is selected.
 
-You can add or remove terms directly in these controls. To load many terms from a file (e.g. a CSV), use the **Settings** tab; see [Custom allow, deny, and page redaction lists](#custom-allow-deny-and-page-redaction-lists).
+![Allow, deny, and whole page redaction dropdowns](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/allow_deny_full_page_dropdowns.PNG)
+
+You can add or remove terms directly in these controls. To load many terms from a file (e.g. a CSV), use the file upload areas at the top of the **Settings** tab. If you upload a csv into one of these boxes containing a single column of terms, the terms will be loaded into the allow list, deny list on the Redact PDFs/images tab. Similarly, if you upload a csv into the 'Fully redact these pages' box containing a single column of page numbers, the pages will be fully redacted on the next redaction run, and the relevant box on the Redact PDFs/images tab will be filled with the page numbers.
+
+![Allow, deny, and whole page redaction file upload](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/allow_deny_full_page_list.PNG)
 
 ### Cost and time estimation
 
@@ -222,7 +226,7 @@ In the second input file box to the right (2.), you can upload a '..._ocr_result
 
 Now you can review and modify the suggested redactions using the interface described below.
 
-![Search extracted text](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/search_extracted_text.PNG)
+![Uploading documents for review](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/upload_documents_review.PNG)
 
 ### Page navigation
 
