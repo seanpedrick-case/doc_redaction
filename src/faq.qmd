@@ -39,6 +39,25 @@ When redacting tabular data or open text, you have several options for how the r
 #### Can I export or import redactions to/from other software like Adobe Acrobat?
 Yes, the app supports exporting and importing redaction data using the **Adobe Acrobat** comment file format (`.xfdf`). You can export suggested redactions from the app to an `.xfdf` file that can be opened in **Adobe**. Conversely, you can import an `.xfdf` file created in **Adobe** into the app to generate a review file (`CSV`) for further work within the application.
 
+#### Is there a way to try the app without uploading my own documents first?
+Yes. The app includes built-in examples on several tabs so you can see how it works before using your own files.
+*   On the **'Redact PDFs/images'** tab, look for the **"Try an example"** section. Click any example to load it with pre-configured settings, then click **'Extract text and redact document'** to run it. Examples include selectable-text PDFs, image OCR, custom entity selection, and deny list / whole-page redaction scenarios.
+*   On the **'Word or Excel/CSV files'** tab, you will find examples for `CSV` redaction, Word document redaction, and Excel duplicate detection. Click an example, then click **'Redact text/data files'** to process it.
+
+#### What is the `...redactions_for_review.pdf` file, and how is it different from `...redacted.pdf`?
+The app produces two different `PDF` outputs after redaction:
+*   **`...redacted.pdf`** — the final output with redacted text permanently removed and replaced by black boxes. This is the document you would share externally.
+*   **`...redactions_for_review.pdf`** — the original document with redaction boxes overlaid but the underlying text still visible. This is a working file intended for review. It can be opened in **Adobe Acrobat** to inspect suggested redactions, and it can be re-uploaded to the app's **'Review redactions'** tab to continue working on redactions at a later session.
+
+#### Does the app support Word (.docx) documents?
+Yes. In addition to `PDF`s, images, `CSV`, and `XLSX` files, the app can also redact **Word** (`.docx`) documents. Go to the **'Word or Excel/CSV files'** tab and upload your `.docx` file. The redaction method and anonymisation output format options available for tabular data apply equally to Word documents.
+
+#### What do the 'Extract text only' and 'Redact selected terms' options do?
+Under **'Redaction settings'** on the **'Redact PDFs/images'** tab, the **'Choose redaction method'** radio button has three options:
+*   **'Extract text only'** — runs text extraction (OCR) without applying any redactions. Useful when you only need the `ocr_output.csv` text output or want to inspect what was extracted before deciding on redactions.
+*   **'Redact all PII'** (the default) — uses the chosen PII detection method to find and redact personal information across all selected entity types.
+*   **'Redact selected terms'** — focuses redaction only on the specific terms in your custom deny list. No automatic PII detection is run; only the terms you have listed will be redacted.
+
 ## Troubleshooting
 
 #### Q1: The app missed some personal information or redacted things it shouldn't have. Is it broken?
@@ -69,7 +88,7 @@ A: Yes. If you have previously processed a document with **AWS Textract** or the
 
 #### Q6: My app crashed, or I reloaded the page. Are my output files lost?
 A: If you are logged in via **AWS Cognito** and the server hasn't been shut down, you might be able to recover them.
-*   **Solution**: Go to the '**Redaction settings**' tab, scroll to the bottom, and look for '**View all output files from this session**'.
+*   **Solution**: Go to the '**Settings**' tab and open '**View and download all output files from this session**'. Click **'Refresh files in output folder'** to load the list, then tick the box next to a file to display and download it.
 
 #### Q7: My custom allow list (terms to never redact) or deny list (terms to always redact) isn't working.
 A: There are a few common reasons:
@@ -80,8 +99,11 @@ A: There are a few common reasons:
 *   **Fuzzy Search for Deny List**: If you intend to use fuzzy matching for your deny list, ensure '**CUSTOM_FUZZY**' is selected as an entity type, and you've configured the "**maximum number of spelling mistakes allowed.**"
 
 #### Q8: I'm trying to review redactions, but the `PDF` in the viewer looks like it's already redacted with black boxes.
-A: You likely uploaded the `...redacted.pdf` file instead of the original document.
-*   **Solution**: On the '**Review redactions**' tab, ensure you upload the original, unredacted `PDF` alongside the `..._review_file.csv`.
+A: You likely uploaded the `...redacted.pdf` file (the final output with text permanently removed) instead of the correct file.
+*   **Solution**: On the '**Review redactions**' tab, the **first upload box (1.)** accepts either:
+    *   The **original, unredacted `PDF`** — if you are starting a fresh review and want to see all suggested redactions overlaid, or
+    *   The **`...redactions_for_review.pdf`** — if you want to reload a previous set of redactions (this file shows the original text with redaction boxes overlaid but the underlying text still visible).
+    The **second upload box (2.)** is for an `...ocr_results_with_words.csv` or `...ocr_output.csv` file, which enables the **'Search text and redact'** and **'View text'** features. Do **not** upload the `...redacted.pdf` (the version with black boxes) to either box.
 
 #### Q9: I can't move or pan the document in the '**Review redactions**' viewer when zoomed in.
 A: You are likely in "**add redaction boxes**" mode.
@@ -96,10 +118,14 @@ A: The app expects a specific format for tabular data.
 *   **Solution**: Ensure your data file has a simple table format, with the table starting in the first cell (`A1`). There should be no other information or multiple tables within the sheet you intend to redact. For `XLSX` files, each sheet to be redacted must follow this format.
 
 #### Q12: The "**Identify duplicate pages**" feature isn't finding duplicates I expect, or it's flagging too many pages.
-A: This feature uses text similarity based on the `ocr_outputs.csv` files and has a default similarity threshold (e.g., 90%).
+A: This feature uses text similarity based on the `ocr_output.csv` files. The default similarity threshold is 0.95 (95%), which may be too strict or too lenient for your documents.
 *   **Solution**:
-    *   Ensure you've uploaded the correct `ocr_outputs.csv` files for all documents you're comparing.
-    *   Review the `page_similarity_results.csv` output to see the similarity scores. The 90% threshold might be too high or too low for your specific documents. The current version of the app described doesn't seem to allow changing this threshold in the `UI`, so you'd mainly use the output to inform your manual review.
+    *   Ensure you've uploaded the correct `ocr_output.csv` files for all documents you're comparing (these are generated every time you run a redaction task).
+    *   On the **'Identify duplicate pages'** tab, open the **'Duplicate matching parameters'** accordion to adjust:
+        *   **Similarity threshold** (0–1): Lower this to catch more (potentially looser) matches; raise it to require more exact matches.
+        *   **Minimum word count**: Pages with fewer words than this are ignored — useful for skipping near-blank pages.
+        *   **Duplicate matching mode**: Choose between **'Find duplicates by page'** (compares full-page text) and **'Find duplicates by text line'** (compares individual lines).
+    *   Review the `page_similarity_results.csv` output to inspect the similarity scores and verify matched text side-by-side in the interactive preview.
 
 #### Q13: I exported a review file to Adobe (`.xfdf`), but when I open it in Adobe Acrobat, it can't find the `PDF` or shows no redactions.
 A: When **Adobe Acrobat** prompts you, it needs to be pointed to the exact original `PDF`.
@@ -203,7 +229,7 @@ A: This could be due to various reasons:
 *   **Permissions**: In rare cases, if running locally, there might be file system permission issues preventing the app from writing outputs.
 *   **Solution**:
     *   Try refreshing the browser page (if feasible without losing input data, or after re-uploading).
-    *   Check the '**Redaction settings**' tab for '**View all output files from this session**' (if logged in via Cognito) – they might be listed there.
+    *   Check the '**Settings**' tab for '**View and download all output files from this session**' (if logged in via Cognito) – they might be listed there.
     *   Try a very simple document with obvious PII and default settings to see if any output is generated.
     *   Check browser developer console (`F12`) for any error messages.
 
@@ -220,3 +246,66 @@ A: The `README` states: "**When you switch page, the viewer will stay in your se
     *   The rotation is a viewing aid for the current page session in the viewer. It does not permanently alter the original `PDF`.
     *   If subsequent pages appear incorrectly rotated, use the rotation buttons again for that new page.
     *   The rotation state might reset if you reload files or perform certain actions. Simply re-apply rotation as needed for viewing.
+
+## Reviewing redactions
+
+#### How do I manually search for and redact text that the automatic detection missed?
+Use the **'Search text and redact'** tab within the **'Review redactions'** tab (found to the right of the document viewer, next to the 'Apply redactions to PDF' and 'Save changes on current page' buttons). This tab shows all the word-level text extracted from your document and allows you to:
+1.  Type a word or phrase in the **'Multi-word text search'** box. Tick **'Enable regex pattern matching'** if you want to use regular expressions. Click **'Search'** (or press Enter).
+2.  The table updates to show only matching rows. Click any row to jump to that page in the document viewer.
+3.  Choose how to redact:
+    *   **'Redact specific text row'** — redacts only the exact instance on the row you clicked.
+    *   **'Redact all words with same text as selected row'** — redacts every occurrence of that word/phrase throughout the document.
+    *   **'Redact all text in table'** — redacts everything currently shown in the filtered table in one go.
+4.  If you make a mistake, click **'Undo latest redaction'** to reverse the last redaction action (one level of undo only).
+5.  Before redacting, you can customise the label and colour for new boxes under the **'Search options'** accordion.
+
+#### What is the 'View text' tab on the 'Review redactions' page?
+The **'View text'** tab (below the 'Search text and redact' tab on the **'Review redactions'** page) displays the line-by-line text extracted from the document. This lets you verify the accuracy of the OCR output. You can search the table using the search bar above it, or filter individual columns by clicking the three dots next to a column header. Clicking a row navigates the document viewer to that page. Click **'Reset OCR output table filter'** to clear any active filters. This table is populated automatically after a redaction run, or when you upload an `...ocr_output.csv` file to the second upload box on the **'Review redactions'** tab.
+
+#### After reviewing and modifying redactions, how do I produce the final redacted PDF?
+Once you are happy with all the redactions in the document viewer, click the **'Apply revised redactions to PDF'** button (found above the 'Save changes on current page to file' button on the **'Review redactions'** tab). This generates a new `...redacted.pdf` (with text permanently removed) and an updated `...redactions_for_review.pdf` (with redaction boxes overlaid on the original text). Both files will appear in the output area.
+
+#### Can I remove individual redactions or all instances of a specific text without using the filter?
+Yes. On the **'Review redactions'** tab, to the right of the document viewer, under the **'Modify redactions'** heading:
+*   **'Exclude specific redaction row'** — removes only the single redaction from the last row you clicked in the table. The currently selected row is shown below the button.
+*   **'Exclude all redactions with the same text as selected row'** — removes every redaction in the document that has exactly the same underlying text as your selected row.
+*   **'Exclude all redactions in table'** — removes all redactions currently visible in the table. Always apply a filter first (using the dropdowns or the filter box, then clicking the blue tick icon) before using this option, otherwise all redactions in the document will be removed.
+*   After any of these actions, click **'Reset filters'** to return the table to showing all remaining redactions.
+*   If you remove redactions by mistake, click **'Undo last element removal'** immediately to restore them (one level of undo only).
+
+## Working with previous redaction results
+
+#### How do I return to a document I previously redacted to add or change redactions?
+You do not need to re-run the full redaction process. Instead:
+1.  On the **'Review redactions'** tab, upload the **`...redactions_for_review.pdf`** file (produced during the original redaction run) into the **first upload box (1.)**. This file contains all the previous redaction boxes embedded in it.
+2.  Upload the **`...ocr_results_with_words.csv`** file into the **second upload box (2.)** if you want to use the **'Search text and redact'** feature to find additional terms to redact.
+3.  The document viewer and redaction table will be populated with the previous redactions, and you can modify them as usual before applying the final redactions to `PDF`.
+
+#### Can I combine redactions from multiple separate redaction runs of the same document?
+Yes. If you have run several redaction tasks on the same document (for example, using different settings each time) and want to merge all the suggested redaction boxes together:
+1.  Go to the **'Settings'** tab and find the **'Combine multiple review PDFs or CSV files'** section.
+2.  Upload all the `...redactions_for_review.pdf` files you want to merge.
+3.  Click **'Combine multiple review PDFs into one'**. A combined file will be produced containing all the redaction boxes from the uploaded files.
+4.  Upload this combined file into the **'Review redactions'** tab to inspect, modify, and finalise the merged redactions.
+
+#### How do I skip re-running OCR or AWS Textract when I redact the same document a second time?
+Every time you redact a document, a **`.json`** output file is produced (either `..._textract.json` for AWS Textract, or `...ocr_outputs_with_words.json` for the local OCR model). To skip the text extraction step on future runs:
+1.  When uploading your document on the **'Redact PDFs/images'** tab, select **both** the original `PDF` and the `.json` file at the same time from the upload area.
+2.  The app will detect the `.json` file and automatically tick the **'Existing Textract output file found'** or **'Existing local OCR output file found'** checkbox, indicating the text extraction step will be skipped.
+This saves time and, where **AWS Textract** is used, avoids incurring the extraction cost again.
+
+## Additional features
+
+#### Can the app summarise documents?
+Yes, if document summarisation is enabled in your deployment, a **'Document summarisation'** tab will be visible. To summarise a document:
+1.  Upload one or more `PDF` files, **or** one or more `...ocr_output.csv` files (from a previous redaction run) using the upload boxes on the tab.
+2.  Open the **'Summarisation settings'** accordion to choose:
+    *   **LLM inference method** — the language model to use.
+    *   **Max pages per page-group summary** — how many pages are summarised together at a time.
+    *   **Summary format** — **Concise** (key themes) or **Detailed**.
+    *   **Additional summary instructions** (optional) — e.g. "Focus on key obligations."
+3.  Click **'Generate summary'**. When finished, the summary appears below and summary files are available for download.
+
+#### What does the 'Redact duplicate pages' checkbox do on the 'Redact PDFs/images' tab?
+When this checkbox is ticked (found alongside the PII identification options under **'Redaction settings'**), the app will automatically detect pages with near-identical text within the document and apply whole-page redaction to any duplicates found, as part of the same redaction run. This is a quick way to handle documents that contain repeated pages. For more control over duplicate detection — such as adjusting the similarity threshold, comparing across multiple documents, or finding duplicate lines of text — use the dedicated **'Identify duplicate pages'** tab as described in the advanced user guide.

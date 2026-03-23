@@ -44,6 +44,7 @@ from tools.config import (
     DO_INITIAL_TABULAR_DATA_CLEAN,
     DOCUMENT_REDACTION_BUCKET,
     EFFICIENT_OCR,
+    EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION,
     EFFICIENT_OCR_MIN_WORDS,
     FEEDBACK_LOGS_FOLDER,
     FULL_COMPREHEND_ENTITY_LIST,
@@ -720,6 +721,13 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
         help="Minimum words on a page to use text-only route; below this use OCR. Defaults to EFFICIENT_OCR_MIN_WORDS config (e.g. 20).",
     )
     pdf_group.add_argument(
+        "--efficient_ocr_min_image_coverage_fraction",
+        type=float,
+        default=None,
+        metavar="F",
+        help="Efficient OCR: min fraction of page area (0-1) for an embedded image to force OCR; 0 disables. Defaults to EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION config (e.g. 0.03).",
+    )
+    pdf_group.add_argument(
         "--ocr_first_pass_max_workers",
         type=int,
         default=None,
@@ -1310,6 +1318,14 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
                         args.efficient_ocr_min_words
                         if getattr(args, "efficient_ocr_min_words", None) is not None
                         else EFFICIENT_OCR_MIN_WORDS
+                    ),
+                    efficient_ocr_min_image_coverage_fraction=(
+                        args.efficient_ocr_min_image_coverage_fraction
+                        if getattr(
+                            args, "efficient_ocr_min_image_coverage_fraction", None
+                        )
+                        is not None
+                        else EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION
                     ),
                     ocr_first_pass_max_workers=(
                         args.ocr_first_pass_max_workers
@@ -2219,6 +2235,14 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
                     efficient_ocr_min_words=(
                         getattr(args, "efficient_ocr_min_words", None)
                         or EFFICIENT_OCR_MIN_WORDS
+                    ),
+                    efficient_ocr_min_image_coverage_fraction=(
+                        getattr(args, "efficient_ocr_min_image_coverage_fraction", None)
+                        if getattr(
+                            args, "efficient_ocr_min_image_coverage_fraction", None
+                        )
+                        is not None
+                        else EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION
                     ),
                     ocr_first_pass_max_workers=(
                         getattr(args, "ocr_first_pass_max_workers", None)

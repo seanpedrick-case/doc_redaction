@@ -103,6 +103,7 @@ from tools.config import (
     DYNAMODB_FEEDBACK_LOG_HEADERS,
     DYNAMODB_USAGE_LOG_HEADERS,
     EFFICIENT_OCR,
+    EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION,
     EFFICIENT_OCR_MIN_WORDS,
     ENFORCE_COST_CODES,
     EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
@@ -421,6 +422,7 @@ walkthrough_in_redact_entities = gr.Dropdown(
     multiselect=True,
     label="Local PII identification model (click empty space in box for full list)",
     visible=initial_show_local_entities,
+    allow_custom_value=True,
 )
 
 walkthrough_in_redact_comprehend_entities = gr.Dropdown(
@@ -429,6 +431,7 @@ walkthrough_in_redact_comprehend_entities = gr.Dropdown(
     multiselect=True,
     label="AWS Comprehend PII identification model (click empty space in box for full list)",
     visible=initial_show_comprehend_entities,
+    allow_custom_value=True,
 )
 
 # Set initial visibility for local OCR and AWS Textract based on default text extraction method
@@ -553,6 +556,7 @@ walkthrough_in_redact_llm_entities = gr.Dropdown(
     multiselect=True,
     label="LLM PII identification model - subset of entities for LLM detection (click empty space in box for full list)",
     visible=True,
+    allow_custom_value=True,
 )
 
 walkthrough_custom_llm_instructions_textbox = gr.Textbox(
@@ -655,6 +659,7 @@ in_redact_entities = gr.Dropdown(
     multiselect=True,
     label="Local PII identification model (click empty space in box for full list)",
     visible=initial_show_local_entities,
+    allow_custom_value=True,
 )
 in_redact_comprehend_entities = gr.Dropdown(
     value=CHOSEN_COMPREHEND_ENTITIES,
@@ -662,6 +667,7 @@ in_redact_comprehend_entities = gr.Dropdown(
     multiselect=True,
     label="AWS Comprehend PII identification model (click empty space in box for full list)",
     visible=initial_show_comprehend_entities,
+    allow_custom_value=True,
 )
 
 in_redact_llm_entities = gr.Dropdown(
@@ -670,6 +676,7 @@ in_redact_llm_entities = gr.Dropdown(
     multiselect=True,
     label="LLM PII identification model - subset of entities for LLM detection (click empty space in box for full list)",
     visible=initial_is_llm_method,
+    allow_custom_value=True,
 )
 
 custom_llm_instructions_textbox = gr.Textbox(
@@ -870,7 +877,11 @@ tabular_min_word_count = gr.Number(
 )
 
 ### All output file components
-all_output_files_btn = gr.Button("Refresh files in output folder", variant="secondary")
+all_output_files_btn = gr.Button(
+    "Refresh files in output folder",
+    variant="secondary",
+    visible=SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
+)
 all_output_files = gr.FileExplorer(
     root_dir=OUTPUT_FOLDER,
     label="Choose output files for download",
@@ -1128,7 +1139,7 @@ with blocks:
 
     s3_default_cost_codes_file = gr.State(value=S3_COST_CODES_PATH)
     default_cost_codes_output_folder_location = gr.State(value=OUTPUT_COST_CODES_PATH)
-    enforce_cost_code_textbox = gr.State(value=ENFORCE_COST_CODES)
+    enforce_cost_code_bool = gr.State(value=ENFORCE_COST_CODES)
     default_cost_code_textbox = gr.State(value=DEFAULT_COST_CODE)
 
     # Base tables that are not modified subsequent to load
@@ -1546,6 +1557,83 @@ with blocks:
                 run_on_click=True,
                 cache_examples=False,
             )
+
+    def _ocr_method_for_difficult_example(desired: str) -> str:
+        """Use *desired* for difficult-OCR examples if it exists on the local OCR radio; else first available fallback."""
+        if desired in LOCAL_OCR_MODEL_OPTIONS:
+            return desired
+        chains = {
+            "vlm": (
+                "vlm",
+                "inference-server",
+                "paddle",
+                "tesseract",
+            ),
+            "hybrid-paddle-vlm": (
+                "hybrid-paddle-vlm",
+                "vlm",
+                "inference-server",
+                "paddle",
+                "tesseract",
+            ),
+            "paddle": ("paddle", "tesseract"),
+            "tesseract": ("tesseract",),
+        }
+        for candidate in chains.get(desired, ("tesseract",)):
+            if candidate in LOCAL_OCR_MODEL_OPTIONS:
+                return candidate
+        return "tesseract"
+
+    def _pii_method_for_difficult_example(desired: str) -> str:
+        """Map intended PII method to one present on pii_identification_method_drop (PII_DETECTION_MODELS)."""
+        if desired in PII_DETECTION_MODELS:
+            return desired
+        available = set(PII_DETECTION_MODELS)
+        chains = {
+            LOCAL_TRANSFORMERS_LLM_PII_OPTION: (
+                LOCAL_TRANSFORMERS_LLM_PII_OPTION,
+                INFERENCE_SERVER_PII_OPTION,
+                AWS_LLM_PII_OPTION,
+                LOCAL_PII_OPTION,
+                NO_REDACTION_PII_OPTION,
+            ),
+            INFERENCE_SERVER_PII_OPTION: (
+                INFERENCE_SERVER_PII_OPTION,
+                LOCAL_TRANSFORMERS_LLM_PII_OPTION,
+                AWS_LLM_PII_OPTION,
+                LOCAL_PII_OPTION,
+                NO_REDACTION_PII_OPTION,
+            ),
+            AWS_LLM_PII_OPTION: (
+                AWS_LLM_PII_OPTION,
+                LOCAL_TRANSFORMERS_LLM_PII_OPTION,
+                INFERENCE_SERVER_PII_OPTION,
+                LOCAL_PII_OPTION,
+                NO_REDACTION_PII_OPTION,
+            ),
+            AWS_PII_OPTION: (
+                AWS_PII_OPTION,
+                LOCAL_PII_OPTION,
+                NO_REDACTION_PII_OPTION,
+            ),
+            LOCAL_PII_OPTION: (
+                LOCAL_PII_OPTION,
+                INFERENCE_SERVER_PII_OPTION,
+                LOCAL_TRANSFORMERS_LLM_PII_OPTION,
+                AWS_LLM_PII_OPTION,
+                AWS_PII_OPTION,
+                NO_REDACTION_PII_OPTION,
+            ),
+            NO_REDACTION_PII_OPTION: (
+                NO_REDACTION_PII_OPTION,
+                LOCAL_PII_OPTION,
+            ),
+        }
+        for candidate in chains.get(desired, ()):
+            if candidate in available:
+                return candidate
+        return PII_DETECTION_MODELS[0] if PII_DETECTION_MODELS else desired
+
     if SHOW_DIFFICULT_OCR_EXAMPLES:
         gr.Markdown(
             "### Test out the different OCR methods available. Click on an example below and then the 'Extract text and redact document' button:"
@@ -1559,14 +1647,14 @@ with blocks:
                     [ocr_example_files[0]],
                     "Local OCR model - PDFs without selectable text",
                     "Only extract text (no redaction)",
-                    ["Extract handwriting", "Extract signatures"],
+                    [],
                     [ocr_example_files[0]],
                     ocr_example_files[0],
                     os.path.splitext(os.path.basename(ocr_example_files[0]))[0],
                     7,
                     1,
                     1,
-                    "tesseract",
+                    _ocr_method_for_difficult_example("tesseract"),
                     CHOSEN_REDACT_ENTITIES,
                     CHOSEN_LLM_ENTITIES,
                     "",
@@ -1586,7 +1674,7 @@ with blocks:
                     7,
                     6,
                     6,
-                    "hybrid-paddle-vlm",
+                    _ocr_method_for_difficult_example("hybrid-paddle-vlm"),
                     CHOSEN_REDACT_ENTITIES + ["CUSTOM_VLM_SIGNATURE"],
                     CHOSEN_LLM_ENTITIES,
                     "",
@@ -1600,14 +1688,14 @@ with blocks:
                     [ocr_example_files[1]],
                     "Local OCR model - PDFs without selectable text",
                     "Only extract text (no redaction)",
-                    ["Extract handwriting", "Extract signatures"],
+                    ["Extract handwriting"],
                     [ocr_example_files[1]],
                     ocr_example_files[1],
                     os.path.splitext(os.path.basename(ocr_example_files[1]))[0],
                     1,
                     0,
                     0,
-                    "vlm",
+                    _ocr_method_for_difficult_example("vlm"),
                     CHOSEN_REDACT_ENTITIES,
                     CHOSEN_LLM_ENTITIES,
                     "",
@@ -1621,14 +1709,14 @@ with blocks:
                     [ocr_example_files[2]],
                     "Local OCR model - PDFs without selectable text",
                     "Local",
-                    ["Extract handwriting", "Extract signatures"],
+                    ["Extract handwriting"],
                     [ocr_example_files[2]],
                     ocr_example_files[2],
                     os.path.splitext(os.path.basename(ocr_example_files[2]))[0],
                     1,
                     0,
                     0,
-                    "hybrid-paddle-vlm",
+                    _ocr_method_for_difficult_example("hybrid-paddle-vlm"),
                     CHOSEN_REDACT_ENTITIES + ["CUSTOM_VLM_PERSON"],
                     CHOSEN_LLM_ENTITIES,
                     "",
@@ -1642,17 +1730,17 @@ with blocks:
                     [example_files[0]],
                     "Local model - selectable text",
                     LOCAL_TRANSFORMERS_LLM_PII_OPTION,
-                    ["Extract handwriting", "Extract signatures"],
+                    [],
                     [example_files[0]],
                     example_files[0],
                     os.path.splitext(os.path.basename(example_files[0]))[0],
                     1,
                     0,
                     0,
-                    "paddle",
+                    _ocr_method_for_difficult_example("paddle"),
                     ["CUSTOM"],
                     ["CUSTOM"],
-                    "Redact Lauren's name, email addresses, and phone numbers with the label LAUREN. Redact university names with the label UNIVERSITY.",
+                    "Redact Lauren's name (always cover the full name if available), email addresses, and phone numbers with the label LAUREN. Redact university names with the label UNIVERSITY. Always include the full university name if available.",
                 ],
             )
             ocr_example_labels.append("Example email LLM PII detection")
@@ -1663,6 +1751,9 @@ with blocks:
                 ex[1] = TEXTRACT_TEXT_EXTRACT_OPTION
                 if ex[2] != NO_REDACTION_PII_OPTION:
                     ex[2] = AWS_LLM_PII_OPTION
+
+        for ex in available_ocr_examples:
+            ex[2] = _pii_method_for_difficult_example(ex[2])
 
         # Only create examples if we have available files
         if available_ocr_examples:
@@ -3627,6 +3718,14 @@ with blocks:
                                 minimum=0,
                                 step=1,
                             )
+                            efficient_ocr_min_image_coverage_number = gr.Number(
+                                label="Min. page-area fraction for an embedded image to force OCR (0 = word count only)",
+                                value=EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION,
+                                precision=3,
+                                minimum=0.0,
+                                maximum=1.0,
+                                step=0.005,
+                            )
                     with gr.Column(scale=1):
                         overwrite_existing_ocr_checkbox = gr.Checkbox(
                             label="Always overwrite existing OCR results for new redaction tasks",
@@ -4453,7 +4552,7 @@ with blocks:
     ).success(
         fn=enforce_cost_codes,
         inputs=[
-            enforce_cost_code_textbox,
+            enforce_cost_code_bool,
             cost_code_choice_drop,
             cost_code_dataframe_base,
         ],
@@ -4514,6 +4613,7 @@ with blocks:
             inference_server_vlm_model_textbox,
             efficient_ocr_checkbox,
             efficient_ocr_min_words_number,
+            efficient_ocr_min_image_coverage_number,
             high_quality_textract_ocr_checkbox,
             overwrite_existing_ocr_checkbox,
             llm_model_name_textbox,
@@ -4925,7 +5025,7 @@ with blocks:
     ).success(
         fn=enforce_cost_codes,
         inputs=[
-            enforce_cost_code_textbox,
+            enforce_cost_code_bool,
             cost_code_choice_drop,
             cost_code_dataframe_base,
         ],
@@ -4986,6 +5086,7 @@ with blocks:
             inference_server_vlm_model_textbox,
             efficient_ocr_checkbox,
             efficient_ocr_min_words_number,
+            efficient_ocr_min_image_coverage_number,
             high_quality_textract_ocr_checkbox,
             overwrite_existing_ocr_checkbox,
             llm_model_name_textbox,
@@ -5634,6 +5735,7 @@ with blocks:
             inference_server_vlm_model_textbox,
             efficient_ocr_checkbox,
             efficient_ocr_min_words_number,
+            efficient_ocr_min_image_coverage_number,
             high_quality_textract_ocr_checkbox,
             overwrite_existing_ocr_checkbox,
             llm_model_name_textbox,
@@ -8549,6 +8651,7 @@ with blocks:
         inference_server_vlm_model_textbox,
         efficient_ocr_checkbox,
         efficient_ocr_min_words_number,
+        efficient_ocr_min_image_coverage_number,
         high_quality_textract_ocr_checkbox,
         overwrite_existing_ocr_checkbox,
         llm_model_name_textbox,
@@ -8760,6 +8863,7 @@ with blocks:
             inference_server_vlm_model_textbox or "",
             efficient_ocr_checkbox if efficient_ocr_checkbox is not None else False,
             efficient_ocr_min_words_number,
+            efficient_ocr_min_image_coverage_number,
             (
                 high_quality_textract_ocr_checkbox
                 if high_quality_textract_ocr_checkbox is not None
@@ -8841,7 +8945,7 @@ with blocks:
     ).success(
         fn=enforce_cost_codes,
         inputs=[
-            enforce_cost_code_textbox,
+            enforce_cost_code_bool,
             cost_code_choice_drop,
             cost_code_dataframe_base,
         ],
@@ -8914,6 +9018,7 @@ with blocks:
             inference_server_vlm_model_textbox,
             efficient_ocr_checkbox,
             efficient_ocr_min_words_number,
+            efficient_ocr_min_image_coverage_number,
             high_quality_textract_ocr_checkbox,
             overwrite_existing_ocr_checkbox,
             llm_model_name_textbox,
@@ -9601,6 +9706,8 @@ with blocks:
                 app,
                 blocks,
                 theme=gr.themes.Default(primary_hue="blue"),
+                head=head_html,
+                css=css,
                 show_error=True,
                 auth=authenticate_user if COGNITO_AUTH else None,
                 max_file_size=MAX_FILE_SIZE,
@@ -9706,6 +9813,7 @@ with blocks:
                 "ocr_first_pass_max_workers": DIRECT_MODE_OCR_FIRST_PASS_MAX_WORKERS,
                 "efficient_ocr": EFFICIENT_OCR,
                 "efficient_ocr_min_words": EFFICIENT_OCR_MIN_WORDS,
+                "efficient_ocr_min_image_coverage_fraction": EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION,
                 "hybrid_textract_bedrock_vlm": HYBRID_TEXTRACT_BEDROCK_VLM,
                 "page_min": DIRECT_MODE_PAGE_MIN,
                 "page_max": DIRECT_MODE_PAGE_MAX,

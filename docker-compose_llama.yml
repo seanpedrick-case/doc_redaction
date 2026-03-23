@@ -1,0 +1,205 @@
+# Pick which GGUF model runs by setting COMPOSE_PROFILES in .env (or pass --profile):
+#   COMPOSE_PROFILES=35b   -> qwen35-35b_q4_gguf
+#   COMPOSE_PROFILES=27b   -> qwen35-27b_q4_gguf
+# The app always talks to http://llama-inference:8080 (shared network alias on both model services).
+# Each model service uses its own llama.cpp cache volume so mmproj-F16.gguf (same filename per repo)
+# is never shared between 35B and 27B downloads.
+# Example CLI commands:
+# docker compose -f docker-compose_llama.yml --profile 35b up -d
+# docker compose -f docker-compose_llama.yml --profile 27b up -d
+services:
+  # Qwen 3.5 35B model setup below requires 24GB of VRAM with n-cpu-moe set to 0. For lower VRAM systems, n-cpu-moe ~ 40 could work for a 12GB VRAM system, and n-cpu-moe ~ 20 for a 16GB VRAM system.
+  qwen35-35b_q4_gguf:
+    profiles: ["35b"]
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda12
+    command:
+      - -hf
+      - unsloth/Qwen3.5-35B-A3B-GGUF
+      - --hf-file
+      - Qwen3.5-35B-A3B-UD-IQ4_NL.gguf
+      - --mmproj-url
+      - https://huggingface.co/unsloth/Qwen3.5-35B-A3B-GGUF/resolve/main/mmproj-F16.gguf
+      - --n-gpu-layers
+      - "999"
+      - --ctx-size
+      - "32768"
+      - --fit
+      - "off"
+      - --temp
+      - "0.7"
+      - --top-k
+      - "20"
+      - --top-p
+      - "0.8"
+      - --min-p
+      - "0.0"
+      - --frequency-penalty
+      - "1"
+      - --presence-penalty
+      - "1"
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8080"
+      - --no-warmup
+      - --seed
+      - "42"
+      - --n-cpu-moe
+      - "0" # Increase this value to fit within your availableVRAM
+    ports:
+      - "8001:8080"
+    volumes:
+      - ./models:/models
+      - hf-llama-cache-qwen35-35b:/root/.cache/llama.cpp
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/v1/models >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 8
+      start_period: 1200s
+    networks:
+      redaction-net-llama:
+        aliases:
+          - llama-inference
+
+  # Qwen 3.5 27B model setup below requires 24GB of VRAM to run.
+  qwen35-27b_q4_gguf:
+    profiles: ["27b"]
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda12
+    command:
+      - -hf
+      - unsloth/Qwen3.5-27B-GGUF
+      - --hf-file
+      - Qwen3.5-27B-UD-Q4_K_XL.gguf
+      - --mmproj-url
+      - https://huggingface.co/unsloth/Qwen3.5-27B-GGUF/resolve/main/mmproj-F16.gguf
+      - --n-gpu-layers
+      - "999"
+      - --ctx-size
+      - "32768"
+      - --fit
+      - "off"
+      - --temp
+      - "0.7"
+      - --top-k
+      - "20"
+      - --top-p
+      - "0.8"
+      - --min-p
+      - "0.0"
+      - --frequency-penalty
+      - "1"
+      - --presence-penalty
+      - "1"
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8080"
+      - --no-warmup
+      - --seed
+      - "42"
+    ports:
+      - "8000:8080"
+    volumes:
+      - ./models:/models
+      - hf-llama-cache-qwen35-27b:/root/.cache/llama.cpp
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/v1/models >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 8
+      start_period: 1200s
+    networks:
+      redaction-net-llama:
+        aliases:
+          - llama-inference
+
+  redaction-app-llama:
+    profiles: ["35b", "27b"]
+    image: redaction-app-main
+    build:
+      context: .              # Look in the current folder
+      dockerfile: Dockerfile  # Use this file
+      target: gradio          # Use the 'gradio' stage from your Dockerfile
+      args:                   # Pass your build-time variables here!
+        - TORCH_GPU_ENABLED=False
+        - INSTALL_VLM=False
+        - PADDLE_GPU_ENABLED=True
+        - INSTALL_PADDLEOCR=True
+    shm_size: '8gb'
+    depends_on:
+      qwen35-35b_q4_gguf:
+        condition: service_healthy
+        required: false
+      qwen35-27b_q4_gguf:
+        condition: service_healthy
+        required: false
+    environment:
+      - FLAGS_fraction_of_gpu_memory_to_use=0.05
+      - RUN_FASTAPI=True
+      - APP_MODE=fastapi
+      - SHOW_PADDLE_MODEL_OPTIONS=True
+      - CHOSEN_LOCAL_OCR_MODEL=paddle
+      - SHOW_LOCAL_OCR_MODEL_OPTIONS=True
+      - SHOW_INFERENCE_SERVER_PII_OPTIONS=True
+      - SHOW_INFERENCE_SERVER_VLM_OPTIONS=True
+      - SHOW_HYBRID_MODELS=True
+      - SHOW_DIFFICULT_OCR_EXAMPLES=True
+      - MAX_WORKERS=12
+      - TESSERACT_MAX_WORKERS=8
+      - PADDLE_MAX_WORKERS=1
+      - CUSTOM_VLM_BACKEND=inference_vlm
+      - LOAD_PADDLE_AT_STARTUP=False
+      - INFERENCE_SERVER_API_URL=http://llama-inference:8080
+      - DEFAULT_INFERENCE_SERVER_VLM_MODEL=""
+      - DEFAULT_INFERENCE_SERVER_PII_MODEL=""
+      - EFFICIENT_OCR=True
+      - SHOW_CUSTOM_VLM_ENTITIES=True
+      - SESSION_OUTPUT_FOLDER=True
+      - SAVE_PAGE_OCR_VISUALISATIONS=True
+      - SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER=True
+      - SHOW_SUMMARISATION=True
+      - HYBRID_OCR_CONFIDENCE_THRESHOLD=97
+      - INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES=True
+      - PREPROCESS_LOCAL_OCR_IMAGES=True
+      - INFERENCE_SERVER_DISABLE_THINKING=True
+      - HYBRID_OCR_MAX_NEW_TOKENS=2048
+      - DEFAULT_NEW_BATCH_CHAR_COUNT=1250
+      - MAX_NEW_TOKENS=16384
+      - MAX_INPUT_TOKEN_LENGTH=32768
+      - SAVE_EXAMPLE_HYBRID_IMAGES=True
+      - SAVE_VLM_INPUT_IMAGES=True
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    ports:
+      - "7861:7860"
+    networks:
+      - redaction-net-llama
+
+networks:
+  redaction-net-llama:
+    driver: bridge
+
+volumes:
+  hf-llama-cache-qwen35-35b:
+  hf-llama-cache-qwen35-27b:

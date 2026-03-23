@@ -631,11 +631,15 @@ def convert_pymupdf_to_image_coords(
     """
     Converts bounding box coordinates from PyMuPDF page format to image coordinates.
 
-    This function takes coordinates (x1, y1, x2, y2) defined relative to a
-    PyMuPDF page's coordinate system and transforms them to correspond to
-    the coordinate system of a target image. It accounts for scaling differences
-    between the page's mediabox/rect and the image dimensions, as well as
-    any potential offsets.
+    PyMuPDF uses coordinates relative to ``page.rect`` (the visible area). The
+    rectangle is often **normalised** so its top-left is (0, 0) even when the CropBox
+    is inset in the MediaBox, so the inset must be taken from ``page.cropbox`` vs
+    ``page.mediabox`` (same as ``off_x`` / ``off_y`` in
+    ``process_page_to_structured_ocr_pymupdf``). Review/annotation images are rendered
+    from the full MediaBox (see ``_render_pdf_page_to_png_pymupdf_mediabox``), so we
+    shift rect-local points to MediaBox-local, then scale by image_size /
+    mediabox_size. This replaces the old symmetric (mediabox−rect)/2 heuristic, which
+    was wrong for asymmetric crops.
 
     Args:
         pymupdf_page (Page): The PyMuPDF page object from which the coordinates originate.
@@ -649,17 +653,14 @@ def convert_pymupdf_to_image_coords(
                                            'image_height'. Used if 'image' is not provided
                                            and 'image' is None. Defaults to an empty dictionary.
     """
-    # Get rect dimensions
-    rect = pymupdf_page.rect
-    rect_width = rect.width
-    rect_height = rect.height
-
-    # Get mediabox dimensions and position
     mediabox = pymupdf_page.mediabox
+    cropbox = pymupdf_page.cropbox
     mediabox_width = mediabox.width
     mediabox_height = mediabox.height
 
-    # Get target image dimensions
+    if mediabox_width <= 0 or mediabox_height <= 0:
+        return x1, y1, x2, y2
+
     if image:
         image_page_width, image_page_height = image.size
     elif image_dimensions:
@@ -670,43 +671,18 @@ def convert_pymupdf_to_image_coords(
     else:
         image_page_width, image_page_height = mediabox_width, mediabox_height
 
-    # Calculate scaling factors
-    image_to_mediabox_x_scale = image_page_width / mediabox_width
-    image_to_mediabox_y_scale = image_page_height / mediabox_height
+    sx = image_page_width / mediabox_width
+    sy = image_page_height / mediabox_height
 
-    # Adjust coordinates:
-    # Apply scaling to match image dimensions
-    x1_image = x1 * image_to_mediabox_x_scale
-    x2_image = x2 * image_to_mediabox_x_scale
-    y1_image = y1 * image_to_mediabox_y_scale
-    y2_image = y2 * image_to_mediabox_y_scale
+    # Rect-local → MediaBox-local: use cropbox vs mediabox (rect may be normalised to
+    # origin 0,0 while cropbox keeps PDF placement).
+    dx = cropbox.x0 - mediabox.x0
+    dy = cropbox.y0 - mediabox.y0
 
-    # Correct for difference in rect and mediabox size
-    if mediabox_width != rect_width:
-
-        mediabox_to_rect_x_scale = mediabox_width / rect_width
-        mediabox_to_rect_y_scale = mediabox_height / rect_height
-
-        rect_width / mediabox_width
-        # rect_to_mediabox_y_scale = rect_height / mediabox_height
-
-        mediabox_rect_x_diff = (mediabox_width - rect_width) * (
-            image_to_mediabox_x_scale / 2
-        )
-        mediabox_rect_y_diff = (mediabox_height - rect_height) * (
-            image_to_mediabox_y_scale / 2
-        )
-
-        x1_image -= mediabox_rect_x_diff
-        x2_image -= mediabox_rect_x_diff
-        y1_image += mediabox_rect_y_diff
-        y2_image += mediabox_rect_y_diff
-
-        #
-        x1_image *= mediabox_to_rect_x_scale
-        x2_image *= mediabox_to_rect_x_scale
-        y1_image *= mediabox_to_rect_y_scale
-        y2_image *= mediabox_to_rect_y_scale
+    x1_image = (x1 + dx) * sx
+    x2_image = (x2 + dx) * sx
+    y1_image = (y1 + dy) * sy
+    y2_image = (y2 + dy) * sy
 
     return x1_image, y1_image, x2_image, y2_image
 

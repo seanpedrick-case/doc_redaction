@@ -343,6 +343,10 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Description:** Minimum number of extractable words on a page to use the text-only route when `EFFICIENT_OCR` is enabled; below this threshold the page uses OCR.
     * **Default Value:** `20`
 
+* **`EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION`**
+    * **Description:** When `EFFICIENT_OCR` is enabled, minimum fraction of the page area (MediaBox) that a single embedded image must cover to route that page through OCR (`redact_image_pdf`) in addition to the word-count rule. This catches pages with plenty of selectable text but meaningful raster content (e.g. photos) where text may appear only inside the image. Set to `0` to disable image-based routing and rely on word count only.
+    * **Default Value:** `0.03` (3% of page area)
+
 * **`MAX_WORKERS`**
     * **Description:** Default maximum number of worker threads for parallel processing across the app. Used as the default or cap for thread pools in review (saving redacted pages, loading page images), file conversion (PDF-to-images, input file listing, annotation processing), file redaction (text extraction, merge/summary, pikepdf annotations), custom image analyser (mapping analyzer results to bounding boxes), and data anonymisation (initial column cleaning). When not set, `OCR_FIRST_PASS_MAX_WORKERS` and `SUMMARY_PAGE_GROUP_MAX_WORKERS` default to this value; set those explicitly to override for OCR or summarisation only.
     * **Default Value:** `8`
@@ -382,6 +386,10 @@ When AWS Textract is selected for text extraction, these options allow lines wit
 * **`HYBRID_TEXTRACT_BEDROCK_VLM_PADDING`**
     * **Description:** Padding in pixels around the line crop when calling Bedrock VLM for re-extraction.
     * **Default Value:** `5`
+
+* **`SAVE_TEXTRACT_BEDROCK_HYBRID_EXAMPLES`**
+    * **Description:** If set to `"True"`, saves example images or artefacts from the Textract + Bedrock VLM hybrid re-extraction path for debugging (see `tools/config.py` / hybrid Textract–Bedrock implementation).
+    * **Default Value:** `"False"`
 
 ### Bedrock VLM and LLM cost estimation
 
@@ -588,7 +596,7 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
     * **Default Value:** `"False"`
 
 * **`USE_TRANSFORMERS_VLM_MODEL_AS_LLM`**
-    * **Description:** When set to `"True"`, use the same local transformers VLM model (e.g. Qwen3-VL-4B-Instruct) for LLM tasks (e.g. PII entity detection in `tools/llm_entity_detection.py`) as for VLM/OCR. Overrides `LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE` when local transformers LLM is selected. The VLM model must be loaded first (e.g. by running VLM OCR); otherwise the standard PII model is used.
+    * **Description:** When set to `"True"`, use the same local transformers VLM model (e.g. Qwen3-VL-4B-Instruct) for LLM tasks (e.g. PII entity detection in `tools/llm_entity_detection.py`) as for VLM/OCR. Overrides `LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE` when local transformers LLM is selected. The VLM weights must be loaded first (e.g. **`LOAD_TRANSFORMERS_VLM_MODEL_AT_START=True`**, or by running a VLM OCR task first); otherwise the standard PII model is used.
     * **Default Value:** `"False"`
 
 * **`LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE`**
@@ -610,6 +618,10 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
 * **`REASONING_SUFFIX`**
     * **Description:** Suffix added to prompts for reasoning-capable models (e.g. `"Reasoning: low"` for GPT-OSS 20B, `"/nothink"` for Qwen 3 4B to disable chain-of-thought). Model-specific; see config for defaults.
     * **Default Value:** Model-dependent (e.g. `"Reasoning: low"` or `"/nothink"` or `''`).
+
+* **`PRINT_TRANSFORMERS_USER_PROMPT`**
+    * **Description:** If set to `"True"`, prints the system and user prompts to the console when calling the local transformers LLM (`tools/llm_funcs.py`). Useful for debugging; avoid in production if logs are sensitive.
+    * **Default Value:** `"False"`
 
 * **LLM generation parameters:** **`LLM_TEMPERATURE`** (default `0.1`), **`LLM_TOP_K`** (`64`), **`LLM_MIN_P`** (`0`), **`LLM_TOP_P`** (`0.95`), **`LLM_REPETITION_PENALTY`** (`1.0`), **`LLM_MAX_NEW_TOKENS`** (`4096`), **`LLM_CONTEXT_LENGTH`** (`32768`), **`LLM_SEED`** (`42`), **`LLM_RESET`** (`False`), **`LLM_STREAM`** (`True`), **`LLM_STOP_STRINGS`**, **`LLM_THREADS`** (`-1`), **`SPECULATIVE_DECODING`** (`False`), **`ASSISTANT_MODEL`**, **`LLM_MODEL_DTYPE`** (`bfloat16`), and other **`LLM_*`** / related variables in `tools/config.py` control local/transformers LLM generation in `tools/llm_funcs.py`. **`LLM_TEMPERATURE`** and **`LLM_MAX_NEW_TOKENS`** also control PII detection LLM calls and retries.
 
@@ -659,6 +671,10 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
     * **Description:** If set to `"True"`, VLM (Vision Language Model) options will be shown in the UI.
     * **Default Value:** `"False"`
 
+* **`LOAD_TRANSFORMERS_VLM_MODEL_AT_START`**
+    * **Description:** When `SHOW_VLM_MODEL_OPTIONS` is `"True"`, if set to `"True"`, loads local transformers VLM weights at application startup (same as historical behavior). If `"False"`, weights load on the first VLM OCR call (`tools/run_vlm.py`), reducing startup memory at the cost of a slower first run. Compare with **`LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START`** for the PII LLM (which defaults to `"False"`).
+    * **Default Value:** `"True"`
+
 * **`SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL`**
     * **Description:** Selected vision model for OCR. Choose from: `"Nanonets-OCR2-3B"`, `"Dots.OCR"`, `"Qwen3-VL-2B-Instruct"`, `"Qwen3-VL-4B-Instruct"`, `"Qwen3-VL-8B-Instruct"`, `"Qwen3-VL-30B-A3B-Instruct"`, `"Qwen3-VL-235B-A22B-Instruct"`, `"PaddleOCR-VL"`.
     * **Default Value:** `"Qwen3-VL-8B-Instruct"`
@@ -695,8 +711,16 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
     * **Description:** Maximum effective DPI after preparation. High-DPI scans are downscaled so effective DPI (see `VLM_MIN_DPI`) does not exceed this value, subject to `VLM_MAX_IMAGE_SIZE` (and hybrid/full-page min pixel settings).
     * **Default Value:** `300.0`
 
+* **`VLM_MAX_ASPECT_RATIO`**
+    * **Description:** Upper bound on image aspect ratio **after** white-padding for every VLM path in `custom_image_analyser_engine`: local transformers (`extract_text_from_image_vlm`), inference-server (`_call_inference_server_vlm_api`), AWS Bedrock (`_call_bedrock_vlm_api`), Gemini, and Azure/OpenAI. The code pads very long/thin crops (typical hybrid line regions) so `max(width/height, height/width)` does not exceed this value. Lower values are stricter (more padding, smaller embedded text relative to canvas); higher values send nearer-native crops but may hit provider limits. Values below `1.0` are clamped to `1.0`. For Bedrock, if the image is still above the AWS Converse vision limit (20:1) after this step, a second stricter pad is applied automatically.
+    * **Default Value:** `10.0`
+
 * **`VLM_DISABLE_QWEN3_5_THINKING`**
-    * **Description:** If set to `"True"`, disables Qwen3.5 "thinking" mode for VLM OCR.
+    * **Description:** If set to `"True"`, disables Qwen3.5 "thinking" mode for **local transformers** VLM calls. Implemented by appending `<think></think>` to the generation prompt after `apply_chat_template`, so the model skips its reasoning chain and outputs the answer directly.
+    * **Default Value:** `"False"`
+
+* **`INFERENCE_SERVER_DISABLE_THINKING`**
+    * **Description:** If set to `"True"`, disables thinking for **inference-server** VLM calls (the server-side equivalent of `VLM_DISABLE_QWEN3_5_THINKING`). Adds `chat_template_kwargs: {"enable_thinking": false}` to every request payload; vLLM applies the Qwen3/Qwen3.5 chat template server-side and honours this flag to suppress `<think>...</think>` generation entirely. Useful when the inference server is running a Qwen3.5 reasoning model and thinking tokens are unnecessary (e.g. for simple line-crop OCR in `hybrid-paddle-inference-server` mode). Eliminates thinking overhead and removes the need to raise `HYBRID_OCR_MAX_NEW_TOKENS` to accommodate the reasoning budget.
     * **Default Value:** `"False"`
 
 * **`MAX_NEW_TOKENS`**
@@ -724,8 +748,12 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
     * **Default Value:** `"False"`
 
 * **`HYBRID_OCR_MAX_NEW_TOKENS`**
-    * **Description:** Maximum number of tokens to generate for hybrid OCR operations.
-    * **Default Value:** `30`
+    * **Description:** Maximum number of tokens the inference server (or local VLM) may generate per hybrid line-crop OCR call. This is the generation budget passed directly to the model via `max_tokens`. For reasoning models such as Qwen3.5, thinking tokens (`<think>...</think>`) count against this budget before any answer is produced, so the value must be large enough to cover both the reasoning chain and the short JSON answer. Setting this too low (e.g. `50`) causes the model to exhaust the budget during thinking and return empty results for every line. Increase to `2048` or higher if you observe "Inference server returned no results" log lines when using `hybrid-paddle-inference-server` with a reasoning model.
+    * **Default Value:** `1024`
+
+* **`HYBRID_OCR_MAX_WORDS`**
+    * **Description:** Maximum number of words allowed in a hybrid OCR result for a single text line. Results whose word count exceeds this threshold are discarded as likely hallucinations or runaway model output, and the original OCR result (e.g. from Paddle) is kept instead. This is a separate sanity check from `HYBRID_OCR_MAX_NEW_TOKENS` — it operates on the parsed response text, not on the token budget. A single line of text rarely contains more than ~50 words, so the default is conservative.
+    * **Default Value:** `50`
 
 * **`VLM_OCR_INTRO_TEXT`**
     * **Description:** UI intro text when the local OCR option **vlm** (full-page vision-language OCR) is shown. Customise for your deployment.
@@ -746,6 +774,10 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
 * **`CLOUD_VLM_MODEL_CHOICE`**
     * **Description:** Default model choice for cloud VLM OCR (AWS Bedrock, Gemini, or Azure/OpenAI). Used when cloud VLM options are enabled.
     * **Default Value:** `"qwen.qwen3-vl-235b-a22b"` (or first available cloud model if empty)
+
+* **`SHOW_CUSTOM_VLM_ENTITIES`**
+    * **Description:** If set to `"True"`, appends **`CUSTOM_VLM_PERSON`** and **`CUSTOM_VLM_SIGNATURE`** to the redaction entity lists when at least one of `SHOW_VLM_MODEL_OPTIONS`, `SHOW_INFERENCE_SERVER_VLM_OPTIONS`, or `SHOW_BEDROCK_VLM_MODELS` is enabled—so users can redact detected faces and signatures from VLM-capable pipelines.
+    * **Default Value:** `"False"`
 
 * **`CUSTOM_VLM_BACKEND`**
     * **Description:** Backend used for CUSTOM_VLM_PERSON and CUSTOM_VLM_SIGNATURE (face and signature detection) when those entities are selected for redaction. One of: `"transformers_vlm"` (local transformers VLM), `"inference_vlm"` (inference-server VLM), or `"bedrock_vlm"` (AWS Bedrock VLM). Applies regardless of the PII identification method (Local, AWS Comprehend, or LLM). Value is case-insensitive; invalid values fall back to `"bedrock_vlm"`.

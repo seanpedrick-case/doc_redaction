@@ -1,7 +1,7 @@
 import os
 import sys
 import time
-from threading import Thread
+from threading import Lock, Thread
 
 import gradio as gr
 import spaces
@@ -12,6 +12,7 @@ from tools.config import (
     CLOUD_VLM_MODEL_CHOICE,
     DEFAULT_INFERENCE_SERVER_VLM_MODEL,
     LOAD_PADDLE_AT_STARTUP,
+    LOAD_TRANSFORMERS_VLM_MODEL_AT_START,
     MAX_INPUT_TOKEN_LENGTH,
     MAX_NEW_TOKENS,
     MAX_SPACES_GPU_RUN_TIME,
@@ -31,6 +32,7 @@ from tools.config import (
     VLM_DEFAULT_MIN_P,
     VLM_DEFAULT_PRESENCE_PENALTY,
     VLM_DEFAULT_REPETITION_PENALTY,
+    VLM_DEFAULT_STREAM,
     VLM_DEFAULT_TEMPERATURE,
     VLM_DEFAULT_TOP_K,
     VLM_DEFAULT_TOP_P,
@@ -149,6 +151,27 @@ model_default_repetition_penalty = (
 model_default_presence_penalty = VLM_DEFAULT_PRESENCE_PENALTY
 model_default_max_new_tokens = int(MAX_NEW_TOKENS)
 model_default_seed = VLM_SEED if VLM_SEED is not None else None
+
+_load_vlm_weights_fn = None
+_vlm_load_lock = Lock()
+_transformers_vlm_weights_loaded = False
+
+
+def ensure_transformers_vlm_loaded():
+    """Load local transformers VLM weights once (thread-safe). No-op if VLM options disabled."""
+    global _transformers_vlm_weights_loaded
+    if not SHOW_VLM_MODEL_OPTIONS:
+        return
+    if _transformers_vlm_weights_loaded:
+        return
+    fn = _load_vlm_weights_fn
+    if fn is None:
+        return
+    with _vlm_load_lock:
+        if _transformers_vlm_weights_loaded:
+            return
+        fn()
+        _transformers_vlm_weights_loaded = True
 
 
 if SHOW_VLM_MODEL_OPTIONS is True:
@@ -269,679 +292,711 @@ if SHOW_VLM_MODEL_OPTIONS is True:
                 tc.max_position_embeddings = cap
         return config
 
-    # print(f"Loading vision model: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}")
+    def _load_vlm_weights_and_finalize():
+        global model, processor, _loaded_vlm_model, _loaded_vlm_processor
+        global model_default_prompt, model_default_do_sample, model_default_top_p, model_default_min_p, model_default_top_k
+        global model_default_temperature, model_default_repetition_penalty, model_default_presence_penalty
+        global model_default_max_new_tokens, model_default_seed, model_supports_presence_penalty
 
-    # Load only the selected model based on configuration
-    if SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Nanonets-OCR2-3B":
-        MODEL_ID = "nanonets/Nanonets-OCR2-3B"
-        if OVERRIDE_VLM_REPO_ID:
-            MODEL_ID = OVERRIDE_VLM_REPO_ID
-        processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
-        load_kwargs = {
-            "trust_remote_code": True,
-            "config": _get_vlm_config_capped_length(MODEL_ID),
-        }
-        if quantization_config is not None:
-            load_kwargs["quantization_config"] = quantization_config
-            load_kwargs["device_map"] = "auto"
+        # print(f"Loading vision model: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}")
+
+        # Load only the selected model based on configuration
+        if SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Nanonets-OCR2-3B":
+            MODEL_ID = "nanonets/Nanonets-OCR2-3B"
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+                load_kwargs["device_map"] = "auto"
+            else:
+                load_kwargs["torch_dtype"] = torch.float16
+            model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+                MODEL_ID, **load_kwargs
+            ).eval()
+            if quantization_config is None:
+                model = model.to(device)
+
+            model_default_prompt = text_read_default_prompt
+
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Dots.OCR":
+            # Download and patch Dots.OCR model
+            model_path_d_local = snapshot_download(
+                repo_id="rednote-hilab/dots.ocr",
+                local_dir=os.path.join(CACHE_PATH, "dots.ocr"),
+                max_workers=MAX_WORKERS,
+                local_dir_use_symlinks=False,
+            )
+
+            config_file_path = os.path.join(model_path_d_local, "configuration_dots.py")
+
+            if os.path.exists(config_file_path):
+                with open(config_file_path, "r") as f:
+                    input_code = f.read()
+
+                lines = input_code.splitlines()
+                if "class DotsVLProcessor" in input_code and not any(
+                    "attributes = " in line for line in lines
+                ):
+                    output_lines = []
+                    for line in lines:
+                        output_lines.append(line)
+                        if line.strip().startswith("class DotsVLProcessor"):
+                            output_lines.append(
+                                '    attributes = ["image_processor", "tokenizer"]'
+                            )
+
+                    with open(config_file_path, "w") as f:
+                        f.write("\n".join(output_lines))
+                    print("Patched configuration_dots.py successfully.")
+
+            sys.path.append(model_path_d_local)
+
+            MODEL_ID = model_path_d_local
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "attn_implementation": attn_implementation,
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["torch_dtype"] = torch.bfloat16
+            model = AutoModelForCausalLM.from_pretrained(MODEL_ID, **load_kwargs).eval()
+
+            model_default_prompt = text_read_default_prompt
+            model_default_max_new_tokens = MAX_NEW_TOKENS
+
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "PaddleOCR-VL":
+            MODEL_ID = "PaddlePaddle/PaddleOCR-VL"
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            load_kwargs = {
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+                load_kwargs["device_map"] = "auto"
+            else:
+                load_kwargs["torch_dtype"] = torch.bfloat16
+            model = AutoModelForCausalLM.from_pretrained(MODEL_ID, **load_kwargs).eval()
+            if quantization_config is None:
+                model = model.to(device)
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+
+            model_default_prompt = """OCR:"""
+            model_default_max_new_tokens = MAX_NEW_TOKENS
+
+        ###
+        # QWEN 3-VL MODELS
+        ###
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-2B-Instruct":
+            MODEL_ID = "Qwen/Qwen3-VL-2B-Instruct"
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["dtype"] = "auto"
+            model = Qwen3VLForConditionalGeneration.from_pretrained(
+                MODEL_ID, **load_kwargs
+            ).eval()
+
+            model_default_prompt = text_read_default_prompt
+            model_default_do_sample = model_default_do_sample
+            model_default_top_p = 0.8
+            model_default_min_p = 0.0
+            model_default_top_k = 20
+            model_default_temperature = 0.7
+            model_default_repetition_penalty = 1.0
+            model_default_presence_penalty = 1.5
+            model_default_max_new_tokens = MAX_NEW_TOKENS
+            model_supports_presence_penalty = (
+                False  # I found that this doesn't work when using transformers
+            )
+
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-4B-Instruct":
+            MODEL_ID = "Qwen/Qwen3-VL-4B-Instruct"
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "attn_implementation": attn_implementation,
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["dtype"] = "auto"
+            model = Qwen3VLForConditionalGeneration.from_pretrained(
+                MODEL_ID, **load_kwargs
+            ).eval()
+
+            model_default_prompt = text_read_default_prompt
+            model_default_do_sample = model_default_do_sample
+            model_default_top_p = 0.8
+            model_default_min_p = 0.0
+            model_default_top_k = 20
+            model_default_temperature = 0.7
+            model_default_repetition_penalty = 1.0
+            model_default_presence_penalty = 1.5
+            model_default_max_new_tokens = MAX_NEW_TOKENS
+            model_supports_presence_penalty = (
+                False  # I found that this doesn't work when using transformers
+            )
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-8B-Instruct":
+            MODEL_ID = "Qwen/Qwen3-VL-8B-Instruct"
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "attn_implementation": attn_implementation,
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["dtype"] = "auto"
+            model = Qwen3VLForConditionalGeneration.from_pretrained(
+                MODEL_ID, **load_kwargs
+            ).eval()
+
+            model_default_prompt = text_read_default_prompt
+            model_default_do_sample = model_default_do_sample
+            model_default_top_p = 0.8
+            model_default_min_p = 0.0
+            model_default_top_k = 20
+            model_default_temperature = 0.7
+            model_default_repetition_penalty = 1.0
+            model_default_presence_penalty = 1.5
+            model_default_max_new_tokens = MAX_NEW_TOKENS
+            model_supports_presence_penalty = (
+                False  # I found that this doesn't work when using transformers
+            )
+
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-32B-Instruct":
+            MODEL_ID = "Qwen/Qwen3-VL-32B-Instruct"
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "attn_implementation": attn_implementation,
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["dtype"] = "auto"
+            model = Qwen3VLForConditionalGeneration.from_pretrained(
+                MODEL_ID, **load_kwargs
+            ).eval()
+
+            model_default_prompt = text_read_default_prompt
+            model_default_do_sample = model_default_do_sample
+            model_default_top_p = 0.8
+            model_default_min_p = 0.0
+            model_default_top_k = 20
+            model_default_temperature = 0.7
+            model_default_repetition_penalty = 1.0
+            model_default_presence_penalty = 1.5
+            model_default_max_new_tokens = MAX_NEW_TOKENS
+            model_supports_presence_penalty = (
+                False  # I found that this doesn't work when using transformers
+            )
+
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-30B-A3B-Instruct":
+            MODEL_ID = "Qwen/Qwen3-VL-30B-A3B-Instruct"
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            from transformers import Qwen3VLMoeForConditionalGeneration
+
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "attn_implementation": attn_implementation,
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["dtype"] = "auto"
+            model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
+                MODEL_ID, **load_kwargs
+            ).eval()
+
+            model_default_prompt = text_read_default_prompt
+            model_default_do_sample = model_default_do_sample
+            model_default_top_p = 0.8
+            model_default_min_p = 0.0
+            model_default_top_k = 20
+            model_default_temperature = 0.7
+            model_default_repetition_penalty = 1.0
+            model_default_presence_penalty = 1.5
+            model_default_max_new_tokens = MAX_NEW_TOKENS
+            model_supports_presence_penalty = (
+                False  # I found that this doesn't work when using transformers
+            )
+
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-235B-A22B-Instruct-FP8":
+            MODEL_ID = "Qwen/Qwen3-VL-235B-A22B-Instruct-FP8"
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            from transformers import Qwen3VLMoeForConditionalGeneration
+
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "attn_implementation": attn_implementation,
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["dtype"] = "auto"
+            model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
+                MODEL_ID, **load_kwargs
+            ).eval()
+
+            model_default_prompt = text_read_default_prompt
+            model_default_do_sample = model_default_do_sample
+            model_default_top_p = 0.8
+            model_default_min_p = 0.0
+            model_default_top_k = 20
+            model_default_temperature = 0.7
+            model_default_repetition_penalty = 1.0
+            model_default_presence_penalty = 1.5
+            model_default_max_new_tokens = MAX_NEW_TOKENS
+            model_supports_presence_penalty = (
+                False  # I found that this doesn't work when using transformers
+            )
+
+        ###
+        # QWEN 3.5 MODELS
+        ###
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-0.8B":
+            from transformers import AutoProcessor, Qwen3_5ForConditionalGeneration
+
+            MODEL_ID = "Qwen/Qwen3.5-0.8B"
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "attn_implementation": attn_implementation,
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["dtype"] = "auto"
+
+            model = Qwen3_5ForConditionalGeneration.from_pretrained(
+                MODEL_ID, **load_kwargs
+            )
+
+            model_default_prompt = text_read_default_prompt
+            model_default_do_sample = model_default_do_sample
+            model_default_top_p = 0.8
+            model_default_min_p = 0.0
+            model_default_top_k = 20
+            model_default_temperature = 0.7
+            model_default_repetition_penalty = 1.0
+            model_default_presence_penalty = 1.5
+            model_default_max_new_tokens = MAX_NEW_TOKENS
+            model_supports_presence_penalty = (
+                False  # I found that this doesn't work when using transformers
+            )
+
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-2B":
+            from transformers import AutoProcessor, Qwen3_5ForConditionalGeneration
+
+            MODEL_ID = "Qwen/Qwen3.5-2B"
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "attn_implementation": attn_implementation,
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["dtype"] = "auto"
+
+            model = Qwen3_5ForConditionalGeneration.from_pretrained(
+                MODEL_ID, **load_kwargs
+            )
+
+            model_default_prompt = text_read_default_prompt
+            model_default_do_sample = model_default_do_sample
+            model_default_top_p = 0.8
+            model_default_min_p = 0.0
+            model_default_top_k = 20
+            model_default_temperature = 0.7
+            model_default_repetition_penalty = 1.0
+            model_default_presence_penalty = 1.5
+            model_default_max_new_tokens = MAX_NEW_TOKENS
+            model_supports_presence_penalty = (
+                False  # I found that this doesn't work when using transformers
+            )
+
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-4B":
+            from transformers import AutoProcessor, Qwen3_5ForConditionalGeneration
+
+            MODEL_ID = "Qwen/Qwen3.5-4B"
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "attn_implementation": attn_implementation,
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["dtype"] = "auto"
+            model = Qwen3_5ForConditionalGeneration.from_pretrained(
+                MODEL_ID, **load_kwargs
+            )
+
+            model_default_prompt = text_read_default_prompt
+            model_default_do_sample = model_default_do_sample
+            model_default_top_p = 0.8
+            model_default_min_p = 0.0
+            model_default_top_k = 20
+            model_default_temperature = 0.7
+            model_default_repetition_penalty = 1.0
+            model_default_presence_penalty = 1.5
+            model_default_max_new_tokens = MAX_NEW_TOKENS
+            model_supports_presence_penalty = (
+                False  # I found that this doesn't work when using transformers
+            )
+
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-9B":
+            from transformers import AutoProcessor, Qwen3_5ForConditionalGeneration
+
+            MODEL_ID = "Qwen/Qwen3.5-9B"
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "attn_implementation": attn_implementation,
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["dtype"] = "auto"
+            model = Qwen3_5ForConditionalGeneration.from_pretrained(
+                MODEL_ID, **load_kwargs
+            )
+
+            model_default_prompt = text_read_default_prompt
+            model_default_do_sample = model_default_do_sample
+            model_default_top_p = 0.8
+            model_default_min_p = 0.0
+            model_default_top_k = 20
+            model_default_temperature = 0.7
+            model_default_repetition_penalty = 1.0
+            model_default_presence_penalty = 1.5
+            model_default_max_new_tokens = MAX_NEW_TOKENS
+            model_supports_presence_penalty = (
+                False  # I found that this doesn't work when using transformers
+            )
+
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-27B":
+            from transformers import (
+                AutoProcessor,
+                Qwen3_5ForConditionalGeneration,
+            )
+
+            MODEL_ID = "Qwen/Qwen3.5-27B"
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "attn_implementation": attn_implementation,
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["dtype"] = "auto"
+            model = Qwen3_5ForConditionalGeneration.from_pretrained(
+                MODEL_ID, **load_kwargs
+            )
+
+            model_default_prompt = text_read_default_prompt
+            model_default_do_sample = model_default_do_sample
+            model_default_top_p = 0.8
+            model_default_min_p = 0.0
+            model_default_top_k = 20
+            model_default_temperature = 0.7
+            model_default_repetition_penalty = 1.0
+            model_default_presence_penalty = 1.5
+            model_default_max_new_tokens = MAX_NEW_TOKENS
+            model_supports_presence_penalty = (
+                False  # I found that this doesn't work when using transformers
+            )
+
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-27B-bnb-4bit":
+            from transformers import (
+                AutoProcessor,
+                Qwen3_5ForConditionalGeneration,
+            )
+
+            MODEL_ID = (
+                "skkwowee/Qwen3.5-27B-bnb-4bit"  # bertbobson/Qwen3.5-27B-bnb-4bit
+            )
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "attn_implementation": attn_implementation,
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["dtype"] = "auto"
+            model = Qwen3_5ForConditionalGeneration.from_pretrained(
+                MODEL_ID, **load_kwargs
+            )
+
+            model_default_prompt = text_read_default_prompt
+            model_default_do_sample = model_default_do_sample
+            model_default_top_p = 0.8
+            model_default_min_p = 0.0
+            model_default_top_k = 20
+            model_default_temperature = 0.7
+            model_default_repetition_penalty = 1.0
+            model_default_presence_penalty = 1.5
+            model_default_max_new_tokens = MAX_NEW_TOKENS
+            model_supports_presence_penalty = (
+                False  # I found that this doesn't work when using transformers
+            )
+
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-35B-A3B":
+            from transformers import (
+                AutoProcessor,
+                Qwen3_5MoeForConditionalGeneration,
+            )
+
+            MODEL_ID = "Qwen/Qwen3.5-35B-A3B"
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "attn_implementation": attn_implementation,
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["dtype"] = "auto"
+            model = Qwen3_5MoeForConditionalGeneration.from_pretrained(
+                MODEL_ID, **load_kwargs
+            )
+
+            model_default_prompt = text_read_default_prompt
+            model_default_do_sample = model_default_do_sample
+            model_default_top_p = 0.8
+            model_default_min_p = 0.0
+            model_default_top_k = 20
+            model_default_temperature = 0.7
+            model_default_repetition_penalty = 1.0
+            model_default_presence_penalty = 1.5
+            model_default_max_new_tokens = MAX_NEW_TOKENS
+            model_supports_presence_penalty = (
+                False  # I found that this doesn't work when using transformers
+            )
+
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-122B-A10B":
+            from transformers import (
+                AutoProcessor,
+                Qwen3_5MoeForConditionalGeneration,
+            )
+
+            MODEL_ID = "Qwen/Qwen3.5-122B-A10B"
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "attn_implementation": attn_implementation,
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["dtype"] = "auto"
+            model = Qwen3_5MoeForConditionalGeneration.from_pretrained(
+                MODEL_ID, **load_kwargs
+            )
+
+            model_default_prompt = text_read_default_prompt
+            model_default_do_sample = model_default_do_sample
+            model_default_top_p = 0.8
+            model_default_min_p = 0.0
+            model_default_top_k = 20
+            model_default_temperature = 0.7
+            model_default_repetition_penalty = 1.0
+            model_default_presence_penalty = 1.5
+            model_default_max_new_tokens = MAX_NEW_TOKENS
+            model_supports_presence_penalty = (
+                False  # I found that this doesn't work when using transformers
+            )
+
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-397B-A17B":
+            from transformers import (
+                AutoProcessor,
+                Qwen3_5MoeForConditionalGeneration,
+            )
+
+            MODEL_ID = "Qwen/Qwen3.5-397B-A17B"
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "attn_implementation": attn_implementation,
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["dtype"] = "auto"
+            model = Qwen3_5MoeForConditionalGeneration.from_pretrained(
+                MODEL_ID, **load_kwargs
+            )
+
+            model_default_prompt = text_read_default_prompt
+            model_default_do_sample = model_default_do_sample
+            model_default_top_p = 0.8
+            model_default_min_p = 0.0
+            model_default_top_k = 20
+            model_default_temperature = 0.7
+            model_default_repetition_penalty = 1.0
+            model_default_presence_penalty = 1.5
+            model_default_max_new_tokens = MAX_NEW_TOKENS
+            model_supports_presence_penalty = (
+                False  # I found that this doesn't work when using transformers
+            )
+
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "None":
+            model = None
+            processor = None
+
         else:
-            load_kwargs["torch_dtype"] = torch.float16
-        model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            MODEL_ID, **load_kwargs
-        ).eval()
-        if quantization_config is None:
-            model = model.to(device)
+            raise ValueError(
+                f"Invalid model selected: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}. Valid options are shown in tools/run_vlm.py, or None"
+            )
 
-        model_default_prompt = text_read_default_prompt
+        # Override model defaults with user-provided config values if they are set
+        # Priority: user config value > model default
+        if VLM_DEFAULT_DO_SAMPLE is not None:
+            model_default_do_sample = VLM_DEFAULT_DO_SAMPLE
+        if VLM_DEFAULT_TOP_P is not None:
+            model_default_top_p = VLM_DEFAULT_TOP_P
+        if VLM_DEFAULT_MIN_P is not None:
+            model_default_min_p = VLM_DEFAULT_MIN_P
+        if VLM_DEFAULT_TOP_K is not None:
+            model_default_top_k = VLM_DEFAULT_TOP_K
+        if VLM_DEFAULT_TEMPERATURE is not None:
+            model_default_temperature = VLM_DEFAULT_TEMPERATURE
+        if VLM_DEFAULT_REPETITION_PENALTY is not None:
+            model_default_repetition_penalty = VLM_DEFAULT_REPETITION_PENALTY
+        if VLM_DEFAULT_PRESENCE_PENALTY is not None:
+            model_default_presence_penalty = VLM_DEFAULT_PRESENCE_PENALTY
+        if VLM_SEED is not None:
+            model_default_seed = VLM_SEED
 
-    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Dots.OCR":
-        # Download and patch Dots.OCR model
-        model_path_d_local = snapshot_download(
-            repo_id="rednote-hilab/dots.ocr",
-            local_dir=os.path.join(CACHE_PATH, "dots.ocr"),
-            max_workers=MAX_WORKERS,
-            local_dir_use_symlinks=False,
+        # Cap processor tokenizer to config max context length so all tokenization respects MAX_INPUT_TOKEN_LENGTH
+        if processor is not None:
+            tokenizer = getattr(processor, "tokenizer", None)
+            if tokenizer is not None and hasattr(tokenizer, "model_max_length"):
+                current_max = tokenizer.model_max_length
+                if current_max is None or current_max == float("inf"):
+                    tokenizer.model_max_length = MAX_INPUT_TOKEN_LENGTH
+                elif current_max > MAX_INPUT_TOKEN_LENGTH:
+                    tokenizer.model_max_length = MAX_INPUT_TOKEN_LENGTH
+        # Log effective VLM context cap so env (e.g. MAX_INPUT_TOKEN_LENGTH=4096) can be verified
+        _ref_ctx = 32768
+        _reserve = 1024
+        _eff_max = min(
+            VLM_MAX_IMAGE_SIZE,
+            (VLM_MAX_IMAGE_SIZE * max(0, MAX_INPUT_TOKEN_LENGTH - _reserve) // _ref_ctx)
+            // 1024
+            * 1024,
+        )
+        _abs_min = 65536
+        effective_max_pixels_at_load = max(_abs_min, _eff_max)
+        effective_min_pixels_at_load = min(
+            VLM_MIN_IMAGE_SIZE, effective_max_pixels_at_load
         )
 
-        config_file_path = os.path.join(model_path_d_local, "configuration_dots.py")
+        if SHOW_VLM_MODEL_OPTIONS:
+            print(
+                f"VLM context cap: MAX_INPUT_TOKEN_LENGTH={MAX_INPUT_TOKEN_LENGTH}, "
+                f"effective max_pixels={effective_max_pixels_at_load}, min_pixels={effective_min_pixels_at_load} "
+                f"(VLM_MAX_IMAGE_SIZE={VLM_MAX_IMAGE_SIZE}, VLM_MIN_IMAGE_SIZE={VLM_MIN_IMAGE_SIZE})"
+            )
 
-        if os.path.exists(config_file_path):
-            with open(config_file_path, "r") as f:
-                input_code = f.read()
+        # Store at module level for USE_TRANSFORMERS_VLM_MODEL_AS_LLM (no global needed at module level)
+        _loaded_vlm_model = model
+        _loaded_vlm_processor = processor
 
-            lines = input_code.splitlines()
-            if "class DotsVLProcessor" in input_code and not any(
-                "attributes = " in line for line in lines
-            ):
-                output_lines = []
-                for line in lines:
-                    output_lines.append(line)
-                    if line.strip().startswith("class DotsVLProcessor"):
-                        output_lines.append(
-                            '    attributes = ["image_processor", "tokenizer"]'
-                        )
-
-                with open(config_file_path, "w") as f:
-                    f.write("\n".join(output_lines))
-                print("Patched configuration_dots.py successfully.")
-
-        sys.path.append(model_path_d_local)
-
-        MODEL_ID = model_path_d_local
-        if OVERRIDE_VLM_REPO_ID:
-            MODEL_ID = OVERRIDE_VLM_REPO_ID
-        processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
-        load_kwargs = {
-            "attn_implementation": attn_implementation,
-            "device_map": "auto",
-            "trust_remote_code": True,
-            "config": _get_vlm_config_capped_length(MODEL_ID),
-        }
-        if quantization_config is not None:
-            load_kwargs["quantization_config"] = quantization_config
-        else:
-            load_kwargs["torch_dtype"] = torch.bfloat16
-        model = AutoModelForCausalLM.from_pretrained(MODEL_ID, **load_kwargs).eval()
-
-        model_default_prompt = text_read_default_prompt
-        model_default_max_new_tokens = MAX_NEW_TOKENS
-
-    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "PaddleOCR-VL":
-        MODEL_ID = "PaddlePaddle/PaddleOCR-VL"
-        if OVERRIDE_VLM_REPO_ID:
-            MODEL_ID = OVERRIDE_VLM_REPO_ID
-        load_kwargs = {
-            "trust_remote_code": True,
-            "config": _get_vlm_config_capped_length(MODEL_ID),
-        }
-        if quantization_config is not None:
-            load_kwargs["quantization_config"] = quantization_config
-            load_kwargs["device_map"] = "auto"
-        else:
-            load_kwargs["torch_dtype"] = torch.bfloat16
-        model = AutoModelForCausalLM.from_pretrained(MODEL_ID, **load_kwargs).eval()
-        if quantization_config is None:
-            model = model.to(device)
-        processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
-
-        model_default_prompt = """OCR:"""
-        model_default_max_new_tokens = MAX_NEW_TOKENS
-
-    ###
-    # QWEN 3-VL MODELS
-    ###
-    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-2B-Instruct":
-        MODEL_ID = "Qwen/Qwen3-VL-2B-Instruct"
-        if OVERRIDE_VLM_REPO_ID:
-            MODEL_ID = OVERRIDE_VLM_REPO_ID
-        processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
-        load_kwargs = {
-            "device_map": "auto",
-            "trust_remote_code": True,
-            "config": _get_vlm_config_capped_length(MODEL_ID),
-        }
-        if quantization_config is not None:
-            load_kwargs["quantization_config"] = quantization_config
-        else:
-            load_kwargs["dtype"] = "auto"
-        model = Qwen3VLForConditionalGeneration.from_pretrained(
-            MODEL_ID, **load_kwargs
-        ).eval()
-
-        model_default_prompt = text_read_default_prompt
-        model_default_do_sample = model_default_do_sample
-        model_default_top_p = 0.8
-        model_default_min_p = 0.0
-        model_default_top_k = 20
-        model_default_temperature = 0.7
-        model_default_repetition_penalty = 1.0
-        model_default_presence_penalty = 1.5
-        model_default_max_new_tokens = MAX_NEW_TOKENS
-        model_supports_presence_penalty = (
-            False  # I found that this doesn't work when using transformers
-        )
-
-    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-4B-Instruct":
-        MODEL_ID = "Qwen/Qwen3-VL-4B-Instruct"
-        if OVERRIDE_VLM_REPO_ID:
-            MODEL_ID = OVERRIDE_VLM_REPO_ID
-        processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
-        load_kwargs = {
-            "attn_implementation": attn_implementation,
-            "device_map": "auto",
-            "trust_remote_code": True,
-            "config": _get_vlm_config_capped_length(MODEL_ID),
-        }
-        if quantization_config is not None:
-            load_kwargs["quantization_config"] = quantization_config
-        else:
-            load_kwargs["dtype"] = "auto"
-        model = Qwen3VLForConditionalGeneration.from_pretrained(
-            MODEL_ID, **load_kwargs
-        ).eval()
-
-        model_default_prompt = text_read_default_prompt
-        model_default_do_sample = model_default_do_sample
-        model_default_top_p = 0.8
-        model_default_min_p = 0.0
-        model_default_top_k = 20
-        model_default_temperature = 0.7
-        model_default_repetition_penalty = 1.0
-        model_default_presence_penalty = 1.5
-        model_default_max_new_tokens = MAX_NEW_TOKENS
-        model_supports_presence_penalty = (
-            False  # I found that this doesn't work when using transformers
-        )
-    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-8B-Instruct":
-        MODEL_ID = "Qwen/Qwen3-VL-8B-Instruct"
-        if OVERRIDE_VLM_REPO_ID:
-            MODEL_ID = OVERRIDE_VLM_REPO_ID
-        processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
-        load_kwargs = {
-            "attn_implementation": attn_implementation,
-            "device_map": "auto",
-            "trust_remote_code": True,
-            "config": _get_vlm_config_capped_length(MODEL_ID),
-        }
-        if quantization_config is not None:
-            load_kwargs["quantization_config"] = quantization_config
-        else:
-            load_kwargs["dtype"] = "auto"
-        model = Qwen3VLForConditionalGeneration.from_pretrained(
-            MODEL_ID, **load_kwargs
-        ).eval()
-
-        model_default_prompt = text_read_default_prompt
-        model_default_do_sample = model_default_do_sample
-        model_default_top_p = 0.8
-        model_default_min_p = 0.0
-        model_default_top_k = 20
-        model_default_temperature = 0.7
-        model_default_repetition_penalty = 1.0
-        model_default_presence_penalty = 1.5
-        model_default_max_new_tokens = MAX_NEW_TOKENS
-        model_supports_presence_penalty = (
-            False  # I found that this doesn't work when using transformers
-        )
-
-    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-32B-Instruct":
-        MODEL_ID = "Qwen/Qwen3-VL-32B-Instruct"
-        if OVERRIDE_VLM_REPO_ID:
-            MODEL_ID = OVERRIDE_VLM_REPO_ID
-        processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
-        load_kwargs = {
-            "attn_implementation": attn_implementation,
-            "device_map": "auto",
-            "trust_remote_code": True,
-            "config": _get_vlm_config_capped_length(MODEL_ID),
-        }
-        if quantization_config is not None:
-            load_kwargs["quantization_config"] = quantization_config
-        else:
-            load_kwargs["dtype"] = "auto"
-        model = Qwen3VLForConditionalGeneration.from_pretrained(
-            MODEL_ID, **load_kwargs
-        ).eval()
-
-        model_default_prompt = text_read_default_prompt
-        model_default_do_sample = model_default_do_sample
-        model_default_top_p = 0.8
-        model_default_min_p = 0.0
-        model_default_top_k = 20
-        model_default_temperature = 0.7
-        model_default_repetition_penalty = 1.0
-        model_default_presence_penalty = 1.5
-        model_default_max_new_tokens = MAX_NEW_TOKENS
-        model_supports_presence_penalty = (
-            False  # I found that this doesn't work when using transformers
-        )
-
-    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-30B-A3B-Instruct":
-        MODEL_ID = "Qwen/Qwen3-VL-30B-A3B-Instruct"
-        if OVERRIDE_VLM_REPO_ID:
-            MODEL_ID = OVERRIDE_VLM_REPO_ID
-        from transformers import Qwen3VLMoeForConditionalGeneration
-
-        processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
-        load_kwargs = {
-            "attn_implementation": attn_implementation,
-            "device_map": "auto",
-            "trust_remote_code": True,
-            "config": _get_vlm_config_capped_length(MODEL_ID),
-        }
-
-        if quantization_config is not None:
-            load_kwargs["quantization_config"] = quantization_config
-        else:
-            load_kwargs["dtype"] = "auto"
-        model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
-            MODEL_ID, **load_kwargs
-        ).eval()
-
-        model_default_prompt = text_read_default_prompt
-        model_default_do_sample = model_default_do_sample
-        model_default_top_p = 0.8
-        model_default_min_p = 0.0
-        model_default_top_k = 20
-        model_default_temperature = 0.7
-        model_default_repetition_penalty = 1.0
-        model_default_presence_penalty = 1.5
-        model_default_max_new_tokens = MAX_NEW_TOKENS
-        model_supports_presence_penalty = (
-            False  # I found that this doesn't work when using transformers
-        )
-
-    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-235B-A22B-Instruct-FP8":
-        MODEL_ID = "Qwen/Qwen3-VL-235B-A22B-Instruct-FP8"
-        if OVERRIDE_VLM_REPO_ID:
-            MODEL_ID = OVERRIDE_VLM_REPO_ID
-        from transformers import Qwen3VLMoeForConditionalGeneration
-
-        processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
-        load_kwargs = {
-            "attn_implementation": attn_implementation,
-            "device_map": "auto",
-            "trust_remote_code": True,
-            "config": _get_vlm_config_capped_length(MODEL_ID),
-        }
-
-        if quantization_config is not None:
-            load_kwargs["quantization_config"] = quantization_config
-        else:
-            load_kwargs["dtype"] = "auto"
-        model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
-            MODEL_ID, **load_kwargs
-        ).eval()
-
-        model_default_prompt = text_read_default_prompt
-        model_default_do_sample = model_default_do_sample
-        model_default_top_p = 0.8
-        model_default_min_p = 0.0
-        model_default_top_k = 20
-        model_default_temperature = 0.7
-        model_default_repetition_penalty = 1.0
-        model_default_presence_penalty = 1.5
-        model_default_max_new_tokens = MAX_NEW_TOKENS
-        model_supports_presence_penalty = (
-            False  # I found that this doesn't work when using transformers
-        )
-
-    ###
-    # QWEN 3.5 MODELS
-    ###
-    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-0.8B":
-        from transformers import AutoProcessor, Qwen3_5ForConditionalGeneration
-
-        MODEL_ID = "Qwen/Qwen3.5-0.8B"
-        if OVERRIDE_VLM_REPO_ID:
-            MODEL_ID = OVERRIDE_VLM_REPO_ID
-        processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
-        load_kwargs = {
-            "attn_implementation": attn_implementation,
-            "device_map": "auto",
-            "trust_remote_code": True,
-            "config": _get_vlm_config_capped_length(MODEL_ID),
-        }
-        if quantization_config is not None:
-            load_kwargs["quantization_config"] = quantization_config
-        else:
-            load_kwargs["dtype"] = "auto"
-
-        model = Qwen3_5ForConditionalGeneration.from_pretrained(MODEL_ID, **load_kwargs)
-
-        model_default_prompt = text_read_default_prompt
-        model_default_do_sample = model_default_do_sample
-        model_default_top_p = 0.8
-        model_default_min_p = 0.0
-        model_default_top_k = 20
-        model_default_temperature = 0.7
-        model_default_repetition_penalty = 1.0
-        model_default_presence_penalty = 1.5
-        model_default_max_new_tokens = MAX_NEW_TOKENS
-        model_supports_presence_penalty = (
-            False  # I found that this doesn't work when using transformers
-        )
-
-    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-2B":
-        from transformers import AutoProcessor, Qwen3_5ForConditionalGeneration
-
-        MODEL_ID = "Qwen/Qwen3.5-2B"
-        if OVERRIDE_VLM_REPO_ID:
-            MODEL_ID = OVERRIDE_VLM_REPO_ID
-        processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
-        load_kwargs = {
-            "attn_implementation": attn_implementation,
-            "device_map": "auto",
-            "trust_remote_code": True,
-            "config": _get_vlm_config_capped_length(MODEL_ID),
-        }
-        if quantization_config is not None:
-            load_kwargs["quantization_config"] = quantization_config
-        else:
-            load_kwargs["dtype"] = "auto"
-
-        model = Qwen3_5ForConditionalGeneration.from_pretrained(MODEL_ID, **load_kwargs)
-
-        model_default_prompt = text_read_default_prompt
-        model_default_do_sample = model_default_do_sample
-        model_default_top_p = 0.8
-        model_default_min_p = 0.0
-        model_default_top_k = 20
-        model_default_temperature = 0.7
-        model_default_repetition_penalty = 1.0
-        model_default_presence_penalty = 1.5
-        model_default_max_new_tokens = MAX_NEW_TOKENS
-        model_supports_presence_penalty = (
-            False  # I found that this doesn't work when using transformers
-        )
-
-    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-4B":
-        from transformers import AutoProcessor, Qwen3_5ForConditionalGeneration
-
-        MODEL_ID = "Qwen/Qwen3.5-4B"
-        if OVERRIDE_VLM_REPO_ID:
-            MODEL_ID = OVERRIDE_VLM_REPO_ID
-        processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
-        load_kwargs = {
-            "attn_implementation": attn_implementation,
-            "device_map": "auto",
-            "trust_remote_code": True,
-            "config": _get_vlm_config_capped_length(MODEL_ID),
-        }
-        if quantization_config is not None:
-            load_kwargs["quantization_config"] = quantization_config
-        else:
-            load_kwargs["dtype"] = "auto"
-        model = Qwen3_5ForConditionalGeneration.from_pretrained(MODEL_ID, **load_kwargs)
-
-        model_default_prompt = text_read_default_prompt
-        model_default_do_sample = model_default_do_sample
-        model_default_top_p = 0.8
-        model_default_min_p = 0.0
-        model_default_top_k = 20
-        model_default_temperature = 0.7
-        model_default_repetition_penalty = 1.0
-        model_default_presence_penalty = 1.5
-        model_default_max_new_tokens = MAX_NEW_TOKENS
-        model_supports_presence_penalty = (
-            False  # I found that this doesn't work when using transformers
-        )
-
-    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-9B":
-        from transformers import AutoProcessor, Qwen3_5ForConditionalGeneration
-
-        MODEL_ID = "Qwen/Qwen3.5-9B"
-        if OVERRIDE_VLM_REPO_ID:
-            MODEL_ID = OVERRIDE_VLM_REPO_ID
-        processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
-        load_kwargs = {
-            "attn_implementation": attn_implementation,
-            "device_map": "auto",
-            "trust_remote_code": True,
-            "config": _get_vlm_config_capped_length(MODEL_ID),
-        }
-        if quantization_config is not None:
-            load_kwargs["quantization_config"] = quantization_config
-        else:
-            load_kwargs["dtype"] = "auto"
-        model = Qwen3_5ForConditionalGeneration.from_pretrained(MODEL_ID, **load_kwargs)
-
-        model_default_prompt = text_read_default_prompt
-        model_default_do_sample = model_default_do_sample
-        model_default_top_p = 0.8
-        model_default_min_p = 0.0
-        model_default_top_k = 20
-        model_default_temperature = 0.7
-        model_default_repetition_penalty = 1.0
-        model_default_presence_penalty = 1.5
-        model_default_max_new_tokens = MAX_NEW_TOKENS
-        model_supports_presence_penalty = (
-            False  # I found that this doesn't work when using transformers
-        )
-
-    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-27B":
-        from transformers import (
-            AutoProcessor,
-            Qwen3_5ForConditionalGeneration,
-        )
-
-        MODEL_ID = "Qwen/Qwen3.5-27B"
-        if OVERRIDE_VLM_REPO_ID:
-            MODEL_ID = OVERRIDE_VLM_REPO_ID
-        processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
-        load_kwargs = {
-            "attn_implementation": attn_implementation,
-            "device_map": "auto",
-            "trust_remote_code": True,
-            "config": _get_vlm_config_capped_length(MODEL_ID),
-        }
-        if quantization_config is not None:
-            load_kwargs["quantization_config"] = quantization_config
-        else:
-            load_kwargs["dtype"] = "auto"
-        model = Qwen3_5ForConditionalGeneration.from_pretrained(MODEL_ID, **load_kwargs)
-
-        model_default_prompt = text_read_default_prompt
-        model_default_do_sample = model_default_do_sample
-        model_default_top_p = 0.8
-        model_default_min_p = 0.0
-        model_default_top_k = 20
-        model_default_temperature = 0.7
-        model_default_repetition_penalty = 1.0
-        model_default_presence_penalty = 1.5
-        model_default_max_new_tokens = MAX_NEW_TOKENS
-        model_supports_presence_penalty = (
-            False  # I found that this doesn't work when using transformers
-        )
-
-    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-27B-bnb-4bit":
-        from transformers import (
-            AutoProcessor,
-            Qwen3_5ForConditionalGeneration,
-        )
-
-        MODEL_ID = "skkwowee/Qwen3.5-27B-bnb-4bit"  # bertbobson/Qwen3.5-27B-bnb-4bit
-        if OVERRIDE_VLM_REPO_ID:
-            MODEL_ID = OVERRIDE_VLM_REPO_ID
-        processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
-        load_kwargs = {
-            "attn_implementation": attn_implementation,
-            "device_map": "auto",
-            "trust_remote_code": True,
-            "config": _get_vlm_config_capped_length(MODEL_ID),
-        }
-        if quantization_config is not None:
-            load_kwargs["quantization_config"] = quantization_config
-        else:
-            load_kwargs["dtype"] = "auto"
-        model = Qwen3_5ForConditionalGeneration.from_pretrained(MODEL_ID, **load_kwargs)
-
-        model_default_prompt = text_read_default_prompt
-        model_default_do_sample = model_default_do_sample
-        model_default_top_p = 0.8
-        model_default_min_p = 0.0
-        model_default_top_k = 20
-        model_default_temperature = 0.7
-        model_default_repetition_penalty = 1.0
-        model_default_presence_penalty = 1.5
-        model_default_max_new_tokens = MAX_NEW_TOKENS
-        model_supports_presence_penalty = (
-            False  # I found that this doesn't work when using transformers
-        )
-
-    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-35B-A3B":
-        from transformers import (
-            AutoProcessor,
-            Qwen3_5MoeForConditionalGeneration,
-        )
-
-        MODEL_ID = "Qwen/Qwen3.5-35B-A3B"
-        if OVERRIDE_VLM_REPO_ID:
-            MODEL_ID = OVERRIDE_VLM_REPO_ID
-        processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
-        load_kwargs = {
-            "attn_implementation": attn_implementation,
-            "device_map": "auto",
-            "trust_remote_code": True,
-            "config": _get_vlm_config_capped_length(MODEL_ID),
-        }
-        if quantization_config is not None:
-            load_kwargs["quantization_config"] = quantization_config
-        else:
-            load_kwargs["dtype"] = "auto"
-        model = Qwen3_5MoeForConditionalGeneration.from_pretrained(
-            MODEL_ID, **load_kwargs
-        )
-
-        model_default_prompt = text_read_default_prompt
-        model_default_do_sample = model_default_do_sample
-        model_default_top_p = 0.8
-        model_default_min_p = 0.0
-        model_default_top_k = 20
-        model_default_temperature = 0.7
-        model_default_repetition_penalty = 1.0
-        model_default_presence_penalty = 1.5
-        model_default_max_new_tokens = MAX_NEW_TOKENS
-        model_supports_presence_penalty = (
-            False  # I found that this doesn't work when using transformers
-        )
-
-    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-122B-A10B":
-        from transformers import (
-            AutoProcessor,
-            Qwen3_5MoeForConditionalGeneration,
-        )
-
-        MODEL_ID = "Qwen/Qwen3.5-122B-A10B"
-        if OVERRIDE_VLM_REPO_ID:
-            MODEL_ID = OVERRIDE_VLM_REPO_ID
-        processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
-        load_kwargs = {
-            "attn_implementation": attn_implementation,
-            "device_map": "auto",
-            "trust_remote_code": True,
-            "config": _get_vlm_config_capped_length(MODEL_ID),
-        }
-        if quantization_config is not None:
-            load_kwargs["quantization_config"] = quantization_config
-        else:
-            load_kwargs["dtype"] = "auto"
-        model = Qwen3_5MoeForConditionalGeneration.from_pretrained(
-            MODEL_ID, **load_kwargs
-        )
-
-        model_default_prompt = text_read_default_prompt
-        model_default_do_sample = model_default_do_sample
-        model_default_top_p = 0.8
-        model_default_min_p = 0.0
-        model_default_top_k = 20
-        model_default_temperature = 0.7
-        model_default_repetition_penalty = 1.0
-        model_default_presence_penalty = 1.5
-        model_default_max_new_tokens = MAX_NEW_TOKENS
-        model_supports_presence_penalty = (
-            False  # I found that this doesn't work when using transformers
-        )
-
-    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-397B-A17B":
-        from transformers import (
-            AutoProcessor,
-            Qwen3_5MoeForConditionalGeneration,
-        )
-
-        MODEL_ID = "Qwen/Qwen3.5-397B-A17B"
-        if OVERRIDE_VLM_REPO_ID:
-            MODEL_ID = OVERRIDE_VLM_REPO_ID
-        processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
-        load_kwargs = {
-            "attn_implementation": attn_implementation,
-            "device_map": "auto",
-            "trust_remote_code": True,
-            "config": _get_vlm_config_capped_length(MODEL_ID),
-        }
-        if quantization_config is not None:
-            load_kwargs["quantization_config"] = quantization_config
-        else:
-            load_kwargs["dtype"] = "auto"
-        model = Qwen3_5MoeForConditionalGeneration.from_pretrained(
-            MODEL_ID, **load_kwargs
-        )
-
-        model_default_prompt = text_read_default_prompt
-        model_default_do_sample = model_default_do_sample
-        model_default_top_p = 0.8
-        model_default_min_p = 0.0
-        model_default_top_k = 20
-        model_default_temperature = 0.7
-        model_default_repetition_penalty = 1.0
-        model_default_presence_penalty = 1.5
-        model_default_max_new_tokens = MAX_NEW_TOKENS
-        model_supports_presence_penalty = (
-            False  # I found that this doesn't work when using transformers
-        )
-
-    elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "None":
-        model = None
-        processor = None
-
-    else:
-        raise ValueError(
-            f"Invalid model selected: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}. Valid options are shown in tools/run_vlm.py, or None"
-        )
-
-    # Override model defaults with user-provided config values if they are set
-    # Priority: user config value > model default
-    if VLM_DEFAULT_DO_SAMPLE is not None:
-        model_default_do_sample = VLM_DEFAULT_DO_SAMPLE
-    if VLM_DEFAULT_TOP_P is not None:
-        model_default_top_p = VLM_DEFAULT_TOP_P
-    if VLM_DEFAULT_MIN_P is not None:
-        model_default_min_p = VLM_DEFAULT_MIN_P
-    if VLM_DEFAULT_TOP_K is not None:
-        model_default_top_k = VLM_DEFAULT_TOP_K
-    if VLM_DEFAULT_TEMPERATURE is not None:
-        model_default_temperature = VLM_DEFAULT_TEMPERATURE
-    if VLM_DEFAULT_REPETITION_PENALTY is not None:
-        model_default_repetition_penalty = VLM_DEFAULT_REPETITION_PENALTY
-    if VLM_DEFAULT_PRESENCE_PENALTY is not None:
-        model_default_presence_penalty = VLM_DEFAULT_PRESENCE_PENALTY
-    if VLM_SEED is not None:
-        model_default_seed = VLM_SEED
-
-    # Cap processor tokenizer to config max context length so all tokenization respects MAX_INPUT_TOKEN_LENGTH
-    if processor is not None:
-        tokenizer = getattr(processor, "tokenizer", None)
-        if tokenizer is not None and hasattr(tokenizer, "model_max_length"):
-            current_max = tokenizer.model_max_length
-            if current_max is None or current_max == float("inf"):
-                tokenizer.model_max_length = MAX_INPUT_TOKEN_LENGTH
-            elif current_max > MAX_INPUT_TOKEN_LENGTH:
-                tokenizer.model_max_length = MAX_INPUT_TOKEN_LENGTH
-    # Log effective VLM context cap so env (e.g. MAX_INPUT_TOKEN_LENGTH=4096) can be verified
-    _ref_ctx = 32768
-    _reserve = 1024
-    _eff_max = min(
-        VLM_MAX_IMAGE_SIZE,
-        (VLM_MAX_IMAGE_SIZE * max(0, MAX_INPUT_TOKEN_LENGTH - _reserve) // _ref_ctx)
-        // 1024
-        * 1024,
-    )
-    _abs_min = 65536
-    effective_max_pixels_at_load = max(_abs_min, _eff_max)
-    effective_min_pixels_at_load = min(VLM_MIN_IMAGE_SIZE, effective_max_pixels_at_load)
-
-    if SHOW_VLM_MODEL_OPTIONS:
-        print(
-            f"VLM context cap: MAX_INPUT_TOKEN_LENGTH={MAX_INPUT_TOKEN_LENGTH}, "
-            f"effective max_pixels={effective_max_pixels_at_load}, min_pixels={effective_min_pixels_at_load} "
-            f"(VLM_MAX_IMAGE_SIZE={VLM_MAX_IMAGE_SIZE}, VLM_MIN_IMAGE_SIZE={VLM_MIN_IMAGE_SIZE})"
-        )
-
-    # Store at module level for USE_TRANSFORMERS_VLM_MODEL_AS_LLM (no global needed at module level)
-    _loaded_vlm_model = model
-    _loaded_vlm_processor = processor
+    _load_vlm_weights_fn = _load_vlm_weights_and_finalize
 
     # print(f"Successfully loaded {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}")
+
+
+if SHOW_VLM_MODEL_OPTIONS and LOAD_TRANSFORMERS_VLM_MODEL_AT_START:
+    try:
+        ensure_transformers_vlm_loaded()
+    except Exception as e:
+        print(f"Warning: Could not load transformers VLM model at startup: {e}")
+        print("The VLM will be loaded on first use when a VLM OCR task runs.")
 
 
 def get_loaded_vlm_model_and_tokenizer():
@@ -950,6 +1005,7 @@ def get_loaded_vlm_model_and_tokenizer():
     Returns (model, tokenizer) or (None, None) if the VLM has not been loaded yet.
     """
     global _loaded_vlm_model, _loaded_vlm_processor
+    ensure_transformers_vlm_loaded()
     if _loaded_vlm_model is None or _loaded_vlm_processor is None:
         return None, None
     tokenizer = getattr(_loaded_vlm_processor, "tokenizer", _loaded_vlm_processor)
@@ -973,7 +1029,11 @@ def extract_text_from_image_vlm(
 ):
     """
     Generates responses using the configured vision model for image input.
-    Streams text to console and returns complete text only at the end.
+
+    When ``VLM_DEFAULT_STREAM`` is True (default), streams text to the console and
+    returns the full string when generation finishes. When ``VLM_DEFAULT_STREAM``
+    is False, runs a single batched ``generate`` call (no console streaming) and
+    returns the same ``(text, input_tokens, output_tokens)`` tuple.
 
     Uses model-specific defaults if they were set during model initialization,
     falling back to function argument defaults if provided, and finally to sensible
@@ -1011,6 +1071,22 @@ def extract_text_from_image_vlm(
     """
     if image is None:
         return "Please upload an image.", 0, 0
+
+    if not SHOW_VLM_MODEL_OPTIONS:
+        return (
+            "Local transformers VLM is not enabled (SHOW_VLM_MODEL_OPTIONS=False).",
+            0,
+            0,
+        )
+
+    ensure_transformers_vlm_loaded()
+    if model is None or processor is None:
+        return (
+            "No local transformers VLM is loaded. Check SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL "
+            "or prior load errors (e.g. set LOAD_TRANSFORMERS_VLM_MODEL_AT_START=True to load at startup).",
+            0,
+            0,
+        )
 
     # Determine parameter values with priority: function args > model defaults > general defaults
     # Priority order: function argument (if not None) > model default > general default
@@ -1148,9 +1224,7 @@ def extract_text_from_image_vlm(
         max_length=MAX_INPUT_TOKEN_LENGTH,
     ).to(device)
 
-    streamer = TextIteratorStreamer(
-        processor, skip_prompt=True, skip_special_tokens=True
-    )
+    use_stream = VLM_DEFAULT_STREAM if VLM_DEFAULT_STREAM is not None else True
 
     # Set random seed if specified
     if actual_seed is not None:
@@ -1161,7 +1235,6 @@ def extract_text_from_image_vlm(
     # Build generation kwargs with resolved parameters
     generation_kwargs = {
         **inputs,
-        "streamer": streamer,
         "max_new_tokens": actual_max_new_tokens,
         "do_sample": actual_do_sample,
         "temperature": actual_temperature,
@@ -1175,35 +1248,51 @@ def extract_text_from_image_vlm(
     # Only Qwen3-VL models currently support presence_penalty
     if actual_presence_penalty is not None and model_supports_presence_penalty:
         generation_kwargs["presence_penalty"] = actual_presence_penalty
+
     start_time = time.time()
-    thread = Thread(target=model.generate, kwargs=generation_kwargs)
-    thread.start()
-
     buffer = ""
-    line_buffer = ""  # Accumulate text for the current line
-    for new_text in streamer:
-        buffer += new_text
+
+    if use_stream:
+        streamer = TextIteratorStreamer(
+            processor, skip_prompt=True, skip_special_tokens=True
+        )
+        generation_kwargs["streamer"] = streamer
+        thread = Thread(target=model.generate, kwargs=generation_kwargs)
+        thread.start()
+
+        line_buffer = ""  # Accumulate text for the current line
+        for new_text in streamer:
+            buffer += new_text
+            buffer = buffer.replace("<|im_end|>", "")
+            line_buffer += new_text
+
+            # Print to console as it streams
+            print(new_text, end="", flush=True)
+
+            # If we hit a newline, report the entire accumulated line to GUI
+            if REPORT_VLM_OUTPUTS_TO_GUI and "\n" in new_text:
+                # Split by newline to handle the line(s) we just completed
+                parts = line_buffer.split("\n")
+                # Report all complete lines (everything except the last part which may be incomplete)
+                for line in parts[:-1]:
+                    if line.strip():  # Only report non-empty lines
+                        gr.Info(line, duration=2)
+                # Keep the last part (after the last newline) for the next line
+                line_buffer = parts[-1] if parts else ""
+
+        # Print final newline after streaming is complete
+        print()  # Add newline at the end
+    else:
+        with torch.inference_mode():
+            output_ids = model.generate(**generation_kwargs)
+        prompt_len = inputs["input_ids"].shape[1]
+        new_token_ids = output_ids[:, prompt_len:]
+        buffer = processor.batch_decode(new_token_ids, skip_special_tokens=True)[0]
         buffer = buffer.replace("<|im_end|>", "")
-        line_buffer += new_text
-
-        # Print to console as it streams
-        print(new_text, end="", flush=True)
-
-        # If we hit a newline, report the entire accumulated line to GUI
-        if REPORT_VLM_OUTPUTS_TO_GUI and "\n" in new_text:
-            # Split by newline to handle the line(s) we just completed
-            parts = line_buffer.split("\n")
-            # Report all complete lines (everything except the last part which may be incomplete)
-            for line in parts[:-1]:
-                if line.strip():  # Only report non-empty lines
+        if REPORT_VLM_OUTPUTS_TO_GUI and buffer.strip():
+            for line in buffer.split("\n"):
+                if line.strip():
                     gr.Info(line, duration=2)
-            # Keep the last part (after the last newline) for the next line
-            line_buffer = parts[-1] if parts else ""
-
-        # time.sleep(0.01)
-
-    # Print final newline after streaming is complete
-    print()  # Add newline at the end
 
     end_time = time.time()
 
@@ -1263,7 +1352,7 @@ if ADD_VLM_BOUNDING_BOX_RULES:
         )
         or ("qwen" in str(CLOUD_VLM_MODEL_CHOICE).lower() and SHOW_BEDROCK_VLM_MODELS)
     ):
-        additional_bounding_box_rules = """- Bounding boxes should fit within the coordinate extents of the image: 0, 0 is the top left corner of the image, and 999, 999 is the bottom right corner of the image"""
+        additional_bounding_box_rules = """\\n- Bounding boxes should fit within the coordinate extents of the image: 0, 0 is the top left corner of the image, and 999, 999 is the bottom right corner of the image"""
     else:
         additional_bounding_box_rules = ""
 else:
@@ -1277,9 +1366,9 @@ Rules:
 - Each line must be on a separate horizontal row in the image
 - Even if a sentence is split over multiple horizontal lines, it should be split into separate entries (one per line)
 - If text spans multiple horizontal lines, split it into separate entries (one per line)
+- The text should not contain any formatting tags unless they are explicitly written in the text (e.g. the text is html or markdown)
 - Do NOT combine lines that appear on different horizontal rows
-- Each bounding box should tightly fit around a single horizontal line of text
-{additional_bounding_box_rules}
+- Each bounding box should tightly fit around a single horizontal line of text{additional_bounding_box_rules}
 - Empty lines should be skipped
 - 'conf' should be a confidence score from 0-1
 
@@ -1293,8 +1382,7 @@ Rules:
 - The image of the face must be a photo, not a drawing or sketch
 - Do NOT combine multiple photos into a single entry
 - Each photo of a person's face that appears in the image should be a separate entry
-- Bounding boxes around the identified person's face should completely cover the person's face
-{additional_bounding_box_rules}
+- Bounding boxes around the identified person's face should completely cover the person's face{additional_bounding_box_rules}
 - 'text' should always be exactly '[PERSON]'
 - 'conf' should be a confidence score from 0-1
 - Do NOT include any other text or information in the JSON
@@ -1308,8 +1396,7 @@ Rules:
 - Each signature must be a separate entry
 - Do NOT combine multiple signatures into a single entry
 - Each signature that appears in the image should be a separate entry
-- Bounding boxes around the identified signature should completely cover the signature
-{additional_bounding_box_rules}
+- Bounding boxes around the identified signature should completely cover the signature{additional_bounding_box_rules}
 - 'text' should always be exactly '[SIGNATURE]'
 - 'conf' should be a confidence score from 0-1
 - Do NOT include any other text or information in the JSON.
@@ -1324,8 +1411,7 @@ IMPORTANT: Extract each word in the image separately. Do NOT combine words into 
 
 Rules:
 - Each entry should correspond to a single distinct word (not groups of words, not whole lines)
-- For each word, provide a tight bounding box [x1, y1, x2, y2] around just that word
-{additional_bounding_box_rules}
+- For each word, provide a tight bounding box [x1, y1, x2, y2] around just that word{additional_bounding_box_rules}
 - Do not merge words. Do not split words into letters. Only return one entry per word
 - Maintain the order of words as they appear spatially from top to bottom, left to right
 - Skip any empty or whitespace-only entries
