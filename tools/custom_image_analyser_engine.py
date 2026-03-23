@@ -34,12 +34,16 @@ from tools.config import (
     CONVERT_LINE_TO_WORD_LEVEL,
     DEFAULT_INFERENCE_SERVER_VLM_MODEL,
     DEFAULT_LANGUAGE,
+    DEFAULT_NEW_BATCH_CHAR_COUNT,
+    DEFAULT_NEW_BATCH_WORD_COUNT,
     FULL_COMPREHEND_ENTITY_LIST,
     HYBRID_OCR_CONFIDENCE_THRESHOLD,
     HYBRID_OCR_MAX_NEW_TOKENS,
+    HYBRID_OCR_MAX_WORDS,
     HYBRID_OCR_PADDING,
     IMAGES_DPI,
     INFERENCE_SERVER_API_URL,
+    INFERENCE_SERVER_DISABLE_THINKING,
     INFERENCE_SERVER_LLM_PII_MODEL_CHOICE,
     INFERENCE_SERVER_MODEL_NAME,
     INFERENCE_SERVER_PII_OPTION,
@@ -73,13 +77,16 @@ from tools.config import (
     TESSERACT_WORD_LEVEL_OCR,
     USE_LLAMA_SWAP,
     USE_TRANSFORMERS_VLM_MODEL_AS_LLM,
+    VLM_DEFAULT_STREAM,
     VLM_HYBRID_MIN_IMAGE_SIZE,
+    VLM_MAX_ASPECT_RATIO,
     VLM_MAX_DPI,
     VLM_MAX_IMAGE_SIZE,
     VLM_MIN_DPI,
     VLM_MIN_IMAGE_SIZE,
 )
 from tools.helper_functions import clean_unicode_text, get_system_font_path
+from tools.llm_funcs import _extract_choice_message_text
 from tools.load_spacy_model_custom_recognisers import custom_entities
 from tools.presidio_analyzer_custom import recognizer_result_from_dict
 from tools.run_vlm import (
@@ -101,12 +108,6 @@ from tools.run_vlm import (
 from tools.secure_path_utils import validate_folder_containment
 from tools.secure_regex_utils import safe_sanitize_text
 from tools.word_segmenter import AdaptiveSegmenter
-
-# Batch limits for AWS Comprehend and LLM entity detection. Batches are cut at the nearest
-# phrase-ending punctuation (PHRASE_ENDING_PUNCTUATION), newline, or end of page so text
-# is never cut mid-sentence.
-DEFAULT_NEW_BATCH_CHAR_COUNT = 2500
-DEFAULT_NEW_BATCH_WORD_COUNT = 500
 
 # AWS Comprehend billing: 1 unit = 100 characters (entity recognition, PII, etc.)
 COMPREHEND_CHARACTERS_PER_UNIT = 100
@@ -982,13 +983,14 @@ def _prepare_image_for_vlm(
 
     new_w = max(1, int(round(width * s)))
     new_h = max(1, int(round(height * s)))
+    new_pixels = new_w * new_h
     achieved_dpi = current_dpi * s
     metadata_dpi = min(dpi_hi, max(dpi_lo, achieved_dpi))
 
     if abs(s - 1.0) > 0.02:
         print(
             f"VLM image preparation: {width}x{height} ({int(area):,} px, ~{current_dpi:.1f} DPI) "
-            f"-> {new_w}x{new_h} (achieved ~{achieved_dpi:.1f} DPI, config requirement ~{metadata_dpi:.1f} DPI), scale {s:.4f}"
+            f"-> {new_w}x{new_h} (achieved ~{achieved_dpi:.1f} DPI, {new_pixels:,} px, config requirement ~{metadata_dpi:.1f} DPI), scale {s:.4f}"
         )
 
     resample = Image.Resampling.LANCZOS if s < 1.0 else Image.Resampling.BICUBIC
@@ -1002,13 +1004,15 @@ def _prepare_image_for_vlm(
 
 def _pad_image_for_vlm_aspect_ratio(
     image: Image.Image,
-    max_aspect: float = 10.0,
+    max_aspect: Optional[float] = None,
 ) -> Image.Image:
     """
-    Pad image so aspect ratio max(w/h, h/w) <= max_aspect (e.g. 10:1).
-    Used for Bedrock, inference-server, and transformers VLM to avoid API errors
-    on very long/thin hybrid crops. Returns RGB image.
+    Pad image so aspect ratio max(w/h, h/w) <= max_aspect (default: ``VLM_MAX_ASPECT_RATIO``).
+    Used for Bedrock, inference-server, Gemini, Azure/OpenAI, and local transformers VLM to avoid
+    API or model issues on very long/thin hybrid crops. Returns RGB image.
     """
+    if max_aspect is None:
+        max_aspect = VLM_MAX_ASPECT_RATIO
     if image is None:
         return image
     try:
@@ -1021,9 +1025,17 @@ def _pad_image_for_vlm_aspect_ratio(
         img = image.convert("RGB") if image.mode != "RGB" else image
         if w >= h:
             new_h = max(int(math.ceil(w / max_aspect)), 1)
+            if new_h != h:
+                print(
+                    f"VLM aspect ratio padding: width >= height. Original size: {w}x{h}. New size: {w}x{new_h}. Applied extra padding to height to achieve aspect ratio <= {max_aspect}."
+                )
             new_w, new_h = w, new_h
         else:
             new_w = max(int(math.ceil(h / max_aspect)), 1)
+            if new_w != w:
+                print(
+                    f"VLM aspect ratio padding: height > width. Original size: {w}x{h}. New size: {new_w}x{h}. Applied extra padding to width to achieve aspect ratio <= {max_aspect}."
+                )
             new_w, new_h = new_w, h
         canvas = Image.new("RGB", (new_w, new_h), color=(255, 255, 255))
         scale = min(new_w / float(w), new_h / float(h))
@@ -1042,6 +1054,21 @@ def _pad_image_for_vlm_aspect_ratio(
         return image.convert("RGB") if image.mode != "RGB" else image
 
 
+def _prepare_hybrid_line_crop_for_vlm(image: Image.Image) -> Image.Image:
+    """
+    Resize/DPI-budget and aspect-pad a line crop for hybrid local VLM or hybrid inference-server.
+
+    Matches the image pipeline in ``_vlm_ocr_predict`` immediately before ``extract_text_from_image_vlm``.
+    Caller should supply an RGB image (e.g. after line crop).
+    """
+    image = _prepare_image_for_vlm(image, hybrid_vlm=True)
+    try:
+        image = _pad_image_for_vlm_aspect_ratio(image)
+    except Exception:
+        pass
+    return image
+
+
 def _call_inference_server_vlm_api(
     image: Image.Image,
     prompt: str,
@@ -1053,12 +1080,14 @@ def _call_inference_server_vlm_api(
     top_k: int = None,
     repetition_penalty: float = None,
     timeout: int = None,
-    stream: bool = True,
+    stream: bool = VLM_DEFAULT_STREAM,
     seed: int = None,
     do_sample: bool = None,
     min_p: float = None,
     presence_penalty: float = None,
     use_llama_swap: bool = USE_LLAMA_SWAP,
+    disable_thinking: bool = INFERENCE_SERVER_DISABLE_THINKING,
+    apply_aspect_ratio_padding: bool = True,
 ) -> Tuple[str, int, int, int, int]:
     """
     Calls a inference-server API endpoint with an image and text prompt.
@@ -1085,9 +1114,16 @@ def _call_inference_server_vlm_api(
         presence_penalty: Penalty for token presence.
         use_llama_swap: Whether to use llama-swap for the model (defaults to USE_LLAMA_SWAP from config).
             If True and model_name is provided, the model name will be included in the payload.
+        disable_thinking: When True, adds chat_template_kwargs={"enable_thinking": False} to the
+            request payload. This is the vLLM-native equivalent of appending <think></think> in the
+            local transformers path (VLM_DISABLE_QWEN3_5_THINKING). Defaults to
+            INFERENCE_SERVER_DISABLE_THINKING from config.
+        apply_aspect_ratio_padding: When False, send the image unchanged (caller already ran
+            ``_pad_image_for_vlm_aspect_ratio``). Full-page callers keep the default True.
     Returns:
         Tuple of response text, input tokens, output tokens, and image width/height
-        in pixels (after aspect-ratio padding sent to the API).
+        in pixels (as encoded for the API, including padding when applied).
+        On success, also prints prompt/completion token counts and output tok/s to stdout.
 
     Raises:
         ConnectionError: If the API request fails
@@ -1102,13 +1138,14 @@ def _call_inference_server_vlm_api(
     if timeout is None:
         timeout = INFERENCE_SERVER_TIMEOUT
 
-    # Pad image so aspect ratio <= 10:1 (same as Bedrock); hybrid crops can be very long/thin
-    try:
-        image = _pad_image_for_vlm_aspect_ratio(image, max_aspect=10.0)
-    except Exception as e:
-        print(
-            f"Warning: could not pad image for inference-server VLM aspect ratio: {e}"
-        )
+    # Pad image so aspect ratio <= VLM_MAX_ASPECT_RATIO; hybrid crops can be very long/thin
+    if apply_aspect_ratio_padding:
+        try:
+            image = _pad_image_for_vlm_aspect_ratio(image)
+        except Exception as e:
+            print(
+                f"Warning: could not pad image for inference-server VLM aspect ratio: {e}"
+            )
 
     # Convert PIL Image to base64
     buffer = io.BytesIO()
@@ -1138,12 +1175,21 @@ def _call_inference_server_vlm_api(
     # Add model name if specified and use llama-swap
     if model_name and use_llama_swap:
         payload["model"] = model_name
+
+    # Disable thinking for Qwen3/Qwen3.5 models served by vLLM. vLLM applies the chat template
+    # server-side and honours enable_thinking=False via chat_template_kwargs, which is the exact
+    # server-side equivalent of appending <think></think> in the local transformers path.
+    if disable_thinking:
+        payload["chat_template_kwargs"] = {"enable_thinking": False}
+
     if do_sample is not None:
         payload["do_sample"] = do_sample
     if temperature is not None:
         payload["temperature"] = temperature
     if top_p is not None:
         payload["top_p"] = top_p
+    if min_p is not None:
+        payload["min_p"] = min_p
     if top_k is not None:
         payload["top_k"] = top_k
     if repetition_penalty is not None:
@@ -1168,8 +1214,8 @@ def _call_inference_server_vlm_api(
 
     endpoint = f"{api_url}/v1/chat/completions"
 
-    # Retry logic: try up to 3 times for connection errors
-    max_retries = 3
+    # Retry logic: try up to 5 times for connection errors
+    max_retries = 5
     retry_delay = 2  # seconds between retries
 
     for attempt in range(max_retries):
@@ -1184,6 +1230,8 @@ def _call_inference_server_vlm_api(
                     timeout=timeout,
                 )
                 response.raise_for_status()
+
+                stream_start = time.perf_counter()
 
                 # Some OpenAI-compatible servers stream *cumulative* delta.content (full text
                 # generated so far on each chunk). Printing every chunk reprints completed lines.
@@ -1230,6 +1278,7 @@ def _call_inference_server_vlm_api(
                 print()  # newline after stream finishes
 
                 text = accumulated_response
+                stream_elapsed_s = time.perf_counter() - stream_start
 
                 # Try to extract token usage from final chunk if available
                 input_tokens = 0
@@ -1250,11 +1299,26 @@ def _call_inference_server_vlm_api(
                     )
                     input_tokens = prompt_word_count + image_tokens_estimate
 
+                if stream_elapsed_s > 0 and output_tokens > 0:
+                    gen_tok_s = output_tokens / stream_elapsed_s
+                    print(
+                        f"Inference-server VLM: prompt_tokens={input_tokens}, "
+                        f"completion_tokens={output_tokens}, speed={gen_tok_s:.2f} tok/s",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"Inference-server VLM: prompt_tokens={input_tokens}, "
+                        f"completion_tokens={output_tokens}, speed=n/a",
+                        flush=True,
+                    )
+
                 iw, ih = image.size
                 return text, input_tokens, output_tokens, iw, ih
 
             else:
                 # Handle non-streaming response
+                req_start = time.perf_counter()
                 response = requests.post(
                     endpoint,
                     json=payload,
@@ -1271,10 +1335,10 @@ def _call_inference_server_vlm_api(
                         "Invalid response format from inference-server: no choices found"
                     )
 
-                message = result["choices"][0].get("message", {})
-                content = message.get("content", "")
+                choice = result["choices"][0]
+                content = _extract_choice_message_text(choice)
 
-                if not content:
+                if not (content and str(content).strip()):
                     raise ValueError(
                         "Invalid response format from inference-server: no content in message"
                     )
@@ -1286,6 +1350,21 @@ def _call_inference_server_vlm_api(
                     usage = result["usage"]
                     input_tokens = usage.get("prompt_tokens", 0)
                     output_tokens = usage.get("completion_tokens", 0)
+
+                req_elapsed_s = time.perf_counter() - req_start
+                if req_elapsed_s > 0 and output_tokens > 0:
+                    gen_tok_s = output_tokens / req_elapsed_s
+                    print(
+                        f"Inference-server VLM: prompt_tokens={input_tokens}, "
+                        f"completion_tokens={output_tokens}, speed={gen_tok_s:.2f} tok/s",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"Inference-server VLM: prompt_tokens={input_tokens}, "
+                        f"completion_tokens={output_tokens}, speed=n/a",
+                        flush=True,
+                    )
 
                 iw, ih = image.size
                 return content, input_tokens, output_tokens, iw, ih
@@ -1356,20 +1435,20 @@ def _call_bedrock_vlm_api(
     if model_choice is None:
         raise ValueError("model_choice is required for Bedrock VLM calls")
 
-    # Bedrock Converse API requires image aspect ratio <= 20:1. Pad to 10:1 for hybrid crops.
+    # Bedrock Converse API requires image aspect ratio <= 20:1. Pad to VLM_MAX_ASPECT_RATIO first.
     try:
-        image = _pad_image_for_vlm_aspect_ratio(image, max_aspect=10.0)
+        image = _pad_image_for_vlm_aspect_ratio(image)
     except Exception as aspect_error:
         print(
             f"Warning: could not adjust image aspect ratio for Bedrock VLM: {aspect_error}"
         )
-    # Final safeguard: never send aspect > 20:1
+    # Final safeguard: never send aspect > 10:1 (AWS Converse limit)
     try:
         w, h = image.size
         if w > 0 and h > 0:
             aspect = max(w / float(h), h / float(w))
-            if aspect > 20.0:
-                image = _pad_image_for_vlm_aspect_ratio(image, max_aspect=19.5)
+            if aspect > 10.0:
+                image = _pad_image_for_vlm_aspect_ratio(image, max_aspect=10.0)
                 print(
                     f"Bedrock VLM: re-padded image to satisfy aspect ratio (was {aspect:.1f}:1)."
                 )
@@ -1488,6 +1567,13 @@ def _call_gemini_vlm_api(
     if model_choice is None:
         raise ValueError("model_choice is required for Gemini VLM calls")
 
+    try:
+        image = _pad_image_for_vlm_aspect_ratio(image)
+    except Exception as aspect_error:
+        print(
+            f"Warning: could not adjust image aspect ratio for Gemini VLM: {aspect_error}"
+        )
+
     # Convert PIL Image to base64
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
@@ -1599,6 +1685,13 @@ def _call_azure_openai_vlm_api(
         raise ValueError("OpenAI client is required for Azure/OpenAI VLM calls")
     if model_choice is None:
         raise ValueError("model_choice is required for Azure/OpenAI VLM calls")
+
+    try:
+        image = _pad_image_for_vlm_aspect_ratio(image)
+    except Exception as aspect_error:
+        print(
+            f"Warning: could not adjust image aspect ratio for Azure/OpenAI VLM: {aspect_error}"
+        )
 
     # Convert PIL Image to base64
     buffer = io.BytesIO()
@@ -1803,19 +1896,13 @@ def _vlm_ocr_predict(
             print(f"VLM OCR error: Could not convert image to RGB: {convert_error}")
             return {"rec_texts": [], "rec_scores": []}
 
-        # Check and resize image if it exceeds maximum size or DPI limits
+        # Same pipeline as hybrid inference-server line crops
         try:
-            image = _prepare_image_for_vlm(image, hybrid_vlm=True)
+            image = _prepare_hybrid_line_crop_for_vlm(image)
             width, height = image.size
         except Exception as prep_error:
             print(f"VLM OCR error: Could not prepare image for VLM: {prep_error}")
             return {"rec_texts": [], "rec_scores": []}
-
-        # Pad so aspect ratio <= 10:1 for hybrid line crops (same as Bedrock/inference-server)
-        try:
-            image = _pad_image_for_vlm_aspect_ratio(image, max_aspect=10.0)
-        except Exception:
-            pass
 
         # Use the VLM to extract text
         # Pass None for parameters to prioritize model-specific defaults from run_vlm.py
@@ -1865,9 +1952,9 @@ def _vlm_ocr_predict(
         cleaned_text = re.sub(r"[\r\n]+", " ", text_content).strip()
         words = cleaned_text.split()
 
-        # Enforce output length below HYBRID_OCR_MAX_NEW_TOKENS (truncate if over)
-        if len(words) > HYBRID_OCR_MAX_NEW_TOKENS:
-            words = words[:HYBRID_OCR_MAX_NEW_TOKENS]
+        # Enforce output length below HYBRID_OCR_MAX_WORDS (truncate if over)
+        if len(words) > HYBRID_OCR_MAX_WORDS:
+            words = words[:HYBRID_OCR_MAX_WORDS]
 
         result = {
             "rec_texts": words,
@@ -2860,6 +2947,7 @@ def _inference_server_ocr_predict(
     prompt: str = model_default_prompt,
     max_retries: int = 5,
     model_name: str = None,
+    image_hybrid_line_prepared: bool = False,
 ) -> Dict[str, Any]:
     """
     Inference-server OCR prediction function that mimics PaddleOCR's interface.
@@ -2870,6 +2958,8 @@ def _inference_server_ocr_predict(
         prompt: Text prompt for the VLM
         max_retries: Maximum number of retry attempts for API calls (default: 5)
         model_name: Name of the inference-server model to use
+        image_hybrid_line_prepared: If True, ``image`` was already processed with
+            ``_prepare_hybrid_line_crop_for_vlm`` (hybrid Paddle + inference-server path).
 
     Returns:
         Dictionary in PaddleOCR format with 'rec_texts' and 'rec_scores'
@@ -2906,15 +2996,16 @@ def _inference_server_ocr_predict(
             )
             return {"rec_texts": [], "rec_scores": []}
 
-        # Check and resize image if it exceeds maximum size or DPI limits
-        try:
-            image = _prepare_image_for_vlm(image, hybrid_vlm=True)
-            width, height = image.size
-        except Exception as prep_error:
-            print(
-                f"Inference-server OCR error: Could not prepare image for VLM: {prep_error}"
-            )
-            return {"rec_texts": [], "rec_scores": []}
+        if not image_hybrid_line_prepared:
+            # Check and resize image if it exceeds maximum size or DPI limits
+            try:
+                image = _prepare_image_for_vlm(image, hybrid_vlm=True)
+                width, height = image.size
+            except Exception as prep_error:
+                print(
+                    f"Inference-server OCR error: Could not prepare image for VLM: {prep_error}"
+                )
+                return {"rec_texts": [], "rec_scores": []}
 
         # Use the inference-server API to extract text with retry logic
         extracted_text = None
@@ -2951,6 +3042,7 @@ def _inference_server_ocr_predict(
                         min_p=None,
                         presence_penalty=None,
                         use_llama_swap=USE_LLAMA_SWAP,
+                        apply_aspect_ratio_padding=not image_hybrid_line_prepared,
                     )
                 )
                 # If we get here, the API call succeeded
@@ -2998,10 +3090,10 @@ def _inference_server_ocr_predict(
             # Split into words for compatibility with PaddleOCR format
             words = cleaned_text.split()
 
-            # If text has more than HYBRID_OCR_MAX_NEW_TOKENS words, assume something went wrong and skip it
-            if len(words) > HYBRID_OCR_MAX_NEW_TOKENS:
+            # If text has more words than the line-level limit, assume something went wrong and skip it
+            if len(words) > HYBRID_OCR_MAX_WORDS:
                 print(
-                    f"Inference-server OCR warning: Extracted text has {len(words)} words, which exceeds the {HYBRID_OCR_MAX_NEW_TOKENS} word limit. Skipping."
+                    f"Inference-server OCR warning: Extracted text has {len(words)} words, which exceeds the {HYBRID_OCR_MAX_WORDS} word limit. Skipping."
                 )
                 return {"rec_texts": [], "rec_scores": []}
 
@@ -3158,7 +3250,7 @@ def _bedrock_vlm_ocr_predict(
                     score = 1.0
                 if text_content:
                     words = re.sub(r"[\r\n]+", " ", text_content).strip().split()
-                    if len(words) <= HYBRID_OCR_MAX_NEW_TOKENS:
+                    if len(words) <= HYBRID_OCR_MAX_WORDS:
                         return _add_prompt_response(
                             {
                                 "rec_texts": words,
@@ -3251,9 +3343,9 @@ def _bedrock_vlm_ocr_predict(
 
             words = cleaned_text.split()
 
-            if len(words) > HYBRID_OCR_MAX_NEW_TOKENS:
+            if len(words) > HYBRID_OCR_MAX_WORDS:
                 print(
-                    f"Bedrock VLM OCR warning: Extracted text has {len(words)} words, which exceeds the {HYBRID_OCR_MAX_NEW_TOKENS} word limit. Skipping."
+                    f"Bedrock VLM OCR warning: Extracted text has {len(words)} words, which exceeds the {HYBRID_OCR_MAX_WORDS} word limit. Skipping."
                 )
                 return _add_prompt_response({"rec_texts": [], "rec_scores": []})
 
@@ -3448,9 +3540,9 @@ def _gemini_vlm_ocr_predict(
 
             words = cleaned_text.split()
 
-            if len(words) > HYBRID_OCR_MAX_NEW_TOKENS:
+            if len(words) > HYBRID_OCR_MAX_WORDS:
                 print(
-                    f"Gemini VLM OCR warning: Extracted text has {len(words)} words, which exceeds the {HYBRID_OCR_MAX_NEW_TOKENS} word limit. Skipping."
+                    f"Gemini VLM OCR warning: Extracted text has {len(words)} words, which exceeds the {HYBRID_OCR_MAX_WORDS} word limit. Skipping."
                 )
                 return {"rec_texts": [], "rec_scores": []}
 
@@ -3642,9 +3734,9 @@ def _azure_openai_vlm_ocr_predict(
 
             words = cleaned_text.split()
 
-            if len(words) > HYBRID_OCR_MAX_NEW_TOKENS:
+            if len(words) > HYBRID_OCR_MAX_WORDS:
                 print(
-                    f"Azure/OpenAI VLM OCR warning: Extracted text has {len(words)} words, which exceeds the {HYBRID_OCR_MAX_NEW_TOKENS} word limit. Skipping."
+                    f"Azure/OpenAI VLM OCR warning: Extracted text has {len(words)} words, which exceeds the {HYBRID_OCR_MAX_WORDS} word limit. Skipping."
                 )
                 return {"rec_texts": [], "rec_scores": []}
 
@@ -4020,10 +4112,8 @@ def _vlm_page_ocr_predict(
         try:
             original_width, original_height = image.size
             processed_image = _prepare_image_for_vlm(image)
-            # Pad so aspect ratio <= 10:1 (same as Bedrock/inference-server) for hybrid/long pages
-            processed_image = _pad_image_for_vlm_aspect_ratio(
-                processed_image, max_aspect=10.0
-            )
+            # Pad so aspect ratio <= VLM_MAX_ASPECT_RATIO for hybrid/long pages
+            processed_image = _pad_image_for_vlm_aspect_ratio(processed_image)
             processed_width, processed_height = processed_image.size
 
             # Use float division to avoid rounding errors
@@ -4526,18 +4616,43 @@ def _inference_server_page_ocr_predict(
         matching the format expected by perform_ocr
     """
     try:
+
+        def _empty_inference_server_page_result(
+            resolved_name: Optional[str] = None,
+        ) -> Tuple[Dict[str, List], int, int, str]:
+            """Always return (ocr_dict, in_tokens, out_tokens, model_name) for perform_ocr."""
+            nm = resolved_name
+            if nm is None or nm == "":
+                nm = (
+                    DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                    if DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                    else None
+                )
+            if nm is None or nm == "":
+                nm = (
+                    INFERENCE_SERVER_MODEL_NAME if INFERENCE_SERVER_MODEL_NAME else None
+                )
+            if nm is None or nm == "":
+                nm = "Inference Server"
+            return (
+                {
+                    "text": [],
+                    "left": [],
+                    "top": [],
+                    "width": [],
+                    "height": [],
+                    "conf": [],
+                    "model": [],
+                },
+                0,
+                0,
+                nm,
+            )
+
         # Validate image exists and is not None
         if image is None:
             print("Inference-server page OCR error: Image is None")
-            return {
-                "text": [],
-                "left": [],
-                "top": [],
-                "width": [],
-                "height": [],
-                "conf": [],
-                "model": [],
-            }
+            return _empty_inference_server_page_result()
 
         # Validate image has valid size (at least 10x10 pixels)
         try:
@@ -4546,28 +4661,12 @@ def _inference_server_page_ocr_predict(
                 print(
                     f"Inference-server page OCR error: Image is too small ({width}x{height} pixels). Minimum size is 10x10."
                 )
-                return {
-                    "text": [],
-                    "left": [],
-                    "top": [],
-                    "width": [],
-                    "height": [],
-                    "conf": [],
-                    "model": [],
-                }
+                return _empty_inference_server_page_result()
         except Exception as size_error:
             print(
                 f"Inference-server page OCR error: Could not get image size: {size_error}"
             )
-            return {
-                "text": [],
-                "left": [],
-                "top": [],
-                "width": [],
-                "height": [],
-                "conf": [],
-                "model": [],
-            }
+            return _empty_inference_server_page_result()
 
         # Ensure image is in RGB mode (convert if needed)
         try:
@@ -4578,15 +4677,7 @@ def _inference_server_page_ocr_predict(
             print(
                 f"Inference-server page OCR error: Could not convert image to RGB: {convert_error}"
             )
-            return {
-                "text": [],
-                "left": [],
-                "top": [],
-                "width": [],
-                "height": [],
-                "conf": [],
-                "model": [],
-            }
+            return _empty_inference_server_page_result()
 
         # Check and resize image if it exceeds maximum size or DPI limits
         scale_x = 1.0
@@ -4619,15 +4710,7 @@ def _inference_server_page_ocr_predict(
             print(
                 f"Inference-server page OCR error: Could not prepare image for VLM: {prep_error}"
             )
-            return {
-                "text": [],
-                "left": [],
-                "top": [],
-                "width": [],
-                "height": [],
-                "conf": [],
-                "model": [],
-            }
+            return _empty_inference_server_page_result()
 
         # Save input image for debugging if environment variable is set
         if SAVE_VLM_INPUT_IMAGES:
@@ -4899,30 +4982,14 @@ def _inference_server_page_ocr_predict(
             print(
                 f"Response text: {extracted_text[:500]}"
             )  # Print first 500 chars for debugging
-            return {
-                "text": [],
-                "left": [],
-                "top": [],
-                "width": [],
-                "height": [],
-                "conf": [],
-                "model": [],
-            }
+            return _empty_inference_server_page_result(final_model_name)
 
         # Validate that lines_data is a list
         if not isinstance(lines_data, list):
             print(
                 f"Inference-server page OCR error: Expected list, got {type(lines_data)}"
             )
-            return {
-                "text": [],
-                "left": [],
-                "top": [],
-                "width": [],
-                "height": [],
-                "conf": [],
-                "model": [],
-            }
+            return _empty_inference_server_page_result(final_model_name)
 
         if SAVE_VLM_INPUT_IMAGES:
             plot_text_bounding_boxes(
@@ -6254,7 +6321,7 @@ class CustomImageAnalyzerEngine:
 
         elif self.ocr_engine == "hybrid-vlm":
             # VLM-based hybrid OCR - no additional initialization needed
-            # The VLM model is loaded when run_vlm.py is imported
+            # VLM weights load at import if LOAD_TRANSFORMERS_VLM_MODEL_AT_START=True, else on first VLM call
             print(
                 f"Initializing hybrid VLM OCR with model: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}"
             )
@@ -6262,7 +6329,7 @@ class CustomImageAnalyzerEngine:
 
         elif self.ocr_engine == "vlm":
             # VLM page-level OCR - no additional initialization needed
-            # The VLM model is loaded when run_vlm.py is imported
+            # VLM weights load at import if LOAD_TRANSFORMERS_VLM_MODEL_AT_START=True, else on first VLM call
             print(
                 f"Initializing VLM OCR with model: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}"
             )
@@ -6270,7 +6337,7 @@ class CustomImageAnalyzerEngine:
 
         if self.ocr_engine == "hybrid-paddle-vlm":
             # Hybrid PaddleOCR + VLM - requires both PaddleOCR and VLM
-            # The VLM model is loaded when run_vlm.py is imported
+            # VLM weights load at import if LOAD_TRANSFORMERS_VLM_MODEL_AT_START=True, else on first VLM call
             print(
                 f"Initializing hybrid PaddleOCR + VLM OCR with model: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}"
             )
@@ -6488,11 +6555,12 @@ class CustomImageAnalyzerEngine:
                     paddle_coord_width != input_image_width
                     or paddle_coord_height != input_image_height
                 ):
-                    print(
-                        f"PaddleOCR metadata indicates coordinate space ({paddle_coord_width}x{paddle_coord_height}) "
-                        f"differs from input ({input_image_width}x{input_image_height}). "
-                        f"Using metadata for coordinate conversion."
-                    )
+                    # print(
+                    #     f"PaddleOCR metadata indicates coordinate space ({paddle_coord_width}x{paddle_coord_height}) "
+                    #     f"differs from input ({input_image_width}x{input_image_height}). "
+                    #     f"Using metadata for coordinate conversion."
+                    # )
+                    pass
             elif input_image_width is not None and input_image_height is not None:
                 # Default: assume coordinates are in input image space (standard PaddleOCR behavior)
                 # This is the most common case and avoids incorrect scaling
@@ -7706,7 +7774,19 @@ class CustomImageAnalyzerEngine:
                         if cropped_image.mode != "RGB":
                             cropped_image = cropped_image.convert("RGB")
 
-                        # Save input image for debugging if environment variable is set
+                        # Match hybrid local VLM: resize/DPI budget then aspect-pad before API
+                        try:
+                            prepared_for_inference = _prepare_hybrid_line_crop_for_vlm(
+                                cropped_image
+                            )
+                        except Exception as prep_err:
+                            print(
+                                f"Current line {i + 1} of {num_lines}: "
+                                f"Could not prepare image for inference server: {prep_err}"
+                            )
+                            continue
+
+                        # Save the same pixels sent to the API when debugging
                         if SAVE_VLM_INPUT_IMAGES:
                             try:
                                 inference_server_debug_dir = os.path.join(
@@ -7722,7 +7802,9 @@ class CustomImageAnalyzerEngine:
                                 filepath = os.path.join(
                                     inference_server_debug_dir, filename
                                 )
-                                _save_image_with_config_dpi(cropped_image, filepath)
+                                _save_image_with_config_dpi(
+                                    prepared_for_inference, filepath
+                                )
                             except Exception as save_error:
                                 print(
                                     f"Warning: Could not save inference-server input image: {save_error}"
@@ -7739,8 +7821,9 @@ class CustomImageAnalyzerEngine:
                         )
                         try:
                             inference_server_result = _inference_server_ocr_predict(
-                                cropped_image,
+                                prepared_for_inference,
                                 model_name=model_name,
+                                image_hybrid_line_prepared=True,
                             )
                             inference_server_rec_texts = (
                                 inference_server_result.get("rec_texts", [])
@@ -7844,7 +7927,7 @@ class CustomImageAnalyzerEngine:
                                         + f"/{safe_filename}.png"
                                     )
                                     _save_image_with_config_dpi(
-                                        cropped_image, output_image_path
+                                        prepared_for_inference, output_image_path
                                     )
 
                                 # Replace with inference-server result in paddle_results format
@@ -8577,12 +8660,19 @@ class CustomImageAnalyzerEngine:
         # The rest of your processing pipeline now works for both engines
         ocr_result = ocr_data
 
-        # Filter out empty strings and low confidence results
-        valid_indices = [
-            i
-            for i, text in enumerate(ocr_result["text"])
-            if text.strip() and int(ocr_result["conf"][i]) > 0
-        ]
+        # Filter out empty strings and non-positive confidence.
+        # Do not use int(conf): fractional confidences in (0, 1) from line→word conversion
+        # (e.g. AdaptiveSegmenter) would become 0 and drop every word (empty OCR tables / UI).
+        valid_indices = []
+        for i, text in enumerate(ocr_result["text"]):
+            if not (text and str(text).strip()):
+                continue
+            try:
+                c = float(ocr_result["conf"][i])
+            except (TypeError, ValueError, IndexError, KeyError):
+                continue
+            if c > 0:
+                valid_indices.append(i)
 
         # Determine default model based on OCR engine if model field is not present
         if "model" in ocr_result and len(ocr_result["model"]) == len(

@@ -3,6 +3,7 @@ import io
 import json
 import os
 import re
+import statistics
 import time
 from collections import defaultdict  # For efficient grouping
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -55,6 +56,7 @@ from tools.config import (
     CUSTOM_VLM_BACKEND,
     DEFAULT_LANGUAGE,
     EFFICIENT_OCR,
+    EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION,
     EFFICIENT_OCR_MIN_WORDS,
     GEMINI_VLM_TEXT_EXTRACT_OPTION,
     HYBRID_TEXTRACT_BEDROCK_VLM,
@@ -253,6 +255,81 @@ def _word_count_by_page_from_ocr_results_with_words(
             words = line_data.get("words", [])
             by_page[page_num] += len(words) if isinstance(words, list) else 0
     return {p: by_page.get(p, 0) for p in page_numbers_1based}
+
+
+def _page_has_significant_embedded_image(
+    page: Page,
+    min_coverage_fraction: float,
+) -> bool:
+    """
+    True if any embedded image on the page covers at least min_coverage_fraction of the
+    MediaBox area (single placement). Uses PyMuPDF get_images / get_image_rects.
+    """
+    if min_coverage_fraction <= 0:
+        return False
+    mediabox = page.mediabox
+    page_area = float(abs(mediabox.width) * abs(mediabox.height))
+    if page_area <= 0:
+        return False
+
+    for img_item in page.get_images(full=True):
+        try:
+            rects = page.get_image_rects(img_item)
+        except Exception:
+            try:
+                xref = img_item[0] if img_item else None
+                rects = page.get_image_rects(xref) if xref is not None else []
+            except Exception:
+                continue
+        for r in rects:
+            if isinstance(r, tuple):
+                r = r[0]
+            try:
+                rect_area = float(abs(r.width) * abs(r.height))
+            except Exception:
+                continue
+            if rect_area / page_area >= min_coverage_fraction:
+                return True
+    return False
+
+
+def _efficient_ocr_pages_with_significant_embedded_images(
+    file_path: str,
+    pages_1based: List[int],
+    min_coverage_fraction: float,
+    pymupdf_doc: Optional[Document] = None,
+) -> set:
+    """
+    1-based page numbers that should use the OCR path due to a significant embedded image,
+    regardless of selectable word count.
+    """
+    if min_coverage_fraction <= 0 or not pages_1based:
+        return set()
+
+    doc: Optional[Document] = None
+    close_doc = False
+    if isinstance(pymupdf_doc, Document) and getattr(pymupdf_doc, "page_count", 0) > 0:
+        doc = pymupdf_doc
+    else:
+        try:
+            doc = pymupdf.open(file_path)
+            close_doc = True
+        except Exception:
+            return set()
+
+    out = set()
+    try:
+        for p1 in pages_1based:
+            p0 = int(p1) - 1
+            if p0 < 0 or p0 >= doc.page_count:
+                continue
+            page = doc.load_page(p0)
+            if _page_has_significant_embedded_image(page, min_coverage_fraction):
+                out.add(int(p1))
+        return out
+    finally:
+        if close_doc and doc is not None:
+            doc.close()
 
 
 def add_page_range_suffix_to_file_path(
@@ -701,7 +778,13 @@ def run_custom_vlm_only_pass(
                 continue
         if all_image_annotations_boxes:
             vlm_annotations_list.append(
-                {"image": image_path, "boxes": all_image_annotations_boxes}
+                {
+                    "image": image_path,
+                    "boxes": all_image_annotations_boxes,
+                    # 0-based index for aligning placeholders with pymupdf / page_sizes
+                    "page_index_0": page_no,
+                    "page": reported_page_number,
+                }
             )
 
     return (
@@ -768,6 +851,7 @@ def choose_and_run_redactor(
     inference_server_vlm_model: str = "",
     efficient_ocr: bool = EFFICIENT_OCR,
     efficient_ocr_min_words: Union[int, float, None] = EFFICIENT_OCR_MIN_WORDS,
+    efficient_ocr_min_image_coverage_fraction: Optional[float] = None,
     hybrid_textract_bedrock_vlm: bool = HYBRID_TEXTRACT_BEDROCK_VLM,
     overwrite_existing_ocr_results: bool = OVERWRITE_EXISTING_OCR_RESULTS,
     llm_model_name="",
@@ -892,6 +976,14 @@ def choose_and_run_redactor(
         if efficient_ocr_min_words is not None
         else EFFICIENT_OCR_MIN_WORDS
     )
+    if efficient_ocr_min_image_coverage_fraction is None:
+        efficient_ocr_min_image_coverage_fraction = float(
+            EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION
+        )
+    else:
+        efficient_ocr_min_image_coverage_fraction = float(
+            efficient_ocr_min_image_coverage_fraction
+        )
 
     # CLI mode may provide options to enter method names in a different format
     if text_extraction_method == "AWS Textract":
@@ -2099,15 +2191,38 @@ def choose_and_run_redactor(
                 page_word_counts = _word_count_by_page_from_ocr_results_with_words(
                     all_page_line_level_ocr_results_with_words_first, all_pages_1based
                 )
+            if efficient_ocr_min_image_coverage_fraction > 0:
+                progress(
+                    0.42,
+                    desc="Efficient OCR: scanning pages for significant embedded images",
+                )
+            pages_flagged_for_image_ocr = (
+                _efficient_ocr_pages_with_significant_embedded_images(
+                    file_path,
+                    all_pages_1based,
+                    efficient_ocr_min_image_coverage_fraction,
+                    pymupdf_doc,
+                )
+            )
+            if pages_flagged_for_image_ocr:
+                print(
+                    "EFFICIENT_OCR: "
+                    + str(len(pages_flagged_for_image_ocr))
+                    + " page(s) routed to OCR due to embedded images (coverage >= "
+                    + f"{efficient_ocr_min_image_coverage_fraction:.1%}"
+                    + " of page area)."
+                )
             pages_with_text_1based = [
                 p
                 for p in all_pages_1based
                 if page_word_counts.get(p, 0) >= efficient_ocr_min_words
+                and p not in pages_flagged_for_image_ocr
             ]
             pages_needing_ocr_1based = [
                 p
                 for p in all_pages_1based
                 if page_word_counts.get(p, 0) < efficient_ocr_min_words
+                or p in pages_flagged_for_image_ocr
             ]
             efficient_ocr_text_pages = len(pages_with_text_1based)
             efficient_ocr_ocr_pages = len(pages_needing_ocr_1based)
@@ -2206,10 +2321,23 @@ def choose_and_run_redactor(
                     pd.to_numeric, errors="coerce"
                 )
                 progress(0.6, desc="Processing pages with OCR")
-                ocr_method_label = (
-                    "Tesseract (local OCR)"
-                    if ocr_fallback_method == TESSERACT_TEXT_EXTRACT_OPTION
-                    else (
+                if ocr_fallback_method == TESSERACT_TEXT_EXTRACT_OPTION:
+                    _local_ocr_display = {
+                        "tesseract": "Tesseract (local OCR)",
+                        "paddle": "PaddleOCR (local)",
+                        "hybrid-paddle": "Hybrid Paddle (local)",
+                        "hybrid-vlm": "Hybrid VLM (local)",
+                        "hybrid-paddle-vlm": "Hybrid Paddle+VLM (local)",
+                        "hybrid-paddle-inference-server": "Hybrid Paddle + inference server",
+                        "vlm": "Local VLM",
+                        "inference-server": "Inference server VLM OCR",
+                    }
+                    ocr_method_label = _local_ocr_display.get(
+                        chosen_local_ocr_model or "tesseract",
+                        f"Local OCR ({chosen_local_ocr_model})",
+                    )
+                else:
+                    ocr_method_label = (
                         "AWS Textract"
                         if ocr_fallback_method == TEXTRACT_TEXT_EXTRACT_OPTION
                         else (
@@ -2227,7 +2355,6 @@ def choose_and_run_redactor(
                             )
                         )
                     )
-                )
                 print(
                     f"EFFICIENT_OCR: Processing {len(pages_needing_ocr_1based)} page(s) with OCR ({ocr_method_label})."
                 )
@@ -2491,13 +2618,14 @@ def choose_and_run_redactor(
                     if vlm_name and not vlm_model_name:
                         vlm_model_name = vlm_name
                     # Merge VLM (face/signature) boxes into annotations and decision table.
-                    # Use placeholder image path so create_annotation_dicts_from_annotation_df
-                    # merges these boxes into the same per-page entry as page_sizes (Review tab
-                    # image_annotator expects one entry per page in order).
+                    # run_custom_vlm_only_pass already sets the real image_path (from
+                    # full_pdf_image_file_paths) on each annotation. Extend directly so
+                    # create_annotation_dicts_from_annotation_df groups these boxes under
+                    # the same image key as the page's regular redaction boxes, making them
+                    # visible in the image_annotator. (Previously a placeholder path was
+                    # written here, which created a separate image_dict entry and hid the
+                    # VLM boxes from the annotator while they still appeared in review_file_state.)
                     if vlm_annotations_list:
-                        placeholder_base = "placeholder_image_{}.png"
-                        for idx, vlm_anno in enumerate(vlm_annotations_list):
-                            vlm_anno["image"] = placeholder_base.format(idx)
                         annotations_all_pages.extend(vlm_annotations_list)
                     if vlm_decision_rows:
                         vlm_df = pd.DataFrame(vlm_decision_rows)
@@ -3408,6 +3536,10 @@ def choose_and_run_redactor(
             xmax="xmax",
             ymin="ymin",
             ymax="ymax",
+            coordinates_in_pdf_points=(
+                text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION
+                or ocr_results_use_pdf_points is True
+            ),
             pages_in_pdf_points=_pages_pdf_pts,
         )
         annotations_all_pages_divide = create_annotation_dicts_from_annotation_df(
@@ -3824,27 +3956,36 @@ def convert_image_coords_to_pymupdf(
 ):
     """
     Converts an image with redaction coordinates from a CustomImageRecognizerResult or pikepdf object with image coordinates to pymupdf coordinates.
+
+    Images are always rendered from the MediaBox (via _render_pdf_page_to_png_pymupdf_mediabox),
+    so scaling must use the MediaBox dimensions.  When CropBox != MediaBox the cropbox offset
+    is subtracted at the end so that the returned coordinates are in the page's current
+    CropBox-local coordinate system (what PyMuPDF expects for add_redact_annot / Rect).
+    When CropBox == MediaBox the offset is zero and behaviour is unchanged.
     """
 
-    rect_height = pymupdf_page.rect.height
-    rect_width = pymupdf_page.rect.width
+    # Use MediaBox dimensions for scaling (the image was rendered from the MediaBox).
+    mediabox_height = pymupdf_page.mediabox.height
+    mediabox_width = pymupdf_page.mediabox.width
 
     image_page_width, image_page_height = image.size
 
-    # Calculate scaling factors between PIL image and pymupdf
-    scale_width = rect_width / image_page_width
-    scale_height = rect_height / image_page_height
+    # Calculate scaling factors between PIL image and MediaBox
+    scale_width = mediabox_width / image_page_width
+    scale_height = mediabox_height / image_page_height
+
+    # Offset needed to convert from MediaBox-local to CropBox-local coordinates.
+    # cropbox.x0 is always 0 after PyMuPDF normalises the coordinate system, so
+    # cropbox_x_off = -mediabox.x0 (positive when CropBox is to the right of MediaBox origin).
+    cropbox_x_off = pymupdf_page.cropbox.x0 - pymupdf_page.mediabox.x0
+    cropbox_y_off = pymupdf_page.cropbox.y0 - pymupdf_page.mediabox.y0
 
     # Calculate scaled coordinates
     if type == "image_recognizer":
-        x1 = annot.left * scale_width  # + page_x_adjust
-        new_y1 = (
-            annot.top * scale_height
-        )  # - page_y_adjust  # Flip Y0 (since it starts from bottom)
-        x2 = (annot.left + annot.width) * scale_width  # + page_x_adjust  # Calculate x1
-        new_y2 = (
-            annot.top + annot.height
-        ) * scale_height  # - page_y_adjust  # Calculate y1 correctly
+        x1 = annot.left * scale_width
+        new_y1 = annot.top * scale_height
+        x2 = (annot.left + annot.width) * scale_width
+        new_y2 = (annot.top + annot.height) * scale_height
     # Else assume it is a pikepdf derived object
     else:
         rect_field = annot["/Rect"]
@@ -3853,14 +3994,16 @@ def convert_image_coords_to_pymupdf(
         # Unpack coordinates
         x1, y1, x2, y2 = rect_coordinates
 
-        x1 = x1 * scale_width  # + page_x_adjust
-        new_y1 = (
-            y2 + (y1 - y2)
-        ) * scale_height  # - page_y_adjust  # Calculate y1 correctly
-        x2 = (x1 + (x2 - x1)) * scale_width  # + page_x_adjust  # Calculate x1
-        new_y2 = (
-            y2 * scale_height
-        )  # - page_y_adjust  # Flip Y0 (since it starts from bottom)
+        x1 = x1 * scale_width
+        new_y1 = (y2 + (y1 - y2)) * scale_height
+        x2 = (x1 + (x2 - x1)) * scale_width
+        new_y2 = y2 * scale_height
+
+    # Convert from MediaBox-local to CropBox-local (no-op when they are equal)
+    x1 -= cropbox_x_off
+    new_y1 -= cropbox_y_off
+    x2 -= cropbox_x_off
+    new_y2 -= cropbox_y_off
 
     return x1, new_y1, x2, new_y2
 
@@ -3870,10 +4013,15 @@ def convert_gradio_image_annotator_object_coords_to_pymupdf(
 ):
     """
     Converts an image with redaction coordinates from a gradio annotation component to pymupdf coordinates.
+
+    Images are always rendered from the MediaBox, so MediaBox dimensions are used for scaling.
+    The CropBox offset is subtracted at the end to produce CropBox-local coordinates.
+    When CropBox == MediaBox the offset is zero and behaviour is unchanged.
     """
 
-    rect_height = pymupdf_page.rect.height
-    rect_width = pymupdf_page.rect.width
+    # Use MediaBox dimensions for scaling (the image was rendered from the MediaBox).
+    mediabox_height = pymupdf_page.mediabox.height
+    mediabox_width = pymupdf_page.mediabox.width
 
     if image_dimensions:
         image_page_width = image_dimensions["image_width"]
@@ -3881,17 +4029,25 @@ def convert_gradio_image_annotator_object_coords_to_pymupdf(
     elif image:
         image_page_width, image_page_height = image.size
 
-    # Calculate scaling factors between PIL image and pymupdf
-    scale_width = rect_width / image_page_width
-    scale_height = rect_height / image_page_height
+    # Calculate scaling factors between PIL image and MediaBox
+    scale_width = mediabox_width / image_page_width
+    scale_height = mediabox_height / image_page_height
 
-    # Calculate scaled coordinates
-    x1 = annot["xmin"] * scale_width  # + page_x_adjust
-    new_y1 = (
-        annot["ymin"] * scale_height
-    )  # - page_y_adjust  # Flip Y0 (since it starts from bottom)
-    x2 = (annot["xmax"]) * scale_width  # + page_x_adjust  # Calculate x1
-    new_y2 = (annot["ymax"]) * scale_height  # - page_y_adjust  # Calculate y1 correctly
+    # Offset to convert from MediaBox-local to CropBox-local (zero when they are equal)
+    cropbox_x_off = pymupdf_page.cropbox.x0 - pymupdf_page.mediabox.x0
+    cropbox_y_off = pymupdf_page.cropbox.y0 - pymupdf_page.mediabox.y0
+
+    # Calculate scaled coordinates (MediaBox-local)
+    x1 = annot["xmin"] * scale_width
+    new_y1 = annot["ymin"] * scale_height
+    x2 = annot["xmax"] * scale_width
+    new_y2 = annot["ymax"] * scale_height
+
+    # Convert to CropBox-local
+    x1 -= cropbox_x_off
+    new_y1 -= cropbox_y_off
+    x2 -= cropbox_x_off
+    new_y2 -= cropbox_y_off
 
     return x1, new_y1, x2, new_y2
 
@@ -3958,13 +4114,19 @@ def prepare_custom_image_recogniser_result_annotation_box(
                 and float(img_w) > 0
                 and float(img_h) > 0
             ):
-                # Image pixel coords (from OCR/CUSTOM) -> scale to PDF
-                scale_x = rect_width / float(img_w)
-                scale_y = rect_height / float(img_h)
-                pymupdf_x1 = annot.left * scale_x
-                pymupdf_y1 = annot.top * scale_y
-                pymupdf_x2 = (annot.left + annot.width) * scale_x
-                pymupdf_y2 = (annot.top + annot.height) * scale_y
+                # Image pixel coords (from OCR/CUSTOM) -> scale to PDF.
+                # Images are always rendered from the MediaBox, so use MediaBox dimensions
+                # for scaling, then subtract the CropBox offset to get CropBox-local coords.
+                mb_w = page_info.get("mediabox_width") or rect_width
+                mb_h = page_info.get("mediabox_height") or rect_height
+                x_off = float(page_info.get("cropbox_x_offset") or 0)
+                y_off = float(page_info.get("cropbox_y_offset_from_top") or 0)
+                scale_x = float(mb_w) / float(img_w)
+                scale_y = float(mb_h) / float(img_h)
+                pymupdf_x1 = annot.left * scale_x - x_off
+                pymupdf_y1 = annot.top * scale_y - y_off
+                pymupdf_x2 = (annot.left + annot.width) * scale_x - x_off
+                pymupdf_y2 = (annot.top + annot.height) * scale_y - y_off
             else:
                 # MediaBox-relative (top-left origin), e.g. text-path
                 mb_width = page_info["mediabox_width"]
@@ -9806,9 +9968,14 @@ def process_page_to_structured_ocr_pymupdf(
     # 1. Extract once (no page.get_text("words") needed; words built from chars)
     raw_dict = page.get_text("rawdict")
 
-    # Coordinates: PyMuPDF (0,0) is CropBox top-left.
-    # Only use these offsets if you MUST map back to MediaBox.
-    off_x, off_y = page.rect.x0, page.rect.y0
+    # Coordinates from get_text() are in CropBox-local space (0,0 = CropBox top-left).
+    # Compute the offset needed to convert to MediaBox-local space, which is what the
+    # downstream coordinate division (divide_coordinates_by_page_sizes) and the
+    # image_annotator display expect.  When CropBox == MediaBox the offset is 0.
+    off_x = (
+        page.cropbox.x0 - page.mediabox.x0
+    )  # = -page.mediabox.x0 (cropbox.x0 is always 0)
+    off_y = page.cropbox.y0 - page.mediabox.y0  # = -page.mediabox.y0
 
     page_data = {"page": str(page_number), "results": {}}
     line_results = []
@@ -9830,12 +9997,25 @@ def process_page_to_structured_ocr_pymupdf(
             current_line_idx = start_line_number + valid_line_count
             lx0, ly0, lx1, ly1 = line["bbox"]
 
-            # 2. Collect Character Objects (relative to CropBox)
+            # 2. Collect Character Objects in MediaBox-local space (same as lines/words).
+            # Raw get_text("rawdict") char bboxes are CropBox-local; merge_text_bounding_boxes
+            # uses these dicts — without the offset, merged redaction boxes stay CropBox-local
+            # while convert_redaction_boxes_pymupdf_to_pdf assumes MediaBox-local coords.
             line_chars = []
             for span in line["spans"]:
                 for char in span["chars"]:
+                    cx0, cy0, cx1, cy1 = char["bbox"]
                     line_chars.append(
-                        {"text": char["c"], "bbox": char["bbox"], "size": span["size"]}
+                        {
+                            "text": char["c"],
+                            "bbox": [
+                                cx0 + off_x,
+                                cy0 + off_y,
+                                cx1 + off_x,
+                                cy1 + off_y,
+                            ],
+                            "size": span["size"],
+                        }
                     )
 
             # 3. Create OCRResult (Corrected math)
@@ -9851,9 +10031,8 @@ def process_page_to_structured_ocr_pymupdf(
             )
 
             # 4. Build words from line chars with punctuation split into separate words
-            word_level_results = _words_from_line_chars_pymupdf(
-                line_chars, off_x, off_y
-            )
+            # (char bboxes already include off_x/off_y)
+            word_level_results = _words_from_line_chars_pymupdf(line_chars, 0.0, 0.0)
 
             # 5. Build final dictionary
             line_key = f"text_line_{current_line_idx}"
@@ -10597,7 +10776,11 @@ def redact_text_pdf(
         desc=(
             "Applying redactions to pages"
             if pii_results_by_page
-            else "Detecting PII (following simple text extraction)"
+            else (
+                "Extracting text (efficient OCR word-count pass)"
+                if text_extraction_only
+                else "Detecting PII (following simple text extraction)"
+            )
         ),
     )
 
@@ -10651,7 +10834,10 @@ def redact_text_pdf(
 
         ### REDACTION
 
-        if pii_identification_method != NO_REDACTION_PII_OPTION:
+        if (
+            not text_extraction_only
+            and pii_identification_method != NO_REDACTION_PII_OPTION
+        ):
             if chosen_redact_entities or chosen_redact_comprehend_entities:
                 if page_no in pii_results_by_page:
                     (
@@ -10727,13 +10913,19 @@ def redact_text_pdf(
                 else False
             )
 
+            # page.cropbox is always reported by PyMuPDF in MediaBox-local coordinates,
+            # so the stored original_cropbox is already in the correct coordinate system
+            # for set_cropbox_safely after set_cropbox(mediabox) has been applied.
+            # No offset transformation is needed here.
+            _orig_cb = original_cropboxes[page_no]
+
             redact_result = redact_page_with_pymupdf(
                 pymupdf_page,
                 pikepdf_redaction_annotations_on_page,
                 image_path,
                 redact_whole_page=redact_whole_page,
                 convert_pikepdf_to_pymupdf_coords=True,
-                original_cropbox=original_cropboxes[page_no],
+                original_cropbox=_orig_cb,
                 page_sizes_df=page_sizes_df,
                 input_folder=input_folder,
                 image_dimensions_override=page_to_image_dimensions.get(
@@ -10781,10 +10973,6 @@ def redact_text_pdf(
 
             if not page_decision_process_table.empty:
                 all_pages_decision_process_list.append(page_decision_process_table)
-
-        # Else, user chose not to run redaction
-        else:
-            pass
 
         # Join extracted text outputs for all lines together
         if not page_text_ocr_outputs.empty:
@@ -11066,6 +11254,17 @@ def _pil_ocr_viz_text_size(font: ImageFont.ImageFont, text: str) -> Tuple[int, i
     return max(1, bb[2] - bb[0]), max(1, bb[3] - bb[1])
 
 
+def _pil_ocr_viz_text_bbox(
+    font: ImageFont.ImageFont, text: str
+) -> Tuple[int, int, int, int]:
+    if not text:
+        text = " "
+    if hasattr(font, "getbbox"):
+        return font.getbbox(text)
+    dr = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    return dr.textbbox((0, 0), text, font=font)
+
+
 def _pil_ocr_viz_load_font(font_path: Optional[str], size: int) -> ImageFont.ImageFont:
     if font_path and os.path.isfile(font_path):
         try:
@@ -11077,6 +11276,85 @@ def _pil_ocr_viz_load_font(font_path: Optional[str], size: int) -> ImageFont.Ima
 
 def _ocr_viz_bgr_to_rgb(bgr: Tuple[int, int, int]) -> Tuple[int, int, int]:
     return (int(bgr[2]), int(bgr[1]), int(bgr[0]))
+
+
+def _ocr_viz_is_punctuation_only_token(text: str) -> bool:
+    s = text.strip()
+    if not s:
+        return False
+    return not any(ch.isalpha() or ch.isdigit() for ch in s)
+
+
+def _ocr_viz_punctuation_only_vertical_fraction(text: str) -> float:
+    """
+    Vertical position within the OCR word box (0 = top, 1 = bottom of box).
+    Dash-like and symmetric separators are centred; comma / full stop class sit lower.
+    """
+    compact = "".join(ch for ch in text if not ch.isspace())
+    if not compact:
+        return 0.5
+    middle_chars = frozenset("-‐−–—‾_·∙•‧;:|/\\+=*()[]{}\"'«»“”‘’")
+    if all(c in middle_chars for c in compact):
+        return 0.5
+    return 2.0 / 3.0
+
+
+def _ocr_viz_overlay_vertical_ref_y(
+    y1: int, y2: int, text: str, line_y_c: float
+) -> float:
+    if y2 <= y1:
+        return float(line_y_c)
+    if not _ocr_viz_is_punctuation_only_token(text):
+        return float(line_y_c)
+    frac = _ocr_viz_punctuation_only_vertical_fraction(text)
+    return float(y1) + (y2 - y1) * frac
+
+
+def _ocr_viz_draw_position_from_left_edge(
+    text: str,
+    font: ImageFont.ImageFont,
+    left_edge_x: float,
+    ref_y: float,
+    img_width: int,
+    img_height: int,
+    box_y1: Optional[int] = None,
+    box_y2: Optional[int] = None,
+) -> Tuple[int, int]:
+    """Return top-left draw coordinates that place the ink bbox at the requested position.
+
+    If box_y1/box_y2 are provided the rendered ink is also clamped so it never
+    escapes the word's own OCR bounding box vertically.
+    """
+    try:
+        left, top, right, bottom = _pil_ocr_viz_text_bbox(font, text)
+    except (TypeError, ValueError, OSError):
+        return int(left_edge_x), int(ref_y)
+
+    draw_x = int(round(left_edge_x - left))
+    draw_y = int(round(ref_y - (top + bottom) / 2.0))
+
+    # Clamp vertically to the word's own OCR box so text never escapes it.
+    if box_y1 is not None and box_y2 is not None:
+        # Ideal: ink top ≥ box_y1 and ink bottom ≤ box_y2.
+        min_draw_y = box_y1 - top  # ink top lands on box_y1
+        max_draw_y = box_y2 - bottom  # ink bottom lands on box_y2
+        if min_draw_y <= max_draw_y:
+            draw_y = max(min_draw_y, min(max_draw_y, draw_y))
+        else:
+            # Ink is taller than the box - centre it (should be rare after height cap).
+            draw_y = int(round((box_y1 + box_y2) / 2.0 - (top + bottom) / 2.0))
+
+    # Finally clamp to image canvas.
+    if draw_x + left < 0:
+        draw_x -= draw_x + left
+    if draw_x + right > img_width:
+        draw_x -= draw_x + right - img_width
+    if draw_y + top < 0:
+        draw_y -= draw_y + top
+    if draw_y + bottom > img_height:
+        draw_y -= draw_y + bottom - img_height
+
+    return draw_x, draw_y
 
 
 def visualise_ocr_words_bounding_boxes(
@@ -11336,6 +11614,67 @@ def visualise_ocr_words_bounding_boxes(
     text_page_rgb = Image.new("RGB", (width, height), (255, 255, 255))
     draw_pil = ImageDraw.Draw(text_page_rgb)
 
+    # Pre-pass: compute a per-line representative font size and vertical centre so that
+    # all words in the same line share the same font size and are aligned on the same
+    # baseline, regardless of how tall their individual bounding boxes are.
+    absolute_max_font_pt = 56
+    max_text_height_fraction = 0.55  # normal cap: text ≤ 55% of box height
+    max_text_height_fraction_small = (
+        0.95  # relaxed cap for small boxes where strict cap would be unreadable
+    )
+    min_readable_px = (
+        10  # if strict cap gives fewer pixels than this, use the relaxed cap
+    )
+    line_font_sizes: dict = {}
+    line_y_centres: dict = {}
+    all_word_box_heights: List[int] = []
+
+    for _lk, _ld in ocr_results.items():
+        if not isinstance(_ld, dict) or "words" not in _ld:
+            continue
+        _valid_bboxes = []
+        for _wd in _ld["words"]:
+            if not isinstance(_wd, dict):
+                continue
+            if not _wd.get("text", "").strip():
+                continue
+            if int(_wd.get("conf", _wd.get("confidence", 0))) == -1:
+                continue
+            _bb = _wd.get("bounding_box", (0, 0, 0, 0))
+            if len(_bb) != 4:
+                continue
+            _bx1, _by1, _bx2, _by2 = _bb
+            if needs_coordinate_conversion:
+                _bx1, _by1 = _bx1 * scale_x, _by1 * scale_y
+                _bx2, _by2 = _bx2 * scale_x, _by2 * scale_y
+            _bx1 = max(0, min(int(_bx1), width))
+            _by1 = max(0, min(int(_by1), height))
+            _bx2 = max(0, min(int(_bx2), width))
+            _by2 = max(0, min(int(_by2), height))
+            if _bx2 > _bx1 and _by2 > _by1:
+                _valid_bboxes.append((_bx1, _by1, _bx2, _by2))
+                all_word_box_heights.append(_by2 - _by1)
+        if not _valid_bboxes:
+            continue
+        _line_y1 = min(b[1] for b in _valid_bboxes)
+        _line_y2 = max(b[3] for b in _valid_bboxes)
+        line_y_centres[_lk] = (_line_y1 + _line_y2) / 2
+        # Use the median box height so outliers (e.g. very tall or very short boxes)
+        # don't skew the font size for the whole line.
+        _heights = sorted(b[3] - b[1] for b in _valid_bboxes)
+        _representative_h = _heights[len(_heights) // 2]
+        line_font_sizes[_lk] = min(160, max(8, int(_representative_h * 1.8)))
+
+    # Page-wide ceiling so a few mistaken huge boxes cannot drive oversized type.
+    if all_word_box_heights:
+        viz_global_max_font_pt = min(
+            160,
+            max(8, int(statistics.median(all_word_box_heights) * 1.8)),
+        )
+    else:
+        viz_global_max_font_pt = 160
+    viz_global_max_font_pt = min(viz_global_max_font_pt, absolute_max_font_pt)
+
     # Process each line's words for text overlay
     for line_key, line_data in ocr_results.items():
         if not isinstance(line_data, dict) or "words" not in line_data:
@@ -11425,19 +11764,43 @@ def visualise_ocr_words_bounding_boxes(
                         text_color = conf_color
                         break
 
-                max_pt = min(160, max(8, int(box_height * 1.8)))
-                min_pt = 6
+                # Use the line-level font size cap so all words in a line stay
+                # visually consistent; only reduce further if the word is too wide.
+                max_pt = min(
+                    line_font_sizes.get(
+                        line_key, min(160, max(8, int(box_height * 1.8)))
+                    ),
+                    viz_global_max_font_pt,
+                )
+                strict_h = int(box_height * max_text_height_fraction)
+                allowed_text_height = max(
+                    1,
+                    (
+                        int(box_height * max_text_height_fraction_small)
+                        if strict_h < min_readable_px
+                        else strict_h
+                    ),
+                )
+                min_pt = 1
                 pil_font = _pil_ocr_viz_load_font(viz_font_path, min_pt)
-                tw, th = 1, 1
+                tw = 1
+                th = 1
                 for pt in range(max_pt, min_pt - 1, -1):
                     pil_font = _pil_ocr_viz_load_font(viz_font_path, pt)
                     tw, th = _pil_ocr_viz_text_size(pil_font, text)
-                    if tw <= box_width * 0.9 and th <= box_height * 0.82:
+                    if tw <= box_width * 0.95 and th <= allowed_text_height:
                         break
-                text_x = x1 + (box_width - tw) // 2
-                text_y = y1 + (box_height - th) // 2
+                text_left_edge = x1 + (box_width - tw) / 2.0
+                # Word-like tokens: align to line vertical centre. Punctuation-only tokens use a
+                # fraction of the OCR box height so glyphs are not pushed to the bottom when the
+                # font bbox is much taller than a tight comma/period box.
+                line_y_c = line_y_centres.get(line_key, y1 + box_height / 2)
+                ref_y = _ocr_viz_overlay_vertical_ref_y(y1, y2, text, line_y_c)
+                draw_x, draw_y = _ocr_viz_draw_position_from_left_edge(
+                    text, pil_font, text_left_edge, ref_y, width, height, y1, y2
+                )
                 draw_pil.text(
-                    (text_x, text_y),
+                    (draw_x, draw_y),
                     text,
                     font=pil_font,
                     fill=_ocr_viz_bgr_to_rgb(text_color),
@@ -11476,8 +11839,24 @@ def visualise_ocr_words_bounding_boxes(
                     word_is_replaced.append(is_replaced)
 
                 n = len(word_texts)
-                max_pt = min(160, max(8, int(box_height * 1.8)))
-                min_pt = 6
+                # Use the line-level font size cap so all words in a line stay
+                # visually consistent; only reduce further if the combined text is too wide.
+                max_pt = min(
+                    line_font_sizes.get(
+                        line_key, min(160, max(8, int(box_height * 1.8)))
+                    ),
+                    viz_global_max_font_pt,
+                )
+                strict_h = int(box_height * max_text_height_fraction)
+                allowed_text_height = max(
+                    1,
+                    (
+                        int(box_height * max_text_height_fraction_small)
+                        if strict_h < min_readable_px
+                        else strict_h
+                    ),
+                )
+                min_pt = 1
                 pil_font = _pil_ocr_viz_load_font(viz_font_path, min_pt)
                 total_width = 0
                 max_text_height = 0
@@ -11494,16 +11873,25 @@ def visualise_ocr_words_bounding_boxes(
                         if i < n - 1:
                             total_width += space_w
                     if (
-                        total_width <= box_width * 0.9
-                        and max_text_height <= box_height * 0.82
+                        total_width <= box_width * 0.95
+                        and max_text_height <= allowed_text_height
                     ):
                         break
 
                 current_x = x1 + (box_width - total_width) // 2
-                text_y = y1 + (box_height - max_text_height) // 2
+                line_y_c = line_y_centres.get(line_key, y1 + box_height / 2)
+                if all(_ocr_viz_is_punctuation_only_token(wt) for wt in word_texts):
+                    ref_y = _ocr_viz_overlay_vertical_ref_y(
+                        y1, y2, "".join(word_texts), line_y_c
+                    )
+                else:
+                    ref_y = float(line_y_c)
                 for i, (wtext, text_color) in enumerate(zip(word_texts, word_colors)):
+                    draw_x, draw_y = _ocr_viz_draw_position_from_left_edge(
+                        wtext, pil_font, float(current_x), ref_y, width, height, y1, y2
+                    )
                     draw_pil.text(
-                        (int(current_x), text_y),
+                        (draw_x, draw_y),
                         wtext,
                         font=pil_font,
                         fill=_ocr_viz_bgr_to_rgb(text_color),
@@ -11621,124 +12009,94 @@ def add_confidence_legend(
     # Calculate legend height based on number of items
     num_items = len(confidence_ranges)
     if show_model_replacement:
-        num_items += 1  # Add one more for model replacement entry
+        num_items += 1
 
-    # Legend parameters
-    legend_width = 200
-    legend_height = 70 + (num_items * 25)  # Dynamic height based on number of items
-    legend_x = width - legend_width - 20
-    legend_y = 20
+    # Scale the entire legend to ~13% of image width so it never dominates.
+    legend_width = max(90, min(200, int(width * 0.13)))
+    scale = legend_width / 200.0  # proportional to original 200px baseline
 
-    # Draw legend background
-    # Draw a translucent (semi-transparent) white rectangle for the legend background
+    font_scale_title = max(0.28, round(0.55 * scale, 2))
+    font_scale_label = max(0.22, round(0.45 * scale, 2))
+    item_spacing = max(12, int(22 * scale))
+    box_size = max(7, int(13 * scale))
+    margin = max(4, int(8 * scale))
+
+    (_, title_h), _ = cv2.getTextSize(
+        "Confidence Levels", cv2.FONT_HERSHEY_SIMPLEX, font_scale_title, 1
+    )
+    legend_height = title_h + margin * 3 + num_items * item_spacing + margin
+
+    outer_pad = max(4, int(14 * scale))
+    legend_x = width - legend_width - outer_pad
+    legend_y = outer_pad
+
+    # Translucent white background
     overlay = image_cv.copy()
     cv2.rectangle(
         overlay,
         (legend_x, legend_y),
         (legend_x + legend_width, legend_y + legend_height),
-        (255, 255, 255),  # White background
+        (255, 255, 255),
         -1,
     )
-    alpha = 0.5  # Opacity: 1.0 = opaque, 0.0 = fully transparent
-    cv2.addWeighted(overlay, alpha, image_cv, 1 - alpha, 0, image_cv)
-    # cv2.rectangle(
-    #     image_cv,
-    #     (legend_x, legend_y),
-    #     (legend_x + legend_width, legend_y + legend_height),
-    #     (0, 0, 0),  # Black border
-    #     2,
-    # )
+    cv2.addWeighted(overlay, 0.5, image_cv, 0.5, 0, image_cv)
 
-    # Add title
+    # Title
     title_text = "Confidence Levels"
-    font_scale = 0.6
-    font_thickness = 1
-    (title_width, title_height), _ = cv2.getTextSize(
-        title_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness
+    (title_w, title_h), _ = cv2.getTextSize(
+        title_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale_title, 1
     )
-    title_x = legend_x + (legend_width - title_width) // 2
-    title_y = legend_y + title_height + 10
+    title_x = legend_x + max(0, (legend_width - title_w) // 2)
+    title_y = legend_y + title_h + margin
     cv2.putText(
         image_cv,
         title_text,
         (title_x, title_y),
         cv2.FONT_HERSHEY_SIMPLEX,
-        font_scale,
-        (0, 0, 0),  # Black text
-        font_thickness,
+        font_scale_title,
+        (0, 0, 0),
+        1,
     )
 
-    # Add confidence range items
-    item_spacing = 25
-    start_y = title_y + 25
+    start_y = title_y + item_spacing
     item_index = 0
 
-    # Add model replacement entry first if enabled
+    def _draw_legend_item(img, lx, iy, bsz, col, lbl, lbl_scale, mgn):
+        bx = lx + mgn
+        by = iy - bsz
+        cv2.rectangle(img, (bx, by), (bx + bsz, by + bsz), col, -1)
+        cv2.rectangle(img, (bx, by), (bx + bsz, by + bsz), (0, 0, 0), 1)
+        cv2.putText(
+            img,
+            lbl,
+            (bx + bsz + mgn, iy - max(1, mgn // 3)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            lbl_scale,
+            (0, 0, 0),
+            1,
+        )
+
     if show_model_replacement:
-        item_y = start_y + item_index * item_spacing
+        _draw_legend_item(
+            image_cv,
+            legend_x,
+            start_y + item_index * item_spacing,
+            box_size,
+            (128, 128, 128),
+            "Model Replacement",
+            font_scale_label,
+            margin,
+        )
         item_index += 1
 
-        # Draw grey color box
-        box_size = 15
-        box_x = legend_x + 10
-        box_y = item_y - box_size
-        replacement_color = (128, 128, 128)  # Grey in BGR
-        cv2.rectangle(
-            image_cv,
-            (box_x, box_y),
-            (box_x + box_size, box_y + box_size),
-            replacement_color,
-            -1,
-        )
-        cv2.rectangle(
-            image_cv,
-            (box_x, box_y),
-            (box_x + box_size, box_y + box_size),
-            (0, 0, 0),  # Black border
-            1,
-        )
-
-        # Add label text
-        label_x = box_x + box_size + 10
-        label_y = item_y - 5
-        cv2.putText(
-            image_cv,
-            "Model Replacement",
-            (label_x, label_y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (0, 0, 0),  # Black text
-            1,
-        )
-
-    # Add confidence range items
     for i, (min_conf, max_conf, color, label) in enumerate(confidence_ranges):
-        item_y = start_y + (item_index + i) * item_spacing
-
-        # Draw color box
-        box_size = 15
-        box_x = legend_x + 10
-        box_y = item_y - box_size
-        cv2.rectangle(
-            image_cv, (box_x, box_y), (box_x + box_size, box_y + box_size), color, -1
-        )
-        cv2.rectangle(
+        _draw_legend_item(
             image_cv,
-            (box_x, box_y),
-            (box_x + box_size, box_y + box_size),
-            (0, 0, 0),  # Black border
-            1,
-        )
-
-        # Add label text
-        label_x = box_x + box_size + 10
-        label_y = item_y - 5
-        cv2.putText(
-            image_cv,
+            legend_x,
+            start_y + (item_index + i) * item_spacing,
+            box_size,
+            color,
             label,
-            (label_x, label_y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (0, 0, 0),  # Black text
-            1,
+            font_scale_label,
+            margin,
         )

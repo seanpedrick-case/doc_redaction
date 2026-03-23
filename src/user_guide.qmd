@@ -149,7 +149,11 @@ Underneath you will see **'Terms to always include or exclude in redactions, and
 
 To add items to the allow list, deny list, or fully redacted pages list, you can do so by typing the item into the box and pressing enter. You can also remove items by clicking the **'x'** next to the item, or pressing the backspace key when the box is selected.
 
-You can add or remove terms directly in these controls. To load many terms from a file (e.g. a CSV), use the **Settings** tab; see [Custom allow, deny, and page redaction lists](#custom-allow-deny-and-page-redaction-lists).
+![Allow, deny, and whole page redaction dropdowns](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/allow_deny_full_page_dropdowns.PNG)
+
+You can add or remove terms directly in these controls. To load many terms from a file (e.g. a CSV), use the file upload areas at the top of the **Settings** tab. If you upload a csv into one of these boxes containing a single column of terms, the terms will be loaded into the allow list, deny list on the Redact PDFs/images tab. Similarly, if you upload a csv into the 'Fully redact these pages' box containing a single column of page numbers, the pages will be fully redacted on the next redaction run, and the relevant box on the Redact PDFs/images tab will be filled with the page numbers.
+
+![Allow, deny, and whole page redaction file upload](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/allow_list/allow_deny_full_page_list.PNG)
 
 ### Cost and time estimation
 
@@ -222,7 +226,7 @@ In the second input file box to the right (2.), you can upload a '..._ocr_result
 
 Now you can review and modify the suggested redactions using the interface described below.
 
-![Search extracted text](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/search_extracted_text.PNG)
+![Uploading documents for review](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/upload_documents_review.PNG)
 
 ### Page navigation
 
@@ -624,7 +628,11 @@ On the Settings tab you may see a section called 'Advanced OCR settings'. Here y
 
 When checked, redaction tasks will first check all pages for text that can be extracted simply without needing to analyse with the OCR model. If there are more words on the page than the value shown in 'Minimum words for efficient OCR', the app will follow this simple extraction process, and only run the more expensive OCR process for the remaining pages.
 
-The downside with this approach is that on pages with mixed text/images, the analysis will miss any text contained within the images. It is also not possible when you want to detect signatures or faces on your documents. To disable this feature, simply uncheck the 'Efficient OCR' checkbox and run your redaction task.
+This field 'Min. page-area fraction for an embedded image to force OCR' is shown when Efficient OCR is enabled. It sets the smallest fraction of the page area (on the PDF page) that a **single** embedded image must cover—on one placement on the page—for that page to be sent through the full OCR step **even if** the page already has enough extractable words for the text-only path. That way, pages with plenty of selectable text but a large image (for example a photo or embedded scan) can still be analysed by OCR, which can pick up text that exists only inside the image and is not separate selectable text.
+
+Values are typically small decimals (for example `0.02` for 2% of the page area). Enter **0** to turn off this rule: routing then depends only on the minimum word count (the label in the app notes this as “word count only”). 
+
+**Other limitations.** Even when Efficient OCR is on, pages that stay on the text-only path can still miss text that appears only inside embedded images if no image on that page meets the area fraction above (or the fraction is set to 0). Efficient OCR is also unsuitable when you need signature or face detection on every page (it will be automatically disabled for signature analysis). To disable Efficient OCR entirely, uncheck the 'Efficient OCR' checkbox and run your redaction task.
 
 ### Overwrite existing OCR results
 

@@ -1,51 +1,54 @@
 # --- Core and data packages ---
 numpy<=2.4.2
-pandas==2.3.3
-bleach==6.3.0
-polars==1.38.1
-pyarrow==21.0.0
-openpyxl==3.1.5
-boto3==1.42.61
-python-dotenv==1.0.1
-defusedxml==0.7.1
-Faker==40.8.0
-python-levenshtein==0.27.3
-rapidfuzz==3.14.3
-markdown>=3.7
-tabulate>=0.9.0
+pandas<=2.3.3
+bleach<=6.3.0
+polars<=1.38.1
+pyarrow<=21.0.0
+openpyxl<=3.1.5
+boto3<=1.42.61
+python-dotenv<=1.0.1
+defusedxml<=0.7.1
+Faker<=40.8.0
+python-levenshtein<=0.27.3
+rapidfuzz<=3.14.3
+markdown<=3.7
+tabulate<=0.9.0
 
 # --- Machine learning / NLP ---
 scikit-learn<=1.8.0
-spacy==3.8.11
-spaczz==0.6.1
+spacy<=3.8.11
+spaczz<=0.6.1
 en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0.tar.gz
 
 # --- PDF / OCR / Redaction tools ---
-pdfminer.six==20260107
-pdf2image==1.17.0
-pymupdf==1.27.1
+pdfminer.six<=20260107
+pdf2image<=1.17.0
+pymupdf<=1.27.1
 #pdfplumber==0.11.9
-pikepdf==10.3.0
-opencv-python==4.13.0.92
-presidio_analyzer==2.2.361
-presidio_anonymizer==2.2.361
-presidio-image-redactor==0.0.57
+pikepdf<=10.3.0
+opencv-python<=4.13.0.92
+presidio_analyzer<=2.2.361
+presidio_anonymizer<=2.2.361
+presidio-image-redactor<=0.0.57
 
 # --- Gradio and apps ---
 gradio<=6.9.0
 https://github.com/seanpedrick-case/gradio_image_annotator/releases/download/v0.5.3/gradio_image_annotation-0.5.3-py3-none-any.whl  # Custom annotator version with rotation, zoom, labels, and box IDs
-spaces==0.47.0
+spaces<=0.47.0
 
 # --- AWS Lambda runtime ---
-awslambdaric==3.1.1
+awslambdaric<=3.1.1
 
 # --- Document generation ---
-python-docx==1.2.0
+python-docx<=1.2.0
 
 # --- Testing ---
-pytest>=7.0.0
-pytest-cov>=4.0.0
+pytest<=7.0.0
+pytest-cov<=4.0.0
 
 # --- LLM libraries ---
-google-genai>=1.66.0
-openai>=2.25.0
+# Explicit protobuf: PaddlePaddle imports google.protobuf; layered `pip --target` installs
+# plus google-* packages can leave the google namespace incomplete without it.
+protobuf<=7.34.0
+google-genai<=1.66.0
+openai<=2.25.0

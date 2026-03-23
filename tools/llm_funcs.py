@@ -72,6 +72,7 @@ from tools.config import (
     COMPILE_MODE,
     COMPILE_TRANSFORMERS,
     HF_TOKEN,
+    INFERENCE_SERVER_DISABLE_THINKING,
     INT8_WITH_OFFLOAD_TO_CPU,
     LLM_CONTEXT_LENGTH,
     LLM_MAX_NEW_TOKENS,
@@ -102,6 +103,45 @@ from tools.config import (
     VLM_DISABLE_QWEN3_5_THINKING,
     VLM_QWEN3_5_NOTHINK_SUFFIX,
 )
+
+
+def _stringify_openai_message_content(content) -> str:
+    """Normalize message.content from OpenAI-compatible APIs (str, null, or list of parts)."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for p in content:
+            if isinstance(p, dict):
+                t = p.get("text")
+                if t is None and p.get("type") == "text":
+                    t = p.get("text", "")
+                if isinstance(t, str):
+                    parts.append(t)
+            elif isinstance(p, str):
+                parts.append(p)
+        return "".join(parts)
+    return str(content)
+
+
+def _extract_choice_message_text(choice: dict) -> str:
+    """Extract assistant text from a chat-completions choice (handles reasoning-only / multimodal)."""
+    if not isinstance(choice, dict):
+        return ""
+    msg = choice.get("message") or {}
+    text = _stringify_openai_message_content(msg.get("content"))
+    if text and str(text).strip():
+        return text
+    for alt_key in ("reasoning_content", "reasoning"):
+        alt = msg.get(alt_key)
+        if isinstance(alt, str) and alt.strip():
+            return alt
+    legacy = choice.get("text")
+    if isinstance(legacy, str) and legacy.strip():
+        return legacy
+    return text or ""
 
 
 def _report_llm_output_to_gui(text: str) -> None:
@@ -1424,7 +1464,9 @@ def send_request(
     elif "choices" in response:  # LLama.cpp model response or inference-server response
         # Check for GPT-OSS thinking models (case-insensitive, handle both hyphen and underscore)
         if "gpt-oss" in model_choice.lower() or "gpt_oss" in model_choice.lower():
-            content = response["choices"][0]["message"]["content"]
+            content = _stringify_openai_message_content(
+                response["choices"][0]["message"].get("content")
+            )
             # Split on the final channel marker to extract only the final output (not thinking tokens)
             parts = content.split("<|start|>assistant<|channel|>final<|message|>")
             if len(parts) > 1:
@@ -1446,7 +1488,7 @@ def send_request(
                 )
                 response_text = content
         else:
-            response_text = response["choices"][0]["message"]["content"]
+            response_text = _extract_choice_message_text(response["choices"][0])
     elif model_source == "Gemini":
         response_text = response.text
     else:  # Assume transformers model response
@@ -1466,6 +1508,7 @@ def send_request(
             response_text = response
 
     # Strip <|end|> tags (used by GPT-OSS thinking models to mark end of thinking)
+    response_text = response_text or ""
     response_text = re.sub(r"<\|end\|>", "", response_text)
 
     # Replace multiple spaces with single space
@@ -1700,9 +1743,13 @@ def call_inference_server_api(
         "stream": stream,
         "stop": LLM_STOP_STRINGS if LLM_STOP_STRINGS else [],
     }
-    # Add model name if specified and use llama-swap
-    if model_name and use_llama_swap:
+    # Include model in payload when set (vLLM/OpenAI-compatible servers; llama-swap or not).
+    if model_name:
         payload["model"] = model_name
+
+    # Match VLM path: Qwen3 / Qwen3.5 on vLLM may stream only "thinking" unless disabled.
+    if INFERENCE_SERVER_DISABLE_THINKING:
+        payload["chat_template_kwargs"] = {"enable_thinking": False}
 
     # Determine the endpoint based on streaming preference
     if stream:
@@ -1739,7 +1786,17 @@ def call_inference_server_api(
                             chunk = json.loads(data)
                             if "choices" in chunk and len(chunk["choices"]) > 0:
                                 delta = chunk["choices"][0].get("delta", {})
-                                token = delta.get("content", "")
+                                token = delta.get("content")
+                                token = _stringify_openai_message_content(token)
+                                if not token:
+                                    for alt in (
+                                        "reasoning_content",
+                                        "reasoning",
+                                    ):
+                                        t = delta.get(alt)
+                                        if isinstance(t, str) and t:
+                                            token = t
+                                            break
                                 if token:
                                     print(token, end="", flush=True)
                                     final_tokens.append(token)

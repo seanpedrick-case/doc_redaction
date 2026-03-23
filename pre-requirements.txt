@@ -1,4 +1,5 @@
-# --- PaddleOCR (CPU, for torch compatibility) ---
+# --- PaddleOCR (CPU version installed here, for torch compatibility on HF spaces) ---
+# If you do want to install the GPU version elsewhere, e.g. in your local environment, you can uncomment the following line and install the GPU version from the following link: https://www.paddlepaddle.org.cn/packages/stable/cu129/
 #--extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu129/
 #paddlepaddle-gpu>=3.0.0,<=3.2.1
 paddlepaddle>=3.0.0,<=3.2.1
