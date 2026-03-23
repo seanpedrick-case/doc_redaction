@@ -32,6 +32,7 @@ from tools.config import (
     VLM_DEFAULT_MIN_P,
     VLM_DEFAULT_PRESENCE_PENALTY,
     VLM_DEFAULT_REPETITION_PENALTY,
+    VLM_DEFAULT_STREAM,
     VLM_DEFAULT_TEMPERATURE,
     VLM_DEFAULT_TOP_K,
     VLM_DEFAULT_TOP_P,
@@ -1028,7 +1029,11 @@ def extract_text_from_image_vlm(
 ):
     """
     Generates responses using the configured vision model for image input.
-    Streams text to console and returns complete text only at the end.
+
+    When ``VLM_DEFAULT_STREAM`` is True (default), streams text to the console and
+    returns the full string when generation finishes. When ``VLM_DEFAULT_STREAM``
+    is False, runs a single batched ``generate`` call (no console streaming) and
+    returns the same ``(text, input_tokens, output_tokens)`` tuple.
 
     Uses model-specific defaults if they were set during model initialization,
     falling back to function argument defaults if provided, and finally to sensible
@@ -1219,9 +1224,7 @@ def extract_text_from_image_vlm(
         max_length=MAX_INPUT_TOKEN_LENGTH,
     ).to(device)
 
-    streamer = TextIteratorStreamer(
-        processor, skip_prompt=True, skip_special_tokens=True
-    )
+    use_stream = VLM_DEFAULT_STREAM if VLM_DEFAULT_STREAM is not None else True
 
     # Set random seed if specified
     if actual_seed is not None:
@@ -1232,7 +1235,6 @@ def extract_text_from_image_vlm(
     # Build generation kwargs with resolved parameters
     generation_kwargs = {
         **inputs,
-        "streamer": streamer,
         "max_new_tokens": actual_max_new_tokens,
         "do_sample": actual_do_sample,
         "temperature": actual_temperature,
@@ -1246,35 +1248,51 @@ def extract_text_from_image_vlm(
     # Only Qwen3-VL models currently support presence_penalty
     if actual_presence_penalty is not None and model_supports_presence_penalty:
         generation_kwargs["presence_penalty"] = actual_presence_penalty
+
     start_time = time.time()
-    thread = Thread(target=model.generate, kwargs=generation_kwargs)
-    thread.start()
-
     buffer = ""
-    line_buffer = ""  # Accumulate text for the current line
-    for new_text in streamer:
-        buffer += new_text
+
+    if use_stream:
+        streamer = TextIteratorStreamer(
+            processor, skip_prompt=True, skip_special_tokens=True
+        )
+        generation_kwargs["streamer"] = streamer
+        thread = Thread(target=model.generate, kwargs=generation_kwargs)
+        thread.start()
+
+        line_buffer = ""  # Accumulate text for the current line
+        for new_text in streamer:
+            buffer += new_text
+            buffer = buffer.replace("<|im_end|>", "")
+            line_buffer += new_text
+
+            # Print to console as it streams
+            print(new_text, end="", flush=True)
+
+            # If we hit a newline, report the entire accumulated line to GUI
+            if REPORT_VLM_OUTPUTS_TO_GUI and "\n" in new_text:
+                # Split by newline to handle the line(s) we just completed
+                parts = line_buffer.split("\n")
+                # Report all complete lines (everything except the last part which may be incomplete)
+                for line in parts[:-1]:
+                    if line.strip():  # Only report non-empty lines
+                        gr.Info(line, duration=2)
+                # Keep the last part (after the last newline) for the next line
+                line_buffer = parts[-1] if parts else ""
+
+        # Print final newline after streaming is complete
+        print()  # Add newline at the end
+    else:
+        with torch.inference_mode():
+            output_ids = model.generate(**generation_kwargs)
+        prompt_len = inputs["input_ids"].shape[1]
+        new_token_ids = output_ids[:, prompt_len:]
+        buffer = processor.batch_decode(new_token_ids, skip_special_tokens=True)[0]
         buffer = buffer.replace("<|im_end|>", "")
-        line_buffer += new_text
-
-        # Print to console as it streams
-        print(new_text, end="", flush=True)
-
-        # If we hit a newline, report the entire accumulated line to GUI
-        if REPORT_VLM_OUTPUTS_TO_GUI and "\n" in new_text:
-            # Split by newline to handle the line(s) we just completed
-            parts = line_buffer.split("\n")
-            # Report all complete lines (everything except the last part which may be incomplete)
-            for line in parts[:-1]:
-                if line.strip():  # Only report non-empty lines
+        if REPORT_VLM_OUTPUTS_TO_GUI and buffer.strip():
+            for line in buffer.split("\n"):
+                if line.strip():
                     gr.Info(line, duration=2)
-            # Keep the last part (after the last newline) for the next line
-            line_buffer = parts[-1] if parts else ""
-
-        # time.sleep(0.01)
-
-    # Print final newline after streaming is complete
-    print()  # Add newline at the end
 
     end_time = time.time()
 
@@ -1334,7 +1352,7 @@ if ADD_VLM_BOUNDING_BOX_RULES:
         )
         or ("qwen" in str(CLOUD_VLM_MODEL_CHOICE).lower() and SHOW_BEDROCK_VLM_MODELS)
     ):
-        additional_bounding_box_rules = """- Bounding boxes should fit within the coordinate extents of the image: 0, 0 is the top left corner of the image, and 999, 999 is the bottom right corner of the image"""
+        additional_bounding_box_rules = """\\n- Bounding boxes should fit within the coordinate extents of the image: 0, 0 is the top left corner of the image, and 999, 999 is the bottom right corner of the image"""
     else:
         additional_bounding_box_rules = ""
 else:
@@ -1348,9 +1366,9 @@ Rules:
 - Each line must be on a separate horizontal row in the image
 - Even if a sentence is split over multiple horizontal lines, it should be split into separate entries (one per line)
 - If text spans multiple horizontal lines, split it into separate entries (one per line)
+- The text should not contain any formatting tags unless they are explicitly written in the text (e.g. the text is html or markdown)
 - Do NOT combine lines that appear on different horizontal rows
-- Each bounding box should tightly fit around a single horizontal line of text
-{additional_bounding_box_rules}
+- Each bounding box should tightly fit around a single horizontal line of text{additional_bounding_box_rules}
 - Empty lines should be skipped
 - 'conf' should be a confidence score from 0-1
 
@@ -1364,8 +1382,7 @@ Rules:
 - The image of the face must be a photo, not a drawing or sketch
 - Do NOT combine multiple photos into a single entry
 - Each photo of a person's face that appears in the image should be a separate entry
-- Bounding boxes around the identified person's face should completely cover the person's face
-{additional_bounding_box_rules}
+- Bounding boxes around the identified person's face should completely cover the person's face{additional_bounding_box_rules}
 - 'text' should always be exactly '[PERSON]'
 - 'conf' should be a confidence score from 0-1
 - Do NOT include any other text or information in the JSON
@@ -1379,8 +1396,7 @@ Rules:
 - Each signature must be a separate entry
 - Do NOT combine multiple signatures into a single entry
 - Each signature that appears in the image should be a separate entry
-- Bounding boxes around the identified signature should completely cover the signature
-{additional_bounding_box_rules}
+- Bounding boxes around the identified signature should completely cover the signature{additional_bounding_box_rules}
 - 'text' should always be exactly '[SIGNATURE]'
 - 'conf' should be a confidence score from 0-1
 - Do NOT include any other text or information in the JSON.
@@ -1395,8 +1411,7 @@ IMPORTANT: Extract each word in the image separately. Do NOT combine words into 
 
 Rules:
 - Each entry should correspond to a single distinct word (not groups of words, not whole lines)
-- For each word, provide a tight bounding box [x1, y1, x2, y2] around just that word
-{additional_bounding_box_rules}
+- For each word, provide a tight bounding box [x1, y1, x2, y2] around just that word{additional_bounding_box_rules}
 - Do not merge words. Do not split words into letters. Only return one entry per word
 - Maintain the order of words as they appear spatially from top to bottom, left to right
 - Skip any empty or whitespace-only entries

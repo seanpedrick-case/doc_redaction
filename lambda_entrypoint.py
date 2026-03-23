@@ -24,6 +24,7 @@ from tools.config import (
     DEFAULT_PAGE_MAX,
     DEFAULT_PAGE_MIN,
     EFFICIENT_OCR,
+    EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION,
     EFFICIENT_OCR_MIN_WORDS,
     GEMINI_API_KEY,
     HYBRID_TEXTRACT_BEDROCK_VLM,
@@ -496,6 +497,15 @@ def lambda_handler(event, context):
             arguments.get(
                 "efficient_ocr_min_words",
                 os.getenv("EFFICIENT_OCR_MIN_WORDS", str(EFFICIENT_OCR_MIN_WORDS)),
+            )
+        ),
+        "efficient_ocr_min_image_coverage_fraction": float(
+            arguments.get(
+                "efficient_ocr_min_image_coverage_fraction",
+                os.getenv(
+                    "EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION",
+                    str(EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION),
+                ),
             )
         ),
         "hybrid_textract_bedrock_vlm": convert_string_to_boolean(

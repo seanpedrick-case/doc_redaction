@@ -274,20 +274,20 @@ def load_in_default_cost_codes(cost_codes_path: str, default_cost_code: str = ""
 
 
 def enforce_cost_codes(
-    enforce_cost_code_textbox: str,
+    enforce_cost_code_bool: bool,
     cost_code_choice: str,
     cost_code_df: pd.DataFrame,
     verify_cost_codes: bool = True,
 ):
     """
-    Check if the enforce cost codes variable is set to true, and then check that a cost cost has been chosen. If not, raise an error. Then, check against the values in the cost code dataframe to ensure that the cost code exists.
+    Check if the enforce cost codes variable is set to True, and then check that a cost cost has been chosen. If not, raise an error. Then, check against the values in the cost code dataframe to ensure that the cost code exists.
     """
 
-    if enforce_cost_code_textbox == "True":
+    if enforce_cost_code_bool:
         if not cost_code_choice:
             raise Exception("Please choose a cost code before continuing")
 
-        if verify_cost_codes is True:
+        if verify_cost_codes:
             if cost_code_df.empty:
                 raise Exception("No cost codes present in dataframe for verification")
             else:
@@ -295,7 +295,7 @@ def enforce_cost_codes(
 
                 if cost_code_choice not in valid_cost_codes_list:
                     raise Exception(
-                        "Selected cost code not found in list. Please contact Finance if you cannot find the correct cost code from the given list of suggestions."
+                        "Selected cost code not found in list. Please contact your system administrator if you cannot find the correct cost code from the given list of suggestions."
                     )
     return
 
@@ -1863,7 +1863,7 @@ def show_info_box_on_click_ocr_examples(
     )
     main_llm_instructions_update = gr.update(
         value=custom_llm_instructions_textbox,
-        visible=is_llm_method,
+        visible=True,
     )
 
     return (

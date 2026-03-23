@@ -1,0 +1,156 @@
+# Pick which vLLM stack runs via COMPOSE_PROFILES (or --profile). Set VLLM_OPENAI_MODEL in .env
+# to match the served model (required for 27b; 9b defaults below if omitted):
+#   COMPOSE_PROFILES=vllm-9b   -> QuantTrio/Qwen3.5-9B-AWQ (default VLLM_OPENAI_MODEL)
+#   COMPOSE_PROFILES=vllm-27b  -> set VLLM_OPENAI_MODEL=QuantTrio/Qwen3.5-27B-AWQ
+# App uses http://vllm-inference:8000 (shared network alias on both vLLM services).
+# Example CLI commands:
+# docker compose -f docker-compose_vllm.yml --profile vllm-9b up -d
+# docker compose -f docker-compose_vllm.yml --profile vllm-27b up -d
+services:
+  vllm-server-qwen35-9b:
+    profiles: ["vllm-9b"]
+    image: vllm/vllm-openai:latest
+    shm_size: '8gb'
+    command: |
+      --model QuantTrio/Qwen3.5-9B-AWQ
+      --gpu-memory-utilization 0.7
+      --tensor-parallel-size 1
+      --max-num-seqs 1
+      --reasoning-parser qwen3
+      --max-model-len 32768
+      --speculative-config '{"method":"mtp","num_speculative_tokens":3}'
+      --max-num-batched-tokens 2048
+    
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/v1/models >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 8
+      start_period: 1200s
+    ports:
+      - "8000:8000"
+    volumes:
+      - hf-model-cache:/root/.cache/huggingface
+    networks:
+      redaction-net-vllm:
+        aliases:
+          - vllm-inference
+
+  vllm-server-qwen35-27b:
+    profiles: ["vllm-27b"]
+    image: vllm/vllm-openai:latest
+    shm_size: '16gb'
+    command: |
+      --model QuantTrio/Qwen3.5-27B-AWQ
+      --gpu-memory-utilization 0.94
+      --tensor-parallel-size 1
+      --max-num-seqs 2
+      --reasoning-parser qwen3
+      --max-model-len 16384  
+      --max-num-batched-tokens 4096
+      --enforce-eager
+      --kv-cache-dtype fp8
+      --enable-chunked-prefill
+      --enable-prefix-caching
+    
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/v1/models >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 8
+      start_period: 1200s
+    ports:
+      - "8001:8000"
+    volumes:
+      - hf-model-cache:/root/.cache/huggingface
+    networks:
+      redaction-net-vllm:
+        aliases:
+          - vllm-inference
+
+  redaction-app-vllm:
+    profiles: ["vllm-9b", "vllm-27b"]
+    image: redaction-app-main
+    build:
+      context: .              # Look in the current folder
+      dockerfile: Dockerfile  # Use this file
+      target: gradio          # Use the 'gradio' stage from your Dockerfile
+      args:                   # Pass your build-time variables here!
+        - TORCH_GPU_ENABLED=False
+        - INSTALL_VLM=False
+        - PADDLE_GPU_ENABLED=True
+        - INSTALL_PADDLEOCR=True
+    shm_size: '8gb'
+    depends_on:
+      vllm-server-qwen35-9b:
+        condition: service_healthy
+        required: false
+      vllm-server-qwen35-27b:
+        condition: service_healthy
+        required: false
+    environment:
+      - FLAGS_fraction_of_gpu_memory_to_use=0.05
+      - RUN_FASTAPI=True
+      - APP_MODE=fastapi
+      - SHOW_PADDLE_MODEL_OPTIONS=True
+      - CHOSEN_LOCAL_OCR_MODEL=paddle
+      - SHOW_LOCAL_OCR_MODEL_OPTIONS=True
+      - SHOW_INFERENCE_SERVER_PII_OPTIONS=True
+      - SHOW_INFERENCE_SERVER_VLM_OPTIONS=True
+      - SHOW_HYBRID_MODELS=True
+      - SHOW_DIFFICULT_OCR_EXAMPLES=True
+      - MAX_WORKERS=12
+      - TESSERACT_MAX_WORKERS=8
+      - PADDLE_MAX_WORKERS=1
+      - CUSTOM_VLM_BACKEND=inference_vlm
+      - LOAD_PADDLE_AT_STARTUP=False
+      - INFERENCE_SERVER_API_URL=http://vllm-inference:8000
+      - DEFAULT_INFERENCE_SERVER_VLM_MODEL="" # ${VLLM_OPENAI_MODEL:-QuantTrio/Qwen3.5-9B-AWQ}
+      - DEFAULT_INFERENCE_SERVER_PII_MODEL="" # ${VLLM_OPENAI_MODEL:-QuantTrio/Qwen3.5-9B-AWQ}
+      - EFFICIENT_OCR=True
+      - SHOW_CUSTOM_VLM_ENTITIES=True
+      - SESSION_OUTPUT_FOLDER=True
+      - SAVE_PAGE_OCR_VISUALISATIONS=True
+      - SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER=True
+      - SHOW_SUMMARISATION=True
+      - HYBRID_OCR_CONFIDENCE_THRESHOLD=97
+      - INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES=True
+      - PREPROCESS_LOCAL_OCR_IMAGES=False
+      - INFERENCE_SERVER_DISABLE_THINKING=True
+      - HYBRID_OCR_MAX_NEW_TOKENS=1024
+      - VLM_MAX_IMAGE_SIZE=1152000
+      - VLM_MAX_DPI=400.0
+
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    ports:
+      - "7860:7860"
+    networks:
+      - redaction-net-vllm
+
+networks:
+  redaction-net-vllm:
+    driver: bridge
+
+volumes:
+  hf-model-cache:

@@ -343,6 +343,10 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Description:** Minimum number of extractable words on a page to use the text-only route when `EFFICIENT_OCR` is enabled; below this threshold the page uses OCR.
     * **Default Value:** `20`
 
+* **`EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION`**
+    * **Description:** When `EFFICIENT_OCR` is enabled, minimum fraction of the page area (MediaBox) that a single embedded image must cover to route that page through OCR (`redact_image_pdf`) in addition to the word-count rule. This catches pages with plenty of selectable text but meaningful raster content (e.g. photos) where text may appear only inside the image. Set to `0` to disable image-based routing and rely on word count only.
+    * **Default Value:** `0.03` (3% of page area)
+
 * **`MAX_WORKERS`**
     * **Description:** Default maximum number of worker threads for parallel processing across the app. Used as the default or cap for thread pools in review (saving redacted pages, loading page images), file conversion (PDF-to-images, input file listing, annotation processing), file redaction (text extraction, merge/summary, pikepdf annotations), custom image analyser (mapping analyzer results to bounding boxes), and data anonymisation (initial column cleaning). When not set, `OCR_FIRST_PASS_MAX_WORKERS` and `SUMMARY_PAGE_GROUP_MAX_WORKERS` default to this value; set those explicitly to override for OCR or summarisation only.
     * **Default Value:** `8`
@@ -707,8 +711,16 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
     * **Description:** Maximum effective DPI after preparation. High-DPI scans are downscaled so effective DPI (see `VLM_MIN_DPI`) does not exceed this value, subject to `VLM_MAX_IMAGE_SIZE` (and hybrid/full-page min pixel settings).
     * **Default Value:** `300.0`
 
+* **`VLM_MAX_ASPECT_RATIO`**
+    * **Description:** Upper bound on image aspect ratio **after** white-padding for every VLM path in `custom_image_analyser_engine`: local transformers (`extract_text_from_image_vlm`), inference-server (`_call_inference_server_vlm_api`), AWS Bedrock (`_call_bedrock_vlm_api`), Gemini, and Azure/OpenAI. The code pads very long/thin crops (typical hybrid line regions) so `max(width/height, height/width)` does not exceed this value. Lower values are stricter (more padding, smaller embedded text relative to canvas); higher values send nearer-native crops but may hit provider limits. Values below `1.0` are clamped to `1.0`. For Bedrock, if the image is still above the AWS Converse vision limit (20:1) after this step, a second stricter pad is applied automatically.
+    * **Default Value:** `10.0`
+
 * **`VLM_DISABLE_QWEN3_5_THINKING`**
-    * **Description:** If set to `"True"`, disables Qwen3.5 "thinking" mode for VLM OCR.
+    * **Description:** If set to `"True"`, disables Qwen3.5 "thinking" mode for **local transformers** VLM calls. Implemented by appending `<think></think>` to the generation prompt after `apply_chat_template`, so the model skips its reasoning chain and outputs the answer directly.
+    * **Default Value:** `"False"`
+
+* **`INFERENCE_SERVER_DISABLE_THINKING`**
+    * **Description:** If set to `"True"`, disables thinking for **inference-server** VLM calls (the server-side equivalent of `VLM_DISABLE_QWEN3_5_THINKING`). Adds `chat_template_kwargs: {"enable_thinking": false}` to every request payload; vLLM applies the Qwen3/Qwen3.5 chat template server-side and honours this flag to suppress `<think>...</think>` generation entirely. Useful when the inference server is running a Qwen3.5 reasoning model and thinking tokens are unnecessary (e.g. for simple line-crop OCR in `hybrid-paddle-inference-server` mode). Eliminates thinking overhead and removes the need to raise `HYBRID_OCR_MAX_NEW_TOKENS` to accommodate the reasoning budget.
     * **Default Value:** `"False"`
 
 * **`MAX_NEW_TOKENS`**
@@ -736,8 +748,12 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
     * **Default Value:** `"False"`
 
 * **`HYBRID_OCR_MAX_NEW_TOKENS`**
-    * **Description:** Maximum number of tokens to generate for hybrid OCR operations.
-    * **Default Value:** `30`
+    * **Description:** Maximum number of tokens the inference server (or local VLM) may generate per hybrid line-crop OCR call. This is the generation budget passed directly to the model via `max_tokens`. For reasoning models such as Qwen3.5, thinking tokens (`<think>...</think>`) count against this budget before any answer is produced, so the value must be large enough to cover both the reasoning chain and the short JSON answer. Setting this too low (e.g. `50`) causes the model to exhaust the budget during thinking and return empty results for every line. Increase to `2048` or higher if you observe "Inference server returned no results" log lines when using `hybrid-paddle-inference-server` with a reasoning model.
+    * **Default Value:** `1024`
+
+* **`HYBRID_OCR_MAX_WORDS`**
+    * **Description:** Maximum number of words allowed in a hybrid OCR result for a single text line. Results whose word count exceeds this threshold are discarded as likely hallucinations or runaway model output, and the original OCR result (e.g. from Paddle) is kept instead. This is a separate sanity check from `HYBRID_OCR_MAX_NEW_TOKENS` — it operates on the parsed response text, not on the token budget. A single line of text rarely contains more than ~50 words, so the default is conservative.
+    * **Default Value:** `50`
 
 * **`VLM_OCR_INTRO_TEXT`**
     * **Description:** UI intro text when the local OCR option **vlm** (full-page vision-language OCR) is shown. Customise for your deployment.

@@ -47,5 +47,8 @@ pytest<=7.0.0
 pytest-cov<=4.0.0
 
 # --- LLM libraries ---
+# Explicit protobuf: PaddlePaddle imports google.protobuf; layered `pip --target` installs
+# plus google-* packages can leave the google namespace incomplete without it.
+protobuf<=7.34.0
 google-genai<=1.66.0
 openai<=2.25.0

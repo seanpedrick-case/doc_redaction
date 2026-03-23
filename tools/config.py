@@ -650,6 +650,12 @@ EFFICIENT_OCR = convert_string_to_boolean(
 )
 # Minimum number of extractable words on a page to use text-only route; below this use OCR.
 EFFICIENT_OCR_MIN_WORDS = int(get_or_create_env_var("EFFICIENT_OCR_MIN_WORDS", "20"))
+# Minimum fraction of page area (MediaBox) that a single placement of an embedded image must
+# cover to route the page through OCR in addition to the word-count rule. Reduces false
+# positives from tiny icons/watermarks. Set to 0 to disable image-based routing (word count only).
+EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION = float(
+    get_or_create_env_var("EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION", "0.02")
+)
 # Default max workers for parallel processing app-wide. Overridable by specific env vars below.
 MAX_WORKERS = max(
     1,
@@ -930,16 +936,23 @@ if SHOW_VLM_MODEL_OPTIONS:
 
 
 MAX_NEW_TOKENS = int(
-    get_or_create_env_var("MAX_NEW_TOKENS", "4096")
+    get_or_create_env_var("MAX_NEW_TOKENS", "8192")
 )  # Maximum number of tokens to generate
 
 DEFAULT_MAX_NEW_TOKENS = int(
-    get_or_create_env_var("DEFAULT_MAX_NEW_TOKENS", "4096")
+    get_or_create_env_var("DEFAULT_MAX_NEW_TOKENS", "8192")
 )  # Default maximum number of tokens to generate
 
 HYBRID_OCR_MAX_NEW_TOKENS = int(
-    get_or_create_env_var("HYBRID_OCR_MAX_NEW_TOKENS", "50")
-)  # Maximum number of tokens to generate for hybrid OCR
+    get_or_create_env_var("HYBRID_OCR_MAX_NEW_TOKENS", "1024")
+)  # Maximum number of tokens to generate per line crop for hybrid OCR. Raised from 50: reasoning
+# models (e.g. Qwen3.5) emit <think>...</think> tokens that consume the generation budget before
+# producing any answer content, causing every line to return empty results at the old 50-token cap.
+
+HYBRID_OCR_MAX_WORDS = int(
+    get_or_create_env_var("HYBRID_OCR_MAX_WORDS", "50")
+)  # Sanity-check: discard any hybrid OCR result whose word count exceeds this value. Kept at 50
+# because a single text line should never legitimately contain more than ~50 words.
 
 MAX_INPUT_TOKEN_LENGTH = int(
     get_or_create_env_var("MAX_INPUT_TOKEN_LENGTH", "8192")
@@ -1009,6 +1022,12 @@ VLM_MIN_DPI = float(
 VLM_MAX_DPI = float(
     get_or_create_env_var("VLM_MAX_DPI", "300.0")
 )  # _prepare_image_for_vlm: reported DPI above this implies downscale. Bounds apply together with min/max pixels.
+
+# Max image aspect ratio max(width/height, height/width) after white-padding for VLM inputs.
+# Very long/thin hybrid line crops can exceed provider or model limits; padding keeps aspect within this ratio.
+VLM_MAX_ASPECT_RATIO = float(get_or_create_env_var("VLM_MAX_ASPECT_RATIO", "10.0"))
+if VLM_MAX_ASPECT_RATIO < 1.0:
+    VLM_MAX_ASPECT_RATIO = 1.0
 
 USE_FLASH_ATTENTION = convert_string_to_boolean(
     get_or_create_env_var("USE_FLASH_ATTENTION", "False")
@@ -1092,6 +1111,14 @@ if VLM_DEFAULT_DO_SAMPLE and VLM_DEFAULT_DO_SAMPLE.strip():
 else:
     VLM_DEFAULT_DO_SAMPLE = None
 
+VLM_DEFAULT_STREAM = get_or_create_env_var(
+    "VLM_DEFAULT_STREAM", "True"
+)  # Default stream setting for VLM generation. If empty, model-specific defaults will be used. True means stream the response, False means return the response as a single string.
+if VLM_DEFAULT_STREAM and VLM_DEFAULT_STREAM.strip():
+    VLM_DEFAULT_STREAM = convert_string_to_boolean(VLM_DEFAULT_STREAM)
+else:
+    VLM_DEFAULT_STREAM = None
+
 VLM_DEFAULT_PRESENCE_PENALTY = get_or_create_env_var(
     "VLM_DEFAULT_PRESENCE_PENALTY", ""
 )  # Default presence penalty for VLM generation. If empty, model-specific defaults will be used.
@@ -1102,10 +1129,18 @@ else:
 
 VLM_DISABLE_QWEN3_5_THINKING = convert_string_to_boolean(
     get_or_create_env_var("VLM_DISABLE_QWEN3_5_THINKING", "False")
-)  # Whether to disable Qwen3.5 thinking.
+)  # Whether to disable Qwen3.5 thinking for local transformers VLM calls.
 
 # Suffix appended to the generation prompt when Qwen3.5 thinking is disabled (used in run_vlm and llm_funcs).
 VLM_QWEN3_5_NOTHINK_SUFFIX = "<think></think>"
+
+INFERENCE_SERVER_DISABLE_THINKING = convert_string_to_boolean(
+    get_or_create_env_var("INFERENCE_SERVER_DISABLE_THINKING", "False")
+)  # When True, passes chat_template_kwargs={"enable_thinking": false} in every inference-server VLM
+# API request. This is the vLLM-native equivalent of VLM_DISABLE_QWEN3_5_THINKING for the
+# inference-server path: vLLM applies the Qwen3/Qwen3.5 chat template server-side and honours this
+# flag to skip <think>...</think> generation entirely. Eliminates thinking-token overhead and avoids
+# the need to raise HYBRID_OCR_MAX_NEW_TOKENS to accommodate reasoning budgets.
 
 
 ### Local OCR model - Tesseract vs PaddleOCR
@@ -1773,7 +1808,7 @@ LLM_TOP_K = int(
 LLM_MIN_P = float(get_or_create_env_var("LLM_MIN_P", "0"))
 LLM_TOP_P = float(get_or_create_env_var("LLM_TOP_P", "0.95"))
 LLM_REPETITION_PENALTY = float(get_or_create_env_var("LLM_REPETITION_PENALTY", "1.0"))
-LLM_MAX_NEW_TOKENS = int(get_or_create_env_var("LLM_MAX_NEW_TOKENS", "4096"))
+LLM_MAX_NEW_TOKENS = int(get_or_create_env_var("LLM_MAX_NEW_TOKENS", "8192"))
 LLM_SEED = int(get_or_create_env_var("LLM_SEED", "42"))
 LLM_RESET = convert_string_to_boolean(get_or_create_env_var("LLM_RESET", "False"))
 LLM_STREAM = convert_string_to_boolean(get_or_create_env_var("LLM_STREAM", "True"))
@@ -1892,7 +1927,7 @@ if INCLUDE_FACE_IDENTIFICATION_TEXTRACT_OPTION == "True":
 # from alphanumeric characters and returned as separate words with separate bounding boxes.
 # If False, words will be returned as-is from Textract (original behavior).
 SPLIT_PUNCTUATION_FROM_WORDS = convert_string_to_boolean(
-    get_or_create_env_var("SPLIT_PUNCTUATION_FROM_WORDS", "False")
+    get_or_create_env_var("SPLIT_PUNCTUATION_FROM_WORDS", "True")
 )
 
 DEFAULT_SEARCH_QUERY = get_or_create_env_var("DEFAULT_SEARCH_QUERY", "")
@@ -2044,6 +2079,14 @@ ENABLE_REVIEW_CSV_PARALLELISM = convert_string_to_boolean(
     get_or_create_env_var("ENABLE_REVIEW_CSV_PARALLELISM", "True")
 )
 
+# Batch limits for AWS Comprehend and LLM entity detection. Batches are cut at the nearest
+# phrase-ending punctuation (PHRASE_ENDING_PUNCTUATION), newline, or end of page so text
+# is never cut mid-sentence.
+DEFAULT_NEW_BATCH_CHAR_COUNT = int(
+    get_or_create_env_var("DEFAULT_NEW_BATCH_CHAR_COUNT", "2500")
+)
+DEFAULT_NEW_BATCH_WORD_COUNT = int(DEFAULT_NEW_BATCH_CHAR_COUNT / 5)
+
 ###
 # APP RUN / GUI OPTIONS
 ###
@@ -2110,7 +2153,7 @@ SHOW_FEEDBACK_BUTTONS = convert_string_to_boolean(
 )
 
 SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER = convert_string_to_boolean(
-    get_or_create_env_var("SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER", "False")
+    get_or_create_env_var("SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER", "True")
 )
 
 APPLY_DUPLICATES_TO_FILE_AUTOMATICALLY = convert_string_to_boolean(

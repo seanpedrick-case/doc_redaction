@@ -91,17 +91,17 @@ paddle = [
 ]
 
 # Extra dependencies for VLM models
-# The following installs the CPU compatible version of pytorch. For torch cuda support you should run manually pip install torch==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cu129 after installation
+# The following installs the CPU compatible version of pytorch. For torch cuda support you should run manually pip install torch==2.9.1 torchvision==0.24.1 --index-url https://download.pytorch.org/whl/cu129 after installation
 vlm = [
     "torch<=2.9.1",
-    "torchvision<=0.25.0",
+    "torchvision<=0.24.1",
     "transformers<=5.3.0",
     "accelerate<=1.13.0",
     "bitsandbytes<=0.49.2", # Needed for on the fly quantisation in transformers
     "sentencepiece<=0.2.1", # Needed for PaddleOCRVL
-    "optimum<=2.1.0", # Needed for GPTQ quantised models in transformers
-    "GPTQModel<=5.8.0", # Needed for GPTQ quantised models in transformers
-    "flash_attn<=2.8.3", # Faster inference with transformers
+    #"optimum<=2.1.0", # Needed for GPTQ quantised models in transformers. Commented out, as optional
+    #"GPTQModel<=5.8.0", # Needed for GPTQ quantised models in transformers. Highly advised to install from a wheel from https://github.com/ModelCloud/GPTQModel
+    #"flash_attn<=2.8.3", # Faster inference with transformers. Highly recommended to install from a wheel at https://github.com/Dao-AILab/flash-attention
 ]
 
 # Run Gradio as an mcp server
