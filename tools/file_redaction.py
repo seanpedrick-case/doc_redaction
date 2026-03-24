@@ -332,6 +332,50 @@ def _efficient_ocr_pages_with_significant_embedded_images(
             doc.close()
 
 
+def _build_full_merged_pdf_image_paths_for_vlm(
+    file_path: str,
+    num_pages: int,
+    pages_needing_ocr_1based: List[int],
+    pages_with_text_1based: List[int],
+    pdf_image_file_paths: List[str],
+    all_pages_1based: List[int],
+    input_folder: str,
+    pymupdf_doc: Document,
+    page_sizes: List[dict],
+    progress,
+) -> Tuple[List[str], List[dict]]:
+    """
+    Merge OCR-page images with text-route page images so every page has an image path
+    (full-document pass). Used for CUSTOM_VLM_SIGNATURE under EFFICIENT_OCR when some
+    pages used the selectable-text path.
+    """
+    if pages_needing_ocr_1based:
+        if pages_with_text_1based:
+            text_page_image_paths, page_sizes = prepare_images_for_pages(
+                file_path,
+                pages_with_text_1based,
+                input_folder,
+                pymupdf_doc,
+                page_sizes,
+                progress,
+            )
+            return [
+                (pdf_image_file_paths[i] if i < len(pdf_image_file_paths) else "")
+                or (text_page_image_paths[i] if i < len(text_page_image_paths) else "")
+                for i in range(num_pages)
+            ], page_sizes
+        return pdf_image_file_paths, page_sizes
+    full_paths, page_sizes = prepare_images_for_pages(
+        file_path,
+        all_pages_1based,
+        input_folder,
+        pymupdf_doc,
+        page_sizes,
+        progress,
+    )
+    return full_paths, page_sizes
+
+
 def add_page_range_suffix_to_file_path(
     file_path: str,
     page_min: int,
@@ -428,6 +472,29 @@ def _parse_vlm_person_signature_result(ocr_result, entity_type: str, text_label:
             )
         )
     return boxes
+
+
+def _gui_tqdm_subphase(
+    tqdm_bar, gradio_progress, phase: str, page_str: str, total_str: str
+):
+    """Show face/signature (or other) sub-phases in tqdm postfix and Gradio progress."""
+    detail = f"{phase} · page {page_str}/{total_str}"
+    try:
+        if tqdm_bar is not None and hasattr(tqdm_bar, "set_postfix_str"):
+            tqdm_bar.set_postfix_str(detail, refresh=True)
+    except Exception:
+        pass
+    try:
+        if gradio_progress is not None:
+            frac = 0.5
+            if tqdm_bar is not None:
+                total = getattr(tqdm_bar, "total", None) or 0
+                n = getattr(tqdm_bar, "n", 0)
+                if total and total > 0:
+                    frac = min(0.999, max(0.0, (float(n) + 0.05) / float(total)))
+            gradio_progress(frac, desc=detail)
+    except Exception:
+        pass
 
 
 def _run_vlm_only_pass_one_page(
@@ -702,8 +769,33 @@ def run_custom_vlm_only_pass(
         )
 
     # Apply redactions and build annotations in page order (pymupdf is not thread-safe)
-    for res in page_results:
+    _vlm_sub = []
+    if run_person:
+        _vlm_sub.append("face")
+    if run_signature:
+        _vlm_sub.append("signature")
+    _vlm_phase_label = (
+        " & ".join(_vlm_sub).title() + " detection"
+        if _vlm_sub
+        else "CUSTOM_VLM detection"
+    )
+    _n_vlm_results = len(page_results)
+    for _vlm_i, res in enumerate(page_results):
         page_no, image_path, page_width, page_height, vlm_boxes, ti, to, name = res
+        try:
+            if progress is not None and _n_vlm_results:
+                progress(
+                    min(
+                        0.92,
+                        0.68 + 0.22 * float(_vlm_i + 1) / float(_n_vlm_results),
+                    ),
+                    desc=(
+                        f"{_vlm_phase_label} · applying page {page_no + 1}/"
+                        f"{number_of_pages}"
+                    ),
+                )
+        except Exception:
+            pass
         vlm_total_input_tokens += ti
         vlm_total_output_tokens += to
         if name and not vlm_model_name:
@@ -1309,8 +1401,8 @@ def choose_and_run_redactor(
     prepare_images_flag = None  # Determines whether to call prepare_image_or_pdf
 
     # When Textract + Extract signatures/forms/tables (not Face detection alone), we run all
-    # pages through redact_image_pdf (skip EFFICIENT_OCR). Face detection uses EFFICIENT_OCR
-    # (simple text where possible) then a VLM-only pass on all page images.
+    # pages through redact_image_pdf (skip EFFICIENT_OCR). Face detection keeps EFFICIENT_OCR;
+    # CUSTOM_VLM_PERSON then runs only on OCR-classified pages (see EFFICIENT_OCR VLM block).
     _textract_needs_full_analysis_global = (
         text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
         and any(
@@ -1322,8 +1414,8 @@ def choose_and_run_redactor(
             )
         )
     )
-    # After EFFICIENT_OCR (text for high-word pages, OCR for low-word), run VLM (face/signature)
-    # on all page images when CUSTOM_VLM_* is selected or Textract + Face detection.
+    # After EFFICIENT_OCR, run CUSTOM_VLM passes when selected or Textract + Face detection.
+    # Routing: CUSTOM_VLM_SIGNATURE = full-document images; CUSTOM_VLM_PERSON = OCR pages only.
     _run_vlm_pass_after_all_pages = _has_any_custom_vlm_entity or (
         text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
         and "Face detection" in (handwrite_signature_checkbox or [])
@@ -2037,8 +2129,8 @@ def choose_and_run_redactor(
         # Remove any existing review_file paths from the review file outputs
         # EFFICIENT_OCR: two-step process per page - try selectable text first, OCR only if needed.
         # When text extraction is selectable-text only, skip EFFICIENT_OCR checks and run only redact_text_pdf.
-        # When Textract is selected with Extract signatures/forms/tables/Face detection, skip
-        # EFFICIENT_OCR so all pages go through redact_image_pdf (Textract analysis and/or face pass).
+        # When Textract is selected with Extract signatures/forms/tables (not Face alone), skip
+        # EFFICIENT_OCR so all pages go through redact_image_pdf (full Textract analysis).
         if (
             efficient_ocr
             and is_pdf(file_path)
@@ -2506,8 +2598,9 @@ def choose_and_run_redactor(
                 list(pages_with_text_1based) if pages_with_text_1based else None
             )
 
-            # When CUSTOM_VLM_* or Textract+Face detection: run VLM (face/signature) on all
-            # page images after text/OCR extraction. Backend from CUSTOM_VLM_BACKEND (bedrock_vlm, inference_vlm, transformers_vlm).
+            # CUSTOM_VLM under EFFICIENT_OCR: CUSTOM_VLM_SIGNATURE uses full merged page
+            # images; CUSTOM_VLM_PERSON (and Textract Face detection) uses sparse OCR-only
+            # paths (pages_needing_ocr_1based). Two passes when both are selected.
             _vlm_backend_available = (
                 CUSTOM_VLM_BACKEND != "bedrock_vlm" or bedrock_runtime is not None
             )
@@ -2519,58 +2612,7 @@ def choose_and_run_redactor(
             ):
                 num_pages = pymupdf_doc.page_count
                 if num_pages and num_pages > 0:
-                    progress(
-                        0.65, desc="Preparing images for VLM (face/signature) pass"
-                    )
-                    if pages_needing_ocr_1based:
-                        # We have pdf_image_file_paths for OCR pages; add images for text pages
-                        if pages_with_text_1based:
-                            (
-                                text_page_image_paths,
-                                page_sizes,
-                            ) = prepare_images_for_pages(
-                                file_path,
-                                pages_with_text_1based,
-                                input_folder,
-                                pymupdf_doc,
-                                page_sizes,
-                                progress,
-                            )
-                            full_pdf_image_file_paths = [
-                                (
-                                    pdf_image_file_paths[i]
-                                    if i < len(pdf_image_file_paths)
-                                    else ""
-                                )
-                                or (
-                                    text_page_image_paths[i]
-                                    if i < len(text_page_image_paths)
-                                    else ""
-                                )
-                                for i in range(num_pages)
-                            ]
-                        else:
-                            full_pdf_image_file_paths = pdf_image_file_paths
-                    else:
-                        # All pages used text path; create images for all for VLM pass
-                        full_pdf_image_file_paths, page_sizes = (
-                            prepare_images_for_pages(
-                                file_path,
-                                all_pages_1based,
-                                input_folder,
-                                pymupdf_doc,
-                                page_sizes,
-                                progress,
-                            )
-                        )
-                    full_page_sizes_df = pd.DataFrame(page_sizes)
-                    if (
-                        not full_page_sizes_df.empty
-                        and "page" in full_page_sizes_df.columns
-                    ):
-                        full_page_sizes_df[["page"]] = full_page_sizes_df[
-                            ["page"]
-                        ].apply(pd.to_numeric, errors="coerce")
+                    progress(0.65, desc="Preparing CUSTOM_VLM (face/signature) pass")
                     entities_for_vlm = list(chosen_redact_entities or [])
                     for _vlm_src in (
                         chosen_redact_comprehend_entities or [],
@@ -2587,58 +2629,146 @@ def choose_and_run_redactor(
                         and "CUSTOM_VLM_PERSON" not in entities_for_vlm
                     ):
                         entities_for_vlm.append("CUSTOM_VLM_PERSON")
-                    progress(0.7, desc="Running VLM (face/signature) on all pages")
-                    print(
-                        "Running CUSTOM_VLM (face/signature) detection on all page images "
-                        "after text/OCR extraction."
-                    )
-                    (
-                        vlm_in,
-                        vlm_out,
-                        vlm_name,
-                        vlm_annotations_list,
-                        vlm_decision_rows,
-                    ) = run_custom_vlm_only_pass(
-                        file_path,
-                        full_pdf_image_file_paths,
-                        pymupdf_doc,
-                        full_page_sizes_df,
-                        entities_for_vlm,
-                        bedrock_runtime,
-                        output_folder,
-                        input_folder,
-                        num_pages,
-                        page_min=page_min,
-                        page_max=page_max if page_max > 0 else num_pages,
-                        progress=progress,
-                        inference_server_vlm_model=inference_server_vlm_model,
-                    )
-                    vlm_total_input_tokens += vlm_in
-                    vlm_total_output_tokens += vlm_out
-                    if vlm_name and not vlm_model_name:
-                        vlm_model_name = vlm_name
-                    # Merge VLM (face/signature) boxes into annotations and decision table.
-                    # run_custom_vlm_only_pass already sets the real image_path (from
-                    # full_pdf_image_file_paths) on each annotation. Extend directly so
-                    # create_annotation_dicts_from_annotation_df groups these boxes under
-                    # the same image key as the page's regular redaction boxes, making them
-                    # visible in the image_annotator. (Previously a placeholder path was
-                    # written here, which created a separate image_dict entry and hid the
-                    # VLM boxes from the annotator while they still appeared in review_file_state.)
-                    if vlm_annotations_list:
-                        annotations_all_pages.extend(vlm_annotations_list)
-                    if vlm_decision_rows:
-                        vlm_df = pd.DataFrame(vlm_decision_rows)
-                        if (
-                            all_pages_decision_process_table is not None
-                            and not all_pages_decision_process_table.empty
-                        ):
-                            all_pages_decision_process_table = pd.concat(
-                                [all_pages_decision_process_table, vlm_df],
-                                ignore_index=True,
+
+                    _vlm_wants_person = "CUSTOM_VLM_PERSON" in entities_for_vlm
+                    _vlm_wants_signature = "CUSTOM_VLM_SIGNATURE" in entities_for_vlm
+
+                    _vlm_rounds = []
+                    if _vlm_wants_signature:
+                        full_merged_paths, page_sizes = (
+                            _build_full_merged_pdf_image_paths_for_vlm(
+                                file_path,
+                                num_pages,
+                                pages_needing_ocr_1based,
+                                pages_with_text_1based,
+                                pdf_image_file_paths,
+                                all_pages_1based,
+                                input_folder,
+                                pymupdf_doc,
+                                page_sizes,
+                                progress,
                             )
-                        else:
-                            all_pages_decision_process_table = vlm_df
+                        )
+                        full_page_sizes_df = pd.DataFrame(page_sizes)
+                        if (
+                            not full_page_sizes_df.empty
+                            and "page" in full_page_sizes_df.columns
+                        ):
+                            full_page_sizes_df[["page"]] = full_page_sizes_df[
+                                ["page"]
+                            ].apply(pd.to_numeric, errors="coerce")
+                        _vlm_rounds.append(
+                            (
+                                ["CUSTOM_VLM_SIGNATURE"],
+                                full_merged_paths,
+                                full_page_sizes_df,
+                                "Running CUSTOM_VLM signature detection on all page images",
+                            )
+                        )
+                    if _vlm_wants_person:
+                        person_page_sizes_df = pd.DataFrame(page_sizes)
+                        if (
+                            not person_page_sizes_df.empty
+                            and "page" in person_page_sizes_df.columns
+                        ):
+                            person_page_sizes_df[["page"]] = person_page_sizes_df[
+                                ["page"]
+                            ].apply(pd.to_numeric, errors="coerce")
+                        _vlm_rounds.append(
+                            (
+                                ["CUSTOM_VLM_PERSON"],
+                                pdf_image_file_paths,
+                                person_page_sizes_df,
+                                "Running CUSTOM_VLM person detection on OCR-classified pages only",
+                            )
+                        )
+
+                    if not _vlm_rounds:
+                        full_merged_paths, page_sizes = (
+                            _build_full_merged_pdf_image_paths_for_vlm(
+                                file_path,
+                                num_pages,
+                                pages_needing_ocr_1based,
+                                pages_with_text_1based,
+                                pdf_image_file_paths,
+                                all_pages_1based,
+                                input_folder,
+                                pymupdf_doc,
+                                page_sizes,
+                                progress,
+                            )
+                        )
+                        full_page_sizes_df = pd.DataFrame(page_sizes)
+                        if (
+                            not full_page_sizes_df.empty
+                            and "page" in full_page_sizes_df.columns
+                        ):
+                            full_page_sizes_df[["page"]] = full_page_sizes_df[
+                                ["page"]
+                            ].apply(pd.to_numeric, errors="coerce")
+                        _vlm_rounds.append(
+                            (
+                                entities_for_vlm,
+                                full_merged_paths,
+                                full_page_sizes_df,
+                                "Running CUSTOM_VLM on all page images",
+                            )
+                        )
+
+                    for _round_idx, (
+                        _vlm_entities,
+                        _vlm_paths,
+                        _vlm_sizes_df,
+                        _vlm_msg,
+                    ) in enumerate(_vlm_rounds):
+                        progress(
+                            0.7 + 0.02 * float(_round_idx),
+                            desc=_vlm_msg,
+                        )
+                        print(_vlm_msg)
+                        (
+                            vlm_in,
+                            vlm_out,
+                            vlm_name,
+                            vlm_annotations_list,
+                            vlm_decision_rows,
+                        ) = run_custom_vlm_only_pass(
+                            file_path,
+                            _vlm_paths,
+                            pymupdf_doc,
+                            _vlm_sizes_df,
+                            _vlm_entities,
+                            bedrock_runtime,
+                            output_folder,
+                            input_folder,
+                            num_pages,
+                            page_min=page_min,
+                            page_max=page_max if page_max > 0 else num_pages,
+                            progress=progress,
+                            inference_server_vlm_model=inference_server_vlm_model,
+                        )
+                        vlm_total_input_tokens += vlm_in
+                        vlm_total_output_tokens += vlm_out
+                        if vlm_name and not vlm_model_name:
+                            vlm_model_name = vlm_name
+                        # Merge VLM boxes into annotations and decision table.
+                        if vlm_annotations_list:
+                            annotations_all_pages.extend(vlm_annotations_list)
+                        if vlm_decision_rows:
+                            vlm_df = pd.DataFrame(vlm_decision_rows)
+                            if (
+                                all_pages_decision_process_table is not None
+                                and not all_pages_decision_process_table.empty
+                            ):
+                                all_pages_decision_process_table = pd.concat(
+                                    [
+                                        all_pages_decision_process_table,
+                                        vlm_df,
+                                    ],
+                                    ignore_index=True,
+                                )
+                            else:
+                                all_pages_decision_process_table = vlm_df
 
         elif (
             text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
@@ -6106,6 +6236,13 @@ def redact_image_pdf(
     for page_no in ocr_progress_bar:
 
         reported_page_number = str(page_no + 1)
+        try:
+            ocr_progress_bar.set_postfix_str(
+                f"OCR · page {reported_page_number}/{_ocr_gui_total_str}",
+                refresh=False,
+            )
+        except Exception:
+            pass
         # print(
         #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
         #     "start iteration (init lists, entity flags)"
@@ -6530,6 +6667,13 @@ def redact_image_pdf(
                     and bedrock_runtime is not None
                 ):
                     try:
+                        _gui_tqdm_subphase(
+                            ocr_progress_bar,
+                            progress,
+                            "Face detection (VLM)",
+                            reported_page_number,
+                            _ocr_gui_total_str,
+                        )
                         # print(
                         #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
                         #     "optional — Bedrock VLM person detection"
@@ -6665,6 +6809,13 @@ def redact_image_pdf(
                     and bedrock_runtime is not None
                 ):
                     try:
+                        _gui_tqdm_subphase(
+                            ocr_progress_bar,
+                            progress,
+                            "Signature detection (VLM)",
+                            reported_page_number,
+                            _ocr_gui_total_str,
+                        )
                         # print(
                         #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
                         #     "optional — Bedrock VLM signature detection"
@@ -6795,6 +6946,13 @@ def redact_image_pdf(
                     and image is not None
                 ):
                     try:
+                        _gui_tqdm_subphase(
+                            ocr_progress_bar,
+                            progress,
+                            "Face detection (local VLM)",
+                            reported_page_number,
+                            _ocr_gui_total_str,
+                        )
                         # print(
                         #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
                         #     f"optional — local VLM/inference person detection ({chosen_local_ocr_model})"
@@ -6929,6 +7087,13 @@ def redact_image_pdf(
                     and image is not None
                 ):
                     try:
+                        _gui_tqdm_subphase(
+                            ocr_progress_bar,
+                            progress,
+                            "Signature detection (local VLM)",
+                            reported_page_number,
+                            _ocr_gui_total_str,
+                        )
                         # print(
                         #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
                         #     f"optional — local VLM/inference signature detection ({chosen_local_ocr_model})"
@@ -7430,6 +7595,13 @@ def redact_image_pdf(
                     and image is not None
                 ):
                     try:
+                        _gui_tqdm_subphase(
+                            ocr_progress_bar,
+                            progress,
+                            "Face detection (VLM, Textract path)",
+                            reported_page_number,
+                            _ocr_gui_total_str,
+                        )
                         # print(
                         #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
                         #     "Textract optional — Bedrock VLM person detection"
@@ -7550,6 +7722,13 @@ def redact_image_pdf(
                     and image is not None
                 ):
                     try:
+                        _gui_tqdm_subphase(
+                            ocr_progress_bar,
+                            progress,
+                            "Signature detection (VLM, Textract path)",
+                            reported_page_number,
+                            _ocr_gui_total_str,
+                        )
                         # print(
                         #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
                         #     "Textract optional — Bedrock VLM signature detection"
@@ -7934,7 +8113,7 @@ def redact_image_pdf(
             zip(ocr_parallel_jobs_textract, results),
             total=len(results),
             unit="pages",
-            desc="Processing OCR results",
+            desc="Processing Textract OCR (per page)",
         )
         for job, result in post_process_pbar:
             (
@@ -8035,6 +8214,18 @@ def redact_image_pdf(
                 and image is not None
             ):
                 try:
+                    _pp_total = str(
+                        post_process_pbar.total
+                        if getattr(post_process_pbar, "total", None)
+                        else len(results)
+                    )
+                    _gui_tqdm_subphase(
+                        post_process_pbar,
+                        progress,
+                        "Face detection (VLM, Textract parallel)",
+                        str(reported_page_number),
+                        _pp_total,
+                    )
                     image_name = (
                         os.path.basename(image_path)
                         if isinstance(image_path, str)
@@ -8135,6 +8326,18 @@ def redact_image_pdf(
                 and image is not None
             ):
                 try:
+                    _pp_total_sig = str(
+                        post_process_pbar.total
+                        if getattr(post_process_pbar, "total", None)
+                        else len(results)
+                    )
+                    _gui_tqdm_subphase(
+                        post_process_pbar,
+                        progress,
+                        "Signature detection (VLM, Textract parallel)",
+                        str(reported_page_number),
+                        _pp_total_sig,
+                    )
                     image_name = (
                         os.path.basename(image_path)
                         if isinstance(image_path, str)
@@ -8436,6 +8639,13 @@ def redact_image_pdf(
             ),
         )
 
+    _pii_gui_total_pages = (
+        len(page_loop_pages)
+        if page_loop_pages is not None
+        else max(0, page_loop_end - page_loop_start)
+    )
+    _pii_gui_total_str = str(_pii_gui_total_pages) if _pii_gui_total_pages else "?"
+
     # Initialize redacted_image - will be updated inside loop for image files
     redacted_image = None
 
@@ -8470,6 +8680,14 @@ def redact_image_pdf(
         page_height = page_data["page_height"]
         image = page_data["image"]
         reported_page_number = page_data["reported_page_number"]
+
+        try:
+            pii_progress_bar.set_postfix_str(
+                f"PII · page {reported_page_number}/{_pii_gui_total_str}",
+                refresh=False,
+            )
+        except Exception:
+            pass
 
         # Initialize redacted_image for image files as fallback (will be updated if redactions are applied)
         if is_pdf(file_path) is False and redacted_image is None:
@@ -8574,6 +8792,13 @@ def redact_image_pdf(
                         and image is not None
                     ):
                         try:
+                            _gui_tqdm_subphase(
+                                pii_progress_bar,
+                                progress,
+                                "Face detection (VLM, during PII)",
+                                str(reported_page_number),
+                                _pii_gui_total_str,
+                            )
                             image_name = (
                                 os.path.basename(image_path)
                                 if isinstance(image_path, str)
@@ -8693,6 +8918,13 @@ def redact_image_pdf(
                         and image is not None
                     ):
                         try:
+                            _gui_tqdm_subphase(
+                                pii_progress_bar,
+                                progress,
+                                "Signature detection (VLM, during PII)",
+                                str(reported_page_number),
+                                _pii_gui_total_str,
+                            )
                             image_name = (
                                 os.path.basename(image_path)
                                 if isinstance(image_path, str)

@@ -1127,6 +1127,8 @@ If VLM or inference server options are enabled, you can also use the VLM to iden
 
 On the 'Redaction Settings' tab, select the CUSTOM_VLM_PERSON and CUSTOM_VLM_SIGNATURE entities. When you conduct an OCR task with the VLM or inference server, it will identify the bounding boxes for photos of people's faces and signatures in the document, and redact them accordingly if a redaction option is selected.
 
+**Efficient OCR and CUSTOM_VLM routing:** When **Efficient OCR** is enabled, **CUSTOM_VLM_PERSON** (including face detection added via Textract options) runs the VLM only on pages that are routed to the OCR path (the same pages as the word-count and embedded-image rules). **CUSTOM_VLM_SIGNATURE** still runs the VLM on **every** page. If both entities are selected, the app runs two passes (signatures on all pages, then faces on OCR-classified pages only). **AWS Textract** with **Extract signatures** (or forms/tables) still processes **all** pages with Textract and disables Efficient OCR for that run.
+
 ### PII identification with LLMs
 
 In addition to rule-based (Local) and AWS Comprehend PII detection, the app can use **Large Language Models (LLMs)** to identify and label personal information. This is useful for entity types that are context-dependent (e.g. job titles, organisation names) or when you want custom instructions (e.g. "do not redact the name of the university"). LLM-based PII can be run via **AWS Bedrock**, a **local transformers** model, or an **inference server** (e.g. llama.cpp, vLLM).
