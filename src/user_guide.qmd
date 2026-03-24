@@ -113,7 +113,9 @@ Under **'Redaction settings'** accordion, you can see **'Change default text ext
 
 If you select **'AWS Textract service - all PDF types'** as the text extraction method, an accordion **'Enable AWS Textract signature detection (default is off)'** appears. Open it to turn on handwriting and/or signature detection. Enabling signatures has a cost impact (~£2.66 ($3.50) per 1,000 pages vs ~£1.14 ($1.50) per 1,000 pages without signature detection).
 
-![AWS Textract handwriting and signature options](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/textract_handwriting_signatures.PNG)
+<p align="center">
+  <img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/quick_start/textract_handwriting_signatures.PNG" alt="AWS Textract handwriting and signature options" width="60%" />
+</p>
 
 **NOTE:** Form, layout, table extraction, or face detection can be enabled if required for specific use cases; they are off by default - please contact your system administrator if you need these features.
 
@@ -301,9 +303,13 @@ If you made a mistake, click the 'Undo last element removal' button to restore t
 
 ### Search text and redact
 
-After a document has been processed, you may need to redact specific terms, names, or phrases that the automatic PII (Personally Identifiable Information) detection might have missed. The **"Search text and redact"** tab gives you the power to find and redact any text within your document manually.
+After a document has been processed, you may need to redact specific terms, names, or phrases that the automatic PII detection might have missed. The **"Search text and redact"** tab gives you the power to find and redact any text within your document manually.
 
 #### **Step 1: Search for Text**
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/redaction_search_menu.png" alt="New redaction search menu" width="80%" />
+</p>
 
 1.  Navigate to the **"Search text and redact"** tab to the right of the **'Review redactions'** tab, under the 'Apply redactions to PDF' and 'Save changes on current page to file' buttons.
 2.  The main table will initially be populated with all the text extracted from the document for a page, broken down by word. Use the page selector to view a specific page, or 'ALL' to see all words.
@@ -312,9 +318,24 @@ After a document has been processed, you may need to redact specific terms, name
 5.  Click the **"Search"** button or press Enter.
 6.  The table below will update to show only the rows containing text that matches your search query.
 
+Below the search button you can customise the appearance and label of the new redactions under the **"Search options"** accordion:
+
+*   **Label for new redactions:** Change the text that appears on the redaction box (default is "Redaction"). You could change this to "CONFIDENTIAL" or "CUSTOM".
+*   **Colour for labels:** Set a custom color for the redaction boxes. You can use the colour picker interface that pops up to select a colour.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/redaction_search_friendship_city_options.png" alt="New redaction search with options selected" width="80%" />
+</p>
+
 > **Tip:** If you make a mistake during the search, to clear all filters and see the full text again, click the **"Reset table to original state"** button. You can also click the 'Undo latest redaction' button to remove the latest redaction item.
 
 #### **Step 2: Select and Review a Match**
+
+Your redaction search results will appear in the table underneath the search options, with each found word on a different row.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/redaction_search_friendship_city_results.png" alt="New redaction search results" width="70%" />
+</p>
 
 When you click on any row in the search results table:
 
@@ -336,17 +357,19 @@ You have several options for redacting the text you've found:
     *   Click the **`Redact all words with same text as selected row`** button.
     *   The application will find and redact every single occurrence of "John Smith" throughout the entire document.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/redact_all_specific_word.png" alt="New redaction all from specific row" width="70%" />
+</p>
+
 *   **Redact all current search results:**
     *   Perform a search (e.g., for a specific person's name).
     *   If you are confident that every result shown in the filtered table should be redacted, click the **`Redact all text in table`** button.
     *   This will apply a redaction to all currently visible items in the table in one go, across all relevant pages in the document.
 
-#### **Customising new redaction boxes**
+An example of the outputs you can see in the document view pane is shown below.
 
-Before you click one of the redact buttons, you can customize the appearance and label of the new redactions under the **"Search options"** accordion:
+![Applied all redactions in table](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/redaction_search_all_table.png)  
 
-*   **Label for new redactions:** Change the text that appears on the redaction box (default is "Redaction"). You could change this to "CONFIDENTIAL" or "CUSTOM".
-*   **Colour for labels:** Set a custom color for the redaction boxes. You can use the colour picker interface that pops up to select a colour.
 
 #### **Undoing a Mistake**
 
@@ -360,11 +383,13 @@ If you make a mistake, you can reverse the last redaction action you performed o
 
 The 'View text' table shows the text extracted from the document so you can check for correctness of the OCR process. If you have just completed a redaction task, you should see this table already filled in. If you have uploaded a '..._ocr_output.csv' file alongside a document file on the Review redactions tab as [described above](#uploading-documents-for-review).
 
-![Search suggested redaction area](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/select_extracted_text.PNG)
+![View text table](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/select_extracted_text.PNG)
 
 You can search through the extracted text by using the search bar just above the table. You can also filter specific columns by clicking on the three dots next to the column header and clicking 'Filter'.  When you click on a row, the Document viewer pane to the left will change to the selected page. To return the table to its original content, click the button below the table 'Reset OCR output table filter'.
 
-![Search suggested redaction area](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/search_extracted_text.PNG)
+<p align="center">
+  <img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/search_extracted_text.PNG" alt="Filter view text table" width="80%" />
+</p>
 
 ### Apply revised redactions to PDF
 
@@ -380,19 +405,27 @@ You may want to return to the same document later to modify existing redactions 
 
 The redaction process produces a file with the suffix '_redactions_for_review.pdf', which contains all the redaction information needed to reuse in the app, and is also suitable for continuing with redactions in Adobe Acrobat.
 
+![Redaction review files input](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/redaction_review_file_upload.png)
+
 To continue with a file previously redacted, import your 'redactions_for_review.pdf' file on the 'Review redactions' tab in the [first file input box](#uploading-documents-for-review). Once your file is uploaded, you should see the first page of the document appear in the Document view pane below, and under the 'Modify redactions' tab to the right, you should see the table filled in with details of the previous redactions.
 
 ### Merging previous redaction review files
 
 Say you have done multiple redaction tasks with the same file, and you want to merge all the redaction boxes together into one combined review document. You can merge multiple output 'redactions for review.pdf' files using the interface on the Settings page under 'Combine multiple review PDFs or CSV files'.
 
+![Merging multiple review files input](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/merge_review_files/merge_review_pdf_input.png)
+
 In the file input box, upload your multiple 'redactions_for_review.pdf' files, then click 'Combine multiple review PDFs into one'. You should then get out a combined file that contains all the redaction boxes from the input files. You can then upload this file into the file input on the 'Review redactions' tab to review and modify redactions [as detailed above](#loading-in-previous-results-from-the-_redactions_for_review.pdf-file).
+
+![Merging multiple review files input](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/merge_review_files/merge_review_pdf_output.png)
 
 ### Loading in OCR results to search for new redactions
 
 When loading in results following the above method, you will notice that the table under 'Search text and redact' is still empty. To use this feature we need to load in the OCR results from your previous redaction task.
 
 When you redact a document, one of the outputs has the suffix 'ocr_results_with_words.csv'. It's this file that we need to upload to be able to search for new redactions. To do this, find the relevant ocr_results_with_words.csv file, and upload it into the second upload box on the 'Review redactions' tab in the top right (labelled 2.). When you do this, you should see the 'Search text and redact' tab table filled in with data. The table under the 'View text' tab should also be filled in.
+
+![Upload OCR documents for review](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/review_redactions/merge_review_pdf_output.png)
 
 ### Using a previous OCR results file to skip redoing OCR for future redaction tasks
 
@@ -404,7 +437,11 @@ To check the previous OCR result upload has been successful, lower down the page
 
 ## Document summarisation
 
-When summarisation is enabled, a **Document summarisation** tab is shown in the app. It lets you generate LLM-based summaries from PDFs, or from OCR output CSVs (e.g. from a previous redaction run). Here is how you can summarise a document:
+When summarisation is enabled, a **Document summarisation** tab is shown in the app. It lets you generate LLM-based summaries from PDFs, or from OCR output CSVs (e.g. from a previous redaction run).
+
+![Document summarisation upload](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/document_summarisation/document_summarisation_upload.png)
+
+Here is how you can summarise a document:
 
 1. **Upload Files:** * **1.a Upload PDF files:** In the summarisation tab, use "Upload one or multiple PDF files to summarise" to attach one or more PDF files, or
    * **1.b Upload OCR output files:** In the summarisation tab, use "Upload one or multiple 'ocr_output.csv' files to summarise" to attach one or more `*_ocr_output.csv` files.
@@ -415,6 +452,8 @@ When summarisation is enabled, a **Document summarisation** tab is shown in the 
    * **Additional summary instructions (optional)**: e.g. "Focus on key obligations."
 3. **Generate summary:** Click **"Generate summary"** to run the summarisation.
 4. **Outputs:** When finished, you can download summary files and view the summary that appears below.
+
+![Document summarisation outputs](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/document_summarisation/summarisation_outputs.png)
 
 ## Redacting Word, tabular data files (XLSX/CSV) or open text
 
@@ -428,7 +467,7 @@ To demonstrate this, we can use [the example csv file 'combined_case_notes.csv']
 
 If you were instead to upload an XLSX file, you would see also a list of all the sheets in the XLSX file that can be redacted. The 'Select columns' area underneath will suggest a list of all columns in the file across all sheets.
 
-![xlsx upload](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/tabular_files/file_upload_xlsx_columns.PNG)
+![Excel file upload](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/tabular_files/file_upload_xlsx_columns.PNG)
 
 Once you have chosen your input file and data, you can choose the redaction method. If visible, 'Local' will use a small local model, which is the same as that used for documents on the **'Redact PDFs/images'** tab. 'AWS Comprehend' will give better results, at a slight cost.
 
@@ -443,6 +482,8 @@ You can also choose the anonymisation format of your output results. Open the ta
 - **redact completely**: Text is removed completely and replaced by nothing.
 - **hash**: Replaced by a unique long ID code that is consistent with entity text. I.e. a particular name will always have the same ID code.
 - **mask**: Replace with stars '*'.
+
+![Anonymisation output format](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/tabular_files/text_anonymisation_formats.PNG)
 
 ### Redacting open text
 You can also write open text into an input box and redact that using the same methods as described above. To do this, write or paste text into the 'Enter open text' box that appears when you open the 'Redact open text' tab. Then select a redaction method, and an anonymisation output format as described above. The redacted text will be printed in the output textbox, and will also be saved to a simple CSV file in the output file box.
@@ -510,7 +551,6 @@ After the analysis is complete, the results will be displayed directly in the in
 **Step 3: Download and Use the Output Files**
 The analysis also generates a set of downloadable files for your records and for performing redactions.
 
-
 - page_similarity_results.csv: This is a detailed report of the analysis you just ran. It shows a breakdown of the pages from each file that are most similar to each other above the similarity threshold. You can compare the text in the two columns 'Page_1_Text' and 'Page_2_Text'. For single-page matches, it will list each pair of matching pages. For subdocument matches, it will list the start and end pages of each matched sequence, along with the total length of the match.
 
 ![Page similarity file example](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/duplicate_page_find_in_app/img/page_similarity_example.PNG)
@@ -540,6 +580,8 @@ Navigate to the 'Word or Excel/CSV files' tab and scroll down to the "Find dupli
 - **Select Excel sheet names**: Choose which sheets to analyze (for Excel files)
 - **Select text columns**: Choose which columns contain text to analyze
 
+![Duplicate detection in tabular data](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/tabular_files/tabular_duplicate_detection.PNG)
+
 **Step 2: Review results**
 
 After clicking "Find duplicate cells/rows", the results will be displayed in a table showing:
@@ -551,7 +593,9 @@ Click on any row to see more details about the duplicate match in the preview bo
 
 **Step 3: Remove duplicates**
 
-Select a file from the dropdown and click "Remove duplicate rows from selected file" to create a cleaned version with duplicates removed. The cleaned file will be available for download.
+The deduplicated output files will be available for download in the output box. If you have selected 'Remove duplicate rows from deduplicated files', the duplicate rows will be removed from the deduplicated files. If not, then the duplicate rows will be indicated in the output files in the column named 'duplicated', which can be TRUE or FALSE.
+
+![Duplicate detection in tabular data](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/tabular_files/tabular_duplicate_analysis_outputs.PNG)
 
 ## Export redacted document files to Adobe Acrobat
 
@@ -630,9 +674,9 @@ When checked, redaction tasks will first check all pages for text that can be ex
 
 This field 'Min. page-area fraction for an embedded image to force OCR' is shown when Efficient OCR is enabled. It sets the smallest fraction of the page area (on the PDF page) that a **single** embedded image must cover—on one placement on the page—for that page to be sent through the full OCR step **even if** the page already has enough extractable words for the text-only path. That way, pages with plenty of selectable text but a large image (for example a photo or embedded scan) can still be analysed by OCR, which can pick up text that exists only inside the image and is not separate selectable text.
 
-Values are typically small decimals (for example `0.02` for 2% of the page area). Enter **0** to turn off this rule: routing then depends only on the minimum word count (the label in the app notes this as “word count only”). 
+Values are typically small decimals (for example `0.02` for 2% of the page area). Enter **0** to turn off this rule: routing then depends only on the minimum word count (the label in the app notes this as “word count only”). To disable Efficient OCR entirely, uncheck the 'Efficient OCR' checkbox and run your redaction task.
 
-**Other limitations.** Even when Efficient OCR is on, pages that stay on the text-only path can still miss text that appears only inside embedded images if no image on that page meets the area fraction above (or the fraction is set to 0). Efficient OCR is also unsuitable when you need signature or face detection on every page (it will be automatically disabled for signature analysis). To disable Efficient OCR entirely, uncheck the 'Efficient OCR' checkbox and run your redaction task.
+**Note:** *AWS Textract* with *Extract signatures* still analyses **all** pages and disables Efficient OCR for that workflow.
 
 ### Overwrite existing OCR results
 
@@ -691,136 +735,153 @@ The app supports advanced OCR options that combine multiple OCR engines for impr
 
 ### Available OCR models
 
-- **Tesseract** (default): The standard OCR engine that works well for most documents. Provides good word-level bounding box accuracy.
-- **PaddleOCR**: More accurate for whole line text extraction, but word-level bounding boxes may be less precise. Best for documents with clear, well-formatted text.
-- **Hybrid-paddle**: Combines Tesseract and PaddleOCR - uses Tesseract for initial extraction, then PaddleOCR for re-extraction of low-confidence text regions.
-- **Hybrid-vlm**: Combines Tesseract with Vision Language Models (VLM) - uses Tesseract for initial extraction, then a VLM model (default: Dots.OCR) for re-extraction of low-confidence text.
-- **Hybrid-paddle-vlm**: Combines PaddleOCR with Vision Language Models - uses PaddleOCR first, then a VLM model for low-confidence regions.
-- **AWS Bedrock VLM**: Cloud-based Vision Language Model OCR via AWS Bedrock. Extracts text (and optionally detects people and signatures) from PDFs and images without running models locally. Requires AWS credentials and is subject to Bedrock quotas and pricing.
+A range of local and cloud OCR models are available for text extraction. The options shown in the app depend on which environment variables are enabled in your `app_config.env` file (see [Enabling advanced OCR options](#enabling-advanced-ocr-options) below). Once enabled, the models appear under **'Change default redaction settings'** on the **'Redact PDFs/images'** tab.
+
+![Available OCR models](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_llm_img/ocr_model_full_options.png)
+
+- **Tesseract** (`tesseract`, default, requires `SHOW_LOCAL_OCR_MODEL_OPTIONS=True`): Best for documents with clear, well-formatted text. Provides a good balance of speed and accuracy with precise word-level bounding boxes, but struggles with handwriting or noisy/scanned documents.
+- **PaddleOCR** (`paddle`, requires `SHOW_PADDLE_MODEL_OPTIONS=True`): More powerful than Tesseract and handles unclear typed text on scanned documents reasonably well, but is slower. Word-level bounding boxes are estimated from line-level output so may be less precise.
+- **VLM** (`vlm`, requires `SHOW_VLM_MODEL_OPTIONS=True`): Uses a Vision Language Model locally (recommended: Qwen 3.5, configurable via the `SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL` environment variable). Excellent for difficult handwriting and noisy documents, but significantly slower than the options above. Inference runs via the `transformers` package and can be quantised with `bitsandbytes` if `QUANTISE_VLM_MODELS=True`; for faster inference, use an [inference server](#inference-server-options) instead.
+- **Inference server** (`inference-server`, requires `SHOW_INFERENCE_SERVER_VLM_OPTIONS=True`): Uses an OpenAI-compatible API endpoint such as [llama-cpp (llama-server)](https://github.com/ggml-org/llama.cpp) or [vLLM](https://docs.vllm.ai/en/stable). Produces results comparable to the in-app VLM but is much faster, and supports GGUF or AWQ/GPTQ quantised models. Requires a separately configured server. See [below for details](#inference-server-options).
+- **AWS Bedrock VLM** (`AWS Bedrock VLM OCR - all PDF types`, requires `SHOW_BEDROCK_VLM_MODELS=True`): Cloud-based OCR using a Bedrock vision model (e.g. Qwen VL). Extracts text and optionally detects people and signatures from PDFs and images without a local GPU. Requires AWS credentials and Bedrock model access, and is subject to Bedrock quotas and pricing.
+
+#### Hybrid options
+
+Hybrid models (enabled with `SHOW_HYBRID_MODELS=True`) use PaddleOCR first to identify bounding boxes and extract text, then pass low-confidence regions to a more powerful model for correction. **Note:** In practice, results are not significantly better than using Paddle or VLM/inference server analysis alone (particularly with Qwen 3 VL), but the options are provided for comparison.
+
+- **Hybrid-paddle-vlm** (`hybrid-paddle-vlm`): Combines PaddleOCR's bounding box detection with an in-app VLM for low-confidence regions. PaddleOCR's stronger bounding box identification makes this the most practical hybrid option, provided both Paddle and the VLM model can run in the same environment.
+- **Hybrid-paddle-inference-server** (`hybrid-paddle-inference-server`): The same as above but uses an inference server instead of an in-app VLM, allowing the use of GGUF or AWQ/GPTQ quantised models via llama.cpp or vLLM. See [below for details](#inference-server-options).
 
 ### Enabling advanced OCR options
 
-To enable these options, you need to modify the app_config.env file in your '/config' folder and set the following environment variables:
+To enable these options, you need to change your system environment variables, or modify the app_config.env file in your '/config' folder and set the following environment variables:
 
 **Basic OCR model selection:**
 ```
-SHOW_LOCAL_OCR_MODEL_OPTIONS = "True"
+SHOW_LOCAL_OCR_MODEL_OPTIONS=True
 ```
 
-**To enable PaddleOCR options (paddle, hybrid-paddle):**
+**To enable PaddleOCR options (paddle):**
 ```
-SHOW_PADDLE_MODEL_OPTIONS = "True"
+SHOW_PADDLE_MODEL_OPTIONS=True
 ```
 
-**To enable Vision Language Model options (hybrid-vlm, hybrid-paddle-vlm):**
+**To enable Vision Language Model options (vlm):**
 ```
-SHOW_VLM_MODEL_OPTIONS = "True"
+SHOW_VLM_MODEL_OPTIONS=True
 ```
 
 **To enable AWS Bedrock VLM OCR (cloud-based VLM text extraction):**
 ```
-SHOW_BEDROCK_VLM_MODELS = "True"
+SHOW_BEDROCK_VLM_MODELS=True
 ```
 
-Once enabled, users will see a "Change default local OCR model" (or text extraction method) section in the redaction settings where they can choose between the available models based on what has been enabled, including Bedrock VLM analysis when configured.
+**To enable Inference Server options (inference-server):**
+```
+SHOW_INFERENCE_SERVER_VLM_OPTIONS=True
+```
+
+**To enable Hybrid OCR options (hybrid-paddle-vlm, hybrid-paddle-inference-server):**
+```
+SHOW_HYBRID_MODELS=True
+```
+
+See the [app settings documentation](https://seanpedrick-case.github.io/doc_redaction/src/app_settings.html), or below, for more details on these options. Once enabled, when running the app, you will see a "Change default local OCR model" (or text extraction method) section in the redaction settings where they can choose between the available models based on what has been enabled, including Bedrock VLM analysis when configured.
 
 ### OCR configuration parameters
 
-The following parameters can be configured by your system administrator to fine-tune OCR behavior:
+The following parameters can be configured to fine-tune OCR behaviour. Set them in your `app_config.env` file or as system environment variables. See the [app settings documentation](https://seanpedrick-case.github.io/doc_redaction/src/app_settings.html) for a full reference.
 
-#### Hybrid OCR settings
+#### General OCR settings
 
-- **SHOW_HYBRID_MODELS** (default: False): If enabled, hybrid OCR options will be shown in the UI.
-- **HYBRID_OCR_CONFIDENCE_THRESHOLD** (default: 80): Tesseract confidence score below which the secondary OCR engine (PaddleOCR or VLM) will be used for re-extraction. Lower values mean more text will be re-extracted.
-- **HYBRID_OCR_PADDING** (default: 1): Padding (in pixels) added to word bounding boxes before re-extraction with the secondary engine.
-- **SAVE_EXAMPLE_HYBRID_IMAGES** (default: False): If enabled, saves comparison images showing Tesseract vs. secondary engine results when using hybrid modes.
-- **SAVE_PAGE_OCR_VISUALISATIONS** (default: False): If enabled, saves images with detected bounding boxes overlaid for debugging purposes.
+- **CHOSEN_LOCAL_OCR_MODEL** (default: `"tesseract"`): Sets the default OCR engine without requiring a UI selection. Valid values: `"tesseract"`, `"paddle"`, `"vlm"`, `"inference-server"`, `"hybrid-paddle-vlm"`, `"hybrid-paddle-inference-server"`.
+- **SHOW_LOCAL_OCR_MODEL_OPTIONS** (default: False): If enabled, users can select the local OCR model from the UI.
+- **SHOW_OCR_GUI_OPTIONS** (default: True): If enabled, OCR-related options (e.g. model selection, Paddle options) are shown in the UI.
+- **EFFICIENT_OCR** (default: False): If enabled, uses a two-step process for PDFs — tries selectable text extraction per page first and only runs OCR on pages where no text could be extracted. Saves time and cost.
+- **EFFICIENT_OCR_MIN_WORDS** (default: 20): Minimum extractable words on a page to use the text-only route when `EFFICIENT_OCR` is enabled; pages below this threshold go through OCR.
+- **EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION** (default: 0.03): When `EFFICIENT_OCR` is enabled, the minimum fraction of the page area a single embedded image must cover for that page to be routed through OCR regardless of word count. Set to `0` to rely on word count only.
+- **MERGE_BOUNDING_BOXES** (default: True): When enabled, merges nearby bounding boxes in OCR/Textract results (reconstruction, grouping, and horizontal merge).
+- **MODEL_CACHE_PATH** (default: `"./model_cache"`): Directory where OCR models are cached locally.
+- **OVERWRITE_EXISTING_OCR_RESULTS** (default: False): If enabled, always runs OCR fresh instead of loading from existing JSON result files.
+- **HF_TOKEN** (default: `''`): Hugging Face token. Required for downloading gated or private VLM models from the Hub.
 
 #### Tesseract settings
 
-- **TESSERACT_SEGMENTATION_LEVEL** (default: 11): Tesseract PSM (Page Segmentation Mode) level. Valid values are 0-13. Higher values provide more detailed segmentation but may be slower.
+- **TESSERACT_SEGMENTATION_LEVEL** (default: 11): Tesseract PSM (Page Segmentation Mode) level. Valid values are 0–13. Higher values provide more detailed segmentation but may be slower.
+- **TESSERACT_WORD_LEVEL_OCR** (default: True): If enabled, uses Tesseract word-level OCR rather than line-level.
+- **TESSERACT_MAX_WORKERS** (default: 4): Maximum number of worker threads for running Tesseract on multiple pages in parallel. Keep lower than `MAX_WORKERS` to avoid saturating CPU/RAM.
+- **TESSERACT_FOLDER** (default: `''`): Path to the local Tesseract installation folder. On Windows, install Tesseract 5.5.0 from [UB-Mannheim/tesseract](https://github.com/UB-Mannheim/tesseract/wiki) and point this variable at the folder (e.g. `tesseract/`).
+- **TESSERACT_DATA_FOLDER** (default: `"/usr/share/tessdata"`): Path to the Tesseract trained data files (`tessdata`).
 
 #### PaddleOCR settings
 
 - **SHOW_PADDLE_MODEL_OPTIONS** (default: False): If enabled, PaddleOCR options will be shown in the UI.
 - **PADDLE_USE_TEXTLINE_ORIENTATION** (default: False): If enabled, PaddleOCR will detect and correct text line orientation.
 - **PADDLE_DET_DB_UNCLIP_RATIO** (default: 1.2): Controls the expansion ratio of detected text regions. Higher values expand the detection area more.
-- **CONVERT_LINE_TO_WORD_LEVEL** (default: False): If enabled, converts PaddleOCR line-level results to word-level for better precision in bounding boxes (not perfect, but pretty good).
+- **CONVERT_LINE_TO_WORD_LEVEL** (default: False): If enabled, converts PaddleOCR line-level results to approximate word-level bounding boxes for better precision.
 - **LOAD_PADDLE_AT_STARTUP** (default: False): If enabled, loads the PaddleOCR model when the application starts, reducing latency for first use but increasing startup time.
+- **PADDLE_MAX_WORKERS** (default: 2): Maximum number of worker threads for running PaddleOCR on multiple pages in parallel. Paddle is often GPU-bound; keep this low (e.g. 1–2) to avoid VRAM contention.
+- **PADDLE_MODEL_PATH** (default: `''`): Custom directory for PaddleOCR model storage, useful for environments like AWS Lambda.
+- **PADDLE_FONT_PATH** (default: `''`): Custom font path for PaddleOCR. If empty, the app uses system fonts.
+- **POPPLER_FOLDER** (default: `''`): Path to the local Poppler `bin` folder, required for PDF-to-image conversion. On Windows, install from [oschwartz10612/poppler-windows](https://github.com/oschwartz10612/poppler-windows) and point this at the `bin` folder (e.g. `poppler/poppler-24.02.0/Library/bin/`).
 
 #### Image preprocessing
 
-- **PREPROCESS_LOCAL_OCR_IMAGES** (default: True): If enabled, images are preprocessed before OCR. This can improve accuracy but may slow down processing.
-- **SAVE_PREPROCESS_IMAGES** (default: False): If enabled, saves the preprocessed images for debugging purposes.
+- **PREPROCESS_LOCAL_OCR_IMAGES** (default: True): If enabled, images are preprocessed before local OCR. Testing has shown this doesn't always improve results and can slow processing — consider setting to `False` if speed is a priority.
+- **SAVE_PREPROCESS_IMAGES** (default: False): If enabled, saves the preprocessed images for debugging.
+- **SAVE_PAGE_OCR_VISUALISATIONS** (default: False): If enabled, saves images with detected bounding boxes overlaid on page images for debugging.
+- **INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES** (default: False): If enabled, includes OCR visualisation files (created when `SAVE_PAGE_OCR_VISUALISATIONS` is True) in the final output file list shown in the Gradio interface.
 
 #### Vision Language Model (VLM) settings
 
-When VLM options are enabled, the following settings are available:
-
-- **SHOW_VLM_MODEL_OPTIONS** (default: False): If enabled, VLM options will be shown in the UI.
-- **SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL** (default: "Dots.OCR"): The VLM model to use. There are a range of options shown in tools/run_vlm.py. Generally, the Qwen 3.5 range of models are the most accurate, and vlm/inference server inference is based on using these models.
+- **SHOW_VLM_MODEL_OPTIONS** (default: False): If enabled, VLM OCR options will be shown in the UI.
+- **SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL** (default: `"Qwen3-VL-8B-Instruct"`): The local transformers VLM model to use for OCR. Available options: `"Nanonets-OCR2-3B"`, `"Dots.OCR"`, `"Qwen3-VL-2B-Instruct"`, `"Qwen3-VL-4B-Instruct"`, `"Qwen3-VL-8B-Instruct"`, `"Qwen3-VL-30B-A3B-Instruct"`, `"Qwen3-VL-235B-A22B-Instruct"`, `"PaddleOCR-VL"`. Generally the Qwen 3 VL range offers the best accuracy.
+- **OVERRIDE_VLM_REPO_ID** (default: `''`): If non-empty, overrides the Hugging Face repo ID or local path used for the selected VLM. Useful for pointing at a custom checkpoint or local folder.
+- **LOAD_TRANSFORMERS_VLM_MODEL_AT_START** (default: True): If enabled, loads the VLM weights at application startup. If disabled, weights load on the first VLM OCR call — reducing startup memory at the cost of a slower first run.
+- **QUANTISE_VLM_MODELS** (default: False): If enabled, quantises VLM models to 4-bit using `bitsandbytes` to reduce VRAM requirements.
+- **MAX_NEW_TOKENS** (default: 4096): Maximum number of tokens the VLM may generate per response.
+- **MAX_INPUT_TOKEN_LENGTH** (default: 8192): Maximum number of tokens that can be input to the VLM.
+- **VLM_MAX_IMAGE_SIZE** (default: 819200): Upper bound on total pixels (width × height) for images sent to the VLM. Larger images are downscaled while preserving aspect ratio.
+- **VLM_MIN_IMAGE_SIZE** (default: 614400): Minimum total pixels for full-page VLM OCR. Smaller pages are upscaled.
+- **VLM_HYBRID_MIN_IMAGE_SIZE** (default: 153600): Minimum total pixels for hybrid VLM line/crop passes. Smaller crops are upscaled.
+- **VLM_MIN_DPI** (default: 200.0): Minimum effective DPI after image preparation. Images below this DPI are upscaled.
+- **VLM_MAX_DPI** (default: 300.0): Maximum effective DPI after image preparation. High-DPI scans are downscaled accordingly.
+- **VLM_MAX_ASPECT_RATIO** (default: 10.0): Upper bound on image aspect ratio sent to the VLM. Very long/thin crops (e.g. hybrid line regions) are white-padded to stay within this limit.
+- **USE_FLASH_ATTENTION** (default: False): If enabled, uses flash attention for improved VLM performance. Not available on Windows.
+- **VLM_DISABLE_QWEN3_5_THINKING** (default: False): If enabled, disables the Qwen3.5 "thinking" chain for local transformers VLM calls, making responses faster by skipping the reasoning step.
 - **MAX_SPACES_GPU_RUN_TIME** (default: 60): Maximum seconds to run GPU operations on Hugging Face Spaces.
-- **MAX_NEW_TOKENS** (default: 30): Maximum number of tokens to generate for VLM responses.
-- **MAX_INPUT_TOKEN_LENGTH** (default: 4096): Maximum number of tokens that can be input to the VLM.
-- **VLM_MAX_IMAGE_SIZE** (default: 1000000): Maximum total pixels (width × height) for images. Larger images are resized while maintaining aspect ratio.
-- **VLM_MAX_DPI** (default: 300.0): Maximum DPI for images. Higher DPI images are resized accordingly.
-- **USE_FLASH_ATTENTION** (default: False): If enabled, uses flash attention for improved VLM performance.
-- **SAVE_VLM_INPUT_IMAGES** (default: False): If enabled, saves input images sent to VLM for debugging.
+- **ADD_VLM_BOUNDING_BOX_RULES** (default: False): If enabled, adds bounding box rules to the VLM prompt (e.g. coordinate format constraints for OCR output).
+- **REPORT_VLM_OUTPUTS_TO_GUI** (default: False): If enabled, reports VLM outputs to the GUI with info boxes as they are processed — useful for monitoring long OCR jobs.
+- **SAVE_VLM_INPUT_IMAGES** (default: False): If enabled, saves input images sent to the VLM for debugging.
+- **VLM_SEED** (default: `''`): Random seed for VLM generation. If empty, generation is non-deterministic.
+- **VLM generation parameters** (`VLM_DEFAULT_TEMPERATURE`, `VLM_DEFAULT_TOP_P`, `VLM_DEFAULT_MIN_P`, `VLM_DEFAULT_TOP_K`, `VLM_DEFAULT_REPETITION_PENALTY`, `VLM_DEFAULT_DO_SAMPLE`, `VLM_DEFAULT_PRESENCE_PENALTY`): Control sampling behaviour for VLM generation. All default to `''` (model-specific defaults are used when empty).
 
-#### General settings
+#### Inference server settings
 
-- **MODEL_CACHE_PATH** (default: "./model_cache"): Directory where OCR models are cached.
-- **OVERWRITE_EXISTING_OCR_RESULTS** (default: False): If enabled, always creates new OCR results instead of loading from existing JSON files.
+- **SHOW_INFERENCE_SERVER_VLM_OPTIONS** (default: False): If enabled, inference server OCR options will be shown in the UI.
+- **INFERENCE_SERVER_API_URL** (default: `"http://localhost:8080"`): Base URL of the inference server API for remote VLM OCR processing.
+- **INFERENCE_SERVER_MODEL_NAME** (default: `''`): Optional model name to send in inference server API requests. If empty, the server's default model is used.
+- **DEFAULT_INFERENCE_SERVER_VLM_MODEL** (default: `"qwen_3_vl_30b_a3b_it"`): Default model name for inference server VLM OCR calls.
+- **INFERENCE_SERVER_TIMEOUT** (default: 300): Timeout in seconds for inference server API requests.
+- **INFERENCE_SERVER_DISABLE_THINKING** (default: False): If enabled, disables chain-of-thought "thinking" for inference server VLM calls (adds `{"enable_thinking": false}` to request payloads). Useful when running a Qwen3.5 reasoning model and thinking tokens are unnecessary, such as in hybrid line-crop OCR — eliminates overhead and avoids needing a large `HYBRID_OCR_MAX_NEW_TOKENS` budget.
+- **SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS** (default: False): If enabled, allows users to select from available inference server VLM models in the UI.
 
-### Using an alternative OCR model
+#### Hybrid OCR settings
 
-If the SHOW_LOCAL_OCR_MODEL_OPTIONS, SHOW_PADDLE_MODEL_OPTIONS, and SHOW_INFERENCE_SERVER_VLM_OPTIONS are set to 'True' in your app_config.env file, you should see the following options available under **'Change default redaction settings'** on the **'Redact PDFs/images'** tab. The different OCR options can be used in different contexts.
-
-- **Tesseract (option 'tesseract')**: Best for documents with clear, well-formatted text, providing a good balance of speed and accuracy with precise word-level bounding boxes. But struggles a lot with handwriting or 'noisy' documents (e.g. scanned documents).
-- **PaddleOCR (option 'paddle')**: More powerful than Tesseract, but slower. Does a decent job with unclear typed text on scanned documents. Also, bounding boxes may not all be accurate as they will be calculated from the line-level bounding boxes produced by Paddle after analysis.
-- **VLM (option 'vlm')**: Recommended for use with the Qwen 3.5 range of models (can set this with the SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL environment variable in config.py). This model is extremely good at identifying difficult to read handwriting and noisy documents. However, it is much slower than the above options.
-Other models are available as you can see in the tools/run_vlm.py code file. This will conduct inference with the transformers package, and quantise with bitsandbytes if the QUANTISE_VLM_MODELS environment variable is set to True. Inference with this package is *much* slower than with e.g. llama.cpp or vllm servers, which can be used with the inference-server options described below.
-- **Inference server (option 'inference-server')**: This can be used with OpenAI compatible API endpoints, for example [llama-cpp using llama-server](https://github.com/ggml-org/llama.cpp), or [vllm](https://docs.vllm.ai/en/stable). Both of these options will be much faster for inference than the VLM 'in-app' model calls described above, and produce results of a similar quality, but you will need to be able to set up the server separately.
-- **AWS Bedrock VLM (option 'AWS Bedrock VLM OCR - all PDF types')**: When SHOW_BEDROCK_VLM_MODELS is True, this option appears in the text extraction method list. It uses a Bedrock vision model (e.g. Qwen VL) to perform OCR and optional person/signature detection in the cloud. No local GPU is required; AWS credentials and Bedrock model access are needed. Useful for PDFs and images when you prefer not to run VLMs locally.
-
-#### Hybrid options
-
-If the SHOW_HYBRID_MODELS environment variable is set to 'True' in your app_config.env file, you will see the hybrid model options available. The hybrid models call a smaller model (paddleOCR) to first identify bounding box position and text, and then pass text sections with low confidence to a more performant model (served in app or via an inference server such as llama.cpp or vllm) to suggest for replacement. **Note:** I have not found that the results from this analysis is significantly better than that from e.g. Paddle or VLM/inference server analysis alone (particularly when using Qwen 3 VL), but are provided for comparison.
-
-- **Hybrid-paddle-vlm**: This uses PaddleOCR's line-level detection with a VLM's advanced recognition capabilities. PaddleOCR is better at identifying bounding boxes for difficult documents, and so this is probably the most usable of the three options, if you can get both Paddle and the VLM model working in the same environment.
-- **Hybrid-paddle-inference-server**: This uses PaddleOCR's line-level detection with an inference server's advanced recognition capabilities. This is the same as the Hybrid-paddle-vlm option, but uses an inference server instead of a VLM model. This allows for the use of GGUF or AWQ/GPTQ quantised models via llama.cpp or vllm servers.
+- **SHOW_HYBRID_MODELS** (default: False): If enabled, hybrid OCR options (`hybrid-paddle-vlm`, `hybrid-paddle-inference-server`) will be shown in the UI.
+- **HYBRID_OCR_CONFIDENCE_THRESHOLD** (default: 95): Confidence score below which the secondary OCR engine (VLM or inference server) will be used for re-extraction. Lower values mean more text will be re-extracted by the secondary model.
+- **HYBRID_OCR_PADDING** (default: 1): Padding in pixels added to word bounding boxes before re-extraction with the secondary engine.
+- **HYBRID_OCR_MAX_NEW_TOKENS** (default: 1024): Maximum tokens the inference server (or local VLM) may generate per hybrid line-crop OCR call. For reasoning models like Qwen3.5, thinking tokens count against this budget — increase to 2048 or higher if you see "Inference server returned no results" when using `hybrid-paddle-inference-server` with a reasoning model.
+- **HYBRID_OCR_MAX_WORDS** (default: 50): Maximum words allowed in a hybrid OCR result for a single text line. Results exceeding this are discarded as likely hallucinations, and the original OCR result is kept instead.
+- **SAVE_EXAMPLE_HYBRID_IMAGES** (default: False): If enabled, saves comparison images showing Tesseract vs. secondary engine results when using hybrid modes.
 
 ### Inference server options
 
-If using a local inference server, I would suggest using (llama.cpp)[https://github.com/ggml-org/llama.cpp] as it is much faster than transformers/torch inference, and it will offload to cpu/ram automatically rather than failing as vllm tends to do. Here is the run command I use for my llama server locally ion a wsl or linux environment) to get deterministic results (need at least 16GB of VRAM to run with all gpu layers assigned to your graphics card to use the following model):
+If using a local inference server, I would suggest using [llama.cpp](https://github.com/ggml-org/llama.cpp), or [vLLM](https://docs.vllm.ai/en/stable/) as they are much faster than transformers/torch inference provided in the app through the 'vlm' OCR route or 'Local Transformers LLM' route. Llama.cpp is more flexible than vLLM for low VRAM systems, as Llama.cpp will offload to cpu/system RAM automatically rather than failing as vLLM tends to do.
 
-```
-llama-server \
-    -hf unsloth/Qwen3-VL-30B-A3B-Instruct-GGUF:UD-Q4_K_XL \
-    --n-gpu-layers 99 \
-    --jinja \
-    --temp 0 \
-    --top-k 1 \
-    --top-p 1 \
-    --min-p 1 \
-    --frequency-penalty 1 \
-    --presence-penalty 1 \
-    --flash-attn on \
-    --ctx-size 8192 \
-    --host 0.0.0.0 \
-    --port 7862 \
-    --image-min-tokens 1600 \
-    --image-max-tokens 2301 \
-    --no-warmup \
-    --n-cpu-moe 13
-```
+To help with installation of the Redaction app with Llama.cpp and vLLM, I have created Docker compose files for both Llama.cpp and vLLM. These can be found in the doc_redaction repo. For Llama.cpp, you can use the [docker-compose_llama.yml](https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_llama.yml) file, and for vLLM, you can use the [docker-compose_vllm.yml](https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_vllm.yml) file. To run, Docker / Docker Desktop should be installed, and then you can run the commands suggested in the top of the files to run the servers.
 
-If running llama.cpp on the same computer as the doc redaction app, you can then set the following variable in config/app_config.env to run:
-
-```
-SHOW_INFERENCE_SERVER_VLM_OPTIONS=True
-INFERENCE_SERVER_API_URL=http://localhost:7862
-```
+You will need ~30-50GB of disk space to run everything depending on the model chosen from the Compose file. For the vLLM server, you will need 24 GB VRAM. For the Llama.cpp server, 24 GB VRAM is needed to run at full speed, but the n-gpu-layers and n-cpu-moe parameters in the Docker compose file can be adjusted to fit into your system. I would suggest that 8 GB VRAM is needed as a bare minimum for decent inference speed. See the [Unsloth guide](https://unsloth.ai/docs/models/qwen3.5) for more details on working with GGUF files for Qwen 3.5.
 
 ### Identifying people and signatures with VLMs
 
@@ -828,30 +889,66 @@ If VLM or inference server options are enabled, you can also use the VLM to iden
 
 On the 'Redaction Settings' tab, select the CUSTOM_VLM_PERSON and CUSTOM_VLM_SIGNATURE entities. When you conduct an OCR task with the VLM or inference server, it will identify the bounding boxes for photos of people's faces and signatures in the document, and redact them accordingly if a redaction option is selected.
 
+With **Efficient OCR** enabled, **CUSTOM_VLM_PERSON** follows the same page rules as OCR (VLM only on OCR-classified pages); **CUSTOM_VLM_SIGNATURE** still scans all pages. Textract **Extract signatures** uses full-document Textract OCR and disables Efficient OCR.
+
 ### PII identification with LLMs
 
-In addition to rule-based (Local) and AWS Comprehend PII detection, the app can use **Large Language Models (LLMs)** to identify and label personal information. This is useful for entity types that are context-dependent (e.g. job titles, organisation names) or when you want custom instructions (e.g. "do not redact the name of the university"). LLM-based PII can be run via **AWS Bedrock**, a **local transformers** model, or an **inference server** (e.g. llama.cpp, vLLM).
+In addition to rule-based (Local) and AWS Comprehend PII detection, the app can use **Large Language Models (LLMs)** to identify and label personal information. This is useful for entity types that are context-dependent (e.g. job titles, organisation names) or when you want custom instructions (e.g. "do not redact the name of the university"). LLM-based PII can be run via **AWS Bedrock**, a **local transformers** model, or a **local inference server** (e.g. llama.cpp, vLLM). 
+
+![Available OCR models](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_llm_img/ocr_model_full_options.png)
 
 **Options (when enabled by your administrator):**
 
 - **LLM (AWS Bedrock)**: Uses a Bedrock model (e.g. Claude, Nova) for PII detection. Requires AWS credentials and Bedrock model access. No local GPU needed.
-- **Local transformers LLM**: Runs a Hugging Face transformers model on your machine for PII detection. Requires sufficient RAM/VRAM and model download.
-- **Local inference server**: Sends text to an OpenAI-compatible API (e.g. llama.cpp, vLLM) for PII detection. You run the server separately; the app only calls the API.
+- **Local transformers LLM**: Runs a Hugging Face transformers model on your machine for PII detection. Requires sufficient RAM/VRAM. The default model is Qwen 3.5 9B; other supported models include Qwen 3.5 (0.8B–122B), Gemma 3 (12B/27B), GPT-OSS 20B, Ministral 3 14B, and NVIDIA Nemotron 3 30B (see the [config.py file for the updated list](https://github.com/seanpedrick-case/doc_redaction/blob/main/tools/config.py)).
+- **Local inference server**: Sends text to an OpenAI-compatible API (e.g. llama.cpp, vLLM) for PII detection. You run the server separately; the app only calls the API. Note: this uses `INFERENCE_SERVER_API_URL`, the same URL endpoint used for VLM OCR. See [Inference server options](#inference-server-options) for installation, as calls to the Local inference server will use the same model as the OCR inference-server model by default.
+
+**Using LLM PII detection**
+
+On the **'Redact PDFs/images'** tab, under **'Redaction settings'**, choose the desired **PII identification** method. You can then:
+
+- Select which **LLM entities** to detect (e.g. NAME, EMAIL_ADDRESS, PHONE_NUMBER, ADDRESS, CUSTOM). Custom entity types can also be added directly in the dropdown box.
+- Optionally add **custom instructions** to guide the LLM — for example: `"Do not redact company names"` or `"Redact all organisation names with the label ORGANISATION"`. When custom instructions are provided, the app can optionally use a more capable model (see `CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE` below).
+
+The LLM processes text page by page. Results include entity type, text span, and confidence score, which are then used to place redaction boxes in the same way as the local or Comprehend methods.
 
 **Enabling LLM PII options**
 
-Visibility of these methods is controlled by config (e.g. `app_config.env`):
+Visibility of these methods is controlled by environment variables in `app_config.env`:
 
-- **SHOW_AWS_BEDROCK_LLM_MODELS** / **SHOW_AWS_PII_DETECTION_OPTIONS**: Show "LLM (AWS Bedrock)" in the PII identification dropdown.
-- **SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS**: Show "Local transformers LLM".
-- **SHOW_INFERENCE_SERVER_PII_OPTIONS**: Show "Local inference server".
+- **SHOW_AWS_BEDROCK_LLM_MODELS** (default: False): Show "LLM (AWS Bedrock)" in the PII identification dropdown.
+- **SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS** (default: False): Show "Local transformers LLM".
+- **SHOW_INFERENCE_SERVER_PII_OPTIONS** (default: False): Show "Local inference server".
 
-On the **'Redact PDFs/images'** tab, under **'Redaction settings'**, choose the desired **PII identification** method (e.g. "LLM (AWS Bedrock)"). You can then:
+#### LLM PII configuration variables
 
-- Select which **LLM entities** to detect (e.g. NAME, EMAIL_ADDRESS, PHONE_NUMBER, ADDRESS, CUSTOM).
-- Optionally add **custom instructions** (e.g. "Do not redact company names" or "Redact all organisation names with the label ORGANISATION").
+##### Model selection
 
-Model choice (Bedrock model ID, inference server URL, or local model name) and parameters (temperature, max tokens) are typically set in **Settings** or via environment variables; see the App settings / config documentation for your deployment.
+- **CLOUD_LLM_PII_MODEL_CHOICE** (default: `"amazon.nova-pro-v1:0"`): Default Bedrock (or cloud) model ID for LLM-based PII detection.
+- **CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE** (default: `"amazon.nova-pro-v1:0"`): If non-empty, overrides `CLOUD_LLM_PII_MODEL_CHOICE` when custom instructions are provided. Leave empty to always use `CLOUD_LLM_PII_MODEL_CHOICE`.
+- **LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE** (default: `"Qwen 3.5 9B"`): The local transformers model for PII detection. Supported values: `"Qwen 3.5 0.8B"`, `"Qwen 3.5 2B"`, `"Qwen 3.5 4B"`, `"Qwen 3.5 9B"`, `"Qwen 3.5 27B"`, `"Qwen 3.5 35B-A3B"`, `"Qwen 3.5 122B-A10B"`, `"Gemma 3 12B"`, `"Gemma 3 27B"`, `"GPT-OSS 20B"`, `"Ministral 3 14B Instruct"`, `"NVIDIA Nemotron 3 Nano 30B A3B NVFP4"`.
+- **USE_TRANSFORMERS_VLM_MODEL_AS_LLM** (default: False): If enabled, reuses the already-loaded VLM model (`SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL`) for LLM PII detection instead of downloading a separate model. The VLM weights must already be loaded (e.g. from a prior VLM OCR run, or `LOAD_TRANSFORMERS_VLM_MODEL_AT_START=True`).
+- **LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START** (default: False): If enabled, loads the local transformers PII model at application startup to reduce latency on first use.
+- **CHOSEN_LLM_PII_INFERENCE_METHOD** (default: `"aws-bedrock"`): Sets the default inference method programmatically. Options: `"aws-bedrock"`, `"local"`, `"inference-server"`, `"azure-openai"`, `"gemini"`.
+- **DEFAULT_INFERENCE_SERVER_PII_MODEL** (default: `"gemma_3_12b"`): Default model name for inference-server LLM PII detection calls.
+- **INFERENCE_SERVER_API_URL** (default: `"http://localhost:8080"`): Base URL for the inference server used for LLM PII detection. Distinct from `INFERENCE_SERVER_API_URL`, which is used for VLM OCR.
+- **DEFAULT_PII_DETECTION_MODEL**: Default PII detection method shown selected in the UI on startup. Automatically defaults to AWS Comprehend if `SHOW_AWS_PII_DETECTION_OPTIONS` is enabled, otherwise defaults to the local model.
+
+##### Entity configuration
+
+- **CHOSEN_LLM_ENTITIES**: Default entity types pre-selected for LLM detection (e.g. `EMAIL_ADDRESS`, `ADDRESS`, `NAME`, `PHONE_NUMBER`, `CUSTOM`). Configurable as a comma-separated list.
+- **FULL_LLM_ENTITY_LIST**: Full list of entity types available in the LLM entity selection dropdown.
+
+##### Generation parameters
+
+- **LLM_TEMPERATURE** (default: 0.1): Sampling temperature for LLM generation. Lower values produce more deterministic output — recommended for PII detection.
+- **LLM_MAX_NEW_TOKENS** (default: 8192): Maximum tokens the LLM may generate per PII detection call.
+- **LLM_SEED** (default: 42): Random seed for reproducible results.
+- **LLM_CONTEXT_LENGTH** (default: 32768): Maximum context length for the local transformers LLM.
+- **REASONING_SUFFIX**: Suffix appended to prompts for reasoning-capable models to control chain-of-thought behaviour. Examples: `"/nothink"` for Qwen 3.5 (disables thinking), `"Reasoning: low"` for GPT-OSS 20B, `""` for models without reasoning modes. Set automatically based on `LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE`.
+- **MULTIMODAL_PROMPT_FORMAT** (default: False): If enabled, uses a multimodal prompt format. Auto-set to True for some model choices (e.g. Gemma 3 12B/27B).
+- **PRINT_TRANSFORMERS_USER_PROMPT** (default: False): If enabled, prints the system and user prompts to the console when calling the local transformers LLM. Useful for debugging; avoid in production if logs are sensitive.
+- **Additional LLM generation parameters**: `LLM_TOP_K` (default: 64), `LLM_MIN_P` (default: 0), `LLM_TOP_P` (default: 0.95), `LLM_REPETITION_PENALTY` (default: 1.0), `LLM_STREAM` (default: True), `LLM_RESET` (default: False), `SPECULATIVE_DECODING` (default: False), `ASSISTANT_MODEL` (empty), `LLM_MODEL_DTYPE` (default: `"bfloat16"`).
 
 ## Command Line Interface (CLI)
 

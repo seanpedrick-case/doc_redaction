@@ -70,7 +70,8 @@ dependencies = [
     "spaces<=0.47.0",
     "google-genai<=1.66.0",
     "openai<=2.25.0",
-    "markdown<=3.7"
+    "markdown<=3.10.2",
+    "tabulate<=0.10.0"
 ]
 
 [project.optional-dependencies]
