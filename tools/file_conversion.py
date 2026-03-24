@@ -101,7 +101,7 @@ def _render_pdf_page_to_png_pymupdf_mediabox(
             dpi=int(dpi) if dpi is not None else None,
             colorspace=pymupdf.csGRAY,
             alpha=False,
-            annots=True,
+            annots=False,
         )
         # Fast path: write PNG via MuPDF, then load with PIL for downstream resizing.
         pix.save(out_path)

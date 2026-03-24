@@ -13,7 +13,6 @@ from gradio import Progress as progress
 from tqdm import tqdm
 
 from tools.config import (
-    API_URL,
     AWS_ACCESS_KEY,
     AWS_LLM_PII_OPTION,
     AWS_REGION,
@@ -21,6 +20,7 @@ from tools.config import (
     CLOUD_LLM_PII_MODEL_CHOICE,
     CLOUD_SUMMARISATION_MODEL_CHOICE,
     DEFAULT_INFERENCE_SERVER_PII_MODEL,
+    INFERENCE_SERVER_API_URL,
     INFERENCE_SERVER_PII_OPTION,
     LLM_CONTEXT_LENGTH,
     LLM_MAX_NEW_TOKENS,
@@ -303,7 +303,7 @@ def summarise_document_wrapper(
 
     # Use config default for region
     summarisation_aws_region = AWS_REGION
-    summarisation_api_url = API_URL
+    summarisation_api_url = INFERENCE_SERVER_API_URL
 
     # Get model choice from inference method
     model_choice = get_model_choice_from_inference_method(inference_method)

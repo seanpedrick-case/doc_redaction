@@ -3957,6 +3957,48 @@ def _fix_malformed_bbox_in_json_string(json_string):
     return fixed_json
 
 
+def _repair_vlm_json_stray_coordinate_strings(
+    json_string: str,
+    default_text: str = "[UNKNOWN]",
+    default_conf: float = 0.9,
+) -> str:
+    """
+    Fix invalid JSON where the VLM repeats bbox coords as a lone quoted string
+    instead of \"text\" / \"conf\", e.g.:
+    {\"bbox\": [870, 290, 913, 316], \"870, 290, 913, 316\"}
+    """
+    if not json_string or not default_text:
+        return json_string
+    text_lit = json.dumps(str(default_text))
+    conf_lit = json.dumps(float(default_conf))
+    # After a closing `]` (end of bbox array), comma, quoted string of four ints only
+    pattern = re.compile(r'(\])\s*,\s*"(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)"')
+
+    def _repl(m):
+        return f'{m.group(1)}, "text": {text_lit}, "conf": {conf_lit}'
+
+    prev = None
+    s = json_string
+    while prev != s:
+        prev = s
+        s = pattern.sub(_repl, s)
+    return s
+
+
+def _preprocess_vlm_ocr_json_string(
+    raw: Optional[str],
+    implied_label: Optional[str] = None,
+) -> str:
+    """Chain bbox fixes and stray-coordinate repair before json.loads."""
+    if not raw or not isinstance(raw, str):
+        return ""
+    s = raw.strip()
+    s = _fix_malformed_bbox_in_json_string(s)
+    label = implied_label if implied_label else "[UNKNOWN]"
+    s = _repair_vlm_json_stray_coordinate_strings(s, default_text=label)
+    return s
+
+
 def _fix_malformed_bbox(bbox):
     """
     Attempts to fix malformed bounding box values.
@@ -4295,7 +4337,14 @@ def _vlm_page_ocr_predict(
 
         # Fix malformed bounding box values in the JSON string before parsing
         # This handles cases like: "bb": "779, 767, 874, 789],
-        extracted_text = _fix_malformed_bbox_in_json_string(extracted_text)
+        _inf_implied = None
+        if detect_people_only:
+            _inf_implied = "[PERSON]"
+        elif detect_signatures_only:
+            _inf_implied = "[SIGNATURE]"
+        extracted_text = _preprocess_vlm_ocr_json_string(
+            extracted_text, implied_label=_inf_implied
+        )
 
         lines_data = None
 
@@ -4461,7 +4510,13 @@ def _vlm_page_ocr_predict(
                 continue
 
             # Check for text_content (matching ocr.ipynb) or text field
-            text = line_item.get("text_content") or line_item.get("text", "").strip()
+            text = line_item.get("text_content") or line_item.get("text", "")
+            if isinstance(text, str):
+                text = text.strip()
+            else:
+                text = str(text).strip() if text is not None else ""
+            if not text and _inf_implied:
+                text = _inf_implied.strip()
             if not text:
                 continue
 
@@ -4875,7 +4930,14 @@ def _inference_server_page_ocr_predict(
 
         # Fix malformed bounding box values in the JSON string before parsing
         # This handles cases like: "bb": "779, 767, 874, 789],
-        extracted_text = _fix_malformed_bbox_in_json_string(extracted_text)
+        _inf_server_implied = None
+        if detect_people_only:
+            _inf_server_implied = "[PERSON]"
+        elif detect_signatures_only:
+            _inf_server_implied = "[SIGNATURE]"
+        extracted_text = _preprocess_vlm_ocr_json_string(
+            extracted_text, implied_label=_inf_server_implied
+        )
 
         lines_data = None
 
@@ -5026,7 +5088,13 @@ def _inference_server_page_ocr_predict(
                 continue
 
             # Check for text_content (matching ocr.ipynb) or text field
-            text = line_item.get("text_content") or line_item.get("text", "").strip()
+            text = line_item.get("text_content") or line_item.get("text", "")
+            if isinstance(text, str):
+                text = text.strip()
+            else:
+                text = str(text).strip() if text is not None else ""
+            if not text and _inf_server_implied:
+                text = _inf_server_implied.strip()
             if not text:
                 continue
 
@@ -5163,6 +5231,7 @@ def _parse_vlm_page_ocr_response(
     scale_y: float,
     normalised_coords_range: Optional[int],
     model_name: str = "Cloud VLM",
+    implied_label: Optional[str] = None,
 ) -> Dict[str, List]:
     """
     Helper function to parse VLM page OCR response and convert to expected format.
@@ -5177,6 +5246,8 @@ def _parse_vlm_page_ocr_response(
         scale_y: Scale factor for y coordinates (original/processed)
         normalised_coords_range: If set, bounding boxes are in normalized coordinates (0 to this value)
         model_name: Name of the model for the 'model' field in results
+        implied_label: When set (e.g. \"[PERSON]\" for face pass), used to repair malformed JSON
+            where the model omits \"text\", and to fill missing text on dict entries that only have bbox.
 
     Returns:
         Dictionary with 'text', 'left', 'top', 'width', 'height', 'conf', 'model' keys
@@ -5192,8 +5263,9 @@ def _parse_vlm_page_ocr_response(
         processed_width = actual_width
         processed_height = actual_height
 
-    # Fix malformed bounding box values in the JSON string before parsing
-    extracted_text = _fix_malformed_bbox_in_json_string(extracted_text.strip())
+    extracted_text = _preprocess_vlm_ocr_json_string(
+        extracted_text, implied_label=implied_label
+    )
 
     lines_data = None
 
@@ -5278,7 +5350,13 @@ def _parse_vlm_page_ocr_response(
         if not isinstance(line_item, dict):
             continue
 
-        text = line_item.get("text_content") or line_item.get("text", "").strip()
+        text = line_item.get("text_content") or line_item.get("text", "")
+        if isinstance(text, str):
+            text = text.strip()
+        else:
+            text = str(text).strip() if text is not None else ""
+        if not text and implied_label:
+            text = implied_label.strip()
         if not text:
             continue
 
@@ -5640,6 +5718,12 @@ def _bedrock_page_ocr_predict(
                 model_choice or "Bedrock",
             )
 
+        _bedrock_implied_label = None
+        if detect_people_only:
+            _bedrock_implied_label = "[PERSON]"
+        elif detect_signatures_only:
+            _bedrock_implied_label = "[SIGNATURE]"
+
         # Plot bounding boxes from VLM response if enabled
         if SAVE_VLM_INPUT_IMAGES:
             try:
@@ -5650,9 +5734,12 @@ def _bedrock_page_ocr_predict(
                 elif detect_signatures_only:
                     task_type = "signature"
 
+                _viz_json = _preprocess_vlm_ocr_json_string(
+                    extracted_text, implied_label=_bedrock_implied_label
+                )
                 plot_text_bounding_boxes(
                     processed_image,
-                    extracted_text,
+                    _viz_json,
                     image_name=image_name,
                     image_folder="bedrock_visualisations",
                     output_folder=output_folder,
@@ -5673,6 +5760,7 @@ def _bedrock_page_ocr_predict(
             scale_y=scale_y,
             normalised_coords_range=normalised_coords_range,
             model_name="Bedrock",
+            implied_label=_bedrock_implied_label,
         )
 
         # Get model name for tracking
@@ -5908,6 +5996,12 @@ def _gemini_page_ocr_predict(
                 model_choice or "Gemini",
             )
 
+        _gem_implied = None
+        if detect_people_only:
+            _gem_implied = "[PERSON]"
+        elif detect_signatures_only:
+            _gem_implied = "[SIGNATURE]"
+
         # Parse response using shared helper
         result = _parse_vlm_page_ocr_response(
             extracted_text=extracted_text,
@@ -5918,6 +6012,7 @@ def _gemini_page_ocr_predict(
             scale_y=scale_y,
             normalised_coords_range=normalised_coords_range,
             model_name="Gemini",
+            implied_label=_gem_implied,
         )
 
         # Get model name for tracking
@@ -6154,6 +6249,12 @@ def _azure_openai_page_ocr_predict(
                 model_choice or "Azure/OpenAI",
             )
 
+        _azure_implied = None
+        if detect_people_only:
+            _azure_implied = "[PERSON]"
+        elif detect_signatures_only:
+            _azure_implied = "[SIGNATURE]"
+
         # Parse response using shared helper
         result = _parse_vlm_page_ocr_response(
             extracted_text=extracted_text,
@@ -6164,6 +6265,7 @@ def _azure_openai_page_ocr_predict(
             scale_y=scale_y,
             normalised_coords_range=normalised_coords_range,
             model_name="Azure/OpenAI",
+            implied_label=_azure_implied,
         )
 
         # Get model name for tracking

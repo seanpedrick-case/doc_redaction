@@ -508,10 +508,6 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
     * **Description:** Inference endpoint URL for Azure/OpenAI. Used with `AZURE_OPENAI_API_KEY` when Azure/OpenAI LLM or VLM options are enabled.
     * **Default Value:** `''`
 
-* **`API_URL`**
-    * **Description:** Base URL of the LLM inference-server API (used for PII detection when `SHOW_INFERENCE_SERVER_LLM_MODELS` is enabled). Distinct from `INFERENCE_SERVER_API_URL`, which is used for VLM/OCR.
-    * **Default Value:** `"http://localhost:8080"`
-
 * **`HF_TOKEN`**
     * **Description:** Hugging Face token. May be required for downloading gated or private models (e.g. some local transformers LLM or VLM models).
     * **Default Value:** `''`
@@ -634,7 +630,7 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
     * **Default Value:** `"False"`
 
 * **`INFERENCE_SERVER_API_URL`**
-    * **Description:** Base URL of the inference-server API for remote OCR processing.
+    * **Description:** Base URL of the inference-server API for remote OCR processing and PII detection.
     * **Default Value:** `"http://localhost:8080"`
 
 * **`INFERENCE_SERVER_MODEL_NAME`**

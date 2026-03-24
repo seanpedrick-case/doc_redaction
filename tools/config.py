@@ -1404,7 +1404,9 @@ AZURE_OPENAI_INFERENCE_ENDPOINT = get_or_create_env_var(
 SHOW_INFERENCE_SERVER_LLM_MODELS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_INFERENCE_SERVER_LLM_MODELS", "False")
 )
-API_URL = get_or_create_env_var("API_URL", "http://localhost:8080")
+INFERENCE_SERVER_API_URL = get_or_create_env_var(
+    "INFERENCE_SERVER_API_URL", str(INFERENCE_SERVER_API_URL)
+)
 
 # Build up options for models
 model_full_names = list()
