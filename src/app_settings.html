@@ -616,6 +616,11 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <li><strong>Description:</strong> Minimum number of extractable words on a page to use the text-only route when <code>EFFICIENT_OCR</code> is enabled; below this threshold the page uses OCR.</li>
 <li><strong>Default Value:</strong> <code>20</code></li>
 </ul></li>
+<li><strong><code>EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION</code></strong>
+<ul>
+<li><strong>Description:</strong> When <code>EFFICIENT_OCR</code> is enabled, minimum fraction of the page area (MediaBox) that a single embedded image must cover to route that page through OCR (<code>redact_image_pdf</code>) in addition to the word-count rule. This catches pages with plenty of selectable text but meaningful raster content (e.g.&nbsp;photos) where text may appear only inside the image. Set to <code>0</code> to disable image-based routing and rely on word count only.</li>
+<li><strong>Default Value:</strong> <code>0.03</code> (3% of page area)</li>
+</ul></li>
 <li><strong><code>MAX_WORKERS</code></strong>
 <ul>
 <li><strong>Description:</strong> Default maximum number of worker threads for parallel processing across the app. Used as the default or cap for thread pools in review (saving redacted pages, loading page images), file conversion (PDF-to-images, input file listing, annotation processing), file redaction (text extraction, merge/summary, pikepdf annotations), custom image analyser (mapping analyzer results to bounding boxes), and data anonymisation (initial column cleaning). When not set, <code>OCR_FIRST_PASS_MAX_WORKERS</code> and <code>SUMMARY_PAGE_GROUP_MAX_WORKERS</code> default to this value; set those explicitly to override for OCR or summarisation only.</li>
@@ -666,6 +671,11 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <ul>
 <li><strong>Description:</strong> Padding in pixels around the line crop when calling Bedrock VLM for re-extraction.</li>
 <li><strong>Default Value:</strong> <code>5</code></li>
+</ul></li>
+<li><strong><code>SAVE_TEXTRACT_BEDROCK_HYBRID_EXAMPLES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, saves example images or artefacts from the Textract + Bedrock VLM hybrid re-extraction path for debugging (see <code>tools/config.py</code> / hybrid Textract–Bedrock implementation).</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
 </ul>
 </section>
@@ -816,11 +826,6 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <li><strong>Description:</strong> Inference endpoint URL for Azure/OpenAI. Used with <code>AZURE_OPENAI_API_KEY</code> when Azure/OpenAI LLM or VLM options are enabled.</li>
 <li><strong>Default Value:</strong> <code>''</code></li>
 </ul></li>
-<li><strong><code>API_URL</code></strong>
-<ul>
-<li><strong>Description:</strong> Base URL of the LLM inference-server API (used for PII detection when <code>SHOW_INFERENCE_SERVER_LLM_MODELS</code> is enabled). Distinct from <code>INFERENCE_SERVER_API_URL</code>, which is used for VLM/OCR.</li>
-<li><strong>Default Value:</strong> <code>"http://localhost:8080"</code></li>
-</ul></li>
 <li><strong><code>HF_TOKEN</code></strong>
 <ul>
 <li><strong>Description:</strong> Hugging Face token. May be required for downloading gated or private models (e.g.&nbsp;some local transformers LLM or VLM models).</li>
@@ -929,7 +934,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 </ul></li>
 <li><p><strong><code>USE_TRANSFORMERS_VLM_MODEL_AS_LLM</code></strong></p>
 <ul>
-<li><strong>Description:</strong> When set to <code>"True"</code>, use the same local transformers VLM model (e.g.&nbsp;Qwen3-VL-4B-Instruct) for LLM tasks (e.g.&nbsp;PII entity detection in <code>tools/llm_entity_detection.py</code>) as for VLM/OCR. Overrides <code>LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE</code> when local transformers LLM is selected. The VLM model must be loaded first (e.g.&nbsp;by running VLM OCR); otherwise the standard PII model is used.</li>
+<li><strong>Description:</strong> When set to <code>"True"</code>, use the same local transformers VLM model (e.g.&nbsp;Qwen3-VL-4B-Instruct) for LLM tasks (e.g.&nbsp;PII entity detection in <code>tools/llm_entity_detection.py</code>) as for VLM/OCR. Overrides <code>LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE</code> when local transformers LLM is selected. The VLM weights must be loaded first (e.g.&nbsp;<strong><code>LOAD_TRANSFORMERS_VLM_MODEL_AT_START=True</code></strong>, or by running a VLM OCR task first); otherwise the standard PII model is used.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
 <li><p><strong><code>LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE</code></strong></p>
@@ -957,6 +962,11 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <li><strong>Description:</strong> Suffix added to prompts for reasoning-capable models (e.g.&nbsp;<code>"Reasoning: low"</code> for GPT-OSS 20B, <code>"/nothink"</code> for Qwen 3 4B to disable chain-of-thought). Model-specific; see config for defaults.</li>
 <li><strong>Default Value:</strong> Model-dependent (e.g.&nbsp;<code>"Reasoning: low"</code> or <code>"/nothink"</code> or <code>''</code>).</li>
 </ul></li>
+<li><p><strong><code>PRINT_TRANSFORMERS_USER_PROMPT</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, prints the system and user prompts to the console when calling the local transformers LLM (<code>tools/llm_funcs.py</code>). Useful for debugging; avoid in production if logs are sensitive.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
 <li><p><strong>LLM generation parameters:</strong> <strong><code>LLM_TEMPERATURE</code></strong> (default <code>0.1</code>), <strong><code>LLM_TOP_K</code></strong> (<code>64</code>), <strong><code>LLM_MIN_P</code></strong> (<code>0</code>), <strong><code>LLM_TOP_P</code></strong> (<code>0.95</code>), <strong><code>LLM_REPETITION_PENALTY</code></strong> (<code>1.0</code>), <strong><code>LLM_MAX_NEW_TOKENS</code></strong> (<code>4096</code>), <strong><code>LLM_CONTEXT_LENGTH</code></strong> (<code>32768</code>), <strong><code>LLM_SEED</code></strong> (<code>42</code>), <strong><code>LLM_RESET</code></strong> (<code>False</code>), <strong><code>LLM_STREAM</code></strong> (<code>True</code>), <strong><code>LLM_STOP_STRINGS</code></strong>, <strong><code>LLM_THREADS</code></strong> (<code>-1</code>), <strong><code>SPECULATIVE_DECODING</code></strong> (<code>False</code>), <strong><code>ASSISTANT_MODEL</code></strong>, <strong><code>LLM_MODEL_DTYPE</code></strong> (<code>bfloat16</code>), and other <strong><code>LLM_*</code></strong> / related variables in <code>tools/config.py</code> control local/transformers LLM generation in <code>tools/llm_funcs.py</code>. <strong><code>LLM_TEMPERATURE</code></strong> and <strong><code>LLM_MAX_NEW_TOKENS</code></strong> also control PII detection LLM calls and retries.</p></li>
 <li><p><strong><code>SHOW_INFERENCE_SERVER_VLM_OPTIONS</code></strong></p>
 <ul>
@@ -970,7 +980,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 </ul></li>
 <li><p><strong><code>INFERENCE_SERVER_API_URL</code></strong></p>
 <ul>
-<li><strong>Description:</strong> Base URL of the inference-server API for remote OCR processing.</li>
+<li><strong>Description:</strong> Base URL of the inference-server API for remote OCR processing and PII detection.</li>
 <li><strong>Default Value:</strong> <code>"http://localhost:8080"</code></li>
 </ul></li>
 <li><p><strong><code>INFERENCE_SERVER_MODEL_NAME</code></strong></p>
@@ -1018,6 +1028,11 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <li><strong>Description:</strong> If set to <code>"True"</code>, VLM (Vision Language Model) options will be shown in the UI.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
+<li><strong><code>LOAD_TRANSFORMERS_VLM_MODEL_AT_START</code></strong>
+<ul>
+<li><strong>Description:</strong> When <code>SHOW_VLM_MODEL_OPTIONS</code> is <code>"True"</code>, if set to <code>"True"</code>, loads local transformers VLM weights at application startup (same as historical behavior). If <code>"False"</code>, weights load on the first VLM OCR call (<code>tools/run_vlm.py</code>), reducing startup memory at the cost of a slower first run. Compare with <strong><code>LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START</code></strong> for the PII LLM (which defaults to <code>"False"</code>).</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
 <li><strong><code>SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL</code></strong>
 <ul>
 <li><strong>Description:</strong> Selected vision model for OCR. Choose from: <code>"Nanonets-OCR2-3B"</code>, <code>"Dots.OCR"</code>, <code>"Qwen3-VL-2B-Instruct"</code>, <code>"Qwen3-VL-4B-Instruct"</code>, <code>"Qwen3-VL-8B-Instruct"</code>, <code>"Qwen3-VL-30B-A3B-Instruct"</code>, <code>"Qwen3-VL-235B-A22B-Instruct"</code>, <code>"PaddleOCR-VL"</code>.</li>
@@ -1063,9 +1078,19 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <li><strong>Description:</strong> Maximum effective DPI after preparation. High-DPI scans are downscaled so effective DPI (see <code>VLM_MIN_DPI</code>) does not exceed this value, subject to <code>VLM_MAX_IMAGE_SIZE</code> (and hybrid/full-page min pixel settings).</li>
 <li><strong>Default Value:</strong> <code>300.0</code></li>
 </ul></li>
+<li><strong><code>VLM_MAX_ASPECT_RATIO</code></strong>
+<ul>
+<li><strong>Description:</strong> Upper bound on image aspect ratio <strong>after</strong> white-padding for every VLM path in <code>custom_image_analyser_engine</code>: local transformers (<code>extract_text_from_image_vlm</code>), inference-server (<code>_call_inference_server_vlm_api</code>), AWS Bedrock (<code>_call_bedrock_vlm_api</code>), Gemini, and Azure/OpenAI. The code pads very long/thin crops (typical hybrid line regions) so <code>max(width/height, height/width)</code> does not exceed this value. Lower values are stricter (more padding, smaller embedded text relative to canvas); higher values send nearer-native crops but may hit provider limits. Values below <code>1.0</code> are clamped to <code>1.0</code>. For Bedrock, if the image is still above the AWS Converse vision limit (20:1) after this step, a second stricter pad is applied automatically.</li>
+<li><strong>Default Value:</strong> <code>10.0</code></li>
+</ul></li>
 <li><strong><code>VLM_DISABLE_QWEN3_5_THINKING</code></strong>
 <ul>
-<li><strong>Description:</strong> If set to <code>"True"</code>, disables Qwen3.5 “thinking” mode for VLM OCR.</li>
+<li><strong>Description:</strong> If set to <code>"True"</code>, disables Qwen3.5 “thinking” mode for <strong>local transformers</strong> VLM calls. Implemented by appending <code>&lt;think&gt;&lt;/think&gt;</code> to the generation prompt after <code>apply_chat_template</code>, so the model skips its reasoning chain and outputs the answer directly.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>INFERENCE_SERVER_DISABLE_THINKING</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, disables thinking for <strong>inference-server</strong> VLM calls (the server-side equivalent of <code>VLM_DISABLE_QWEN3_5_THINKING</code>). Adds <code>chat_template_kwargs: {"enable_thinking": false}</code> to every request payload; vLLM applies the Qwen3/Qwen3.5 chat template server-side and honours this flag to suppress <code>&lt;think&gt;...&lt;/think&gt;</code> generation entirely. Useful when the inference server is running a Qwen3.5 reasoning model and thinking tokens are unnecessary (e.g.&nbsp;for simple line-crop OCR in <code>hybrid-paddle-inference-server</code> mode). Eliminates thinking overhead and removes the need to raise <code>HYBRID_OCR_MAX_NEW_TOKENS</code> to accommodate the reasoning budget.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
 <li><strong><code>MAX_NEW_TOKENS</code></strong>
@@ -1100,8 +1125,13 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 </ul></li>
 <li><strong><code>HYBRID_OCR_MAX_NEW_TOKENS</code></strong>
 <ul>
-<li><strong>Description:</strong> Maximum number of tokens to generate for hybrid OCR operations.</li>
-<li><strong>Default Value:</strong> <code>30</code></li>
+<li><strong>Description:</strong> Maximum number of tokens the inference server (or local VLM) may generate per hybrid line-crop OCR call. This is the generation budget passed directly to the model via <code>max_tokens</code>. For reasoning models such as Qwen3.5, thinking tokens (<code>&lt;think&gt;...&lt;/think&gt;</code>) count against this budget before any answer is produced, so the value must be large enough to cover both the reasoning chain and the short JSON answer. Setting this too low (e.g.&nbsp;<code>50</code>) causes the model to exhaust the budget during thinking and return empty results for every line. Increase to <code>2048</code> or higher if you observe “Inference server returned no results” log lines when using <code>hybrid-paddle-inference-server</code> with a reasoning model.</li>
+<li><strong>Default Value:</strong> <code>1024</code></li>
+</ul></li>
+<li><strong><code>HYBRID_OCR_MAX_WORDS</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of words allowed in a hybrid OCR result for a single text line. Results whose word count exceeds this threshold are discarded as likely hallucinations or runaway model output, and the original OCR result (e.g.&nbsp;from Paddle) is kept instead. This is a separate sanity check from <code>HYBRID_OCR_MAX_NEW_TOKENS</code> — it operates on the parsed response text, not on the token budget. A single line of text rarely contains more than ~50 words, so the default is conservative.</li>
+<li><strong>Default Value:</strong> <code>50</code></li>
 </ul></li>
 <li><strong><code>VLM_OCR_INTRO_TEXT</code></strong>
 <ul>
@@ -1127,6 +1157,11 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <ul>
 <li><strong>Description:</strong> Default model choice for cloud VLM OCR (AWS Bedrock, Gemini, or Azure/OpenAI). Used when cloud VLM options are enabled.</li>
 <li><strong>Default Value:</strong> <code>"qwen.qwen3-vl-235b-a22b"</code> (or first available cloud model if empty)</li>
+</ul></li>
+<li><strong><code>SHOW_CUSTOM_VLM_ENTITIES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, appends <strong><code>CUSTOM_VLM_PERSON</code></strong> and <strong><code>CUSTOM_VLM_SIGNATURE</code></strong> to the redaction entity lists when at least one of <code>SHOW_VLM_MODEL_OPTIONS</code>, <code>SHOW_INFERENCE_SERVER_VLM_OPTIONS</code>, or <code>SHOW_BEDROCK_VLM_MODELS</code> is enabled—so users can redact detected faces and signatures from VLM-capable pipelines.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
 <li><strong><code>CUSTOM_VLM_BACKEND</code></strong>
 <ul>
