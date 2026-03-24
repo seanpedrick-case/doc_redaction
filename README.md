@@ -146,6 +146,22 @@ pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu129
 pip install torchvision --index-url https://download.pytorch.org/whl/cu129
 ```
 
+#### Docker installation
+
+The doc_redaction Redaction app can be installed by using the [Dockerfile](https://github.com/seanpedrick-case/doc_redaction/blob/main/Dockerfile) or Docker compose files ([llama.cpp](https://github.com/ggml-org/llama.cpp), [vLLM](https://docs.vllm.ai/en/stable/)) provided in the repo.
+
+##### Without Llama.cpp / vLLM inference server
+
+If you want a working Docker installation without GPU support, you can install from the [Dockerfile](https://github.com/seanpedrick-case/doc_redaction/blob/main/Dockerfile) in the repo. A working example of this, with the CPU version of PaddleOCR, can be found on [Hugging Face](https://huggingface.co/spaces/seanpedrickcase/document_redaction). You can adjust the INSTALL_PADDLEOCR, PADDLE_GPU_ENABLED, INSTALL_VLM, and TORCH_GPU_ENABLED config variables to adjust for PaddleOCR and Transformers packages for local VLM support. Note that GPU-enabled PaddleOCR, and GPU-enabled Transformers/Torch often don't work well together, which is one reason why a Llama.cpp/vLLM inference server Docker installation option is provided below.
+
+##### With Llama.cpp / vLLM inference server
+
+The project now has Docker and Docker compose files available to pair running the Redaction app with local inference servers powered by [llama.cpp](https://github.com/ggml-org/llama.cpp), or [vLLM](https://docs.vllm.ai/en/stable/). Llama.cpp is more flexible than vLLM for low VRAM systems, as Llama.cpp will offload to cpu/system RAM automatically rather than failing as vLLM tends to do.
+
+For Llama.cpp, you can use the [docker-compose_llama.yml](https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_llama.yml) file, and for vLLM, you can use the [docker-compose_vllm.yml](https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_vllm.yml) file. To run, Docker / Docker Desktop should be installed, and then you can run the commands suggested in the top of the files to run the servers.
+
+You will need ~40-50GB of disk space to run everything depending on the model chosen from the compose file. For the vLLM server, you will need 24 GB VRAM. For the Llama.cpp server, 24 GB VRAM is needed to run at full speed, but the n-gpu-layers and n-cpu-moe parameters in the Docker compose file can be adjusted to fit into your system. I would suggest that 8 GB VRAM is needed as a bare minimum for decent inference speed. See the [Unsloth guide](https://unsloth.ai/docs/models/qwen3.5) for more details on working with GGUF files for Qwen 3.5.
+
 ### 3. Run the Application
 
 With all dependencies installed, you can now start the Gradio application.

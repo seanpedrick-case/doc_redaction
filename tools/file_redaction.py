@@ -4625,7 +4625,8 @@ def redact_whole_pymupdf_page(
     whole_page_img_annotation_box["ymin"] = relative_y1
     whole_page_img_annotation_box["xmax"] = relative_x2
     whole_page_img_annotation_box["ymax"] = relative_y2
-    whole_page_img_annotation_box["color"] = (0, 0, 0)
+    # Match word-level redactions: define_box_colour uses this when GUI/output colours are on.
+    whole_page_img_annotation_box["color"] = CUSTOM_BOX_COLOUR
     whole_page_img_annotation_box["label"] = "Whole page"
 
     if redact_pdf is True:
@@ -5816,9 +5817,8 @@ def redact_image_pdf(
     # recreate page_line_level_ocr_results, and skip OCR (including hybrid textract-bedrock).
     textract_ocr_by_page_1based = None
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
-        existing_textract_ocr_path = (
-            output_folder + file_name + "_ocr_results_with_words_textract.json"
-        )
+        existing_ocr_file_name = file_name + "_ocr_results_with_words_textract.json"
+        existing_textract_ocr_path = output_folder + existing_ocr_file_name
         if os.path.exists(existing_textract_ocr_path):
             (
                 loaded_textract_ocr_list,
@@ -5838,7 +5838,7 @@ def redact_image_pdf(
                         textract_ocr_by_page_1based[page_1based] = item
                 if textract_ocr_by_page_1based:
                     print(
-                        f"Found existing Textract OCR results file: {existing_textract_ocr_path} "
+                        f"Found existing Textract OCR results file: {existing_ocr_file_name} "
                         f"({len(textract_ocr_by_page_1based)} pages). Will use for matching pages and skip OCR/hybrid."
                     )
 
@@ -7131,12 +7131,9 @@ def redact_image_pdf(
                         #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
                         #     "Textract cached — stored ocr_results_by_page for second pass"
                         # )
-                    else:
-                        # print(
-                        #     f"[Performing image-based processing] page {reported_page_number}/{_ocr_gui_total_str}: "
-                        #     "Textract cached — page outside selected range, skipped ocr_results_by_page store"
-                        # )
-                        continue
+                    # Skip parallel/sequential Textract and hybrid Bedrock for pages loaded from
+                    # _ocr_results_with_words_textract.json (already finalised OCR).
+                    continue
 
                 text_blocks = list()
                 page_exists = False

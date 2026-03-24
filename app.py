@@ -5842,7 +5842,6 @@ with blocks:
     ###
 
     # Upload previous PDF for modifying redactions
-    # upload_pdf_for_review_btn.click(
     input_pdf_for_review.upload(
         fn=reset_review_vars,
         inputs=None,
@@ -5930,10 +5929,31 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+    ).success(
+        apply_redactions_to_review_df_and_files,
+        inputs=[
+            annotator,
+            doc_full_file_name_textbox,
+            pdf_doc_state,
+            all_image_annotations_state,
+            annotate_current_page,
+            review_file_df,
+            output_folder_textbox,
+            do_not_save_pdf_state,
+            page_sizes,
+            input_folder_textbox,
+        ],
+        outputs=[
+            pdf_doc_state,
+            all_image_annotations_state,
+            input_pdf_for_review,
+            log_files_output,
+            review_file_df,
+        ],
+        show_progress_on=[input_pdf_for_review],
     )
 
     # Upload previous review CSV files for modifying redactions
-    # upload_review_files_btn.click(
     input_review_files.upload(
         fn=prepare_image_or_pdf_with_efficient_ocr,
         inputs=[
@@ -6006,62 +6026,84 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+    ).success(
+        apply_redactions_to_review_df_and_files,
+        inputs=[
+            annotator,
+            doc_full_file_name_textbox,
+            pdf_doc_state,
+            all_image_annotations_state,
+            annotate_current_page,
+            review_file_df,
+            output_folder_textbox,
+            do_not_save_pdf_state,
+            page_sizes,
+            input_folder_textbox,
+        ],
+        outputs=[
+            pdf_doc_state,
+            all_image_annotations_state,
+            input_pdf_for_review,
+            log_files_output,
+            review_file_df,
+        ],
+        show_progress_on=[input_pdf_for_review],
     )
 
     # Manual updates to review df
-    # review_file_df.input(
-    #     update_annotator_page_from_review_df,
-    #     inputs=[
-    #         review_file_df,
-    #         images_pdf_state,
-    #         page_sizes,
-    #         all_image_annotations_state,
-    #         annotator,
-    #         selected_entity_dataframe_row,
-    #         input_folder_textbox,
-    #         doc_full_file_name_textbox,
-    #     ],
-    #     outputs=[
-    #         annotator,
-    #         all_image_annotations_state,
-    #         annotate_current_page,
-    #         page_sizes,
-    #         review_file_df,
-    #         annotate_previous_page,
-    #     ],
-    #     show_progress_on=[annotator],
-    # ).success(
-    #     update_annotator_object_and_filter_df,
-    #     inputs=[
-    #         all_image_annotations_state,
-    #         annotate_current_page,
-    #         recogniser_entity_dropdown,
-    #         page_entity_dropdown,
-    #         page_entity_dropdown_redaction,
-    #         text_entity_dropdown,
-    #         recogniser_entity_dataframe_base,
-    #         annotator_zoom_number,
-    #         review_file_df,
-    #         page_sizes,
-    #         doc_full_file_name_textbox,
-    #         input_folder_textbox,
-    #     ],
-    #     outputs=[
-    #         annotator,
-    #         annotate_current_page,
-    #         annotate_current_page_bottom,
-    #         annotate_previous_page,
-    #         recogniser_entity_dropdown,
-    #         recogniser_entity_dataframe,
-    #         recogniser_entity_dataframe_base,
-    #         text_entity_dropdown,
-    #         page_entity_dropdown,
-    #         page_entity_dropdown_redaction,
-    #         page_sizes,
-    #         all_image_annotations_state,
-    #     ],
-    #     show_progress_on=[annotator],
-    # )
+    review_file_df.input(
+        update_annotator_page_from_review_df,
+        inputs=[
+            review_file_df,
+            images_pdf_state,
+            page_sizes,
+            all_image_annotations_state,
+            annotator,
+            selected_entity_dataframe_row,
+            input_folder_textbox,
+            doc_full_file_name_textbox,
+        ],
+        outputs=[
+            annotator,
+            all_image_annotations_state,
+            annotate_current_page,
+            page_sizes,
+            review_file_df,
+            annotate_previous_page,
+        ],
+        show_progress_on=[annotator],
+    ).success(
+        update_annotator_object_and_filter_df,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[annotator],
+    )
 
     # Page number controls
     annotate_current_page.submit(
