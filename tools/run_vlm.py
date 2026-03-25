@@ -1355,7 +1355,7 @@ if ADD_VLM_BOUNDING_BOX_RULES:
     ):
         additional_bounding_box_rules = ""
     else:
-        additional_bounding_box_rules = """\\n- Bounding boxes should fit within the coordinate extents of the image: 0, 0 is the top left corner of the image, and 999, 999 is the bottom right corner of the image"""
+        additional_bounding_box_rules = "\n- Bounding boxes should fit within the coordinate extents of the image: 0, 0 is the top left corner of the image, and 999, 999 is the bottom right corner of the image"
 else:
     additional_bounding_box_rules = ""
 

@@ -656,6 +656,31 @@ def _get_tesseract_psm(segmentation_level: str) -> int:
         return 11
 
 
+def _extract_page_number_for_vlm_log(image_name: Optional[str]) -> Optional[int]:
+    """
+    Best-effort 0-based page index from an image basename for VLM log filenames.
+
+    Tries end-anchored patterns first, then the last ``_page_<digits>`` occurrence
+    anywhere in the name (e.g. ``doc.pdf_0_page_0000.png``).
+    """
+    if not image_name:
+        return None
+    end_patterns = (
+        r"_page_(\d+)\.(?:png|jpg|jpeg|webp|tif|tiff)$",
+        r"_page_(\d+)\.png$",
+        r"_(\d+)\.png$",
+        r"page_(\d+)\.png$",
+    )
+    for pattern in end_patterns:
+        match = re.search(pattern, image_name, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+    last_page: Optional[int] = None
+    for match in re.finditer(r"(?i)_page_(\d+)", image_name):
+        last_page = int(match.group(1))
+    return last_page
+
+
 def save_vlm_prompt_response(
     prompt: str,
     response_text: str,
@@ -682,7 +707,8 @@ def save_vlm_prompt_response(
         output_folder: Output folder path
         model_choice: Model used
         image_name: Optional image name (without extension) for the filename
-        page_number: Optional page number (0-based) for the filename; displayed in log as 1-based.
+        page_number: Optional 0-based page index for the filename (overrides parsing
+            ``image_name``). Displayed in the log body as 1-based when set or parsed.
         temperature: Temperature used (if applicable)
         max_new_tokens: Max tokens used (if applicable)
         top_p: Top-p parameter used (if applicable)
@@ -703,29 +729,29 @@ def save_vlm_prompt_response(
     # Add task suffix to filename if provided
     suffix_str = f"_{task_suffix}" if task_suffix else ""
 
-    # Create filename with image name and page number if available, otherwise use timestamp
-    if image_name and page_number is not None:
-        # Sanitize image name for use in filename (remove invalid characters)
-        safe_image_name = "".join(
-            c for c in image_name if c.isalnum() or c in (" ", "-", "_", ".")
-        ).strip()
-        safe_image_name = safe_image_name.replace(" ", "_")
-        # Remove file extension if present
-        safe_image_name = safe_image_name.rsplit(".", 1)[0]
-        filename = f"vlm_{safe_image_name}_page_{page_number:04d}{suffix_str}_{model_type.lower().replace(' ', '_')}.txt"
-    elif image_name:
+    effective_page: Optional[int] = page_number
+    if effective_page is None and image_name:
+        effective_page = _extract_page_number_for_vlm_log(image_name)
+
+    # Filenames always include a page segment: _page_NNNN or _page_unknown
+    if image_name:
         safe_image_name = "".join(
             c for c in image_name if c.isalnum() or c in (" ", "-", "_", ".")
         ).strip()
         safe_image_name = safe_image_name.replace(" ", "_")
         safe_image_name = safe_image_name.rsplit(".", 1)[0]
-        filename = f"vlm_{safe_image_name}{suffix_str}_{model_type.lower().replace(' ', '_')}.txt"
+        if isinstance(effective_page, int):
+            page_part = f"_page_{effective_page:04d}"
+        else:
+            page_part = "_page_unknown"
+        filename = f"vlm_{safe_image_name}{page_part}{suffix_str}_{model_type.lower().replace(' ', '_')}.txt"
     else:
-        # Fallback to timestamp if image info not available
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = (
-            f"vlm_{model_type.lower().replace(' ', '_')}{suffix_str}_{timestamp}.txt"
-        )
+        if isinstance(effective_page, int):
+            page_part = f"_page_{effective_page:04d}"
+        else:
+            page_part = "_page_unknown"
+        filename = f"vlm_{model_type.lower().replace(' ', '_')}{page_part}{suffix_str}_{timestamp}.txt"
     filepath = os.path.join(vlm_logs_folder, filename)
 
     # Write prompt and response to file
@@ -737,8 +763,8 @@ def save_vlm_prompt_response(
         f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         if image_name:
             f.write(f"Image: {image_name}\n")
-        if page_number is not None:
-            f.write(f"Page: {page_number + 1}\n")
+        if isinstance(effective_page, int):
+            f.write(f"Page: {effective_page + 1}\n")
         if image_width is not None and image_height is not None:
             f.write(
                 f"Image input size (pixels): {image_width} x {image_height} (width x height)\n"
@@ -4428,6 +4454,7 @@ def _vlm_page_ocr_predict(
     detect_people_only: bool = False,
     detect_signatures_only: bool = False,
     progress: Optional[gr.Progress] = gr.Progress(),
+    page_index_0: Optional[int] = None,
 ) -> Tuple[Dict[str, List], int, int, str]:
     """
     VLM page-level OCR prediction that returns structured line-level results with bounding boxes.
@@ -4614,20 +4641,6 @@ def _vlm_page_ocr_predict(
         # Save prompt and response to file
         if extracted_text and isinstance(extracted_text, str) and output_folder:
             try:
-                # Extract page number from image_name if present
-                page_number = None
-                if image_name:
-                    page_patterns = [
-                        r"_page_(\d+)\.png$",
-                        r"_(\d+)\.png$",
-                        r"page_(\d+)\.png$",
-                    ]
-                    for pattern in page_patterns:
-                        match = re.search(pattern, image_name, re.IGNORECASE)
-                        if match:
-                            page_number = int(match.group(1))
-                            break
-
                 # Determine task suffix based on detection type
                 task_suffix = None
                 if detect_people_only:
@@ -4648,7 +4661,7 @@ def _vlm_page_ocr_predict(
                     output_folder=output_folder,
                     model_choice=vlm_model_name,
                     image_name=image_name,
-                    page_number=page_number,
+                    page_number=page_index_0,
                     temperature=model_default_temperature,
                     max_new_tokens=model_default_max_new_tokens,
                     top_p=model_default_top_p,
@@ -4961,6 +4974,7 @@ def _inference_server_page_ocr_predict(
     detect_signatures_only: bool = False,
     progress: Optional[gr.Progress] = gr.Progress(),
     model_name: str = None,
+    page_index_0: Optional[int] = None,
 ) -> Tuple[Dict[str, List], int, int, str]:
     """
     Inference-server page-level OCR prediction that returns structured line-level results with bounding boxes.
@@ -5166,20 +5180,6 @@ def _inference_server_page_ocr_predict(
         # Save prompt and response to file
         if extracted_text and isinstance(extracted_text, str) and output_folder:
             try:
-                # Extract page number from image_name if present
-                page_number = None
-                if image_name:
-                    page_patterns = [
-                        r"_page_(\d+)\.png$",
-                        r"_(\d+)\.png$",
-                        r"page_(\d+)\.png$",
-                    ]
-                    for pattern in page_patterns:
-                        match = re.search(pattern, image_name, re.IGNORECASE)
-                        if match:
-                            page_number = int(match.group(1))
-                            break
-
                 # Determine task suffix based on detection type
                 task_suffix = None
                 if detect_people_only:
@@ -5193,7 +5193,7 @@ def _inference_server_page_ocr_predict(
                     output_folder=output_folder,
                     model_choice=final_model_name or "unknown",
                     image_name=image_name,
-                    page_number=page_number,
+                    page_number=page_index_0,
                     temperature=model_default_temperature,
                     max_new_tokens=model_default_max_new_tokens,
                     top_p=model_default_top_p,
@@ -5665,6 +5665,7 @@ def _bedrock_page_ocr_predict(
     progress: Optional[gr.Progress] = gr.Progress(),
     model_choice: str = None,
     bedrock_runtime=None,
+    page_index_0: Optional[int] = None,
 ) -> Tuple[Dict[str, List], int, int, str]:
     """
     Bedrock page-level OCR prediction that returns structured line-level results with bounding boxes.
@@ -5873,20 +5874,6 @@ def _bedrock_page_ocr_predict(
         # Save prompt and response to file (including when response is empty, e.g. no faces/signatures)
         if extracted_text is not None and output_folder:
             try:
-                # Extract page number from image_name if present
-                page_number = None
-                if image_name:
-                    page_patterns = [
-                        r"_page_(\d+)\.png$",
-                        r"_(\d+)\.png$",
-                        r"page_(\d+)\.png$",
-                    ]
-                    for pattern in page_patterns:
-                        match = re.search(pattern, image_name, re.IGNORECASE)
-                        if match:
-                            page_number = int(match.group(1))
-                            break
-
                 # Determine task suffix based on detection type
                 task_suffix = None
                 if detect_people_only:
@@ -5905,7 +5892,7 @@ def _bedrock_page_ocr_predict(
                     output_folder=output_folder,
                     model_choice=model_choice or "unknown",
                     image_name=image_name,
-                    page_number=page_number,
+                    page_number=page_index_0,
                     temperature=model_default_temperature,
                     max_new_tokens=model_default_max_new_tokens,
                     top_p=model_default_top_p,
@@ -6021,6 +6008,7 @@ def _gemini_page_ocr_predict(
     model_choice: str = None,
     client=None,
     config=None,
+    page_index_0: Optional[int] = None,
 ) -> Tuple[Dict[str, List], int, int, str]:
     """
     Gemini page-level OCR prediction that returns structured line-level results with bounding boxes.
@@ -6152,20 +6140,6 @@ def _gemini_page_ocr_predict(
         # Save prompt and response to file (including when response is empty, e.g. no faces/signatures)
         if extracted_text is not None and output_folder:
             try:
-                # Extract page number from image_name if present
-                page_number = None
-                if image_name:
-                    page_patterns = [
-                        r"_page_(\d+)\.png$",
-                        r"_(\d+)\.png$",
-                        r"page_(\d+)\.png$",
-                    ]
-                    for pattern in page_patterns:
-                        match = re.search(pattern, image_name, re.IGNORECASE)
-                        if match:
-                            page_number = int(match.group(1))
-                            break
-
                 # Determine task suffix based on detection type
                 task_suffix = None
                 if detect_people_only:
@@ -6184,7 +6158,7 @@ def _gemini_page_ocr_predict(
                     output_folder=output_folder,
                     model_choice=model_choice or "unknown",
                     image_name=image_name,
-                    page_number=page_number,
+                    page_number=page_index_0,
                     temperature=model_default_temperature,
                     max_new_tokens=model_default_max_new_tokens,
                     model_type="Gemini",
@@ -6272,6 +6246,7 @@ def _azure_openai_page_ocr_predict(
     progress: Optional[gr.Progress] = gr.Progress(),
     model_choice: str = None,
     client=None,
+    page_index_0: Optional[int] = None,
 ) -> Tuple[Dict[str, List], int, int, str]:
     """
     Azure/OpenAI page-level OCR prediction that returns structured line-level results with bounding boxes.
@@ -6405,20 +6380,6 @@ def _azure_openai_page_ocr_predict(
         # Save prompt and response to file (including when response is empty, e.g. no faces/signatures)
         if extracted_text is not None and output_folder:
             try:
-                # Extract page number from image_name if present
-                page_number = None
-                if image_name:
-                    page_patterns = [
-                        r"_page_(\d+)\.png$",
-                        r"_(\d+)\.png$",
-                        r"page_(\d+)\.png$",
-                    ]
-                    for pattern in page_patterns:
-                        match = re.search(pattern, image_name, re.IGNORECASE)
-                        if match:
-                            page_number = int(match.group(1))
-                            break
-
                 # Determine task suffix based on detection type
                 task_suffix = None
                 if detect_people_only:
@@ -6437,7 +6398,7 @@ def _azure_openai_page_ocr_predict(
                     output_folder=output_folder,
                     model_choice=model_choice or "unknown",
                     image_name=image_name,
-                    page_number=page_number,
+                    page_number=page_index_0,
                     temperature=model_default_temperature,
                     max_new_tokens=model_default_max_new_tokens,
                     model_type="Azure/OpenAI",
@@ -8332,9 +8293,13 @@ class CustomImageAnalyzerEngine:
         azure_openai_client=None,
         vlm_model_choice: str = None,
         inference_server_model_name: str = None,
+        page_index_0: Optional[int] = None,
     ) -> Tuple[List[OCRResult], int, int, str]:
         """
         Performs OCR on the given image using the configured engine.
+
+        page_index_0: 0-based page index for VLM prompt/response log filenames when the
+            basename does not encode the page (optional).
         """
         if isinstance(image, str):
             image_path = image
@@ -8425,7 +8390,10 @@ class CustomImageAnalyzerEngine:
             )
             ocr_data, vlm_input_tokens, vlm_output_tokens, vlm_model_name = (
                 _vlm_page_ocr_predict(
-                    vlm_image, image_name=image_name, output_folder=self.output_folder
+                    vlm_image,
+                    image_name=image_name,
+                    output_folder=self.output_folder,
+                    page_index_0=page_index_0,
                 )
             )
             vlm_total_input_tokens = vlm_input_tokens
@@ -8447,6 +8415,7 @@ class CustomImageAnalyzerEngine:
                     normalised_coords_range=999,
                     output_folder=self.output_folder,
                     model_name=inference_server_model_name,
+                    page_index_0=page_index_0,
                 )
             )
             vlm_total_input_tokens = vlm_input_tokens
@@ -8479,6 +8448,7 @@ class CustomImageAnalyzerEngine:
                     output_folder=self.output_folder,
                     model_choice=model_choice,
                     bedrock_runtime=bedrock_runtime,
+                    page_index_0=page_index_0,
                 )
             )
             vlm_total_input_tokens = vlm_input_tokens
@@ -8508,6 +8478,7 @@ class CustomImageAnalyzerEngine:
                     model_choice=model_choice,
                     client=gemini_client,
                     config=gemini_config,
+                    page_index_0=page_index_0,
                 )
             )
             vlm_total_input_tokens = vlm_input_tokens
@@ -8536,6 +8507,7 @@ class CustomImageAnalyzerEngine:
                     output_folder=self.output_folder,
                     model_choice=model_choice,
                     client=azure_openai_client,
+                    page_index_0=page_index_0,
                 )
             )
             vlm_total_input_tokens = vlm_input_tokens
