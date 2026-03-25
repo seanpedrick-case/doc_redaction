@@ -1339,8 +1339,9 @@ def extract_text_from_image_vlm(
     return buffer, input_tokens, output_tokens
 
 
-# Optionally,, give some more guidance on bounding box coordinates
+# Optionally, give some more guidance on bounding box coordinates
 if ADD_VLM_BOUNDING_BOX_RULES:
+    # Qwen models don't need the additional bounding box guidance as they have already been trained in this coordinate system
     if (
         (
             "qwen" in str(SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL).lower()
@@ -1352,9 +1353,9 @@ if ADD_VLM_BOUNDING_BOX_RULES:
         )
         or ("qwen" in str(CLOUD_VLM_MODEL_CHOICE).lower() and SHOW_BEDROCK_VLM_MODELS)
     ):
-        additional_bounding_box_rules = """\\n- Bounding boxes should fit within the coordinate extents of the image: 0, 0 is the top left corner of the image, and 999, 999 is the bottom right corner of the image"""
-    else:
         additional_bounding_box_rules = ""
+    else:
+        additional_bounding_box_rules = """\\n- Bounding boxes should fit within the coordinate extents of the image: 0, 0 is the top left corner of the image, and 999, 999 is the bottom right corner of the image"""
 else:
     additional_bounding_box_rules = ""
 

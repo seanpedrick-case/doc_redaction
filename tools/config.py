@@ -970,10 +970,9 @@ MAX_INPUT_TOKEN_LENGTH = int(
     get_or_create_env_var("MAX_INPUT_TOKEN_LENGTH", "32768")
 )  # VLM only: maximum input/context tokens for vision-language models. Controls tokenizer cap, model max_position_embeddings (KV cache), and effective max_pixels (image size) so image+text fit. Set lower (e.g. 8192 or 16384) to reduce VRAM. Separate from LLM_CONTEXT_LENGTH.
 
-
 ADD_VLM_BOUNDING_BOX_RULES = convert_string_to_boolean(
-    get_or_create_env_var("ADD_VLM_BOUNDING_BOX_RULES", "False")
-)  # Whether to add bounding box rules to the VLM prompt.
+    get_or_create_env_var("ADD_VLM_BOUNDING_BOX_RULES", "True")
+)  # Whether to add bounding box rules to the VLM prompt. Does not apply to Qwen models as they have already been trained in this coordinate system.
 
 # Bedrock VLM OCR cost estimation (used when text extraction method is "AWS Bedrock VLM OCR - all PDF types")
 BEDROCK_VLM_INPUT_COST = float(
