@@ -561,6 +561,7 @@ def _run_vlm_only_pass_one_page(
                     detect_people_only=True,
                     model_choice=CLOUD_VLM_MODEL_CHOICE or None,
                     bedrock_runtime=bedrock_runtime,
+                    page_index_0=page_no,
                 )
                 add_tokens(people_ocr_result)
                 vlm_boxes.extend(
@@ -582,6 +583,7 @@ def _run_vlm_only_pass_one_page(
                     detect_signatures_only=True,
                     model_choice=CLOUD_VLM_MODEL_CHOICE or None,
                     bedrock_runtime=bedrock_runtime,
+                    page_index_0=page_no,
                 )
                 add_tokens(sig_ocr_result)
                 vlm_boxes.extend(
@@ -605,6 +607,7 @@ def _run_vlm_only_pass_one_page(
                     detect_people_only=True,
                     detect_signatures_only=False,
                     model_name=model_name,
+                    page_index_0=page_no,
                 )
                 add_tokens(people_ocr_result)
                 vlm_boxes.extend(
@@ -626,6 +629,7 @@ def _run_vlm_only_pass_one_page(
                     detect_people_only=False,
                     detect_signatures_only=True,
                     model_name=model_name,
+                    page_index_0=page_no,
                 )
                 add_tokens(sig_ocr_result)
                 vlm_boxes.extend(
@@ -647,6 +651,7 @@ def _run_vlm_only_pass_one_page(
                     output_folder=output_folder,
                     detect_people_only=True,
                     detect_signatures_only=False,
+                    page_index_0=page_no,
                 )
                 add_tokens(people_ocr_result)
                 vlm_boxes.extend(
@@ -667,6 +672,7 @@ def _run_vlm_only_pass_one_page(
                     output_folder=output_folder,
                     detect_people_only=False,
                     detect_signatures_only=True,
+                    page_index_0=page_no,
                 )
                 add_tokens(sig_ocr_result)
                 vlm_boxes.extend(
@@ -6174,6 +6180,7 @@ def redact_image_pdf(
                             if inference_server_vlm_model
                             else None
                         ),
+                        page_index_0=pno,
                     ),
                 )
 
@@ -6246,7 +6253,10 @@ def redact_image_pdf(
                     page_vlm_input_tokens,
                     page_vlm_output_tokens,
                     page_vlm_model_name,
-                ) = image_analyser.perform_ocr(actual_path)
+                ) = image_analyser.perform_ocr(
+                    actual_path,
+                    page_index_0=pno,
+                )
 
                 # Pre-compute line-level OCR structures here so the main loop can
                 # skip the expensive combine_ocr_results step.
@@ -6745,6 +6755,7 @@ def redact_image_pdf(
                                 if inference_server_vlm_model
                                 else None
                             ),
+                            page_index_0=page_no,
                         )
 
                     # Accumulate VLM token usage
@@ -6827,6 +6838,7 @@ def redact_image_pdf(
                             detect_people_only=True,
                             model_choice=model_choice,
                             bedrock_runtime=bedrock_runtime,
+                            page_index_0=page_no,
                         )
 
                         # Unpack tuple: (Dict[str, List], int, int, str) -> (ocr_data, vlm_input_tokens, vlm_output_tokens, vlm_model_name)
@@ -6969,6 +6981,7 @@ def redact_image_pdf(
                             detect_signatures_only=True,
                             model_choice=model_choice,
                             bedrock_runtime=bedrock_runtime,
+                            page_index_0=page_no,
                         )
 
                         # Unpack tuple: (Dict[str, List], int, int, str) -> (ocr_data, vlm_input_tokens, vlm_output_tokens, vlm_model_name)
@@ -7102,6 +7115,7 @@ def redact_image_pdf(
                                 normalised_coords_range=999,
                                 output_folder=output_folder,
                                 detect_people_only=True,
+                                page_index_0=page_no,
                             )
                         else:  # inference-server based hybrids
                             people_ocr_result = _inference_server_page_ocr_predict(
@@ -7110,6 +7124,7 @@ def redact_image_pdf(
                                 normalised_coords_range=999,
                                 output_folder=output_folder,
                                 detect_people_only=True,
+                                page_index_0=page_no,
                             )
 
                         # Unpack tuple: (Dict[str, List], int, int, str) -> (ocr_data, vlm_input_tokens, vlm_output_tokens, vlm_model_name)
@@ -7243,6 +7258,7 @@ def redact_image_pdf(
                                 normalised_coords_range=999,
                                 output_folder=output_folder,
                                 detect_signatures_only=True,
+                                page_index_0=page_no,
                             )
                         else:  # inference-server based hybrids
                             sig_ocr_result = _inference_server_page_ocr_predict(
@@ -7251,6 +7267,7 @@ def redact_image_pdf(
                                 normalised_coords_range=999,
                                 output_folder=output_folder,
                                 detect_signatures_only=True,
+                                page_index_0=page_no,
                             )
 
                         # Unpack tuple: (Dict[str, List], int, int, str) -> (ocr_data, vlm_input_tokens, vlm_output_tokens, vlm_model_name)
@@ -7753,6 +7770,7 @@ def redact_image_pdf(
                             detect_people_only=True,
                             model_choice=model_choice,
                             bedrock_runtime=bedrock_runtime,
+                            page_index_0=page_no,
                         )
 
                         # Unpack tuple: (Dict[str, List], int, int, str) -> (ocr_data, vlm_input_tokens, vlm_output_tokens, vlm_model_name)
@@ -7880,6 +7898,7 @@ def redact_image_pdf(
                             detect_signatures_only=True,
                             model_choice=model_choice,
                             bedrock_runtime=bedrock_runtime,
+                            page_index_0=page_no,
                         )
 
                         # Unpack tuple: (Dict[str, List], int, int, str) -> (ocr_data, vlm_input_tokens, vlm_output_tokens, vlm_model_name)
@@ -8370,6 +8389,7 @@ def redact_image_pdf(
                         detect_people_only=True,
                         model_choice=model_choice,
                         bedrock_runtime=bedrock_runtime,
+                        page_index_0=page_no,
                     )
                     if (
                         isinstance(people_ocr_result, tuple)
@@ -8482,6 +8502,7 @@ def redact_image_pdf(
                         detect_signatures_only=True,
                         model_choice=model_choice,
                         bedrock_runtime=bedrock_runtime,
+                        page_index_0=page_no,
                     )
                     if isinstance(sig_ocr_result, tuple) and len(sig_ocr_result) == 4:
                         (
@@ -8947,6 +8968,7 @@ def redact_image_pdf(
                                 detect_people_only=True,
                                 model_choice=model_choice,
                                 bedrock_runtime=bedrock_runtime,
+                                page_index_0=page_no,
                             )
 
                             # Unpack tuple: (Dict[str, List], int, int, str) -> (ocr_data, vlm_input_tokens, vlm_output_tokens, vlm_model_name)
@@ -9073,6 +9095,7 @@ def redact_image_pdf(
                                 detect_signatures_only=True,
                                 model_choice=model_choice,
                                 bedrock_runtime=bedrock_runtime,
+                                page_index_0=page_no,
                             )
 
                             # Unpack tuple: (Dict[str, List], int, int, str) -> (ocr_data, vlm_input_tokens, vlm_output_tokens, vlm_model_name)
@@ -11809,6 +11832,16 @@ def visualise_ocr_words_bounding_boxes(
         ):
             base_model_name = "Inference Server"
             visualisation_folder = "inference_server_visualisations"
+        elif text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION:
+            # Matches word-level model string from _parse_vlm_page_ocr_response (model_name="Bedrock")
+            base_model_name = "Bedrock"
+            visualisation_folder = "bedrock_visualisations"
+        elif text_extraction_method == GEMINI_VLM_TEXT_EXTRACT_OPTION:
+            base_model_name = "Gemini"
+            visualisation_folder = "gemini_visualisations"
+        elif text_extraction_method == AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION:
+            base_model_name = "Azure/OpenAI"
+            visualisation_folder = "azure_openai_visualisations"
         else:
             base_model_name = "OCR"
             visualisation_folder = "ocr_visualisations"
