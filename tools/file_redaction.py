@@ -53,6 +53,7 @@ from tools.config import (
     CUSTOM_BOX_COLOUR,
     CUSTOM_ENTITIES,
     CUSTOM_VLM_BACKEND,
+    CUSTOM_VLM_MIN_CONFIDENCE,
     DEFAULT_LANGUAGE,
     DEFAULT_LOCAL_OCR_MODEL,
     EFFICIENT_OCR,
@@ -461,8 +462,12 @@ def _parse_vlm_person_signature_result(ocr_result, entity_type: str, text_label:
             top = int(tops[idx])
             width = int(widths[idx])
             height = int(heights[idx])
-            conf = float(confs[idx]) if idx < len(confs) else 0.0
+            conf_raw = float(confs[idx]) if idx < len(confs) else 0.0
         except Exception:
+            continue
+        conf = conf_raw / 100.0 if conf_raw > 1.0 else conf_raw
+        conf = max(0.0, min(1.0, conf))
+        if conf < CUSTOM_VLM_MIN_CONFIDENCE:
             continue
         boxes.append(
             CustomImageRecognizerResult(
@@ -879,7 +884,7 @@ def run_custom_vlm_only_pass(
             "image_width": page_width,
             "image_height": page_height,
         }
-        redact_page_with_pymupdf(
+        redact_result = redact_page_with_pymupdf(
             pymupdf_page,
             {"boxes": vlm_boxes},
             image_path,
@@ -887,6 +892,23 @@ def run_custom_vlm_only_pass(
             input_folder=input_folder,
             image_dimensions_override=image_dimensions_override,
         )
+        # In dual-output mode, capture the final redacted page copy so _redacted.pdf
+        # merge includes CUSTOM_VLM pages (signature/face post-pass as well).
+        try:
+            if (
+                isinstance(redact_result, tuple)
+                and len(redact_result) >= 1
+                and isinstance(redact_result[0], tuple)
+                and len(redact_result[0]) == 2
+            ):
+                _review_page, _applied_redaction_page = redact_result[0]
+                if not hasattr(redact_image_pdf, "_applied_redaction_pages"):
+                    redact_image_pdf._applied_redaction_pages = list()
+                redact_image_pdf._applied_redaction_pages.append(
+                    (_applied_redaction_page, page_no)
+                )
+        except Exception:
+            pass
 
         # Build annotations and decision rows for review/outputs
         reported_page_number = page_no + 1
@@ -4984,6 +5006,18 @@ def redact_page_with_pymupdf(
 
     out_annotation_boxes = dict()
     all_image_annotation_boxes = list()
+    dual_output_same_pass = (
+        return_pdf_end_of_redaction and return_pdf_for_review and review_page is None
+    )
+    applied_redaction_page = None
+    if dual_output_same_pass:
+        applied_redaction_doc = pymupdf.open()
+        applied_redaction_doc.insert_pdf(
+            page.parent,
+            from_page=page.number,
+            to_page=page.number,
+        )
+        applied_redaction_page = applied_redaction_doc[0]
 
     if isinstance(image, Image.Image):
         # Create an image path using the input folder with PDF filename
@@ -5079,6 +5113,24 @@ def redact_page_with_pymupdf(
                     retain_text=True,
                     return_pdf_end_of_redaction=False,
                 )
+            elif dual_output_same_pass and applied_redaction_page is not None:
+                # Apply both review and final redactions cumulatively on the same page copies.
+                redact_single_box(
+                    page,
+                    rect,
+                    img_annotation_box,
+                    custom_colours,
+                    retain_text=True,
+                    return_pdf_end_of_redaction=False,
+                )
+                redact_single_box(
+                    applied_redaction_page,
+                    rect,
+                    img_annotation_box,
+                    custom_colours,
+                    retain_text=False,
+                    return_pdf_end_of_redaction=False,
+                )
             else:
                 redact_result = redact_single_box(
                     page,
@@ -5089,17 +5141,7 @@ def redact_page_with_pymupdf(
                     return_pdf_end_of_redaction,
                 )
                 if isinstance(redact_result, tuple):
-                    page, applied_redaction_page = redact_result
-                    if not hasattr(redact_page_with_pymupdf, "_applied_redaction_page"):
-                        redact_page_with_pymupdf._applied_redaction_page = (
-                            applied_redaction_page,
-                            page.number,
-                        )
-                    else:
-                        redact_page_with_pymupdf._applied_redaction_page = (
-                            applied_redaction_page,
-                            page.number,
-                        )
+                    page, _ = redact_result
             continue
         # Check if an Image recogniser result, or a Gradio annotation object
         if (isinstance(annot, CustomImageRecognizerResult)) or isinstance(annot, dict):
@@ -5209,6 +5251,24 @@ def redact_page_with_pymupdf(
                 retain_text=True,
                 return_pdf_end_of_redaction=False,
             )
+        elif dual_output_same_pass and applied_redaction_page is not None:
+            # Apply both review and final redactions cumulatively on the same page copies.
+            redact_single_box(
+                page,
+                rect,
+                img_annotation_box,
+                custom_colours,
+                retain_text=True,
+                return_pdf_end_of_redaction=False,
+            )
+            redact_single_box(
+                applied_redaction_page,
+                rect,
+                img_annotation_box,
+                custom_colours,
+                retain_text=False,
+                return_pdf_end_of_redaction=False,
+            )
         else:
             redact_result = redact_single_box(
                 page,
@@ -5220,20 +5280,7 @@ def redact_page_with_pymupdf(
             )
             # Handle dual page objects if returned
             if isinstance(redact_result, tuple):
-                page, applied_redaction_page = redact_result
-                # Store the final page with page number for unpacking at end of function
-                if not hasattr(redact_page_with_pymupdf, "_applied_redaction_page"):
-                    redact_page_with_pymupdf._applied_redaction_page = (
-                        applied_redaction_page,
-                        page.number,
-                    )
-                else:
-                    # If we already have a final page, we need to handle multiple pages
-                    # For now, we'll use the last final page
-                    redact_page_with_pymupdf._applied_redaction_page = (
-                        applied_redaction_page,
-                        page.number,
-                    )
+                page, _ = redact_result
 
     # If whole page is to be redacted, do that here
     if redact_whole_page is True:
@@ -5251,23 +5298,8 @@ def redact_page_with_pymupdf(
         )
         all_image_annotation_boxes.append(whole_page_img_annotation_box)
 
-        # Handle dual page objects for whole page redaction if needed
-        if (
-            return_pdf_end_of_redaction
-            and return_pdf_for_review
-            and review_page is None
-        ):
-            # Create a copy of the page for final redaction using the same approach as redact_single_box
-
-            applied_redaction_doc = pymupdf.open()
-            applied_redaction_doc.insert_pdf(
-                page.parent,
-                from_page=page.number,
-                to_page=page.number,
-            )
-            applied_redaction_page = applied_redaction_doc[0]
-
-            # Apply the whole page redaction to the final page as well
+        # In dual-output mode, apply whole-page redaction to the final page copy too.
+        if dual_output_same_pass and applied_redaction_page is not None:
             redact_whole_pymupdf_page(
                 rect_height,
                 rect_width,
@@ -5275,20 +5307,6 @@ def redact_page_with_pymupdf(
                 custom_colours,
                 border=5,
             )
-
-            # Store the final page with its original page number for later use
-            if not hasattr(redact_page_with_pymupdf, "_applied_redaction_page"):
-                redact_page_with_pymupdf._applied_redaction_page = (
-                    applied_redaction_page,
-                    page.number,
-                )
-            else:
-                # If we already have a final page, we need to handle multiple pages
-                # For now, we'll use the last final page
-                redact_page_with_pymupdf._applied_redaction_page = (
-                    applied_redaction_page,
-                    page.number,
-                )
 
     out_annotation_boxes = {
         "image": image_path,  # Image.open(image_path), #image_path,
@@ -5310,18 +5328,7 @@ def redact_page_with_pymupdf(
         review_page.clean_contents()
 
     # Handle dual page objects if we have a final page
-    if (
-        return_pdf_end_of_redaction
-        and return_pdf_for_review
-        and hasattr(redact_page_with_pymupdf, "_applied_redaction_page")
-    ):
-        applied_redaction_page_data = redact_page_with_pymupdf._applied_redaction_page
-        # Handle both tuple format (new) and single page format (backward compatibility)
-        if isinstance(applied_redaction_page_data, tuple):
-            applied_redaction_page, original_page_number = applied_redaction_page_data
-        else:
-            applied_redaction_page = applied_redaction_page_data
-
+    if dual_output_same_pass and applied_redaction_page is not None:
         # Apply redactions to applied redaction page only
         applied_redaction_page.apply_redactions(
             images=APPLY_REDACTIONS_IMAGES,
@@ -5331,9 +5338,6 @@ def redact_page_with_pymupdf(
 
         set_cropbox_safely(applied_redaction_page, original_cropbox)
         applied_redaction_page.clean_contents()
-        # Clear the stored final page (guard for concurrent requests sharing the same function ref)
-        if hasattr(redact_page_with_pymupdf, "_applied_redaction_page"):
-            delattr(redact_page_with_pymupdf, "_applied_redaction_page")
         return (page, applied_redaction_page), out_annotation_boxes
 
     else:
@@ -5399,6 +5403,11 @@ def merge_img_bboxes(
                 text_val = word.get("text")
                 if text_val not in ["[FACE]", "[SIGNATURE]"]:
                     continue
+                conf_raw = float(word.get("conf", word.get("confidence", 0.0)))
+                conf = conf_raw / 100.0 if conf_raw > 1.0 else conf_raw
+                conf = max(0.0, min(1.0, conf))
+                if conf < CUSTOM_VLM_MIN_CONFIDENCE:
+                    continue
                 x0, y0, x1, y1 = word.get("bounding_box", (0, 0, 0, 0))
                 width = x1 - x0
                 height = y1 - y0
@@ -5412,7 +5421,7 @@ def merge_img_bboxes(
                         entity_type,
                         0,
                         0,
-                        float(word.get("conf", word.get("confidence", 0.0))),
+                        conf,
                         int(x0),
                         int(y0),
                         int(width),

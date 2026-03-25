@@ -674,7 +674,7 @@ When checked, redaction tasks will first check all pages for text that can be ex
 
 This field 'Min. page-area fraction for an embedded image to force OCR' is shown when Efficient OCR is enabled. It sets the smallest fraction of the page area (on the PDF page) that a **single** embedded image must cover—on one placement on the page—for that page to be sent through the full OCR step **even if** the page already has enough extractable words for the text-only path. That way, pages with plenty of selectable text but a large image (for example a photo or embedded scan) can still be analysed by OCR, which can pick up text that exists only inside the image and is not separate selectable text.
 
-Values are typically small decimals (for example `0.02` for 2% of the page area). Enter **0** to turn off this rule: routing then depends only on the minimum word count (the label in the app notes this as “word count only”). To disable Efficient OCR entirely, uncheck the 'Efficient OCR' checkbox and run your redaction task.
+Values are typically small decimals (for example `0.01` for 1% of the page area). Enter **0** to turn off this rule: routing then depends only on the minimum word count (the label in the app notes this as “word count only”). To disable Efficient OCR entirely, uncheck the 'Efficient OCR' checkbox and run your redaction task.
 
 **Note:** *AWS Textract* with *Extract signatures* still analyses **all** pages and disables Efficient OCR for that workflow.
 

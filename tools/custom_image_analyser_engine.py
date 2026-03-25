@@ -6,6 +6,7 @@ import json
 import math
 import os
 import re
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
@@ -48,6 +49,7 @@ from tools.config import (
     INFERENCE_SERVER_MODEL_NAME,
     INFERENCE_SERVER_PII_OPTION,
     INFERENCE_SERVER_TIMEOUT,
+    LINE_TO_WORD_SEGMENT_MAX_WORKERS,
     LLM_MAX_NEW_TOKENS,
     LLM_TEMPERATURE,
     LOAD_PADDLE_AT_STARTUP,
@@ -1790,6 +1792,90 @@ def _call_azure_openai_vlm_api(
         raise ConnectionError(f"Failed to call Azure/OpenAI API: {str(e)}")
 
 
+def _repair_vlm_json_common_quote_issues(s: str) -> str:
+    """
+    Best-effort repair for minor JSON issues seen in VLM outputs.
+
+    Common cases:
+    - Stray quote after numeric conf: {"conf": 0.85"} -> {"conf": 0.85}
+    - Conf glued to extra text: {"conf": 0.85"some text..."} -> {"conf": 0.85}
+    - A second trailing "conf : .6}" fragment appended inside an object
+    """
+    if not s or not isinstance(s, str):
+        return s
+
+    out = s
+
+    # Remove a stray quote (and any non-delimiter junk) immediately after numeric conf/confidence.
+    # Keep the numeric value and let json.loads succeed.
+    out = re.sub(
+        r'("conf(?:idence)?"\s*:\s*)(-?\d+(?:\.\d+)?)(?:"[^,}\]]*)',
+        r"\1\2",
+        out,
+    )
+
+    # Drop malformed trailing fragments like: ,   conf : .6}"
+    # (unquoted key, often followed by extra braces/quotes).
+    out = re.sub(
+        r",\s*conf\s*:\s*-?(?:\d+(?:\.\d+)?|\.\d+)\s*\}?\s*\"?\s*",
+        "",
+        out,
+        flags=re.IGNORECASE,
+    )
+
+    # If the model accidentally emits single quotes around keys/strings, prefer leaving as-is
+    # (other code paths already rely on strict JSON). Avoid aggressive rewriting here.
+    return out
+
+
+def _best_effort_extract_text_conf_from_messy_jsonish(
+    raw: str,
+) -> Optional[Dict[str, Any]]:
+    """
+    Last-resort extractor for hybrid VLM OCR single-line payloads when JSON is too broken.
+    Pulls the first `text` string and the first numeric `conf/confidence` value.
+    """
+    if not raw or not isinstance(raw, str):
+        return None
+
+    s = raw.strip()
+
+    # Extract text (prefer quoted JSON-like "text": "...")
+    text_match = re.search(
+        r'"text"\s*:\s*"(?P<text>(?:[^"\\\\]|\\\\.)*)"',
+        s,
+        flags=re.IGNORECASE,
+    )
+    if not text_match:
+        text_match = re.search(
+            r"\btext\b\s*[:=]\s*\"(?P<text>(?:[^\"\\\\]|\\\\.)*)\"",
+            s,
+            flags=re.IGNORECASE,
+        )
+    if not text_match:
+        return None
+    text_val = text_match.group("text")
+    try:
+        # Unescape common sequences
+        text_val = bytes(text_val, "utf-8").decode("unicode_escape")
+    except Exception:
+        pass
+    text_val = str(text_val).strip()
+    if not text_val:
+        return None
+
+    # Extract first confidence number after conf/confidence (tolerate unquoted key)
+    conf_match = re.search(
+        r"(?:\"?conf(?:idence)?\"?)\s*:\s*(?P<conf>-?(?:\d+(?:\.\d+)?|\.\d+))",
+        s,
+        flags=re.IGNORECASE,
+    )
+    out: Dict[str, Any] = {"text": text_val}
+    if conf_match:
+        out["confidence"] = conf_match.group("conf")
+    return out
+
+
 def _extract_last_text_dict_from_vlm_response(raw: str) -> Optional[Dict[str, Any]]:
     """
     Extract the last JSON object that contains a "text" key from a VLM response.
@@ -1820,13 +1906,18 @@ def _extract_last_text_dict_from_vlm_response(raw: str) -> Optional[Dict[str, An
             continue
         snippet = raw[start:j]
         try:
+            snippet = _repair_vlm_json_common_quote_issues(snippet)
             obj = json.loads(snippet)
             if isinstance(obj, dict):
                 norm = _normalize_single_line_text_dict(obj)
                 if norm is not None:
                     last_valid = norm
         except (json.JSONDecodeError, TypeError):
-            pass
+            fallback = _best_effort_extract_text_conf_from_messy_jsonish(snippet)
+            if fallback is not None:
+                norm = _normalize_single_line_text_dict(fallback)
+                if norm is not None:
+                    last_valid = norm
         i = j
     return last_valid
 
@@ -1863,13 +1954,18 @@ def _extract_and_combine_text_dicts_from_vlm_response(
             continue
         snippet = raw[start:j]
         try:
+            snippet = _repair_vlm_json_common_quote_issues(snippet)
             obj = json.loads(snippet)
             if isinstance(obj, dict):
                 norm = _normalize_single_line_text_dict(obj)
                 if norm is not None:
                     collected.append(norm)
         except (json.JSONDecodeError, TypeError):
-            pass
+            fallback = _best_effort_extract_text_conf_from_messy_jsonish(snippet)
+            if fallback is not None:
+                norm = _normalize_single_line_text_dict(fallback)
+                if norm is not None:
+                    collected.append(norm)
         i = j
     if not collected:
         return None
@@ -4036,6 +4132,7 @@ def _preprocess_vlm_ocr_json_string(
     s = _fix_malformed_bbox_in_json_string(s)
     label = implied_label if implied_label else "[UNKNOWN]"
     s = _repair_vlm_json_stray_coordinate_strings(s, default_text=label)
+    s = _repair_vlm_json_common_quote_issues(s)
     return s
 
 
@@ -6849,6 +6946,7 @@ class CustomImageAnalyzerEngine:
         task: Tuple,
         output_folder: str,
         image_name: Optional[str],
+        thread_local_segmenter: Optional[threading.local] = None,
     ) -> Tuple[int, Dict[str, List]]:
         """
         Process a single line to word-level bounding boxes. Used by
@@ -6883,7 +6981,13 @@ class CustomImageAnalyzerEngine:
             "conf": [],
             "model": [],
         }
-        segmenter = AdaptiveSegmenter(output_folder=output_folder)
+        if thread_local_segmenter is not None:
+            segmenter = getattr(thread_local_segmenter, "segmenter", None)
+            if segmenter is None:
+                segmenter = AdaptiveSegmenter(output_folder=output_folder)
+                thread_local_segmenter.segmenter = segmenter
+        else:
+            segmenter = AdaptiveSegmenter(output_folder=output_folder)
         single_line_data = {
             "text": [line_text],
             "left": [0],
@@ -6969,6 +7073,7 @@ class CustomImageAnalyzerEngine:
 
         if not line_data or not line_data.get("text"):
             return output
+        # Timing hooks removed (test-only).
 
         # Validate that image is not None before processing
         if image is None:
@@ -7003,6 +7108,7 @@ class CustomImageAnalyzerEngine:
             image_height = actual_height
 
         # Build list of tasks: one per valid line (crop and validate on main thread)
+        _start_task_build = time.perf_counter()
         tasks = []
         for i in range(len(line_data["text"])):
             line_text = line_data["text"][i]
@@ -7073,21 +7179,30 @@ class CustomImageAnalyzerEngine:
 
         if not tasks:
             return output
+        # Timing hooks removed (test-only).
 
-        # Process lines in parallel (or single line in thread)
-        max_workers = min(MAX_WORKERS, len(tasks))
+        # Process lines in parallel. Dedicated worker cap is safer for this CPU-heavy path.
+        max_workers = min(LINE_TO_WORD_SEGMENT_MAX_WORKERS, len(tasks))
+        # Timing hooks removed (test-only).
         process_one = partial(
             CustomImageAnalyzerEngine._process_one_line_to_words,
             output_folder=self.output_folder,
             image_name=image_name,
+            thread_local_segmenter=threading.local(),
         )
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            results = list(executor.map(process_one, tasks))
+        if max_workers <= 1:
+            results = [process_one(task) for task in tasks]
+        else:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                results = list(executor.map(process_one, tasks))
+        # Timing hooks removed (test-only).
 
         # Merge results in line order to preserve document order
+        # Timing hooks removed (test-only).
         for _i, word_dict in sorted(results, key=lambda x: x[0]):
             for key in output:
                 output[key].extend(word_dict[key])
+        # Timing hooks removed (test-only).
 
         return output
 
@@ -8571,109 +8686,109 @@ class CustomImageAnalyzerEngine:
                 input_image_height=original_image_height,
             )
 
-            if self.save_page_ocr_visualisations is True:
-                # Save output to image with identified bounding boxes
-                # Use original image since coordinates are in original image space
-                # Prefer original_image_for_cropping (when PaddleOCR processed from file path),
-                # otherwise use original_image_for_visualization (stored before preprocessing)
-                viz_image = (
-                    original_image_for_cropping
-                    if original_image_for_cropping is not None
-                    else (
-                        original_image_for_visualization
-                        if original_image_for_visualization is not None
-                        else image
-                    )
-                )
-                if isinstance(viz_image, Image.Image):
-                    # Convert PIL Image to numpy array in BGR format for OpenCV
-                    image_cv = cv2.cvtColor(np.array(viz_image), cv2.COLOR_RGB2BGR)
-                else:
-                    image_cv = np.array(viz_image)
-                    if len(image_cv.shape) == 2:
-                        image_cv = cv2.cvtColor(image_cv, cv2.COLOR_GRAY2BGR)
-                    elif len(image_cv.shape) == 3 and image_cv.shape[2] == 3:
-                        # Assume RGB, convert to BGR
-                        image_cv = cv2.cvtColor(image_cv, cv2.COLOR_RGB2BGR)
+            # if self.save_page_ocr_visualisations is True:
+            #     # Save output to image with identified bounding boxes
+            #     # Use original image since coordinates are in original image space
+            #     # Prefer original_image_for_cropping (when PaddleOCR processed from file path),
+            #     # otherwise use original_image_for_visualization (stored before preprocessing)
+            #     viz_image = (
+            #         original_image_for_cropping
+            #         if original_image_for_cropping is not None
+            #         else (
+            #             original_image_for_visualization
+            #             if original_image_for_visualization is not None
+            #             else image
+            #         )
+            #     )
+            #     if isinstance(viz_image, Image.Image):
+            #         # Convert PIL Image to numpy array in BGR format for OpenCV
+            #         image_cv = cv2.cvtColor(np.array(viz_image), cv2.COLOR_RGB2BGR)
+            #     else:
+            #         image_cv = np.array(viz_image)
+            #         if len(image_cv.shape) == 2:
+            #             image_cv = cv2.cvtColor(image_cv, cv2.COLOR_GRAY2BGR)
+            #         elif len(image_cv.shape) == 3 and image_cv.shape[2] == 3:
+            #             # Assume RGB, convert to BGR
+            #             image_cv = cv2.cvtColor(image_cv, cv2.COLOR_RGB2BGR)
 
-                # Draw all bounding boxes on the image
-                for i in range(len(ocr_data["text"])):
-                    left = int(ocr_data["left"][i])
-                    top = int(ocr_data["top"][i])
-                    width = int(ocr_data["width"][i])
-                    height = int(ocr_data["height"][i])
-                    # Ensure coordinates are within image bounds
-                    left = max(0, min(left, image_cv.shape[1] - 1))
-                    top = max(0, min(top, image_cv.shape[0] - 1))
-                    right = max(left + 1, min(left + width, image_cv.shape[1]))
-                    bottom = max(top + 1, min(top + height, image_cv.shape[0]))
-                    cv2.rectangle(
-                        image_cv, (left, top), (right, bottom), (0, 255, 0), 2
-                    )
+            #     # Draw all bounding boxes on the image
+            #     for i in range(len(ocr_data["text"])):
+            #         left = int(ocr_data["left"][i])
+            #         top = int(ocr_data["top"][i])
+            #         width = int(ocr_data["width"][i])
+            #         height = int(ocr_data["height"][i])
+            #         # Ensure coordinates are within image bounds
+            #         left = max(0, min(left, image_cv.shape[1] - 1))
+            #         top = max(0, min(top, image_cv.shape[0] - 1))
+            #         right = max(left + 1, min(left + width, image_cv.shape[1]))
+            #         bottom = max(top + 1, min(top + height, image_cv.shape[0]))
+            #         cv2.rectangle(
+            #             image_cv, (left, top), (right, bottom), (0, 255, 0), 2
+            #         )
 
-                # Save the visualization once with all boxes drawn
-                paddle_viz_folder = os.path.join(
-                    self.output_folder, "paddle_visualisations"
-                )
-                # Double-check the constructed path is safe
-                if not validate_folder_containment(paddle_viz_folder, OUTPUT_FOLDER):
-                    raise ValueError(
-                        f"Unsafe paddle visualisations folder path: {paddle_viz_folder}"
-                    )
+            #     # Save the visualization once with all boxes drawn
+            #     paddle_viz_folder = os.path.join(
+            #         self.output_folder, "paddle_visualisations"
+            #     )
+            #     # Double-check the constructed path is safe
+            #     if not validate_folder_containment(paddle_viz_folder, OUTPUT_FOLDER):
+            #         raise ValueError(
+            #             f"Unsafe paddle visualisations folder path: {paddle_viz_folder}"
+            #         )
 
-                os.makedirs(paddle_viz_folder, exist_ok=True)
+            #     os.makedirs(paddle_viz_folder, exist_ok=True)
 
-                # Generate safe filename
-                if image_name:
-                    base_name = os.path.splitext(os.path.basename(image_name))[0]
-                    # Increment the number at the end of base_name
-                    # This converts zero-indexed input to one-indexed output
-                    incremented_base_name = base_name
-                    # Find the number pattern at the end
-                    # Matches patterns like: _0, _00, 0, 00, etc.
-                    pattern = r"(\d+)$"
-                    match = re.search(pattern, base_name)
-                    if match:
-                        number_str = match.group(1)
-                        number = int(number_str)
-                        incremented_number = number + 1
-                        # Preserve the same number of digits (padding with zeros if needed)
-                        incremented_str = str(incremented_number).zfill(len(number_str))
-                        incremented_base_name = re.sub(
-                            pattern, incremented_str, base_name
-                        )
-                    # Sanitize filename to avoid issues with special characters
-                    incremented_base_name = safe_sanitize_text(
-                        incremented_base_name, max_length=50
-                    )
-                    filename = f"{incremented_base_name}_initial_bounding_boxes.jpg"
-                else:
-                    timestamp = int(time.time())
-                    filename = f"initial_bounding_boxes_{timestamp}.jpg"
+            #     # Generate safe filename
+            #     if image_name:
+            #         base_name = os.path.splitext(os.path.basename(image_name))[0]
+            #         # Increment the number at the end of base_name
+            #         # This converts zero-indexed input to one-indexed output
+            #         incremented_base_name = base_name
+            #         # Find the number pattern at the end
+            #         # Matches patterns like: _0, _00, 0, 00, etc.
+            #         pattern = r"(\d+)$"
+            #         match = re.search(pattern, base_name)
+            #         if match:
+            #             number_str = match.group(1)
+            #             number = int(number_str)
+            #             incremented_number = number + 1
+            #             # Preserve the same number of digits (padding with zeros if needed)
+            #             incremented_str = str(incremented_number).zfill(len(number_str))
+            #             incremented_base_name = re.sub(
+            #                 pattern, incremented_str, base_name
+            #             )
+            #         # Sanitize filename to avoid issues with special characters
+            #         incremented_base_name = safe_sanitize_text(
+            #             incremented_base_name, max_length=50
+            #         )
+            #         filename = f"{incremented_base_name}_initial_bounding_boxes.jpg"
+            #     else:
+            #         timestamp = int(time.time())
+            #         filename = f"initial_bounding_boxes_{timestamp}.jpg"
 
-                output_path = os.path.join(paddle_viz_folder, filename)
-                max_filesize = 500 * 1024  # 500kb in bytes
-                quality = 95  # Start high, OpenCV JPEG quality range is 0-100
+            #     output_path = os.path.join(paddle_viz_folder, filename)
+            #     max_filesize = 500 * 1024  # 500kb in bytes
+            #     quality = 95  # Start high, OpenCV JPEG quality range is 0-100
 
-                # Try lowering JPEG quality until file is below size limit
-                is_saved = False
-                while quality >= 10:
-                    cv2.imwrite(
-                        output_path, image_cv, [int(cv2.IMWRITE_JPEG_QUALITY), quality]
-                    )
-                    if (
-                        os.path.exists(output_path)
-                        and os.path.getsize(output_path) <= max_filesize
-                    ):
-                        is_saved = True
-                        break
-                    quality -= 5
+            #     # Try lowering JPEG quality until file is below size limit
+            #     is_saved = False
+            #     while quality >= 10:
+            #         cv2.imwrite(
+            #             output_path, image_cv, [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+            #         )
+            #         if (
+            #             os.path.exists(output_path)
+            #             and os.path.getsize(output_path) <= max_filesize
+            #         ):
+            #             is_saved = True
+            #             break
+            #         quality -= 5
 
-                if not is_saved:
-                    # Save as lowest acceptable quality if cannot get under 500kb, or raise warning
-                    cv2.imwrite(
-                        output_path, image_cv, [int(cv2.IMWRITE_JPEG_QUALITY), 10]
-                    )
+            #     if not is_saved:
+            #         # Save as lowest acceptable quality if cannot get under 500kb, or raise warning
+            #         cv2.imwrite(
+            #             output_path, image_cv, [int(cv2.IMWRITE_JPEG_QUALITY), 10]
+            #         )
 
         else:
             raise RuntimeError(f"Unsupported OCR engine: {self.ocr_engine}")
@@ -8705,6 +8820,8 @@ class CustomImageAnalyzerEngine:
             else:
                 # print("rescaling ocr_data with scale_factor: ", scale_factor)
                 ocr_data = rescale_ocr_data(ocr_data, scale_factor)
+
+            # print("Finished rescaling ocr_data")
 
         # Convert line-level results to word-level if configured and needed
         if CONVERT_LINE_TO_WORD_LEVEL and self._is_line_level_data(ocr_data):
@@ -8818,6 +8935,8 @@ class CustomImageAnalyzerEngine:
                     crop_image,
                     image_name=image_name,
                 )
+
+        # print("Finished converting line level results to word level")
 
         # The rest of your processing pipeline now works for both engines
         ocr_result = ocr_data

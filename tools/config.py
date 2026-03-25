@@ -655,12 +655,23 @@ EFFICIENT_OCR_MIN_WORDS = int(get_or_create_env_var("EFFICIENT_OCR_MIN_WORDS", "
 # cover to route the page through OCR in addition to the word-count rule. Reduces false
 # positives from tiny icons/watermarks. Set to 0 to disable image-based routing (word count only).
 EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION = float(
-    get_or_create_env_var("EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION", "0.02")
+    get_or_create_env_var("EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION", "0.01")
 )
 # Default max workers for parallel processing app-wide. Overridable by specific env vars below.
 MAX_WORKERS = max(
     1,
     int(get_or_create_env_var("MAX_WORKERS", "8")),
+)
+# Dedicated worker cap for line->word segmentation. This path is CPU/memory heavy
+# and can slow down when matching MAX_WORKERS on busy documents.
+LINE_TO_WORD_SEGMENT_MAX_WORKERS = max(
+    1,
+    int(
+        get_or_create_env_var(
+            "LINE_TO_WORD_SEGMENT_MAX_WORKERS",
+            str(min(MAX_WORKERS, 4)),
+        )
+    ),
 )
 # Max threads for OCR first pass in redact_image_pdf (1 = sequential). Enables parallel Textract/Tesseract/VLM.
 OCR_FIRST_PASS_MAX_WORKERS = max(
@@ -1021,7 +1032,7 @@ VLM_MIN_DPI = float(
 )  # _prepare_image_for_vlm: reported DPI below this implies upscale (effective DPI = reported_dpi * scale).
 
 VLM_MAX_DPI = float(
-    get_or_create_env_var("VLM_MAX_DPI", "300.0")
+    get_or_create_env_var("VLM_MAX_DPI", "200.0")
 )  # _prepare_image_for_vlm: reported DPI above this implies downscale. Bounds apply together with min/max pixels.
 
 # Max image aspect ratio max(width/height, height/width) after white-padding for VLM inputs.
@@ -1286,7 +1297,7 @@ MODEL_CACHE_PATH = ensure_folder_within_app_directory(MODEL_CACHE_PATH)
 
 
 HYBRID_OCR_CONFIDENCE_THRESHOLD = int(
-    get_or_create_env_var("HYBRID_OCR_CONFIDENCE_THRESHOLD", "90")
+    get_or_create_env_var("HYBRID_OCR_CONFIDENCE_THRESHOLD", "95")
 )  # The tesseract confidence threshold under which the text will be passed to PaddleOCR for re-extraction using the hybrid OCR method.
 
 HYBRID_OCR_PADDING = int(
@@ -1786,6 +1797,15 @@ CUSTOM_VLM_BACKEND = (
 )
 if CUSTOM_VLM_BACKEND not in ("transformers_vlm", "inference_vlm", "bedrock_vlm"):
     CUSTOM_VLM_BACKEND = "bedrock_vlm"
+
+# Minimum confidence for CUSTOM_VLM face/signature detections to be kept.
+# Values can be provided either as 0..1 or 0..100. Internally interpreted as 0..1.
+CUSTOM_VLM_MIN_CONFIDENCE = float(
+    get_or_create_env_var("CUSTOM_VLM_MIN_CONFIDENCE", "0.65")
+)
+if CUSTOM_VLM_MIN_CONFIDENCE > 1.0:
+    CUSTOM_VLM_MIN_CONFIDENCE = CUSTOM_VLM_MIN_CONFIDENCE / 100.0
+CUSTOM_VLM_MIN_CONFIDENCE = max(0.0, min(1.0, CUSTOM_VLM_MIN_CONFIDENCE))
 
 # Local transformers LLM generation parameters
 LLM_MODEL_DTYPE = get_or_create_env_var("LLM_MODEL_DTYPE", "bfloat16")

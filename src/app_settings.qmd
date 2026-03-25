@@ -345,7 +345,7 @@ Configurations related to text extraction, PII detection, and the redaction proc
 
 * **`EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION`**
     * **Description:** When `EFFICIENT_OCR` is enabled, minimum fraction of the page area (MediaBox) that a single embedded image must cover to route that page through OCR (`redact_image_pdf`) in addition to the word-count rule. This catches pages with plenty of selectable text but meaningful raster content (e.g. photos) where text may appear only inside the image. Set to `0` to disable image-based routing and rely on word count only.
-    * **Default Value:** `0.03` (3% of page area)
+    * **Default Value:** `0.01` (1% of page area)
 
 * **`MAX_WORKERS`**
     * **Description:** Default maximum number of worker threads for parallel processing across the app. Used as the default or cap for thread pools in review (saving redacted pages, loading page images), file conversion (PDF-to-images, input file listing, annotation processing), file redaction (text extraction, merge/summary, pikepdf annotations), custom image analyser (mapping analyzer results to bounding boxes), and data anonymisation (initial column cleaning). When not set, `OCR_FIRST_PASS_MAX_WORKERS` and `SUMMARY_PAGE_GROUP_MAX_WORKERS` default to this value; set those explicitly to override for OCR or summarisation only.
@@ -362,6 +362,10 @@ Configurations related to text extraction, PII detection, and the redaction proc
 * **`PADDLE_MAX_WORKERS`**
     * **Description:** Maximum number of worker threads used to run local PaddleOCR on multiple pages in parallel when **Paddle** is the chosen local OCR model. Paddle is often GPU-bound and shares one model instance; keep this low (e.g. `1`–`2`) to avoid VRAM contention or errors. Set to `1` for effectively sequential Paddle OCR per document.
     * **Default Value:** `2`
+
+* **`LINE_TO_WORD_SEGMENT_MAX_WORKERS`**
+    * **Description:** Maximum number of worker threads used to run the line-to-word segmentation process. This is a CPU/memory intensive process and can slow down when matching `MAX_WORKERS` on busy documents.
+    * **Default Value:** `4`
 
 * **`SUMMARY_PAGE_GROUP_MAX_WORKERS`**
     * **Description:** Maximum number of threads for page-group summarisation in document summarisation. Set to `1` for sequential processing (recommended for local LLM models); use a value greater than `1` to summarise multiple page groups in parallel (typically for API-based models). Defaults to `MAX_WORKERS` if not set. Can be overridden via CLI `--summary_page_group_max_workers` or direct-mode/Lambda env.
@@ -778,6 +782,10 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
 * **`CUSTOM_VLM_BACKEND`**
     * **Description:** Backend used for CUSTOM_VLM_FACES and CUSTOM_VLM_SIGNATURE (face and signature detection) when those entities are selected for redaction. One of: `"transformers_vlm"` (local transformers VLM), `"inference_vlm"` (inference-server VLM), or `"bedrock_vlm"` (AWS Bedrock VLM). Applies regardless of the PII identification method (Local, AWS Comprehend, or LLM). Value is case-insensitive; invalid values fall back to `"bedrock_vlm"`.
     * **Default Value:** `"bedrock_vlm"`
+
+* **`CUSTOM_VLM_MIN_CONFIDENCE`**
+    * **Description:** Minimum confidence required for VLM face/signature detections (**`CUSTOM_VLM_FACES`** / **`CUSTOM_VLM_SIGNATURE`**) to be kept for downstream outputs (annotations, decision tables, and PDF redaction). Values can be provided as `0..1` (e.g. `0.5`) or `0..100` (e.g. `50`).
+    * **Default Value:** `0.5`
 
 * **`CLOUD_LLM_PII_MODEL_CHOICE`**
     * **Description:** Default AWS Bedrock (or cloud) model for LLM-based PII detection when `SHOW_AWS_BEDROCK_LLM_MODELS` (or other cloud LLM options) is enabled. Used by `tools/llm_entity_detection.py`.

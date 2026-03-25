@@ -927,8 +927,8 @@ css = """
 /* Target tab navigation buttons only - not buttons inside tab content */
 /* Gradio renders tab buttons with role="tab" in the navigation area */
 button[role="tab"] {
-    font-size: 1.3em !important;
-    padding: 0.75em 1.5em !important;
+    font-size: 1.2em !important;
+    padding: 0.75em 1.4em !important;
 }
 
 /* Alternative selectors for different Gradio versions */
@@ -936,7 +936,7 @@ button[role="tab"] {
 nav button[role="tab"],
 div[class*="tab-nav"] button {
     font-size: 1.2em !important;
-    padding: 0.75em 1.5em !important;
+    padding: 0.75em 1.4em !important;
 }
 """
 
@@ -1572,6 +1572,7 @@ with blocks:
             ),
             "hybrid-paddle-vlm": (
                 "hybrid-paddle-vlm",
+                "hybrid-paddle-inference-server",
                 "vlm",
                 "inference-server",
                 "paddle",
@@ -3701,15 +3702,10 @@ with blocks:
 
             with gr.Accordion("Advanced OCR settings", open=False):
                 with gr.Row(equal_height=True):
-                    with gr.Column(scale=2):
-                        gr.Markdown(
-                            "Efficient OCR: When enabled, PDFs are processed per page - selectable text extraction is tried first; only pages with too little text use OCR (Tesseract/Textract/VLM), saving time and cost.",
-                            visible=False,
-                        )
-
+                    with gr.Column(scale=5):
                         with gr.Row():
                             efficient_ocr_checkbox = gr.Checkbox(
-                                label="Use efficient OCR (try text extraction first, OCR only when needed)",
+                                label="Use efficient OCR",
                                 value=EFFICIENT_OCR,
                             )
                             efficient_ocr_min_words_number = gr.Number(
@@ -3733,16 +3729,16 @@ with blocks:
                             value=OVERWRITE_EXISTING_OCR_RESULTS,
                         )
                     with gr.Column(scale=1):
+                        save_page_ocr_visualisations_checkbox = gr.Checkbox(
+                            label="Save page OCR visualisations (debug bounding boxes)",
+                            value=SAVE_PAGE_OCR_VISUALISATIONS,
+                        )
+                    with gr.Column(scale=1):
                         high_quality_textract_ocr_checkbox = gr.Checkbox(
                             label="High-quality Textract OCR (re-run low-confidence lines with Bedrock VLM for higher quality)",
                             value=HYBRID_TEXTRACT_BEDROCK_VLM,
                             visible=SHOW_AWS_TEXT_EXTRACTION_OPTIONS
                             and SHOW_HYBRID_TEXTRACT_BEDROCK_CHECKBOX,
-                        )
-                    with gr.Column(scale=1):
-                        save_page_ocr_visualisations_checkbox = gr.Checkbox(
-                            label="Save page OCR visualisations (debug bounding boxes)",
-                            value=SAVE_PAGE_OCR_VISUALISATIONS,
                         )
 
             with gr.Accordion(
