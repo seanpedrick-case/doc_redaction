@@ -398,7 +398,7 @@ def lambda_handler(event, context):
             arguments.get("images_dpi", os.getenv("IMAGES_DPI", IMAGES_DPI))
         ),
         "chosen_local_ocr_model": arguments.get(
-            "chosen_local_ocr_model", os.getenv("CHOSEN_LOCAL_OCR_MODEL", "tesseract")
+            "chosen_local_ocr_model", os.getenv("DEFAULT_LOCAL_OCR_MODEL", "tesseract")
         ),
         "preprocess_local_ocr_images": convert_string_to_boolean(
             arguments.get(

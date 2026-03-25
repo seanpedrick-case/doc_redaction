@@ -1,4 +1,5 @@
 import os
+from bisect import bisect_left
 from typing import Dict, List, Tuple
 
 import cv2
@@ -49,6 +50,11 @@ POLARITY_MEAN_THRESHOLD = 128
 POLARITY_CORNER_FRACTION = (
     0.15  # Fraction of width/height used for corner/edge sampling
 )
+
+SEARCH_STAGE1_COARSE_STEP = 0.06
+SEARCH_STAGE1_FINE_STEP = 0.02
+SEARCH_STAGE2_COARSE_STEP = 0.05
+SEARCH_STAGE2_FINE_STEP = 0.02
 
 
 def _find_widest_zero_gaps(
@@ -383,6 +389,42 @@ class AdaptiveSegmenter:
 
         return deskewed_gray, M
 
+    def _estimate_quick_skew_degrees(self, gray_image: np.ndarray) -> float:
+        """Cheap skew estimate used to skip expensive orientation/deskew when safe."""
+        if gray_image is None or gray_image.size == 0:
+            return 0.0
+        h, w = gray_image.shape[:2]
+        if h < 8 or w < 8:
+            return 0.0
+        _, quick_bin = cv2.threshold(
+            gray_image, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+        )
+        coords = np.column_stack(np.where(quick_bin > 0))
+        if len(coords) < 30:
+            return 0.0
+        rect = cv2.minAreaRect(coords[:, ::-1])
+        rect_w, rect_h = rect[1]
+        angle = float(rect[2])
+        if rect_w < rect_h:
+            angle += 90.0
+        if angle > 45.0:
+            angle -= 90.0
+        elif angle < -45.0:
+            angle += 90.0
+        return angle
+
+    def _can_skip_expensive_preprocess(self, gray_image: np.ndarray) -> bool:
+        """Return True when line is already horizontal enough for direct segmentation."""
+        if gray_image is None or gray_image.size == 0:
+            return True
+        h, w = gray_image.shape[:2]
+        if h <= 0 or w <= 0:
+            return True
+        if w <= int(h * 1.2):
+            return False
+        skew = self._estimate_quick_skew_degrees(gray_image)
+        return abs(skew) < 1.2
+
     def _get_boxes_from_profile(
         self,
         binary_image: np.ndarray,
@@ -480,24 +522,30 @@ class AdaptiveSegmenter:
         final_pass_boxes = []
         if boxes:
             keep_indices = [True] * len(boxes)
-            for i in range(len(boxes)):
-                for j in range(len(boxes)):
-                    if i == j:
-                        continue
-                    b1 = boxes[i]
-                    b2 = boxes[j]
-
-                    x_nested = (b1["left"] >= b2["left"] - 2) and (
-                        b1["left"] + b1["width"] <= b2["left"] + b2["width"] + 2
-                    )
-                    y_nested = (b1["top"] >= b2["top"] - 2) and (
-                        b1["top"] + b1["height"] <= b2["top"] + b2["height"] + 2
-                    )
-
-                    if x_nested and y_nested:
-                        if b1["text"] == b2["text"]:
-                            if b1["width"] * b1["height"] <= b2["width"] * b2["height"]:
-                                keep_indices[i] = False
+            # Fast path: adjacent comparisons after sorting removes most duplicates
+            # without full O(n^2) cross checks.
+            for i in range(len(boxes) - 1):
+                b1 = boxes[i]
+                b2 = boxes[i + 1]
+                x_nested = (b1["left"] >= b2["left"] - 2) and (
+                    b1["left"] + b1["width"] <= b2["left"] + b2["width"] + 2
+                )
+                y_nested = (b1["top"] >= b2["top"] - 2) and (
+                    b1["top"] + b1["height"] <= b2["top"] + b2["height"] + 2
+                )
+                if x_nested and y_nested and b1["text"] == b2["text"]:
+                    if b1["width"] * b1["height"] <= b2["width"] * b2["height"]:
+                        keep_indices[i] = False
+                # Also evaluate opposite containment (b2 inside b1).
+                x_nested_rev = (b2["left"] >= b1["left"] - 2) and (
+                    b2["left"] + b2["width"] <= b1["left"] + b1["width"] + 2
+                )
+                y_nested_rev = (b2["top"] >= b1["top"] - 2) and (
+                    b2["top"] + b2["height"] <= b1["top"] + b1["height"] + 2
+                )
+                if x_nested_rev and y_nested_rev and b1["text"] == b2["text"]:
+                    if b2["width"] * b2["height"] <= b1["width"] * b1["height"]:
+                        keep_indices[i + 1] = False
 
             for i, keep in enumerate(keep_indices):
                 if keep:
@@ -510,38 +558,31 @@ class AdaptiveSegmenter:
         else:
             boxes.sort(key=lambda b: (b["left"], -b["width"]))
 
-        for i in range(len(boxes)):
-            for j in range(i + 1, len(boxes)):
-                b1 = boxes[i]
-                b2 = boxes[j]
+        for i in range(len(boxes) - 1):
+            b1 = boxes[i]
+            b2 = boxes[i + 1]
+            x_overlap = min(b1["left"] + b1["width"], b2["left"] + b2["width"]) - max(
+                b1["left"], b2["left"]
+            )
+            y_overlap = min(b1["top"] + b1["height"], b2["top"] + b2["height"]) - max(
+                b1["top"], b2["top"]
+            )
 
-                x_overlap = min(
-                    b1["left"] + b1["width"], b2["left"] + b2["width"]
-                ) - max(b1["left"], b2["left"])
-                y_overlap = min(
-                    b1["top"] + b1["height"], b2["top"] + b2["height"]
-                ) - max(b1["top"], b2["top"])
-
-                if x_overlap > 0 and y_overlap > 0:
-                    if is_vertical:
-                        if b1["top"] < b2["top"]:
-                            new_h = max(1, b2["top"] - b1["top"])
-                            b1["height"] = new_h
-                    else:
-                        if b1["left"] < b2["left"]:
-                            b1_right = b1["left"] + b1["width"]
-                            b2_right = b2["left"] + b2["width"]
-                            left_slice_width = max(0, b2["left"] - b1["left"])
-                            right_slice_width = max(0, b1_right - b2_right)
-
-                            if (
-                                b1_right > b2_right
-                                and right_slice_width > left_slice_width
-                            ):
-                                b1["left"] = b2_right
-                                b1["width"] = right_slice_width
-                            else:
-                                b1["width"] = max(1, left_slice_width)
+            if x_overlap > 0 and y_overlap > 0:
+                if is_vertical:
+                    if b1["top"] < b2["top"]:
+                        b1["height"] = max(1, b2["top"] - b1["top"])
+                else:
+                    if b1["left"] < b2["left"]:
+                        b1_right = b1["left"] + b1["width"]
+                        b2_right = b2["left"] + b2["width"]
+                        left_slice_width = max(0, b2["left"] - b1["left"])
+                        right_slice_width = max(0, b1_right - b2_right)
+                        if b1_right > b2_right and right_slice_width > left_slice_width:
+                            b1["left"] = b2_right
+                            b1["width"] = right_slice_width
+                        else:
+                            b1["width"] = max(1, left_slice_width)
 
         cleaned_output = {
             k: [] for k in ["text", "left", "top", "width", "height", "conf"]
@@ -703,7 +744,6 @@ class AdaptiveSegmenter:
         match_tolerance=MATCH_TOLERANCE,
         image_name: str = None,
     ) -> Tuple[Dict[str, List], bool]:
-
         if (
             line_image is None
             or not isinstance(line_image, np.ndarray)
@@ -733,9 +773,13 @@ class AdaptiveSegmenter:
             return {}, False
 
         line_number = line_data["line"][0]
-        safe_image_name = _sanitize_filename(image_name or "image", max_length=50)
-        safe_line_number = _sanitize_filename(str(line_number), max_length=10)
-        safe_shortened_line_text = _sanitize_filename(line_text, max_length=10)
+        safe_image_name = "image"
+        safe_line_number = str(line_number)
+        safe_shortened_line_text = "line"
+        if SAVE_WORD_SEGMENTER_OUTPUT_IMAGES:
+            safe_image_name = _sanitize_filename(image_name or "image", max_length=50)
+            safe_line_number = _sanitize_filename(str(line_number), max_length=10)
+            safe_shortened_line_text = _sanitize_filename(line_text, max_length=10)
 
         if SAVE_WORD_SEGMENTER_OUTPUT_IMAGES:
             os.makedirs(self.output_folder, exist_ok=True)
@@ -753,24 +797,30 @@ class AdaptiveSegmenter:
         # ========================================================================
         # IMAGE PREPROCESSING (Deskew / Rotate)
         # ========================================================================
-        oriented_gray, M_orient = self._correct_orientation(gray)
-        deskewed_gray, M_skew = self._deskew_image(oriented_gray)
+        if self._can_skip_expensive_preprocess(gray):
+            h, w = gray.shape[:2]
+            deskewed_gray = gray
+            deskewed_line_image = line_image.copy()
+            M = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32)
+        else:
+            oriented_gray, M_orient = self._correct_orientation(gray)
+            deskewed_gray, M_skew = self._deskew_image(oriented_gray)
 
-        # Combine matrices: M_total = M_skew * M_orient
-        M_orient_3x3 = np.vstack([M_orient, [0, 0, 1]])
-        M_skew_3x3 = np.vstack([M_skew, [0, 0, 1]])
-        M_total_3x3 = M_skew_3x3 @ M_orient_3x3
-        M = M_total_3x3[0:2, :]  # Extract 2x3 affine matrix
+            # Combine matrices: M_total = M_skew * M_orient
+            M_orient_3x3 = np.vstack([M_orient, [0, 0, 1]])
+            M_skew_3x3 = np.vstack([M_skew, [0, 0, 1]])
+            M_total_3x3 = M_skew_3x3 @ M_orient_3x3
+            M = M_total_3x3[0:2, :]  # Extract 2x3 affine matrix
 
-        # Apply transformation to the original color image
-        h, w = deskewed_gray.shape
-        deskewed_line_image = cv2.warpAffine(
-            line_image,
-            M,
-            (w, h),
-            flags=cv2.INTER_CUBIC,
-            borderMode=cv2.BORDER_REPLICATE,
-        )
+            # Apply transformation to the original color image
+            h, w = deskewed_gray.shape
+            deskewed_line_image = cv2.warpAffine(
+                line_image,
+                M,
+                (w, h),
+                flags=cv2.INTER_CUBIC,
+                borderMode=cv2.BORDER_REPLICATE,
+            )
 
         # [FIX] Create Local Line Data that matches the deskewed/rotated image dimensions.
         # This prevents the fallback segmenter from using vertical dimensions on a horizontal image.
@@ -972,9 +1022,14 @@ class AdaptiveSegmenter:
                 words = line_data["text"][0].split()
                 target = len(words)
                 backup_boxes_s1 = None
+                best_stage1_diff = float("inf")
+                best_stage1_factor = INITIAL_VALLEY_THRESHOLD_FACTOR
 
                 # STAGE 1
-                for v_factor in np.arange(INITIAL_VALLEY_THRESHOLD_FACTOR, 0.60, 0.02):
+                stage1_coarse = np.arange(
+                    INITIAL_VALLEY_THRESHOLD_FACTOR, 0.60, SEARCH_STAGE1_COARSE_STEP
+                )
+                for v_factor in stage1_coarse:
                     curr_boxes = self._get_boxes_from_profile(
                         analysis_image,
                         avg_char_width_approx,
@@ -985,6 +1040,9 @@ class AdaptiveSegmenter:
                     is_geom_valid = self._is_geometry_valid(
                         curr_boxes, words, estimated_char_height
                     )
+                    if diff < best_stage1_diff:
+                        best_stage1_diff = diff
+                        best_stage1_factor = float(v_factor)
 
                     if diff == 0:
                         if is_geom_valid:
@@ -1001,10 +1059,45 @@ class AdaptiveSegmenter:
                     ):
                         backup_boxes_s1 = curr_boxes
 
+                # Refine around best coarse factor only when needed.
+                if best_boxes is None:
+                    lower = max(
+                        INITIAL_VALLEY_THRESHOLD_FACTOR,
+                        best_stage1_factor - SEARCH_STAGE1_COARSE_STEP,
+                    )
+                    upper = min(0.60, best_stage1_factor + SEARCH_STAGE1_COARSE_STEP)
+                    for v_factor in np.arange(
+                        lower, upper + 1e-9, SEARCH_STAGE1_FINE_STEP
+                    ):
+                        curr_boxes = self._get_boxes_from_profile(
+                            analysis_image,
+                            avg_char_width_approx,
+                            min_space_factor,
+                            v_factor,
+                        )
+                        diff = abs(target - len(curr_boxes))
+                        is_geom_valid = self._is_geometry_valid(
+                            curr_boxes, words, estimated_char_height
+                        )
+                        if diff == 0 and is_geom_valid:
+                            best_boxes = curr_boxes
+                            successful_binary_image = analysis_image
+                            break
+                        if (
+                            diff <= ALLOWED_WORD_MISMATCH_COUNT
+                            and backup_boxes_s1 is None
+                            and is_geom_valid
+                        ):
+                            backup_boxes_s1 = curr_boxes
+
                 # STAGE 2 (if needed)
                 if best_boxes is None:
                     backup_boxes_s2 = None
-                    for k_factor in np.arange(INITIAL_KERNEL_WIDTH_FACTOR, 0.5, 0.02):
+                    best_stage2_diff = float("inf")
+                    best_stage2_factor = INITIAL_KERNEL_WIDTH_FACTOR
+                    for k_factor in np.arange(
+                        INITIAL_KERNEL_WIDTH_FACTOR, 0.5, SEARCH_STAGE2_COARSE_STEP
+                    ):
                         k_w = max(1, int(avg_char_width_approx * k_factor))
                         s2_bin = cv2.morphologyEx(
                             clean_binary, cv2.MORPH_CLOSE, np.ones((1, k_w), np.uint8)
@@ -1025,6 +1118,9 @@ class AdaptiveSegmenter:
                             MAIN_VALLEY_THRESHOLD_FACTOR,
                         )
                         diff = abs(target - len(curr_boxes))
+                        if diff < best_stage2_diff:
+                            best_stage2_diff = diff
+                            best_stage2_factor = float(k_factor)
                         is_geom_valid = self._is_geometry_valid(
                             curr_boxes, words, estimated_char_height
                         )
@@ -1040,6 +1136,49 @@ class AdaptiveSegmenter:
                             and is_geom_valid
                         ):
                             backup_boxes_s2 = curr_boxes
+
+                    if best_boxes is None:
+                        lower = max(
+                            INITIAL_KERNEL_WIDTH_FACTOR,
+                            best_stage2_factor - SEARCH_STAGE2_COARSE_STEP,
+                        )
+                        upper = min(0.5, best_stage2_factor + SEARCH_STAGE2_COARSE_STEP)
+                        for k_factor in np.arange(
+                            lower, upper + 1e-9, SEARCH_STAGE2_FINE_STEP
+                        ):
+                            k_w = max(1, int(avg_char_width_approx * k_factor))
+                            s2_bin = cv2.morphologyEx(
+                                clean_binary,
+                                cv2.MORPH_CLOSE,
+                                np.ones((1, k_w), np.uint8),
+                            )
+                            s2_img = (
+                                s2_bin[y_start:y_end, :]
+                                if len(non_zero_rows) > 0
+                                else s2_bin
+                            )
+                            if s2_img is None or s2_img.size == 0:
+                                continue
+                            curr_boxes = self._get_boxes_from_profile(
+                                s2_img,
+                                avg_char_width_approx,
+                                min_space_factor,
+                                MAIN_VALLEY_THRESHOLD_FACTOR,
+                            )
+                            diff = abs(target - len(curr_boxes))
+                            is_geom_valid = self._is_geometry_valid(
+                                curr_boxes, words, estimated_char_height
+                            )
+                            if diff == 0 and is_geom_valid:
+                                best_boxes = curr_boxes
+                                successful_binary_image = s2_bin
+                                break
+                            if (
+                                diff <= ALLOWED_WORD_MISMATCH_COUNT
+                                and backup_boxes_s2 is None
+                                and is_geom_valid
+                            ):
+                                backup_boxes_s2 = curr_boxes
 
                     if best_boxes is None:
                         if backup_boxes_s1 is not None:
@@ -1075,6 +1214,13 @@ class AdaptiveSegmenter:
                 component_assignments = {}
                 num_proc = min(len(words), len(unlabeled_boxes))
                 min_valid_component_area = estimated_char_height * 2
+                box_meta = []
+                for i in range(num_proc):
+                    box_x, box_y, box_w, box_h = unlabeled_boxes[i]
+                    box_r = box_x + box_w
+                    box_center_x = box_x + box_w / 2
+                    box_meta.append((i, box_x, box_r, box_center_x, box_w))
+                box_starts = [meta[1] for meta in box_meta]
 
                 for j in range(1, num_labels):
                     comp_x = stats[j, cv2.CC_STAT_LEFT]
@@ -1099,16 +1245,15 @@ class AdaptiveSegmenter:
                     best_center_distance = float("inf")
                     component_center_in_box = False
 
-                    num_to_process = min(len(words), len(unlabeled_boxes))
-
                     # Assign components to boxes...
-                    for i in range(
-                        num_to_process
-                    ):  # Note: ensure num_to_process is defined
-                        box_x, box_y, box_w, box_h = unlabeled_boxes[i]
-                        box_r = box_x + box_w
-                        box_center_x = box_x + box_w / 2
-
+                    # Candidate pruning: only evaluate boxes near this component.
+                    left_search = max(0, comp_x - comp_w)
+                    right_search = comp_r + comp_w
+                    start_idx = bisect_left(box_starts, left_search)
+                    idx = start_idx
+                    while idx < len(box_meta) and box_meta[idx][1] <= right_search:
+                        i, box_x, box_r, box_center_x, box_w = box_meta[idx]
+                        idx += 1
                         if comp_w > box_w * 1.5:
                             continue
 

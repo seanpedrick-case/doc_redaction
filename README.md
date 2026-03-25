@@ -215,7 +215,7 @@ These settings are useful for all users, regardless of whether you are using AWS
 *   `SHOW_LANGUAGE_SELECTION=True`
     *   Set to `True` to display a language selection dropdown in the UI for OCR processing.
 
-*   `CHOSEN_LOCAL_OCR_MODEL=tesseract`"
+*   `DEFAULT_LOCAL_OCR_MODEL=tesseract`"
     *   Choose the backend for local OCR. Options are `tesseract`, `paddle`, or `hybrid`. "Tesseract" is the default, and is recommended. "hybrid-paddle" is a combination of the two - first pass through the redactions will be done with Tesseract, and then a second pass will be done with PaddleOCR on words with low confidence. "paddle" will only return whole line text extraction, and so will only work for OCR, not redaction. 
 
 *   `SESSION_OUTPUT_FOLDER=False`
@@ -1125,9 +1125,9 @@ INFERENCE_SERVER_API_URL=http://localhost:7862
 
 If VLM or inference server options are enabled, you can also use the VLM to identify photos of people's faces and signatures in the document, and redact them accordingly.
 
-On the 'Redaction Settings' tab, select the CUSTOM_VLM_PERSON and CUSTOM_VLM_SIGNATURE entities. When you conduct an OCR task with the VLM or inference server, it will identify the bounding boxes for photos of people's faces and signatures in the document, and redact them accordingly if a redaction option is selected.
+On the 'Redaction Settings' tab, select the CUSTOM_VLM_FACES and CUSTOM_VLM_SIGNATURE entities. When you conduct an OCR task with the VLM or inference server, it will identify the bounding boxes for photos of people's faces and signatures in the document, and redact them accordingly if a redaction option is selected.
 
-**Efficient OCR and CUSTOM_VLM routing:** When **Efficient OCR** is enabled, **CUSTOM_VLM_PERSON** (including face detection added via Textract options) runs the VLM only on pages that are routed to the OCR path (the same pages as the word-count and embedded-image rules). **CUSTOM_VLM_SIGNATURE** still runs the VLM on **every** page. If both entities are selected, the app runs two passes (signatures on all pages, then faces on OCR-classified pages only). **AWS Textract** with **Extract signatures** (or forms/tables) still processes **all** pages with Textract and disables Efficient OCR for that run.
+**Efficient OCR and CUSTOM_VLM routing:** When **Efficient OCR** is enabled, **CUSTOM_VLM_FACES** (including face detection added via Textract options) runs the VLM only on pages that are routed to the OCR path (the same pages as the word-count and embedded-image rules). **CUSTOM_VLM_SIGNATURE** still runs the VLM on **every** page. If both entities are selected, the app runs two passes (signatures on all pages, then faces on OCR-classified pages only). **AWS Textract** with **Extract signatures** (or forms/tables) still processes **all** pages with Textract and disables Efficient OCR for that run.
 
 ### PII identification with LLMs
 

@@ -44,9 +44,9 @@ from tools.config import (
 )
 from tools.helper_functions import get_system_font_path
 
-text_read_default_prompt = """Read the central line of text in the image, and return the text in the format {"text":"text content", "confidence":"confidence score from 0-1"}. Ignore any text next to the top or bottom of the image. Ensure that spaces between words and upper/lower cases are preserved. If you can't read the text, return an empty string ""."""
+text_read_default_prompt = """Read the main line of text in the image, and return JSON with keys "text" (string) and "conf" (number 0–1) for confidence in your identification, e.g. {"text": "read text", "conf": 0.95}. Do not include any other keys in the JSON. Ignore any words that are not part of the main line of text closest to the center of the image. Ensure that spaces between words and upper/lower cases are preserved. If you can't read the text, return an empty string ""."""
 
-if LOAD_PADDLE_AT_STARTUP is True:
+if LOAD_PADDLE_AT_STARTUP:
     # Set PaddleOCR environment variables BEFORE importing PaddleOCR
     # This ensures fonts are configured before the package loads
 
@@ -1339,8 +1339,9 @@ def extract_text_from_image_vlm(
     return buffer, input_tokens, output_tokens
 
 
-# Optionally,, give some more guidance on bounding box coordinates
+# Optionally, give some more guidance on bounding box coordinates
 if ADD_VLM_BOUNDING_BOX_RULES:
+    # Qwen models don't need the additional bounding box guidance as they have already been trained in this coordinate system
     if (
         (
             "qwen" in str(SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL).lower()
@@ -1352,13 +1353,13 @@ if ADD_VLM_BOUNDING_BOX_RULES:
         )
         or ("qwen" in str(CLOUD_VLM_MODEL_CHOICE).lower() and SHOW_BEDROCK_VLM_MODELS)
     ):
-        additional_bounding_box_rules = """\\n- Bounding boxes should fit within the coordinate extents of the image: 0, 0 is the top left corner of the image, and 999, 999 is the bottom right corner of the image"""
-    else:
         additional_bounding_box_rules = ""
+    else:
+        additional_bounding_box_rules = "\n- Bounding boxes should fit within the coordinate extents of the image: 0, 0 is the top left corner of the image, and 999, 999 is the bottom right corner of the image"
 else:
     additional_bounding_box_rules = ""
 
-full_page_ocr_vlm_prompt = f"""Spot all the text in the image at line-level, and output in JSON format as [{{'bbox': [x1, y1, x2, y2], 'text': 'identified text', 'conf': 'confidence score 0-1'}}, ...].
+full_page_ocr_vlm_prompt = f"""Spot all the text in the image at line-level, and output in JSON format as [{{'bbox': [x1, y1, x2, y2], 'text': 'identified text', 'conf': 'confidence score 0-1.0'}}, ...].
 
 IMPORTANT: Extract each horizontal line of text separately. Do NOT combine multiple lines into paragraphs. Each line that appears on a separate horizontal row in the image should be a separate entry.
 
@@ -1370,48 +1371,50 @@ Rules:
 - Do NOT combine lines that appear on different horizontal rows
 - Each bounding box should tightly fit around a single horizontal line of text{additional_bounding_box_rules}
 - Empty lines should be skipped
-- 'conf' should be a confidence score from 0-1
+- Use keys bbox, text, and conf; 'conf' must be a numeric confidence from 0-1
 
 
 # Only return valid JSON, no additional text or explanation."""
 
-full_page_ocr_people_vlm_prompt = f"""Spot all photos of people's faces in the image, and output in JSON format as [{{'bbox': [x1, y1, x2, y2], 'text': '[PERSON]', 'conf': 'confidence score 0-1'}}, ...].
+full_page_ocr_people_vlm_prompt = f"""Spot all photos of people's faces in the image, and output in JSON format as [{{'bbox': [x1, y1, x2, y2], 'text': '[FACE]', 'conf': 'confidence score 0-1.0'}}, ...].
 
 Rules:
-- Each photo of a person's face must be a separate entry
-- The image of the face must be a photo, not a drawing or sketch
-- Do NOT combine multiple photos into a single entry
-- Each photo of a person's face that appears in the image should be a separate entry
-- Bounding boxes around the identified person's face should completely cover the person's face{additional_bounding_box_rules}
-- 'text' should always be exactly '[PERSON]'
-- 'conf' should be a confidence score from 0-1
+- If there are no photos of people's faces in the image, return an empty JSON array []
+- If you are not confident that the detected object is a photo of a person's face, do not include it in the results. Only return results for objects that are clearly photos of people's faces. If in doubt, do not include it in the results.
+- For successful results, only return bbox, text, and conf keys. Do not include any other keys in the JSON.
+- Each identified photo of a person's face with high confidence should be a separate JSON entry
+- Only include photos of people's faces in the results, not a drawing or sketch
+- Bounding boxes around an identified person's face should completely cover the person's face{additional_bounding_box_rules}
+- 'text' must be exactly the string '[FACE]' (no other wording)
+- 'conf' should be a numeric confidence from 0-1
 - Do NOT include any other text or information in the JSON
-- If there are no photos of people's faces in the image, return an empty JSON array
+
 
 # Only return valid JSON, no additional text or explanation."""
 
-full_page_ocr_signature_vlm_prompt = f"""Spot all signatures in the image, and output in JSON format as [{{'bbox': [x1, y1, x2, y2], 'text': '[SIGNATURE]', 'conf': 'confidence score 0-1'}}, ...].
+full_page_ocr_signature_vlm_prompt = f"""Spot all handwritten signatures in the image, and output in JSON format as [{{'bbox': [x1, y1, x2, y2], 'text': '[SIGNATURE]', 'conf': 'confidence score 0-1.0'}}, ...].
 
 Rules:
-- Each signature must be a separate entry
-- Do NOT combine multiple signatures into a single entry
-- Each signature that appears in the image should be a separate entry
-- Bounding boxes around the identified signature should completely cover the signature{additional_bounding_box_rules}
-- 'text' should always be exactly '[SIGNATURE]'
-- 'conf' should be a confidence score from 0-1
+- If there are no handwritten signatures in the image, return an empty JSON array []
+- If you are not confident that the detected object is a handwritten signature, do not include it in the results. Only return results for objects that are clearly handwritten signatures. If in doubt, do not include it in the results.
+- For successful results, only return bbox, text, and conf keys. Do not include any other keys in the JSON.
+- Each identified handwritten signature with high confidence should be a separate JSON entry
+- Bounding boxes around an identified handwritten signature should completely cover the signature{additional_bounding_box_rules}
+- 'text' must be exactly the string '[SIGNATURE]' (no other wording)
+- 'conf' should be a numeric confidence from 0-1
 - Do NOT include any other text or information in the JSON.
-- If there are no signatures in the image, return an empty JSON array
 
 # Only return valid JSON, no additional text or explanation."""
 
 # Test for word-level OCR with VLMs - makes some mistakes but not bad
-full_page_ocr_vlm_words_prompt = f"""Spot all the text in the image at word-level, and output in JSON format as [{{'bbox': [x1, y1, x2, y2], 'text': 'identified word', 'conf': 'confidence score 0-1'}}, ...].
+full_page_ocr_vlm_words_prompt = f"""Spot all the text in the image at word-level, and output in JSON format as [{{'bbox': [x1, y1, x2, y2], 'text': 'identified word', 'conf': 'confidence score 0-1.0'}}, ...].
 
 IMPORTANT: Extract each word in the image separately. Do NOT combine words into longer fragments, sentences, or paragraphs. Each entry must correspond to a single, individual word as visually separated in the image.
 
 Rules:
 - Each entry should correspond to a single distinct word (not groups of words, not whole lines)
 - For each word, provide a tight bounding box [x1, y1, x2, y2] around just that word{additional_bounding_box_rules}
+- For successful results, only return bbox, text, and conf keys. Do not include any other keys in the JSON.
 - Do not merge words. Do not split words into letters. Only return one entry per word
 - Maintain the order of words as they appear spatially from top to bottom, left to right
 - Skip any empty or whitespace-only entries

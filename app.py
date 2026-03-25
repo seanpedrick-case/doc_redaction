@@ -33,7 +33,6 @@ from tools.config import (
     CHOSEN_LLM_ENTITIES,
     CHOSEN_LLM_PII_INFERENCE_METHOD,
     CHOSEN_LOCAL_MODEL_INTRO_TEXT,
-    CHOSEN_LOCAL_OCR_MODEL,
     CHOSEN_REDACT_ENTITIES,
     CLOUD_LLM_PII_MODEL_CHOICE,
     CLOUD_VLM_MODEL_CHOICE,
@@ -54,6 +53,7 @@ from tools.config import (
     DEFAULT_INFERENCE_SERVER_VLM_MODEL,
     DEFAULT_LANGUAGE,
     DEFAULT_LANGUAGE_FULL_NAME,
+    DEFAULT_LOCAL_OCR_MODEL,
     DEFAULT_MIN_CONSECUTIVE_PAGES,
     DEFAULT_MIN_WORD_COUNT,
     DEFAULT_PAGE_MAX,
@@ -134,6 +134,7 @@ from tools.config import (
     LLM_TEMPERATURE,
     LOAD_PREVIOUS_TEXTRACT_JOBS_S3,
     LOCAL_OCR_MODEL_OPTIONS,
+    LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION,
     LOCAL_PII_OPTION,
     LOCAL_TRANSFORMERS_LLM_PII_OPTION,
     LOG_FILE_NAME,
@@ -164,6 +165,7 @@ from tools.config import (
     SAVE_LOGS_TO_CSV,
     SAVE_LOGS_TO_DYNAMODB,
     SAVE_OUTPUTS_TO_S3,
+    SAVE_PAGE_OCR_VISUALISATIONS,
     SESSION_OUTPUT_FOLDER,
     SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
     SHOW_AWS_API_KEYS,
@@ -186,7 +188,6 @@ from tools.config import (
     SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS,
     SPACY_MODEL_PATH,
     TABULAR_PII_DETECTION_MODELS,
-    TESSERACT_TEXT_EXTRACT_OPTION,
     TEXT_EXTRACTION_MODELS,
     TEXTRACT_JOBS_LOCAL_LOC,
     TEXTRACT_JOBS_S3_INPUT_LOC,
@@ -436,7 +437,7 @@ walkthrough_in_redact_comprehend_entities = gr.Dropdown(
 
 # Set initial visibility for local OCR and AWS Textract based on default text extraction method
 initial_local_ocr_visible = (
-    DEFAULT_TEXT_EXTRACTION_MODEL == TESSERACT_TEXT_EXTRACT_OPTION
+    DEFAULT_TEXT_EXTRACTION_MODEL == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
 )
 initial_aws_textract_visible = (
     DEFAULT_TEXT_EXTRACTION_MODEL == TEXTRACT_TEXT_EXTRACT_OPTION
@@ -453,8 +454,8 @@ walkthrough_text_extract_method_radio = gr.Radio(
 )
 
 # Set initial value for walkthrough local OCR method based on default text extraction method
-# If Bedrock VLM is the default, set to "bedrock-vlm", otherwise use CHOSEN_LOCAL_OCR_MODEL
-initial_walkthrough_local_ocr_value = CHOSEN_LOCAL_OCR_MODEL
+# If Bedrock VLM is the default, set to "bedrock-vlm", otherwise use DEFAULT_LOCAL_OCR_MODEL
+initial_walkthrough_local_ocr_value = DEFAULT_LOCAL_OCR_MODEL
 if (
     DEFAULT_TEXT_EXTRACTION_MODEL == BEDROCK_VLM_TEXT_EXTRACT_OPTION
     and "bedrock-vlm" in LOCAL_OCR_MODEL_OPTIONS
@@ -596,8 +597,8 @@ text_extract_method_radio = gr.Radio(
 )
 
 # Set initial value for local OCR method based on default text extraction method
-# If Bedrock VLM is the default, set to "bedrock-vlm", otherwise use CHOSEN_LOCAL_OCR_MODEL
-initial_local_ocr_value = CHOSEN_LOCAL_OCR_MODEL
+# If Bedrock VLM is the default, set to "bedrock-vlm", otherwise use DEFAULT_LOCAL_OCR_MODEL
+initial_local_ocr_value = DEFAULT_LOCAL_OCR_MODEL
 if (
     DEFAULT_TEXT_EXTRACTION_MODEL == BEDROCK_VLM_TEXT_EXTRACT_OPTION
     and "bedrock-vlm" in LOCAL_OCR_MODEL_OPTIONS
@@ -926,8 +927,8 @@ css = """
 /* Target tab navigation buttons only - not buttons inside tab content */
 /* Gradio renders tab buttons with role="tab" in the navigation area */
 button[role="tab"] {
-    font-size: 1.3em !important;
-    padding: 0.75em 1.5em !important;
+    font-size: 1.2em !important;
+    padding: 0.75em 1.4em !important;
 }
 
 /* Alternative selectors for different Gradio versions */
@@ -935,7 +936,7 @@ button[role="tab"] {
 nav button[role="tab"],
 div[class*="tab-nav"] button {
     font-size: 1.2em !important;
-    padding: 0.75em 1.5em !important;
+    padding: 0.75em 1.4em !important;
 }
 """
 
@@ -1571,6 +1572,7 @@ with blocks:
             ),
             "hybrid-paddle-vlm": (
                 "hybrid-paddle-vlm",
+                "hybrid-paddle-inference-server",
                 "vlm",
                 "inference-server",
                 "paddle",
@@ -1717,7 +1719,7 @@ with blocks:
                     0,
                     0,
                     _ocr_method_for_difficult_example("hybrid-paddle-vlm"),
-                    CHOSEN_REDACT_ENTITIES + ["CUSTOM_VLM_PERSON"],
+                    CHOSEN_REDACT_ENTITIES + ["CUSTOM_VLM_FACES"],
                     CHOSEN_LLM_ENTITIES,
                     "",
                 ],
@@ -2410,7 +2412,7 @@ with blocks:
                             open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
                             visible=(
                                 DEFAULT_TEXT_EXTRACTION_MODEL
-                                == TESSERACT_TEXT_EXTRACT_OPTION
+                                == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
                             ),
                         )
                         with local_ocr_accordion:
@@ -2422,7 +2424,7 @@ with blocks:
                             visible=(
                                 SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS
                                 and DEFAULT_TEXT_EXTRACTION_MODEL
-                                == TESSERACT_TEXT_EXTRACT_OPTION
+                                == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
                             ),
                         )
                         with inference_server_vlm_accordion:
@@ -3700,15 +3702,10 @@ with blocks:
 
             with gr.Accordion("Advanced OCR settings", open=False):
                 with gr.Row(equal_height=True):
-                    with gr.Column(scale=2):
-                        gr.Markdown(
-                            "Efficient OCR: When enabled, PDFs are processed per page - selectable text extraction is tried first; only pages with too little text use OCR (Tesseract/Textract/VLM), saving time and cost.",
-                            visible=False,
-                        )
-
+                    with gr.Column(scale=5):
                         with gr.Row():
                             efficient_ocr_checkbox = gr.Checkbox(
-                                label="Use efficient OCR (try text extraction first, OCR only when needed)",
+                                label="Use efficient OCR",
                                 value=EFFICIENT_OCR,
                             )
                             efficient_ocr_min_words_number = gr.Number(
@@ -3730,6 +3727,11 @@ with blocks:
                         overwrite_existing_ocr_checkbox = gr.Checkbox(
                             label="Always overwrite existing OCR results for new redaction tasks",
                             value=OVERWRITE_EXISTING_OCR_RESULTS,
+                        )
+                    with gr.Column(scale=1):
+                        save_page_ocr_visualisations_checkbox = gr.Checkbox(
+                            label="Save page OCR visualisations (debug bounding boxes)",
+                            value=SAVE_PAGE_OCR_VISUALISATIONS,
                         )
                     with gr.Column(scale=1):
                         high_quality_textract_ocr_checkbox = gr.Checkbox(
@@ -4622,6 +4624,7 @@ with blocks:
             vlm_model_name_textbox,
             vlm_total_input_tokens_number,
             vlm_total_output_tokens_number,
+            save_page_ocr_visualisations_checkbox,
         ],
         outputs=[
             redaction_output_summary_textbox,
@@ -5095,6 +5098,7 @@ with blocks:
             vlm_model_name_textbox,
             vlm_total_input_tokens_number,
             vlm_total_output_tokens_number,
+            save_page_ocr_visualisations_checkbox,
         ],
         outputs=[
             redaction_output_summary_textbox,
@@ -5744,6 +5748,7 @@ with blocks:
             vlm_model_name_textbox,
             vlm_total_input_tokens_number,
             vlm_total_output_tokens_number,
+            save_page_ocr_visualisations_checkbox,
         ],
         outputs=[
             redaction_output_summary_textbox,
@@ -8696,6 +8701,7 @@ with blocks:
         efficient_ocr_min_image_coverage_number,
         high_quality_textract_ocr_checkbox,
         overwrite_existing_ocr_checkbox,
+        save_page_ocr_visualisations_checkbox,
         llm_model_name_textbox,
         llm_total_input_tokens_number,
         llm_total_output_tokens_number,
@@ -8922,6 +8928,11 @@ with blocks:
             vlm_model_name_textbox or "",
             vlm_total_input_tokens_number or 0,
             vlm_total_output_tokens_number or 0,
+            save_page_ocr_visualisations=(
+                save_page_ocr_visualisations_checkbox
+                if save_page_ocr_visualisations_checkbox is not None
+                else SAVE_PAGE_OCR_VISUALISATIONS
+            ),
         )
 
         ocr_df_for_summary = redactor_result[12]
@@ -9063,6 +9074,7 @@ with blocks:
             efficient_ocr_min_image_coverage_number,
             high_quality_textract_ocr_checkbox,
             overwrite_existing_ocr_checkbox,
+            save_page_ocr_visualisations_checkbox,
             llm_model_name_textbox,
             llm_total_input_tokens_number,
             llm_total_output_tokens_number,
