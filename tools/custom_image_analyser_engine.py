@@ -4121,6 +4121,38 @@ def _repair_vlm_json_stray_coordinate_strings(
     return s
 
 
+def _repair_vlm_json_missing_text_key_after_bbox(json_string: str) -> str:
+    """
+    Fix invalid JSON where the VLM omits the \"text\" key before the OCR string.
+
+    Broken (not valid JSON — bare string where a key:value pair is required):
+      {\"bbox\": [42, 70, 223, 115], \"Method\", \"conf\": 0.882}
+    Fixed:
+      {\"bbox\": [42, 70, 223, 115], \"text\": \"Method\", \"conf\": 0.882}
+
+    Common Bedrock/VLM mistake after a correct first line or two.
+    """
+    if not json_string or not isinstance(json_string, str):
+        return json_string
+    # After closing bbox array `]`, comma, a quoted string, comma, then "conf":
+    # Insert "text": before that string (only when the string is not already "text").
+    pattern = re.compile(
+        r'\]\s*,\s*"((?:[^"\\]|\\.)*)"\s*,\s*"conf"\s*:',
+    )
+
+    def _repl(m) -> str:
+        inner = m.group(1)
+        text_lit = json.dumps(inner)
+        return f'], "text": {text_lit}, "conf":'
+
+    prev = None
+    s = json_string
+    while prev != s:
+        prev = s
+        s = pattern.sub(_repl, s)
+    return s
+
+
 def _preprocess_vlm_ocr_json_string(
     raw: Optional[str],
     implied_label: Optional[str] = None,
@@ -4132,6 +4164,7 @@ def _preprocess_vlm_ocr_json_string(
     s = _fix_malformed_bbox_in_json_string(s)
     label = implied_label if implied_label else "[UNKNOWN]"
     s = _repair_vlm_json_stray_coordinate_strings(s, default_text=label)
+    s = _repair_vlm_json_missing_text_key_after_bbox(s)
     s = _repair_vlm_json_common_quote_issues(s)
     return s
 
