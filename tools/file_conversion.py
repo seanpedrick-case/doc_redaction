@@ -29,12 +29,12 @@ from tools.config import (
     INPUT_FOLDER,
     LOAD_REDACTION_ANNOTATIONS_FROM_PDF,
     LOAD_TRUNCATED_IMAGES,
+    LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION,
     MAX_IMAGE_PIXELS,
     MAX_SIMULTANEOUS_FILES,
     MAX_WORKERS,
     OUTPUT_FOLDER,
     SELECTABLE_TEXT_EXTRACT_OPTION,
-    TESSERACT_TEXT_EXTRACT_OPTION,
     TEXTRACT_TEXT_EXTRACT_OPTION,
 )
 from tools.helper_functions import get_file_name_without_type, read_file
@@ -1621,7 +1621,7 @@ def prepare_image_or_pdf(
                 file_extension in [".jpg", ".jpeg", ".png"]
                 and text_extract_method == SELECTABLE_TEXT_EXTRACT_OPTION
             ):
-                text_extract_method = TESSERACT_TEXT_EXTRACT_OPTION
+                text_extract_method = LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
 
             # Convert image to a pymupdf document
             pymupdf_doc = pymupdf.open()  # Create a new empty document
@@ -1814,7 +1814,7 @@ def prepare_image_or_pdf(
                 ):
                     relevant_ocr_output_with_words_found = True
                 if (
-                    text_extract_method == TESSERACT_TEXT_EXTRACT_OPTION
+                    text_extract_method == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
                     and file_path.endswith("_ocr_results_with_words_local_ocr.json")
                 ):
                     relevant_ocr_output_with_words_found = True

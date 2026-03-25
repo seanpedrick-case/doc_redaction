@@ -48,13 +48,13 @@ from tools.config import (
     AWS_SECRET_KEY,
     AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION,
     BEDROCK_VLM_TEXT_EXTRACT_OPTION,
-    CHOSEN_LOCAL_OCR_MODEL,
     CLOUD_LLM_PII_MODEL_CHOICE,
     CLOUD_VLM_MODEL_CHOICE,
     CUSTOM_BOX_COLOUR,
     CUSTOM_ENTITIES,
     CUSTOM_VLM_BACKEND,
     DEFAULT_LANGUAGE,
+    DEFAULT_LOCAL_OCR_MODEL,
     EFFICIENT_OCR,
     EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION,
     EFFICIENT_OCR_MIN_WORDS,
@@ -69,6 +69,7 @@ from tools.config import (
     INFERENCE_SERVER_PII_OPTION,
     INPUT_FOLDER,
     LOAD_TRUNCATED_IMAGES,
+    LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION,
     LOCAL_PII_OPTION,
     LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
     LOCAL_TRANSFORMERS_LLM_PII_OPTION,
@@ -92,7 +93,6 @@ from tools.config import (
     SAVE_PAGE_OCR_VISUALISATIONS,
     SELECTABLE_TEXT_EXTRACT_OPTION,
     TESSERACT_MAX_WORKERS,
-    TESSERACT_TEXT_EXTRACT_OPTION,
     TEXTRACT_TEXT_EXTRACT_OPTION,
     USE_GUI_BOX_COLOURS_FOR_OUTPUTS,
     aws_comprehend_language_choices,
@@ -435,7 +435,13 @@ def add_page_range_suffix_to_file_path(
 
 
 def _parse_vlm_person_signature_result(ocr_result, entity_type: str, text_label: str):
-    """Parse VLM OCR result dict into list of CustomImageRecognizerResult. Shared across backends."""
+    """Parse VLM OCR result dict into list of CustomImageRecognizerResult. Shared across backends.
+
+    Rows are expected to use canonical labels in the parallel ``text`` list (``[FACE]`` /
+    ``[SIGNATURE]``) as produced by ``_parse_vlm_page_ocr_response`` and local/inference
+    page OCR paths; the engine coerces person/signature JSON so mis-keyed text fields
+    do not drop valid boxes.
+    """
     boxes = []
     if isinstance(ocr_result, tuple) and len(ocr_result) >= 1:
         ocr_result = ocr_result[0]
@@ -554,7 +560,7 @@ def _run_vlm_only_pass_one_page(
                 add_tokens(people_ocr_result)
                 vlm_boxes.extend(
                     _parse_vlm_person_signature_result(
-                        people_ocr_result, "CUSTOM_VLM_PERSON", "[PERSON]"
+                        people_ocr_result, "CUSTOM_VLM_FACES", "[FACE]"
                     )
                 )
             except Exception as e:
@@ -598,7 +604,7 @@ def _run_vlm_only_pass_one_page(
                 add_tokens(people_ocr_result)
                 vlm_boxes.extend(
                     _parse_vlm_person_signature_result(
-                        people_ocr_result, "CUSTOM_VLM_PERSON", "[PERSON]"
+                        people_ocr_result, "CUSTOM_VLM_FACES", "[FACE]"
                     )
                 )
             except Exception as e:
@@ -640,7 +646,7 @@ def _run_vlm_only_pass_one_page(
                 add_tokens(people_ocr_result)
                 vlm_boxes.extend(
                     _parse_vlm_person_signature_result(
-                        people_ocr_result, "CUSTOM_VLM_PERSON", "[PERSON]"
+                        people_ocr_result, "CUSTOM_VLM_FACES", "[FACE]"
                     )
                 )
             except Exception as e:
@@ -692,7 +698,8 @@ def run_custom_vlm_only_pass(
     is selectable text but user selected CUSTOM_VLM_* entities (so text comes from
     PDF, VLM detection from images).
     Backend is chosen by config CUSTOM_VLM_BACKEND: 'transformers_vlm', 'inference_vlm', or 'bedrock_vlm'.
-    API calls are run in parallel across pages (ThreadPoolExecutor).
+    Only ``bedrock_vlm`` runs page VLM calls in parallel (ThreadPoolExecutor); ``inference_vlm`` and
+    ``transformers_vlm`` process pages sequentially.
     Returns (vlm_total_input_tokens, vlm_total_output_tokens, vlm_model_name,
             vlm_annotations_list, vlm_decision_rows) for merging into annotations_all_pages
     and all_pages_decision_process_table.
@@ -707,7 +714,7 @@ def run_custom_vlm_only_pass(
     normalised_coords_range = 999
     custom_vlm_backend = CUSTOM_VLM_BACKEND
 
-    run_person = "CUSTOM_VLM_PERSON" in (chosen_redact_entities or [])
+    run_person = "CUSTOM_VLM_FACES" in (chosen_redact_entities or [])
     run_signature = "CUSTOM_VLM_SIGNATURE" in (chosen_redact_entities or [])
 
     # Skip if chosen backend is not available
@@ -749,7 +756,8 @@ def run_custom_vlm_only_pass(
             )
         )
 
-    # Run Bedrock VLM calls in parallel across pages
+    # Only Bedrock runs page VLM calls in parallel (separate cloud requests). Inference server and
+    # local Transformers VLM run sequentially to avoid overloading the server or local GPU/memory.
     if not page_args:
         return (
             vlm_total_input_tokens,
@@ -759,16 +767,6 @@ def run_custom_vlm_only_pass(
             vlm_decision_rows,
         )
 
-    max_workers = min(MAX_WORKERS, len(page_args))
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        page_results = list(
-            executor.map(
-                _run_vlm_only_pass_one_page,
-                page_args,
-            )
-        )
-
-    # Apply redactions and build annotations in page order (pymupdf is not thread-safe)
     _vlm_sub = []
     if run_person:
         _vlm_sub.append("face")
@@ -779,19 +777,91 @@ def run_custom_vlm_only_pass(
         if _vlm_sub
         else "CUSTOM_VLM detection"
     )
-    _n_vlm_results = len(page_results)
+
+    _n_vlm_pages = len(page_args)
+
+    def _vlm_inference_progress_frac(completed: int) -> float:
+        """First half of the VLM sub-progress band (parallel API calls)."""
+        if _n_vlm_pages <= 0:
+            return 0.79
+        return min(0.79, 0.68 + 0.11 * float(completed) / float(_n_vlm_pages))
+
+    def _vlm_apply_progress_frac(i_done: int) -> float:
+        """Second half of the VLM sub-progress band (sequential pymupdf apply)."""
+        if _n_vlm_pages <= 0:
+            return 0.92
+        return min(0.92, 0.79 + 0.11 * float(i_done + 1) / float(_n_vlm_pages))
+
+    _use_parallel_vlm = custom_vlm_backend == "bedrock_vlm"
+
+    if _use_parallel_vlm:
+        futures_map = {}
+        max_workers = min(MAX_WORKERS, _n_vlm_pages)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for arg in page_args:
+                fut = executor.submit(_run_vlm_only_pass_one_page, arg)
+                futures_map[fut] = arg[0]
+            results_by_page: Dict[int, tuple] = {}
+            _completed = 0
+            for fut in as_completed(futures_map):
+                page_no = futures_map[fut]
+                try:
+                    res = fut.result()
+                except Exception as e:
+                    print(
+                        f"Warning: CUSTOM_VLM worker failed on page {page_no + 1}: {e}"
+                    )
+                    _failed_path = next(
+                        (a[1] for a in page_args if a[0] == page_no), ""
+                    )
+                    res = (page_no, _failed_path, 0, 0, [], 0, 0, "")
+                results_by_page[page_no] = res
+                _completed += 1
+                if progress is not None:
+                    try:
+                        progress(
+                            _vlm_inference_progress_frac(_completed),
+                            desc=(
+                                f"{_vlm_phase_label} · VLM page {page_no + 1}/"
+                                f"{number_of_pages} ({_completed}/{_n_vlm_pages} done)"
+                            ),
+                        )
+                    except Exception:
+                        pass
+        page_results = [results_by_page[arg[0]] for arg in page_args]
+    else:
+        page_results = []
+        for _completed, arg in enumerate(page_args, start=1):
+            page_no = arg[0]
+            try:
+                res = _run_vlm_only_pass_one_page(arg)
+            except Exception as e:
+                print(f"Warning: CUSTOM_VLM failed on page {page_no + 1}: {e}")
+                _failed_path = arg[1] if len(arg) > 1 else ""
+                res = (page_no, _failed_path, 0, 0, [], 0, 0, "")
+            page_results.append(res)
+            if progress is not None:
+                try:
+                    progress(
+                        _vlm_inference_progress_frac(_completed),
+                        desc=(
+                            f"{_vlm_phase_label} · VLM page {page_no + 1}/"
+                            f"{number_of_pages} ({_completed}/{_n_vlm_pages} done)"
+                        ),
+                    )
+                except Exception:
+                    pass
+
+    # Apply redactions and build annotations in page order (pymupdf is not thread-safe)
     for _vlm_i, res in enumerate(page_results):
         page_no, image_path, page_width, page_height, vlm_boxes, ti, to, name = res
         try:
-            if progress is not None and _n_vlm_results:
+            if progress is not None and _n_vlm_pages:
                 progress(
-                    min(
-                        0.92,
-                        0.68 + 0.22 * float(_vlm_i + 1) / float(_n_vlm_results),
-                    ),
+                    _vlm_apply_progress_frac(_vlm_i),
                     desc=(
-                        f"{_vlm_phase_label} · applying page {page_no + 1}/"
-                        f"{number_of_pages}"
+                        f"{_vlm_phase_label} · applying redactions "
+                        f"page {page_no + 1}/{number_of_pages}"
                     ),
                 )
         except Exception:
@@ -936,7 +1006,7 @@ def choose_and_run_redactor(
     all_page_line_level_ocr_results: list[dict] = list(),
     all_page_line_level_ocr_results_with_words: list[dict] = list(),
     all_page_line_level_ocr_results_with_words_df: pd.DataFrame = None,
-    chosen_local_ocr_model: str = CHOSEN_LOCAL_OCR_MODEL,
+    chosen_local_ocr_model: str = DEFAULT_LOCAL_OCR_MODEL,
     language: str = DEFAULT_LANGUAGE,
     ocr_review_files: list = list(),
     custom_llm_instructions: str = "",
@@ -952,6 +1022,7 @@ def choose_and_run_redactor(
     vlm_model_name="",
     vlm_total_input_tokens=0,
     vlm_total_output_tokens=0,
+    save_page_ocr_visualisations: bool = SAVE_PAGE_OCR_VISUALISATIONS,
     ocr_first_pass_max_workers: Optional[int] = None,
     prepare_images: bool = True,
     RETURN_REDACTED_PDF: bool = RETURN_REDACTED_PDF,
@@ -1007,7 +1078,7 @@ def choose_and_run_redactor(
     - all_page_line_level_ocr_results (list, optional): All line level text on the page with bounding boxes.
     - all_page_line_level_ocr_results_with_words (list, optional): All word level text on the page with bounding boxes.
     - all_page_line_level_ocr_results_with_words_df (pd.Dataframe, optional): All word level text on the page with bounding boxes as a dataframe.
-    - chosen_local_ocr_model (str): Which local model is being used for OCR on images - uses the value of CHOSEN_LOCAL_OCR_MODEL by default, choices are "tesseract", "paddle" for PaddleOCR, or "hybrid-paddle" to combine both.
+    - chosen_local_ocr_model (str): Which local model is being used for OCR on images - uses the value of DEFAULT_LOCAL_OCR_MODEL by default, choices are "tesseract", "paddle" for PaddleOCR, or "hybrid-paddle" to combine both.
     - language (str, optional): The language of the text in the files. Defaults to English.
     - language (str, optional): The language to do AWS Comprehend calls. Defaults to value of language if not provided.
     - ocr_review_files (list, optional): A list of OCR review files to be used for the redaction process. Defaults to an empty list.
@@ -1021,6 +1092,7 @@ def choose_and_run_redactor(
     - vlm_model_name (str, optional): The name of the VLM model to use for the redaction process. Defaults to an empty string.
     - vlm_total_input_tokens (int, optional): The total number of input tokens for the VLM model. Defaults to 0.
     - vlm_total_output_tokens (int, optional): The total number of output tokens for the VLM model. Defaults to 0.
+    - save_page_ocr_visualisations (bool, optional): Boolean to determine whether to save page OCR visualisations. Defaults to SAVE_PAGE_OCR_VISUALISATIONS.
     - prepare_images (bool, optional): Boolean to determine whether to load images for the PDF.
     - RETURN_REDACTED_PDF (bool, optional): Boolean to determine whether to return a redacted PDF at the end of the redaction process.
     - RETURN_PDF_FOR_REVIEW (bool, optional): Boolean to determine whether to return a review PDF at the end of the redaction process.
@@ -1081,7 +1153,7 @@ def choose_and_run_redactor(
     if text_extraction_method == "AWS Textract":
         text_extraction_method = TEXTRACT_TEXT_EXTRACT_OPTION
     if text_extraction_method == "Local OCR":
-        text_extraction_method = TESSERACT_TEXT_EXTRACT_OPTION
+        text_extraction_method = LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
         print("Performing local OCR with" + chosen_local_ocr_model + " model.")
     if text_extraction_method == "Local text":
         text_extraction_method = SELECTABLE_TEXT_EXTRACT_OPTION
@@ -1100,7 +1172,7 @@ def choose_and_run_redactor(
         if "CUSTOM_FUZZY" not in chosen_llm_entities:
             chosen_llm_entities.append("CUSTOM_FUZZY")
 
-    # Any entity starting with CUSTOM_VLM (e.g. CUSTOM_VLM_PERSON, CUSTOM_VLM_SIGNATURE) requires
+    # Any entity starting with CUSTOM_VLM (e.g. CUSTOM_VLM_FACES, CUSTOM_VLM_SIGNATURE) requires
     # image-based analysis; when user selected simple text extraction we still run image path for these.
     _has_any_custom_vlm_entity = any(
         str(e).startswith("CUSTOM_VLM")
@@ -1402,7 +1474,7 @@ def choose_and_run_redactor(
 
     # When Textract + Extract signatures/forms/tables (not Face detection alone), we run all
     # pages through redact_image_pdf (skip EFFICIENT_OCR). Face detection keeps EFFICIENT_OCR;
-    # CUSTOM_VLM_PERSON then runs only on OCR-classified pages (see EFFICIENT_OCR VLM block).
+    # CUSTOM_VLM_FACES then runs only on OCR-classified pages (see EFFICIENT_OCR VLM block).
     _textract_needs_full_analysis_global = (
         text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
         and any(
@@ -1415,7 +1487,7 @@ def choose_and_run_redactor(
         )
     )
     # After EFFICIENT_OCR, run CUSTOM_VLM passes when selected or Textract + Face detection.
-    # Routing: CUSTOM_VLM_SIGNATURE = full-document images; CUSTOM_VLM_PERSON = OCR pages only.
+    # Routing: CUSTOM_VLM_SIGNATURE = full-document images; CUSTOM_VLM_FACES = OCR pages only.
     _run_vlm_pass_after_all_pages = _has_any_custom_vlm_entity or (
         text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
         and "Face detection" in (handwrite_signature_checkbox or [])
@@ -1785,19 +1857,19 @@ def choose_and_run_redactor(
     else:
         bedrock_runtime = None
 
-    # If using AWS Comprehend and CUSTOM_VLM_PERSON or CUSTOM_VLM_SIGNATURE is selected,
+    # If using AWS Comprehend and CUSTOM_VLM_FACES or CUSTOM_VLM_SIGNATURE is selected,
     # ensure bedrock_runtime is available only when CUSTOM_VLM_BACKEND is bedrock_vlm.
     if (
         pii_identification_method == AWS_PII_OPTION
         and bedrock_runtime is None
         and CUSTOM_VLM_BACKEND == "bedrock_vlm"
         and (
-            "CUSTOM_VLM_PERSON" in chosen_redact_comprehend_entities
+            "CUSTOM_VLM_FACES" in chosen_redact_comprehend_entities
             or "CUSTOM_VLM_SIGNATURE" in chosen_redact_comprehend_entities
         )
     ):
         print(
-            "CUSTOM_VLM_PERSON or CUSTOM_VLM_SIGNATURE selected with AWS Comprehend. Connecting to Bedrock for additional detection."
+            "CUSTOM_VLM_FACES or CUSTOM_VLM_SIGNATURE selected with AWS Comprehend. Connecting to Bedrock for additional detection."
         )
         if RUN_AWS_FUNCTIONS and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:
             print("Connecting to Bedrock via existing SSO connection for VLM detection")
@@ -1919,7 +1991,7 @@ def choose_and_run_redactor(
     _image_based_extraction = text_extraction_method in (
         TEXTRACT_TEXT_EXTRACT_OPTION,
         BEDROCK_VLM_TEXT_EXTRACT_OPTION,
-        TESSERACT_TEXT_EXTRACT_OPTION,
+        LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION,
         GEMINI_VLM_TEXT_EXTRACT_OPTION,
         AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION,
     )
@@ -1999,7 +2071,7 @@ def choose_and_run_redactor(
     ### Language check - check if selected language packs exist
     try:
         if (
-            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            text_extraction_method == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
             and chosen_local_ocr_model == "tesseract"
         ):
             if language != "en":
@@ -2069,7 +2141,7 @@ def choose_and_run_redactor(
                 print(
                     "File is not a PDF, assuming that image analysis needs to be used."
                 )
-                text_extraction_method = TESSERACT_TEXT_EXTRACT_OPTION
+                text_extraction_method = LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
         else:
             out_message = "No file selected"
             print(out_message)
@@ -2082,7 +2154,7 @@ def choose_and_run_redactor(
 
         if text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION:
             file_ending = "local_text"
-        elif text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION:
+        elif text_extraction_method == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION:
             file_ending = "local_ocr"
         elif text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
             file_ending = "textract"
@@ -2147,13 +2219,13 @@ def choose_and_run_redactor(
                 text_extraction_method
                 if text_extraction_method
                 in (
-                    TESSERACT_TEXT_EXTRACT_OPTION,
+                    LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION,
                     TEXTRACT_TEXT_EXTRACT_OPTION,
                     BEDROCK_VLM_TEXT_EXTRACT_OPTION,
                     GEMINI_VLM_TEXT_EXTRACT_OPTION,
                     AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION,
                 )
-                else TESSERACT_TEXT_EXTRACT_OPTION
+                else LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
             )
             start_page_0 = (page_min - 1) if page_min > 0 else 0
             end_page_0 = start_page_0 + number_of_pages_to_process
@@ -2167,7 +2239,7 @@ def choose_and_run_redactor(
             extraction_results = None
 
             if not overwrite_existing_ocr_results:
-                if ocr_fallback_method == TESSERACT_TEXT_EXTRACT_OPTION:
+                if ocr_fallback_method == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION:
                     cached_ocr_path = (
                         output_folder
                         + pdf_file_name_without_ext
@@ -2413,7 +2485,7 @@ def choose_and_run_redactor(
                     pd.to_numeric, errors="coerce"
                 )
                 progress(0.6, desc="Processing pages with OCR")
-                if ocr_fallback_method == TESSERACT_TEXT_EXTRACT_OPTION:
+                if ocr_fallback_method == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION:
                     _local_ocr_display = {
                         "tesseract": "Tesseract (local OCR)",
                         "paddle": "PaddleOCR (local)",
@@ -2532,6 +2604,7 @@ def choose_and_run_redactor(
                     custom_llm_instructions=custom_llm_instructions,
                     inference_server_vlm_model=inference_server_vlm_model,
                     efficient_ocr=efficient_ocr,
+                    save_page_ocr_visualisations=save_page_ocr_visualisations,
                     pages_to_process=pages_needing_ocr_1based,
                     ocr_first_pass_max_workers=ocr_first_pass_max_workers,
                     pages_in_pdf_points=pages_with_text_1based,
@@ -2599,7 +2672,7 @@ def choose_and_run_redactor(
             )
 
             # CUSTOM_VLM under EFFICIENT_OCR: CUSTOM_VLM_SIGNATURE uses full merged page
-            # images; CUSTOM_VLM_PERSON (and Textract Face detection) uses sparse OCR-only
+            # images; CUSTOM_VLM_FACES (and Textract Face detection) uses sparse OCR-only
             # paths (pages_needing_ocr_1based). Two passes when both are selected.
             _vlm_backend_available = (
                 CUSTOM_VLM_BACKEND != "bedrock_vlm" or bedrock_runtime is not None
@@ -2612,7 +2685,9 @@ def choose_and_run_redactor(
             ):
                 num_pages = pymupdf_doc.page_count
                 if num_pages and num_pages > 0:
-                    progress(0.65, desc="Preparing CUSTOM_VLM (face/signature) pass")
+                    progress(
+                        0.65, desc="Preparing custom VLM entity (face/signature) pass"
+                    )
                     entities_for_vlm = list(chosen_redact_entities or [])
                     for _vlm_src in (
                         chosen_redact_comprehend_entities or [],
@@ -2626,11 +2701,11 @@ def choose_and_run_redactor(
                                 entities_for_vlm.append(_e)
                     if (
                         "Face detection" in (handwrite_signature_checkbox or [])
-                        and "CUSTOM_VLM_PERSON" not in entities_for_vlm
+                        and "CUSTOM_VLM_FACES" not in entities_for_vlm
                     ):
-                        entities_for_vlm.append("CUSTOM_VLM_PERSON")
+                        entities_for_vlm.append("CUSTOM_VLM_FACES")
 
-                    _vlm_wants_person = "CUSTOM_VLM_PERSON" in entities_for_vlm
+                    _vlm_wants_person = "CUSTOM_VLM_FACES" in entities_for_vlm
                     _vlm_wants_signature = "CUSTOM_VLM_SIGNATURE" in entities_for_vlm
 
                     _vlm_rounds = []
@@ -2676,10 +2751,10 @@ def choose_and_run_redactor(
                             ].apply(pd.to_numeric, errors="coerce")
                         _vlm_rounds.append(
                             (
-                                ["CUSTOM_VLM_PERSON"],
+                                ["CUSTOM_VLM_FACES"],
                                 pdf_image_file_paths,
                                 person_page_sizes_df,
-                                "Running CUSTOM_VLM person detection on OCR-classified pages only",
+                                "Running custom VLM entity detection on OCR-classified pages only",
                             )
                         )
 
@@ -2711,7 +2786,7 @@ def choose_and_run_redactor(
                                 entities_for_vlm,
                                 full_merged_paths,
                                 full_page_sizes_df,
-                                "Running CUSTOM_VLM on all page images",
+                                "Running custom VLM entity detection on all page images",
                             )
                         )
 
@@ -2771,7 +2846,7 @@ def choose_and_run_redactor(
                                 all_pages_decision_process_table = vlm_df
 
         elif (
-            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            text_extraction_method == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
             or text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
             or text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
             or text_extraction_method == GEMINI_VLM_TEXT_EXTRACT_OPTION
@@ -2853,6 +2928,7 @@ def choose_and_run_redactor(
                 custom_llm_instructions=custom_llm_instructions,
                 inference_server_vlm_model=inference_server_vlm_model,
                 efficient_ocr=efficient_ocr,
+                save_page_ocr_visualisations=save_page_ocr_visualisations,
                 ocr_first_pass_max_workers=ocr_first_pass_max_workers,
                 hybrid_textract_bedrock_vlm=hybrid_textract_bedrock_vlm,
                 overwrite_existing_ocr_results=overwrite_existing_ocr_results,
@@ -5315,20 +5391,20 @@ def merge_img_bboxes(
             # print("Extracting signatures in merge_img_bboxes function")
             merged_bboxes.extend(copy.deepcopy(page_signature_recogniser_results))
 
-    # Add VLM [PERSON] and [SIGNATURE] detections from combined_results, if present
+    # Add VLM [FACE] and [SIGNATURE] detections from combined_results, if present
     try:
         for line_info in combined_results.values():
             words = line_info.get("words", [])
             for word in words:
                 text_val = word.get("text")
-                if text_val not in ["[PERSON]", "[SIGNATURE]"]:
+                if text_val not in ["[FACE]", "[SIGNATURE]"]:
                     continue
                 x0, y0, x1, y1 = word.get("bounding_box", (0, 0, 0, 0))
                 width = x1 - x0
                 height = y1 - y0
                 entity_type = (
-                    "CUSTOM_VLM_PERSON"
-                    if text_val == "[PERSON]"
+                    "CUSTOM_VLM_FACES"
+                    if text_val == "[FACE]"
                     else "CUSTOM_VLM_SIGNATURE"
                 )
                 merged_bboxes.append(
@@ -5346,7 +5422,7 @@ def merge_img_bboxes(
                 )
     except Exception as e:
         print(
-            f"Warning: Error while adding VLM [PERSON]/[SIGNATURE] boxes in merge_img_bboxes: {e}"
+            f"Warning: Error while adding VLM [FACE]/[SIGNATURE] boxes in merge_img_bboxes: {e}"
         )
 
     # Reconstruct and merge bounding boxes only if MERGE_BOUNDING_BOXES is enabled
@@ -5504,7 +5580,7 @@ def redact_image_pdf(
     chosen_llm_entities: List[str] = None,
     page_min: int = 0,
     page_max: int = 0,
-    text_extraction_method: str = TESSERACT_TEXT_EXTRACT_OPTION,
+    text_extraction_method: str = LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION,
     handwrite_signature_checkbox: List[str] = [
         "Extract handwriting",
         "Extract signatures",
@@ -5551,7 +5627,7 @@ def redact_image_pdf(
     textract_output_found: bool = False,
     all_page_line_level_ocr_results=list(),
     all_page_line_level_ocr_results_with_words=list(),
-    chosen_local_ocr_model: str = CHOSEN_LOCAL_OCR_MODEL,
+    chosen_local_ocr_model: str = DEFAULT_LOCAL_OCR_MODEL,
     page_break_val: int = int(PAGE_BREAK_VALUE),
     log_files_output_paths: List = list(),
     out_file_paths: List = list(),
@@ -5564,6 +5640,7 @@ def redact_image_pdf(
     efficient_ocr: bool = EFFICIENT_OCR,
     hybrid_textract_bedrock_vlm: bool = HYBRID_TEXTRACT_BEDROCK_VLM,
     overwrite_existing_ocr_results: bool = OVERWRITE_EXISTING_OCR_RESULTS,
+    save_page_ocr_visualisations: bool = SAVE_PAGE_OCR_VISUALISATIONS,
     pages_to_process: Optional[List[int]] = None,
     ocr_first_pass_max_workers: Optional[int] = None,
     pages_in_pdf_points: Optional[List[int]] = None,
@@ -5591,7 +5668,7 @@ def redact_image_pdf(
     - allow_list (List[str], optional): A list of entity types to allow in the PDF. Defaults to None.
     - page_min (int, optional): The minimum page number to start redaction from. Defaults to 0.
     - page_max (int, optional): The maximum page number to end redaction at. Defaults to 0.
-    - text_extraction_method (str, optional): The type of analysis to perform on the PDF. Defaults to TESSERACT_TEXT_EXTRACT_OPTION.
+    - text_extraction_method (str, optional): The type of analysis to perform on the PDF. Defaults to LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION.
     - handwrite_signature_checkbox (List[str], optional): A list of options for redacting handwriting and signatures. Defaults to ["Extract handwriting", "Extract signatures"].
     - textract_request_metadata (list, optional): Metadata related to the redaction request. Defaults to an empty string.
     - current_loop_page (int, optional): The current page being processed. Defaults to 0.
@@ -5613,7 +5690,7 @@ def redact_image_pdf(
     - textract_output_found (bool, optional): Boolean is true when a textract OCR output for the file has been found.
     - all_page_line_level_ocr_results (optional): List of all page line level OCR results.
     - all_page_line_level_ocr_results_with_words (optional): List of all page line level OCR results with words.
-    - chosen_local_ocr_model (str, optional): The local model chosen for OCR. Defaults to CHOSEN_LOCAL_OCR_MODEL, other choices are "paddle" for PaddleOCR, or "hybrid-paddle" for a combination of both.
+    - chosen_local_ocr_model (str, optional): The local model chosen for OCR. Defaults to DEFAULT_LOCAL_OCR_MODEL, other choices are "paddle" for PaddleOCR, or "hybrid-paddle" for a combination of both.
     - page_break_val (int, optional): The value at which to trigger a page break. Defaults to PAGE_BREAK_VALUE.
     - log_files_output_paths (List, optional): List of file paths used for saving redaction process logging results.
     - out_file_paths (List, optional): List of file paths used for saving redaction process output results.
@@ -5633,19 +5710,19 @@ def redact_image_pdf(
     #     chosen_llm_entities = chosen_redact_comprehend_entities
 
     # When AWS Textract + Face detection: always analyse all pages for faces (as if
-    # CUSTOM_VLM_PERSON were enabled), regardless of PII method or text_extraction_only.
+    # CUSTOM_VLM_FACES were enabled), regardless of PII method or text_extraction_only.
     if "Face detection" in (handwrite_signature_checkbox or []):
         chosen_redact_entities = list(chosen_redact_entities or [])
         chosen_redact_comprehend_entities = list(
             chosen_redact_comprehend_entities or []
         )
         chosen_llm_entities = list(chosen_llm_entities or [])
-        if "CUSTOM_VLM_PERSON" not in chosen_redact_entities:
-            chosen_redact_entities.append("CUSTOM_VLM_PERSON")
-        if "CUSTOM_VLM_PERSON" not in chosen_redact_comprehend_entities:
-            chosen_redact_comprehend_entities.append("CUSTOM_VLM_PERSON")
-        if "CUSTOM_VLM_PERSON" not in chosen_llm_entities:
-            chosen_llm_entities.append("CUSTOM_VLM_PERSON")
+        if "CUSTOM_VLM_FACES" not in chosen_redact_entities:
+            chosen_redact_entities.append("CUSTOM_VLM_FACES")
+        if "CUSTOM_VLM_FACES" not in chosen_redact_comprehend_entities:
+            chosen_redact_comprehend_entities.append("CUSTOM_VLM_FACES")
+        if "CUSTOM_VLM_FACES" not in chosen_llm_entities:
+            chosen_llm_entities.append("CUSTOM_VLM_FACES")
 
     # When True, skip per-page VLM face/signature detection; run_custom_vlm_only_pass
     # (after OCR in efficient-OCR flow) handles each once per page on full images.
@@ -5704,6 +5781,7 @@ def redact_image_pdf(
         ocr_engine=ocr_engine,
         language=language,
         output_folder=output_folder,
+        save_page_ocr_visualisations=save_page_ocr_visualisations,
     )
 
     if pii_identification_method == "AWS Comprehend" and comprehend_client == "":
@@ -5761,7 +5839,7 @@ def redact_image_pdf(
             )
 
     # If running local OCR option, check if file already exists. If it does, load in existing data
-    if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION:
+    if text_extraction_method == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION:
         all_page_line_level_ocr_results_with_words_json_file_path = (
             output_folder + file_name + "_ocr_results_with_words_local_ocr.json"
         )
@@ -6097,7 +6175,7 @@ def redact_image_pdf(
                 ):
                     ocr_results_from_parallel[pno] = result
 
-    if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION:
+    if text_extraction_method == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION:
         _local_ocr_tasks = []
         _pages_iter = (
             list(page_loop_pages)
@@ -6191,33 +6269,46 @@ def redact_image_pdf(
                 _max_workers = min(TESSERACT_MAX_WORKERS, len(_local_ocr_tasks))
                 _parallel_label = "local model"
 
-            _n_local = len(_local_ocr_tasks)
-            print(
-                f"Parallel {_parallel_label} page OCR: processing {_n_local} page(s) "
-                f"with {int(_max_workers)} worker(s)."
+            _local_ocr_sequential_only = frozenset(
+                (
+                    "vlm",
+                    "inference-server",
+                    "hybrid-paddle-vlm",
+                    "hybrid-paddle-inference-server",
+                )
             )
+            _sequential_local_ocr = chosen_local_ocr_model in _local_ocr_sequential_only
+            _phase = "Sequential" if _sequential_local_ocr else "Parallel"
+
+            _n_local = len(_local_ocr_tasks)
+            if _sequential_local_ocr:
+                print(
+                    f"{_phase} {_parallel_label} page OCR: processing {_n_local} page(s) "
+                    f"one at a time ({chosen_local_ocr_model!r})."
+                )
+            else:
+                print(
+                    f"{_phase} {_parallel_label} page OCR: processing {_n_local} page(s) "
+                    f"with {int(_max_workers)} worker(s)."
+                )
             # Progress slice for this phase (first pass OCR); main page loop uses tqdm after this.
             _prog_lo, _prog_hi = 0.0, 1.0
             try:
                 progress(
                     _prog_lo,
-                    desc=f"Parallel {_parallel_label} OCR (0/{_n_local} pages)",
+                    desc=f"{_phase} {_parallel_label} OCR (0/{_n_local} pages)",
                 )
             except Exception:
                 pass
             _completed_local = 0
-            with ThreadPoolExecutor(max_workers=_max_workers) as executor:
-                future_to_pno = {
-                    executor.submit(_run_local_page_ocr, task): task[0]
-                    for task in _local_ocr_tasks
-                }
-                for fut in as_completed(future_to_pno):
-                    pno = future_to_pno[fut]
+            if _sequential_local_ocr:
+                for task in _local_ocr_tasks:
+                    pno = task[0]
                     try:
-                        res_pno, result = fut.result()
+                        res_pno, result = _run_local_page_ocr(task)
                         ocr_results_from_parallel_local_ocr[res_pno] = result
                     except Exception as _e:
-                        print(f"Parallel local OCR failed for page {pno + 1}: {_e}")
+                        print(f"Sequential local OCR failed for page {pno + 1}: {_e}")
                     _completed_local += 1
                     try:
                         frac = _prog_lo + (_prog_hi - _prog_lo) * (
@@ -6226,12 +6317,39 @@ def redact_image_pdf(
                         progress(
                             frac,
                             desc=(
-                                f"Parallel {_parallel_label} OCR "
+                                f"{_phase} {_parallel_label} OCR "
                                 f"({_completed_local}/{_n_local} pages)"
                             ),
                         )
                     except Exception:
                         pass
+            else:
+                with ThreadPoolExecutor(max_workers=_max_workers) as executor:
+                    future_to_pno = {
+                        executor.submit(_run_local_page_ocr, task): task[0]
+                        for task in _local_ocr_tasks
+                    }
+                    for fut in as_completed(future_to_pno):
+                        pno = future_to_pno[fut]
+                        try:
+                            res_pno, result = fut.result()
+                            ocr_results_from_parallel_local_ocr[res_pno] = result
+                        except Exception as _e:
+                            print(f"Parallel local OCR failed for page {pno + 1}: {_e}")
+                        _completed_local += 1
+                        try:
+                            frac = _prog_lo + (_prog_hi - _prog_lo) * (
+                                _completed_local / max(_n_local, 1)
+                            )
+                            progress(
+                                frac,
+                                desc=(
+                                    f"{_phase} {_parallel_label} OCR "
+                                    f"({_completed_local}/{_n_local} pages)"
+                                ),
+                            )
+                        except Exception:
+                            pass
 
     for page_no in ocr_progress_bar:
 
@@ -6250,9 +6368,9 @@ def redact_image_pdf(
 
         # Define once per iteration so they are always set before use at _include_vlm_boxes_in_outputs (line ~7610)
         _person_selected = (
-            "CUSTOM_VLM_PERSON" in (chosen_redact_entities or [])
-            or "CUSTOM_VLM_PERSON" in (chosen_redact_comprehend_entities or [])
-            or "CUSTOM_VLM_PERSON" in (chosen_llm_entities or [])
+            "CUSTOM_VLM_FACES" in (chosen_redact_entities or [])
+            or "CUSTOM_VLM_FACES" in (chosen_redact_comprehend_entities or [])
+            or "CUSTOM_VLM_FACES" in (chosen_llm_entities or [])
         )
         _textract_face_identification = (
             text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
@@ -6479,7 +6597,7 @@ def redact_image_pdf(
             # Step 1: Perform OCR. Either with Tesseract, cloud VLM, or with AWS Textract
             # If using Tesseract or cloud VLM (all image-based OCR methods)
             if (
-                text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+                text_extraction_method == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
                 or text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
                 or text_extraction_method == GEMINI_VLM_TEXT_EXTRACT_OPTION
                 or text_extraction_method == AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION
@@ -6647,8 +6765,8 @@ def redact_image_pdf(
                     # )
 
                 # Optional additional Bedrock VLM pass to detect people
-                # and inject [PERSON] entries into the word-level OCR structure for AWS Bedrock VLM OCR.
-                # Run when CUSTOM_VLM_PERSON is selected (in any entity selector), or when AWS Textract
+                # and inject [FACE] entries into the word-level OCR structure for AWS Bedrock VLM OCR.
+                # Run when CUSTOM_VLM_FACES is selected (in any entity selector), or when AWS Textract
                 # + Face detection is selected (all pages analysed for faces regardless of PII method
                 # or text_extraction_only).
                 # (_run_face_pass, _textract_face_identification set at start of loop)
@@ -6735,7 +6853,7 @@ def redact_image_pdf(
 
                         results_dict = page_line_level_ocr_results_with_words["results"]
 
-                        # Determine a valid starting line number for synthetic [PERSON] lines
+                        # Determine a valid starting line number for synthetic [FACE] lines
                         existing_lines = []
                         for _line_key, _line_data in results_dict.items():
                             line_val = _line_data.get("line")
@@ -6752,7 +6870,7 @@ def redact_image_pdf(
                         person_index_start = len(existing_keys) + 1
 
                         for idx, text in enumerate(texts):
-                            if text != "[PERSON]":
+                            if text != "[FACE]":
                                 continue
                             try:
                                 left = int(lefts[idx])
@@ -6767,11 +6885,11 @@ def redact_image_pdf(
                             bbox = (left, top, left + width, top + height)
                             results_dict[key] = {
                                 "line": int(next_line_number),
-                                "text": "[PERSON]",
+                                "text": "[FACE]",
                                 "bounding_box": bbox,
                                 "words": [
                                     {
-                                        "text": "[PERSON]",
+                                        "text": "[FACE]",
                                         "bounding_box": bbox,
                                         "conf": conf,
                                         "model": "bedrock-vlm",
@@ -6928,7 +7046,7 @@ def redact_image_pdf(
                         )
 
                 # Optional additional VLM / inference-server pass to detect people
-                # and inject [PERSON] entries into the word-level OCR structure.
+                # and inject [FACE] entries into the word-level OCR structure.
                 # Supports pure and hybrid VLM/inference-server local OCR models.
                 if (
                     not _skip_inline_custom_vlm_detection
@@ -6940,7 +7058,7 @@ def redact_image_pdf(
                         "hybrid-paddle-vlm",
                         "hybrid-paddle-inference-server",
                     ]
-                    and "CUSTOM_VLM_PERSON" in chosen_redact_entities
+                    and "CUSTOM_VLM_FACES" in chosen_redact_entities
                     and isinstance(page_line_level_ocr_results_with_words, dict)
                     and page_line_level_ocr_results_with_words.get("results")
                     and image is not None
@@ -7018,7 +7136,7 @@ def redact_image_pdf(
 
                         results_dict = page_line_level_ocr_results_with_words["results"]
 
-                        # Determine a valid starting line number for synthetic [PERSON] lines
+                        # Determine a valid starting line number for synthetic [FACE] lines
                         existing_lines = []
                         for _line_key, _line_data in results_dict.items():
                             line_val = _line_data.get("line")
@@ -7035,7 +7153,7 @@ def redact_image_pdf(
                         person_index_start = len(existing_keys) + 1
 
                         for idx, text in enumerate(texts):
-                            if text != "[PERSON]":
+                            if text != "[FACE]":
                                 continue
                             try:
                                 left = int(lefts[idx])
@@ -7050,11 +7168,11 @@ def redact_image_pdf(
                             bbox = (left, top, left + width, top + height)
                             results_dict[key] = {
                                 "line": int(next_line_number),
-                                "text": "[PERSON]",
+                                "text": "[FACE]",
                                 "bounding_box": bbox,
                                 "words": [
                                     {
-                                        "text": "[PERSON]",
+                                        "text": "[FACE]",
                                         "bounding_box": bbox,
                                         "conf": conf,
                                         "model": chosen_local_ocr_model,
@@ -7585,11 +7703,11 @@ def redact_image_pdf(
                 # )
 
                 # Optional additional Bedrock VLM pass to detect people
-                # and inject [PERSON] entries into the word-level OCR structure for AWS Textract.
+                # and inject [FACE] entries into the word-level OCR structure for AWS Textract.
                 if (
                     not _skip_inline_custom_vlm_detection
                     and text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
-                    and "CUSTOM_VLM_PERSON" in chosen_redact_entities
+                    and "CUSTOM_VLM_FACES" in chosen_redact_entities
                     and isinstance(page_line_level_ocr_results_with_words, dict)
                     and page_line_level_ocr_results_with_words.get("results")
                     and image is not None
@@ -7661,7 +7779,7 @@ def redact_image_pdf(
 
                         results_dict = page_line_level_ocr_results_with_words["results"]
 
-                        # Determine a valid starting line number for synthetic [PERSON] lines
+                        # Determine a valid starting line number for synthetic [FACE] lines
                         existing_lines = []
                         for _line_key, _line_data in results_dict.items():
                             line_val = _line_data.get("line")
@@ -7678,7 +7796,7 @@ def redact_image_pdf(
                         person_index_start = len(existing_keys) + 1
 
                         for idx, text in enumerate(texts):
-                            if text != "[PERSON]":
+                            if text != "[FACE]":
                                 continue
                             try:
                                 left = int(lefts[idx])
@@ -7693,11 +7811,11 @@ def redact_image_pdf(
                             bbox = (left, top, left + width, top + height)
                             results_dict[key] = {
                                 "line": int(next_line_number),
-                                "text": "[PERSON]",
+                                "text": "[FACE]",
                                 "bounding_box": bbox,
                                 "words": [
                                     {
-                                        "text": "[PERSON]",
+                                        "text": "[FACE]",
                                         "bounding_box": bbox,
                                         "conf": conf,
                                         "model": "bedrock-vlm",
@@ -7888,15 +8006,15 @@ def redact_image_pdf(
             if (
                 (
                     text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
-                    and SAVE_PAGE_OCR_VISUALISATIONS is True
+                    and save_page_ocr_visualisations is True
                 )
                 or (
-                    text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
-                    and SAVE_PAGE_OCR_VISUALISATIONS is True
+                    text_extraction_method == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
+                    and save_page_ocr_visualisations is True
                 )
                 or (
                     text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
-                    and SAVE_PAGE_OCR_VISUALISATIONS is True
+                    and save_page_ocr_visualisations is True
                 )
             ):
                 if (
@@ -8208,7 +8326,7 @@ def redact_image_pdf(
             if (
                 not _skip_inline_custom_vlm_detection
                 and text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
-                and "CUSTOM_VLM_PERSON" in chosen_redact_entities
+                and "CUSTOM_VLM_FACES" in chosen_redact_entities
                 and isinstance(page_line_level_ocr_results_with_words, dict)
                 and page_line_level_ocr_results_with_words.get("results")
                 and image is not None
@@ -8285,7 +8403,7 @@ def redact_image_pdf(
                     existing_keys = list(results_dict.keys())
                     person_index_start = len(existing_keys) + 1
                     for idx, text in enumerate(texts):
-                        if text != "[PERSON]":
+                        if text != "[FACE]":
                             continue
                         try:
                             left = int(lefts[idx])
@@ -8299,11 +8417,11 @@ def redact_image_pdf(
                         bbox = (left, top, left + width, top + height)
                         results_dict[key] = {
                             "line": int(next_line_number),
-                            "text": "[PERSON]",
+                            "text": "[FACE]",
                             "bounding_box": bbox,
                             "words": [
                                 {
-                                    "text": "[PERSON]",
+                                    "text": "[FACE]",
                                     "bounding_box": bbox,
                                     "conf": conf,
                                     "model": "bedrock-vlm",
@@ -8458,7 +8576,7 @@ def redact_image_pdf(
 
             if (
                 text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
-                and SAVE_PAGE_OCR_VISUALISATIONS is True
+                and save_page_ocr_visualisations is True
             ):
                 if (
                     page_line_level_ocr_results_with_words
@@ -8520,14 +8638,17 @@ def redact_image_pdf(
     # SECOND PASS: Perform PII detection on all pages using stored OCR results
     print("Second pass: Performing PII detection on all pages...")
 
-    # Optional: run PII detection in parallel for Local and AWS Comprehend (skip when CUSTOM_VLM_PERSON is used).
+    # Optional: run PII detection in parallel for Local and AWS Comprehend (skip when CUSTOM_VLM_FACES is used).
+    # IMPORTANT: never parallelise PII when using inference-server or local-transformers LLM backends.
     pii_results_by_page_image = {}
     _use_parallel_image_pii = (
         pii_identification_method in (LOCAL_PII_OPTION, AWS_PII_OPTION)
+        and pii_identification_method
+        not in (INFERENCE_SERVER_PII_OPTION, LOCAL_TRANSFORMERS_LLM_PII_OPTION)
         and (chosen_redact_entities or chosen_redact_comprehend_entities)
         and not (
             pii_identification_method == AWS_PII_OPTION
-            and "CUSTOM_VLM_PERSON" in (chosen_redact_comprehend_entities or [])
+            and "CUSTOM_VLM_FACES" in (chosen_redact_comprehend_entities or [])
         )
     )
     if _use_parallel_image_pii and ocr_results_by_page:
@@ -8782,11 +8903,11 @@ def redact_image_pdf(
                         )
 
                     # Optional additional Bedrock VLM pass to detect people
-                    # and inject [PERSON] entries into the word-level OCR structure for AWS Comprehend.
+                    # and inject [FACE] entries into the word-level OCR structure for AWS Comprehend.
                     if (
                         not _skip_inline_custom_vlm_detection
                         and pii_identification_method == AWS_PII_OPTION
-                        and "CUSTOM_VLM_PERSON" in chosen_redact_comprehend_entities
+                        and "CUSTOM_VLM_FACES" in chosen_redact_comprehend_entities
                         and isinstance(page_line_level_ocr_results_with_words, dict)
                         and page_line_level_ocr_results_with_words.get("results")
                         and image is not None
@@ -8854,7 +8975,7 @@ def redact_image_pdf(
                                 "results"
                             ]
 
-                            # Determine a valid starting line number for synthetic [PERSON] lines
+                            # Determine a valid starting line number for synthetic [FACE] lines
                             existing_lines = []
                             for _line_key, _line_data in results_dict.items():
                                 line_val = _line_data.get("line")
@@ -8871,7 +8992,7 @@ def redact_image_pdf(
                             person_index_start = len(existing_keys) + 1
 
                             for idx, text in enumerate(texts):
-                                if text != "[PERSON]":
+                                if text != "[FACE]":
                                     continue
                                 try:
                                     left = int(lefts[idx])
@@ -8888,11 +9009,11 @@ def redact_image_pdf(
                                 bbox = (left, top, left + width, top + height)
                                 results_dict[key] = {
                                     "line": int(next_line_number),
-                                    "text": "[PERSON]",
+                                    "text": "[FACE]",
                                     "bounding_box": bbox,
                                     "words": [
                                         {
-                                            "text": "[PERSON]",
+                                            "text": "[FACE]",
                                             "bounding_box": bbox,
                                             "conf": conf,
                                             "model": "bedrock-vlm",
@@ -9526,7 +9647,7 @@ def redact_image_pdf(
                 if textract_json_file_path not in log_files_output_paths:
                     log_files_output_paths.append(textract_json_file_path)
 
-            if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION:
+            if text_extraction_method == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION:
                 if (
                     original_all_page_line_level_ocr_results_with_words
                     != all_page_line_level_ocr_results_with_words
@@ -9597,7 +9718,7 @@ def redact_image_pdf(
         if textract_json_file_path not in log_files_output_paths:
             log_files_output_paths.append(textract_json_file_path)
 
-    if text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION:
+    if text_extraction_method == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION:
         # print(
         #     f"Writing updated existing local OCR data back to the JSON file: {all_page_line_level_ocr_results_with_words_json_file_path}"
         # )
@@ -10902,9 +11023,12 @@ def redact_text_pdf(
         extraction_results.sort(key=lambda r: r[0])
 
     # Optional: run PII detection in parallel for Local and AWS Comprehend (bounded by MAX_WORKERS).
+    # IMPORTANT: never parallelize PII when using inference-server or local-transformers LLM backends.
     pii_results_by_page = {}
     if (
         pii_identification_method in (LOCAL_PII_OPTION, AWS_PII_OPTION)
+        and pii_identification_method
+        not in (INFERENCE_SERVER_PII_OPTION, LOCAL_TRANSFORMERS_LLM_PII_OPTION)
         and not text_extraction_only
         and (chosen_redact_entities or chosen_redact_comprehend_entities)
         and extraction_results
@@ -11629,49 +11753,49 @@ def visualise_ocr_words_bounding_boxes(
             base_model_name = "Textract"
             visualisation_folder = "textract_visualisations"
         elif (
-            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            text_extraction_method == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
             and chosen_local_ocr_model == "tesseract"
         ):
             base_model_name = "Tesseract"
             visualisation_folder = "tesseract_visualisations"
         elif (
-            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            text_extraction_method == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
             and chosen_local_ocr_model == "hybrid-paddle"
         ):
             base_model_name = "Tesseract"
             visualisation_folder = "hybrid_paddle_visualisations"
         elif (
-            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            text_extraction_method == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
             and chosen_local_ocr_model == "paddle"
         ):
             base_model_name = "Paddle"
             visualisation_folder = "paddle_visualisations"
         elif (
-            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            text_extraction_method == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
             and chosen_local_ocr_model == "hybrid-vlm"
         ):
             base_model_name = "Tesseract"
             visualisation_folder = "hybrid_vlm_visualisations"
         elif (
-            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            text_extraction_method == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
             and chosen_local_ocr_model == "hybrid-paddle-vlm"
         ):
             base_model_name = "Paddle"
             visualisation_folder = "hybrid_paddle_vlm_visualisations"
         elif (
-            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            text_extraction_method == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
             and chosen_local_ocr_model == "hybrid-paddle-inference-server"
         ):
             base_model_name = "Paddle"
             visualisation_folder = "hybrid_paddle_inference_server_visualisations"
         elif (
-            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            text_extraction_method == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
             and chosen_local_ocr_model == "vlm"
         ):
             base_model_name = "VLM"
             visualisation_folder = "vlm_visualisations"
         elif (
-            text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION
+            text_extraction_method == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
             and chosen_local_ocr_model == "inference-server"
         ):
             base_model_name = "Inference Server"

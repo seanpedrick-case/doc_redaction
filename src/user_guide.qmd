@@ -686,6 +686,9 @@ When checked, redaction tasks will overwrite any existing OCR results with the n
 
 This option may not be visible unless you system administrator has enabled it. When checked, redaction tasks will use a hybrid approach to OCR. This will first use the relatively efficient Textract OCR process to extract text, and then use the more expensive Vision Language Model (VLM) OCR process to extract any text that was missed by the efficient OCR process. This is useful if you have a document that is a mix of text and images, and you want to ensure that all text is extracted. To disable this feature, simply uncheck the 'High quality Textract OCR' checkbox and run your redaction task.
 
+### Save page OCR visualisations
+When checked, redaction tasks will save page OCR visualisations to the output folder. This is useful for debugging and to see the OCR results for each page. The visualisations will be saved as '_page_ocr_visualisations.png' files in the output folder. To disable this feature, simply uncheck the 'Save page OCR visualisations' checkbox and run your redaction task.
+
 ## Modifying existing redaction review files
 You can find the folder containing the files discussed in this section [here](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/merge_review_files/).
 
@@ -794,7 +797,7 @@ The following parameters can be configured to fine-tune OCR behaviour. Set them 
 
 #### General OCR settings
 
-- **CHOSEN_LOCAL_OCR_MODEL** (default: `"tesseract"`): Sets the default OCR engine without requiring a UI selection. Valid values: `"tesseract"`, `"paddle"`, `"vlm"`, `"inference-server"`, `"hybrid-paddle-vlm"`, `"hybrid-paddle-inference-server"`.
+- **DEFAULT_LOCAL_OCR_MODEL** (default: `"tesseract"`): Sets the default OCR engine without requiring a UI selection. Valid values: `"tesseract"`, `"paddle"`, `"vlm"`, `"inference-server"`, `"hybrid-paddle-vlm"`, `"hybrid-paddle-inference-server"`.
 - **SHOW_LOCAL_OCR_MODEL_OPTIONS** (default: False): If enabled, users can select the local OCR model from the UI.
 - **SHOW_OCR_GUI_OPTIONS** (default: True): If enabled, OCR-related options (e.g. model selection, Paddle options) are shown in the UI.
 - **EFFICIENT_OCR** (default: False): If enabled, uses a two-step process for PDFs — tries selectable text extraction per page first and only runs OCR on pages where no text could be extracted. Saves time and cost.
@@ -887,9 +890,9 @@ You will need ~30-50GB of disk space to run everything depending on the model ch
 
 If VLM or inference server options are enabled, you can also use the VLM to identify photos of people's faces and signatures in the document, and redact them accordingly.
 
-On the 'Redaction Settings' tab, select the CUSTOM_VLM_PERSON and CUSTOM_VLM_SIGNATURE entities. When you conduct an OCR task with the VLM or inference server, it will identify the bounding boxes for photos of people's faces and signatures in the document, and redact them accordingly if a redaction option is selected.
+On the 'Redaction Settings' tab, select the CUSTOM_VLM_FACES and CUSTOM_VLM_SIGNATURE entities. When you conduct an OCR task with the VLM or inference server, it will identify the bounding boxes for photos of people's faces and signatures in the document, and redact them accordingly if a redaction option is selected.
 
-With **Efficient OCR** enabled, **CUSTOM_VLM_PERSON** follows the same page rules as OCR (VLM only on OCR-classified pages); **CUSTOM_VLM_SIGNATURE** still scans all pages. Textract **Extract signatures** uses full-document Textract OCR and disables Efficient OCR.
+With **Efficient OCR** enabled, **CUSTOM_VLM_FACES** follows the same page rules as OCR (VLM only on OCR-classified pages); **CUSTOM_VLM_SIGNATURE** still scans all pages. Textract **Extract signatures** uses full-document Textract OCR and disables Efficient OCR.
 
 ### PII identification with LLMs
 

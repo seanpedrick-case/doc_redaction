@@ -1237,6 +1237,10 @@ def _call_inference_server_vlm_api(
                 # generated so far on each chunk). Printing every chunk reprints completed lines.
                 # Others stream incremental tokens only. Support both.
                 accumulated_response = ""
+                # Track only the current in-progress line (since the last newline) so GUI line
+                # reporting doesn't repeatedly emit the entire response.
+                line_buffer = ""
+                accumulated_response_line = ""
                 output_tokens = 0
                 final_chunk = None
 
@@ -1272,6 +1276,38 @@ def _call_inference_server_vlm_api(
                                     print(token, end="", flush=True)
                                     accumulated_response += token
                                 output_tokens += 1
+
+                                # Maintain line-only buffer for GUI reporting.
+                                try:
+                                    # Prefer the delta we just received; supports both cumulative and incremental streams.
+                                    if accumulated_response and token.startswith(
+                                        accumulated_response
+                                    ):
+                                        # This is a cumulative chunk; line_buffer should only get the new part.
+                                        line_buffer += (
+                                            new_part if "new_part" in locals() else ""
+                                        )
+                                    else:
+                                        # This is an incremental token (or reset); append the token to current line.
+                                        line_buffer += token
+                                except Exception:
+                                    # If anything is inconsistent, fall back to using the full accumulated response.
+                                    line_buffer = accumulated_response
+
+                                if "\n" in line_buffer:
+                                    parts = line_buffer.split("\n")
+                                    complete_lines = parts[:-1]
+                                    line_buffer = parts[-1] if parts else ""
+                                    accumulated_response_line = line_buffer
+                                    if REPORT_VLM_OUTPUTS_TO_GUI:
+                                        for _ln in complete_lines:
+                                            if _ln.strip():
+                                                try:
+                                                    gr.Info(_ln, duration=2)
+                                                except Exception:
+                                                    pass
+                                else:
+                                    accumulated_response_line = line_buffer
                         except json.JSONDecodeError:
                             continue
 
@@ -1785,8 +1821,10 @@ def _extract_last_text_dict_from_vlm_response(raw: str) -> Optional[Dict[str, An
         snippet = raw[start:j]
         try:
             obj = json.loads(snippet)
-            if isinstance(obj, dict) and "text" in obj:
-                last_valid = obj
+            if isinstance(obj, dict):
+                norm = _normalize_single_line_text_dict(obj)
+                if norm is not None:
+                    last_valid = norm
         except (json.JSONDecodeError, TypeError):
             pass
         i = j
@@ -1826,8 +1864,10 @@ def _extract_and_combine_text_dicts_from_vlm_response(
         snippet = raw[start:j]
         try:
             obj = json.loads(snippet)
-            if isinstance(obj, dict) and "text" in obj:
-                collected.append(obj)
+            if isinstance(obj, dict):
+                norm = _normalize_single_line_text_dict(obj)
+                if norm is not None:
+                    collected.append(norm)
         except (json.JSONDecodeError, TypeError):
             pass
         i = j
@@ -3999,6 +4039,70 @@ def _preprocess_vlm_ocr_json_string(
     return s
 
 
+CUSTOM_VLM_CANONICAL_LABELS = frozenset({"[FACE]", "[SIGNATURE]"})
+
+
+def _extract_vlm_line_text(item: dict) -> str:
+    """
+    Best-effort string for general OCR line items when the model uses alternate keys.
+    Order avoids grabbing non-OCR fields like 'label' used for classes.
+    """
+    for key in ("text", "text_content", "content", "transcription"):
+        val = item.get(key)
+        if val is None:
+            continue
+        if isinstance(val, str):
+            s = val.strip()
+            if s:
+                return s
+        else:
+            s = str(val).strip()
+            if s:
+                return s
+    return ""
+
+
+def _get_vlm_item_bbox_field(item: dict):
+    """Raw bbox value from common VLM keys (may be list or malformed string)."""
+    if not isinstance(item, dict):
+        return None
+    if item.get("bbox_2d") is not None:
+        return item.get("bbox_2d")
+    if item.get("bbox") is not None:
+        return item.get("bbox")
+    if item.get("bb") is not None:
+        return item.get("bb")
+    return None
+
+
+def _normalize_single_line_text_dict(obj: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Map content/conf aliases to text/confidence for hybrid / single-line VLM dicts.
+    """
+    if not isinstance(obj, dict):
+        return None
+    text = obj.get("text")
+    if text is None or (isinstance(text, str) and not text.strip()):
+        for alt in ("content", "transcription", "text_content"):
+            v = obj.get(alt)
+            if v is not None:
+                if isinstance(v, str) and v.strip():
+                    text = v.strip()
+                    break
+                if not isinstance(v, str) and str(v).strip():
+                    text = str(v).strip()
+                    break
+    if text is None:
+        return None
+    if not isinstance(text, str):
+        text = str(text)
+    conf = obj.get("confidence", obj.get("conf"))
+    out = {"text": text}
+    if conf is not None:
+        out["confidence"] = conf
+    return out
+
+
 def _fix_malformed_bbox(bbox):
     """
     Attempts to fix malformed bounding box values.
@@ -4062,6 +4166,81 @@ def _fix_malformed_bbox(bbox):
 
     except Exception:
         return None
+
+
+def _parse_vlm_line_item_to_geometry(
+    line_item: dict,
+    implied_label: Optional[str],
+    warn_prefix: str,
+) -> Optional[Tuple[str, List[float], float]]:
+    """
+    Parse one VLM JSON line object into text, xyxy floats, and raw confidence.
+    For person/signature passes (implied_label in CUSTOM_VLM_CANONICAL_LABELS),
+    text is always the canonical label when the bbox is valid; model text keys are ignored.
+    """
+    if not isinstance(line_item, dict):
+        return None
+
+    canon = None
+    if implied_label and str(implied_label).strip() in CUSTOM_VLM_CANONICAL_LABELS:
+        canon = str(implied_label).strip()
+
+    raw_bbox = _get_vlm_item_bbox_field(line_item)
+    if raw_bbox is None:
+        raw_bbox = []
+
+    fixed_bbox = _fix_malformed_bbox(raw_bbox)
+    if fixed_bbox is not None:
+        bbox = fixed_bbox
+        if not isinstance(raw_bbox, list) or len(raw_bbox) != 4:
+            dbg_txt = canon or _extract_vlm_line_text(line_item) or "?"
+            print(
+                f"{warn_prefix}: Fixed malformed bbox for line '{dbg_txt[:50]}': "
+                f"{raw_bbox} -> {fixed_bbox}"
+            )
+    elif isinstance(raw_bbox, list) and len(raw_bbox) == 4:
+        bbox = raw_bbox
+    else:
+        dbg_txt = canon or _extract_vlm_line_text(line_item) or "?"
+        print(
+            f"{warn_prefix} warning: Invalid bbox format for line '{dbg_txt[:50]}': {raw_bbox}"
+        )
+        return None
+
+    try:
+        x1 = float(bbox[0])
+        y1 = float(bbox[1])
+        x2 = float(bbox[2])
+        y2 = float(bbox[3])
+    except (ValueError, TypeError):
+        dbg_txt = canon or _extract_vlm_line_text(line_item) or "?"
+        print(
+            f"{warn_prefix} warning: Invalid bbox coordinates for line '{dbg_txt[:50]}': {bbox}"
+        )
+        return None
+
+    if x2 <= x1 or y2 <= y1:
+        dbg_txt = canon or _extract_vlm_line_text(line_item) or "?"
+        print(
+            f"{warn_prefix} warning: Invalid bbox dimensions for line '{dbg_txt[:50]}': {bbox}"
+        )
+        return None
+
+    if canon:
+        text = canon
+        conf_raw = line_item.get("confidence", line_item.get("conf", 0.9))
+    else:
+        text = _extract_vlm_line_text(line_item)
+        if not text:
+            return None
+        conf_raw = line_item.get("confidence", line_item.get("conf", 100))
+
+    try:
+        confidence = float(conf_raw)
+    except (TypeError, ValueError):
+        confidence = 0.9 if canon else 100.0
+
+    return (text, [x1, y1, x2, y2], confidence)
 
 
 def _vlm_page_ocr_predict(
@@ -4224,13 +4403,13 @@ def _vlm_page_ocr_predict(
 
         # Create prompt that requests structured JSON output with bounding boxes
         if detect_people_only:
-            progress(0.5, "Detecting people on page...")
-            print("Detecting people on page...")
+            # progress(0.5, "Detecting faces on page...")
+            # print("Detecting faces on page...")
             prompt = full_page_ocr_people_vlm_prompt
-            task_type = "person"
+            task_type = "face"
         elif detect_signatures_only:
-            progress(0.5, "Detecting signatures on page...")
-            print("Detecting signatures on page...")
+            # progress(0.5, "Detecting signatures on page...")
+            # print("Detecting signatures on page...")
             prompt = full_page_ocr_signature_vlm_prompt
             task_type = "signature"
         else:
@@ -4275,7 +4454,7 @@ def _vlm_page_ocr_predict(
                 # Determine task suffix based on detection type
                 task_suffix = None
                 if detect_people_only:
-                    task_suffix = "person"
+                    task_suffix = "face"
                 elif detect_signatures_only:
                     task_suffix = "sig"
 
@@ -4339,7 +4518,7 @@ def _vlm_page_ocr_predict(
         # This handles cases like: "bb": "779, 767, 874, 789],
         _inf_implied = None
         if detect_people_only:
-            _inf_implied = "[PERSON]"
+            _inf_implied = "[FACE]"
         elif detect_signatures_only:
             _inf_implied = "[SIGNATURE]"
         extracted_text = _preprocess_vlm_ocr_json_string(
@@ -4462,8 +4641,9 @@ def _vlm_page_ocr_predict(
                 "model": [],
             }
 
-        # Validate that lines_data is a list
-        if not isinstance(lines_data, list):
+        if isinstance(lines_data, dict):
+            lines_data = [lines_data]
+        elif not isinstance(lines_data, list):
             print(f"VLM page OCR error: Expected list, got {type(lines_data)}")
             return {
                 "text": [],
@@ -4506,66 +4686,15 @@ def _vlm_page_ocr_predict(
         }
 
         for line_item in lines_data:
-            if not isinstance(line_item, dict):
-                continue
-
-            # Check for text_content (matching ocr.ipynb) or text field
-            text = line_item.get("text_content") or line_item.get("text", "")
-            if isinstance(text, str):
-                text = text.strip()
-            else:
-                text = str(text).strip() if text is not None else ""
-            if not text and _inf_implied:
-                text = _inf_implied.strip()
-            if not text:
-                continue
-
-            # Check for bbox_2d format (matching ocr.ipynb) or bbox format
-            bbox = (
-                line_item.get("bbox_2d")
-                or line_item.get("bbox", [])
-                or line_item.get("bb", [])
+            parsed = _parse_vlm_line_item_to_geometry(
+                line_item,
+                _inf_implied,
+                "VLM page OCR",
             )
-            # Accept "confidence" or fallback to "conf" (VLM may use either); default 100 if neither provided
-            confidence = line_item.get("confidence", line_item.get("conf", 100))
-
-            # Attempt to fix malformed bounding boxes (e.g., string instead of array)
-            fixed_bbox = _fix_malformed_bbox(bbox)
-            if fixed_bbox is not None:
-                if not isinstance(bbox, list) or len(bbox) != 4:
-                    print(
-                        f"VLM page OCR: Fixed malformed bbox for line '{text[:50]}': {bbox} -> {fixed_bbox}"
-                    )
-                bbox = fixed_bbox
-            elif not isinstance(bbox, list) or len(bbox) != 4:
-                print(
-                    f"VLM page OCR warning: Invalid bbox format for line '{text[:50]}': {bbox}"
-                )
+            if parsed is None:
                 continue
-
-            # Handle bbox_2d format [x1, y1, x2, y2] (matching ocr.ipynb) or bbox format [x1, y1, x2, y2]
-            # ocr.ipynb uses bbox_2d with format [x1, y1, x2, y2] - same as standard bbox format
-            # Both formats use [x1, y1, x2, y2] order
-            x1, y1, x2, y2 = bbox
-
-            # Ensure coordinates are valid numbers
-            try:
-                x1 = float(x1)
-                y1 = float(y1)
-                x2 = float(x2)
-                y2 = float(y2)
-            except (ValueError, TypeError):
-                print(
-                    f"VLM page OCR warning: Invalid bbox coordinates for line '{text[:50]}': {bbox}"
-                )
-                continue
-
-            # Ensure x2 > x1 and y2 > y1
-            if x2 <= x1 or y2 <= y1:
-                print(
-                    f"VLM page OCR warning: Invalid bbox dimensions for line '{text[:50]}': {bbox}"
-                )
-                continue
+            text, bbox_xyxy, confidence = parsed
+            x1, y1, x2, y2 = bbox_xyxy
 
             # If coordinates are normalized (0 to normalised_coords_range), rescale directly to processed image dimensions
             # This matches the ocr.ipynb approach: direct normalization to image size using /999 * dimension
@@ -4806,13 +4935,13 @@ def _inference_server_page_ocr_predict(
 
         # Create prompt that requests structured JSON output with bounding boxes
         if detect_people_only:
-            progress(0.5, "Detecting people on page...")
-            print("Detecting people on page...")
+            # progress(0.5, "Detecting faces on page...")
+            # print("Detecting faces on page...")
             prompt = full_page_ocr_people_vlm_prompt
-            task_type = "person"
+            task_type = "face"
         elif detect_signatures_only:
-            progress(0.5, "Detecting signatures on page...")
-            print("Detecting signatures on page...")
+            # progress(0.5, "Detecting signatures on page...")
+            # print("Detecting signatures on page...")
             prompt = full_page_ocr_signature_vlm_prompt
             task_type = "signature"
         else:
@@ -4877,7 +5006,7 @@ def _inference_server_page_ocr_predict(
                 # Determine task suffix based on detection type
                 task_suffix = None
                 if detect_people_only:
-                    task_suffix = "person"
+                    task_suffix = "face"
                 elif detect_signatures_only:
                     task_suffix = "sig"
 
@@ -4932,7 +5061,7 @@ def _inference_server_page_ocr_predict(
         # This handles cases like: "bb": "779, 767, 874, 789],
         _inf_server_implied = None
         if detect_people_only:
-            _inf_server_implied = "[PERSON]"
+            _inf_server_implied = "[FACE]"
         elif detect_signatures_only:
             _inf_server_implied = "[SIGNATURE]"
         extracted_text = _preprocess_vlm_ocr_json_string(
@@ -5046,8 +5175,9 @@ def _inference_server_page_ocr_predict(
             )  # Print first 500 chars for debugging
             return _empty_inference_server_page_result(final_model_name)
 
-        # Validate that lines_data is a list
-        if not isinstance(lines_data, list):
+        if isinstance(lines_data, dict):
+            lines_data = [lines_data]
+        elif not isinstance(lines_data, list):
             print(
                 f"Inference-server page OCR error: Expected list, got {type(lines_data)}"
             )
@@ -5084,66 +5214,15 @@ def _inference_server_page_ocr_predict(
         }
 
         for line_item in lines_data:
-            if not isinstance(line_item, dict):
-                continue
-
-            # Check for text_content (matching ocr.ipynb) or text field
-            text = line_item.get("text_content") or line_item.get("text", "")
-            if isinstance(text, str):
-                text = text.strip()
-            else:
-                text = str(text).strip() if text is not None else ""
-            if not text and _inf_server_implied:
-                text = _inf_server_implied.strip()
-            if not text:
-                continue
-
-            # Check for bbox_2d format (matching ocr.ipynb) or bbox format
-            bbox = (
-                line_item.get("bbox_2d")
-                or line_item.get("bbox", [])
-                or line_item.get("bb", [])
+            parsed = _parse_vlm_line_item_to_geometry(
+                line_item,
+                _inf_server_implied,
+                "Inference-server page OCR",
             )
-            # Accept "confidence" or fallback to "conf" (VLM may use either); default 100 if neither provided
-            confidence = line_item.get("confidence", line_item.get("conf", 100))
-
-            # Attempt to fix malformed bounding boxes (e.g., string instead of array)
-            fixed_bbox = _fix_malformed_bbox(bbox)
-            if fixed_bbox is not None:
-                if not isinstance(bbox, list) or len(bbox) != 4:
-                    print(
-                        f"Inference-server page OCR: Fixed malformed bbox for line '{text[:50]}': {bbox} -> {fixed_bbox}"
-                    )
-                bbox = fixed_bbox
-            elif not isinstance(bbox, list) or len(bbox) != 4:
-                print(
-                    f"Inference-server page OCR warning: Invalid bbox format for line '{text[:50]}': {bbox}"
-                )
+            if parsed is None:
                 continue
-
-            # Handle bbox_2d format [x1, y1, x2, y2] (matching ocr.ipynb) or bbox format [x1, y1, x2, y2]
-            # ocr.ipynb uses bbox_2d with format [x1, y1, x2, y2] - same as standard bbox format
-            # Both formats use [x1, y1, x2, y2] order
-            x1, y1, x2, y2 = bbox
-
-            # Ensure coordinates are valid numbers
-            try:
-                x1 = float(x1)
-                y1 = float(y1)
-                x2 = float(x2)
-                y2 = float(y2)
-            except (ValueError, TypeError):
-                print(
-                    f"Inference-server page OCR warning: Invalid bbox coordinates for line '{text[:50]}': {bbox}"
-                )
-                continue
-
-            # Ensure x2 > x1 and y2 > y1
-            if x2 <= x1 or y2 <= y1:
-                print(
-                    f"Inference-server page OCR warning: Invalid bbox dimensions for line '{text[:50]}': {bbox}"
-                )
-                continue
+            text, bbox_xyxy, confidence = parsed
+            x1, y1, x2, y2 = bbox_xyxy
 
             # If coordinates are normalized (0 to normalised_coords_range), rescale directly to processed image dimensions
             if normalised_coords_range is not None and normalised_coords_range > 0:
@@ -5246,7 +5325,7 @@ def _parse_vlm_page_ocr_response(
         scale_y: Scale factor for y coordinates (original/processed)
         normalised_coords_range: If set, bounding boxes are in normalized coordinates (0 to this value)
         model_name: Name of the model for the 'model' field in results
-        implied_label: When set (e.g. \"[PERSON]\" for face pass), used to repair malformed JSON
+        implied_label: When set (e.g. \"[FACE]\" for face pass), used to repair malformed JSON
             where the model omits \"text\", and to fill missing text on dict entries that only have bbox.
 
     Returns:
@@ -5307,6 +5386,8 @@ def _parse_vlm_page_ocr_response(
             python_data = ast.literal_eval(extracted_text)
             if isinstance(python_data, list):
                 lines_data = python_data
+            elif isinstance(python_data, dict):
+                lines_data = python_data
         except Exception:
             pass
 
@@ -5323,7 +5404,9 @@ def _parse_vlm_page_ocr_response(
             "model": [],
         }
 
-    if not isinstance(lines_data, list):
+    if isinstance(lines_data, dict):
+        lines_data = [lines_data]
+    elif not isinstance(lines_data, list):
         print(f"{model_name} page OCR error: Expected list, got {type(lines_data)}")
         return {
             "text": [],
@@ -5347,54 +5430,15 @@ def _parse_vlm_page_ocr_response(
     }
 
     for line_item in lines_data:
-        if not isinstance(line_item, dict):
-            continue
-
-        text = line_item.get("text_content") or line_item.get("text", "")
-        if isinstance(text, str):
-            text = text.strip()
-        else:
-            text = str(text).strip() if text is not None else ""
-        if not text and implied_label:
-            text = implied_label.strip()
-        if not text:
-            continue
-
-        bbox = (
-            line_item.get("bbox_2d")
-            or line_item.get("bbox", [])
-            or line_item.get("bb", [])
+        parsed = _parse_vlm_line_item_to_geometry(
+            line_item,
+            implied_label,
+            f"{model_name} page OCR",
         )
-        # Accept "confidence" or fallback to "conf" (VLM may use either); default 100 if neither provided
-        confidence = line_item.get("confidence", line_item.get("conf", 100))
-
-        fixed_bbox = _fix_malformed_bbox(bbox)
-        if fixed_bbox is not None:
-            bbox = fixed_bbox
-        elif not isinstance(bbox, list) or len(bbox) != 4:
-            print(
-                f"{model_name} page OCR warning: Invalid bbox format for line '{text[:50]}': {bbox}"
-            )
+        if parsed is None:
             continue
-
-        x1, y1, x2, y2 = bbox
-
-        try:
-            x1 = float(x1)
-            y1 = float(y1)
-            x2 = float(x2)
-            y2 = float(y2)
-        except (ValueError, TypeError):
-            print(
-                f"{model_name} page OCR warning: Invalid bbox coordinates for line '{text[:50]}': {bbox}"
-            )
-            continue
-
-        if x2 <= x1 or y2 <= y1:
-            print(
-                f"{model_name} page OCR warning: Invalid bbox dimensions for line '{text[:50]}': {bbox}"
-            )
-            continue
+        text, bbox_xyxy, confidence = parsed
+        x1, y1, x2, y2 = bbox_xyxy
 
         if normalised_coords_range is not None and normalised_coords_range > 0:
             x1 = (x1 / float(normalised_coords_range)) * processed_width
@@ -5556,12 +5600,12 @@ def _bedrock_page_ocr_predict(
 
         # Create prompt
         if detect_people_only:
-            progress(0.5, "Detecting people on page...")
-            print("Detecting people on page...")
+            # progress(0.5, "Detecting faces on page...")
+            # print("Detecting faces on page...")
             prompt = full_page_ocr_people_vlm_prompt
         elif detect_signatures_only:
-            progress(0.5, "Detecting signatures on page...")
-            print("Detecting signatures on page...")
+            # progress(0.5, "Detecting signatures on page...")
+            # print("Detecting signatures on page...")
             prompt = full_page_ocr_signature_vlm_prompt
         else:
             prompt = full_page_ocr_vlm_prompt
@@ -5669,7 +5713,7 @@ def _bedrock_page_ocr_predict(
                 # Determine task suffix based on detection type
                 task_suffix = None
                 if detect_people_only:
-                    task_suffix = "person"
+                    task_suffix = "face"
                 elif detect_signatures_only:
                     task_suffix = "sig"
 
@@ -5720,7 +5764,7 @@ def _bedrock_page_ocr_predict(
 
         _bedrock_implied_label = None
         if detect_people_only:
-            _bedrock_implied_label = "[PERSON]"
+            _bedrock_implied_label = "[FACE]"
         elif detect_signatures_only:
             _bedrock_implied_label = "[SIGNATURE]"
 
@@ -5730,7 +5774,7 @@ def _bedrock_page_ocr_predict(
                 # Determine task type based on prompt
                 task_type = "ocr"
                 if detect_people_only:
-                    task_type = "person"
+                    task_type = "face"
                 elif detect_signatures_only:
                     task_type = "signature"
 
@@ -5907,12 +5951,12 @@ def _gemini_page_ocr_predict(
 
         # Create prompt
         if detect_people_only:
-            progress(0.5, "Detecting people on page...")
-            print("Detecting people on page...")
+            # progress(0.5, "Detecting faces on page...")
+            # print("Detecting faces on page...")
             prompt = full_page_ocr_people_vlm_prompt
         elif detect_signatures_only:
-            progress(0.5, "Detecting signatures on page...")
-            print("Detecting signatures on page...")
+            # progress(0.5, "Detecting signatures on page...")
+            # print("Detecting signatures on page...")
             prompt = full_page_ocr_signature_vlm_prompt
         else:
             prompt = full_page_ocr_vlm_prompt
@@ -5948,7 +5992,7 @@ def _gemini_page_ocr_predict(
                 # Determine task suffix based on detection type
                 task_suffix = None
                 if detect_people_only:
-                    task_suffix = "person"
+                    task_suffix = "face"
                 elif detect_signatures_only:
                     task_suffix = "sig"
 
@@ -5998,7 +6042,7 @@ def _gemini_page_ocr_predict(
 
         _gem_implied = None
         if detect_people_only:
-            _gem_implied = "[PERSON]"
+            _gem_implied = "[FACE]"
         elif detect_signatures_only:
             _gem_implied = "[SIGNATURE]"
 
@@ -6159,12 +6203,12 @@ def _azure_openai_page_ocr_predict(
 
         # Create prompt
         if detect_people_only:
-            progress(0.5, "Detecting people on page...")
-            print("Detecting people on page...")
+            # progress(0.5, "Detecting faces on page...")
+            # print("Detecting faces on page...")
             prompt = full_page_ocr_people_vlm_prompt
         elif detect_signatures_only:
-            progress(0.5, "Detecting signatures on page...")
-            print("Detecting signatures on page...")
+            # progress(0.5, "Detecting signatures on page...")
+            # print("Detecting signatures on page...")
             prompt = full_page_ocr_signature_vlm_prompt
         else:
             prompt = full_page_ocr_vlm_prompt
@@ -6201,7 +6245,7 @@ def _azure_openai_page_ocr_predict(
                 # Determine task suffix based on detection type
                 task_suffix = None
                 if detect_people_only:
-                    task_suffix = "person"
+                    task_suffix = "face"
                 elif detect_signatures_only:
                     task_suffix = "sig"
 
@@ -6251,7 +6295,7 @@ def _azure_openai_page_ocr_predict(
 
         _azure_implied = None
         if detect_people_only:
-            _azure_implied = "[PERSON]"
+            _azure_implied = "[FACE]"
         elif detect_signatures_only:
             _azure_implied = "[SIGNATURE]"
 
@@ -6304,6 +6348,7 @@ class CustomImageAnalyzerEngine:
         image_preprocessor: Optional[ImagePreprocessor] = None,
         language: Optional[str] = DEFAULT_LANGUAGE,
         output_folder: str = OUTPUT_FOLDER,
+        save_page_ocr_visualisations: bool = SAVE_PAGE_OCR_VISUALISATIONS,
     ):
         """
         Initializes the CustomImageAnalyzerEngine.
@@ -6337,6 +6382,7 @@ class CustomImageAnalyzerEngine:
                 f"Unsafe output folder path: {output_folder}. Must be contained within {OUTPUT_FOLDER}"
             )
         self.output_folder = normalized_output_folder
+        self.save_page_ocr_visualisations = bool(save_page_ocr_visualisations)
 
         if (
             self.ocr_engine == "paddle"
@@ -7426,9 +7472,15 @@ class CustomImageAnalyzerEngine:
                     # Only replace if Paddle's/VLM's confidence is better
                     if new_conf >= conf:
                         ocr_type = "VLM" if use_vlm else "Paddle"
-                        print(
-                            f"  Re-OCR'd word: '{text}' (conf: {conf}) -> '{new_text}' (conf: {new_conf:.0f}) [{ocr_type}]"
-                        )
+                        message_output = f"  Re-OCR'd word: '{text}' (conf: {conf}) -> '{new_text}' (conf: {new_conf:.0f}) [{ocr_type}]"
+                        print(message_output)
+
+                        if REPORT_VLM_OUTPUTS_TO_GUI:
+                            try:
+                                gr.Info(message_output, duration=2)
+                            except Exception:
+                                # gr.Info may not be available in worker process, ignore
+                                pass
 
                         # For exporting example image comparisons, not used here
                         safe_filename = self._create_safe_filename_with_confidence(
@@ -7982,10 +8034,18 @@ class CustomImageAnalyzerEngine:
                                 and inference_server_word_count - paddle_word_count
                                 >= -word_count_allowed_difference
                             ):
-                                print(
+                                message_output = (
                                     f"  Re-OCR'd line: '{line_text}' (conf: {line_conf:.1f}, words: {paddle_word_count}) "
                                     f"-> '{inference_server_text}' (conf: {inference_server_conf*100:.1f}, words: {inference_server_word_count}) [Inference Server]"
                                 )
+                                print(message_output)
+
+                                if REPORT_VLM_OUTPUTS_TO_GUI:
+                                    try:
+                                        gr.Info(message_output, duration=2)
+                                    except Exception:
+                                        # gr.Info may not be available in worker process, ignore
+                                        pass
 
                                 # For exporting example image comparisons
                                 safe_filename = (
@@ -8444,7 +8504,7 @@ class CustomImageAnalyzerEngine:
                     paddle_processed_image = temp_image.copy()
 
             # Save PaddleOCR visualization with bounding boxes
-            if paddle_results and SAVE_PAGE_OCR_VISUALISATIONS is True:
+            if paddle_results and self.save_page_ocr_visualisations is True:
 
                 for res in paddle_results:
                     # self.output_folder is already validated and normalized at construction time
@@ -8511,7 +8571,7 @@ class CustomImageAnalyzerEngine:
                 input_image_height=original_image_height,
             )
 
-            if SAVE_PAGE_OCR_VISUALISATIONS is True:
+            if self.save_page_ocr_visualisations is True:
                 # Save output to image with identified bounding boxes
                 # Use original image since coordinates are in original image space
                 # Prefer original_image_for_cropping (when PaddleOCR processed from file path),

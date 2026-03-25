@@ -327,7 +327,7 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Default Value:** `"True"` for both.
     * **Note:** If both are set to `"False"`, the application will automatically enable `SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS` to ensure at least one option is available.
 
-* **`SELECTABLE_TEXT_EXTRACT_OPTION`**, **`TESSERACT_TEXT_EXTRACT_OPTION`**, **`TEXTRACT_TEXT_EXTRACT_OPTION`**
+* **`SELECTABLE_TEXT_EXTRACT_OPTION`**, **`LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION`**, **`TEXTRACT_TEXT_EXTRACT_OPTION`**
     * **Description:** Labels for text extraction model options displayed in the UI. Customize the display names for "Local model - selectable text", "Local OCR model - PDFs without selectable text", and "AWS Textract service - all PDF types" respectively.
     * **Default Values:** `"Local model - selectable text"`, `"Local OCR model - PDFs without selectable text"`, `"AWS Textract service - all PDF types"`
 
@@ -518,7 +518,7 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
     * **Description:** If set to `"True"`, OCR-related options (e.g. local OCR model, Paddle options) are shown in the UI.
     * **Default Value:** `"True"`
 
-* **`CHOSEN_LOCAL_OCR_MODEL`**
+* **`DEFAULT_LOCAL_OCR_MODEL`**
     * **Description:** Choose the engine for local OCR: `"tesseract"`, `"paddle"`, `"hybrid-paddle"`, `"hybrid-vlm"`, `"hybrid-paddle-vlm"`, `"hybrid-paddle-inference-server"`, `"vlm"`, or `"inference-server"`.
     * **Default Value:** `"tesseract"`
 
@@ -772,11 +772,11 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
     * **Default Value:** `"qwen.qwen3-vl-235b-a22b"` (or first available cloud model if empty)
 
 * **`SHOW_CUSTOM_VLM_ENTITIES`**
-    * **Description:** If set to `"True"`, appends **`CUSTOM_VLM_PERSON`** and **`CUSTOM_VLM_SIGNATURE`** to the redaction entity lists when at least one of `SHOW_VLM_MODEL_OPTIONS`, `SHOW_INFERENCE_SERVER_VLM_OPTIONS`, or `SHOW_BEDROCK_VLM_MODELS` is enabled—so users can redact detected faces and signatures from VLM-capable pipelines.
+    * **Description:** If set to `"True"`, appends **`CUSTOM_VLM_FACES`** and **`CUSTOM_VLM_SIGNATURE`** to the redaction entity lists when at least one of `SHOW_VLM_MODEL_OPTIONS`, `SHOW_INFERENCE_SERVER_VLM_OPTIONS`, or `SHOW_BEDROCK_VLM_MODELS` is enabled—so users can redact detected faces and signatures from VLM-capable pipelines.
     * **Default Value:** `"False"`
 
 * **`CUSTOM_VLM_BACKEND`**
-    * **Description:** Backend used for CUSTOM_VLM_PERSON and CUSTOM_VLM_SIGNATURE (face and signature detection) when those entities are selected for redaction. One of: `"transformers_vlm"` (local transformers VLM), `"inference_vlm"` (inference-server VLM), or `"bedrock_vlm"` (AWS Bedrock VLM). Applies regardless of the PII identification method (Local, AWS Comprehend, or LLM). Value is case-insensitive; invalid values fall back to `"bedrock_vlm"`.
+    * **Description:** Backend used for CUSTOM_VLM_FACES and CUSTOM_VLM_SIGNATURE (face and signature detection) when those entities are selected for redaction. One of: `"transformers_vlm"` (local transformers VLM), `"inference_vlm"` (inference-server VLM), or `"bedrock_vlm"` (AWS Bedrock VLM). Applies regardless of the PII identification method (Local, AWS Comprehend, or LLM). Value is case-insensitive; invalid values fall back to `"bedrock_vlm"`.
     * **Default Value:** `"bedrock_vlm"`
 
 * **`CLOUD_LLM_PII_MODEL_CHOICE`**
@@ -1043,7 +1043,7 @@ Settings for running the application from the command line (Direct Mode) or as a
 
 * **`DIRECT_MODE_CHOSEN_LOCAL_OCR_MODEL`**
     * **Description:** Local OCR model choice for direct mode.
-    * **Default Value:** Inherits from `CHOSEN_LOCAL_OCR_MODEL`
+    * **Default Value:** Inherits from `DEFAULT_LOCAL_OCR_MODEL`
 
 * **`DIRECT_MODE_PREPROCESS_LOCAL_OCR_IMAGES`**
     * **Description:** If set to `"True"`, preprocesses images before OCR in direct mode.
