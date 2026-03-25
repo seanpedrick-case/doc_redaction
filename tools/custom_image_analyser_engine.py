@@ -4139,6 +4139,23 @@ def _preprocess_vlm_ocr_json_string(
 CUSTOM_VLM_CANONICAL_LABELS = frozenset({"[FACE]", "[SIGNATURE]"})
 
 
+def _get_vlm_item_conf_field(item: dict):
+    """Best-effort confidence field from common or fuzzy VLM keys."""
+    if not isinstance(item, dict):
+        return None
+    for k in ("confidence", "conf", "confidence_level", "confidence_score"):
+        if item.get(k) is not None:
+            return item.get(k)
+    # Fuzzy match: any key containing "conf" (covers confidence_level, conf_score, etc.)
+    for key, val in item.items():
+        if val is None:
+            continue
+        lk = str(key).lower()
+        if "conf" in lk:
+            return val
+    return None
+
+
 def _extract_vlm_line_text(item: dict) -> str:
     """
     Best-effort string for general OCR line items when the model uses alternate keys.
@@ -4147,6 +4164,25 @@ def _extract_vlm_line_text(item: dict) -> str:
     for key in ("text", "text_content", "content", "transcription"):
         val = item.get(key)
         if val is None:
+            continue
+        if isinstance(val, str):
+            s = val.strip()
+            if s:
+                return s
+        else:
+            s = str(val).strip()
+            if s:
+                return s
+    # Fuzzy match: accept any key that contains "text", but avoid obvious non-text fields.
+    for key, val in item.items():
+        if val is None:
+            continue
+        lk = str(key).lower()
+        if "text" not in lk:
+            continue
+        if lk in ("context", "texture", "text_direction"):
+            continue
+        if "label" in lk:
             continue
         if isinstance(val, str):
             s = val.strip()
@@ -4169,6 +4205,13 @@ def _get_vlm_item_bbox_field(item: dict):
         return item.get("bbox")
     if item.get("bb") is not None:
         return item.get("bb")
+    # Fuzzy match: any key containing bbox/bounding_box.
+    for key, val in item.items():
+        if val is None:
+            continue
+        lk = str(key).lower()
+        if "bbox" in lk or "bounding_box" in lk or "boundingbox" in lk:
+            return val
     return None
 
 
@@ -4193,7 +4236,7 @@ def _normalize_single_line_text_dict(obj: Dict[str, Any]) -> Optional[Dict[str, 
         return None
     if not isinstance(text, str):
         text = str(text)
-    conf = obj.get("confidence", obj.get("conf"))
+    conf = _get_vlm_item_conf_field(obj)
     out = {"text": text}
     if conf is not None:
         out["confidence"] = conf
@@ -4325,12 +4368,16 @@ def _parse_vlm_line_item_to_geometry(
 
     if canon:
         text = canon
-        conf_raw = line_item.get("confidence", line_item.get("conf", 0.9))
+        conf_raw = _get_vlm_item_conf_field(line_item)
+        if conf_raw is None:
+            conf_raw = 0.9
     else:
         text = _extract_vlm_line_text(line_item)
         if not text:
             return None
-        conf_raw = line_item.get("confidence", line_item.get("conf", 100))
+        conf_raw = _get_vlm_item_conf_field(line_item)
+        if conf_raw is None:
+            conf_raw = 100
 
     try:
         confidence = float(conf_raw)
