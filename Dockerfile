@@ -48,7 +48,7 @@ ENV TORCH_GPU_ENABLED=${TORCH_GPU_ENABLED}
 # Optionally install VLM if the INSTALL_VLM environment variable is set to True. Use e.g. --index-url https://download.pytorch.org/whl/cu129 for a specifc cuda compatible GPU version of PyTorch, otherwise the following CPU compatible versions will be installed.
 RUN if [ "$INSTALL_VLM" = "True" ] && [ "$TORCH_GPU_ENABLED" = "False" ]; then \
     pip install --verbose --no-cache-dir --target=/install "torch<=2.8.0" --index-url https://download.pytorch.org/whl/cpu && \
-    pip install --verbose --no-cache-dir --target=/install "torchvision<=0.24.1" && \
+    pip install --verbose --no-cache-dir --target=/install "torchvision<=0.24.1" --index-url https://download.pytorch.org/whl/cpu && \
     pip install --verbose --no-cache-dir --target=/install \
         "transformers<=5.30.0" \
         "accelerate<=1.13.0" \
@@ -56,7 +56,7 @@ RUN if [ "$INSTALL_VLM" = "True" ] && [ "$TORCH_GPU_ENABLED" = "False" ]; then \
         "sentencepiece<=0.2.1"; \
 elif [ "$INSTALL_VLM" = "True" ] && [ "$TORCH_GPU_ENABLED" = "True" ]; then \
     pip install --verbose --no-cache-dir --target=/install "torch<=2.8.0" --index-url https://download.pytorch.org/whl/cu129 && \
-    pip install --verbose --no-cache-dir --target=/install "torchvision<=0.24.1" && \
+    pip install --verbose --no-cache-dir --target=/install "torchvision<=0.24.1" --index-url https://download.pytorch.org/whl/cu129&& \
     pip install --verbose --no-cache-dir --target=/install \
         "transformers<=5.30.0" \
         "accelerate<=1.13.0" \
