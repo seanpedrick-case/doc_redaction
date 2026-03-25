@@ -596,7 +596,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <li><strong>Default Value:</strong> <code>"True"</code> for both.</li>
 <li><strong>Note:</strong> If both are set to <code>"False"</code>, the application will automatically enable <code>SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS</code> to ensure at least one option is available.</li>
 </ul></li>
-<li><strong><code>SELECTABLE_TEXT_EXTRACT_OPTION</code></strong>, <strong><code>TESSERACT_TEXT_EXTRACT_OPTION</code></strong>, <strong><code>TEXTRACT_TEXT_EXTRACT_OPTION</code></strong>
+<li><strong><code>SELECTABLE_TEXT_EXTRACT_OPTION</code></strong>, <strong><code>LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION</code></strong>, <strong><code>TEXTRACT_TEXT_EXTRACT_OPTION</code></strong>
 <ul>
 <li><strong>Description:</strong> Labels for text extraction model options displayed in the UI. Customize the display names for “Local model - selectable text”, “Local OCR model - PDFs without selectable text”, and “AWS Textract service - all PDF types” respectively.</li>
 <li><strong>Default Values:</strong> <code>"Local model - selectable text"</code>, <code>"Local OCR model - PDFs without selectable text"</code>, <code>"AWS Textract service - all PDF types"</code></li>
@@ -619,7 +619,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <li><strong><code>EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION</code></strong>
 <ul>
 <li><strong>Description:</strong> When <code>EFFICIENT_OCR</code> is enabled, minimum fraction of the page area (MediaBox) that a single embedded image must cover to route that page through OCR (<code>redact_image_pdf</code>) in addition to the word-count rule. This catches pages with plenty of selectable text but meaningful raster content (e.g.&nbsp;photos) where text may appear only inside the image. Set to <code>0</code> to disable image-based routing and rely on word count only.</li>
-<li><strong>Default Value:</strong> <code>0.03</code> (3% of page area)</li>
+<li><strong>Default Value:</strong> <code>0.01</code> (1% of page area)</li>
 </ul></li>
 <li><strong><code>MAX_WORKERS</code></strong>
 <ul>
@@ -640,6 +640,11 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <ul>
 <li><strong>Description:</strong> Maximum number of worker threads used to run local PaddleOCR on multiple pages in parallel when <strong>Paddle</strong> is the chosen local OCR model. Paddle is often GPU-bound and shares one model instance; keep this low (e.g.&nbsp;<code>1</code>–<code>2</code>) to avoid VRAM contention or errors. Set to <code>1</code> for effectively sequential Paddle OCR per document.</li>
 <li><strong>Default Value:</strong> <code>2</code></li>
+</ul></li>
+<li><strong><code>LINE_TO_WORD_SEGMENT_MAX_WORKERS</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of worker threads used to run the line-to-word segmentation process. This is a CPU/memory intensive process and can slow down when matching <code>MAX_WORKERS</code> on busy documents.</li>
+<li><strong>Default Value:</strong> <code>4</code></li>
 </ul></li>
 <li><strong><code>SUMMARY_PAGE_GROUP_MAX_WORKERS</code></strong>
 <ul>
@@ -841,7 +846,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <li><strong>Description:</strong> If set to <code>"True"</code>, OCR-related options (e.g.&nbsp;local OCR model, Paddle options) are shown in the UI.</li>
 <li><strong>Default Value:</strong> <code>"True"</code></li>
 </ul></li>
-<li><p><strong><code>CHOSEN_LOCAL_OCR_MODEL</code></strong></p>
+<li><p><strong><code>DEFAULT_LOCAL_OCR_MODEL</code></strong></p>
 <ul>
 <li><strong>Description:</strong> Choose the engine for local OCR: <code>"tesseract"</code>, <code>"paddle"</code>, <code>"hybrid-paddle"</code>, <code>"hybrid-vlm"</code>, <code>"hybrid-paddle-vlm"</code>, <code>"hybrid-paddle-inference-server"</code>, <code>"vlm"</code>, or <code>"inference-server"</code>.</li>
 <li><strong>Default Value:</strong> <code>"tesseract"</code></li>
@@ -1160,13 +1165,18 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 </ul></li>
 <li><strong><code>SHOW_CUSTOM_VLM_ENTITIES</code></strong>
 <ul>
-<li><strong>Description:</strong> If set to <code>"True"</code>, appends <strong><code>CUSTOM_VLM_PERSON</code></strong> and <strong><code>CUSTOM_VLM_SIGNATURE</code></strong> to the redaction entity lists when at least one of <code>SHOW_VLM_MODEL_OPTIONS</code>, <code>SHOW_INFERENCE_SERVER_VLM_OPTIONS</code>, or <code>SHOW_BEDROCK_VLM_MODELS</code> is enabled—so users can redact detected faces and signatures from VLM-capable pipelines.</li>
+<li><strong>Description:</strong> If set to <code>"True"</code>, appends <strong><code>CUSTOM_VLM_FACES</code></strong> and <strong><code>CUSTOM_VLM_SIGNATURE</code></strong> to the redaction entity lists when at least one of <code>SHOW_VLM_MODEL_OPTIONS</code>, <code>SHOW_INFERENCE_SERVER_VLM_OPTIONS</code>, or <code>SHOW_BEDROCK_VLM_MODELS</code> is enabled—so users can redact detected faces and signatures from VLM-capable pipelines.</li>
 <li><strong>Default Value:</strong> <code>"False"</code></li>
 </ul></li>
 <li><strong><code>CUSTOM_VLM_BACKEND</code></strong>
 <ul>
-<li><strong>Description:</strong> Backend used for CUSTOM_VLM_PERSON and CUSTOM_VLM_SIGNATURE (face and signature detection) when those entities are selected for redaction. One of: <code>"transformers_vlm"</code> (local transformers VLM), <code>"inference_vlm"</code> (inference-server VLM), or <code>"bedrock_vlm"</code> (AWS Bedrock VLM). Applies regardless of the PII identification method (Local, AWS Comprehend, or LLM). Value is case-insensitive; invalid values fall back to <code>"bedrock_vlm"</code>.</li>
+<li><strong>Description:</strong> Backend used for CUSTOM_VLM_FACES and CUSTOM_VLM_SIGNATURE (face and signature detection) when those entities are selected for redaction. One of: <code>"transformers_vlm"</code> (local transformers VLM), <code>"inference_vlm"</code> (inference-server VLM), or <code>"bedrock_vlm"</code> (AWS Bedrock VLM). Applies regardless of the PII identification method (Local, AWS Comprehend, or LLM). Value is case-insensitive; invalid values fall back to <code>"bedrock_vlm"</code>.</li>
 <li><strong>Default Value:</strong> <code>"bedrock_vlm"</code></li>
+</ul></li>
+<li><strong><code>CUSTOM_VLM_MIN_CONFIDENCE</code></strong>
+<ul>
+<li><strong>Description:</strong> Minimum confidence required for VLM face/signature detections (<strong><code>CUSTOM_VLM_FACES</code></strong> / <strong><code>CUSTOM_VLM_SIGNATURE</code></strong>) to be kept for downstream outputs (annotations, decision tables, and PDF redaction). Values can be provided as <code>0..1</code> (e.g.&nbsp;<code>0.5</code>) or <code>0..100</code> (e.g.&nbsp;<code>50</code>).</li>
+<li><strong>Default Value:</strong> <code>0.5</code></li>
 </ul></li>
 <li><strong><code>CLOUD_LLM_PII_MODEL_CHOICE</code></strong>
 <ul>
@@ -1513,7 +1523,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <li><strong><code>DIRECT_MODE_CHOSEN_LOCAL_OCR_MODEL</code></strong>
 <ul>
 <li><strong>Description:</strong> Local OCR model choice for direct mode.</li>
-<li><strong>Default Value:</strong> Inherits from <code>CHOSEN_LOCAL_OCR_MODEL</code></li>
+<li><strong>Default Value:</strong> Inherits from <code>DEFAULT_LOCAL_OCR_MODEL</code></li>
 </ul></li>
 <li><strong><code>DIRECT_MODE_PREPROCESS_LOCAL_OCR_IMAGES</code></strong>
 <ul>

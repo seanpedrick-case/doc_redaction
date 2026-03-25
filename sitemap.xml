@@ -2,7 +2,7 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://seanpedrick-case.github.io/doc_redaction/src/user_guide.html</loc>
-    <lastmod>2026-03-24T22:22:06.000Z</lastmod>
+    <lastmod>2026-03-25T13:03:36.000Z</lastmod>
   </url>
   <url>
     <loc>https://seanpedrick-case.github.io/doc_redaction/src/management_guide.html</loc>
@@ -18,7 +18,7 @@
   </url>
   <url>
     <loc>https://seanpedrick-case.github.io/doc_redaction/src/app_settings.html</loc>
-    <lastmod>2026-03-24T21:37:00.000Z</lastmod>
+    <lastmod>2026-03-25T14:59:42.000Z</lastmod>
   </url>
   <url>
     <loc>https://seanpedrick-case.github.io/doc_redaction/src/installation_guide.html</loc>
@@ -26,6 +26,6 @@
   </url>
   <url>
     <loc>https://seanpedrick-case.github.io/doc_redaction/src/redaction_with_vlm_and_llms.html</loc>
-    <lastmod>2026-03-03T22:22:02.000Z</lastmod>
+    <lastmod>2026-03-25T10:48:13.000Z</lastmod>
   </url>
 </urlset>
