@@ -627,8 +627,9 @@ EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT = convert_string_to_boolean(
 SELECTABLE_TEXT_EXTRACT_OPTION = get_or_create_env_var(
     "SELECTABLE_TEXT_EXTRACT_OPTION", "Local model - selectable text"
 )
-TESSERACT_TEXT_EXTRACT_OPTION = get_or_create_env_var(
-    "TESSERACT_TEXT_EXTRACT_OPTION", "Local OCR model - PDFs without selectable text"
+LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION = get_or_create_env_var(
+    "LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION",
+    "Local OCR model - PDFs without selectable text",
 )
 TEXTRACT_TEXT_EXTRACT_OPTION = get_or_create_env_var(
     "TEXTRACT_TEXT_EXTRACT_OPTION", "AWS Textract service - all PDF types"
@@ -654,12 +655,23 @@ EFFICIENT_OCR_MIN_WORDS = int(get_or_create_env_var("EFFICIENT_OCR_MIN_WORDS", "
 # cover to route the page through OCR in addition to the word-count rule. Reduces false
 # positives from tiny icons/watermarks. Set to 0 to disable image-based routing (word count only).
 EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION = float(
-    get_or_create_env_var("EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION", "0.02")
+    get_or_create_env_var("EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION", "0.01")
 )
 # Default max workers for parallel processing app-wide. Overridable by specific env vars below.
 MAX_WORKERS = max(
     1,
     int(get_or_create_env_var("MAX_WORKERS", "8")),
+)
+# Dedicated worker cap for line->word segmentation. This path is CPU/memory heavy
+# and can slow down when matching MAX_WORKERS on busy documents.
+LINE_TO_WORD_SEGMENT_MAX_WORKERS = max(
+    1,
+    int(
+        get_or_create_env_var(
+            "LINE_TO_WORD_SEGMENT_MAX_WORKERS",
+            str(min(MAX_WORKERS, 4)),
+        )
+    ),
 )
 # Max threads for OCR first pass in redact_image_pdf (1 = sequential). Enables parallel Textract/Tesseract/VLM.
 OCR_FIRST_PASS_MAX_WORKERS = max(
@@ -721,7 +733,7 @@ cloud_vlm_model_options = list()
 
 if SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS:
     local_text_extraction_model_options.append(SELECTABLE_TEXT_EXTRACT_OPTION)
-    local_text_extraction_model_options.append(TESSERACT_TEXT_EXTRACT_OPTION)
+    local_text_extraction_model_options.append(LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION)
 
 if SHOW_AWS_TEXT_EXTRACTION_OPTIONS:
     aws_text_extraction_model_options.append(TEXTRACT_TEXT_EXTRACT_OPTION)
@@ -955,8 +967,8 @@ HYBRID_OCR_MAX_WORDS = int(
 # because a single text line should never legitimately contain more than ~50 words.
 
 MAX_INPUT_TOKEN_LENGTH = int(
-    get_or_create_env_var("MAX_INPUT_TOKEN_LENGTH", "8192")
-)  # VLM only: maximum input/context tokens for vision-language models. Controls tokenizer cap, model max_position_embeddings (KV cache), and effective max_pixels (image size) so image+text fit. Set lower (e.g. 4096) to reduce VRAM. Separate from LLM_CONTEXT_LENGTH.
+    get_or_create_env_var("MAX_INPUT_TOKEN_LENGTH", "32768")
+)  # VLM only: maximum input/context tokens for vision-language models. Controls tokenizer cap, model max_position_embeddings (KV cache), and effective max_pixels (image size) so image+text fit. Set lower (e.g. 8192 or 16384) to reduce VRAM. Separate from LLM_CONTEXT_LENGTH.
 
 
 ADD_VLM_BOUNDING_BOX_RULES = convert_string_to_boolean(
@@ -1012,15 +1024,15 @@ VLM_MIN_IMAGE_SIZE = int(
 )  # Min pixels for full-page VLM via _prepare_image_for_vlm(hybrid_vlm=False). Upscaled if below. Default 819200. Hybrid crops use VLM_HYBRID_MIN_IMAGE_SIZE.
 
 VLM_MAX_IMAGE_SIZE = int(
-    get_or_create_env_var("VLM_MAX_IMAGE_SIZE", "1536000")
-)  # Maximum total pixels (width * height) for images passed to VLM, as a multiple of 32*32 for Qwen3.5. Images with more pixels will be resized while maintaining aspect ratio. Default is 1536000 (1500*32*32).
+    get_or_create_env_var("VLM_MAX_IMAGE_SIZE", "1152000")
+)  # Maximum total pixels (width * height) for images passed to VLM, as a multiple of 16*16 for Qwen3.5. Images with more pixels will be resized while maintaining aspect ratio. Default is 1152000 (1125*16*16).
 
 VLM_MIN_DPI = float(
     get_or_create_env_var("VLM_MIN_DPI", "150.0")
 )  # _prepare_image_for_vlm: reported DPI below this implies upscale (effective DPI = reported_dpi * scale).
 
 VLM_MAX_DPI = float(
-    get_or_create_env_var("VLM_MAX_DPI", "300.0")
+    get_or_create_env_var("VLM_MAX_DPI", "200.0")
 )  # _prepare_image_for_vlm: reported DPI above this implies downscale. Bounds apply together with min/max pixels.
 
 # Max image aspect ratio max(width/height, height/width) after white-padding for VLM inputs.
@@ -1144,8 +1156,8 @@ INFERENCE_SERVER_DISABLE_THINKING = convert_string_to_boolean(
 
 
 ### Local OCR model - Tesseract vs PaddleOCR
-CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var(
-    "CHOSEN_LOCAL_OCR_MODEL", "tesseract"
+DEFAULT_LOCAL_OCR_MODEL = get_or_create_env_var(
+    "DEFAULT_LOCAL_OCR_MODEL", "tesseract"
 )  # Choose the engine for local OCR: "tesseract", "paddle", "hybrid-paddle", "hybrid-vlm", "hybrid-paddle-vlm", "hybrid-paddle-inference-server", "vlm", "inference-server"
 
 SHOW_OCR_GUI_OPTIONS = convert_string_to_boolean(
@@ -1285,7 +1297,7 @@ MODEL_CACHE_PATH = ensure_folder_within_app_directory(MODEL_CACHE_PATH)
 
 
 HYBRID_OCR_CONFIDENCE_THRESHOLD = int(
-    get_or_create_env_var("HYBRID_OCR_CONFIDENCE_THRESHOLD", "90")
+    get_or_create_env_var("HYBRID_OCR_CONFIDENCE_THRESHOLD", "95")
 )  # The tesseract confidence threshold under which the text will be passed to PaddleOCR for re-extraction using the hybrid OCR method.
 
 HYBRID_OCR_PADDING = int(
@@ -1345,7 +1357,7 @@ SAVE_PAGE_OCR_VISUALISATIONS = convert_string_to_boolean(
 )  # Whether to save visualisations of Tesseract, PaddleOCR, and Textract bounding boxes.
 
 INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES = convert_string_to_boolean(
-    get_or_create_env_var("INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES", "False")
+    get_or_create_env_var("INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES", "True")
 )  # Whether to include OCR visualisation outputs in the final output file list returned by choose_and_run_redactor.
 
 SAVE_WORD_SEGMENTER_OUTPUT_IMAGES = convert_string_to_boolean(
@@ -1778,13 +1790,22 @@ else:
     # Use the value from environment variable
     CLOUD_VLM_MODEL_CHOICE = CLOUD_VLM_MODEL_CHOICE.strip()
 
-# Backend used for CUSTOM_VLM_PERSON / CUSTOM_VLM_SIGNATURE (face/signature detection).
+# Backend used for CUSTOM_VLM_FACES / CUSTOM_VLM_SIGNATURE (face/signature detection).
 # One of: 'transformers_vlm', 'inference_vlm', 'bedrock_vlm'.
 CUSTOM_VLM_BACKEND = (
     get_or_create_env_var("CUSTOM_VLM_BACKEND", "bedrock_vlm").strip().lower()
 )
 if CUSTOM_VLM_BACKEND not in ("transformers_vlm", "inference_vlm", "bedrock_vlm"):
     CUSTOM_VLM_BACKEND = "bedrock_vlm"
+
+# Minimum confidence for CUSTOM_VLM face/signature detections to be kept.
+# Values can be provided either as 0..1 or 0..100. Internally interpreted as 0..1.
+CUSTOM_VLM_MIN_CONFIDENCE = float(
+    get_or_create_env_var("CUSTOM_VLM_MIN_CONFIDENCE", "0.65")
+)
+if CUSTOM_VLM_MIN_CONFIDENCE > 1.0:
+    CUSTOM_VLM_MIN_CONFIDENCE = CUSTOM_VLM_MIN_CONFIDENCE / 100.0
+CUSTOM_VLM_MIN_CONFIDENCE = max(0.0, min(1.0, CUSTOM_VLM_MIN_CONFIDENCE))
 
 # Local transformers LLM generation parameters
 LLM_MODEL_DTYPE = get_or_create_env_var("LLM_MODEL_DTYPE", "bfloat16")
@@ -2238,7 +2259,7 @@ DIRECT_MODE_IMAGES_DPI = float(
     get_or_create_env_var("DIRECT_MODE_IMAGES_DPI", str(IMAGES_DPI))
 )  # DPI for image processing
 DIRECT_MODE_CHOSEN_LOCAL_OCR_MODEL = get_or_create_env_var(
-    "DIRECT_MODE_CHOSEN_LOCAL_OCR_MODEL", CHOSEN_LOCAL_OCR_MODEL
+    "DIRECT_MODE_CHOSEN_LOCAL_OCR_MODEL", DEFAULT_LOCAL_OCR_MODEL
 )  # Local OCR model choice
 DIRECT_MODE_PREPROCESS_LOCAL_OCR_IMAGES = convert_string_to_boolean(
     get_or_create_env_var(
@@ -2501,9 +2522,9 @@ if SHOW_CUSTOM_VLM_ENTITIES and (
     or SHOW_INFERENCE_SERVER_VLM_OPTIONS
     or SHOW_BEDROCK_VLM_MODELS
 ):
-    FULL_ENTITY_LIST.extend(["CUSTOM_VLM_PERSON", "CUSTOM_VLM_SIGNATURE"])
-    FULL_COMPREHEND_ENTITY_LIST.extend(["CUSTOM_VLM_PERSON", "CUSTOM_VLM_SIGNATURE"])
-    FULL_LLM_ENTITY_LIST.extend(["CUSTOM_VLM_PERSON", "CUSTOM_VLM_SIGNATURE"])
+    FULL_ENTITY_LIST.extend(["CUSTOM_VLM_FACES", "CUSTOM_VLM_SIGNATURE"])
+    FULL_COMPREHEND_ENTITY_LIST.extend(["CUSTOM_VLM_FACES", "CUSTOM_VLM_SIGNATURE"])
+    FULL_LLM_ENTITY_LIST.extend(["CUSTOM_VLM_FACES", "CUSTOM_VLM_SIGNATURE"])
 
 if DEFAULT_TEXT_COLUMNS:
     DEFAULT_TEXT_COLUMNS = _get_env_list(DEFAULT_TEXT_COLUMNS)

@@ -36,7 +36,7 @@ services:
       - --frequency-penalty
       - "1"
       - --presence-penalty
-      - "1"
+      - "1.5"
       - --host
       - "0.0.0.0"
       - --port
@@ -97,7 +97,7 @@ services:
       - --frequency-penalty
       - "1"
       - --presence-penalty
-      - "1"
+      - "1.5"
       - --host
       - "0.0.0.0"
       - --port
@@ -153,36 +153,41 @@ services:
       - RUN_FASTAPI=True
       - APP_MODE=fastapi
       - SHOW_PADDLE_MODEL_OPTIONS=True
-      - CHOSEN_LOCAL_OCR_MODEL=paddle
       - SHOW_LOCAL_OCR_MODEL_OPTIONS=True
+      - SHOW_LOCAL_PII_DETECTION_OPTIONS=True
       - SHOW_INFERENCE_SERVER_PII_OPTIONS=True
       - SHOW_INFERENCE_SERVER_VLM_OPTIONS=True
       - SHOW_HYBRID_MODELS=True
       - SHOW_DIFFICULT_OCR_EXAMPLES=True
-      - MAX_WORKERS=12
-      - TESSERACT_MAX_WORKERS=8
-      - PADDLE_MAX_WORKERS=1
-      - CUSTOM_VLM_BACKEND=inference_vlm
-      - LOAD_PADDLE_AT_STARTUP=False
+      - SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER=True
+      - SHOW_SUMMARISATION=True
+      - SHOW_AWS_API_KEYS=True
+      - DEFAULT_TEXT_EXTRACTION_MODEL=Local OCR model - PDFs without selectable text
+      - DEFAULT_LOCAL_OCR_MODEL=paddle
+      - DEFAULT_PII_DETECTION_MODEL=Local
       - INFERENCE_SERVER_API_URL=http://llama-inference:8080
       - DEFAULT_INFERENCE_SERVER_VLM_MODEL=""
       - DEFAULT_INFERENCE_SERVER_PII_MODEL=""
+      - CUSTOM_VLM_BACKEND=inference_vlm
+      - MAX_WORKERS=12
+      - TESSERACT_MAX_WORKERS=8
+      - PADDLE_MAX_WORKERS=1 # Keep this to 1 to avoid VRAM overflow or errors
+      - LOAD_PADDLE_AT_STARTUP=False
       - EFFICIENT_OCR=True
       - SHOW_CUSTOM_VLM_ENTITIES=True
       - SESSION_OUTPUT_FOLDER=True
-      - SAVE_PAGE_OCR_VISUALISATIONS=True
-      - SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER=True
-      - SHOW_SUMMARISATION=True
-      - HYBRID_OCR_CONFIDENCE_THRESHOLD=97
+      - SAVE_PAGE_OCR_VISUALISATIONS=False
+      - HYBRID_OCR_CONFIDENCE_THRESHOLD=95
       - INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES=True
-      - PREPROCESS_LOCAL_OCR_IMAGES=True
+      - PREPROCESS_LOCAL_OCR_IMAGES=False
       - INFERENCE_SERVER_DISABLE_THINKING=True
-      - HYBRID_OCR_MAX_NEW_TOKENS=2048
-      - DEFAULT_NEW_BATCH_CHAR_COUNT=1250
       - MAX_NEW_TOKENS=16384
-      - MAX_INPUT_TOKEN_LENGTH=32768
-      - SAVE_EXAMPLE_HYBRID_IMAGES=True
-      - SAVE_VLM_INPUT_IMAGES=True
+      - SAVE_EXAMPLE_HYBRID_IMAGES=False
+      - SAVE_VLM_INPUT_IMAGES=False
+      - VLM_MAX_DPI=200.0
+      - DEFAULT_NEW_BATCH_CHAR_COUNT=1250
+      - REPORT_VLM_OUTPUTS_TO_GUI=True
+      - REPORT_LLM_OUTPUTS_TO_GUI=True      
 
     deploy:
       resources:

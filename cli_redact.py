@@ -21,7 +21,6 @@ from tools.config import (
     CHOSEN_COMPREHEND_ENTITIES,
     CHOSEN_LLM_ENTITIES,
     CHOSEN_LLM_PII_INFERENCE_METHOD,
-    CHOSEN_LOCAL_OCR_MODEL,
     CHOSEN_REDACT_ENTITIES,
     CLOUD_LLM_PII_MODEL_CHOICE,
     CLOUD_VLM_MODEL_CHOICE,
@@ -35,6 +34,7 @@ from tools.config import (
     DEFAULT_INFERENCE_SERVER_PII_MODEL,
     DEFAULT_INFERENCE_SERVER_VLM_MODEL,
     DEFAULT_LANGUAGE,
+    DEFAULT_LOCAL_OCR_MODEL,
     DEFAULT_MIN_CONSECUTIVE_PAGES,
     DEFAULT_MIN_WORD_COUNT,
     DEFAULT_TABULAR_ANONYMISATION_STRATEGY,
@@ -77,6 +77,7 @@ from tools.config import (
     SAVE_LOGS_TO_CSV,
     SAVE_LOGS_TO_DYNAMODB,
     SAVE_OUTPUTS_TO_S3,
+    SAVE_PAGE_OCR_VISUALISATIONS,
     SESSION_OUTPUT_FOLDER,
     SPACY_MODEL_PATH,
     SUMMARY_PAGE_GROUP_MAX_WORKERS,
@@ -617,7 +618,7 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
     pdf_group.add_argument(
         "--chosen_local_ocr_model",
         choices=LOCAL_OCR_MODEL_OPTIONS,
-        default=CHOSEN_LOCAL_OCR_MODEL,
+        default=DEFAULT_LOCAL_OCR_MODEL,
         help="Local OCR model to use.",
     )
     pdf_group.add_argument(
@@ -757,6 +758,18 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
         action="store_false",
         dest="overwrite_existing_ocr_results",
         help="Use existing OCR results when available (do not overwrite cached JSON).",
+    )
+    pdf_group.add_argument(
+        "--save_page_ocr_visualisations",
+        action="store_true",
+        default=None,
+        help="Save page OCR visualisations (debug bounding boxes). Defaults to SAVE_PAGE_OCR_VISUALISATIONS config.",
+    )
+    pdf_group.add_argument(
+        "--no_save_page_ocr_visualisations",
+        action="store_false",
+        dest="save_page_ocr_visualisations",
+        help="Do not save page OCR visualisations (debug bounding boxes).",
     )
 
     # --- LLM PII Detection Arguments ---
@@ -1339,6 +1352,12 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
                         args,
                         "overwrite_existing_ocr_results",
                         OVERWRITE_EXISTING_OCR_RESULTS,
+                    ),
+                    save_page_ocr_visualisations=(
+                        getattr(args, "save_page_ocr_visualisations", None)
+                        if getattr(args, "save_page_ocr_visualisations", None)
+                        is not None
+                        else SAVE_PAGE_OCR_VISUALISATIONS
                     ),
                     # Note: bedrock_runtime, gemini_client, gemini_config, azure_openai_client
                     # are initialized inside choose_and_run_redactor based on text_extraction_method
@@ -2255,6 +2274,12 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
                         args,
                         "overwrite_existing_ocr_results",
                         OVERWRITE_EXISTING_OCR_RESULTS,
+                    ),
+                    save_page_ocr_visualisations=(
+                        getattr(args, "save_page_ocr_visualisations", None)
+                        if getattr(args, "save_page_ocr_visualisations", None)
+                        is not None
+                        else SAVE_PAGE_OCR_VISUALISATIONS
                     ),
                     text_extraction_only=True,
                 )

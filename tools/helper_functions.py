@@ -38,18 +38,19 @@ from tools.config import (
     BEDROCK_VLM_OUTPUT_COST,
     BEDROCK_VLM_PIXELS_PER_INPUT_TOKEN,
     BEDROCK_VLM_TEXT_EXTRACT_OPTION,
-    CHOSEN_LOCAL_OCR_MODEL,
     COST_CODES_PATH,
     CUSTOM_HEADER,
     CUSTOM_HEADER_VALUE,
     DEFAULT_COST_CODE,
     DEFAULT_LANGUAGE,
+    DEFAULT_LOCAL_OCR_MODEL,
     DOCUMENT_REDACTION_BUCKET,
     INFERENCE_SERVER_PII_OPTION,
     INPUT_FOLDER,
     LANGUAGE_CHOICES,
     LANGUAGE_MAP,
     LOCAL_OCR_MODEL_OPTIONS,
+    LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION,
     LOCAL_PII_OPTION,
     LOCAL_TRANSFORMERS_LLM_PII_OPTION,
     NO_REDACTION_PII_OPTION,
@@ -62,7 +63,6 @@ from tools.config import (
     SELECTABLE_TEXT_EXTRACT_OPTION,
     SESSION_OUTPUT_FOLDER,
     SHOW_FEEDBACK_BUTTONS,
-    TESSERACT_TEXT_EXTRACT_OPTION,
     TEXTRACT_JOBS_LOCAL_LOC,
     TEXTRACT_JOBS_S3_LOC,
     TEXTRACT_TEXT_EXTRACT_OPTION,
@@ -837,7 +837,7 @@ def check_for_relevant_ocr_output_with_words(
 ):
     if text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION:
         file_ending = "_ocr_results_with_words_local_text.json"
-    elif text_extraction_method == TESSERACT_TEXT_EXTRACT_OPTION:
+    elif text_extraction_method == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION:
         file_ending = "_ocr_results_with_words_local_ocr.json"
     elif text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
         file_ending = "_ocr_results_with_words_textract.json"
@@ -1332,7 +1332,7 @@ def calculate_time_taken(
     TEXTRACT_TEXT_EXTRACT_OPTION: str = TEXTRACT_TEXT_EXTRACT_OPTION,
     BEDROCK_VLM_TEXT_EXTRACT_OPTION: str = BEDROCK_VLM_TEXT_EXTRACT_OPTION,
     SELECTABLE_TEXT_EXTRACT_OPTION: str = SELECTABLE_TEXT_EXTRACT_OPTION,
-    local_ocr_option: str = TESSERACT_TEXT_EXTRACT_OPTION,
+    local_ocr_option: str = LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION,
     NO_REDACTION_PII_OPTION: str = NO_REDACTION_PII_OPTION,
     AWS_PII_OPTION: str = AWS_PII_OPTION,
     AWS_LLM_PII_OPTION: str = AWS_LLM_PII_OPTION,
@@ -1748,7 +1748,7 @@ def show_info_box_on_click(
     allow_list_walkthrough = []
 
     # Use default local OCR method - examples don't set this directly
-    local_ocr_method = CHOSEN_LOCAL_OCR_MODEL
+    local_ocr_method = DEFAULT_LOCAL_OCR_MODEL
 
     # Update visibility of main PII entity components based on selected PII method
     # This ensures visibility is correct even when clicking examples with the same PII method

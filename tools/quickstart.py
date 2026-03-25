@@ -13,6 +13,7 @@ from tools.config import (
     CHOSEN_REDACT_ENTITIES,
     DEFAULT_PII_DETECTION_MODEL,
     INFERENCE_SERVER_PII_OPTION,
+    LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION,
     LOCAL_PII_OPTION,
     LOCAL_TRANSFORMERS_LLM_PII_OPTION,
     NO_REDACTION_PII_OPTION,
@@ -20,7 +21,6 @@ from tools.config import (
     SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS,
     SHOW_OCR_GUI_OPTIONS,
     SHOW_PII_IDENTIFICATION_OPTIONS,
-    TESSERACT_TEXT_EXTRACT_OPTION,
     TEXTRACT_TEXT_EXTRACT_OPTION,
 )
 from tools.helper_functions import put_columns_in_df
@@ -231,11 +231,11 @@ def handle_text_extract_method_selection(text_extract_method: str):
     if isinstance(text_extract_method, str):
         text_extract_method = text_extract_method.strip()
     if text_extract_method is None or text_extract_method == "":
-        text_extract_method = TESSERACT_TEXT_EXTRACT_OPTION
+        text_extract_method = LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
 
     # Show local OCR method radio only if "Local OCR model - PDFs without selectable text" is selected
     # When "AWS Bedrock VLM OCR" is selected, the local OCR method is automatically set to "bedrock-vlm" but the component is hidden
-    show_local_ocr = text_extract_method == TESSERACT_TEXT_EXTRACT_OPTION
+    show_local_ocr = text_extract_method == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
     # Show AWS Textract settings accordion only if "AWS Textract service - all PDF types" is selected
     show_aws_textract = (
         text_extract_method == TEXTRACT_TEXT_EXTRACT_OPTION
@@ -856,11 +856,11 @@ def handle_main_text_extract_method_selection(text_extract_method: str):
     if isinstance(text_extract_method, str):
         text_extract_method = text_extract_method.strip()
     if text_extract_method is None or text_extract_method == "":
-        text_extract_method = TESSERACT_TEXT_EXTRACT_OPTION
+        text_extract_method = LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
 
     # Show local OCR method accordion only if "Local OCR model - PDFs without selectable text" is selected
     # When "AWS Bedrock VLM OCR" is selected, the local OCR method is automatically set to "bedrock-vlm" but the component is hidden
-    show_local_ocr = text_extract_method == TESSERACT_TEXT_EXTRACT_OPTION
+    show_local_ocr = text_extract_method == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
     # Show AWS Textract settings accordion only if "AWS Textract service - all PDF types" is selected
     show_aws_textract = (
         text_extract_method == TEXTRACT_TEXT_EXTRACT_OPTION
@@ -868,7 +868,7 @@ def handle_main_text_extract_method_selection(text_extract_method: str):
     )
     # Show inference server VLM model accordion only if local OCR is selected (not Bedrock VLM) and the option is enabled
     show_inference_server = (
-        text_extract_method == TESSERACT_TEXT_EXTRACT_OPTION
+        text_extract_method == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
         and SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS
     )
 

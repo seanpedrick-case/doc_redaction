@@ -24,7 +24,6 @@ en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_
 pdfminer.six<=20260107
 pdf2image<=1.17.0
 pymupdf<=1.27.1
-#pdfplumber==0.11.9
 pikepdf<=10.3.0
 opencv-python<=4.13.0.92
 presidio_analyzer<=2.2.361
@@ -32,9 +31,9 @@ presidio_anonymizer<=2.2.361
 presidio-image-redactor<=0.0.57
 
 # --- Gradio and apps ---
-gradio<=6.9.0
+gradio<=6.10.0
 https://github.com/seanpedrick-case/gradio_image_annotator/releases/download/v0.5.3/gradio_image_annotation-0.5.3-py3-none-any.whl  # Custom annotator version with rotation, zoom, labels, and box IDs
-spaces<=0.47.0
+spaces<=0.48.1
 
 # --- AWS Lambda runtime ---
 awslambdaric<=3.1.1
