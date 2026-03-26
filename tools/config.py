@@ -655,7 +655,7 @@ EFFICIENT_OCR_MIN_WORDS = int(get_or_create_env_var("EFFICIENT_OCR_MIN_WORDS", "
 # cover to route the page through OCR in addition to the word-count rule. Reduces false
 # positives from tiny icons/watermarks. Set to 0 to disable image-based routing (word count only).
 EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION = float(
-    get_or_create_env_var("EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION", "0.01")
+    get_or_create_env_var("EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION", "0.005")
 )
 # Default max workers for parallel processing app-wide. Overridable by specific env vars below.
 MAX_WORKERS = max(
@@ -1491,7 +1491,7 @@ QWEN35_27B_REPO_ID = get_or_create_env_var(
     "QWEN35_27B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-27B"
 )
 QWEN35_27B_BNB_4BIT_REPO_ID = get_or_create_env_var(
-    "QWEN35_27B_BNB_4BIT_REPO_TRANSFORMERS_ID", "skkwowee/Qwen3.5-27B-bnb-4bit"
+    "QWEN35_27B_BNB_4BIT_REPO_TRANSFORMERS_ID", "bertbobson/Qwen3.5-27B-bnb-4bit"
 )
 QWEN35_35B_A3B_REPO_ID = get_or_create_env_var(
     "QWEN35_35B_A3B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-35B-A3B"

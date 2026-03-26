@@ -1187,6 +1187,8 @@ def send_request(
     num_transformer_input_tokens = 0
     num_transformer_generated_tokens = 0
     response_text = ""
+    if not model_choice or model_choice == "":
+        model_choice = None
 
     for entry in conversation_history:
         role = entry[
@@ -1744,7 +1746,7 @@ def call_inference_server_api(
         "stop": LLM_STOP_STRINGS if LLM_STOP_STRINGS else [],
     }
     # Include model in payload when set (vLLM/OpenAI-compatible servers; llama-swap or not).
-    if model_name:
+    if model_name or model_name != "":
         payload["model"] = model_name
 
     # Match VLM path: Qwen3 / Qwen3.5 on vLLM may stream only "thinking" unless disabled.

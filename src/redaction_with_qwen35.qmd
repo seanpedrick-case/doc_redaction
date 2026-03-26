@@ -1,0 +1,69 @@
+---
+title: "Redaction with Qwen 3.5"
+format:
+  html:
+    toc: true # Enable the table of contents
+    toc-depth: 3 # Include headings up to level 3 (##)
+    toc-title: "On this page" # Optional: Title for your TOC
+---
+
+# Overview
+
+In February 2026, I wrote an article looking into the use of VLMs for OCR and redaction tasks in documents. The original article, using Qwen 3 VL 8B Instruct, can be found [here](https://seanpedrick-case.github.io/doc_redaction/src/redaction_with_vlm_and_llms.html){target="_blank"}. In late February 2026, Qwen 3.5 was released and I have been testing out the same examples discussed in the original blog post. Here I will show a comparison between Qwen 3 and Qwen 3.5 for OCR/redaction tasks with an updated version of the app (version 2.0.1, which you can find [here](https://github.com/seanpedrick-case/doc_redaction){target="_blank"}).
+
+My conclusion from the last article was that PaddleOCR for initial OCR, paired with Qwen 3 VL 8B Instruct for low confidence phrases was the best solution for 'difficult' pages in documents. How does this conclusion hold up with Qwen 3.5? Let's take a look.
+
+
+
+I will also compare with these other deployment methods. Please see below for how to deploy them yourself:
+
+- Qwen 3.5 9b 4 bit quantised, deployed via vLLM.
+- Qwen 3.5 35B A3B 4 bit quantised, deployed via llama.cpp.
+- Qwen 3.5 27B 4 bit quantised, hosted on the Document Redaction VLM space on Hugging Face [here](https://huggingface.co/spaces/seanpedrickcase/document_redaction_vlm){target="_blank"}. You can try this model directly with the examples below at this URL without deploying your own server.
+
+
+### Deploying Qwen 3.5 35B A3B 4 bit quantised (llama.cpp)
+* For llama.cpp, use the Docker Compose file in the main doc_redaction repository [here](https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_llama.yml){target="_blank"}. Use command 'docker compose -f docker-compose_llama.yml --profile 27b up -d'. Recommended VRAM is 24GB, but can be adjusted downwards with the '--n-gpu-layers' or '--n-cpu-moe' parameters (as relevant)in the docker compose file. See the [Unsloth guide to Qwen 3.5 deployment](https://unsloth.ai/docs/models/qwen3.5){target="_blank"} for more details.
+
+### Deploying Qwen 3.5 9B 4 bit quantised (vLLM)
+Deploy with the docker compose file [here](https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_vllm.yml){target="_blank"}. Use command 'docker compose -f docker-compose_vllm.yml --profile vllm-9b up -d', needs 16-17GB GB VRAM. Further instructions for use of vLLM can be found [here](https://docs.vllm.ai/projects/recipes/en/latest/Qwen/Qwen3.5.html){target="_blank"}. For less VRAM usage, you can deploy the 9B model also using an Unsloth GGUF file, similar to the approach for the 35B model above.
+
+## Example 1: Difficult handwritten note
+
+__At the [Hugging Face space](https://huggingface.co/spaces/seanpedrickcase/document_redaction_vlm){target="_blank"}, click the third example name, 'Unclear text on handwritten note', change the local OCR model option below to 'vlm'. Then click on 'Redact document'.__
+
+The first example is a note with handwriting that is hard to decipher even for a person.
+
+[![Example of a handwritten note](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/Difficult%20handwritten%20note.jpg)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/Difficult%20handwritten%20note.jpg){target="_blank"}
+
+As a reminder, Qwen 3 VL 8B Instruct alone found this:
+
+[![Unclear text on handwritten note analysed with Qwen 3 VL](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/3.c%20unclear_text_handwritten_note_vlm/Difficult%20handwritten%20note_page_1_vlm_visualisations.jpg)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/3.c%20unclear_text_handwritten_note_vlm/Difficult%20handwritten%20note_page_1_vlm_visualisations.jpg){target="_blank"}
+
+A hybrid approach of PaddleOCR + Qwen 3 VL 8B Instruct found this:
+
+[![Unclear text on handwritten note analysed with hybrid PaddleOCR + Qwen 3 VL](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/3.b%20unclear_text_handwritten_note_paddle_hyb/Difficult%20handwritten%20note_page_1_hybrid_paddle_vlm_visualisations.jpg)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/3.b%20unclear_text_handwritten_note_paddle_hyb/Difficult%20handwritten%20note_page_1_hybrid_paddle_vlm_visualisations.jpg){target="_blank"}
+
+My conclusion from the last article was that PaddleOCR for initial OCR, paired with Qwen 3 VL 8B Instruct for low confidence phrases was the best solution for 'difficult' pages in documents. This was mainly due to the 'laziness' of the VLM model to identify text in the document - note that Qwen 3 VL 8B Instruct ignored the two text lines on the left. On pages with lots of text, I find that this pattern is repeated - the VLM will tend to miss some text.
+
+### Qwen 3.5 9B (vLLM)
+
+[![Unclear text on handwritten note analysed with Qwen 3.5 9B](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/3.a%20unclear_text_handwritten_note_vllm/Difficult%20handwritten%20note_page_1_vllm_visualisations.jpg)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/3.a%20unclear_text_handwritten_note_vllm/Difficult%20handwritten%20note_page_1_vllm_visualisations.jpg){target="_blank"}
+
+### Qwen 3.5 35B A3B (llama.cpp)
+
+### Qwen 3.5 27B (HF space)
+
+Now let's try Qwen 3.5 27B. Here are the results for the pure VLM approach:
+
+[![Unclear text on handwritten note analysed with Qwen 3.5 27B](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Handwritten%20note/Qwen%203.5%2027B%20bnb/direct/Difficult%20handwritten%20note_page_1_vlm_visualisations.jpg)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Handwritten%20note/Qwen%203.5%2027B%20bnb/direct/Difficult%20handwritten%20note_page_1_vlm_visualisations.jpg){target="_blank"}
+
+I would summarise the output as generally very good. This time, the VLM model has identified all the text in the document, and has not ignored any text lines. The position of the bounding boxes are also generally correct. There is not much to complain about in this analysis.
+
+## Example 2: Face identification
+
+
+## Example 3: Custom entity redaction with LLMs
+
+
+
