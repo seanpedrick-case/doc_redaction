@@ -1779,7 +1779,7 @@ def show_info_box_on_click(
         visible=is_llm_method,
     )
     main_llm_instructions_update = gr.update(
-        visible=is_llm_method,
+        visible=True,
     )
 
     # Set visibility on walkthrough entity dropdowns so they match PII method after example load
