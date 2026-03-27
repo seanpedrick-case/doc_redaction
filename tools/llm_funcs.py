@@ -509,13 +509,24 @@ def load_model(
 
             # Load model from the SAME model_id to ensure compatibility
 
-            if "qwen" in model_id.lower() and "3.5" in model_id.lower():
+            if "qwen" in local_model_type.lower() and "3.5" in local_model_type.lower():
                 print(f"Loading Qwen 3.5 model from {model_id}...")
                 from transformers import (
                     Qwen3_5ForCausalLM,
                 )
 
                 model = Qwen3_5ForCausalLM.from_pretrained(
+                    model_id,
+                    trust_remote_code=True,
+                    **load_kwargs,
+                )
+            elif (
+                "qwen" in local_model_type.lower() and "3 " in local_model_type.lower()
+            ):
+                print(f"Loading Qwen 3 model from {model_id}...")
+                from transformers import Qwen3ForCausalLM
+
+                model = Qwen3ForCausalLM.from_pretrained(
                     model_id,
                     trust_remote_code=True,
                     **load_kwargs,
