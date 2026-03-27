@@ -607,6 +607,10 @@ These variables are used by the app to estimate AWS cost when "AWS Bedrock VLM O
     * **Description:** Hugging Face repo ID, for the local transformers PII detection model. Can be overridden automatically based on `LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE`.
     * **Default Values:** e.g. `"unsloth/gemma-3-4b-it-bnb-4bit"`.
 
+* **`OVERRIDE_LLM_TRANSFORMERS_REPO_ID`**
+    * **Description:** If non-empty, overrides **`LOCAL_TRANSFORMERS_LLM_PII_REPO_ID`** (the Hugging Face repo ID or local path used for the local transformers LLM PII model). Use to point at a different checkpoint or a local folder without changing `LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE`. Leave empty for no override.
+    * **Default Value:** `''` (empty)
+
 * **`LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START`**
     * **Description:** If set to `"True"`, loads the local transformers LLM PII model at application startup (reduces latency on first use).
     * **Default Value:** `"False"`
