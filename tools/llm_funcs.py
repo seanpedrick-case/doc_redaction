@@ -526,7 +526,6 @@ def load_model(
                 print(f"Loading Qwen 3 model from {model_id}...")
                 from transformers import Qwen3VLForConditionalGeneration
 
-
                 model = Qwen3VLForConditionalGeneration.from_pretrained(
                     model_id,
                     trust_remote_code=True,

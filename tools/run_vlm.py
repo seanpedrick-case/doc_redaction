@@ -179,11 +179,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     from huggingface_hub import snapshot_download
     from transformers import (
         AutoConfig,
-        AutoModelForCausalLM,
-        AutoProcessor,
         BitsAndBytesConfig,
-        Qwen2_5_VLForConditionalGeneration,
-        Qwen3VLForConditionalGeneration,
         TextIteratorStreamer,
     )
 
@@ -303,6 +299,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         # Load only the selected model based on configuration
         if SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Nanonets-OCR2-3B":
             MODEL_ID = "nanonets/Nanonets-OCR2-3B"
+            from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+
             if OVERRIDE_VLM_REPO_ID:
                 MODEL_ID = OVERRIDE_VLM_REPO_ID
             processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
@@ -359,6 +357,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             MODEL_ID = model_path_d_local
             if OVERRIDE_VLM_REPO_ID:
                 MODEL_ID = OVERRIDE_VLM_REPO_ID
+            from transformers import AutoModelForCausalLM, AutoProcessor
+
             processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
             load_kwargs = {
                 "attn_implementation": attn_implementation,
@@ -377,6 +377,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
         elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "PaddleOCR-VL":
             MODEL_ID = "PaddlePaddle/PaddleOCR-VL"
+            from transformers import AutoModelForCausalLM, AutoProcessor
+
             if OVERRIDE_VLM_REPO_ID:
                 MODEL_ID = OVERRIDE_VLM_REPO_ID
             load_kwargs = {
@@ -401,6 +403,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         ###
         elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-2B-Instruct":
             MODEL_ID = "Qwen/Qwen3-VL-2B-Instruct"
+            from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
+
             if OVERRIDE_VLM_REPO_ID:
                 MODEL_ID = OVERRIDE_VLM_REPO_ID
             processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
@@ -432,6 +436,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
         elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-4B-Instruct":
             MODEL_ID = "Qwen/Qwen3-VL-4B-Instruct"
+            from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
+
             if OVERRIDE_VLM_REPO_ID:
                 MODEL_ID = OVERRIDE_VLM_REPO_ID
             processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
@@ -463,6 +469,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             )
         elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-8B-Instruct":
             MODEL_ID = "Qwen/Qwen3-VL-8B-Instruct"
+            from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
+
             if OVERRIDE_VLM_REPO_ID:
                 MODEL_ID = OVERRIDE_VLM_REPO_ID
             processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
@@ -495,6 +503,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
         elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-32B-Instruct":
             MODEL_ID = "Qwen/Qwen3-VL-32B-Instruct"
+            from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
+
             if OVERRIDE_VLM_REPO_ID:
                 MODEL_ID = OVERRIDE_VLM_REPO_ID
             processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
@@ -529,7 +539,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             MODEL_ID = "Qwen/Qwen3-VL-30B-A3B-Instruct"
             if OVERRIDE_VLM_REPO_ID:
                 MODEL_ID = OVERRIDE_VLM_REPO_ID
-            from transformers import Qwen3VLMoeForConditionalGeneration
+            from transformers import AutoProcessor, Qwen3VLMoeForConditionalGeneration
 
             processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
             load_kwargs = {
@@ -564,7 +574,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             MODEL_ID = "Qwen/Qwen3-VL-235B-A22B-Instruct-FP8"
             if OVERRIDE_VLM_REPO_ID:
                 MODEL_ID = OVERRIDE_VLM_REPO_ID
-            from transformers import Qwen3VLMoeForConditionalGeneration
+            from transformers import AutoProcessor, Qwen3VLMoeForConditionalGeneration
 
             processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
             load_kwargs = {
