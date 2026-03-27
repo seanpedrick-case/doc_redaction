@@ -1475,7 +1475,7 @@ MINISTRAL_3_14B_INST_REPO_ID = get_or_create_env_var(
 
 # Qwen 3.0 model repo IDs (8B through 27B, from run_vlm.py)
 QWEN3_8B_INST_REPO_ID = get_or_create_env_var(
-    "QWEN3_8B_INST_REPO_TRANSFORMERS_ID", "Qwen/Qwen3-8B-Instruct"
+    "QWEN3_8B_INST_REPO_TRANSFORMERS_ID", "Qwen/Qwen3-VL-8B-Instruct"
 )
 
 # Qwen 3.5 model repo IDs (9B through 122B, from run_vlm.py)
