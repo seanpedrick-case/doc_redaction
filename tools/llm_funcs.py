@@ -475,7 +475,7 @@ def load_model(
                             load_in_4bit=True,
                             bnb_4bit_quant_type="nf4",  # Use the modern NF4 quantisation for better performance
                             bnb_4bit_compute_dtype=torch_dtype,
-                            bnb_4bit_use_double_quant=True,  # Optional: uses a second quantisation step to save even more memory
+                            # bnb_4bit_use_double_quant=True,  # Optional: uses a second quantisation step to save even more memory
                         )
 
             # Prepare load kwargs
