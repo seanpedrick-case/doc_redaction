@@ -524,9 +524,10 @@ def load_model(
                 "qwen" in local_model_type.lower() and "3 " in local_model_type.lower()
             ):
                 print(f"Loading Qwen 3 model from {model_id}...")
-                from transformers import Qwen3ForCausalLM
+                from transformers import Qwen3VLForConditionalGeneration
 
-                model = Qwen3ForCausalLM.from_pretrained(
+
+                model = Qwen3VLForConditionalGeneration.from_pretrained(
                     model_id,
                     trust_remote_code=True,
                     **load_kwargs,
