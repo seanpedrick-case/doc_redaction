@@ -121,7 +121,11 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
   </li>  
   <li class="nav-item">
     <a class="nav-link" href="../src/redaction_with_vlm_and_llms.html"> 
-<span class="menu-text">Redaction with local VLM and LLMs</span></a>
+<span class="menu-text">Redaction with local VLM and LLMs (Qwen 3)</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../src/ocr_and_redaction_with_qwen35.html"> 
+<span class="menu-text">OCR and redaction with Qwen 3.5 (Mar 2026)</span></a>
   </li>  
 </ul>
           </div> <!-- /navcollapse -->
@@ -951,6 +955,11 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <ul>
 <li><strong>Description:</strong> Hugging Face repo ID, for the local transformers PII detection model. Can be overridden automatically based on <code>LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE</code>.</li>
 <li><strong>Default Values:</strong> e.g.&nbsp;<code>"unsloth/gemma-3-4b-it-bnb-4bit"</code>.</li>
+</ul></li>
+<li><p><strong><code>OVERRIDE_LLM_TRANSFORMERS_REPO_ID</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If non-empty, overrides <strong><code>LOCAL_TRANSFORMERS_LLM_PII_REPO_ID</code></strong> (the Hugging Face repo ID or local path used for the local transformers LLM PII model). Use to point at a different checkpoint or a local folder without changing <code>LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE</code>. Leave empty for no override.</li>
+<li><strong>Default Value:</strong> <code>''</code> (empty)</li>
 </ul></li>
 <li><p><strong><code>LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START</code></strong></p>
 <ul>

@@ -121,7 +121,11 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
   </li>  
   <li class="nav-item">
     <a class="nav-link active" href="../src/redaction_with_vlm_and_llms.html" aria-current="page"> 
-<span class="menu-text">Redaction with local VLM and LLMs</span></a>
+<span class="menu-text">Redaction with local VLM and LLMs (Qwen 3)</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../src/ocr_and_redaction_with_qwen35.html"> 
+<span class="menu-text">OCR and redaction with Qwen 3.5 (Mar 2026)</span></a>
   </li>  
 </ul>
           </div> <!-- /navcollapse -->
@@ -199,6 +203,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 
 <section id="overview" class="level1">
 <h1>Overview</h1>
+<p><strong>NOTE:</strong> As of March 2026, this article has been superseded with a new article based on Qwen 3.5 and an updated version of the app. See <a href="https://seanpedrick-case.github.io/doc_redaction/src/redaction_with_qwen35.html" target="_blank">here</a> for the new article.</p>
 <p>Redaction workflows require both text and bounding box identification from documents. In this post, I will test local vision language models (VLMs) from the Qwen 3 VL family against existing OCR tools to see how well they can perform in identifying text and bounding boxes from ‘difficult’ documents. All the examples can be recreated on the <a href="https://huggingface.co/spaces/seanpedrickcase/document_redaction_vlm" target="_blank">Document Redaction app VLM space on Hugging Face</a>. The code underlying this app can be found <a href="https://github.com/seanpedrick-case/doc_redaction" target="_blank">here</a>.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -329,7 +334,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 </section>
 <section id="example-3---unclear-text-on-handwritten-note" class="level1">
 <h1>Example 3 - Unclear text on handwritten note</h1>
-<p>THere are of course many situations where it is important to accurately extract handwritten text from documents. This has long been a struggle for OCR tools, including paid options, but modern VLMs are getting better and better at this. How will a small model like Qwen 3 VL 8B Instruct perform? Let’s find out.</p>
+<p>There are of course many situations where it is important to accurately extract handwritten text from documents. This has long been a struggle for OCR tools, including paid options, but modern VLMs are getting better and better at this. How will a small model like Qwen 3 VL 8B Instruct perform? Let’s find out.</p>
 <p>The document for this is example is below. As you can see, some of the text is very difficult for a person to read.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">

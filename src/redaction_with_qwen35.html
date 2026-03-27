@@ -2,12 +2,12 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
 
 <meta charset="utf-8">
-<meta name="generator" content="quarto-1.8.27">
+<meta name="generator" content="quarto-1.8.26">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 
-<title>Home – Document Redaction App</title>
+<title>Redaction with Qwen 3.5 – Document Redaction App</title>
 <style>
 code{white-space: pre-wrap;}
 span.smallcaps{font-variant: small-caps;}
@@ -23,24 +23,24 @@ ul.task-list li input[type="checkbox"] {
 </style>
 
 
-<script src="site_libs/quarto-nav/quarto-nav.js"></script>
-<script src="site_libs/quarto-nav/headroom.min.js"></script>
-<script src="site_libs/clipboard/clipboard.min.js"></script>
-<script src="site_libs/quarto-search/autocomplete.umd.js"></script>
-<script src="site_libs/quarto-search/fuse.min.js"></script>
-<script src="site_libs/quarto-search/quarto-search.js"></script>
-<meta name="quarto:offset" content="./">
-<script src="site_libs/quarto-html/quarto.js" type="module"></script>
-<script src="site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
-<script src="site_libs/quarto-html/axe/axe-check.js" type="module"></script>
-<script src="site_libs/quarto-html/popper.min.js"></script>
-<script src="site_libs/quarto-html/tippy.umd.min.js"></script>
-<script src="site_libs/quarto-html/anchor.min.js"></script>
-<link href="site_libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="site_libs/quarto-html/quarto-syntax-highlighting-ed96de9b727972fe78a7b5d16c58bf87.css" rel="stylesheet" id="quarto-text-highlighting-styles">
-<script src="site_libs/bootstrap/bootstrap.min.js"></script>
-<link href="site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="site_libs/bootstrap/bootstrap-e31584831b205ffbb2d98406f31c2a5b.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<script src="../site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="../site_libs/quarto-nav/headroom.min.js"></script>
+<script src="../site_libs/clipboard/clipboard.min.js"></script>
+<script src="../site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="../site_libs/quarto-search/fuse.min.js"></script>
+<script src="../site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="../">
+<script src="../site_libs/quarto-html/quarto.js" type="module"></script>
+<script src="../site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="../site_libs/quarto-html/axe/axe-check.js" type="module"></script>
+<script src="../site_libs/quarto-html/popper.min.js"></script>
+<script src="../site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="../site_libs/quarto-html/anchor.min.js"></script>
+<link href="../site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-587c61ba64f3a5504c4d52d930310e48.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="../site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="../site_libs/bootstrap/bootstrap-e31584831b205ffbb2d98406f31c2a5b.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -82,14 +82,14 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <link rel="stylesheet" href="styles.css">
 </head>
 
-<body class="nav-fixed fullcontent quarto-light">
+<body class="nav-fixed quarto-light">
 
 <div id="quarto-search-results"></div>
   <header id="quarto-header" class="headroom fixed-top">
     <nav class="navbar navbar-expand-lg " data-bs-theme="dark">
       <div class="navbar-container container-fluid">
       <div class="navbar-brand-container mx-auto">
-    <a class="navbar-brand" href="./index.html">
+    <a class="navbar-brand" href="../index.html">
     <span class="navbar-title">Document Redaction App</span>
     </a>
   </div>
@@ -100,32 +100,28 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
           <div class="collapse navbar-collapse" id="navbarCollapse">
             <ul class="navbar-nav navbar-nav-scroll me-auto">
   <li class="nav-item">
-    <a class="nav-link active" href="./index.html" aria-current="page"> 
+    <a class="nav-link" href="../index.html"> 
 <span class="menu-text">Home</span></a>
   </li>  
   <li class="nav-item">
-    <a class="nav-link" href="./src/user_guide.html"> 
+    <a class="nav-link" href="../src/user_guide.html"> 
 <span class="menu-text">User guide</span></a>
   </li>  
   <li class="nav-item">
-    <a class="nav-link" href="./src/faq.html"> 
+    <a class="nav-link" href="../src/faq.html"> 
 <span class="menu-text">User FAQ</span></a>
   </li>  
   <li class="nav-item">
-    <a class="nav-link" href="./src/installation_guide.html"> 
+    <a class="nav-link" href="../src/installation_guide.html"> 
 <span class="menu-text">App installation guide (with CDK)</span></a>
   </li>  
   <li class="nav-item">
-    <a class="nav-link" href="./src/app_settings.html"> 
+    <a class="nav-link" href="../src/app_settings.html"> 
 <span class="menu-text">App settings management guide</span></a>
   </li>  
   <li class="nav-item">
-    <a class="nav-link" href="./src/redaction_with_vlm_and_llms.html"> 
-<span class="menu-text">Redaction with local VLM and LLMs (Qwen 3)</span></a>
-  </li>  
-  <li class="nav-item">
-    <a class="nav-link" href="./src/ocr_and_redaction_with_qwen35.html"> 
-<span class="menu-text">OCR and redaction with Qwen 3.5 (Mar 2026)</span></a>
+    <a class="nav-link" href="../src/redaction_with_vlm_and_llms.html"> 
+<span class="menu-text">Redaction with local VLM and LLMs</span></a>
   </li>  
 </ul>
           </div> <!-- /navcollapse -->
@@ -138,13 +134,24 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
 <!-- sidebar -->
 <!-- margin-sidebar -->
-    
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+        <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">On this page</h2>
+   
+  <ul>
+  <li><a href="#overview" id="toc-overview" class="nav-link active" data-scroll-target="#overview">Overview</a>
+  <ul class="collapse">
+  <li><a href="#example-1-difficult-handwritten-note" id="toc-example-1-difficult-handwritten-note" class="nav-link" data-scroll-target="#example-1-difficult-handwritten-note">Example 1: Difficult handwritten note</a></li>
+  </ul></li>
+  </ul>
+</nav>
+    </div>
 <!-- main -->
 <main class="content" id="quarto-document-content">
 
 <header id="title-block-header" class="quarto-title-block default">
 <div class="quarto-title">
-<h1 class="title">Home</h1>
+<h1 class="title">Redaction with Qwen 3.5</h1>
 </div>
 
 
@@ -161,23 +168,38 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 </header>
 
 
-<p>version: 2.0.1</p>
-<p>Welcome to the Document Redaction App documentation. This site provides comprehensive documentation for the Document Redaction App.</p>
-<p>Navigate through the sections to learn how to install, use, and manage the application. Below is a brief introduction to the app.</p>
-<section id="document-redaction" class="level2">
-<h2 class="anchored" data-anchor-id="document-redaction">Document redaction</h2>
-<p>Redact personally identifiable information (PII) from documents (pdf, png, jpg), Word files (docx), or tabular data (xlsx/csv/parquet). Please see the <a href="./src/user_guide.html">User Guide</a> for a full walkthrough of all the features in the app.</p>
+<section id="overview" class="level1">
+<h1>Overview</h1>
+<p>In February 2026, I wrote an article looking into the use of VLMs for OCR and redaction tasks in documents. The original article, using Qwen 3 VL 8B Instruct, can be found <a href="https://seanpedrick-case.github.io/doc_redaction/src/redaction_with_vlm_and_llms.html" target="_blank">here</a>. In late February 2026, Qwen 3.5 was released and I have been testing out the same examples discussed in the original blog post. Here I will show a comparison between Qwen 3 and Qwen 3.5 for OCR/redaction tasks with an updated version of the app (version 2.0.1, which you can find <a href="https://github.com/seanpedrick-case/doc_redaction" target="_blank">here</a>).</p>
+<p>My conclusion from the last article was that PaddleOCR for initial OCR, paired with Qwen 3 VL 8B Instruct for low confidence phrases was the best solution for ‘difficult’ pages in documents. How does this conclusion hold up with Qwen 3.5? Let’s take a look.</p>
+<p>The Document Redaction VLM space on Hugging Face can be found <a href="https://huggingface.co/spaces/seanpedrickcase/document_redaction_vlm" target="_blank">here</a>. By default, Qwen 3.5 27B is loaded in as the VLM model, quantised to 4 bit using bitsandbytes.</p>
+<section id="example-1-difficult-handwritten-note" class="level2">
+<h2 class="anchored" data-anchor-id="example-1-difficult-handwritten-note">Example 1: Difficult handwritten note</h2>
+<p>The first example is a note with handwriting that is hard to decipher even for a person.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
-<p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/refs/heads/main/review_redactions/Signatures%20and%20handwriting%20found.PNG" class="img-fluid figure-img"></p>
-<figcaption>Handwriting and signatures redacted example</figcaption>
+<p><a href="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/Difficult%20handwritten%20note.jpg" target="_blank"><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/Difficult%20handwritten%20note.jpg" class="img-fluid figure-img"></a></p>
+<figcaption>Example of a handwritten note</figcaption>
 </figure>
 </div>
-<p>To identify text in documents, the ‘Local’ text extraction uses PikePDF, and OCR image analysis uses Tesseract, and works well only for documents with typed text or scanned PDFs with clear text. Use AWS Textract to extract more complex elements e.g.&nbsp;handwriting, signatures, or unclear text. For PII identification, ‘Local’ (based on spaCy) gives good results if you are looking for common names or terms, or a custom list of terms to redact (see Redaction settings). AWS Comprehend gives better results at a small cost.</p>
-<p>Additional options include, choosing the type of information to redact (e.g.&nbsp;people, places), custom terms to include/ exclude from redaction, fuzzy matching, language settings, and whole page redaction. After redaction is complete, you can view and modify suggested redactions on the ‘Review redactions’ tab to quickly create a final redacted document.</p>
-<p>NOTE: The app is not 100% accurate, and it will miss some personal information. It is essential that all outputs are reviewed <strong>by a human</strong> before using the final outputs.</p>
+<p>As a reminder, Qwen 3 VL 8B Instruct alone found this:</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><a href="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/3.c%20unclear_text_handwritten_note_vlm/Difficult%20handwritten%20note_page_1_vlm_visualisations.jpg" target="_blank"><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/3.c%20unclear_text_handwritten_note_vlm/Difficult%20handwritten%20note_page_1_vlm_visualisations.jpg" class="img-fluid figure-img"></a></p>
+<figcaption>Unclear text on handwritten note analysed with Qwen 3 VL</figcaption>
+</figure>
+</div>
+<p>A hybrid approach of PaddleOCR + Qwen 3 VL 8B Instruct found this:</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><a href="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/3.b%20unclear_text_handwritten_note_paddle_hyb/Difficult%20handwritten%20note_page_1_hybrid_paddle_vlm_visualisations.jpg" target="_blank"><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/3.b%20unclear_text_handwritten_note_paddle_hyb/Difficult%20handwritten%20note_page_1_hybrid_paddle_vlm_visualisations.jpg" class="img-fluid figure-img"></a></p>
+<figcaption>Unclear text on handwritten note analysed with hybrid PaddleOCR + Qwen 3 VL</figcaption>
+</figure>
+</div>
+<p>Now let’s try Qwen 3.5 27B.</p>
 
 
+</section>
 </section>
 
 <a onclick="window.scrollTo(0, 0); return false;" role="button" id="quarto-back-to-top"><i class="bi bi-arrow-up"></i> Back to top</a></main> <!-- /main -->
@@ -254,7 +276,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
     }
       var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
       var mailtoRegex = new RegExp(/^mailto:/);
-        var filterRegex = new RegExp("https:\/\/seanpedrick-case\.github\.io\/doc_redaction\/");
+        var filterRegex = new RegExp('/' + window.location.host + '/');
       var isInternal = (href) => {
           return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
       }
