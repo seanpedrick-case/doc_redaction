@@ -500,6 +500,7 @@ def load_model(
             tokenizer = AutoTokenizer.from_pretrained(
                 model_id,
                 token=hf_token,
+                trust_remote_code=True,
             )
 
             if not tokenizer.pad_token:
@@ -507,11 +508,25 @@ def load_model(
             print("Tokenizer loaded successfully")
 
             # Load model from the SAME model_id to ensure compatibility
-            print(f"Loading model from {model_id}...")
-            model = AutoModelForCausalLM.from_pretrained(
-                model_id,
-                **load_kwargs,
-            )
+
+            if "qwen" in model_id.lower() and "3.5" in model_id.lower():
+                print(f"Loading Qwen 3.5 model from {model_id}...")
+                from transformers import (
+                    Qwen3_5ForCausalLM,
+                )
+
+                model = Qwen3_5ForCausalLM.from_pretrained(
+                    model_id,
+                    trust_remote_code=True,
+                    **load_kwargs,
+                )
+            else:
+                print(f"Loading model from {model_id}...")
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_id,
+                    trust_remote_code=True,
+                    **load_kwargs,
+                )
 
             # Set model to evaluation mode (standard transformers approach)
             # Note: With device_map="auto", don't manually move model - let it handle device placement
@@ -563,6 +578,7 @@ def load_model(
             tokenizer = AutoTokenizer.from_pretrained(
                 model_id,
                 token=hf_token,
+                trust_remote_code=True,
             )
             if not tokenizer.pad_token:
                 tokenizer.pad_token = tokenizer.eos_token

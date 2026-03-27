@@ -118,6 +118,21 @@ Overall, the Qwen 3.5 27B model alone (i.e. not using the hybrid approach with P
 
 The next task is to accurately identify the location of people's faces on a document. The document can be found here: [https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Lambeth%20foreword%20faces/Lambeth%2030%20FINAL%20ACC_Ver_Dec.pdf_foreword.pdf](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Lambeth%20foreword%20faces/Lambeth%2030%20FINAL%20ACC_Ver_Dec.pdf_foreword.pdf){target="_blank"}.
 
+Since the pages contain a lot of typed text, pure VLM analysis is not necessary, and would likely worse due to the general VLM 'laziness' in terms of missing lines of text in their response.
+
+### Qwen 3.5 9B (vLLM)
+
+### Qwen 3.5 35B A3B (llama.cpp)
+
+### Qwen 3.5 27B (HF space)
+
+__Qwen 3.5 is served on the Hugging Face space [here](https://huggingface.co/spaces/seanpedrickcase/document_redaction_vlm){target="_blank"}. Click the fourth example name, 'Face identification', change the local OCR model option below to 'vlm'. Then click on 'Redact document'.__
+
+#### VLM alone
+
+[![Face identification analysed with Qwen 3.5 27B VLM alone](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Lambeth%20foreword%20faces/Qwen%203.5%2027B%20bnb/direct/Lambeth%2030%20FINAL%20ACC_Ver_Dec.pdf_foreword_page_1_vlm_visualisations.jpg)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Lambeth%20foreword%20faces/Qwen%203.5%2027B%20bnb/direct/Lambeth%2030%20FINAL%20ACC_Ver_Dec.pdf_foreword_page_1_vlm_visualisations.jpg){target="_blank"}
+
+**Rating: 8.5/10** - The text identification is generally good, but I would say it slightly worse than the 9B model (8/10). No text boxes have been missed, however some boxes seem too large and overlap their neighbours (8/10).
 
 ## Example 3: Custom entity redaction with LLMs
 
