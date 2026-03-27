@@ -763,6 +763,7 @@ def call_transformers_model(
     # Load model and tokenizer together to ensure they're from the same source
     # This prevents mismatches that could occur if they're loaded separately
     if model is None or tokenizer is None:
+        print("Model not found. Loading model and tokenizer...")
         # Use get_model_and_tokenizer() to ensure both are loaded atomically
         # This is safer than calling get_pii_model() and get_pii_tokenizer() separately
         loaded_model, loaded_tokenizer, assistant_model = load_model()

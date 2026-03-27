@@ -122,19 +122,82 @@ Since the pages contain a lot of typed text, pure VLM analysis is not necessary,
 
 ### Qwen 3.5 9B (vLLM)
 
+[![Face identification analysed with Qwen 3.5 9B VLM alone](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Lambeth%20foreword%20faces/Qwen%203.5%209B%20inf/qwen_3_5_9b_lambeth_foreword_face_detection)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Lambeth%20foreword%20faces/Qwen%203.5%209B%20inf/qwen_3_5_9b_lambeth_foreword_face_detection){target="_blank"}
+
+**Rating: 5/10** - Qwen 3.5 9B identified that there were two photos of faces on the page, but missed both faces completely with the bounding boxes.
+
 ### Qwen 3.5 35B A3B (llama.cpp)
+
+[![Face identification analysed with Qwen 3.5 35B A3B VLM alone](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Lambeth%20foreword%20faces/Qwen%203.5%2035B%20inf/qwen_35_35B_foreword_faces.png)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Lambeth%20foreword%20faces/Qwen%203.5%2035B%20inf/qwen_35_35B_foreword_faces.png){target="_blank"}
+
+**Rating: 8.5/10** - Qwen 3.5 35B A3B identified the faces and located them roughly in the correct position, just with a slight miss on the face on the right side of the page.
 
 ### Qwen 3.5 27B (HF space)
 
-__Qwen 3.5 is served on the Hugging Face space [here](https://huggingface.co/spaces/seanpedrickcase/document_redaction_vlm){target="_blank"}. Click the fourth example name, 'Face identification', change the local OCR model option below to 'vlm'. Then click on 'Redact document'.__
-
-#### VLM alone
+__Qwen 3.5 is served on the Hugging Face space [here](https://huggingface.co/spaces/seanpedrickcase/document_redaction_vlm){target="_blank"}. Upload the 'Lambeth 30 FINAL ACC Ver Dec.pdf' file linked above. change the local OCR model option below to 'hybrid-paddle-vlm', and in the entities list below, ensure that 'CUSTOM_VLM_FACES' is part of the list. Then click on 'Redact document'.__
 
 [![Face identification analysed with Qwen 3.5 27B VLM alone](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Lambeth%20foreword%20faces/Qwen%203.5%2027B%20bnb/direct/Lambeth%2030%20FINAL%20ACC_Ver_Dec.pdf_foreword_page_1_vlm_visualisations.jpg)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Lambeth%20foreword%20faces/Qwen%203.5%2027B%20bnb/direct/Lambeth%2030%20FINAL%20ACC_Ver_Dec.pdf_foreword_page_1_vlm_visualisations.jpg){target="_blank"}
 
-**Rating: 8.5/10** - The text identification is generally good, but I would say it slightly worse than the 9B model (8/10). No text boxes have been missed, however some boxes seem too large and overlap their neighbours (8/10).
+**Rating: 8.5/10** - Like the 35B A3B model, Qwen 3.5 27B identified the faces and located them roughly in the correct position, just with a slight miss on the face on the right side of the page.
+
+## Conclusion
+
+| Model | Face Identification | Bounding Boxes |
+|-------|---------------------|----------------|
+| Qwen 3.5 9B | 10/10 | 5/10 |
+| Qwen 3.5 35B A3B | 10/10 | 8.5/10 |
+| Qwen 3.5 27B | 10/10 | 8.5/10 |
+
+All three models identified that there were two photos of faces on the page, and ignore the cartoon drawings. However, their success with locating bounding boxes varied greatly. The 9B model missed completely, while the 35B A3B and 27B models located the faces roughly in the correct position, although neither were perfect.
 
 ## Example 3: Custom entity redaction with LLMs
 
+The third task is to classify text according to specific instructions passed to an LLM model. As noted in the last post, small models < 27B were not good at this task. Let's see how Qwen 3.5 does. In this case, due to Hugging Face's limited VRAM, I used the 9B model on the demonstration app. The results for the other two models (35B A3B and 27B) come from the llama.cpp deployment of the model that you can run [here](https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_llama.yml){target="_blank"}.
+
+The custom instructions used for this task were:
+
+__"Redact Lauren's name (always cover the full name if available), email addresses, and phone numbers with the label LAUREN. Redact university names with the label UNIVERSITY. Always include the full university name if available."__
+
+### Qwen 3.5 9B (LLM)
+
+__To try the Qwen 3.5 9B model with this example, at the [Hugging Face space](https://huggingface.co/spaces/seanpedrickcase/document_redaction_vlm){target="_blank"}, click the fourth example name, 'Example email LLM PII detection', change the local OCR model option below to 'vlm'. Then click on 'Redact document'.__
+
+[![Custom entity redaction analysed with Qwen 3.5 9B VLM](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/custom_entity_redaction/Qwen%203.5%209B%20bnb/llm_entity_extraction.png)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/custom_entity_redaction/Qwen%203.5%209B%20bnb/llm_entity_extraction.png){target="_blank"}
+
+You can find the full prompt and response text log files [here](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/custom_entity_redaction/Qwen%203.5%209B%20bnb/){target="_blank"}.
+
+**Rating: 7/10** - The Qwen 3.5 9B model identified the entities mostly correctly, and located them roughly in the correct position. However, it missed the university label towards the bottom of the page in the second LLM call for the document. This model is probably too inconsistent to use reliably for this task.
+
+### Qwen 3.5 35B A3B (llama.cpp)
+
+__To try the Qwen 3.5 35B A3B model with this example, at the [Hugging Face space](https://huggingface.co/spaces/seanpedrickcase/document_redaction_vlm){target="_blank"}, click the fourth example name, 'Example email LLM PII detection', change the local OCR model option below to 'vlm'. Then click on 'Redact document'.__
+
+[![Custom entity redaction analysed with Qwen 3.5 35B A3B VLM](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/custom_entity_redaction/Qwen%203.5%2035B%20a3b/llm_entity_extraction.png)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/custom_entity_redaction/Qwen%203.5%2035B%20a3b/llm_entity_extraction.png){target="_blank"}
+
+You can find the full prompt and response text log files [here](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/custom_entity_redaction/Qwen%203.5%2035B%20a3b/){target="_blank"}.
+
+**Rating: 8/10** - The Qwen 3.5 35B A3B model identified the entities mostly correctly, and located them roughly in the correct position. However, its labelling is inconsistent. The first labels in the document cover just the university name, while the second pair of university names redacted completely, covering the 'University of...' text, which was asked of by the instructions. This model is probably too inconsistent to use reliably for this task.
+
+### Qwen 3.5 27B (llama.cpp)
+
+__To try the Qwen 3.5 27B model with this example, at the [Hugging Face space](https://huggingface.co/spaces/seanpedrickcase/document_redaction_vlm){target="_blank"}, click the fourth example name, 'Example email LLM PII detection', change the local OCR model option below to 'vlm'. Then click on 'Redact document'.__
+
+[![Custom entity redaction analysed with Qwen 3.5 27B VLM](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/custom_entity_redaction/Qwen%203.5%2027B%20bnb/llm_entity_extraction.png)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/custom_entity_redaction/Qwen%203.5%2027B%20bnb/llm_entity_extraction.png){target="_blank"}
+
+You can find the full prompt and response text log files [here](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/custom_entity_redaction/Qwen%203.5%2027B%20bnb/){target="_blank"}.
+
+**Rating: 10/10** - The Qwen 3.5 27B model identified the entities correctly, and located them in the correct position.
+
+## Conclusion
+
+| Model | Entity Identification | Bounding Boxes |
+|-------|---------------------|----------------|
+| Qwen 3.5 9B | 7/10 | 7/10 |
+| Qwen 3.5 35B A3B | 7/10 | 7/10 |
+| Qwen 3.5 27B | 10/10 | 10/10 |
+
+Overall, the Qwen 3.5 27B model alone (i.e. not using the hybrid approach with PaddleOCR) performs best on this task for identifying custom entities. However, the issue with model 'laziness' in terms of missing lines of text in its response still persists, preventing me giving it a near perfect score.
+
+## Conclusion
 
 

@@ -1473,6 +1473,11 @@ MINISTRAL_3_14B_INST_REPO_ID = get_or_create_env_var(
     "mistralai/Ministral-3-14B-Instruct-2512",
 )
 
+# Qwen 3.0 model repo IDs (8B through 27B, from run_vlm.py)
+QWEN3_8B_INST_REPO_ID = get_or_create_env_var(
+    "QWEN3_8B_INST_REPO_TRANSFORMERS_ID", "Qwen/Qwen3-8B-Instruct"
+)
+
 # Qwen 3.5 model repo IDs (9B through 122B, from run_vlm.py)
 QWEN35_08B_REPO_ID = get_or_create_env_var(
     "QWEN35_08B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-0.8B"
@@ -1524,6 +1529,12 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
     ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = MINISTRAL_3_14B_INST_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Ministral 3 14B Instruct"
+    elif (
+        "qwen3-8b-instruct" in model_choice_lower
+        or "qwen-3-8b-instruct" in model_choice_lower
+    ):
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN3_8B_INST_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3 8B Instruct"
     elif "qwen3.5-0.8b" in model_choice_lower or "qwen-3.5-0.8b" in model_choice_lower:
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_08B_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 0.8B"
@@ -1573,7 +1584,7 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE in [
     "Gemma 3 12B",
     "Gemma 3 27B",
     "Ministral 3 14B Instruct",
-    "Qwen 3.5 0.8B",
+    "Qwen 3 8B Instruct" "Qwen 3.5 0.8B",
     "Qwen 3.5 2B",
     "Qwen 3.5 4B",
     "Qwen 3.5 9B",
