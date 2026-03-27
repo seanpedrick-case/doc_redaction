@@ -36,31 +36,87 @@ The first example is a note with handwriting that is hard to decipher even for a
 
 [![Example of a handwritten note](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/Difficult%20handwritten%20note.jpg)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/Difficult%20handwritten%20note.jpg){target="_blank"}
 
+### Qwen 3 VL 8B Instruct
+
+#### Qwen 3 VL 8B Instruct alone
 As a reminder, Qwen 3 VL 8B Instruct alone found this:
 
 [![Unclear text on handwritten note analysed with Qwen 3 VL](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/3.c%20unclear_text_handwritten_note_vlm/Difficult%20handwritten%20note_page_1_vlm_visualisations.jpg)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/3.c%20unclear_text_handwritten_note_vlm/Difficult%20handwritten%20note_page_1_vlm_visualisations.jpg){target="_blank"}
+
+**Rating: 7/10** - the text identification is pretty good, but the model ignored the two text lines on the left. Bounding boxes are generally accurate, but some do not cover the entire line.
+
+#### Hybrid PaddleOCR + Qwen 3 VL
 
 A hybrid approach of PaddleOCR + Qwen 3 VL 8B Instruct found this:
 
 [![Unclear text on handwritten note analysed with hybrid PaddleOCR + Qwen 3 VL](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/3.b%20unclear_text_handwritten_note_paddle_hyb/Difficult%20handwritten%20note_page_1_hybrid_paddle_vlm_visualisations.jpg)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/3.b%20unclear_text_handwritten_note_paddle_hyb/Difficult%20handwritten%20note_page_1_hybrid_paddle_vlm_visualisations.jpg){target="_blank"}
 
+**Rating: 7.5/10** - the text identification is a bit worse than the VLM model alone. This is improved by the fact that due to the hybrid approach, all the bounding boxes have been identified, and the text is generally correctly.
+
 My conclusion from the last article was that PaddleOCR for initial OCR, paired with Qwen 3 VL 8B Instruct for low confidence phrases was the best solution for 'difficult' pages in documents. This was mainly due to the 'laziness' of the VLM model to identify text in the document - note that Qwen 3 VL 8B Instruct ignored the two text lines on the left. On pages with lots of text, I find that this pattern is repeated - the VLM will tend to miss some text.
 
 ### Qwen 3.5 9B (vLLM)
 
-[![Unclear text on handwritten note analysed with Qwen 3.5 9B](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/3.a%20unclear_text_handwritten_note_vllm/Difficult%20handwritten%20note_page_1_vllm_visualisations.jpg)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/3.a%20unclear_text_handwritten_note_vllm/Difficult%20handwritten%20note_page_1_vllm_visualisations.jpg){target="_blank"}
+#### VLM alone
+
+[![Unclear text on handwritten note analysed with Qwen 3.5 9B VLM alone](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Handwritten%20note/Qwen%203.5%209B%20inference-server/direct/Difficult%20handwritten%20note_page_1_inference_server_visualisations.jpg)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Handwritten%20note/Qwen%203.5%209B%20inference-server/direct/Difficult%20handwritten%20note_page_1_inference_server_visualisations.jpg){target="_blank"}
+
+**Rating: 8/10** - the text identification is generally good, and it has included the two text lines on the left that were missed by Qwen 3 VL 8B Instruct. It did miss one text box in the middle of the page, and the text is not fully correct.
+
+#### Hybrid PaddleOCR + Qwen 3.5 9B
+
+[![Unclear text on handwritten note analysed with hybrid PaddleOCR + Qwen 3.5 9B](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Handwritten%20note/Qwen%203.5%209B%20inference-server/hybrid/Difficult%20handwritten%20note_page_1_inference_server_visualisations.jpg)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Handwritten%20note/Qwen%203.5%209B%20inference-server/hybrid/Difficult%20handwritten%20note_page_1_inference_server_visualisations.jpg){target="_blank"}
+
+**Rating: 7.5/10** - The bounding boxes are all located correctly, but the text identification is not that great - particularly noting the Cyrillic characters identified near the bottom of the page.
 
 ### Qwen 3.5 35B A3B (llama.cpp)
 
+#### VLM alone
+
+[![Unclear text on handwritten note analysed with Qwen 3.5 35B A3B VLM alone](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Handwritten%20note/Qwen%203.5%2035B%20inference-server/direct/Difficult%20handwritten%20note_page_1_inference_server_visualisations.jpg)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Handwritten%20note/Qwen%203.5%2035B%20inference-server/direct/Difficult%20handwritten%20note_page_1_inference_server_visualisations.jpg){target="_blank"}
+
+**Rating: 8/10** - the text identification is generally good, but I would say it slightly worse than the 9B model. No text boxes have been missed.
+
+#### Hybrid PaddleOCR + Qwen 3.5 35B A3B
+
+[![Unclear text on handwritten note analysed with hybrid PaddleOCR + Qwen 3.5 35B A3B](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Handwritten%20note/Qwen%203.5%2035B%20inference-server/hybrid/Difficult%20handwritten%20note_page_1_inference_server_visualisations.jpg)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Handwritten%20note/Qwen%203.5%2035B%20inference-server/hybrid/Difficult%20handwritten%20note_page_1_inference_server_visualisations.jpg){target="_blank"}
+
+**Rating: 8/10** - The text identification is slightly better than for the 9B model in the hybrid approach, but still not perfect (particularly near the bottom).
+
 ### Qwen 3.5 27B (HF space)
 
-Now let's try Qwen 3.5 27B. Here are the results for the pure VLM approach:
+Now let's try Qwen 3.5 27B.
 
-[![Unclear text on handwritten note analysed with Qwen 3.5 27B](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Handwritten%20note/Qwen%203.5%2027B%20bnb/direct/Difficult%20handwritten%20note_page_1_vlm_visualisations.jpg)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Handwritten%20note/Qwen%203.5%2027B%20bnb/direct/Difficult%20handwritten%20note_page_1_vlm_visualisations.jpg){target="_blank"}
+#### VLM alone
 
-I would summarise the output as generally very good. This time, the VLM model has identified all the text in the document, and has not ignored any text lines. The position of the bounding boxes are also generally correct. There is not much to complain about in this analysis.
+[![Unclear text on handwritten note analysed with Qwen 3.5 27B VLM alone](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Handwritten%20note/Qwen%203.5%2027B%20bnb/direct/Difficult%20handwritten%20note_page_1_vlm_visualisations.jpg)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Handwritten%20note/Qwen%203.5%2027B%20bnb/direct/Difficult%20handwritten%20note_page_1_vlm_visualisations.jpg){target="_blank"}
+
+**Rating: 8.5/10** - The output as generally very good. This time, the VLM model has identified all the text in the document. The position of the bounding boxes are also generally correct.
+
+#### Hybrid PaddleOCR + Qwen 3.5 27B
+
+[![Unclear text on handwritten note analysed with hybrid PaddleOCR + Qwen 3.5 27B](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Handwritten%20note/Qwen%203.5%2027B%20bnb/hybrid/Difficult%20handwritten%20note_page_1_vlm_visualisations.jpg)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Handwritten%20note/Qwen%203.5%2027B%20bnb/hybrid/Difficult%20handwritten%20note_page_1_vlm_visualisations.jpg){target="_blank"}
+
+**Rating: 8/10** - The text identification is noticeably worse than using the VLM alone (Cyrillic characters identified near the bottom).
+
+### Conclusion 
+
+| Model | Text Identification | Bounding Boxes |
+|-------|---------------------|----------------|
+| Qwen 3 VL 8B Instruct | 7/10 | 7/10 |
+| Hybrid PaddleOCR + Qwen 3 VL | 7.5/10 | 7.5/10 |
+| Qwen 3.5 9B | 8/10 | 8/10 |
+| Hybrid PaddleOCR + Qwen 3.5 9B | 7.5/10 | 8/10 |
+| Qwen 3.5 35B A3B | 8/10 | 8/10 |
+| Hybrid PaddleOCR + Qwen 3.5 35B A3B | 8/10 | 8.5/10 |
+| Qwen 3.5 27B | 8.5/10 | 8.5/10 |
+| Hybrid PaddleOCR + Qwen 3.5 27B | 7.5/10 | 8.5/10 |
+
+Overall, the Qwen 3.5 27B model alone (i.e. not using the hybrid approach with PaddleOCR) performs best on this task for identifying difficult handwriting.
 
 ## Example 2: Face identification
+
+The next task is to accurately identify the location of people's faces on a document. The document can be found here: [https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Lambeth%20foreword%20faces/Lambeth%2030%20FINAL%20ACC_Ver_Dec.pdf_foreword.pdf](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/qwen3.5/Lambeth%20foreword%20faces/Lambeth%2030%20FINAL%20ACC_Ver_Dec.pdf_foreword.pdf){target="_blank"}.
 
 
 ## Example 3: Custom entity redaction with LLMs
