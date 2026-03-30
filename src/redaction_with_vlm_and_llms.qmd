@@ -9,6 +9,8 @@ format:
 
 # Overview
 
+**NOTE:** As of March 2026, this article has been superseded with a new article based on Qwen 3.5 and an updated version of the app. See [here](https://seanpedrick-case.github.io/doc_redaction/src/redaction_with_qwen35.html){target="_blank"} for the new article.
+
 Redaction workflows require both text and bounding box identification from documents. In this post, I will test local vision language models (VLMs) from the Qwen 3 VL family against existing OCR tools to see how well they can perform in identifying text and bounding boxes from 'difficult' documents. All the examples can be recreated on the [Document Redaction app VLM space on Hugging Face](https://huggingface.co/spaces/seanpedrickcase/document_redaction_vlm){target="_blank"}. The code underlying this app can be found [here](https://github.com/seanpedrick-case/doc_redaction){target="_blank"}.
 
 [![Unclear text on handwritten note analysed with hybrid PaddleOCR + Qwen 3 VL 8B Instruct](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/3.b%20unclear_text_handwritten_note_paddle_hyb/Difficult%20handwritten%20note_page_1_hybrid_paddle_vlm_visualisations.jpg)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/3.b%20unclear_text_handwritten_note_paddle_hyb/Difficult%20handwritten%20note_page_1_hybrid_paddle_vlm_visualisations.jpg){target="_blank"}
@@ -130,7 +132,7 @@ I would say that the hybrid approach is a good option for 'noisy' documents with
 
 # Example 3 - Unclear text on handwritten note
 
-THere are of course many situations where it is important to accurately extract handwritten text from documents. This has long been a struggle for OCR tools, including paid options, but modern VLMs are getting better and better at this. How will a small model like Qwen 3 VL 8B Instruct perform? Let's find out.
+There are of course many situations where it is important to accurately extract handwritten text from documents. This has long been a struggle for OCR tools, including paid options, but modern VLMs are getting better and better at this. How will a small model like Qwen 3 VL 8B Instruct perform? Let's find out.
 
 The document for this is example is below. As you can see, some of the text is very difficult for a person to read.
 

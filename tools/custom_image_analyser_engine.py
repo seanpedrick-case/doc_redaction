@@ -8738,109 +8738,109 @@ class CustomImageAnalyzerEngine:
                 input_image_height=original_image_height,
             )
 
-            # if self.save_page_ocr_visualisations is True:
-            #     # Save output to image with identified bounding boxes
-            #     # Use original image since coordinates are in original image space
-            #     # Prefer original_image_for_cropping (when PaddleOCR processed from file path),
-            #     # otherwise use original_image_for_visualization (stored before preprocessing)
-            #     viz_image = (
-            #         original_image_for_cropping
-            #         if original_image_for_cropping is not None
-            #         else (
-            #             original_image_for_visualization
-            #             if original_image_for_visualization is not None
-            #             else image
-            #         )
-            #     )
-            #     if isinstance(viz_image, Image.Image):
-            #         # Convert PIL Image to numpy array in BGR format for OpenCV
-            #         image_cv = cv2.cvtColor(np.array(viz_image), cv2.COLOR_RGB2BGR)
-            #     else:
-            #         image_cv = np.array(viz_image)
-            #         if len(image_cv.shape) == 2:
-            #             image_cv = cv2.cvtColor(image_cv, cv2.COLOR_GRAY2BGR)
-            #         elif len(image_cv.shape) == 3 and image_cv.shape[2] == 3:
-            #             # Assume RGB, convert to BGR
-            #             image_cv = cv2.cvtColor(image_cv, cv2.COLOR_RGB2BGR)
+            if self.save_page_ocr_visualisations is True:
+                # Save output to image with identified bounding boxes
+                # Use original image since coordinates are in original image space
+                # Prefer original_image_for_cropping (when PaddleOCR processed from file path),
+                # otherwise use original_image_for_visualization (stored before preprocessing)
+                viz_image = (
+                    original_image_for_cropping
+                    if original_image_for_cropping is not None
+                    else (
+                        original_image_for_visualization
+                        if original_image_for_visualization is not None
+                        else image
+                    )
+                )
+                if isinstance(viz_image, Image.Image):
+                    # Convert PIL Image to numpy array in BGR format for OpenCV
+                    image_cv = cv2.cvtColor(np.array(viz_image), cv2.COLOR_RGB2BGR)
+                else:
+                    image_cv = np.array(viz_image)
+                    if len(image_cv.shape) == 2:
+                        image_cv = cv2.cvtColor(image_cv, cv2.COLOR_GRAY2BGR)
+                    elif len(image_cv.shape) == 3 and image_cv.shape[2] == 3:
+                        # Assume RGB, convert to BGR
+                        image_cv = cv2.cvtColor(image_cv, cv2.COLOR_RGB2BGR)
 
-            #     # Draw all bounding boxes on the image
-            #     for i in range(len(ocr_data["text"])):
-            #         left = int(ocr_data["left"][i])
-            #         top = int(ocr_data["top"][i])
-            #         width = int(ocr_data["width"][i])
-            #         height = int(ocr_data["height"][i])
-            #         # Ensure coordinates are within image bounds
-            #         left = max(0, min(left, image_cv.shape[1] - 1))
-            #         top = max(0, min(top, image_cv.shape[0] - 1))
-            #         right = max(left + 1, min(left + width, image_cv.shape[1]))
-            #         bottom = max(top + 1, min(top + height, image_cv.shape[0]))
-            #         cv2.rectangle(
-            #             image_cv, (left, top), (right, bottom), (0, 255, 0), 2
-            #         )
+                # Draw all bounding boxes on the image
+                for i in range(len(ocr_data["text"])):
+                    left = int(ocr_data["left"][i])
+                    top = int(ocr_data["top"][i])
+                    width = int(ocr_data["width"][i])
+                    height = int(ocr_data["height"][i])
+                    # Ensure coordinates are within image bounds
+                    left = max(0, min(left, image_cv.shape[1] - 1))
+                    top = max(0, min(top, image_cv.shape[0] - 1))
+                    right = max(left + 1, min(left + width, image_cv.shape[1]))
+                    bottom = max(top + 1, min(top + height, image_cv.shape[0]))
+                    cv2.rectangle(
+                        image_cv, (left, top), (right, bottom), (0, 255, 0), 2
+                    )
 
-            #     # Save the visualization once with all boxes drawn
-            #     paddle_viz_folder = os.path.join(
-            #         self.output_folder, "paddle_visualisations"
-            #     )
-            #     # Double-check the constructed path is safe
-            #     if not validate_folder_containment(paddle_viz_folder, OUTPUT_FOLDER):
-            #         raise ValueError(
-            #             f"Unsafe paddle visualisations folder path: {paddle_viz_folder}"
-            #         )
+                # Save the visualization once with all boxes drawn
+                paddle_viz_folder = os.path.join(
+                    self.output_folder, "paddle_visualisations"
+                )
+                # Double-check the constructed path is safe
+                if not validate_folder_containment(paddle_viz_folder, OUTPUT_FOLDER):
+                    raise ValueError(
+                        f"Unsafe paddle visualisations folder path: {paddle_viz_folder}"
+                    )
 
-            #     os.makedirs(paddle_viz_folder, exist_ok=True)
+                os.makedirs(paddle_viz_folder, exist_ok=True)
 
-            #     # Generate safe filename
-            #     if image_name:
-            #         base_name = os.path.splitext(os.path.basename(image_name))[0]
-            #         # Increment the number at the end of base_name
-            #         # This converts zero-indexed input to one-indexed output
-            #         incremented_base_name = base_name
-            #         # Find the number pattern at the end
-            #         # Matches patterns like: _0, _00, 0, 00, etc.
-            #         pattern = r"(\d+)$"
-            #         match = re.search(pattern, base_name)
-            #         if match:
-            #             number_str = match.group(1)
-            #             number = int(number_str)
-            #             incremented_number = number + 1
-            #             # Preserve the same number of digits (padding with zeros if needed)
-            #             incremented_str = str(incremented_number).zfill(len(number_str))
-            #             incremented_base_name = re.sub(
-            #                 pattern, incremented_str, base_name
-            #             )
-            #         # Sanitize filename to avoid issues with special characters
-            #         incremented_base_name = safe_sanitize_text(
-            #             incremented_base_name, max_length=50
-            #         )
-            #         filename = f"{incremented_base_name}_initial_bounding_boxes.jpg"
-            #     else:
-            #         timestamp = int(time.time())
-            #         filename = f"initial_bounding_boxes_{timestamp}.jpg"
+                # Generate safe filename
+                if image_name:
+                    base_name = os.path.splitext(os.path.basename(image_name))[0]
+                    # Increment the number at the end of base_name
+                    # This converts zero-indexed input to one-indexed output
+                    incremented_base_name = base_name
+                    # Find the number pattern at the end
+                    # Matches patterns like: _0, _00, 0, 00, etc.
+                    pattern = r"(\d+)$"
+                    match = re.search(pattern, base_name)
+                    if match:
+                        number_str = match.group(1)
+                        number = int(number_str)
+                        incremented_number = number + 1
+                        # Preserve the same number of digits (padding with zeros if needed)
+                        incremented_str = str(incremented_number).zfill(len(number_str))
+                        incremented_base_name = re.sub(
+                            pattern, incremented_str, base_name
+                        )
+                    # Sanitize filename to avoid issues with special characters
+                    incremented_base_name = safe_sanitize_text(
+                        incremented_base_name, max_length=50
+                    )
+                    filename = f"{incremented_base_name}_initial_bounding_boxes.jpg"
+                else:
+                    timestamp = int(time.time())
+                    filename = f"initial_bounding_boxes_{timestamp}.jpg"
 
-            #     output_path = os.path.join(paddle_viz_folder, filename)
-            #     max_filesize = 500 * 1024  # 500kb in bytes
-            #     quality = 95  # Start high, OpenCV JPEG quality range is 0-100
+                output_path = os.path.join(paddle_viz_folder, filename)
+                max_filesize = 500 * 1024  # 500kb in bytes
+                quality = 95  # Start high, OpenCV JPEG quality range is 0-100
 
-            #     # Try lowering JPEG quality until file is below size limit
-            #     is_saved = False
-            #     while quality >= 10:
-            #         cv2.imwrite(
-            #             output_path, image_cv, [int(cv2.IMWRITE_JPEG_QUALITY), quality]
-            #         )
-            #         if (
-            #             os.path.exists(output_path)
-            #             and os.path.getsize(output_path) <= max_filesize
-            #         ):
-            #             is_saved = True
-            #             break
-            #         quality -= 5
+                # Try lowering JPEG quality until file is below size limit
+                is_saved = False
+                while quality >= 10:
+                    cv2.imwrite(
+                        output_path, image_cv, [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+                    )
+                    if (
+                        os.path.exists(output_path)
+                        and os.path.getsize(output_path) <= max_filesize
+                    ):
+                        is_saved = True
+                        break
+                    quality -= 5
 
-            #     if not is_saved:
-            #         # Save as lowest acceptable quality if cannot get under 500kb, or raise warning
-            #         cv2.imwrite(
-            #             output_path, image_cv, [int(cv2.IMWRITE_JPEG_QUALITY), 10]
-            #         )
+                if not is_saved:
+                    # Save as lowest acceptable quality if cannot get under 500kb, or raise warning
+                    cv2.imwrite(
+                        output_path, image_cv, [int(cv2.IMWRITE_JPEG_QUALITY), 10]
+                    )
 
         else:
             raise RuntimeError(f"Unsupported OCR engine: {self.ocr_engine}")

@@ -475,7 +475,7 @@ def load_model(
                             load_in_4bit=True,
                             bnb_4bit_quant_type="nf4",  # Use the modern NF4 quantisation for better performance
                             bnb_4bit_compute_dtype=torch_dtype,
-                            bnb_4bit_use_double_quant=True,  # Optional: uses a second quantisation step to save even more memory
+                            # bnb_4bit_use_double_quant=True,  # Optional: uses a second quantisation step to save even more memory
                         )
 
             # Prepare load kwargs
@@ -500,6 +500,7 @@ def load_model(
             tokenizer = AutoTokenizer.from_pretrained(
                 model_id,
                 token=hf_token,
+                trust_remote_code=True,
             )
 
             if not tokenizer.pad_token:
@@ -507,11 +508,36 @@ def load_model(
             print("Tokenizer loaded successfully")
 
             # Load model from the SAME model_id to ensure compatibility
-            print(f"Loading model from {model_id}...")
-            model = AutoModelForCausalLM.from_pretrained(
-                model_id,
-                **load_kwargs,
-            )
+
+            if "qwen" in local_model_type.lower() and "3.5" in local_model_type.lower():
+                print(f"Loading Qwen 3.5 model from {model_id}...")
+                from transformers import (
+                    Qwen3_5ForCausalLM,
+                )
+
+                model = Qwen3_5ForCausalLM.from_pretrained(
+                    model_id,
+                    trust_remote_code=True,
+                    **load_kwargs,
+                )
+            elif (
+                "qwen" in local_model_type.lower() and "3 " in local_model_type.lower()
+            ):
+                print(f"Loading Qwen 3 model from {model_id}...")
+                from transformers import Qwen3VLForConditionalGeneration
+
+                model = Qwen3VLForConditionalGeneration.from_pretrained(
+                    model_id,
+                    trust_remote_code=True,
+                    **load_kwargs,
+                )
+            else:
+                print(f"Loading model from {model_id}...")
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_id,
+                    trust_remote_code=True,
+                    **load_kwargs,
+                )
 
             # Set model to evaluation mode (standard transformers approach)
             # Note: With device_map="auto", don't manually move model - let it handle device placement
@@ -563,6 +589,7 @@ def load_model(
             tokenizer = AutoTokenizer.from_pretrained(
                 model_id,
                 token=hf_token,
+                trust_remote_code=True,
             )
             if not tokenizer.pad_token:
                 tokenizer.pad_token = tokenizer.eos_token
@@ -747,6 +774,7 @@ def call_transformers_model(
     # Load model and tokenizer together to ensure they're from the same source
     # This prevents mismatches that could occur if they're loaded separately
     if model is None or tokenizer is None:
+        print("Model not found. Loading model and tokenizer...")
         # Use get_model_and_tokenizer() to ensure both are loaded atomically
         # This is safer than calling get_pii_model() and get_pii_tokenizer() separately
         loaded_model, loaded_tokenizer, assistant_model = load_model()
@@ -1187,6 +1215,8 @@ def send_request(
     num_transformer_input_tokens = 0
     num_transformer_generated_tokens = 0
     response_text = ""
+    if not model_choice or model_choice == "":
+        model_choice = None
 
     for entry in conversation_history:
         role = entry[
@@ -1744,7 +1774,7 @@ def call_inference_server_api(
         "stop": LLM_STOP_STRINGS if LLM_STOP_STRINGS else [],
     }
     # Include model in payload when set (vLLM/OpenAI-compatible servers; llama-swap or not).
-    if model_name:
+    if model_name or model_name != "":
         payload["model"] = model_name
 
     # Match VLM path: Qwen3 / Qwen3.5 on vLLM may stream only "thinking" unless disabled.

@@ -23,7 +23,9 @@ website:
       - href: src/app_settings.qmd
         text: App settings management guide
       - href: src/redaction_with_vlm_and_llms.qmd
-        text: Redaction with local VLM and LLMs
+        text: Redaction with local VLM and LLMs (Qwen 3)
+      - href: src/ocr_and_redaction_with_qwen35.qmd
+        text: OCR and redaction with Qwen 3.5 (Mar 2026)
 
 format:
   html:
