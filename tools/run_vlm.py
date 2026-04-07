@@ -294,6 +294,59 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         global model_default_temperature, model_default_repetition_penalty, model_default_presence_penalty
         global model_default_max_new_tokens, model_default_seed, model_supports_presence_penalty
 
+        def _apply_generation_family_defaults(defaults: dict):
+            """
+            Apply a shared set of generation defaults for a model family.
+            These are *model defaults* (later overridden by config/env VLM_DEFAULT_* if set).
+            """
+            # Note: we intentionally assign to the module-level "model_default_*" globals declared above.
+            global model_default_do_sample, model_default_top_p, model_default_min_p, model_default_top_k
+            global model_default_temperature, model_default_repetition_penalty, model_default_presence_penalty
+            global model_default_max_new_tokens, model_supports_presence_penalty
+
+            if not defaults:
+                return
+            if "do_sample" in defaults:
+                model_default_do_sample = defaults["do_sample"]
+            if "top_p" in defaults:
+                model_default_top_p = defaults["top_p"]
+            if "min_p" in defaults:
+                model_default_min_p = defaults["min_p"]
+            if "top_k" in defaults:
+                model_default_top_k = defaults["top_k"]
+            if "temperature" in defaults:
+                model_default_temperature = defaults["temperature"]
+            if "repetition_penalty" in defaults:
+                model_default_repetition_penalty = defaults["repetition_penalty"]
+            if "presence_penalty" in defaults:
+                model_default_presence_penalty = defaults["presence_penalty"]
+            if "max_new_tokens" in defaults:
+                model_default_max_new_tokens = defaults["max_new_tokens"]
+            if "supports_presence_penalty" in defaults:
+                model_supports_presence_penalty = defaults["supports_presence_penalty"]
+
+        # Shared generation defaults (top_p/top_k/etc.) by model family to avoid repeating values in each model block.
+        # These are applied as "model defaults" and can still be overridden by VLM_DEFAULT_* config later.
+        _QWEN3_VL_FAMILY_DEFAULTS = {
+            "top_p": 0.8,
+            "min_p": 0.0,
+            "top_k": 20,
+            "temperature": 0.7,
+            "repetition_penalty": 1.0,
+            "presence_penalty": 1.0,
+            "max_new_tokens": MAX_NEW_TOKENS,
+            # I found that this doesn't work when using transformers
+            "supports_presence_penalty": False,
+        }
+        _QWEN3_5_FAMILY_DEFAULTS = dict(_QWEN3_VL_FAMILY_DEFAULTS)
+        _GEMMA4_FAMILY_DEFAULTS = {
+            "top_p": 0.95,
+            "top_k": 64,
+            "temperature": 1.0,
+            "max_new_tokens": MAX_NEW_TOKENS,
+            # I found that this doesn't work when using transformers
+            "supports_presence_penalty": False,
+        }
         # print(f"Loading vision model: {SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}")
 
         # Load only the selected model based on configuration
@@ -422,17 +475,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             ).eval()
 
             model_default_prompt = text_read_default_prompt
-            model_default_do_sample = model_default_do_sample
-            model_default_top_p = 0.8
-            model_default_min_p = 0.0
-            model_default_top_k = 20
-            model_default_temperature = 0.7
-            model_default_repetition_penalty = 1.0
-            model_default_presence_penalty = 1.5
-            model_default_max_new_tokens = MAX_NEW_TOKENS
-            model_supports_presence_penalty = (
-                False  # I found that this doesn't work when using transformers
-            )
+            _apply_generation_family_defaults(_QWEN3_VL_FAMILY_DEFAULTS)
 
         elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-4B-Instruct":
             MODEL_ID = "Qwen/Qwen3-VL-4B-Instruct"
@@ -456,17 +499,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             ).eval()
 
             model_default_prompt = text_read_default_prompt
-            model_default_do_sample = model_default_do_sample
-            model_default_top_p = 0.8
-            model_default_min_p = 0.0
-            model_default_top_k = 20
-            model_default_temperature = 0.7
-            model_default_repetition_penalty = 1.0
-            model_default_presence_penalty = 1.5
-            model_default_max_new_tokens = MAX_NEW_TOKENS
-            model_supports_presence_penalty = (
-                False  # I found that this doesn't work when using transformers
-            )
+            _apply_generation_family_defaults(_QWEN3_VL_FAMILY_DEFAULTS)
         elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-8B-Instruct":
             MODEL_ID = "Qwen/Qwen3-VL-8B-Instruct"
             from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
@@ -489,17 +522,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             ).eval()
 
             model_default_prompt = text_read_default_prompt
-            model_default_do_sample = model_default_do_sample
-            model_default_top_p = 0.8
-            model_default_min_p = 0.0
-            model_default_top_k = 20
-            model_default_temperature = 0.7
-            model_default_repetition_penalty = 1.0
-            model_default_presence_penalty = 1.5
-            model_default_max_new_tokens = MAX_NEW_TOKENS
-            model_supports_presence_penalty = (
-                False  # I found that this doesn't work when using transformers
-            )
+            _apply_generation_family_defaults(_QWEN3_VL_FAMILY_DEFAULTS)
 
         elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-32B-Instruct":
             MODEL_ID = "Qwen/Qwen3-VL-32B-Instruct"
@@ -523,17 +546,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             ).eval()
 
             model_default_prompt = text_read_default_prompt
-            model_default_do_sample = model_default_do_sample
-            model_default_top_p = 0.8
-            model_default_min_p = 0.0
-            model_default_top_k = 20
-            model_default_temperature = 0.7
-            model_default_repetition_penalty = 1.0
-            model_default_presence_penalty = 1.5
-            model_default_max_new_tokens = MAX_NEW_TOKENS
-            model_supports_presence_penalty = (
-                False  # I found that this doesn't work when using transformers
-            )
+            _apply_generation_family_defaults(_QWEN3_VL_FAMILY_DEFAULTS)
 
         elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-30B-A3B-Instruct":
             MODEL_ID = "Qwen/Qwen3-VL-30B-A3B-Instruct"
@@ -558,17 +571,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             ).eval()
 
             model_default_prompt = text_read_default_prompt
-            model_default_do_sample = model_default_do_sample
-            model_default_top_p = 0.8
-            model_default_min_p = 0.0
-            model_default_top_k = 20
-            model_default_temperature = 0.7
-            model_default_repetition_penalty = 1.0
-            model_default_presence_penalty = 1.5
-            model_default_max_new_tokens = MAX_NEW_TOKENS
-            model_supports_presence_penalty = (
-                False  # I found that this doesn't work when using transformers
-            )
+            _apply_generation_family_defaults(_QWEN3_VL_FAMILY_DEFAULTS)
 
         elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3-VL-235B-A22B-Instruct-FP8":
             MODEL_ID = "Qwen/Qwen3-VL-235B-A22B-Instruct-FP8"
@@ -593,17 +596,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             ).eval()
 
             model_default_prompt = text_read_default_prompt
-            model_default_do_sample = model_default_do_sample
-            model_default_top_p = 0.8
-            model_default_min_p = 0.0
-            model_default_top_k = 20
-            model_default_temperature = 0.7
-            model_default_repetition_penalty = 1.0
-            model_default_presence_penalty = 1.5
-            model_default_max_new_tokens = MAX_NEW_TOKENS
-            model_supports_presence_penalty = (
-                False  # I found that this doesn't work when using transformers
-            )
+            _apply_generation_family_defaults(_QWEN3_VL_FAMILY_DEFAULTS)
 
         ###
         # QWEN 3.5 MODELS
@@ -631,17 +624,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             )
 
             model_default_prompt = text_read_default_prompt
-            model_default_do_sample = model_default_do_sample
-            model_default_top_p = 0.8
-            model_default_min_p = 0.0
-            model_default_top_k = 20
-            model_default_temperature = 0.7
-            model_default_repetition_penalty = 1.0
-            model_default_presence_penalty = 1.5
-            model_default_max_new_tokens = MAX_NEW_TOKENS
-            model_supports_presence_penalty = (
-                False  # I found that this doesn't work when using transformers
-            )
+            _apply_generation_family_defaults(_QWEN3_5_FAMILY_DEFAULTS)
 
         elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-2B":
             from transformers import AutoProcessor, Qwen3_5ForConditionalGeneration
@@ -666,17 +649,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             )
 
             model_default_prompt = text_read_default_prompt
-            model_default_do_sample = model_default_do_sample
-            model_default_top_p = 0.8
-            model_default_min_p = 0.0
-            model_default_top_k = 20
-            model_default_temperature = 0.7
-            model_default_repetition_penalty = 1.0
-            model_default_presence_penalty = 1.5
-            model_default_max_new_tokens = MAX_NEW_TOKENS
-            model_supports_presence_penalty = (
-                False  # I found that this doesn't work when using transformers
-            )
+            _apply_generation_family_defaults(_QWEN3_5_FAMILY_DEFAULTS)
 
         elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-4B":
             from transformers import AutoProcessor, Qwen3_5ForConditionalGeneration
@@ -700,17 +673,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             )
 
             model_default_prompt = text_read_default_prompt
-            model_default_do_sample = model_default_do_sample
-            model_default_top_p = 0.8
-            model_default_min_p = 0.0
-            model_default_top_k = 20
-            model_default_temperature = 0.7
-            model_default_repetition_penalty = 1.0
-            model_default_presence_penalty = 1.5
-            model_default_max_new_tokens = MAX_NEW_TOKENS
-            model_supports_presence_penalty = (
-                False  # I found that this doesn't work when using transformers
-            )
+            _apply_generation_family_defaults(_QWEN3_5_FAMILY_DEFAULTS)
 
         elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-9B":
             from transformers import AutoProcessor, Qwen3_5ForConditionalGeneration
@@ -734,17 +697,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             )
 
             model_default_prompt = text_read_default_prompt
-            model_default_do_sample = model_default_do_sample
-            model_default_top_p = 0.8
-            model_default_min_p = 0.0
-            model_default_top_k = 20
-            model_default_temperature = 0.7
-            model_default_repetition_penalty = 1.0
-            model_default_presence_penalty = 1.5
-            model_default_max_new_tokens = MAX_NEW_TOKENS
-            model_supports_presence_penalty = (
-                False  # I found that this doesn't work when using transformers
-            )
+            _apply_generation_family_defaults(_QWEN3_5_FAMILY_DEFAULTS)
 
         elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-27B":
             from transformers import (
@@ -771,17 +724,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             )
 
             model_default_prompt = text_read_default_prompt
-            model_default_do_sample = model_default_do_sample
-            model_default_top_p = 0.8
-            model_default_min_p = 0.0
-            model_default_top_k = 20
-            model_default_temperature = 0.7
-            model_default_repetition_penalty = 1.0
-            model_default_presence_penalty = 1.5
-            model_default_max_new_tokens = MAX_NEW_TOKENS
-            model_supports_presence_penalty = (
-                False  # I found that this doesn't work when using transformers
-            )
+            _apply_generation_family_defaults(_QWEN3_5_FAMILY_DEFAULTS)
 
         elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-27B-bnb-4bit":
             from transformers import (
@@ -808,17 +751,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             )
 
             model_default_prompt = text_read_default_prompt
-            model_default_do_sample = model_default_do_sample
-            model_default_top_p = 0.8
-            model_default_min_p = 0.0
-            model_default_top_k = 20
-            model_default_temperature = 0.7
-            model_default_repetition_penalty = 1.0
-            model_default_presence_penalty = 1.5
-            model_default_max_new_tokens = MAX_NEW_TOKENS
-            model_supports_presence_penalty = (
-                False  # I found that this doesn't work when using transformers
-            )
+            _apply_generation_family_defaults(_QWEN3_5_FAMILY_DEFAULTS)
 
         elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-35B-A3B":
             from transformers import (
@@ -845,17 +778,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             )
 
             model_default_prompt = text_read_default_prompt
-            model_default_do_sample = model_default_do_sample
-            model_default_top_p = 0.8
-            model_default_min_p = 0.0
-            model_default_top_k = 20
-            model_default_temperature = 0.7
-            model_default_repetition_penalty = 1.0
-            model_default_presence_penalty = 1.5
-            model_default_max_new_tokens = MAX_NEW_TOKENS
-            model_supports_presence_penalty = (
-                False  # I found that this doesn't work when using transformers
-            )
+            _apply_generation_family_defaults(_QWEN3_5_FAMILY_DEFAULTS)
 
         elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-122B-A10B":
             from transformers import (
@@ -882,17 +805,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             )
 
             model_default_prompt = text_read_default_prompt
-            model_default_do_sample = model_default_do_sample
-            model_default_top_p = 0.8
-            model_default_min_p = 0.0
-            model_default_top_k = 20
-            model_default_temperature = 0.7
-            model_default_repetition_penalty = 1.0
-            model_default_presence_penalty = 1.5
-            model_default_max_new_tokens = MAX_NEW_TOKENS
-            model_supports_presence_penalty = (
-                False  # I found that this doesn't work when using transformers
-            )
+            _apply_generation_family_defaults(_QWEN3_5_FAMILY_DEFAULTS)
 
         elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-397B-A17B":
             from transformers import (
@@ -919,17 +832,29 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             )
 
             model_default_prompt = text_read_default_prompt
-            model_default_do_sample = model_default_do_sample
-            model_default_top_p = 0.8
-            model_default_min_p = 0.0
-            model_default_top_k = 20
-            model_default_temperature = 0.7
-            model_default_repetition_penalty = 1.0
-            model_default_presence_penalty = 1.5
-            model_default_max_new_tokens = MAX_NEW_TOKENS
-            model_supports_presence_penalty = (
-                False  # I found that this doesn't work when using transformers
-            )
+            _apply_generation_family_defaults(_QWEN3_5_FAMILY_DEFAULTS)
+
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Gemma 4 31B bnb":
+            from transformers import AutoModelForCausalLM, AutoProcessor
+
+            MODEL_ID = "unsloth/gemma-4-31B-it-unsloth-bnb-4bit"
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "attn_implementation": attn_implementation,
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["dtype"] = "auto"
+            model = AutoModelForCausalLM.from_pretrained(MODEL_ID, **load_kwargs)
+
+            model_default_prompt = text_read_default_prompt
+            _apply_generation_family_defaults(_GEMMA4_FAMILY_DEFAULTS)
 
         elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "None":
             model = None

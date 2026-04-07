@@ -2,11 +2,14 @@
 #   COMPOSE_PROFILES=35b   -> qwen35-35b_q4_gguf
 #   COMPOSE_PROFILES=27b   -> qwen35-27b_q4_gguf
 # The app always talks to http://llama-inference:8080 (shared network alias on both model services).
-# Each model service uses its own llama.cpp cache volume so mmproj-F16.gguf (same filename per repo)
-# is never shared between 35B and 27B downloads.
+# Each model service uses its own llama.cpp and Hugging Face hub cache volumes so mmproj-F16.gguf
+# (same filename per repo) and -hf downloads are not shared across profiles.
 # Example CLI commands:
 # docker compose -f docker-compose_llama.yml --profile 35b up -d
 # docker compose -f docker-compose_llama.yml --profile 27b up -d
+# docker compose -f docker-compose_llama.yml --profile gemma4-31b up -d
+# docker compose -f docker-compose_llama.yml --profile gemma4-26b up -d
+# Add --build to the above if you want to rebuild the app image.
 services:
   # Qwen 3.5 35B model setup below requires 24GB of VRAM with n-cpu-moe set to 0. For lower VRAM systems, n-cpu-moe ~ 40 could work for a 12GB VRAM system, and n-cpu-moe ~ 20 for a 16GB VRAM system.
   qwen35-35b_q4_gguf:
@@ -51,6 +54,8 @@ services:
     volumes:
       - ./models:/models
       - hf-llama-cache-qwen35-35b:/root/.cache/llama.cpp
+      - hf-hub-cache-qwen35-35b:/root/.cache/huggingface
+    pull_policy: always
     deploy:
       resources:
         reservations:
@@ -110,6 +115,130 @@ services:
     volumes:
       - ./models:/models
       - hf-llama-cache-qwen35-27b:/root/.cache/llama.cpp
+      - hf-hub-cache-qwen35-27b:/root/.cache/huggingface
+    pull_policy: always
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/v1/models >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 8
+      start_period: 1200s
+    networks:
+      redaction-net-llama:
+        aliases:
+          - llama-inference
+
+   # Gemma 4 31B model setup below requires 24GB+ of VRAM to run.
+  gemma4-31b_q4_gguf:
+    profiles: ["gemma4-31b"]
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda12
+    command:
+      - -hf
+      - unsloth/gemma-4-31B-it-GGUF
+      - --hf-file
+      - gemma-4-31B-it-UD-Q4_K_XL.gguf
+      - --mmproj-url
+      - https://huggingface.co/unsloth/gemma-4-31B-it-GGUF/resolve/main/mmproj-F16.gguf
+      - --n-gpu-layers
+      - "999"
+      - --ctx-size
+      - "16384"
+      - --fit
+      - "off"
+      - --temp
+      - "1.0"
+      - --top-k
+      - "64"
+      - --top-p
+      - "0.95"
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8080"
+      - --no-warmup
+      - --seed
+      - "42"
+      - -np
+      - "1"
+      - --cache-type-k
+      - "q8_0"
+      - --cache-type-v
+      - "q8_0"
+    ports:
+      - "8002:8080"
+    volumes:
+      - ./models:/models
+      - hf-llama-cache-gemma4-31b:/root/.cache/llama.cpp
+      - hf-hub-cache-gemma4-31b:/root/.cache/huggingface
+    pull_policy: always
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/v1/models >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 8
+      start_period: 1200s
+    networks:
+      redaction-net-llama:
+        aliases:
+          - llama-inference
+
+ # Gemma 4 26B model setup below requires 24GB+ of VRAM to run.
+  gemma4-26b_q4_gguf:
+    profiles: ["gemma4-26b"]
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda12
+    command:
+      - -hf
+      - unsloth/gemma-4-26B-A4B-it-GGUF
+      - --hf-file
+      - gemma-4-26B-A4B-it-UD-IQ4_NL.gguf
+      - --mmproj-url
+      - https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/main/mmproj-F16.gguf
+      - --n-gpu-layers
+      - "999"
+      - --ctx-size
+      - "32768"
+      - --fit
+      - "off"
+      - --temp
+      - "1.0"
+      - --top-k
+      - "64"
+      - --top-p
+      - "0.95"
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8080"
+      - --no-warmup
+      - --seed
+      - "42"
+      - -np
+      - "1"
+      - --cache-type-k
+      - "q8_0"
+      - --cache-type-v
+      - "q8_0"
+    ports:
+      - "8002:8080"
+    volumes:
+      - ./models:/models
+      - hf-llama-cache-gemma4-26b:/root/.cache/llama.cpp
+      - hf-hub-cache-gemma4-26b:/root/.cache/huggingface
+    pull_policy: always
     deploy:
       resources:
         reservations:
@@ -129,7 +258,7 @@ services:
           - llama-inference
 
   redaction-app-llama:
-    profiles: ["35b", "27b"]
+    profiles: ["35b", "27b", "gemma4-31b", "gemma4-26b"]
     image: redaction-app-main
     build:
       context: .              # Look in the current folder
@@ -146,6 +275,12 @@ services:
         condition: service_healthy
         required: false
       qwen35-27b_q4_gguf:
+        condition: service_healthy
+        required: false
+      gemma4-31b_q4_gguf:
+        condition: service_healthy
+        required: false
+      gemma4-26b_q4_gguf:
         condition: service_healthy
         required: false
     environment:
@@ -209,3 +344,9 @@ networks:
 volumes:
   hf-llama-cache-qwen35-35b:
   hf-llama-cache-qwen35-27b:
+  hf-llama-cache-gemma4-31b:
+  hf-llama-cache-gemma4-26b:
+  hf-hub-cache-qwen35-35b:
+  hf-hub-cache-qwen35-27b:
+  hf-hub-cache-gemma4-31b:
+  hf-hub-cache-gemma4-26b:
