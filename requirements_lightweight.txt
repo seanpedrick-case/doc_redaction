@@ -1,11 +1,11 @@
 # --- Core and data packages ---
-numpy<=2.4.2
+numpy<=2.4.4
 pandas<=2.3.3
 bleach<=6.3.0
 polars<=1.38.1
-pyarrow<=21.0.0
+pyarrow<=23.0.1
 openpyxl<=3.1.5
-boto3<=1.42.61
+boto3<=1.42.80
 python-dotenv<=1.0.1
 defusedxml<=0.7.1
 Faker<=40.8.0
@@ -42,7 +42,7 @@ awslambdaric<=3.1.1
 python-docx<=1.2.0
 
 # --- Testing ---
-pytest<=7.0.0
+pytest<=7.4.3
 pytest-cov<=4.0.0
 
 # --- LLM libraries ---

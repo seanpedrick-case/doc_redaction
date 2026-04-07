@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc_redaction"
-version = "2.0.1"
+version = "2.0.2"
 description = "Redact PDF/image-based documents, Word, or CSV/XLSX files using a Gradio-based GUI interface"
 readme = "README.md"
 authors = [
@@ -52,8 +52,8 @@ dependencies = [
     "spacy<=3.8.11",
     "en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0.tar.gz",
     "gradio<=6.10.0",
-    "boto3<=1.42.61",
-    "pyarrow<=21.0.0",
+    "boto3<=1.42.80",
+    "pyarrow<=23.0.1",
     "openpyxl<=3.1.5",
     "Faker<=40.8.0",
     "python-levenshtein<=0.27.3",
@@ -65,7 +65,7 @@ dependencies = [
     "python-docx<=1.2.0",
     "polars<=1.38.1",
     "defusedxml<=0.7.1",
-    "numpy<=2.4.2",
+    "numpy<=2.4.4",
     "spaces<=0.48.1",
     "google-genai<=1.66.0",
     "openai<=2.25.0",
@@ -95,7 +95,7 @@ paddle = [
 vlm = [
     "torch<=2.9.1",
     "torchvision<=0.24.1",
-    "transformers<=5.3.0",
+    "transformers<=5.5.0",
     "accelerate<=1.13.0",
     "bitsandbytes<=0.49.2", # Needed for on the fly quantisation in transformers
     "sentencepiece<=0.2.1", # Needed for PaddleOCRVL
