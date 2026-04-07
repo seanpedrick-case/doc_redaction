@@ -688,10 +688,8 @@ TESSERACT_MAX_WORKERS = max(
 
 # Maximum parallel workers for local PaddleOCR page OCR. Often GPU-bound; keep low to
 # avoid saturating VRAM or contending on a single PaddleOCR model instance.
-PADDLE_MAX_WORKERS = max(
-    1,
-    int(get_or_create_env_var("PADDLE_MAX_WORKERS", "2")),
-)
+PADDLE_MAX_WORKERS = int(get_or_create_env_var("PADDLE_MAX_WORKERS", "2"))
+
 # Max threads for page-group summarisation in summarise_document (1 = sequential). Use 1 for local models.
 SUMMARY_PAGE_GROUP_MAX_WORKERS = max(
     1,
@@ -1510,64 +1508,114 @@ NVIDIA_NEMOTRON_30B_A3B_REPO_ID = get_or_create_env_var(
     "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4",
 )
 
+GEMMA4_31B_BNB_REPO_ID = get_or_create_env_var(
+    "GEMMA4_31B_BNB_REPO_TRANSFORMERS_ID", "unsloth/gemma-4-31B-it-unsloth-bnb-4bit"
+)
+
 if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
     # Rename LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE for display on GUI
     model_choice_lower = LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE.lower()
 
-    if "gemma-3-12b" in model_choice_lower or "gemma3-12b" in model_choice_lower:
+    if (
+        "gemma-3-12b" in model_choice_lower
+        or "gemma3-12b"
+        or GEMMA3_12B_REPO_ID in model_choice_lower
+    ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GEMMA3_12B_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Gemma 3 12B"
-    elif "gemma-3-27b" in model_choice_lower or "gemma3-27b" in model_choice_lower:
+    elif (
+        "gemma-3-27b" in model_choice_lower
+        or "gemma3-27b"
+        or GEMMA3_27B_REPO_ID in model_choice_lower
+    ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GEMMA3_27B_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Gemma 3 27B"
-    elif "gpt-oss" in model_choice_lower:
+    elif "gpt-oss" in model_choice_lower or GPT_OSS_REPO_ID in model_choice_lower:
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GPT_OSS_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "GPT-OSS 20B"
     elif (
         "ministral-3-14b-instruct" in model_choice_lower
+        or MINISTRAL_3_14B_INST_REPO_ID in model_choice_lower
         or "ministral3-14b-instruct" in model_choice_lower
     ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = MINISTRAL_3_14B_INST_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Ministral 3 14B Instruct"
     elif (
         "qwen3-8b-instruct" in model_choice_lower
+        or QWEN3_8B_INST_REPO_ID in model_choice_lower
         or "qwen-3-8b-instruct" in model_choice_lower
     ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN3_8B_INST_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3 8B Instruct"
-    elif "qwen3.5-0.8b" in model_choice_lower or "qwen-3.5-0.8b" in model_choice_lower:
+    elif (
+        "qwen3.5-0.8b" in model_choice_lower
+        or "qwen-3.5-0.8b"
+        or QWEN35_08B_REPO_ID in model_choice_lower
+    ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_08B_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 0.8B"
-    elif "qwen3.5-2b" in model_choice_lower or "qwen-3.5-2b" in model_choice_lower:
+    elif (
+        "qwen3.5-2b" in model_choice_lower
+        or "qwen-3.5-2b"
+        or QWEN35_2B_REPO_ID in model_choice_lower
+    ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_2B_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 2B"
-    elif "qwen3.5-4b" in model_choice_lower or "qwen-3.5-4b" in model_choice_lower:
+    elif (
+        "qwen3.5-4b" in model_choice_lower
+        or "qwen-3.5-4b"
+        or QWEN35_4B_REPO_ID in model_choice_lower
+    ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_4B_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 4B"
-    elif "qwen3.5-9b" in model_choice_lower or "qwen-3.5-9b" in model_choice_lower:
+    elif (
+        "qwen3.5-9b" in model_choice_lower
+        or "qwen-3.5-9b"
+        or QWEN35_9B_REPO_ID in model_choice_lower
+    ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_9B_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 9B"
     elif (
         "qwen3.5-27b-bnb" in model_choice_lower
+        or QWEN35_27B_BNB_4BIT_REPO_ID in model_choice_lower
         or "qwen3.5-27b-4bit" in model_choice_lower
     ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_27B_BNB_4BIT_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 27B (4-bit)"
-    elif "qwen3.5-27b" in model_choice_lower or "qwen-3.5-27b" in model_choice_lower:
+    elif (
+        "qwen3.5-27b" in model_choice_lower
+        or "qwen-3.5-27b"
+        or QWEN35_27B_REPO_ID in model_choice_lower
+    ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_27B_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 27B"
-    elif "qwen3.5-35b" in model_choice_lower or "qwen-3.5-35b" in model_choice_lower:
+    elif (
+        "qwen3.5-35b" in model_choice_lower
+        or "qwen-3.5-35b"
+        or QWEN35_35B_A3B_REPO_ID in model_choice_lower
+    ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_35B_A3B_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 35B-A3B"
-    elif "qwen3.5-122b" in model_choice_lower or "qwen-3.5-122b" in model_choice_lower:
+    elif (
+        "qwen3.5-122b" in model_choice_lower
+        or "qwen-3.5-122b"
+        or QWEN35_122B_A10B_REPO_ID in model_choice_lower
+    ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_122B_A10B_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 122B-A10B"
     elif (
         "nvidia-nemotron-3-nano-30b-a3b-nvfp4" in model_choice_lower
-        or "nvidia-nemotron-3-nano-30b-a3b-nvfp4" in model_choice_lower
+        or "nvidia-nemotron-3-nano-30b-a3b"
+        or NVIDIA_NEMOTRON_30B_A3B_REPO_ID in model_choice_lower
     ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = NVIDIA_NEMOTRON_30B_A3B_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "NVIDIA Nemotron 3 Nano 30B A3B NVFP4"
+    elif (
+        "gemma-4-31b-bnb" in model_choice_lower
+        or GEMMA4_31B_BNB_REPO_ID in model_choice_lower
+    ):
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GEMMA4_31B_BNB_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Gemma 4 31B bnb"
 
 if (
     SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS
@@ -1584,7 +1632,8 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE in [
     "Gemma 3 12B",
     "Gemma 3 27B",
     "Ministral 3 14B Instruct",
-    "Qwen 3 8B Instruct" "Qwen 3.5 0.8B",
+    "Qwen 3 8B Instruct",
+    "Qwen 3.5 0.8B",
     "Qwen 3.5 2B",
     "Qwen 3.5 4B",
     "Qwen 3.5 9B",
@@ -1592,6 +1641,7 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE in [
     "Qwen 3.5 27B",
     "Qwen 3.5 35B-A3B",
     "Qwen 3.5 122B-A10B",
+    "Gemma 4 31B bnb",
 ]:
     MULTIMODAL_PROMPT_FORMAT = True
 
