@@ -2,7 +2,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
 
 <meta charset="utf-8">
-<meta name="generator" content="quarto-1.8.26">
+<meta name="generator" content="quarto-1.8.27">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
@@ -37,7 +37,7 @@ ul.task-list li input[type="checkbox"] {
 <script src="../site_libs/quarto-html/tippy.umd.min.js"></script>
 <script src="../site_libs/quarto-html/anchor.min.js"></script>
 <link href="../site_libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-587c61ba64f3a5504c4d52d930310e48.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-ed96de9b727972fe78a7b5d16c58bf87.css" rel="stylesheet" id="quarto-text-highlighting-styles">
 <script src="../site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
 <link href="../site_libs/bootstrap/bootstrap-e31584831b205ffbb2d98406f31c2a5b.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
@@ -624,6 +624,11 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <ul>
 <li><strong>Description:</strong> When <code>EFFICIENT_OCR</code> is enabled, minimum fraction of the page area (MediaBox) that a single embedded image must cover to route that page through OCR (<code>redact_image_pdf</code>) in addition to the word-count rule. This catches pages with plenty of selectable text but meaningful raster content (e.g.&nbsp;photos) where text may appear only inside the image. Set to <code>0</code> to disable image-based routing and rely on word count only.</li>
 <li><strong>Default Value:</strong> <code>0.01</code> (1% of page area)</li>
+</ul></li>
+<li><strong><code>EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX</code></strong>
+<ul>
+<li><strong>Description:</strong> When <code>EFFICIENT_OCR</code> is enabled and <code>EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION</code> is greater than zero, each embedded image <strong>placement</strong> on the page is considered for image-based OCR routing only if both its width and height are at least this many <strong>PDF points</strong> (PyMuPDF rect units; roughly pixels at 72 dpi). This avoids tiny marks or artifacts that still exceed the area fraction on very small pages. Set to <code>0</code> to disable the minimum-size filter (only the area fraction applies). Overridable in the Gradio app (Efficient OCR section), via CLI <code>--efficient_ocr_min_embedded_image_px</code>, and in Lambda/direct mode as <code>efficient_ocr_min_embedded_image_px</code> in the arguments payload (env: <code>EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX</code>).</li>
+<li><strong>Default Value:</strong> <code>10</code></li>
 </ul></li>
 <li><strong><code>MAX_WORKERS</code></strong>
 <ul>
