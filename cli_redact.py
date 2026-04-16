@@ -44,6 +44,7 @@ from tools.config import (
     DO_INITIAL_TABULAR_DATA_CLEAN,
     DOCUMENT_REDACTION_BUCKET,
     EFFICIENT_OCR,
+    EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX,
     EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION,
     EFFICIENT_OCR_MIN_WORDS,
     FEEDBACK_LOGS_FOLDER,
@@ -729,6 +730,13 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
         help="Efficient OCR: min fraction of page area (0-1) for an embedded image to force OCR; 0 disables. Defaults to EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION config (e.g. 0.03).",
     )
     pdf_group.add_argument(
+        "--efficient_ocr_min_embedded_image_px",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Efficient OCR: min width and height (PDF points, ~px at 72 dpi) for an embedded image placement to count toward image-based OCR routing; 0 disables. Defaults to EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX config (e.g. 10).",
+    )
+    pdf_group.add_argument(
         "--ocr_first_pass_max_workers",
         type=int,
         default=None,
@@ -1339,6 +1347,12 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
                         )
                         is not None
                         else EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION
+                    ),
+                    efficient_ocr_min_embedded_image_px=(
+                        args.efficient_ocr_min_embedded_image_px
+                        if getattr(args, "efficient_ocr_min_embedded_image_px", None)
+                        is not None
+                        else EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX
                     ),
                     ocr_first_pass_max_workers=(
                         args.ocr_first_pass_max_workers
@@ -2262,6 +2276,12 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
                         )
                         is not None
                         else EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION
+                    ),
+                    efficient_ocr_min_embedded_image_px=(
+                        getattr(args, "efficient_ocr_min_embedded_image_px", None)
+                        if getattr(args, "efficient_ocr_min_embedded_image_px", None)
+                        is not None
+                        else EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX
                     ),
                     ocr_first_pass_max_workers=(
                         getattr(args, "ocr_first_pass_max_workers", None)

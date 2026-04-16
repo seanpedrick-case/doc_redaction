@@ -374,6 +374,72 @@ def get_session_default_cost_codes_csv_path(folder: str | None = None):
     return os.path.join(folder, SESSION_DEFAULT_COST_CODES_FILENAME)
 
 
+def _session_default_cost_codes_parent_dirs() -> List[Path]:
+    """Resolved directories where session_default_cost_codes.csv may be stored locally."""
+    dirs: List[Path] = []
+    for folder in (
+        INPUT_FOLDER,
+        (os.path.dirname(COST_CODES_PATH) if COST_CODES_PATH else ""),
+        (os.path.dirname(OUTPUT_COST_CODES_PATH) if OUTPUT_COST_CODES_PATH else ""),
+        os.getcwd(),
+    ):
+        s = str(folder).strip() if folder is not None else ""
+        if not s:
+            continue
+        try:
+            dirs.append(Path(folder).resolve())
+        except OSError:
+            continue
+    seen: Set[str] = set()
+    out: List[Path] = []
+    for d in dirs:
+        key = str(d)
+        if key not in seen:
+            seen.add(key)
+            out.append(d)
+    return out
+
+
+def _path_is_under_any_root(resolved: Path, roots: List[Path]) -> bool:
+    for root in roots:
+        try:
+            resolved.relative_to(root)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def _validate_session_default_cost_codes_csv_path(
+    csv_path: str, *, allow_download_temp: bool = False
+) -> Path:
+    """
+    Ensure csv_path is safe for local read/write (CodeQL py/path-injection).
+    When allow_download_temp is True, only paths under the system temp directory
+    are accepted (S3 download scratch file).
+    """
+    if not csv_path or not str(csv_path).strip():
+        raise ValueError("Missing session default cost codes CSV path")
+    resolved = Path(csv_path).resolve()
+    if allow_download_temp:
+        temp_root = Path(tempfile.gettempdir()).resolve()
+        if not _path_is_under_any_root(resolved, [temp_root]):
+            raise PermissionError(
+                f"Session cost codes download path outside system temp: {resolved}"
+            )
+        return resolved
+    if resolved.name != SESSION_DEFAULT_COST_CODES_FILENAME:
+        raise PermissionError(
+            f"Unexpected session default cost codes filename: {resolved.name!r}"
+        )
+    roots = _session_default_cost_codes_parent_dirs()
+    if not _path_is_under_any_root(resolved, roots):
+        raise PermissionError(
+            f"Session default cost codes CSV outside allowed directories: {resolved}"
+        )
+    return resolved
+
+
 def save_default_cost_code_for_session(
     session_hash: str,
     cost_code_choice: str,
@@ -400,7 +466,14 @@ def save_default_cost_code_for_session(
     valid_codes = list(cost_code_df.iloc[:, 0].astype(str).unique())
     if cost_code_choice not in valid_codes:
         return "Selected cost code not in the list. Choose a cost code from the table."
-    csv_path = get_session_default_cost_codes_csv_path(output_folder)
+    try:
+        csv_path = str(
+            _validate_session_default_cost_codes_csv_path(
+                get_session_default_cost_codes_csv_path(output_folder)
+            )
+        )
+    except (ValueError, PermissionError, OSError):
+        return "Cannot save default cost code: invalid or unsafe storage path."
     ensure_folder_exists(os.path.dirname(csv_path))
     saved_at = datetime.now().isoformat()
     row = {
@@ -462,10 +535,23 @@ def save_default_cost_code_for_session(
     return "Default cost code saved"
 
 
-def _read_session_default_from_csv_path(csv_path: str, session_hash: str) -> str:
+def _read_session_default_from_csv_path(
+    csv_path: str,
+    session_hash: str,
+    *,
+    allow_download_temp: bool = False,
+) -> str:
     """Read CSV at csv_path and return default_cost_code for session_hash, or "".
     If saved_at exists, uses the latest row by saved_at for that session_hash.
     """
+    try:
+        csv_path = str(
+            _validate_session_default_cost_codes_csv_path(
+                csv_path, allow_download_temp=allow_download_temp
+            )
+        )
+    except (ValueError, PermissionError, OSError):
+        return ""
     if not os.path.exists(csv_path):
         return ""
     try:
@@ -515,7 +601,9 @@ def load_session_default_cost_code(
                 RUN_AWS_FUNCTIONS=RUN_AWS_FUNCTIONS,
             )
             if tmp_path and os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
-                result = _read_session_default_from_csv_path(tmp_path, session_hash)
+                result = _read_session_default_from_csv_path(
+                    tmp_path, session_hash, allow_download_temp=True
+                )
                 if result:
                     try:
                         os.unlink(tmp_path)

@@ -103,6 +103,7 @@ from tools.config import (
     DYNAMODB_FEEDBACK_LOG_HEADERS,
     DYNAMODB_USAGE_LOG_HEADERS,
     EFFICIENT_OCR,
+    EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX,
     EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION,
     EFFICIENT_OCR_MIN_WORDS,
     ENFORCE_COST_CODES,
@@ -3723,6 +3724,13 @@ with blocks:
                                 maximum=1.0,
                                 step=0.005,
                             )
+                            efficient_ocr_min_embedded_image_px_number = gr.Number(
+                                label="Min. embedded image width/height (PDF pt, ~px@72dpi) to force OCR; 0 = no minimum",
+                                value=EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX,
+                                precision=0,
+                                minimum=0,
+                                step=1,
+                            )
                     with gr.Column(scale=1):
                         overwrite_existing_ocr_checkbox = gr.Checkbox(
                             label="Always overwrite existing OCR results for new redaction tasks",
@@ -4616,6 +4624,7 @@ with blocks:
             efficient_ocr_checkbox,
             efficient_ocr_min_words_number,
             efficient_ocr_min_image_coverage_number,
+            efficient_ocr_min_embedded_image_px_number,
             high_quality_textract_ocr_checkbox,
             overwrite_existing_ocr_checkbox,
             llm_model_name_textbox,
@@ -5090,6 +5099,7 @@ with blocks:
             efficient_ocr_checkbox,
             efficient_ocr_min_words_number,
             efficient_ocr_min_image_coverage_number,
+            efficient_ocr_min_embedded_image_px_number,
             high_quality_textract_ocr_checkbox,
             overwrite_existing_ocr_checkbox,
             llm_model_name_textbox,
@@ -5740,6 +5750,7 @@ with blocks:
             efficient_ocr_checkbox,
             efficient_ocr_min_words_number,
             efficient_ocr_min_image_coverage_number,
+            efficient_ocr_min_embedded_image_px_number,
             high_quality_textract_ocr_checkbox,
             overwrite_existing_ocr_checkbox,
             llm_model_name_textbox,
@@ -8699,6 +8710,7 @@ with blocks:
         efficient_ocr_checkbox,
         efficient_ocr_min_words_number,
         efficient_ocr_min_image_coverage_number,
+        efficient_ocr_min_embedded_image_px_number,
         high_quality_textract_ocr_checkbox,
         overwrite_existing_ocr_checkbox,
         save_page_ocr_visualisations_checkbox,
@@ -8912,6 +8924,7 @@ with blocks:
             efficient_ocr_checkbox if efficient_ocr_checkbox is not None else False,
             efficient_ocr_min_words_number,
             efficient_ocr_min_image_coverage_number,
+            efficient_ocr_min_embedded_image_px_number,
             (
                 high_quality_textract_ocr_checkbox
                 if high_quality_textract_ocr_checkbox is not None
@@ -9072,6 +9085,7 @@ with blocks:
             efficient_ocr_checkbox,
             efficient_ocr_min_words_number,
             efficient_ocr_min_image_coverage_number,
+            efficient_ocr_min_embedded_image_px_number,
             high_quality_textract_ocr_checkbox,
             overwrite_existing_ocr_checkbox,
             save_page_ocr_visualisations_checkbox,
@@ -9868,6 +9882,7 @@ with blocks:
                 "efficient_ocr": EFFICIENT_OCR,
                 "efficient_ocr_min_words": EFFICIENT_OCR_MIN_WORDS,
                 "efficient_ocr_min_image_coverage_fraction": EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION,
+                "efficient_ocr_min_embedded_image_px": EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX,
                 "hybrid_textract_bedrock_vlm": HYBRID_TEXTRACT_BEDROCK_VLM,
                 "page_min": DIRECT_MODE_PAGE_MIN,
                 "page_max": DIRECT_MODE_PAGE_MAX,

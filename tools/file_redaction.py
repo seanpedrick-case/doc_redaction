@@ -57,6 +57,7 @@ from tools.config import (
     DEFAULT_LANGUAGE,
     DEFAULT_LOCAL_OCR_MODEL,
     EFFICIENT_OCR,
+    EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX,
     EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION,
     EFFICIENT_OCR_MIN_WORDS,
     GEMINI_VLM_TEXT_EXTRACT_OPTION,
@@ -261,10 +262,14 @@ def _word_count_by_page_from_ocr_results_with_words(
 def _page_has_significant_embedded_image(
     page: Page,
     min_coverage_fraction: float,
+    min_embedded_image_px: int = 0,
 ) -> bool:
     """
     True if any embedded image on the page covers at least min_coverage_fraction of the
     MediaBox area (single placement). Uses PyMuPDF get_images / get_image_rects.
+
+    If min_embedded_image_px > 0, the placement's width and height (PDF points) must both
+    be >= that value so tiny artifacts on small pages do not force OCR.
     """
     if min_coverage_fraction <= 0:
         return False
@@ -286,8 +291,14 @@ def _page_has_significant_embedded_image(
             if isinstance(r, tuple):
                 r = r[0]
             try:
-                rect_area = float(abs(r.width) * abs(r.height))
+                rw = float(abs(r.width))
+                rh = float(abs(r.height))
+                rect_area = rw * rh
             except Exception:
+                continue
+            if min_embedded_image_px > 0 and (
+                rw < min_embedded_image_px or rh < min_embedded_image_px
+            ):
                 continue
             if rect_area / page_area >= min_coverage_fraction:
                 return True
@@ -299,6 +310,7 @@ def _efficient_ocr_pages_with_significant_embedded_images(
     pages_1based: List[int],
     min_coverage_fraction: float,
     pymupdf_doc: Optional[Document] = None,
+    min_embedded_image_px: int = 0,
 ) -> set:
     """
     1-based page numbers that should use the OCR path due to a significant embedded image,
@@ -325,7 +337,9 @@ def _efficient_ocr_pages_with_significant_embedded_images(
             if p0 < 0 or p0 >= doc.page_count:
                 continue
             page = doc.load_page(p0)
-            if _page_has_significant_embedded_image(page, min_coverage_fraction):
+            if _page_has_significant_embedded_image(
+                page, min_coverage_fraction, min_embedded_image_px
+            ):
                 out.add(int(p1))
         return out
     finally:
@@ -1042,6 +1056,7 @@ def choose_and_run_redactor(
     efficient_ocr: bool = EFFICIENT_OCR,
     efficient_ocr_min_words: Union[int, float, None] = EFFICIENT_OCR_MIN_WORDS,
     efficient_ocr_min_image_coverage_fraction: Optional[float] = None,
+    efficient_ocr_min_embedded_image_px: Optional[int] = None,
     hybrid_textract_bedrock_vlm: bool = HYBRID_TEXTRACT_BEDROCK_VLM,
     overwrite_existing_ocr_results: bool = OVERWRITE_EXISTING_OCR_RESULTS,
     llm_model_name="",
@@ -1175,6 +1190,13 @@ def choose_and_run_redactor(
     else:
         efficient_ocr_min_image_coverage_fraction = float(
             efficient_ocr_min_image_coverage_fraction
+        )
+
+    if efficient_ocr_min_embedded_image_px is None:
+        efficient_ocr_min_embedded_image_px = int(EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX)
+    else:
+        efficient_ocr_min_embedded_image_px = max(
+            0, int(efficient_ocr_min_embedded_image_px)
         )
 
     # CLI mode may provide options to enter method names in a different format
@@ -2394,16 +2416,21 @@ def choose_and_run_redactor(
                     all_pages_1based,
                     efficient_ocr_min_image_coverage_fraction,
                     pymupdf_doc,
+                    min_embedded_image_px=efficient_ocr_min_embedded_image_px,
                 )
             )
             if pages_flagged_for_image_ocr:
-                print(
+                _img_ocr_msg = (
                     "EFFICIENT_OCR: "
                     + str(len(pages_flagged_for_image_ocr))
                     + " page(s) routed to OCR due to embedded images (coverage >= "
                     + f"{efficient_ocr_min_image_coverage_fraction:.1%}"
-                    + " of page area)."
+                    + " of page area"
                 )
+                if efficient_ocr_min_embedded_image_px > 0:
+                    _img_ocr_msg += f"; min placement width/height {efficient_ocr_min_embedded_image_px} pt"
+                _img_ocr_msg += ")."
+                print(_img_ocr_msg)
             pages_with_text_1based = [
                 p
                 for p in all_pages_1based

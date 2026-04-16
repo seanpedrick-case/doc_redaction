@@ -36,6 +36,7 @@ from tools.config import (
     OUTPUT_FOLDER,
     SELECTABLE_TEXT_EXTRACT_OPTION,
     TEXTRACT_TEXT_EXTRACT_OPTION,
+    ensure_folder_within_app_directory,
 )
 from tools.helper_functions import get_file_name_without_type, read_file
 from tools.secure_path_utils import secure_file_read, secure_join
@@ -229,16 +230,16 @@ def process_single_page_for_image_conversion(
 
     if create_images is True:
         try:
-            # Construct the full output directory path
-            # Normalize input_folder to ensure it's used as-is without sanitization
-            if os.path.isabs(input_folder):
-                image_output_dir = Path(input_folder).resolve()
-            else:
-                # Join with cwd, but ensure input_folder is used as-is
-                base_dir = Path(os.getcwd()).resolve()
-                # Use Path.joinpath which doesn't sanitize folder names
-                image_output_dir = base_dir / input_folder
-                image_output_dir = image_output_dir.resolve()
+            # User-controlled input_folder must not be used to build paths without
+            # containment checks (CodeQL py/path-injection).
+            safe_folder = ensure_folder_within_app_directory(
+                str(input_folder).strip() if input_folder is not None else ""
+            )
+            if not (safe_folder and str(safe_folder).strip()):
+                raise ValueError(
+                    "input_folder is empty; cannot determine image output directory"
+                )
+            image_output_dir = Path(safe_folder).resolve()
 
             # Ensure the directory exists
             image_output_dir.mkdir(parents=True, exist_ok=True)
