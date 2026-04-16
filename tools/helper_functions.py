@@ -353,15 +353,55 @@ def _get_session_default_cost_codes_s3_key_prefix():
 def get_session_default_cost_codes_csv_path(folder: str | None = None):
     """
     Return the path to the CSV file that stores session_hash -> default_cost_code.
-    If folder is provided (e.g. input folder path), constrain it to a sanitized
-    single directory name under INPUT_FOLDER (CodeQL / path-injection). If that
-    fails, fall back to the same folder as cost codes
-    (COST_CODES_PATH or OUTPUT_COST_CODES_PATH).
+    If folder is provided (e.g. session-specific input folder), derive path segments
+    only from the portion of that folder under INPUT_FOLDER (each segment
+    sanitized, then secure_path_join). If the folder is not under INPUT_FOLDER,
+    try a single sanitized basename under INPUT_FOLDER. Otherwise fall back to
+    the cost codes directory (COST_CODES_PATH or OUTPUT_COST_CODES_PATH).
     """
     if folder is not None and str(folder).strip():
         raw_folder = str(folder).strip()
         try:
-            safe_folder_name = sanitize_filename(os.path.basename(raw_folder))
+            input_root = os.path.normpath(
+                os.path.abspath(str(Path(INPUT_FOLDER).resolve()))
+            )
+        except OSError:
+            input_root = os.path.normpath(os.path.abspath(str(INPUT_FOLDER)))
+
+        candidate = os.path.normpath(os.path.abspath(raw_folder.rstrip("/\\")))
+        try:
+            rel = os.path.relpath(candidate, input_root)
+        except ValueError:
+            rel = None
+
+        def _join_sanitized_under_input(parts: List[str]) -> str:
+            safe_base: Path | str = INPUT_FOLDER
+            for p in parts:
+                safe_folder_name = sanitize_filename(p)
+                if safe_folder_name in {"", ".", ".."}:
+                    raise ValueError(
+                        "Invalid folder name for session default cost codes path"
+                    )
+                safe_base = secure_path_join(safe_base, safe_folder_name)
+            return os.path.join(str(safe_base), SESSION_DEFAULT_COST_CODES_FILENAME)
+
+        if rel is not None and rel != ".." and not rel.startswith(".." + os.sep):
+            part_tokens = [
+                p
+                for p in rel.replace("\\", "/").split("/")
+                if p and p not in (".", "..")
+            ]
+            if part_tokens:
+                try:
+                    return _join_sanitized_under_input(part_tokens)
+                except (ValueError, PermissionError, OSError):
+                    pass
+            else:
+                return os.path.join(input_root, SESSION_DEFAULT_COST_CODES_FILENAME)
+
+        try:
+            tail = raw_folder.rstrip("/\\")
+            safe_folder_name = sanitize_filename(os.path.basename(tail))
             if safe_folder_name in {"", ".", ".."}:
                 raise ValueError(
                     "Invalid folder name for session default cost codes path"
@@ -369,7 +409,6 @@ def get_session_default_cost_codes_csv_path(folder: str | None = None):
             safe_base = secure_path_join(INPUT_FOLDER, safe_folder_name)
             return os.path.join(str(safe_base), SESSION_DEFAULT_COST_CODES_FILENAME)
         except (ValueError, PermissionError, OSError):
-            # Cannot constrain user folder under INPUT_FOLDER; use defaults below.
             pass
     if COST_CODES_PATH:
         folder = os.path.dirname(COST_CODES_PATH)

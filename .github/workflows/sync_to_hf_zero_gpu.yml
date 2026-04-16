@@ -18,6 +18,11 @@ jobs:
       - name: Install Git LFS
         run: git lfs install
 
+      # HF Spaces read Space config from README.md front matter. The repo README
+      # targets GitHub (e.g. docker); patch only this CI checkout before HF push.
+      - name: Apply HF Zero GPU Space README front matter
+        run: python3 tools/apply_hf_zero_gpu_readme_frontmatter.py
+
       - name: Recreate repo history (single-commit force push)
         run: |
           # 1. Capture the message BEFORE we delete the .git folder
