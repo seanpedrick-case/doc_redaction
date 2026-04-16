@@ -12,7 +12,7 @@ python-dotenv<=1.0.1
 defusedxml<=0.7.1
 Faker<=40.8.0
 python-levenshtein<=0.27.3
-rapidfuzz<=3.14.3
+rapidfuzz<=3.14.5
 markdown<=3.10.2
 tabulate<=0.10.0
 
@@ -22,9 +22,9 @@ pdf2image<=1.17.0
 pymupdf<=1.27.1
 pikepdf<=10.3.0
 opencv-python<=4.13.0.92
-presidio_analyzer<=2.2.361
-presidio_anonymizer<=2.2.361
-presidio-image-redactor<=0.0.57
+presidio_analyzer<=2.2.362
+presidio_anonymizer<=2.2.362
+presidio-image-redactor<=0.0.58
 
 # --- Document generation ---
 python-docx<=1.2.0
@@ -42,19 +42,19 @@ scikit-learn<=1.8.0
 spacy<=3.8.11
 spaczz<=0.6.1
 en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0.tar.gz
-transformers<=5.5.0
+transformers<=5.5.4
 accelerate<=1.13.0
 bitsandbytes<=0.49.2
 sentencepiece<=0.2.1
 optimum<=2.1.0
 
 # --- Testing ---
-pytest<=7.4.3
-pytest-cov<=4.0.0
+pytest<=9.0.3
+pytest-cov<=7.1.0
 
 # --- LLM libraries ---
-google-genai<=1.66.0
-openai<=2.25.0
+google-genai<=1.73.0
+openai<=2.31.0
 
 # --- PyTorch (CUDA 12.6) ---
 --extra-index-url https://download.pytorch.org/whl/cu128

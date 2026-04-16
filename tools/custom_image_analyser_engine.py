@@ -11092,7 +11092,9 @@ def run_page_text_redaction(
     page_text = ""
     page_text_mapping = list()
     all_text_line_results = list()
-    comprehend_query_number = 0
+    # Track Comprehend usage for this page in AWS billing units (1 unit = 100 chars).
+    # IMPORTANT: do not reset/overwrite the function argument; callers aggregate per-page usage.
+    comprehend_units_used = 0
 
     # Track LLM token usage
     llm_total_input_tokens = 0
@@ -11310,7 +11312,7 @@ def run_page_text_redaction(
                             all_text_line_results,
                         )
                         if aws_comprehend_entities:
-                            comprehend_query_number += (
+                            comprehend_units_used += (
                                 len(current_batch.strip())
                                 + COMPREHEND_CHARACTERS_PER_UNIT
                                 - 1
@@ -11376,7 +11378,7 @@ def run_page_text_redaction(
                             all_text_line_results,
                         )
                         if aws_comprehend_entities:
-                            comprehend_query_number += (
+                            comprehend_units_used += (
                                 len(current_batch.strip())
                                 + COMPREHEND_CHARACTERS_PER_UNIT
                                 - 1
@@ -11421,7 +11423,7 @@ def run_page_text_redaction(
                 all_text_line_results,
             )
             if aws_comprehend_entities:
-                comprehend_query_number += (
+                comprehend_units_used += (
                     len(current_batch.strip()) + COMPREHEND_CHARACTERS_PER_UNIT - 1
                 ) // COMPREHEND_CHARACTERS_PER_UNIT
 
@@ -12108,7 +12110,8 @@ def run_page_text_redaction(
             # Accumulate token usage
             llm_total_input_tokens += batch_input_tokens
             llm_total_output_tokens += batch_output_tokens
-            comprehend_query_number += 1
+            # LLM-based detection is metered separately; keep counter semantics consistent
+            # (this function reports Comprehend units only).
 
     elif pii_identification_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION:
         # LLM-based entity detection using local transformers models
@@ -12464,6 +12467,7 @@ def run_page_text_redaction(
 
     return (
         page_analysed_bounding_boxes,
+        comprehend_units_used,
         llm_model_name,
         llm_total_input_tokens,
         llm_total_output_tokens,
