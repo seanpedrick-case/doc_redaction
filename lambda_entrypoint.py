@@ -24,6 +24,7 @@ from tools.config import (
     DEFAULT_PAGE_MAX,
     DEFAULT_PAGE_MIN,
     EFFICIENT_OCR,
+    EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX,
     EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION,
     EFFICIENT_OCR_MIN_WORDS,
     GEMINI_API_KEY,
@@ -505,6 +506,15 @@ def lambda_handler(event, context):
                 os.getenv(
                     "EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION",
                     str(EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION),
+                ),
+            )
+        ),
+        "efficient_ocr_min_embedded_image_px": int(
+            arguments.get(
+                "efficient_ocr_min_embedded_image_px",
+                os.getenv(
+                    "EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX",
+                    str(EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX),
                 ),
             )
         ),

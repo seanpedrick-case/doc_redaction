@@ -347,6 +347,10 @@ Configurations related to text extraction, PII detection, and the redaction proc
     * **Description:** When `EFFICIENT_OCR` is enabled, minimum fraction of the page area (MediaBox) that a single embedded image must cover to route that page through OCR (`redact_image_pdf`) in addition to the word-count rule. This catches pages with plenty of selectable text but meaningful raster content (e.g. photos) where text may appear only inside the image. Set to `0` to disable image-based routing and rely on word count only.
     * **Default Value:** `0.01` (1% of page area)
 
+* **`EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX`**
+    * **Description:** When `EFFICIENT_OCR` is enabled and `EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION` is greater than zero, each embedded image **placement** on the page is considered for image-based OCR routing only if both its width and height are at least this many **PDF points** (PyMuPDF rect units; roughly pixels at 72 dpi). This avoids tiny marks or artifacts that still exceed the area fraction on very small pages. Set to `0` to disable the minimum-size filter (only the area fraction applies). Overridable in the Gradio app (Efficient OCR section), via CLI `--efficient_ocr_min_embedded_image_px`, and in Lambda/direct mode as `efficient_ocr_min_embedded_image_px` in the arguments payload (env: `EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX`).
+    * **Default Value:** `10`
+
 * **`MAX_WORKERS`**
     * **Description:** Default maximum number of worker threads for parallel processing across the app. Used as the default or cap for thread pools in review (saving redacted pages, loading page images), file conversion (PDF-to-images, input file listing, annotation processing), file redaction (text extraction, merge/summary, pikepdf annotations), custom image analyser (mapping analyzer results to bounding boxes), and data anonymisation (initial column cleaning). When not set, `OCR_FIRST_PASS_MAX_WORKERS` and `SUMMARY_PAGE_GROUP_MAX_WORKERS` default to this value; set those explicitly to override for OCR or summarisation only.
     * **Default Value:** `8`

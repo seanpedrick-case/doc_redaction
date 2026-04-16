@@ -353,17 +353,62 @@ def _get_session_default_cost_codes_s3_key_prefix():
 def get_session_default_cost_codes_csv_path(folder: str | None = None):
     """
     Return the path to the CSV file that stores session_hash -> default_cost_code.
-    If folder is provided (e.g. input folder path), resolve it under the configured
-    INPUT_FOLDER via secure_path_join (CodeQL / path-injection). If that fails,
-    fall back to the same folder as cost codes (COST_CODES_PATH or OUTPUT_COST_CODES_PATH).
+    If folder is provided (e.g. session-specific input folder), derive path segments
+    only from the portion of that folder under INPUT_FOLDER (each segment
+    sanitized, then secure_path_join). If the folder is not under INPUT_FOLDER,
+    try a single sanitized basename under INPUT_FOLDER. Otherwise fall back to
+    the cost codes directory (COST_CODES_PATH or OUTPUT_COST_CODES_PATH).
     """
     if folder is not None and str(folder).strip():
-        base = str(folder).strip()
+        raw_folder = str(folder).strip()
         try:
-            safe_base = secure_path_join(INPUT_FOLDER, base)
+            input_root = os.path.normpath(
+                os.path.abspath(str(Path(INPUT_FOLDER).resolve()))
+            )
+        except OSError:
+            input_root = os.path.normpath(os.path.abspath(str(INPUT_FOLDER)))
+
+        candidate = os.path.normpath(os.path.abspath(raw_folder.rstrip("/\\")))
+        try:
+            rel = os.path.relpath(candidate, input_root)
+        except ValueError:
+            rel = None
+
+        def _join_sanitized_under_input(parts: List[str]) -> str:
+            safe_base: Path | str = INPUT_FOLDER
+            for p in parts:
+                safe_folder_name = sanitize_filename(p)
+                if safe_folder_name in {"", ".", ".."}:
+                    raise ValueError(
+                        "Invalid folder name for session default cost codes path"
+                    )
+                safe_base = secure_path_join(safe_base, safe_folder_name)
+            return os.path.join(str(safe_base), SESSION_DEFAULT_COST_CODES_FILENAME)
+
+        if rel is not None and rel != ".." and not rel.startswith(".." + os.sep):
+            part_tokens = [
+                p
+                for p in rel.replace("\\", "/").split("/")
+                if p and p not in (".", "..")
+            ]
+            if part_tokens:
+                try:
+                    return _join_sanitized_under_input(part_tokens)
+                except (ValueError, PermissionError, OSError):
+                    pass
+            else:
+                return os.path.join(input_root, SESSION_DEFAULT_COST_CODES_FILENAME)
+
+        try:
+            tail = raw_folder.rstrip("/\\")
+            safe_folder_name = sanitize_filename(os.path.basename(tail))
+            if safe_folder_name in {"", ".", ".."}:
+                raise ValueError(
+                    "Invalid folder name for session default cost codes path"
+                )
+            safe_base = secure_path_join(INPUT_FOLDER, safe_folder_name)
             return os.path.join(str(safe_base), SESSION_DEFAULT_COST_CODES_FILENAME)
         except (ValueError, PermissionError, OSError):
-            # Cannot constrain user folder under INPUT_FOLDER; use defaults below.
             pass
     if COST_CODES_PATH:
         folder = os.path.dirname(COST_CODES_PATH)
@@ -372,6 +417,75 @@ def get_session_default_cost_codes_csv_path(folder: str | None = None):
     if not folder:
         folder = "."
     return os.path.join(folder, SESSION_DEFAULT_COST_CODES_FILENAME)
+
+
+def _session_default_cost_codes_parent_dirs() -> List[Path]:
+    """Resolved directories where session_default_cost_codes.csv may be stored locally."""
+    dirs: List[Path] = []
+    for folder in (
+        INPUT_FOLDER,
+        (os.path.dirname(COST_CODES_PATH) if COST_CODES_PATH else ""),
+        (os.path.dirname(OUTPUT_COST_CODES_PATH) if OUTPUT_COST_CODES_PATH else ""),
+        os.getcwd(),
+    ):
+        s = str(folder).strip() if folder is not None else ""
+        if not s:
+            continue
+        try:
+            dirs.append(Path(folder).resolve())
+        except OSError:
+            continue
+    seen: Set[str] = set()
+    out: List[Path] = []
+    for d in dirs:
+        key = str(d)
+        if key not in seen:
+            seen.add(key)
+            out.append(d)
+    return out
+
+
+def _validate_session_default_cost_codes_csv_path(
+    csv_path: str, *, allow_download_temp: bool = False
+) -> Path:
+    """
+    Ensure csv_path is safe for local read/write (CodeQL py/path-injection).
+    When allow_download_temp is True, only paths under the system temp directory
+    are accepted (S3 download scratch file).
+    """
+    if not csv_path or not str(csv_path).strip():
+        raise ValueError("Missing session default cost codes CSV path")
+    path_str = str(csv_path).strip()
+    # Do not call Path.resolve() on untrusted paths (CodeQL py/path-injection);
+    # use normpath + abspath + commonpath containment like validate_path_safety.
+    candidate = os.path.normpath(os.path.abspath(path_str))
+    if allow_download_temp:
+        temp_root = os.path.normpath(os.path.abspath(tempfile.gettempdir()))
+        try:
+            common = os.path.commonpath([candidate, temp_root])
+        except ValueError:
+            common = None
+        if common != temp_root:
+            raise PermissionError(
+                f"Session cost codes download path outside system temp: {candidate}"
+            )
+        return Path(candidate)
+    if os.path.basename(candidate) != SESSION_DEFAULT_COST_CODES_FILENAME:
+        raise PermissionError(
+            f"Unexpected session default cost codes filename: {os.path.basename(candidate)!r}"
+        )
+    roots = _session_default_cost_codes_parent_dirs()
+    for root in roots:
+        root_norm = os.path.normpath(os.path.abspath(str(root)))
+        try:
+            common = os.path.commonpath([candidate, root_norm])
+        except ValueError:
+            continue
+        if common == root_norm:
+            return Path(candidate)
+    raise PermissionError(
+        f"Session default cost codes CSV outside allowed directories: {candidate}"
+    )
 
 
 def save_default_cost_code_for_session(
@@ -400,7 +514,14 @@ def save_default_cost_code_for_session(
     valid_codes = list(cost_code_df.iloc[:, 0].astype(str).unique())
     if cost_code_choice not in valid_codes:
         return "Selected cost code not in the list. Choose a cost code from the table."
-    csv_path = get_session_default_cost_codes_csv_path(output_folder)
+    try:
+        csv_path = str(
+            _validate_session_default_cost_codes_csv_path(
+                get_session_default_cost_codes_csv_path(output_folder)
+            )
+        )
+    except (ValueError, PermissionError, OSError):
+        return "Cannot save default cost code: invalid or unsafe storage path."
     ensure_folder_exists(os.path.dirname(csv_path))
     saved_at = datetime.now().isoformat()
     row = {
@@ -462,10 +583,23 @@ def save_default_cost_code_for_session(
     return "Default cost code saved"
 
 
-def _read_session_default_from_csv_path(csv_path: str, session_hash: str) -> str:
+def _read_session_default_from_csv_path(
+    csv_path: str,
+    session_hash: str,
+    *,
+    allow_download_temp: bool = False,
+) -> str:
     """Read CSV at csv_path and return default_cost_code for session_hash, or "".
     If saved_at exists, uses the latest row by saved_at for that session_hash.
     """
+    try:
+        csv_path = str(
+            _validate_session_default_cost_codes_csv_path(
+                csv_path, allow_download_temp=allow_download_temp
+            )
+        )
+    except (ValueError, PermissionError, OSError):
+        return ""
     if not os.path.exists(csv_path):
         return ""
     try:
@@ -515,7 +649,9 @@ def load_session_default_cost_code(
                 RUN_AWS_FUNCTIONS=RUN_AWS_FUNCTIONS,
             )
             if tmp_path and os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
-                result = _read_session_default_from_csv_path(tmp_path, session_hash)
+                result = _read_session_default_from_csv_path(
+                    tmp_path, session_hash, allow_download_temp=True
+                )
                 if result:
                     try:
                         os.unlink(tmp_path)

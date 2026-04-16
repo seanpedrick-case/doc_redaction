@@ -1462,10 +1462,12 @@ def replace_annotator_object_img_np_array_with_page_sizes_image_path(
     """
     page_zero_index = page - 1
 
+    _existing_img_str = str(all_image_annotations[page_zero_index].get("image", ""))
+    _current_img_str = str(page_image_annotator_object.get("image", ""))
     if (
         isinstance(all_image_annotations[page_zero_index]["image"], np.ndarray)
-        or "placeholder_image"
-        in str(all_image_annotations[page_zero_index].get("image", ""))
+        or ("placeholder" in _existing_img_str)
+        or ("placeholder" in _current_img_str)
         or isinstance(page_image_annotator_object.get("image"), np.ndarray)
     ):
         if page_sizes_df is None or page_sizes_df.empty:
@@ -1487,6 +1489,169 @@ def replace_annotator_object_img_np_array_with_page_sizes_image_path(
             print(f"No image path found for page {page}.")
 
     return page_image_annotator_object, all_image_annotations
+
+
+def _needs_on_demand_page_image(image_value: object) -> bool:
+    """
+    Return True if the given annotator image value is a placeholder-like string or
+    a missing file path. This keeps review behavior robust across placeholder naming
+    conventions and avoids relying on strict prefixes.
+    """
+    if not isinstance(image_value, str) or not image_value:
+        return False
+    if "placeholder" in image_value:
+        return True
+    # Also treat missing local paths as needing a render, even if they don't contain
+    # the placeholder token (e.g. stale paths after moving folders).
+    try:
+        return not os.path.exists(image_value)
+    except Exception:
+        return True
+
+
+def _ensure_page_image_dims_in_page_sizes_df(
+    page_sizes_df: pd.DataFrame, page_num_1based: int
+) -> pd.DataFrame:
+    """
+    Ensure `image_width`/`image_height` for a page are numeric + finite if we have a real image_path.
+
+    This is critical because downstream scaling (`multiply_coordinates_by_page_sizes`) will leave
+    relative (0-1) coords unchanged if width/height are NaN/non-numeric, which the annotator then
+    interprets as pixel coordinates (tiny boxes top-left).
+    """
+    if page_sizes_df is None or page_sizes_df.empty:
+        return page_sizes_df
+    if "page" not in page_sizes_df.columns:
+        return page_sizes_df
+
+    try:
+        page_col = pd.to_numeric(page_sizes_df["page"], errors="coerce")
+        mask = page_col == int(page_num_1based)
+        if not mask.any():
+            return page_sizes_df
+
+        # Coerce width/height to numeric early (handles string "nan", etc.)
+        if "image_width" in page_sizes_df.columns:
+            page_sizes_df.loc[mask, "image_width"] = pd.to_numeric(
+                page_sizes_df.loc[mask, "image_width"], errors="coerce"
+            )
+        if "image_height" in page_sizes_df.columns:
+            page_sizes_df.loc[mask, "image_height"] = pd.to_numeric(
+                page_sizes_df.loc[mask, "image_height"], errors="coerce"
+            )
+
+        img_path = None
+        if "image_path" in page_sizes_df.columns:
+            vals = page_sizes_df.loc[mask, "image_path"].dropna().astype(str)
+            if not vals.empty:
+                img_path = vals.iloc[0]
+
+        if not img_path or not isinstance(img_path, str):
+            return page_sizes_df
+        if "placeholder" in img_path:
+            return page_sizes_df
+        if not os.path.exists(img_path):
+            return page_sizes_df
+
+        w = (
+            float(page_sizes_df.loc[mask, "image_width"].max())
+            if "image_width" in page_sizes_df.columns
+            else float("nan")
+        )
+        h = (
+            float(page_sizes_df.loc[mask, "image_height"].max())
+            if "image_height" in page_sizes_df.columns
+            else float("nan")
+        )
+
+        # If missing/non-finite, read dims from the actual image file.
+        if not np.isfinite(w) or not np.isfinite(h) or w <= 0 or h <= 0:
+            try:
+                im = Image.open(img_path)
+                page_sizes_df.loc[mask, "image_width"] = float(im.width)
+                page_sizes_df.loc[mask, "image_height"] = float(im.height)
+            except Exception:
+                pass
+
+    except Exception:
+        return page_sizes_df
+
+    return page_sizes_df
+
+
+def _maybe_scale_pdf_points_boxes_to_pixels(
+    boxes_df: pd.DataFrame, page_size_row: pd.DataFrame
+) -> pd.DataFrame:
+    """
+    If boxes appear to be in absolute PDF points (MediaBox space), scale them to image pixels
+    for display in the annotator.
+
+    Heuristic:
+    - coords are absolute (>1), and their maxima are roughly within the MediaBox dimensions
+    - and we have both mediabox dims and image dims for the page
+
+    This addresses cases where downstream state rebuilds (e.g. bulk exclude) can leave coords
+    in point units for pages that were OCR'd / detected in PDF space.
+    """
+    if (
+        boxes_df is None
+        or boxes_df.empty
+        or page_size_row is None
+        or page_size_row.empty
+    ):
+        return boxes_df
+
+    required_cols = {"xmin", "xmax", "ymin", "ymax"}
+    if not required_cols.issubset(boxes_df.columns):
+        return boxes_df
+
+    try:
+        row = page_size_row.iloc[0]
+        img_w = float(pd.to_numeric(row.get("image_width"), errors="coerce"))
+        img_h = float(pd.to_numeric(row.get("image_height"), errors="coerce"))
+        mb_w = float(pd.to_numeric(row.get("mediabox_width"), errors="coerce"))
+        mb_h = float(pd.to_numeric(row.get("mediabox_height"), errors="coerce"))
+
+        if not (np.isfinite(img_w) and np.isfinite(img_h) and img_w > 0 and img_h > 0):
+            return boxes_df
+        if not (np.isfinite(mb_w) and np.isfinite(mb_h) and mb_w > 0 and mb_h > 0):
+            return boxes_df
+
+        coords = boxes_df[["xmin", "xmax", "ymin", "ymax"]].apply(
+            pd.to_numeric, errors="coerce"
+        )
+        if coords.isnull().all().all():
+            return boxes_df
+
+        # Determine if any row appears absolute (not relative)
+        any_relative = coords.le(1).any().any()
+        if any_relative:
+            return boxes_df
+
+        max_x = float(
+            pd.to_numeric(coords[["xmin", "xmax"]].max().max(), errors="coerce")
+        )
+        max_y = float(
+            pd.to_numeric(coords[["ymin", "ymax"]].max().max(), errors="coerce")
+        )
+        if not (np.isfinite(max_x) and np.isfinite(max_y)):
+            return boxes_df
+
+        # If maxima fall within MediaBox range (with small slack), treat as points.
+        if max_x <= (mb_w * 1.05) and max_y <= (mb_h * 1.05):
+            sx = img_w / mb_w
+            sy = img_h / mb_h
+            out = boxes_df.copy()
+            out["xmin"] = pd.to_numeric(out["xmin"], errors="coerce") * sx
+            out["xmax"] = pd.to_numeric(out["xmax"], errors="coerce") * sx
+            out["ymin"] = pd.to_numeric(out["ymin"], errors="coerce") * sy
+            out["ymax"] = pd.to_numeric(out["ymax"], errors="coerce") * sy
+            return out
+
+    except Exception:
+        return boxes_df
+
+    return boxes_df
 
 
 def replace_placeholder_image_with_real_image(
@@ -1525,14 +1690,41 @@ def replace_placeholder_image_with_real_image(
 
     else:
         if page_mask.any():
-            width_vals = page_sizes_df.loc[page_mask, "image_width"]
-            if not width_vals.isnull().all():
-                width = width_vals.max()
-                height = page_sizes_df.loc[page_mask, "image_height"].max()
-            else:
+            width_vals = (
+                pd.to_numeric(
+                    page_sizes_df.loc[page_mask, "image_width"], errors="coerce"
+                )
+                if "image_width" in page_sizes_df.columns
+                else pd.Series([float("nan")])
+            )
+            height_vals = (
+                pd.to_numeric(
+                    page_sizes_df.loc[page_mask, "image_height"], errors="coerce"
+                )
+                if "image_height" in page_sizes_df.columns
+                else pd.Series([float("nan")])
+            )
+
+            width = (
+                float(width_vals.max())
+                if not width_vals.isnull().all()
+                else float("nan")
+            )
+            height = (
+                float(height_vals.max())
+                if not height_vals.isnull().all()
+                else float("nan")
+            )
+
+            if (
+                (not np.isfinite(width))
+                or (not np.isfinite(height))
+                or width <= 0
+                or height <= 0
+            ):
                 image = Image.open(current_image_path)
-                width = image.width
-                height = image.height
+                width = float(image.width)
+                height = float(image.height)
                 page_sizes_df.loc[page_mask, "image_width"] = width
                 page_sizes_df.loc[page_mask, "image_height"] = height
         else:
@@ -1706,6 +1898,11 @@ def update_annotator_object_and_filter_df(
                     )
                 )
 
+                # Ensure the page_sizes entry has numeric, finite image dims for this page.
+                page_sizes_df = _ensure_page_image_dims_in_page_sizes_df(
+                    page_sizes_df, page_num_reported
+                )
+
                 # Update the image path in the state and review_df for the current page
                 # Find the correct entry in all_image_annotations list again by index
                 if len(all_image_annotations) > page_num_reported_zero_indexed:
@@ -1736,6 +1933,15 @@ def update_annotator_object_and_filter_df(
 
     # Save back page_sizes_df to page_sizes list format
     if not page_sizes_df.empty:
+        # Ensure numeric width/height for reliable downstream joins/scaling.
+        if "image_width" in page_sizes_df.columns:
+            page_sizes_df["image_width"] = pd.to_numeric(
+                page_sizes_df["image_width"], errors="coerce"
+            )
+        if "image_height" in page_sizes_df.columns:
+            page_sizes_df["image_height"] = pd.to_numeric(
+                page_sizes_df["image_height"], errors="coerce"
+            )
         page_sizes = page_sizes_df.to_dict(orient="records")
     else:
         page_sizes = list()  # Ensure page_sizes is a list if df is empty
@@ -1754,6 +1960,10 @@ def update_annotator_object_and_filter_df(
         if not current_page_annotations_df.empty and not page_sizes_df.empty:
             # Multiply coordinates *only* for this page's DataFrame (reuse single filter)
             try:
+                # One more guard: if dims are still missing but we have an image_path, populate them.
+                page_sizes_df = _ensure_page_image_dims_in_page_sizes_df(
+                    page_sizes_df, page_num_reported
+                )
                 page_size_row = page_sizes_df[
                     page_sizes_df["page"] == page_num_reported
                 ]
@@ -1765,6 +1975,12 @@ def update_annotator_object_and_filter_df(
                         xmax="xmax",
                         ymin="ymin",
                         ymax="ymax",
+                    )
+                    # If coords are still absolute but in PDF points, scale them to pixels.
+                    current_page_annotations_df = (
+                        _maybe_scale_pdf_points_boxes_to_pixels(
+                            current_page_annotations_df, page_size_row
+                        )
                     )
             except Exception as e:
                 print(
@@ -1877,16 +2093,70 @@ def update_annotator_object_and_filter_df(
         print("Warning: Could not prepare annotator object for the current page.")
         out_image_annotator = None
     else:
-        if current_page_image_annotator_object["image"].startswith("placeholder_image"):
-            current_page_image_annotator_object["image"], page_sizes_df = (
-                replace_placeholder_image_with_real_image(
-                    doc_full_file_name_textbox,
-                    current_page_image_annotator_object["image"],
-                    page_sizes_df,
-                    gradio_annotator_current_page_number,
-                    input_folder,
-                )
+        if _needs_on_demand_page_image(
+            current_page_image_annotator_object.get("image")
+        ):
+            replaced_path, page_sizes_df = replace_placeholder_image_with_real_image(
+                doc_full_file_name_textbox,
+                current_page_image_annotator_object.get("image", ""),
+                page_sizes_df,
+                gradio_annotator_current_page_number,
+                input_folder,
             )
+            current_page_image_annotator_object["image"] = replaced_path
+
+            # Keep state in sync (both page_sizes and all_image_annotations).
+            try:
+                _page_idx0 = int(gradio_annotator_current_page_number) - 1
+                if 0 <= _page_idx0 < len(all_image_annotations):
+                    all_image_annotations[_page_idx0]["image"] = replaced_path
+            except Exception:
+                pass
+
+            if not page_sizes_df.empty:
+                page_sizes = page_sizes_df.to_dict(orient="records")
+
+            # If boxes are still relative (0–1), multiply now that image dims exist.
+            try:
+                page_num = int(gradio_annotator_current_page_number)
+                page_size_row = page_sizes_df[page_sizes_df["page"] == page_num]
+                if not page_size_row.empty and current_page_image_annotator_object.get(
+                    "boxes"
+                ):
+                    boxes_df = pd.DataFrame(
+                        current_page_image_annotator_object["boxes"]
+                    )
+                    boxes_df["page"] = page_num
+                    boxes_df = multiply_coordinates_by_page_sizes(
+                        boxes_df,
+                        page_size_row,
+                        xmin="xmin",
+                        xmax="xmax",
+                        ymin="ymin",
+                        ymax="ymax",
+                    )
+                    boxes_df = _maybe_scale_pdf_points_boxes_to_pixels(
+                        boxes_df, page_size_row
+                    )
+                    # Preserve only the expected annotator keys.
+                    keep_cols = [
+                        "xmin",
+                        "xmax",
+                        "ymin",
+                        "ymax",
+                        "label",
+                        "color",
+                        "text",
+                        "id",
+                    ]
+                    keep_cols = [c for c in keep_cols if c in boxes_df.columns]
+                    current_page_image_annotator_object["boxes"] = boxes_df[
+                        keep_cols
+                    ].to_dict(orient="records")
+            except Exception as e:
+                print(
+                    f"Warning: failed to re-scale boxes after on-demand render for page {gradio_annotator_current_page_number}: {e}"
+                )
 
         out_image_annotator = current_page_image_annotator_object
 

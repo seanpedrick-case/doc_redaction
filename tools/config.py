@@ -82,42 +82,40 @@ def ensure_folder_within_app_directory(
     if folder_path == "TEMP":
         return folder_path
 
-    # Handle absolute paths
+    # Handle absolute paths. Do not call Path.resolve() on untrusted input (CodeQL
+    # py/path-injection); use normpath + abspath + commonpath like validate_path_safety.
     if os.path.isabs(folder_path):
-        folder_path_resolved = Path(folder_path).resolve()
-        # Check if the absolute path is within the app directory
+        base_norm = os.path.normpath(os.path.abspath(str(app_base_dir)))
+        candidate = os.path.normpath(os.path.abspath(folder_path))
         try:
-            folder_path_resolved.relative_to(app_base_dir)
-            # Path is already within app directory, return it normalized
-            result = str(folder_path_resolved)
+            common = os.path.commonpath([candidate, base_norm])
+        except ValueError:
+            common = None
+        if common == base_norm:
+            result = candidate
             if has_trailing_sep and not result.endswith(os.sep):
                 result = result + os.sep
             return result
-        except ValueError:
-            # Path is outside app directory - this is a security issue
-            # For system paths like /usr/share/tessdata, we'll allow them but log a warning
-            # For other absolute paths outside app directory, we'll raise an error
-            normalized_path = os.path.normpath(folder_path).lower()
-            system_path_prefixes = [
-                "/usr",
-                "/opt",
-                "/var",
-                "/etc",
-                "/tmp",
-            ]
-            if any(
-                normalized_path.startswith(prefix) for prefix in system_path_prefixes
-            ):
-                # System paths are allowed but we log a warning
-                print(
-                    f"Warning: Using system path outside app directory: {folder_path}"
-                )
-                return folder_path
-            else:
-                raise ValueError(
-                    f"Folder path '{folder_path}' is outside the app directory '{app_base_dir}'. "
-                    f"For security, all user-defined folder paths must be within the app directory."
-                )
+        # Path is outside app directory - this is a security issue
+        # For system paths like /usr/share/tessdata, we'll allow them but log a warning
+        # For other absolute paths outside app directory, we'll raise an error
+        normalized_path = candidate.lower()
+        system_path_prefixes = [
+            "/usr",
+            "/opt",
+            "/var",
+            "/etc",
+            "/tmp",
+        ]
+        if any(normalized_path.startswith(prefix) for prefix in system_path_prefixes):
+            # System paths are allowed but we log a warning
+            print(f"Warning: Using system path outside app directory: {folder_path}")
+            return folder_path
+        else:
+            raise ValueError(
+                f"Folder path '{folder_path}' is outside the app directory '{app_base_dir}'. "
+                f"For security, all user-defined folder paths must be within the app directory."
+            )
 
     # Handle relative paths - ensure they're within app directory
     try:
@@ -656,6 +654,13 @@ EFFICIENT_OCR_MIN_WORDS = int(get_or_create_env_var("EFFICIENT_OCR_MIN_WORDS", "
 # positives from tiny icons/watermarks. Set to 0 to disable image-based routing (word count only).
 EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION = float(
     get_or_create_env_var("EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION", "0.005")
+)
+# Minimum width and height (PDF points; ~pixels at 72 dpi) for an embedded image placement
+# to count toward image-based OCR routing. Ignores tiny artifacts that still meet the area
+# fraction on very small pages. Set to 0 to disable (area fraction only).
+EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX = max(
+    0,
+    int(get_or_create_env_var("EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX", "10")),
 )
 # Default max workers for parallel processing app-wide. Overridable by specific env vars below.
 MAX_WORKERS = max(

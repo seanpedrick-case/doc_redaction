@@ -36,6 +36,7 @@ from tools.config import (
     OUTPUT_FOLDER,
     SELECTABLE_TEXT_EXTRACT_OPTION,
     TEXTRACT_TEXT_EXTRACT_OPTION,
+    ensure_folder_within_app_directory,
 )
 from tools.helper_functions import get_file_name_without_type, read_file
 from tools.secure_path_utils import secure_file_read, secure_join
@@ -229,16 +230,26 @@ def process_single_page_for_image_conversion(
 
     if create_images is True:
         try:
-            # Construct the full output directory path
-            # Normalize input_folder to ensure it's used as-is without sanitization
-            if os.path.isabs(input_folder):
-                image_output_dir = Path(input_folder).resolve()
-            else:
-                # Join with cwd, but ensure input_folder is used as-is
-                base_dir = Path(os.getcwd()).resolve()
-                # Use Path.joinpath which doesn't sanitize folder names
-                image_output_dir = base_dir / input_folder
-                image_output_dir = image_output_dir.resolve()
+            # User-controlled input_folder must not be used to build paths without
+            # containment checks (CodeQL py/path-injection).
+            safe_folder = ensure_folder_within_app_directory(
+                str(input_folder).strip() if input_folder is not None else ""
+            )
+            if not (safe_folder and str(safe_folder).strip()):
+                raise ValueError(
+                    "input_folder is empty; cannot determine image output directory"
+                )
+            app_base_dir = Path(os.getcwd()).resolve()
+            candidate_output_dir = Path(safe_folder)
+            if not candidate_output_dir.is_absolute():
+                candidate_output_dir = app_base_dir / candidate_output_dir
+            image_output_dir = candidate_output_dir.resolve()
+            try:
+                image_output_dir.relative_to(app_base_dir)
+            except ValueError:
+                raise ValueError(
+                    f"input_folder must be within app directory: {app_base_dir}"
+                ) from None
 
             # Ensure the directory exists
             image_output_dir.mkdir(parents=True, exist_ok=True)
@@ -775,7 +786,8 @@ def create_page_size_objects(
                 out_page_image_sizes["image_height"] = image_sizes_height[image_index]
         else:
             # This page was not processed for image creation - use placeholder
-            out_page_image_sizes["image_path"] = f"image_placeholder_{page_no}.png"
+            # Standard placeholder name used across review UI for on-demand rendering.
+            out_page_image_sizes["image_path"] = f"placeholder_image_{page_no}.png"
             # No image dimensions for placeholder pages
 
         page_sizes.append(out_page_image_sizes)
