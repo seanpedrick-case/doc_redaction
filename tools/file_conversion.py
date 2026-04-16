@@ -239,7 +239,17 @@ def process_single_page_for_image_conversion(
                 raise ValueError(
                     "input_folder is empty; cannot determine image output directory"
                 )
-            image_output_dir = Path(safe_folder).resolve()
+            app_base_dir = Path(os.getcwd()).resolve()
+            candidate_output_dir = Path(safe_folder)
+            if not candidate_output_dir.is_absolute():
+                candidate_output_dir = app_base_dir / candidate_output_dir
+            image_output_dir = candidate_output_dir.resolve()
+            try:
+                image_output_dir.relative_to(app_base_dir)
+            except ValueError:
+                raise ValueError(
+                    f"input_folder must be within app directory: {app_base_dir}"
+                ) from None
 
             # Ensure the directory exists
             image_output_dir.mkdir(parents=True, exist_ok=True)

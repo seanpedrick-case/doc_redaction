@@ -353,14 +353,20 @@ def _get_session_default_cost_codes_s3_key_prefix():
 def get_session_default_cost_codes_csv_path(folder: str | None = None):
     """
     Return the path to the CSV file that stores session_hash -> default_cost_code.
-    If folder is provided (e.g. input folder path), resolve it under the configured
-    INPUT_FOLDER via secure_path_join (CodeQL / path-injection). If that fails,
-    fall back to the same folder as cost codes (COST_CODES_PATH or OUTPUT_COST_CODES_PATH).
+    If folder is provided (e.g. input folder path), constrain it to a sanitized
+    single directory name under INPUT_FOLDER (CodeQL / path-injection). If that
+    fails, fall back to the same folder as cost codes
+    (COST_CODES_PATH or OUTPUT_COST_CODES_PATH).
     """
     if folder is not None and str(folder).strip():
-        base = str(folder).strip()
+        raw_folder = str(folder).strip()
         try:
-            safe_base = secure_path_join(INPUT_FOLDER, base)
+            safe_folder_name = sanitize_filename(os.path.basename(raw_folder))
+            if safe_folder_name in {"", ".", ".."}:
+                raise ValueError(
+                    "Invalid folder name for session default cost codes path"
+                )
+            safe_base = secure_path_join(INPUT_FOLDER, safe_folder_name)
             return os.path.join(str(safe_base), SESSION_DEFAULT_COST_CODES_FILENAME)
         except (ValueError, PermissionError, OSError):
             # Cannot constrain user folder under INPUT_FOLDER; use defaults below.
@@ -400,16 +406,6 @@ def _session_default_cost_codes_parent_dirs() -> List[Path]:
     return out
 
 
-def _path_is_under_any_root(resolved: Path, roots: List[Path]) -> bool:
-    for root in roots:
-        try:
-            resolved.relative_to(root)
-            return True
-        except ValueError:
-            continue
-    return False
-
-
 def _validate_session_default_cost_codes_csv_path(
     csv_path: str, *, allow_download_temp: bool = False
 ) -> Path:
@@ -420,24 +416,37 @@ def _validate_session_default_cost_codes_csv_path(
     """
     if not csv_path or not str(csv_path).strip():
         raise ValueError("Missing session default cost codes CSV path")
-    resolved = Path(csv_path).resolve()
+    path_str = str(csv_path).strip()
+    # Do not call Path.resolve() on untrusted paths (CodeQL py/path-injection);
+    # use normpath + abspath + commonpath containment like validate_path_safety.
+    candidate = os.path.normpath(os.path.abspath(path_str))
     if allow_download_temp:
-        temp_root = Path(tempfile.gettempdir()).resolve()
-        if not _path_is_under_any_root(resolved, [temp_root]):
+        temp_root = os.path.normpath(os.path.abspath(tempfile.gettempdir()))
+        try:
+            common = os.path.commonpath([candidate, temp_root])
+        except ValueError:
+            common = None
+        if common != temp_root:
             raise PermissionError(
-                f"Session cost codes download path outside system temp: {resolved}"
+                f"Session cost codes download path outside system temp: {candidate}"
             )
-        return resolved
-    if resolved.name != SESSION_DEFAULT_COST_CODES_FILENAME:
+        return Path(candidate)
+    if os.path.basename(candidate) != SESSION_DEFAULT_COST_CODES_FILENAME:
         raise PermissionError(
-            f"Unexpected session default cost codes filename: {resolved.name!r}"
+            f"Unexpected session default cost codes filename: {os.path.basename(candidate)!r}"
         )
     roots = _session_default_cost_codes_parent_dirs()
-    if not _path_is_under_any_root(resolved, roots):
-        raise PermissionError(
-            f"Session default cost codes CSV outside allowed directories: {resolved}"
-        )
-    return resolved
+    for root in roots:
+        root_norm = os.path.normpath(os.path.abspath(str(root)))
+        try:
+            common = os.path.commonpath([candidate, root_norm])
+        except ValueError:
+            continue
+        if common == root_norm:
+            return Path(candidate)
+    raise PermissionError(
+        f"Session default cost codes CSV outside allowed directories: {candidate}"
+    )
 
 
 def save_default_cost_code_for_session(
