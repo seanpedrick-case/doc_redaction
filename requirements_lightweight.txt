@@ -26,8 +26,8 @@ pdf2image<=1.17.0
 pymupdf<=1.27.1
 pikepdf<=10.3.0
 opencv-python<=4.13.0.92
-presidio_analyzer<=2.2.361
-presidio_anonymizer<=2.2.361
+presidio_analyzer<=2.2.362
+presidio_anonymizer<=2.2.362
 presidio-image-redactor<=0.0.57
 
 # --- Gradio and apps ---

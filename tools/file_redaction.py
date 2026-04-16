@@ -11114,6 +11114,7 @@ def redact_text_pdf(
         ) in pii_results_list:
             pii_results_by_page[page_no] = (
                 page_redaction_bounding_boxes,
+                comprehend_units_used,
                 llm_name,
                 llm_in,
                 llm_out,

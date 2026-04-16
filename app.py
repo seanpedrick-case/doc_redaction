@@ -3212,7 +3212,7 @@ with blocks:
         with gr.Tab(label="Word or Excel/CSV files", id=5):
 
             gr.Markdown(
-                """Choose a Word or tabular data file (xlsx or csv) to redact. Note that when redacting complex Word files with e.g. images, some content/formatting will be removed, and it may not attempt to redact headers. You may prefer to convert the doc file to PDF in Word, and then run it through the first tab of this app (Print to PDF in print settings). Alternatively, an xlsx file output is provided when redacting docx files directly to allow for copying and pasting outputs back into the original document if preferred."""
+                """Choose a Word or tabular data file (xlsx or csv) to redact. Note that when redacting complex Word files with e.g. images, some content/formatting will be removed, and it may not attempt to redact headers. You may prefer to convert the document file to PDF in Word, and then run it through the first tab of this app (Redact PDFs/images)."""
             )
 
             # Examples for Word/Excel/csv redaction and tabular duplicate detection
@@ -3311,7 +3311,7 @@ with blocks:
                     )
 
             with gr.Accordion(
-                "Redact Word or Excel/CSV files options",
+                "Redact Word or Excel/CSV files options. Further settings such as entity types and custom allow/deny lists can be set in the first tab (Redact PDFs/images).",
                 open=show_main_redaction_accordion,
             ):
                 with gr.Accordion("Upload docx, xlsx, or csv files", open=True):
@@ -3330,7 +3330,7 @@ with blocks:
                 pii_identification_method_drop_tabular.render()
 
                 with gr.Accordion(
-                    "Anonymisation output format - by default will replace PII with a blank space",
+                    "Anonymisation output format - by default will replace PII with a blank space. ",
                     open=False,
                 ):
                     with gr.Row():
