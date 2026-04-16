@@ -10787,10 +10787,10 @@ def _run_pii_for_one_page(
     chosen_llm_entities: List[str],
     output_folder: str,
     file_name: str,
-) -> Tuple[int, List, str, int, int]:
+) -> Tuple[int, List, int, str, int, int]:
     """
     Run PII identification for a single page (used for parallel Local/AWS Comprehend).
-    Returns (page_no, page_redaction_bounding_boxes, llm_model_name, llm_input_tokens, llm_output_tokens).
+    Returns (page_no, page_redaction_bounding_boxes, comprehend_units_used, llm_model_name, llm_input_tokens, llm_output_tokens).
     """
     (
         page_no,
@@ -10804,6 +10804,7 @@ def _run_pii_for_one_page(
     page_redaction_bounding_boxes = list()
     (
         page_redaction_bounding_boxes,
+        comprehend_units_used,
         llm_model_name_page,
         llm_input_tokens_page,
         llm_output_tokens_page,
@@ -10833,6 +10834,7 @@ def _run_pii_for_one_page(
     return (
         page_no,
         page_redaction_bounding_boxes,
+        comprehend_units_used,
         llm_model_name_page,
         llm_input_tokens_page,
         llm_output_tokens_page,
@@ -11101,9 +11103,11 @@ def redact_text_pdf(
                     desc="Detecting PII (parallel)",
                 )
             )
+        _comprehend_units_parallel = 0
         for (
             page_no,
             page_redaction_bounding_boxes,
+            comprehend_units_used,
             llm_name,
             llm_in,
             llm_out,
@@ -11114,6 +11118,13 @@ def redact_text_pdf(
                 llm_in,
                 llm_out,
             )
+            try:
+                _comprehend_units_parallel += int(comprehend_units_used or 0)
+            except Exception:
+                pass
+
+        # Accumulate Comprehend usage across parallel pages (billing units).
+        comprehend_query_number += int(_comprehend_units_parallel or 0)
 
     # Precompute per-page lookups so the loop does O(1) access instead of repeated DataFrame .loc
     # (Same approach as redaction_review: pass image_dimensions_override to skip per-call .loc in redact_page_with_pymupdf.)
@@ -11227,6 +11238,7 @@ def redact_text_pdf(
                 if page_no in pii_results_by_page:
                     (
                         page_redaction_bounding_boxes,
+                        comprehend_units_used,
                         llm_model_name_page,
                         llm_input_tokens_page,
                         llm_output_tokens_page,
@@ -11234,6 +11246,7 @@ def redact_text_pdf(
                 else:
                     (
                         page_redaction_bounding_boxes,
+                        comprehend_units_used,
                         llm_model_name_page,
                         llm_input_tokens_page,
                         llm_output_tokens_page,
@@ -11260,6 +11273,8 @@ def redact_text_pdf(
                         file_name=file_name,
                         page_number=int(reported_page_number),
                     )
+
+                comprehend_query_number += int(comprehend_units_used or 0)
 
                 if (
                     not page_redaction_bounding_boxes

@@ -775,7 +775,8 @@ def create_page_size_objects(
                 out_page_image_sizes["image_height"] = image_sizes_height[image_index]
         else:
             # This page was not processed for image creation - use placeholder
-            out_page_image_sizes["image_path"] = f"image_placeholder_{page_no}.png"
+            # Standard placeholder name used across review UI for on-demand rendering.
+            out_page_image_sizes["image_path"] = f"placeholder_image_{page_no}.png"
             # No image dimensions for placeholder pages
 
         page_sizes.append(out_page_image_sizes)

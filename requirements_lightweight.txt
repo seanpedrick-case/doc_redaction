@@ -10,7 +10,7 @@ python-dotenv<=1.0.1
 defusedxml<=0.7.1
 Faker<=40.8.0
 python-levenshtein<=0.27.3
-rapidfuzz<=3.14.3
+rapidfuzz<=3.14.5
 markdown<=3.10.2
 tabulate<=0.10.0
 
@@ -31,7 +31,7 @@ presidio_anonymizer<=2.2.361
 presidio-image-redactor<=0.0.57
 
 # --- Gradio and apps ---
-gradio<=6.10.0
+gradio<=6.12.0
 https://github.com/seanpedrick-case/gradio_image_annotator/releases/download/v0.5.3/gradio_image_annotation-0.5.3-py3-none-any.whl  # Custom annotator version with rotation, zoom, labels, and box IDs
 spaces<=0.48.1
 
@@ -42,12 +42,12 @@ awslambdaric<=3.1.1
 python-docx<=1.2.0
 
 # --- Testing ---
-pytest<=7.4.3
-pytest-cov<=4.0.0
+pytest<=9.0.3
+pytest-cov<=7.1.0
 
 # --- LLM libraries ---
 # Explicit protobuf: PaddlePaddle imports google.protobuf; layered `pip --target` installs
 # plus google-* packages can leave the google namespace incomplete without it.
 protobuf<=7.34.0
-google-genai<=1.66.0
-openai<=2.25.0
+google-genai<=1.73.0
+openai<=2.31.0
