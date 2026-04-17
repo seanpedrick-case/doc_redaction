@@ -455,7 +455,8 @@ services:
       - DEFAULT_NEW_BATCH_CHAR_COUNT=1250
       - REPORT_VLM_OUTPUTS_TO_GUI=True
       - REPORT_LLM_OUTPUTS_TO_GUI=True
-      - ADD_VLM_BOUNDING_BOX_RULES=False      
+      - ADD_VLM_BOUNDING_BOX_RULES=False
+      - RUN_MCP_SERVER=True   
 
     deploy:
       resources:
