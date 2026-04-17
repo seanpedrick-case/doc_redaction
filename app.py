@@ -2147,7 +2147,9 @@ with blocks:
             # QUICKSTART WALKTHROUGH EVENT HANDLERS
             ###
             step_1_back_btn.click(
-                lambda: gr.Walkthrough(selected=0), outputs=walkthrough
+                lambda: gr.Walkthrough(selected=0),
+                outputs=walkthrough,
+                api_visibility="undocumented",
             )
             # Step 1: Route files to appropriate component when Next is clicked
             step_1_next_btn.click(
@@ -2162,6 +2164,7 @@ with blocks:
                     walkthrough_local_ocr_accordion,
                     walkthrough_aws_textract_accordion,
                 ],
+                api_visibility="undocumented",
             )
 
             ### Step 2
@@ -2169,7 +2172,9 @@ with blocks:
             # Note: in_excel_sheets is defined in the "Word or Excel/CSV files" tab (id=5)
             # Both tabs are in the same gr.Tabs() context, so components are accessible at runtime
             step_2_back_btn.click(
-                lambda: gr.Walkthrough(selected=1), outputs=walkthrough
+                lambda: gr.Walkthrough(selected=1),
+                outputs=walkthrough,
+                api_visibility="undocumented",
             )
 
             step_2_next_btn.click(
@@ -2189,6 +2194,7 @@ with blocks:
                     walkthrough_text_extract_method_radio,
                     walkthrough,
                 ],  # type: ignore
+                api_visibility="undocumented",
             )
 
             # Update local OCR method radio and AWS Textract settings visibility when text extraction method is selected
@@ -2202,6 +2208,7 @@ with blocks:
                 ],
                 queue=False,
                 postprocess=False,
+                api_visibility="undocumented",
             )
 
             # When data files are uploaded in walkthrough, automatically populate dropdowns
@@ -2219,6 +2226,7 @@ with blocks:
                     walkthrough_last_data_file_keys,
                 ],
                 queue=False,
+                api_visibility="undocumented",
             )
 
             # Update Step 3 components visibility when redaction method is selected
@@ -2237,6 +2245,7 @@ with blocks:
                     walkthrough_list_accordion,
                     walkthrough_max_fuzzy_spelling_mistakes_num,
                 ],
+                api_visibility="undocumented",
             )
 
             # Update entity dropdowns when PII method is selected (document path)
@@ -2250,6 +2259,7 @@ with blocks:
                 ],
                 queue=False,
                 postprocess=False,
+                api_visibility="undocumented",
             )
 
             # Update entity dropdowns when tabular PII method is selected.
@@ -2265,6 +2275,7 @@ with blocks:
                 ],
                 queue=False,
                 postprocess=False,
+                api_visibility="undocumented",
             )
 
             # Update Step 3 component visibility based on file type (hide document-only when CSV/Excel)
@@ -2280,11 +2291,14 @@ with blocks:
                     walkthrough_anon_strategy,
                     walkthrough_do_initial_clean,
                 ],
+                api_visibility="undocumented",
             )
 
             ### Step 3
             step_3_back_btn.click(
-                lambda: gr.Walkthrough(selected=2), outputs=walkthrough
+                lambda: gr.Walkthrough(selected=2),
+                outputs=walkthrough,
+                api_visibility="undocumented",
             )
 
             step_3_next_btn.click(
@@ -2326,6 +2340,7 @@ with blocks:
                     walkthrough,
                     max_fuzzy_spelling_mistakes_num,
                 ],
+                api_visibility="undocumented",
             )
 
             # Reset cost code dataframe filter in walkthrough
@@ -2336,6 +2351,7 @@ with blocks:
                     reset_base_dataframe,
                     inputs=[cost_code_dataframe_base],
                     outputs=[walkthrough_cost_code_dataframe],
+                    api_visibility="undocumented",
                 )
 
                 def _walkthrough_save_default_cost_code(sh, choice, df, output_folder):
@@ -2353,6 +2369,7 @@ with blocks:
                         input_folder_textbox,
                     ],
                     outputs=[],
+                    api_visibility="undocumented",
                 )
 
             # Update Step 4 component visibility based on file type
@@ -2363,12 +2380,15 @@ with blocks:
                     step_4_next_document_redact_btn,
                     step_4_next_tabular_redact_btn,
                 ],
+                api_visibility="undocumented",
             )
 
             ### Step 4
 
             step_4_back_btn.click(
-                lambda: gr.Walkthrough(selected=3), outputs=walkthrough
+                lambda: gr.Walkthrough(selected=3),
+                outputs=walkthrough,
+                api_visibility="undocumented",
             )
 
             ## Step 4 next button actions are further down the file (step_4_next_document_redact_btn.click and step_4_next_tabular_redact_btn.click)
@@ -3969,6 +3989,7 @@ with blocks:
                 estimated_aws_costs_number,
                 walkthrough_estimated_aws_costs_number,
             ],
+            api_visibility="undocumented",
         )
         text_extract_method_radio.change(
             fn=_check_for_relevant_ocr_output_with_words_sync,
@@ -3981,6 +4002,7 @@ with blocks:
                 relevant_ocr_output_with_words_found_checkbox,
                 walkthrough_relevant_ocr_output_with_words_found_checkbox,
             ],
+            api_visibility="undocumented",
         ).success(
             _calculate_aws_costs_sync,
             inputs=[
@@ -3995,6 +4017,7 @@ with blocks:
                 estimated_aws_costs_number,
                 walkthrough_estimated_aws_costs_number,
             ],
+            api_visibility="undocumented",
         )
         pii_identification_method_drop.change(
             _calculate_aws_costs_sync,
@@ -4010,6 +4033,7 @@ with blocks:
                 estimated_aws_costs_number,
                 walkthrough_estimated_aws_costs_number,
             ],
+            api_visibility="undocumented",
         )
         handwrite_signature_checkbox.change(
             fn=_check_for_existing_textract_file_sync,
@@ -4022,6 +4046,7 @@ with blocks:
                 textract_output_found_checkbox,
                 walkthrough_textract_output_found_checkbox,
             ],
+            api_visibility="undocumented",
         ).then(
             _calculate_aws_costs_sync,
             inputs=[
@@ -4036,6 +4061,7 @@ with blocks:
                 estimated_aws_costs_number,
                 walkthrough_estimated_aws_costs_number,
             ],
+            api_visibility="undocumented",
         )
         textract_output_found_checkbox.change(
             _calculate_aws_costs_sync,
@@ -4051,6 +4077,7 @@ with blocks:
                 estimated_aws_costs_number,
                 walkthrough_estimated_aws_costs_number,
             ],
+            api_visibility="undocumented",
         )
         only_extract_text_radio.change(
             _calculate_aws_costs_sync,
@@ -4066,6 +4093,7 @@ with blocks:
                 estimated_aws_costs_number,
                 walkthrough_estimated_aws_costs_number,
             ],
+            api_visibility="undocumented",
         )
         textract_output_found_checkbox.change(
             _calculate_aws_costs_sync,
@@ -4081,6 +4109,7 @@ with blocks:
                 estimated_aws_costs_number,
                 walkthrough_estimated_aws_costs_number,
             ],
+            api_visibility="undocumented",
         )
 
         # Calculate time taken
@@ -4099,6 +4128,7 @@ with blocks:
                 estimated_time_taken_number,
                 walkthrough_estimated_time_taken_number,
             ],
+            api_visibility="undocumented",
         )
         text_extract_method_radio.change(
             _calculate_time_taken_sync,
@@ -4115,6 +4145,7 @@ with blocks:
                 estimated_time_taken_number,
                 walkthrough_estimated_time_taken_number,
             ],
+            api_visibility="undocumented",
         )
         pii_identification_method_drop.change(
             _calculate_time_taken_sync,
@@ -4131,6 +4162,7 @@ with blocks:
                 estimated_time_taken_number,
                 walkthrough_estimated_time_taken_number,
             ],
+            api_visibility="undocumented",
         )
         handwrite_signature_checkbox.change(
             fn=_check_for_existing_textract_file_sync,
@@ -4143,6 +4175,7 @@ with blocks:
                 textract_output_found_checkbox,
                 walkthrough_textract_output_found_checkbox,
             ],
+            api_visibility="undocumented",
         ).then(
             _calculate_time_taken_sync,
             inputs=[
@@ -4158,6 +4191,7 @@ with blocks:
                 estimated_time_taken_number,
                 walkthrough_estimated_time_taken_number,
             ],
+            api_visibility="undocumented",
         )
         textract_output_found_checkbox.change(
             _calculate_time_taken_sync,
@@ -4174,6 +4208,7 @@ with blocks:
                 estimated_time_taken_number,
                 walkthrough_estimated_time_taken_number,
             ],
+            api_visibility="undocumented",
         )
         only_extract_text_radio.change(
             _calculate_time_taken_sync,
@@ -4190,6 +4225,7 @@ with blocks:
                 estimated_time_taken_number,
                 walkthrough_estimated_time_taken_number,
             ],
+            api_visibility="undocumented",
         )
         textract_output_found_checkbox.change(
             _calculate_time_taken_sync,
@@ -4206,6 +4242,7 @@ with blocks:
                 estimated_time_taken_number,
                 walkthrough_estimated_time_taken_number,
             ],
+            api_visibility="undocumented",
         )
         relevant_ocr_output_with_words_found_checkbox.change(
             _calculate_time_taken_sync,
@@ -4222,12 +4259,14 @@ with blocks:
                 estimated_time_taken_number,
                 walkthrough_estimated_time_taken_number,
             ],
+            api_visibility="undocumented",
         )
 
     text_extract_method_radio.change(
         fn=auto_set_local_ocr_for_bedrock_vlm,
         inputs=[text_extract_method_radio],
         outputs=[local_ocr_method_radio],
+        api_visibility="undocumented",
     )
 
     # Update visibility of OCR-related accordions based on text extraction method selection
@@ -4239,6 +4278,7 @@ with blocks:
             inference_server_vlm_accordion,
             aws_textract_signature_accordion,
         ],
+        api_visibility="undocumented",
     )
 
     redaction_method_radio.change(
@@ -4256,6 +4296,7 @@ with blocks:
             terms_accordion,
             only_extract_text_radio,
         ],
+        api_visibility="undocumented",
     )
 
     # Update visibility of PII-related accordions based on PII method selection
@@ -4268,6 +4309,7 @@ with blocks:
             in_redact_llm_entities,
             custom_llm_entities_accordion,
         ],
+        api_visibility="undocumented",
     )
 
     # Allow user to select items from cost code dataframe for cost code
@@ -4276,17 +4318,20 @@ with blocks:
             df_select_callback_cost,
             inputs=[cost_code_dataframe],
             outputs=[cost_code_choice_drop],
+            api_visibility="undocumented",
         )
         reset_cost_code_dataframe_button.click(
             reset_base_dataframe,
             inputs=[cost_code_dataframe_base],
             outputs=[cost_code_dataframe],
+            api_visibility="undocumented",
         )
 
         cost_code_choice_drop.select(
             update_cost_code_dataframe_from_dropdown_select,
             inputs=[cost_code_choice_drop, cost_code_dataframe_base],
             outputs=[cost_code_dataframe],
+            api_visibility="undocumented",
         )
 
         def _save_default_cost_code_and_notify(
@@ -4306,6 +4351,7 @@ with blocks:
                 input_folder_textbox,
             ],
             outputs=[],
+            api_visibility="undocumented",
         )
 
     # Uploading a file writes to state variables
@@ -4377,6 +4423,7 @@ with blocks:
         fn=_doc_upload_fn,
         inputs=[in_doc_files],
         outputs=_doc_upload_outputs,
+        api_visibility="undocumented",
     ).success(
         fn=_prepare_fn,
         inputs=[
@@ -4402,6 +4449,7 @@ with blocks:
         ],
         outputs=_prepare_outputs,
         show_progress_on=[redaction_output_summary_textbox],
+        api_visibility="undocumented",
     ).success(
         fn=_textract_check_fn,
         inputs=[
@@ -4410,6 +4458,7 @@ with blocks:
             handwrite_signature_checkbox,
         ],
         outputs=_textract_check_outputs,
+        api_visibility="undocumented",
     ).success(
         fn=_ocr_check_fn,
         inputs=[
@@ -4418,6 +4467,7 @@ with blocks:
             output_folder_textbox,
         ],
         outputs=_ocr_check_outputs,
+        api_visibility="undocumented",
     )
 
     # Same process as above for walkthrough file input
@@ -4425,6 +4475,7 @@ with blocks:
         fn=_doc_upload_fn,
         inputs=[walkthrough_file_input],
         outputs=_doc_upload_outputs,
+        api_visibility="undocumented",
     ).success(
         fn=_prepare_fn,
         inputs=[
@@ -4450,6 +4501,7 @@ with blocks:
         ],
         outputs=_prepare_outputs,
         show_progress_on=[redaction_output_summary_textbox],
+        api_visibility="undocumented",
     ).success(
         fn=_textract_check_fn,
         inputs=[
@@ -4458,6 +4510,7 @@ with blocks:
             handwrite_signature_checkbox,
         ],
         outputs=_textract_check_outputs,
+        api_visibility="undocumented",
     ).success(
         fn=_ocr_check_fn,
         inputs=[
@@ -4466,6 +4519,7 @@ with blocks:
             output_folder_textbox,
         ],
         outputs=_ocr_check_outputs,
+        api_visibility="undocumented",
     )
 
     ###
@@ -4533,6 +4587,7 @@ with blocks:
         change_tab_to_tabular_or_document_redactions,
         inputs=walkthrough_is_data_file,
         outputs=tabs,
+        api_visibility="undocumented",
     ).then(
         fn=reset_state_vars,
         outputs=[
@@ -4559,6 +4614,7 @@ with blocks:
             vlm_total_input_tokens_number,
             vlm_total_output_tokens_number,
         ],
+        api_visibility="undocumented",
     ).success(
         fn=enforce_cost_codes,
         inputs=[
@@ -4566,6 +4622,7 @@ with blocks:
             cost_code_choice_drop,
             cost_code_dataframe_base,
         ],
+        api_visibility="undocumented",
     ).success(
         fn=choose_and_run_redactor,
         inputs=[
@@ -4743,6 +4800,7 @@ with blocks:
         fn=upload_log_file_to_s3,
         inputs=[usage_logs_state, usage_s3_logs_loc_state],
         outputs=[s3_logs_output_textbox],
+        api_visibility="undocumented",
     ).success(
         fn=export_outputs_to_s3,
         inputs=[
@@ -4752,6 +4810,7 @@ with blocks:
             in_doc_files,
         ],
         outputs=None,
+        api_visibility="undocumented",
     ).success(
         fn=update_annotator_object_and_filter_df,
         inputs=[
@@ -4783,6 +4842,7 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         fn=check_for_existing_textract_file,
         inputs=[
@@ -4791,6 +4851,7 @@ with blocks:
             handwrite_signature_checkbox,
         ],
         outputs=[textract_output_found_checkbox],
+        api_visibility="undocumented",
     ).success(
         fn=check_for_relevant_ocr_output_with_words,
         inputs=[
@@ -4799,6 +4860,7 @@ with blocks:
             output_folder_textbox,
         ],
         outputs=[relevant_ocr_output_with_words_found_checkbox],
+        api_visibility="undocumented",
     ).success(
         fn=reveal_feedback_buttons,
         outputs=[
@@ -4807,10 +4869,12 @@ with blocks:
             pdf_submit_feedback_btn,
             pdf_feedback_title,
         ],
+        api_visibility="undocumented",
     ).success(
         fn=check_duplicate_pages_checkbox,
         inputs=[redact_duplicate_pages_checkbox],
         outputs=None,
+        api_visibility="undocumented",
     ).failure(  # Failure case enables branching for when duplicate analysis textbox is enabled
         fn=lambda: None
     ).then(
@@ -4825,6 +4889,7 @@ with blocks:
             llm_model_name_textbox,
             vlm_model_name_textbox,
         ],
+        api_visibility="undocumented",
     ).success(
         fn=run_duplicate_analysis,
         inputs=[
@@ -4850,6 +4915,7 @@ with blocks:
             duplicate_pages_list_state,
         ],
         show_progress_on=[results_df_preview, redaction_output_summary_textbox],
+        api_visibility="undocumented",
     ).success(
         fn=export_outputs_to_s3,
         # duplicate_files_out returns a single file path; export helper will normalise it
@@ -4860,9 +4926,9 @@ with blocks:
             in_duplicate_pages,
         ],
         outputs=None,
+        api_visibility="undocumented",
     ).success(
-        fn=lambda: "deduplicate",
-        outputs=[task_textbox],
+        fn=lambda: "deduplicate", outputs=[task_textbox], api_visibility="undocumented"
     ).success(
         fn=lambda *args: usage_callback.flag(
             list(args),
@@ -4921,10 +4987,12 @@ with blocks:
         ),
         outputs=[flag_value_placeholder],
         preprocess=False,
+        api_visibility="undocumented",
     ).success(
         fn=upload_log_file_to_s3,
         inputs=[usage_logs_state, usage_s3_logs_loc_state],
         outputs=[s3_logs_output_textbox],
+        api_visibility="undocumented",
     ).success(
         fn=create_annotation_objects_from_duplicates,
         inputs=[
@@ -4938,6 +5006,7 @@ with blocks:
             new_duplicate_search_annotation_object,
             redaction_output_summary_textbox,
         ],
+        api_visibility="undocumented",
     ).success(
         fn=apply_whole_page_redactions_from_list,
         inputs=[
@@ -4953,6 +5022,7 @@ with blocks:
             latest_review_file_path,
         ],
         outputs=[review_file_df, all_image_annotations_state],
+        api_visibility="undocumented",
     ).success(
         update_annotator_page_from_review_df,
         inputs=[
@@ -4974,6 +5044,7 @@ with blocks:
             annotate_previous_page,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -5005,6 +5076,7 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     )
 
     # Run redaction function from document redaction tab button
@@ -5034,6 +5106,7 @@ with blocks:
             vlm_total_input_tokens_number,
             vlm_total_output_tokens_number,
         ],
+        api_visibility="undocumented",
     ).success(
         fn=enforce_cost_codes,
         inputs=[
@@ -5041,6 +5114,7 @@ with blocks:
             cost_code_choice_drop,
             cost_code_dataframe_base,
         ],
+        api_visibility="undocumented",
     ).success(
         fn=choose_and_run_redactor,
         inputs=[
@@ -5218,6 +5292,7 @@ with blocks:
         fn=upload_log_file_to_s3,
         inputs=[usage_logs_state, usage_s3_logs_loc_state],
         outputs=[s3_logs_output_textbox],
+        api_visibility="undocumented",
     ).success(
         fn=export_outputs_to_s3,
         inputs=[
@@ -5227,6 +5302,7 @@ with blocks:
             in_doc_files,
         ],
         outputs=None,
+        api_visibility="undocumented",
     ).success(
         fn=update_annotator_object_and_filter_df,
         inputs=[
@@ -5258,6 +5334,7 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         fn=check_for_existing_textract_file,
         inputs=[
@@ -5266,6 +5343,7 @@ with blocks:
             handwrite_signature_checkbox,
         ],
         outputs=[textract_output_found_checkbox],
+        api_visibility="undocumented",
     ).success(
         fn=check_for_relevant_ocr_output_with_words,
         inputs=[
@@ -5274,6 +5352,7 @@ with blocks:
             output_folder_textbox,
         ],
         outputs=[relevant_ocr_output_with_words_found_checkbox],
+        api_visibility="undocumented",
     ).success(
         fn=reveal_feedback_buttons,
         outputs=[
@@ -5282,10 +5361,12 @@ with blocks:
             pdf_submit_feedback_btn,
             pdf_feedback_title,
         ],
+        api_visibility="undocumented",
     ).success(
         fn=check_duplicate_pages_checkbox,
         inputs=[redact_duplicate_pages_checkbox],
         outputs=None,
+        api_visibility="undocumented",
     ).failure(  # Failure case enables branching for when duplicate analysis textbox is enabled
         fn=lambda: None
     ).then(
@@ -5300,6 +5381,7 @@ with blocks:
             llm_model_name_textbox,
             vlm_model_name_textbox,
         ],
+        api_visibility="undocumented",
     ).success(
         fn=run_duplicate_analysis,
         inputs=[
@@ -5325,6 +5407,7 @@ with blocks:
             duplicate_pages_list_state,
         ],
         show_progress_on=[results_df_preview, redaction_output_summary_textbox],
+        api_visibility="undocumented",
     ).success(
         fn=export_outputs_to_s3,
         # duplicate_files_out returns a single file path; export helper will normalise it
@@ -5335,9 +5418,9 @@ with blocks:
             in_duplicate_pages,
         ],
         outputs=None,
+        api_visibility="undocumented",
     ).success(
-        fn=lambda: "deduplicate",
-        outputs=[task_textbox],
+        fn=lambda: "deduplicate", outputs=[task_textbox], api_visibility="undocumented"
     ).success(
         fn=lambda *args: usage_callback.flag(
             list(args),
@@ -5396,10 +5479,12 @@ with blocks:
         ),
         outputs=[flag_value_placeholder],
         preprocess=False,
+        api_visibility="undocumented",
     ).success(
         fn=upload_log_file_to_s3,
         inputs=[usage_logs_state, usage_s3_logs_loc_state],
         outputs=[s3_logs_output_textbox],
+        api_visibility="undocumented",
     ).success(
         fn=create_annotation_objects_from_duplicates,
         inputs=[
@@ -5413,6 +5498,7 @@ with blocks:
             new_duplicate_search_annotation_object,
             redaction_output_summary_textbox,
         ],
+        api_visibility="undocumented",
     ).success(
         fn=apply_whole_page_redactions_from_list,
         inputs=[
@@ -5428,6 +5514,7 @@ with blocks:
             latest_review_file_path,
         ],
         outputs=[review_file_df, all_image_annotations_state],
+        api_visibility="undocumented",
     ).success(
         update_annotator_page_from_review_df,
         inputs=[
@@ -5449,6 +5536,7 @@ with blocks:
             annotate_previous_page,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -5480,6 +5568,7 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     )
 
     # If the line level ocr results are changed by load in by user or by a new redaction task, replace the ocr results displayed in the table
@@ -5487,6 +5576,7 @@ with blocks:
         reset_ocr_base_dataframe,
         inputs=[all_page_line_level_ocr_results_df_base],
         outputs=[all_page_line_level_ocr_results_df],
+        api_visibility="undocumented",
     )
     all_page_line_level_ocr_results_with_words_df_base.change(
         reset_ocr_with_words_base_dataframe,
@@ -5498,6 +5588,7 @@ with blocks:
             all_page_line_level_ocr_results_with_words_df,
             backup_all_page_line_level_ocr_results_with_words_df_base,
         ],
+        api_visibility="undocumented",
     )
 
     # Send whole document to Textract for text extraction
@@ -5524,7 +5615,12 @@ with blocks:
             task_textbox,
         ],
         show_progress_on=[job_current_status],
-    ).success(check_for_provided_job_id, inputs=[job_id_textbox]).success(
+        api_visibility="undocumented",
+    ).success(
+        check_for_provided_job_id,
+        inputs=[job_id_textbox],
+        api_visibility="undocumented",
+    ).success(
         poll_whole_document_textract_analysis_progress_and_download,
         inputs=[
             job_id_textbox,
@@ -5544,17 +5640,20 @@ with blocks:
             doc_file_name_no_extension_textbox,
         ],
         show_progress_on=[job_current_status],
+        api_visibility="undocumented",
     ).success(
         fn=check_for_existing_textract_file,
         inputs=[doc_file_name_no_extension_textbox, output_folder_textbox],
         outputs=[textract_output_found_checkbox],
         show_progress_on=[job_current_status],
+        api_visibility="undocumented",
     )
 
     check_state_of_textract_api_call_btn.click(
         check_for_provided_job_id,
         inputs=[job_id_textbox],
         show_progress_on=[job_current_status],
+        api_visibility="undocumented",
     ).success(
         poll_whole_document_textract_analysis_progress_and_download,
         inputs=[
@@ -5575,17 +5674,20 @@ with blocks:
             doc_file_name_no_extension_textbox,
         ],
         show_progress_on=[job_current_status],
+        api_visibility="undocumented",
     ).success(
         fn=check_for_existing_textract_file,
         inputs=[doc_file_name_no_extension_textbox, output_folder_textbox],
         outputs=[textract_output_found_checkbox],
         show_progress_on=[job_current_status],
+        api_visibility="undocumented",
     )
 
     textract_job_detail_df.select(
         df_select_callback_textract_api,
         inputs=[textract_output_found_checkbox],
         outputs=[job_id_textbox, job_type_dropdown, selected_job_id_row],
+        api_visibility="undocumented",
     )
 
     convert_textract_outputs_to_ocr_results.click(
@@ -5607,6 +5709,7 @@ with blocks:
             total_pdf_page_count,
         ],
         show_progress_on=[redaction_output_summary_textbox],
+        api_visibility="undocumented",
     ).success(
         fn=prepare_image_or_pdf_with_efficient_ocr,
         inputs=[
@@ -5648,6 +5751,7 @@ with blocks:
             all_page_line_level_ocr_results_with_words_df_base,
         ],
         show_progress_on=[redaction_output_summary_textbox],
+        api_visibility="undocumented",
     ).success(
         fn=check_for_existing_textract_file,
         inputs=[
@@ -5656,6 +5760,7 @@ with blocks:
             handwrite_signature_checkbox,
         ],
         outputs=[textract_output_found_checkbox],
+        api_visibility="undocumented",
     ).success(
         fn=check_for_relevant_ocr_output_with_words,
         inputs=[
@@ -5664,8 +5769,11 @@ with blocks:
             output_folder_textbox,
         ],
         outputs=[relevant_ocr_output_with_words_found_checkbox],
+        api_visibility="undocumented",
     ).success(
-        fn=check_textract_outputs_exist, inputs=[textract_output_found_checkbox]
+        fn=check_textract_outputs_exist,
+        inputs=[textract_output_found_checkbox],
+        api_visibility="undocumented",
     ).success(
         fn=reset_state_vars,
         outputs=[
@@ -5691,6 +5799,7 @@ with blocks:
             vlm_total_input_tokens_number,
             vlm_total_output_tokens_number,
         ],
+        api_visibility="undocumented",
     ).success(
         fn=choose_and_run_redactor,
         inputs=[
@@ -5805,6 +5914,7 @@ with blocks:
             total_pdf_page_count,
         ],
         show_progress_on=[redaction_output_summary_textbox],
+        api_visibility="undocumented",
     ).success(
         fn=export_outputs_to_s3,
         inputs=[
@@ -5814,6 +5924,7 @@ with blocks:
             in_doc_files,
         ],
         outputs=None,
+        api_visibility="undocumented",
     ).success(
         fn=update_annotator_object_and_filter_df,
         inputs=[
@@ -5845,12 +5956,14 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     )
 
     go_to_review_redactions_tab_btn.click(
         fn=change_tab_to_review_redactions,
         inputs=None,
         outputs=tabs,
+        api_visibility="undocumented",
     )
 
     ###
@@ -5862,6 +5975,7 @@ with blocks:
         fn=reset_review_vars,
         inputs=None,
         outputs=[recogniser_entity_dataframe, recogniser_entity_dataframe_base],
+        api_visibility="undocumented",
     ).success(
         fn=get_document_file_names,
         inputs=[input_pdf_for_review],
@@ -5872,6 +5986,7 @@ with blocks:
             doc_file_name_textbox_list,
             total_pdf_page_count,
         ],
+        api_visibility="undocumented",
     ).success(
         fn=prepare_image_or_pdf_with_efficient_ocr,
         inputs=[
@@ -5945,6 +6060,7 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         apply_redactions_to_review_df_and_files,
         inputs=[
@@ -5967,6 +6083,7 @@ with blocks:
             review_file_df,
         ],
         show_progress_on=[input_pdf_for_review],
+        api_visibility="undocumented",
     )
 
     # Upload previous review CSV files for modifying redactions
@@ -6011,6 +6128,7 @@ with blocks:
             all_page_line_level_ocr_results_with_words_df_base,
         ],
         show_progress_on=[redaction_output_summary_textbox],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -6042,6 +6160,7 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         apply_redactions_to_review_df_and_files,
         inputs=[
@@ -6064,6 +6183,7 @@ with blocks:
             review_file_df,
         ],
         show_progress_on=[input_pdf_for_review],
+        api_visibility="undocumented",
     )
 
     # Manual updates to review df
@@ -6088,6 +6208,7 @@ with blocks:
             annotate_previous_page,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -6119,6 +6240,7 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     )
 
     # Page number controls
@@ -6136,6 +6258,7 @@ with blocks:
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -6167,6 +6290,7 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         apply_redactions_to_review_df_and_files,
         inputs=[
@@ -6189,6 +6313,7 @@ with blocks:
             review_file_df,
         ],
         show_progress_on=[input_pdf_for_review],
+        api_visibility="undocumented",
     )
 
     annotation_last_page_button.click(
@@ -6196,6 +6321,7 @@ with blocks:
         inputs=[annotate_current_page, all_image_annotations_state],
         outputs=[annotate_current_page, annotate_current_page_bottom],
         show_progress_on=[all_image_annotations_state],
+        api_visibility="undocumented",
     ).success(
         update_all_page_annotation_object_based_on_previous_page,
         inputs=[
@@ -6210,6 +6336,7 @@ with blocks:
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -6241,6 +6368,7 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         apply_redactions_to_review_df_and_files,
         inputs=[
@@ -6263,6 +6391,7 @@ with blocks:
             review_file_df,
         ],
         show_progress_on=[input_pdf_for_review],
+        api_visibility="undocumented",
     )
 
     annotation_next_page_button.click(
@@ -6270,6 +6399,7 @@ with blocks:
         inputs=[annotate_current_page, all_image_annotations_state],
         outputs=[annotate_current_page, annotate_current_page_bottom],
         show_progress_on=[all_image_annotations_state],
+        api_visibility="undocumented",
     ).success(
         update_all_page_annotation_object_based_on_previous_page,
         inputs=[
@@ -6284,6 +6414,7 @@ with blocks:
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -6315,6 +6446,7 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         apply_redactions_to_review_df_and_files,
         inputs=[
@@ -6337,6 +6469,7 @@ with blocks:
             review_file_df,
         ],
         show_progress_on=[input_pdf_for_review],
+        api_visibility="undocumented",
     )
 
     annotation_last_page_button_bottom.click(
@@ -6344,6 +6477,7 @@ with blocks:
         inputs=[annotate_current_page, all_image_annotations_state],
         outputs=[annotate_current_page, annotate_current_page_bottom],
         show_progress_on=[all_image_annotations_state],
+        api_visibility="undocumented",
     ).success(
         update_all_page_annotation_object_based_on_previous_page,
         inputs=[
@@ -6358,6 +6492,7 @@ with blocks:
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -6389,6 +6524,7 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         apply_redactions_to_review_df_and_files,
         inputs=[
@@ -6411,6 +6547,7 @@ with blocks:
             review_file_df,
         ],
         show_progress_on=[input_pdf_for_review],
+        api_visibility="undocumented",
     )
 
     annotation_next_page_button_bottom.click(
@@ -6418,6 +6555,7 @@ with blocks:
         inputs=[annotate_current_page, all_image_annotations_state],
         outputs=[annotate_current_page, annotate_current_page_bottom],
         show_progress_on=[all_image_annotations_state],
+        api_visibility="undocumented",
     ).success(
         update_all_page_annotation_object_based_on_previous_page,
         inputs=[
@@ -6432,6 +6570,7 @@ with blocks:
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -6463,6 +6602,7 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         apply_redactions_to_review_df_and_files,
         inputs=[
@@ -6485,12 +6625,14 @@ with blocks:
             review_file_df,
         ],
         show_progress_on=[input_pdf_for_review],
+        api_visibility="undocumented",
     )
 
     annotate_current_page_bottom.submit(
         update_other_annotator_number_from_current,
         inputs=[annotate_current_page_bottom],
         outputs=[annotate_current_page],
+        api_visibility="undocumented",
     ).success(
         update_all_page_annotation_object_based_on_previous_page,
         inputs=[
@@ -6505,6 +6647,7 @@ with blocks:
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -6536,6 +6679,7 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         apply_redactions_to_review_df_and_files,
         inputs=[
@@ -6558,6 +6702,7 @@ with blocks:
             review_file_df,
         ],
         show_progress_on=[input_pdf_for_review],
+        api_visibility="undocumented",
     )
 
     # Apply page redactions
@@ -6575,6 +6720,7 @@ with blocks:
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -6606,6 +6752,7 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         apply_redactions_to_review_df_and_files,
         inputs=[
@@ -6629,6 +6776,7 @@ with blocks:
         ],
         scroll_to_output=True,
         show_progress_on=[input_pdf_for_review],
+        api_visibility="undocumented",
     )
 
     # Save current page manual redactions
@@ -6646,6 +6794,7 @@ with blocks:
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -6677,6 +6826,7 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         apply_redactions_to_review_df_and_files,
         inputs=[
@@ -6699,6 +6849,7 @@ with blocks:
             review_file_df,
         ],
         show_progress_on=[input_pdf_for_review],
+        api_visibility="undocumented",
     )
 
     ###
@@ -6719,6 +6870,7 @@ with blocks:
             text_entity_dropdown,
             page_entity_dropdown,
         ],
+        api_visibility="undocumented",
     )
     page_entity_dropdown.select(
         update_entities_df_page,
@@ -6733,6 +6885,7 @@ with blocks:
             recogniser_entity_dropdown,
             text_entity_dropdown,
         ],
+        api_visibility="undocumented",
     )
     text_entity_dropdown.select(
         update_entities_df_text,
@@ -6747,6 +6900,7 @@ with blocks:
             recogniser_entity_dropdown,
             page_entity_dropdown,
         ],
+        api_visibility="undocumented",
     )
 
     # Clicking on a cell in the recogniser entity dataframe will take you to that page, and also highlight the target redaction box in blue
@@ -6754,6 +6908,7 @@ with blocks:
         df_select_callback_dataframe_row,
         inputs=[recogniser_entity_dataframe],
         outputs=[selected_entity_dataframe_row, selected_entity_dataframe_row_text],
+        api_visibility="undocumented",
     ).success(
         update_all_page_annotation_object_based_on_previous_page,
         inputs=[
@@ -6768,6 +6923,7 @@ with blocks:
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        api_visibility="undocumented",
     ).success(
         get_and_merge_current_page_annotations,
         inputs=[
@@ -6777,6 +6933,7 @@ with blocks:
             review_file_df,
         ],
         outputs=[review_file_df],
+        api_visibility="undocumented",
     ).success(
         update_selected_review_df_row_colour,
         inputs=[
@@ -6786,6 +6943,7 @@ with blocks:
             selected_entity_colour,
         ],
         outputs=[review_file_df, selected_entity_id, selected_entity_colour],
+        api_visibility="undocumented",
     ).success(
         update_annotator_page_from_review_df,
         inputs=[
@@ -6807,10 +6965,12 @@ with blocks:
             annotate_previous_page,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         increase_bottom_page_count_based_on_top,
         inputs=[annotate_current_page],
         outputs=[annotate_current_page_bottom],
+        api_visibility="undocumented",
     ).success(
         apply_redactions_to_review_df_and_files,
         inputs=[
@@ -6833,6 +6993,7 @@ with blocks:
             review_file_df,
         ],
         show_progress_on=[input_pdf_for_review],
+        api_visibility="undocumented",
     )
 
     reset_dropdowns_btn.click(
@@ -6843,6 +7004,7 @@ with blocks:
             text_entity_dropdown,
             page_entity_dropdown,
         ],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -6874,6 +7036,7 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     )
 
     ### Exclude current selection from annotator and outputs
@@ -6892,6 +7055,7 @@ with blocks:
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        api_visibility="undocumented",
     ).success(
         get_and_merge_current_page_annotations,
         inputs=[
@@ -6901,6 +7065,7 @@ with blocks:
             review_file_df,
         ],
         outputs=[review_file_df],
+        api_visibility="undocumented",
     ).success(
         exclude_selected_items_from_redaction,
         inputs=[
@@ -6919,6 +7084,7 @@ with blocks:
             backup_image_annotations_state,
             backup_recogniser_entity_dataframe_base,
         ],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -6950,6 +7116,7 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         apply_redactions_to_review_df_and_files,
         inputs=[
@@ -6972,6 +7139,7 @@ with blocks:
             review_file_df,
         ],
         show_progress_on=[input_pdf_for_review],
+        api_visibility="undocumented",
     ).success(
         update_all_entity_df_dropdowns,
         inputs=[
@@ -6985,6 +7153,7 @@ with blocks:
             text_entity_dropdown,
             page_entity_dropdown,
         ],
+        api_visibility="undocumented",
     )
 
     # Exclude all items with same text as selected row
@@ -7002,6 +7171,7 @@ with blocks:
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        api_visibility="undocumented",
     ).success(
         get_and_merge_current_page_annotations,
         inputs=[
@@ -7011,6 +7181,7 @@ with blocks:
             review_file_df,
         ],
         outputs=[review_file_df],
+        api_visibility="undocumented",
     ).success(
         get_all_rows_with_same_text,
         inputs=[
@@ -7018,6 +7189,7 @@ with blocks:
             selected_entity_dataframe_row_text,
         ],
         outputs=[recogniser_entity_dataframe_same_text],
+        api_visibility="undocumented",
     ).success(
         exclude_selected_items_from_redaction,
         inputs=[
@@ -7036,6 +7208,7 @@ with blocks:
             backup_image_annotations_state,
             backup_recogniser_entity_dataframe_base,
         ],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -7067,6 +7240,7 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         apply_redactions_to_review_df_and_files,
         inputs=[
@@ -7089,6 +7263,7 @@ with blocks:
             review_file_df,
         ],
         show_progress_on=[input_pdf_for_review],
+        api_visibility="undocumented",
     ).success(
         update_all_entity_df_dropdowns,
         inputs=[
@@ -7102,6 +7277,7 @@ with blocks:
             text_entity_dropdown,
             page_entity_dropdown,
         ],
+        api_visibility="undocumented",
     )
 
     # Exclude everything visible in table
@@ -7119,6 +7295,7 @@ with blocks:
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        api_visibility="undocumented",
     ).success(
         get_and_merge_current_page_annotations,
         inputs=[
@@ -7128,6 +7305,7 @@ with blocks:
             review_file_df,
         ],
         outputs=[review_file_df],
+        api_visibility="undocumented",
     ).success(
         exclude_selected_items_from_redaction,
         inputs=[
@@ -7146,6 +7324,7 @@ with blocks:
             backup_image_annotations_state,
             backup_recogniser_entity_dataframe_base,
         ],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -7177,6 +7356,7 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         apply_redactions_to_review_df_and_files,
         inputs=[
@@ -7199,6 +7379,7 @@ with blocks:
             review_file_df,
         ],
         show_progress_on=[input_pdf_for_review],
+        api_visibility="undocumented",
     ).success(
         update_all_entity_df_dropdowns,
         inputs=[
@@ -7212,6 +7393,7 @@ with blocks:
             text_entity_dropdown,
             page_entity_dropdown,
         ],
+        api_visibility="undocumented",
     )
 
     # Undo last redaction exclusion action
@@ -7227,6 +7409,7 @@ with blocks:
             all_image_annotations_state,
             recogniser_entity_dataframe_base,
         ],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -7258,6 +7441,7 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         apply_redactions_to_review_df_and_files,
         inputs=[
@@ -7280,6 +7464,7 @@ with blocks:
             review_file_df,
         ],
         show_progress_on=[input_pdf_for_review],
+        api_visibility="undocumented",
     )
 
     ###
@@ -7292,6 +7477,7 @@ with blocks:
             all_page_line_level_ocr_results_with_words_df_base,
         ],
         outputs=[all_page_line_level_ocr_results_with_words_df],
+        api_visibility="undocumented",
     )
 
     multi_word_search_text.submit(
@@ -7307,6 +7493,7 @@ with blocks:
             duplicate_files_out,
             full_duplicate_data_by_file,
         ],
+        api_visibility="undocumented",
     )
 
     multi_word_search_text_btn.click(
@@ -7333,6 +7520,7 @@ with blocks:
             selected_entity_dataframe_row_redact,
             selected_entity_dataframe_row_text_redact,
         ],
+        api_visibility="undocumented",
     ).success(
         update_all_page_annotation_object_based_on_previous_page,
         inputs=[
@@ -7347,6 +7535,7 @@ with blocks:
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        api_visibility="undocumented",
     ).success(
         get_and_merge_current_page_annotations,
         inputs=[
@@ -7356,6 +7545,7 @@ with blocks:
             review_file_df,
         ],
         outputs=[review_file_df],
+        api_visibility="undocumented",
     ).success(
         update_annotator_page_from_review_df,
         inputs=[
@@ -7377,10 +7567,12 @@ with blocks:
             annotate_previous_page,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         increase_bottom_page_count_based_on_top,
         inputs=[annotate_current_page],
         outputs=[annotate_current_page_bottom],
+        api_visibility="undocumented",
     )
 
     # Reset dropdowns
@@ -7392,6 +7584,7 @@ with blocks:
             text_entity_dropdown,
             page_entity_dropdown_redaction,
         ],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -7423,6 +7616,7 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     )
 
     # Redact everything visible in table
@@ -7440,6 +7634,7 @@ with blocks:
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        api_visibility="undocumented",
     ).success(
         create_annotation_objects_from_filtered_ocr_results_with_words,
         inputs=[
@@ -7461,6 +7656,7 @@ with blocks:
             recogniser_entity_dataframe,
             backup_recogniser_entity_dataframe_base,
         ],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -7492,6 +7688,7 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         apply_redactions_to_review_df_and_files,
         inputs=[
@@ -7514,6 +7711,7 @@ with blocks:
             review_file_df,
         ],
         show_progress_on=[input_pdf_for_review],
+        api_visibility="undocumented",
     ).success(
         update_all_entity_df_dropdowns,
         inputs=[
@@ -7527,6 +7725,7 @@ with blocks:
             text_entity_dropdown,
             page_entity_dropdown_redaction,
         ],
+        api_visibility="undocumented",
     )
 
     # Reset redaction table following filtering
@@ -7540,6 +7739,7 @@ with blocks:
             all_page_line_level_ocr_results_with_words_df,
             backup_all_page_line_level_ocr_results_with_words_df_base,
         ],
+        api_visibility="undocumented",
     )
 
     # Redact current selection
@@ -7557,6 +7757,7 @@ with blocks:
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        api_visibility="undocumented",
     ).success(
         create_annotation_objects_from_filtered_ocr_results_with_words,
         inputs=[
@@ -7578,6 +7779,7 @@ with blocks:
             recogniser_entity_dataframe,
             backup_recogniser_entity_dataframe_base,
         ],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -7609,6 +7811,7 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         apply_redactions_to_review_df_and_files,
         inputs=[
@@ -7631,6 +7834,7 @@ with blocks:
             review_file_df,
         ],
         show_progress_on=[input_pdf_for_review],
+        api_visibility="undocumented",
     ).success(
         update_all_entity_df_dropdowns,
         inputs=[
@@ -7644,6 +7848,7 @@ with blocks:
             text_entity_dropdown,
             page_entity_dropdown_redaction,
         ],
+        api_visibility="undocumented",
     )
 
     # Redact all items with same text as selected row
@@ -7661,6 +7866,7 @@ with blocks:
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        api_visibility="undocumented",
     ).success(
         get_all_rows_with_same_text_redact,
         inputs=[
@@ -7668,6 +7874,7 @@ with blocks:
             selected_entity_dataframe_row_text_redact,
         ],
         outputs=[to_redact_dataframe_same_text],
+        api_visibility="undocumented",
     ).success(
         create_annotation_objects_from_filtered_ocr_results_with_words,
         inputs=[
@@ -7689,6 +7896,7 @@ with blocks:
             recogniser_entity_dataframe,
             backup_recogniser_entity_dataframe_base,
         ],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -7720,6 +7928,7 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         apply_redactions_to_review_df_and_files,
         inputs=[
@@ -7742,6 +7951,7 @@ with blocks:
             review_file_df,
         ],
         show_progress_on=[input_pdf_for_review],
+        api_visibility="undocumented",
     ).success(
         update_all_entity_df_dropdowns,
         inputs=[
@@ -7755,6 +7965,7 @@ with blocks:
             text_entity_dropdown,
             page_entity_dropdown_redaction,
         ],
+        api_visibility="undocumented",
     )
 
     # Undo last redaction action
@@ -7770,6 +7981,7 @@ with blocks:
             all_image_annotations_state,
             recogniser_entity_dataframe_base,
         ],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -7801,6 +8013,7 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         apply_redactions_to_review_df_and_files,
         inputs=[
@@ -7823,6 +8036,7 @@ with blocks:
             review_file_df,
         ],
         show_progress_on=[input_pdf_for_review],
+        api_visibility="undocumented",
     )
 
     ###
@@ -7832,6 +8046,7 @@ with blocks:
         df_select_callback_ocr,
         inputs=[all_page_line_level_ocr_results_df],
         outputs=[annotate_current_page, selected_ocr_dataframe_row],
+        api_visibility="undocumented",
     ).success(
         update_annotator_page_from_review_df,
         inputs=[
@@ -7853,10 +8068,12 @@ with blocks:
             annotate_previous_page,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         increase_bottom_page_count_based_on_top,
         inputs=[annotate_current_page],
         outputs=[annotate_current_page_bottom],
+        api_visibility="undocumented",
     )
 
     # Reset the OCR results filter
@@ -7864,6 +8081,7 @@ with blocks:
         reset_ocr_base_dataframe,
         inputs=[all_page_line_level_ocr_results_df_base],
         outputs=[all_page_line_level_ocr_results_df],
+        api_visibility="undocumented",
     )
 
     # Convert review file to xfdf Adobe format
@@ -7877,6 +8095,7 @@ with blocks:
             doc_file_name_textbox_list,
             total_pdf_page_count,
         ],
+        api_visibility="undocumented",
     ).success(
         fn=prepare_image_or_pdf_with_efficient_ocr,
         inputs=[
@@ -7918,6 +8137,7 @@ with blocks:
             all_page_line_level_ocr_results_with_words_df_base,
         ],
         show_progress_on=[adobe_review_files_out],
+        api_visibility="undocumented",
     ).success(
         convert_df_to_xfdf,
         inputs=[
@@ -7929,6 +8149,7 @@ with blocks:
             page_sizes,
         ],
         outputs=[adobe_review_files_out],
+        api_visibility="undocumented",
     ).success(
         fn=export_outputs_to_s3,
         inputs=[
@@ -7938,6 +8159,7 @@ with blocks:
             input_pdf_for_review,
         ],
         outputs=None,
+        api_visibility="undocumented",
     )
 
     # Convert xfdf Adobe file back to review_file.csv
@@ -7951,6 +8173,7 @@ with blocks:
             doc_file_name_textbox_list,
             total_pdf_page_count,
         ],
+        api_visibility="undocumented",
     ).success(
         fn=prepare_image_or_pdf_with_efficient_ocr,
         inputs=[
@@ -7992,6 +8215,7 @@ with blocks:
             all_page_line_level_ocr_results_with_words_df_base,
         ],
         show_progress_on=[adobe_review_files_out],
+        api_visibility="undocumented",
     ).success(
         fn=convert_xfdf_to_dataframe,
         inputs=[
@@ -8003,6 +8227,7 @@ with blocks:
         ],
         outputs=[input_pdf_for_review],
         scroll_to_output=True,
+        api_visibility="undocumented",
     )
 
     ###
@@ -8012,6 +8237,7 @@ with blocks:
         fn=put_columns_in_df,
         inputs=[in_data_files],
         outputs=[in_colnames, in_excel_sheets],
+        api_visibility="undocumented",
     ).success(
         fn=get_input_file_names,
         inputs=[in_data_files],
@@ -8022,6 +8248,7 @@ with blocks:
             data_file_name_textbox_list,
             total_pdf_page_count,
         ],
+        api_visibility="undocumented",
     )
 
     # Redact tabular data
@@ -8031,6 +8258,7 @@ with blocks:
         change_tab_to_tabular_or_document_redactions,
         inputs=walkthrough_is_data_file,
         outputs=tabs,
+        api_visibility="undocumented",
     ).success(
         fn=reset_data_vars,
         outputs=[
@@ -8038,6 +8266,7 @@ with blocks:
             log_files_output_list_state,
             comprehend_query_number,
         ],
+        api_visibility="undocumented",
     ).success(
         fn=anonymise_files_with_open_text,
         inputs=[
@@ -8140,10 +8369,12 @@ with blocks:
         ),
         outputs=[flag_value_placeholder],
         preprocess=False,
+        api_visibility="undocumented",
     ).success(
         fn=upload_log_file_to_s3,
         inputs=[usage_logs_state, usage_s3_logs_loc_state],
         outputs=[s3_logs_output_textbox],
+        api_visibility="undocumented",
     ).success(
         fn=export_outputs_to_s3,
         inputs=[
@@ -8153,6 +8384,7 @@ with blocks:
             in_data_files,
         ],
         outputs=None,
+        api_visibility="undocumented",
     )
 
     ## From tabular data redaction tab button
@@ -8163,6 +8395,7 @@ with blocks:
             log_files_output_list_state,
             comprehend_query_number,
         ],
+        api_visibility="undocumented",
     ).success(
         fn=anonymise_files_with_open_text,
         inputs=[
@@ -8265,10 +8498,12 @@ with blocks:
         ),
         outputs=[flag_value_placeholder],
         preprocess=False,
+        api_visibility="undocumented",
     ).success(
         fn=upload_log_file_to_s3,
         inputs=[usage_logs_state, usage_s3_logs_loc_state],
         outputs=[s3_logs_output_textbox],
+        api_visibility="undocumented",
     ).success(
         fn=export_outputs_to_s3,
         inputs=[
@@ -8278,6 +8513,7 @@ with blocks:
             in_data_files,
         ],
         outputs=None,
+        api_visibility="undocumented",
     ).success(
         fn=reveal_feedback_buttons,
         outputs=[
@@ -8286,6 +8522,7 @@ with blocks:
             data_submit_feedback_btn,
             data_feedback_title,
         ],
+        api_visibility="undocumented",
     )
 
     ###
@@ -8296,6 +8533,7 @@ with blocks:
         fn=lambda greedy: gr.update(visible=not greedy),
         inputs=[greedy_match_input],
         outputs=[min_consecutive_pages_input],
+        api_visibility="undocumented",
     )
 
     find_duplicate_pages_btn.click(
@@ -8323,6 +8561,7 @@ with blocks:
             duplicate_pages_list_state,
         ],
         show_progress_on=[results_df_preview, redaction_output_summary_textbox],
+        api_visibility="undocumented",
     ).success(
         fn=export_outputs_to_s3,
         # duplicate_files_out returns a single file path; export helper will normalise it
@@ -8333,9 +8572,9 @@ with blocks:
             in_duplicate_pages,
         ],
         outputs=None,
+        api_visibility="undocumented",
     ).success(
-        fn=lambda: "deduplicate",
-        outputs=[task_textbox],
+        fn=lambda: "deduplicate", outputs=[task_textbox], api_visibility="undocumented"
     ).success(
         fn=lambda *args: usage_callback.flag(
             list(args),
@@ -8394,10 +8633,12 @@ with blocks:
         ),
         outputs=[flag_value_placeholder],
         preprocess=False,
+        api_visibility="undocumented",
     ).success(
         fn=upload_log_file_to_s3,
         inputs=[usage_logs_state, usage_s3_logs_loc_state],
         outputs=[s3_logs_output_textbox],
+        api_visibility="undocumented",
     )
 
     results_df_preview.select(
@@ -8408,6 +8649,7 @@ with blocks:
             page1_text_preview,
             page2_text_preview,
         ],
+        api_visibility="undocumented",
     )
 
     # When the user clicks the "Exclude" button
@@ -8426,6 +8668,7 @@ with blocks:
             page2_text_preview,
             duplicate_pages_list_state,
         ],
+        api_visibility="undocumented",
     )
 
     apply_match_btn.click(
@@ -8441,6 +8684,7 @@ with blocks:
             new_duplicate_search_annotation_object,
             redaction_output_summary_textbox,
         ],
+        api_visibility="undocumented",
     ).success(
         fn=apply_whole_page_redactions_from_list,
         inputs=[
@@ -8456,6 +8700,7 @@ with blocks:
             latest_review_file_path,
         ],
         outputs=[review_file_df, all_image_annotations_state],
+        api_visibility="undocumented",
     ).success(
         update_annotator_page_from_review_df,
         inputs=[
@@ -8477,6 +8722,7 @@ with blocks:
             annotate_previous_page,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -8508,12 +8754,14 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     )
 
     go_to_review_redactions_tab_btn_2.click(
         fn=change_tab_to_review_redactions,
         inputs=None,
         outputs=tabs,
+        api_visibility="undocumented",
     )
 
     ###
@@ -8525,6 +8773,7 @@ with blocks:
         fn=put_columns_in_df,
         inputs=[in_tabular_duplicate_files],
         outputs=[tabular_text_columns, in_excel_tabular_sheets],
+        api_visibility="undocumented",
     )
 
     find_tabular_duplicates_btn.click(
@@ -8549,8 +8798,7 @@ with blocks:
         api_name="tabular_clean_duplicates",
         show_progress_on=[tabular_results_df],
     ).success(
-        fn=lambda: "deduplicate",
-        outputs=[task_textbox],
+        fn=lambda: "deduplicate", outputs=[task_textbox], api_visibility="undocumented"
     ).success(
         fn=lambda *args: usage_callback.flag(
             list(args),
@@ -8609,10 +8857,12 @@ with blocks:
         ),
         outputs=[flag_value_placeholder],
         preprocess=False,
+        api_visibility="undocumented",
     ).success(
         fn=upload_log_file_to_s3,
         inputs=[usage_logs_state, usage_s3_logs_loc_state],
         outputs=[s3_logs_output_textbox],
+        api_visibility="undocumented",
     )
 
     tabular_results_df.select(
@@ -8623,6 +8873,7 @@ with blocks:
             tabular_text1_preview,
             tabular_text2_preview,
         ],
+        api_visibility="undocumented",
     )
 
     clean_duplicates_btn.click(
@@ -8634,6 +8885,7 @@ with blocks:
             in_excel_tabular_sheets,
         ],
         outputs=[tabular_cleaned_file],
+        api_visibility="undocumented",
     )
 
     ###
@@ -9008,6 +9260,7 @@ with blocks:
             llm_model_name_textbox,
             vlm_model_name_textbox,
         ],
+        api_visibility="undocumented",
     ).success(
         fn=enforce_cost_codes,
         inputs=[
@@ -9015,6 +9268,7 @@ with blocks:
             cost_code_choice_drop,
             cost_code_dataframe_base,
         ],
+        api_visibility="undocumented",
     ).success(
         fn=maybe_extract_then_summarise,
         inputs=[
@@ -9112,9 +9366,11 @@ with blocks:
         ],
         show_progress=True,
         show_progress_on=[summarisation_status],
+        api_visibility="undocumented",
     ).success(
         fn=lambda: "summarisation",
         outputs=[task_textbox],
+        api_visibility="undocumented",
     ).success(
         fn=lambda *args: usage_callback.flag(
             list(args),
@@ -9178,6 +9434,7 @@ with blocks:
         fn=upload_log_file_to_s3,
         inputs=[usage_logs_state, usage_s3_logs_loc_state],
         outputs=[s3_logs_output_textbox],
+        api_visibility="undocumented",
     )
 
     ###
@@ -9188,16 +9445,19 @@ with blocks:
         fn=custom_regex_load,
         inputs=[in_allow_list],
         outputs=[in_allow_list_text, in_allow_list_state],
+        api_visibility="undocumented",
     )
     in_deny_list.change(
         fn=custom_regex_load,
         inputs=[in_deny_list, in_deny_list_text_in],
         outputs=[in_deny_list_text, in_deny_list_state],
+        api_visibility="undocumented",
     )
     in_fully_redacted_list.change(
         fn=custom_regex_load,
         inputs=[in_fully_redacted_list, in_fully_redacted_text_in],
         outputs=[in_fully_redacted_list_text, in_fully_redacted_list_state],
+        api_visibility="undocumented",
     )
 
     # Apply whole page redactions from the provided whole page redaction csv file upload/list of specific page numbers given by user
@@ -9237,6 +9497,7 @@ with blocks:
             latest_review_file_path,
         ],
         outputs=[review_file_df, all_image_annotations_state],
+        api_visibility="undocumented",
     ).success(
         update_annotator_page_from_review_df,
         inputs=[
@@ -9258,6 +9519,7 @@ with blocks:
             annotate_previous_page,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -9289,6 +9551,7 @@ with blocks:
             all_image_annotations_state,
         ],
         show_progress_on=[annotator],
+        api_visibility="undocumented",
     )
 
     # Merge multiple review csv files together
@@ -9312,16 +9575,19 @@ with blocks:
         fn=lambda: gr.FileExplorer(root_dir=FEEDBACK_LOGS_FOLDER),
         inputs=None,
         outputs=all_output_files,
+        api_visibility="undocumented",
     ).success(
         fn=load_all_output_files,
         inputs=output_folder_textbox,
         outputs=all_output_files,
+        api_visibility="undocumented",
     )
 
     all_output_files.input(
         fn=all_outputs_file_download_fn,
         inputs=all_output_files,
         outputs=all_outputs_file_download,
+        api_visibility="undocumented",
     )
 
     # Language selection dropdown
@@ -9329,6 +9595,7 @@ with blocks:
         update_language_dropdown,
         inputs=[chosen_language_full_name_drop],
         outputs=[chosen_language_drop],
+        api_visibility="undocumented",
     )
 
     ###
@@ -9361,6 +9628,7 @@ with blocks:
                 local_whole_document_textract_logs_subfolder,
                 s3_output_folder_state,
             ],
+            api_visibility="undocumented",
         ).success(
             load_in_textract_job_details,
             inputs=[
@@ -9369,10 +9637,12 @@ with blocks:
                 local_whole_document_textract_logs_subfolder,
             ],
             outputs=[textract_job_detail_df],
+            api_visibility="undocumented",
         ).success(
             fn=load_all_output_files,
             inputs=output_folder_textbox,
             outputs=all_output_files,
+            api_visibility="undocumented",
         )
 
     else:
@@ -9399,10 +9669,12 @@ with blocks:
                 local_whole_document_textract_logs_subfolder,
                 s3_output_folder_state,
             ],
+            api_visibility="undocumented",
         ).success(
             fn=load_all_output_files,
             inputs=output_folder_textbox,
             outputs=all_output_files,
+            api_visibility="undocumented",
         )
 
     # If relevant environment variable is set, load in the default allow list file from S3 or locally. Even when setting S3 path, need to local path to give a download location
@@ -9420,10 +9692,12 @@ with blocks:
                     s3_default_allow_list_file,
                     default_allow_list_output_folder_location,
                 ],
+                api_visibility="undocumented",
             ).success(
                 load_in_default_allow_list,
                 inputs=[default_allow_list_output_folder_location],
                 outputs=[in_allow_list],
+                api_visibility="undocumented",
             )
             print("Successfully loaded allow list from S3")
         elif os.path.exists(ALLOW_LIST_PATH):
@@ -9435,6 +9709,7 @@ with blocks:
                 load_in_default_allow_list,
                 inputs=[default_allow_list_output_folder_location],
                 outputs=[in_allow_list],
+                api_visibility="undocumented",
             )
         else:
             print("Could not load in default allow list")
@@ -9454,6 +9729,7 @@ with blocks:
                     s3_default_cost_codes_file,
                     default_cost_codes_output_folder_location,
                 ],
+                api_visibility="undocumented",
             ).success(
                 load_in_default_cost_codes,
                 inputs=[
@@ -9465,6 +9741,7 @@ with blocks:
                     cost_code_dataframe_base,
                     cost_code_choice_drop,
                 ],
+                api_visibility="undocumented",
             )
             print("Successfully loaded cost codes from S3")
         elif os.path.exists(COST_CODES_PATH):
@@ -9483,6 +9760,7 @@ with blocks:
                     cost_code_dataframe_base,
                     cost_code_choice_drop,
                 ],
+                api_visibility="undocumented",
             )
         else:
             print("Could not load in cost code data")
@@ -9499,6 +9777,7 @@ with blocks:
                 cost_code_choice_drop,
             ],
             outputs=[default_cost_code_textbox, cost_code_choice_drop],
+            api_visibility="undocumented",
         )
 
     ###
@@ -9522,10 +9801,12 @@ with blocks:
         [session_hash_textbox, host_name_textbox],
         outputs=[flag_value_placeholder],
         preprocess=False,
+        api_visibility="undocumented",
     ).success(
         fn=upload_log_file_to_s3,
         inputs=[access_logs_state, access_s3_logs_loc_state],
         outputs=[s3_logs_output_textbox],
+        api_visibility="undocumented",
     )
 
     ### FEEDBACK LOGS
@@ -9558,10 +9839,12 @@ with blocks:
             ],
             outputs=[flag_value_placeholder],
             preprocess=False,
+            api_visibility="undocumented",
         ).success(
             fn=upload_log_file_to_s3,
             inputs=[feedback_logs_state, feedback_s3_logs_loc_state],
             outputs=[pdf_further_details_text],
+            api_visibility="undocumented",
         )
 
         # User submitted feedback for data redactions
@@ -9589,10 +9872,12 @@ with blocks:
             ],
             outputs=[flag_value_placeholder],
             preprocess=False,
+            api_visibility="undocumented",
         ).success(
             fn=upload_log_file_to_s3,
             inputs=[feedback_logs_state, feedback_s3_logs_loc_state],
             outputs=[data_further_details_text],
+            api_visibility="undocumented",
         )
     else:
         # User submitted feedback for pdf redactions
@@ -9620,10 +9905,12 @@ with blocks:
             ],
             outputs=[flag_value_placeholder],
             preprocess=False,
+            api_visibility="undocumented",
         ).success(
             fn=upload_log_file_to_s3,
             inputs=[feedback_logs_state, feedback_s3_logs_loc_state],
             outputs=[pdf_further_details_text],
+            api_visibility="undocumented",
         )
 
         # User submitted feedback for data redactions
@@ -9651,10 +9938,12 @@ with blocks:
             ],
             outputs=[flag_value_placeholder],
             preprocess=False,
+            api_visibility="undocumented",
         ).success(
             fn=upload_log_file_to_s3,
             inputs=[feedback_logs_state, feedback_s3_logs_loc_state],
             outputs=[data_further_details_text],
+            api_visibility="undocumented",
         )
 
     ### USAGE LOGS for data file analysis and Textract API calls
@@ -9694,10 +9983,12 @@ with blocks:
             ],
             outputs=[flag_value_placeholder],
             preprocess=False,
+            api_visibility="undocumented",
         ).success(
             fn=upload_log_file_to_s3,
             inputs=[usage_logs_state, usage_s3_logs_loc_state],
             outputs=[s3_logs_output_textbox],
+            api_visibility="undocumented",
         )
 
     else:
@@ -9734,10 +10025,12 @@ with blocks:
             ],
             outputs=[flag_value_placeholder],
             preprocess=False,
+            api_visibility="undocumented",
         ).success(
             fn=upload_log_file_to_s3,
             inputs=[usage_logs_state, usage_s3_logs_loc_state],
             outputs=[s3_logs_output_textbox],
+            api_visibility="undocumented",
         )
 
     ###
