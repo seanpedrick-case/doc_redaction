@@ -28,9 +28,9 @@ services:
       - --mmproj-url
       - https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/main/mmproj-F16.gguf
       - --n-gpu-layers
-      - "999"
+      - "-1"
       - --ctx-size
-      - "131072"
+      - "196608"
       - --fit
       - "off"
       - --temp
@@ -45,6 +45,8 @@ services:
       - "1"
       - --presence-penalty
       - "1"
+      - --chat-template-kwargs
+      - "{\"preserve_thinking\": true}"
       - --host
       - "0.0.0.0"
       - --port
@@ -91,9 +93,9 @@ services:
       - --mmproj-url
       - https://huggingface.co/unsloth/Qwen3.5-35B-A3B-GGUF/resolve/main/mmproj-F16.gguf
       - --n-gpu-layers
-      - "999"
+      - "-1"
       - --ctx-size
-      - "131072"
+      - "196608"
       - --fit
       - "off"
       - --temp
@@ -154,9 +156,9 @@ services:
       - --mmproj-url
       - https://huggingface.co/unsloth/Qwen3.5-27B-GGUF/resolve/main/mmproj-F16.gguf
       - --n-gpu-layers
-      - "999"
+      - "-1"
       - --ctx-size
-      - "131072"
+      - "196608"
       - --fit
       - "off"
       - --temp
@@ -214,9 +216,9 @@ services:
       - --mmproj-url
       - https://huggingface.co/unsloth/Qwen3.5-9B-A3B-GGUF/resolve/main/mmproj-F16.gguf
       - --n-gpu-layers
-      - "999"
+      - "-1"
       - --ctx-size
-      - "131072"
+      - "196608"
       - --fit
       - "off"
       - --temp
@@ -273,9 +275,9 @@ services:
       - --mmproj-url
       - https://huggingface.co/unsloth/gemma-4-31B-it-GGUF/resolve/main/mmproj-F16.gguf
       - --n-gpu-layers
-      - "999"
+      - "-1"
       - --ctx-size
-      - "131072"
+      - "196608"
       - --fit
       - "off"
       - --temp
@@ -334,7 +336,7 @@ services:
       - --mmproj-url
       - https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/main/mmproj-F16.gguf
       - --n-gpu-layers
-      - "999"
+      - "-1"
       - --ctx-size
       - "65536"
       - --fit
@@ -448,7 +450,7 @@ services:
       - INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES=True
       - PREPROCESS_LOCAL_OCR_IMAGES=False
       - INFERENCE_SERVER_DISABLE_THINKING=True
-      - MAX_NEW_TOKENS=131072
+      - MAX_NEW_TOKENS=196608
       - SAVE_EXAMPLE_HYBRID_IMAGES=False
       - SAVE_VLM_INPUT_IMAGES=False
       - VLM_MAX_DPI=200.0

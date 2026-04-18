@@ -51,7 +51,7 @@ dependencies = [
     "scikit-learn<=1.8.0",
     "spacy<=3.8.11",
     "en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0.tar.gz",
-    "gradio<=6.9.0",
+    "gradio<=6.10.0",
     "boto3<=1.42.80",
     "pyarrow<=23.0.1",
     "openpyxl<=3.1.5",
@@ -106,7 +106,7 @@ vlm = [
 
 # Run Gradio as an mcp server
 mcp = [
-    "gradio[mcp]<=6.9.0"
+    "gradio[mcp]<=6.10.0"
 ]
 
 [project.urls]
