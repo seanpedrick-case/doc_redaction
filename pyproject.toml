@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc_redaction"
-version = "2.0.3"
+version = "2.0.4"
 description = "Redact PDF/image-based documents, Word, or CSV/XLSX files using a Gradio-based GUI interface"
 readme = "README.md"
 authors = [
@@ -66,7 +66,7 @@ dependencies = [
     "polars<=1.38.1",
     "defusedxml<=0.7.1",
     "numpy<=2.4.4",
-    "spaces<=0.48.1",
+    "spaces<=0.48.3",
     "google-genai<=1.73.0",
     "openai<=2.31.0",
     "markdown<=3.10.2",
@@ -106,7 +106,7 @@ vlm = [
 
 # Run Gradio as an mcp server
 mcp = [
-    "gradio[mcp]<=6.9.0"
+    "gradio[mcp]<=6.10.0"
 ]
 
 [project.urls]
