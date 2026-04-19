@@ -73,33 +73,36 @@ pytest --version
 
 # Run a simple test to verify the test suite works
 cd test
-python test.py
+python cli_epilog_suite.py
 ```
 
 ## Running Tests
 
-### Method 1: Using the test script (Recommended)
+### Method 1: Using the CLI epilog suite script (Recommended for full CLI examples)
 ```bash
 cd test
-python test.py
+python cli_epilog_suite.py
 ```
 
-### Method 2: Using pytest
+### Method 2: Using pytest (fast unit/smoke tests from repo root)
 ```bash
-# Run all tests
-pytest test/test.py -v
+# Run all tests (integration-marked tests excluded by default; see pyproject.toml)
+pytest test/ -v
 
-# Run with coverage
-pytest test/test.py --cov=. --cov-report=html
+# Run with coverage (example: limit to application code)
+pytest test/ --cov=tools --cov-report=html
 
 # Run in parallel (faster)
-pytest test/test.py -n auto
+pytest test/ -n auto
+
+# Optional slow/integration tests
+pytest test/ -m integration
 ```
 
 ### Method 3: Using unittest directly
 ```bash
 cd test
-python -m unittest test.test.TestCLIRedactExamples -v
+python -m unittest test.cli_epilog_suite.TestCLIRedactExamples -v
 ```
 
 ## Troubleshooting

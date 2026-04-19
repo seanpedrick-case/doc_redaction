@@ -2432,6 +2432,15 @@ def divide_coordinates_by_page_sizes(
     return result
 
 
+def _pandas_to_numeric_coerce(series: pd.Series) -> pd.Series:
+    """Gradio/DataFrame edits often yield object columns of strings; strip quotes then parse."""
+    if pd.api.types.is_numeric_dtype(series.dtype):
+        return series
+    s = series.astype(str).str.strip().str.strip('"').str.strip("'")
+    s = s.replace({"nan": np.nan, "None": np.nan, "<NA>": np.nan})
+    return pd.to_numeric(s, errors="coerce")
+
+
 def multiply_coordinates_by_page_sizes(
     review_file_df: pd.DataFrame,
     page_sizes_df: pd.DataFrame,
@@ -2451,7 +2460,16 @@ def multiply_coordinates_by_page_sizes(
         return review_file_df  # Return early if empty or key column missing
 
     coord_cols = [xmin, xmax, ymin, ymax]
-    df = pl.from_pandas(review_file_df)
+    cast_cols_pd = [c for c in coord_cols + ["page"] if c in review_file_df.columns]
+    df_pd = review_file_df
+    if cast_cols_pd and any(
+        not pd.api.types.is_numeric_dtype(review_file_df[c].dtype) for c in cast_cols_pd
+    ):
+        df_pd = review_file_df.copy()
+        for c in cast_cols_pd:
+            if c in df_pd.columns:
+                df_pd[c] = _pandas_to_numeric_coerce(df_pd[c])
+    df = pl.from_pandas(df_pd)
 
     # Cast coordinates and page to numeric (single with_columns for less overhead)
     cast_cols = [c for c in coord_cols + ["page"] if c in df.columns]
@@ -2765,25 +2783,54 @@ def convert_annotation_data_to_dataframe(all_annotations: List[Dict[str, Any]]):
                             if isinstance(v, (list, tuple)) and len(v) >= 3:
                                 v = [int(float(x)) for x in v[:3]]
                             elif isinstance(v, str):
-                                s = v.strip("()").replace(" ", "")
-                                # e.g. "(128,128,128)" or "128,128,128"
-                                parts = s.split(",")
-                                if len(parts) >= 3:
-                                    v = [int(float(p)) for p in parts[:3]]
-                                elif s.startswith("#") and len(s) in (4, 7):
-                                    # Hex #rgb or #rrggbb (from gradio_image_annotation label_colors)
-                                    hex_s = s[1:]
-                                    if len(hex_s) == 3:
-                                        v = [
-                                            int(hex_s[i : i + 1] * 2, 16)
-                                            for i in (0, 1, 2)
+                                s_raw = v.strip()
+                                s_lower = s_raw.lower()
+                                # rgba(0,0,0,1) / rgb(0,0,0) from browsers and annotators
+                                if s_lower.startswith("rgba") or s_lower.startswith(
+                                    "rgb"
+                                ):
+                                    lp = s_raw.find("(")
+                                    rp = s_raw.rfind(")")
+                                    if lp != -1 and rp != -1 and rp > lp:
+                                        inner = s_raw[lp + 1 : rp]
+                                        parts = [
+                                            p.strip()
+                                            for p in inner.split(",")
+                                            if p.strip()
                                         ]
+                                        if len(parts) >= 3:
+                                            try:
+                                                v = [
+                                                    int(float(parts[i]))
+                                                    for i in range(3)
+                                                ]
+                                            except (TypeError, ValueError):
+                                                v = [0, 0, 0]
+                                        else:
+                                            v = [0, 0, 0]
                                     else:
-                                        v = [
-                                            int(hex_s[i : i + 2], 16) for i in (0, 2, 4)
-                                        ]
+                                        v = [0, 0, 0]
                                 else:
-                                    v = [0, 0, 0]
+                                    s = s_raw.strip("()").replace(" ", "")
+                                    # e.g. "(128,128,128)" or "128,128,128"
+                                    parts = s.split(",")
+                                    if len(parts) >= 3:
+                                        v = [int(float(p)) for p in parts[:3]]
+                                    elif s.startswith("#") and len(s) in (4, 7):
+                                        # Hex #rgb or #rrggbb (from gradio_image_annotation label_colors)
+                                        hex_s = s[1:]
+                                        if len(hex_s) == 3:
+                                            v = [
+                                                int(hex_s[i : i + 1] * 2, 16)
+                                                for i in (0, 1, 2)
+                                            ]
+                                        else:
+                                            v = [
+                                                int(hex_s[i : i + 2], 16)
+                                                for i in (0, 2, 4)
+                                            ]
+                                    else:
+                                        v = [0, 0, 0]
                             else:
                                 v = [0, 0, 0]
                         elif k == "color" and v is None:

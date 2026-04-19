@@ -145,6 +145,12 @@ from tools.load_spacy_model_custom_recognisers import (
     nlp_analyser,
     score_threshold,
 )
+from tools.redaction_types import (
+    RedactionContext,
+    RedactionOptions,
+    from_legacy_dict,
+    to_legacy_kwargs,
+)
 from tools.secure_path_utils import (
     secure_file_write,
     validate_folder_containment,
@@ -1000,12 +1006,12 @@ def run_custom_vlm_only_pass(
     )
 
 
-def choose_and_run_redactor(
+def _choose_and_run_redactor_impl(
     file_paths: List[str],
-    prepared_pdf_file_paths: List[str],
-    pdf_image_file_paths: List[str],
-    chosen_redact_entities: List[str],
-    chosen_redact_comprehend_entities: List[str],
+    prepared_pdf_file_paths: Optional[List[str]] = None,
+    pdf_image_file_paths: Optional[List[str]] = None,
+    chosen_redact_entities: Optional[List[str]] = None,
+    chosen_redact_comprehend_entities: Optional[List[str]] = None,
     chosen_llm_entities: List[str] = None,
     text_extraction_method: str = None,
     in_allow_list: List[str] = list(),
@@ -1015,7 +1021,6 @@ def choose_and_run_redactor(
     combined_out_message: List = list(),
     out_file_paths: List = list(),
     log_files_output_paths: List = list(),
-    first_loop_state: bool = False,
     page_min: int = 0,
     page_max: int = 0,
     estimated_time_taken_state: float = 0.0,
@@ -1025,10 +1030,7 @@ def choose_and_run_redactor(
     all_page_line_level_ocr_results_df: pd.DataFrame = None,
     all_pages_decision_process_table: pd.DataFrame = None,
     pymupdf_doc=list(),
-    current_loop_page: int = 0,
-    page_break_return: bool = False,
     pii_identification_method: str = "Local",
-    comprehend_query_number: int = 0,
     max_fuzzy_spelling_mistakes_num: int = 1,
     match_fuzzy_whole_phrase_bool: bool = True,
     aws_access_key_textbox: str = "",
@@ -1043,7 +1045,6 @@ def choose_and_run_redactor(
     duplication_file_path_outputs: list = list(),
     review_file_path: str = "",
     input_folder: str = INPUT_FOLDER,
-    total_textract_query_number: int = 0,
     ocr_file_path: str = "",
     all_page_line_level_ocr_results: list[dict] = list(),
     all_page_line_level_ocr_results_with_words: list[dict] = list(),
@@ -1059,12 +1060,6 @@ def choose_and_run_redactor(
     efficient_ocr_min_embedded_image_px: Optional[int] = None,
     hybrid_textract_bedrock_vlm: bool = HYBRID_TEXTRACT_BEDROCK_VLM,
     overwrite_existing_ocr_results: bool = OVERWRITE_EXISTING_OCR_RESULTS,
-    llm_model_name="",
-    llm_total_input_tokens=0,
-    llm_total_output_tokens=0,
-    vlm_model_name="",
-    vlm_total_input_tokens=0,
-    vlm_total_output_tokens=0,
     save_page_ocr_visualisations: bool = SAVE_PAGE_OCR_VISUALISATIONS,
     ocr_first_pass_max_workers: Optional[int] = None,
     prepare_images: bool = True,
@@ -1088,7 +1083,6 @@ def choose_and_run_redactor(
     - combined_out_message (list, optional): A list to store output messages. Defaults to an empty list.
     - out_file_paths (list, optional): A list to store paths to the output files. Defaults to an empty list.
     - log_files_output_paths (list, optional): A list to store paths to the log files. Defaults to an empty list.
-    - first_loop_state (bool, optional): A flag indicating if this is the first iteration. Defaults to False.
     - page_min (int, optional): The minimum page number to start redaction from. Defaults to 0 (first page).
     - page_max (int, optional): The maximum page number to end redaction at. Defaults to 0 (last page).
     - estimated_time_taken_state (float, optional): The estimated time taken for the redaction process. Defaults to 0.0.
@@ -1098,10 +1092,7 @@ def choose_and_run_redactor(
     - all_page_line_level_ocr_results_df (pd.DataFrame, optional): A DataFrame containing all line-level OCR results. Defaults to an empty DataFrame.
     - all_pages_decision_process_table (pd.DataFrame, optional): A DataFrame containing all decision process tables. Defaults to an empty DataFrame.
     - pymupdf_doc (optional): A list containing the PDF document object. Defaults to an empty list.
-    - current_loop_page (int, optional): The current page being processed in the loop. Defaults to 0.
-    - page_break_return (bool, optional): A flag indicating if the function should return after a page break. Defaults to False.
     - pii_identification_method (str, optional): The method to redact personal information. Either 'Local' (spacy model), or 'AWS Comprehend' (AWS Comprehend API).
-    - comprehend_query_number (int, optional): A counter tracking the number of queries to AWS Comprehend.
     - max_fuzzy_spelling_mistakes_num (int, optional): The maximum number of spelling mistakes allowed in a searched phrase for fuzzy matching. Can range from 0-9.
     - match_fuzzy_whole_phrase_bool (bool, optional): A boolean where 'True' means that the whole phrase is fuzzy matched, and 'False' means that each word is fuzzy matched separately (excluding stop words).
     - aws_access_key_textbox (str, optional): AWS access key for account with Textract and Comprehend permissions.
@@ -1116,7 +1107,6 @@ def choose_and_run_redactor(
     - duplication_file_outputs (list, optional): List to allow for export to the duplication function page.
     - review_file_path (str, optional): The latest review file path created by the app
     - input_folder (str, optional): The custom input path, if provided
-    - total_textract_query_number (int, optional): The number of textract queries up until this point.
     - ocr_file_path (str, optional): The latest ocr file path created by the app.
     - all_page_line_level_ocr_results (list, optional): All line level text on the page with bounding boxes.
     - all_page_line_level_ocr_results_with_words (list, optional): All word level text on the page with bounding boxes.
@@ -1129,12 +1119,6 @@ def choose_and_run_redactor(
     - inference_server_vlm_model (str, optional): The name of the inference server VLM model to use for OCR. Defaults to an empty string.
     - efficient_ocr (bool, optional): Boolean to determine whether to use efficient OCR.
     - efficient_ocr_min_words (int, optional): The minimum number of words on a page for efficient OCR.
-    - llm_model_name (str, optional): The name of the LLM model to use for the redaction process. Defaults to an empty string.
-    - llm_total_input_tokens (int, optional): The total number of input tokens for the LLM model. Defaults to 0.
-    - llm_total_output_tokens (int, optional): The total number of output tokens for the LLM model. Defaults to 0.
-    - vlm_model_name (str, optional): The name of the VLM model to use for the redaction process. Defaults to an empty string.
-    - vlm_total_input_tokens (int, optional): The total number of input tokens for the VLM model. Defaults to 0.
-    - vlm_total_output_tokens (int, optional): The total number of output tokens for the VLM model. Defaults to 0.
     - save_page_ocr_visualisations (bool, optional): Boolean to determine whether to save page OCR visualisations. Defaults to SAVE_PAGE_OCR_VISUALISATIONS.
     - prepare_images (bool, optional): Boolean to determine whether to load images for the PDF.
     - RETURN_REDACTED_PDF (bool, optional): Boolean to determine whether to return a redacted PDF at the end of the redaction process.
@@ -1300,24 +1284,21 @@ def choose_and_run_redactor(
                 ]
             )
 
-    # If this is the first time around, set variables to 0/blank
-    if first_loop_state is True:
-        # print("First_loop_state is True")
-        latest_file_completed = 0
-        current_loop_page = 0
-        out_file_paths = list()
-        log_files_output_paths = list()
-        estimated_time_taken_state = 0
-        comprehend_query_number = 0
-        total_textract_query_number = 0
+    # Initialize per-run counters/state (these are still returned as outputs)
+    latest_file_completed = 0
+    current_loop_page = 0
+    out_file_paths = list()
+    log_files_output_paths = list()
+    estimated_time_taken_state = 0
+    comprehend_query_number = 0
+    total_textract_query_number = 0
 
-        # Initialize VLM and LLM token tracking variables
-        llm_model_name = ""
-        llm_total_input_tokens = 0
-        llm_total_output_tokens = 0
-        vlm_model_name = ""
-        vlm_total_input_tokens = 0
-        vlm_total_output_tokens = 0
+    llm_model_name = ""
+    llm_total_input_tokens = 0
+    llm_total_output_tokens = 0
+    vlm_model_name = ""
+    vlm_total_input_tokens = 0
+    vlm_total_output_tokens = 0
     # elif current_loop_page == 0:
     # comprehend_query_number = 0
     # Do not reset total_textract_query_number here: EFFICIENT_OCR and other paths
@@ -4076,6 +4057,87 @@ def choose_and_run_redactor(
         llm_total_output_tokens,
         total_pages_for_usage_log,
     )
+
+
+def run_redaction(
+    file_paths: List[str],
+    options: RedactionOptions,
+    context: Optional[RedactionContext] = None,
+    progress=gr.Progress(track_tqdm=True),
+):
+    """Run redaction using typed options and optional session context."""
+    ctx = context if context is not None else RedactionContext()
+    kw = to_legacy_kwargs(options, ctx)
+    return _choose_and_run_redactor_impl(file_paths, **kw, progress=progress)
+
+
+def choose_and_run_redactor(
+    file_paths: List[str],
+    prepared_pdf_file_paths: Optional[List[str]] = None,
+    pdf_image_file_paths: Optional[List[str]] = None,
+    chosen_redact_entities: Optional[List[str]] = None,
+    chosen_redact_comprehend_entities: Optional[List[str]] = None,
+    chosen_llm_entities: List[str] = None,
+    text_extraction_method: str = None,
+    in_allow_list: List[str] = list(),
+    in_deny_list: List[str] = list(),
+    redact_whole_page_list: List[str] = list(),
+    latest_file_completed: int = 0,
+    combined_out_message: List = list(),
+    out_file_paths: List = list(),
+    log_files_output_paths: List = list(),
+    page_min: int = 0,
+    page_max: int = 0,
+    estimated_time_taken_state: float = 0.0,
+    handwrite_signature_checkbox: List[str] = list(["Extract handwriting"]),
+    all_request_metadata_str: str = "",
+    annotations_all_pages: List[dict] = list(),
+    all_page_line_level_ocr_results_df: pd.DataFrame = None,
+    all_pages_decision_process_table: pd.DataFrame = None,
+    pymupdf_doc=list(),
+    pii_identification_method: str = "Local",
+    max_fuzzy_spelling_mistakes_num: int = 1,
+    match_fuzzy_whole_phrase_bool: bool = True,
+    aws_access_key_textbox: str = "",
+    aws_secret_key_textbox: str = "",
+    annotate_max_pages: int = 1,
+    review_file_state: pd.DataFrame = list(),
+    output_folder: str = OUTPUT_FOLDER,
+    document_cropboxes: List = list(),
+    page_sizes: List[dict] = list(),
+    textract_output_found: bool = False,
+    text_extraction_only: bool = False,
+    duplication_file_path_outputs: list = list(),
+    review_file_path: str = "",
+    input_folder: str = INPUT_FOLDER,
+    ocr_file_path: str = "",
+    all_page_line_level_ocr_results: list[dict] = list(),
+    all_page_line_level_ocr_results_with_words: list[dict] = list(),
+    all_page_line_level_ocr_results_with_words_df: pd.DataFrame = None,
+    chosen_local_ocr_model: str = DEFAULT_LOCAL_OCR_MODEL,
+    language: str = DEFAULT_LANGUAGE,
+    ocr_review_files: list = list(),
+    custom_llm_instructions: str = "",
+    inference_server_vlm_model: str = "",
+    efficient_ocr: bool = EFFICIENT_OCR,
+    efficient_ocr_min_words: Union[int, float, None] = EFFICIENT_OCR_MIN_WORDS,
+    efficient_ocr_min_image_coverage_fraction: Optional[float] = None,
+    efficient_ocr_min_embedded_image_px: Optional[int] = None,
+    hybrid_textract_bedrock_vlm: bool = HYBRID_TEXTRACT_BEDROCK_VLM,
+    overwrite_existing_ocr_results: bool = OVERWRITE_EXISTING_OCR_RESULTS,
+    save_page_ocr_visualisations: bool = SAVE_PAGE_OCR_VISUALISATIONS,
+    ocr_first_pass_max_workers: Optional[int] = None,
+    prepare_images: bool = True,
+    RETURN_REDACTED_PDF: bool = RETURN_REDACTED_PDF,
+    RETURN_PDF_FOR_REVIEW: bool = RETURN_PDF_FOR_REVIEW,
+    progress=gr.Progress(track_tqdm=True),
+):
+    """Compatibility wrapper: builds RedactionOptions/RedactionContext and calls run_redaction."""
+    flat = dict(locals())
+    flat.pop("file_paths", None)
+    prog = flat.pop("progress")
+    opts, ctx = from_legacy_dict(flat)
+    return run_redaction(file_paths, opts, ctx, progress=prog)
 
 
 def convert_pikepdf_coords_to_pymupdf(

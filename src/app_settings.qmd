@@ -256,10 +256,6 @@ Configurations for the Gradio UI, server behavior, and application limits.
     * **Description:** Maximum time value for processing operations.
     * **Default Value:** `999999`
 
-* **`TLDEXTRACT_CACHE`**
-    * **Description:** Path to the cache directory used by the `tldextract` library.
-    * **Default Value:** `'tmp/tld/'`
-
 * **`COGNITO_AUTH`**
     * **Description:** Enables or disables AWS Cognito authentication. Set to `'True'` to enable.
     * **Default Value:** `'False'`

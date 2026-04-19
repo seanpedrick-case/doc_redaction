@@ -101,7 +101,6 @@ ENV APP_HOME=/home/user
 
 # Set env variables for Gradio & other apps
 ENV GRADIO_TEMP_DIR=/tmp/gradio_tmp/ \
-    TLDEXTRACT_CACHE=/tmp/tld/ \
     MPLCONFIGDIR=/tmp/matplotlib_cache/ \
     GRADIO_OUTPUT_FOLDER=$APP_HOME/app/output/ \
     GRADIO_INPUT_FOLDER=$APP_HOME/app/input/ \

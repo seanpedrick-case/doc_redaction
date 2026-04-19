@@ -308,15 +308,11 @@ full_llm_entity_list = FULL_LLM_ENTITY_LIST
 default_handwrite_signature_checkbox = DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX
 
 
-# --- Main CLI Function ---
-def main(direct_mode_args={}):
-    """
-    A unified command-line interface to prepare, redact, and anonymise various document types.
+# --- CLI parser and main ---
 
-    Args:
-        direct_mode_args (dict, optional): Dictionary of arguments for direct mode execution.
-                                          If provided, uses these instead of parsing command line arguments.
-    """
+
+def build_cli_argument_parser() -> argparse.ArgumentParser:
+    """Build the CLI ArgumentParser (shared by main(), Agent API, and tests)."""
     parser = argparse.ArgumentParser(
         description="A versatile CLI for redacting PII from PDF/image files and anonymising Word/tabular data.",
         formatter_class=argparse.RawTextHelpFormatter,
@@ -1015,6 +1011,23 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
         default=120,
         help="Maximum number of polling attempts for Textract job completion.",
     )
+    return parser
+
+
+def get_cli_default_args_dict() -> dict:
+    """All CLI flag defaults as a dict; merge agent overrides then call main(direct_mode_args=...)."""
+    return vars(build_cli_argument_parser().parse_args([]))
+
+
+def main(direct_mode_args={}):
+    """
+    A unified command-line interface to prepare, redact, and anonymise various document types.
+
+    Args:
+        direct_mode_args (dict, optional): Dictionary of arguments for direct mode execution.
+                                          If provided, uses these instead of parsing command line arguments.
+    """
+    parser = build_cli_argument_parser()
     # Parse arguments - either from command line or direct mode
     if direct_mode_args:
         # Use direct mode arguments
@@ -1214,7 +1227,8 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
             start_time = time.time()
             try:
                 from tools.file_conversion import prepare_image_or_pdf
-                from tools.file_redaction import choose_and_run_redactor
+                from tools.file_redaction import run_redaction
+                from tools.redaction_types import RedactionContext, RedactionOptions
 
                 # Step 1: Prepare the document
                 print("\nStep 1: Preparing document...")
@@ -1249,7 +1263,7 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
                 )
                 print(f"Preparation complete. {prep_summary}")
 
-                # Note: VLM and LLM clients are initialized inside choose_and_run_redactor
+                # Note: VLM and LLM clients are initialized inside run_redaction
                 # based on text_extraction_method and pii_identification_method.
                 # Model choices (vlm_model_choice, llm_model_choice) can be overridden via
                 # environment variables (CLOUD_VLM_MODEL_CHOICE, CLOUD_LLM_PII_MODEL_CHOICE) before running the CLI.
@@ -1301,82 +1315,93 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
                     llm_total_input_tokens,
                     llm_total_output_tokens,
                     _,
-                ) = choose_and_run_redactor(
-                    file_paths=args.input_file,
-                    prepared_pdf_file_paths=prepared_pdf_paths,
-                    pdf_image_file_paths=image_file_paths,
-                    chosen_redact_entities=args.local_redact_entities,
-                    chosen_redact_comprehend_entities=args.aws_redact_entities,
-                    chosen_llm_entities=args.llm_redact_entities,
-                    text_extraction_method=args.ocr_method,
-                    in_allow_list=args.allow_list_file,
-                    in_deny_list=args.deny_list_file,
-                    redact_whole_page_list=args.redact_whole_page_file,
-                    first_loop_state=True,
-                    page_min=args.page_min,
-                    page_max=args.page_max,
-                    handwrite_signature_checkbox=args.handwrite_signature_extraction,
-                    max_fuzzy_spelling_mistakes_num=args.fuzzy_mistakes,
-                    match_fuzzy_whole_phrase_bool=args.match_fuzzy_whole_phrase_bool,
-                    pymupdf_doc=pdf_doc,
-                    annotations_all_pages=image_annotations,
-                    page_sizes=page_sizes,
-                    document_cropboxes=original_cropboxes,
-                    pii_identification_method=args.pii_detector,
-                    aws_access_key_textbox=args.aws_access_key,
-                    aws_secret_key_textbox=args.aws_secret_key,
-                    language=args.language,
-                    output_folder=args.output_dir,
-                    input_folder=args.input_dir,
-                    custom_llm_instructions=args.custom_llm_instructions,
-                    inference_server_vlm_model=(
-                        args.inference_server_vlm_model
-                        if args.inference_server_vlm_model
-                        else DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                ) = run_redaction(
+                    args.input_file,
+                    RedactionOptions(
+                        chosen_redact_entities=args.local_redact_entities,
+                        chosen_redact_comprehend_entities=args.aws_redact_entities,
+                        chosen_llm_entities=args.llm_redact_entities,
+                        text_extraction_method=args.ocr_method,
+                        in_allow_list=args.allow_list_file,
+                        in_deny_list=args.deny_list_file,
+                        redact_whole_page_list=args.redact_whole_page_file,
+                        page_min=args.page_min,
+                        page_max=args.page_max,
+                        handwrite_signature_checkbox=args.handwrite_signature_extraction,
+                        max_fuzzy_spelling_mistakes_num=args.fuzzy_mistakes,
+                        match_fuzzy_whole_phrase_bool=args.match_fuzzy_whole_phrase_bool,
+                        pii_identification_method=args.pii_detector,
+                        aws_access_key_textbox=args.aws_access_key,
+                        aws_secret_key_textbox=args.aws_secret_key,
+                        language=args.language,
+                        output_folder=args.output_dir,
+                        input_folder=args.input_dir,
+                        custom_llm_instructions=args.custom_llm_instructions,
+                        inference_server_vlm_model=(
+                            args.inference_server_vlm_model
+                            if args.inference_server_vlm_model
+                            else DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                        ),
+                        efficient_ocr=getattr(args, "efficient_ocr", EFFICIENT_OCR),
+                        efficient_ocr_min_words=(
+                            args.efficient_ocr_min_words
+                            if getattr(args, "efficient_ocr_min_words", None)
+                            is not None
+                            else EFFICIENT_OCR_MIN_WORDS
+                        ),
+                        efficient_ocr_min_image_coverage_fraction=(
+                            args.efficient_ocr_min_image_coverage_fraction
+                            if getattr(
+                                args,
+                                "efficient_ocr_min_image_coverage_fraction",
+                                None,
+                            )
+                            is not None
+                            else EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION
+                        ),
+                        efficient_ocr_min_embedded_image_px=(
+                            args.efficient_ocr_min_embedded_image_px
+                            if getattr(
+                                args, "efficient_ocr_min_embedded_image_px", None
+                            )
+                            is not None
+                            else EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX
+                        ),
+                        ocr_first_pass_max_workers=(
+                            args.ocr_first_pass_max_workers
+                            if getattr(args, "ocr_first_pass_max_workers", None)
+                            is not None
+                            else OCR_FIRST_PASS_MAX_WORKERS
+                        ),
+                        hybrid_textract_bedrock_vlm=getattr(
+                            args,
+                            "hybrid_textract_bedrock_vlm",
+                            HYBRID_TEXTRACT_BEDROCK_VLM,
+                        ),
+                        overwrite_existing_ocr_results=getattr(
+                            args,
+                            "overwrite_existing_ocr_results",
+                            OVERWRITE_EXISTING_OCR_RESULTS,
+                        ),
+                        save_page_ocr_visualisations=(
+                            getattr(args, "save_page_ocr_visualisations", None)
+                            if getattr(args, "save_page_ocr_visualisations", None)
+                            is not None
+                            else SAVE_PAGE_OCR_VISUALISATIONS
+                        ),
                     ),
-                    efficient_ocr=getattr(args, "efficient_ocr", EFFICIENT_OCR),
-                    efficient_ocr_min_words=(
-                        args.efficient_ocr_min_words
-                        if getattr(args, "efficient_ocr_min_words", None) is not None
-                        else EFFICIENT_OCR_MIN_WORDS
-                    ),
-                    efficient_ocr_min_image_coverage_fraction=(
-                        args.efficient_ocr_min_image_coverage_fraction
-                        if getattr(
-                            args, "efficient_ocr_min_image_coverage_fraction", None
-                        )
-                        is not None
-                        else EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION
-                    ),
-                    efficient_ocr_min_embedded_image_px=(
-                        args.efficient_ocr_min_embedded_image_px
-                        if getattr(args, "efficient_ocr_min_embedded_image_px", None)
-                        is not None
-                        else EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX
-                    ),
-                    ocr_first_pass_max_workers=(
-                        args.ocr_first_pass_max_workers
-                        if getattr(args, "ocr_first_pass_max_workers", None) is not None
-                        else OCR_FIRST_PASS_MAX_WORKERS
-                    ),
-                    hybrid_textract_bedrock_vlm=getattr(
-                        args, "hybrid_textract_bedrock_vlm", HYBRID_TEXTRACT_BEDROCK_VLM
-                    ),
-                    overwrite_existing_ocr_results=getattr(
-                        args,
-                        "overwrite_existing_ocr_results",
-                        OVERWRITE_EXISTING_OCR_RESULTS,
-                    ),
-                    save_page_ocr_visualisations=(
-                        getattr(args, "save_page_ocr_visualisations", None)
-                        if getattr(args, "save_page_ocr_visualisations", None)
-                        is not None
-                        else SAVE_PAGE_OCR_VISUALISATIONS
+                    RedactionContext(
+                        prepared_pdf_file_paths=prepared_pdf_paths,
+                        pdf_image_file_paths=image_file_paths,
+                        pymupdf_doc=pdf_doc,
+                        annotations_all_pages=image_annotations,
+                        page_sizes=page_sizes,
+                        document_cropboxes=original_cropboxes,
                     ),
                     # Note: bedrock_runtime, gemini_client, gemini_config, azure_openai_client
-                    # are initialized inside choose_and_run_redactor based on text_extraction_method
+                    # are initialized inside run_redaction based on text_extraction_method
                     # but we can pass vlm_model_choice through custom_llm_instructions or other means
-                    # The clients will be initialized in choose_and_run_redactor based on the method
+                    # The clients will be initialized in run_redaction based on the method
                 )
 
                 # Calculate processing time
@@ -2154,7 +2179,8 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
                     f"Detected PDF input. Extracting text with '{args.ocr_method}' then summarising..."
                 )
                 from tools.file_conversion import prepare_image_or_pdf
-                from tools.file_redaction import choose_and_run_redactor
+                from tools.file_redaction import run_redaction
+                from tools.redaction_types import RedactionContext, RedactionOptions
 
                 prepare_images = args.ocr_method in ["Local OCR", "AWS Textract"]
                 (
@@ -2227,81 +2253,91 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
                     _,
                     _,
                     _,
-                ) = choose_and_run_redactor(
-                    file_paths=[pdf_path],
-                    prepared_pdf_file_paths=prepared_pdf_paths,
-                    pdf_image_file_paths=image_file_paths,
-                    chosen_redact_entities=args.local_redact_entities or [],
-                    chosen_redact_comprehend_entities=args.aws_redact_entities or [],
-                    chosen_llm_entities=args.llm_redact_entities or [],
-                    text_extraction_method=args.ocr_method,
-                    in_allow_list=args.allow_list_file,
-                    in_deny_list=args.deny_list_file,
-                    redact_whole_page_list=args.redact_whole_page_file,
-                    first_loop_state=True,
-                    page_min=args.page_min,
-                    page_max=args.page_max,
-                    handwrite_signature_checkbox=args.handwrite_signature_extraction
-                    or [],
-                    max_fuzzy_spelling_mistakes_num=getattr(
-                        args, "fuzzy_mistakes", DEFAULT_FUZZY_SPELLING_MISTAKES_NUM
+                ) = run_redaction(
+                    [pdf_path],
+                    RedactionOptions(
+                        chosen_redact_entities=args.local_redact_entities or [],
+                        chosen_redact_comprehend_entities=args.aws_redact_entities
+                        or [],
+                        chosen_llm_entities=args.llm_redact_entities or [],
+                        text_extraction_method=args.ocr_method,
+                        in_allow_list=args.allow_list_file,
+                        in_deny_list=args.deny_list_file,
+                        redact_whole_page_list=args.redact_whole_page_file,
+                        page_min=args.page_min,
+                        page_max=args.page_max,
+                        handwrite_signature_checkbox=args.handwrite_signature_extraction
+                        or [],
+                        max_fuzzy_spelling_mistakes_num=getattr(
+                            args, "fuzzy_mistakes", DEFAULT_FUZZY_SPELLING_MISTAKES_NUM
+                        ),
+                        match_fuzzy_whole_phrase_bool=getattr(
+                            args, "match_fuzzy_whole_phrase_bool", True
+                        ),
+                        pii_identification_method=args.pii_detector or "Local",
+                        aws_access_key_textbox=args.aws_access_key or "",
+                        aws_secret_key_textbox=args.aws_secret_key or "",
+                        language=args.language,
+                        output_folder=args.output_dir,
+                        input_folder=args.input_dir,
+                        custom_llm_instructions=args.custom_llm_instructions or "",
+                        inference_server_vlm_model=(
+                            getattr(args, "inference_server_vlm_model", None)
+                            or DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                        ),
+                        efficient_ocr=getattr(args, "efficient_ocr", EFFICIENT_OCR),
+                        efficient_ocr_min_words=(
+                            getattr(args, "efficient_ocr_min_words", None)
+                            or EFFICIENT_OCR_MIN_WORDS
+                        ),
+                        efficient_ocr_min_image_coverage_fraction=(
+                            getattr(
+                                args, "efficient_ocr_min_image_coverage_fraction", None
+                            )
+                            if getattr(
+                                args, "efficient_ocr_min_image_coverage_fraction", None
+                            )
+                            is not None
+                            else EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION
+                        ),
+                        efficient_ocr_min_embedded_image_px=(
+                            getattr(args, "efficient_ocr_min_embedded_image_px", None)
+                            if getattr(
+                                args, "efficient_ocr_min_embedded_image_px", None
+                            )
+                            is not None
+                            else EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX
+                        ),
+                        ocr_first_pass_max_workers=(
+                            getattr(args, "ocr_first_pass_max_workers", None)
+                            or OCR_FIRST_PASS_MAX_WORKERS
+                        ),
+                        hybrid_textract_bedrock_vlm=getattr(
+                            args,
+                            "hybrid_textract_bedrock_vlm",
+                            HYBRID_TEXTRACT_BEDROCK_VLM,
+                        ),
+                        overwrite_existing_ocr_results=getattr(
+                            args,
+                            "overwrite_existing_ocr_results",
+                            OVERWRITE_EXISTING_OCR_RESULTS,
+                        ),
+                        save_page_ocr_visualisations=(
+                            getattr(args, "save_page_ocr_visualisations", None)
+                            if getattr(args, "save_page_ocr_visualisations", None)
+                            is not None
+                            else SAVE_PAGE_OCR_VISUALISATIONS
+                        ),
+                        text_extraction_only=True,
                     ),
-                    match_fuzzy_whole_phrase_bool=getattr(
-                        args, "match_fuzzy_whole_phrase_bool", True
+                    RedactionContext(
+                        prepared_pdf_file_paths=prepared_pdf_paths,
+                        pdf_image_file_paths=image_file_paths,
+                        pymupdf_doc=pdf_doc,
+                        annotations_all_pages=image_annotations,
+                        page_sizes=page_sizes,
+                        document_cropboxes=original_cropboxes,
                     ),
-                    pymupdf_doc=pdf_doc,
-                    annotations_all_pages=image_annotations,
-                    page_sizes=page_sizes,
-                    document_cropboxes=original_cropboxes,
-                    pii_identification_method=args.pii_detector or "Local",
-                    aws_access_key_textbox=args.aws_access_key or "",
-                    aws_secret_key_textbox=args.aws_secret_key or "",
-                    language=args.language,
-                    output_folder=args.output_dir,
-                    input_folder=args.input_dir,
-                    custom_llm_instructions=args.custom_llm_instructions or "",
-                    inference_server_vlm_model=(
-                        getattr(args, "inference_server_vlm_model", None)
-                        or DEFAULT_INFERENCE_SERVER_VLM_MODEL
-                    ),
-                    efficient_ocr=getattr(args, "efficient_ocr", EFFICIENT_OCR),
-                    efficient_ocr_min_words=(
-                        getattr(args, "efficient_ocr_min_words", None)
-                        or EFFICIENT_OCR_MIN_WORDS
-                    ),
-                    efficient_ocr_min_image_coverage_fraction=(
-                        getattr(args, "efficient_ocr_min_image_coverage_fraction", None)
-                        if getattr(
-                            args, "efficient_ocr_min_image_coverage_fraction", None
-                        )
-                        is not None
-                        else EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION
-                    ),
-                    efficient_ocr_min_embedded_image_px=(
-                        getattr(args, "efficient_ocr_min_embedded_image_px", None)
-                        if getattr(args, "efficient_ocr_min_embedded_image_px", None)
-                        is not None
-                        else EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX
-                    ),
-                    ocr_first_pass_max_workers=(
-                        getattr(args, "ocr_first_pass_max_workers", None)
-                        or OCR_FIRST_PASS_MAX_WORKERS
-                    ),
-                    hybrid_textract_bedrock_vlm=getattr(
-                        args, "hybrid_textract_bedrock_vlm", HYBRID_TEXTRACT_BEDROCK_VLM
-                    ),
-                    overwrite_existing_ocr_results=getattr(
-                        args,
-                        "overwrite_existing_ocr_results",
-                        OVERWRITE_EXISTING_OCR_RESULTS,
-                    ),
-                    save_page_ocr_visualisations=(
-                        getattr(args, "save_page_ocr_visualisations", None)
-                        if getattr(args, "save_page_ocr_visualisations", None)
-                        is not None
-                        else SAVE_PAGE_OCR_VISUALISATIONS
-                    ),
-                    text_extraction_only=True,
                 )
 
                 if ocr_df is None or (

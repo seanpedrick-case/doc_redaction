@@ -10,7 +10,6 @@ from typing import List
 
 import bleach
 from dotenv import load_dotenv
-from tldextract import TLDExtract
 
 from tools.secure_path_utils import (
     secure_file_read,
@@ -2193,13 +2192,27 @@ USER_GUIDE_URL = validate_safe_url(
 
 DEFAULT_INTRO_TEXT = f"""# Document redaction
 
-    Redact personally identifiable information (PII) from documents (pdf, png, jpg), Word files (docx), or tabular data (xlsx/csv/parquet). Please see the [User Guide]({USER_GUIDE_URL}) for a full walkthrough of all the features in the app.
-    
-    To extract text from documents, the 'Local' options are PikePDF for PDFs with selectable text, and OCR with Tesseract. Use AWS Textract to extract more complex elements e.g. handwriting, signatures, or unclear text. For PII identification, 'Local' (based on spaCy) gives good results if you are looking for common names or terms, or a custom list of terms to redact (see Redaction settings).  AWS Comprehend gives better results at a small cost.
-
-    Additional options on the 'Redaction settings' include, the type of information to redact (e.g. people, places), custom terms to include/ exclude from redaction, fuzzy matching, language settings, and whole page redaction. After redaction is complete, you can view and modify suggested redactions on the 'Review redactions' tab to quickly create a final redacted document.
-
-    NOTE: The app is not 100% accurate, and it will miss some personal information. It is essential that all outputs are reviewed **by a human** before using the final outputs."""
+    Redact personally identifiable information (PII) from:\n
+    - **Documents**: PDF / PNG / JPG\n
+    - **Word**: DOCX\n
+    - **Tabular data**: XLSX / CSV / Parquet\n
+    See the [User Guide]({USER_GUIDE_URL}) for full guidance.\n
+\n
+    ## Quick start\n
+    1. Go to **Redact PDF/image**.\n
+    2. Upload a file.\n
+    3. Choose **Text extraction**:\n
+       - **Local text**: best for PDFs with selectable text.\n
+       - **Local OCR**: for scans/images.\n
+       - **AWS Textract**: best for difficult scans, handwriting, signatures, or forms (paid).\n
+    4. Choose **PII detection**:\n
+       - **Local** (spaCy): good general PII + custom lists.\n
+       - **AWS Comprehend**: often higher recall (paid).\n
+    5. Click **Extract text and redact document**.\n
+    6. Review and edit results in **Review redactions**, then export the final redacted PDF.\n
+\n
+    ## Important\n
+    The app is not 100% accurate and may miss PII. **A human must review** all outputs before use."""
 
 INTRO_TEXT = get_or_create_env_var("INTRO_TEXT", DEFAULT_INTRO_TEXT)
 
@@ -2230,14 +2243,6 @@ INTRO_TEXT = sanitize_markdown_text(INTRO_TEXT.strip('"').strip("'"))
 if not INTRO_TEXT or not INTRO_TEXT.strip():
     print("Warning: Intro text is empty after sanitization, using default intro text")
     INTRO_TEXT = sanitize_markdown_text(DEFAULT_INTRO_TEXT)
-
-TLDEXTRACT_CACHE = get_or_create_env_var("TLDEXTRACT_CACHE", "tmp/tld/")
-TLDEXTRACT_CACHE = ensure_folder_within_app_directory(TLDEXTRACT_CACHE)
-try:
-    extract = TLDExtract(cache_dir=TLDEXTRACT_CACHE)
-except Exception as e:
-    print(f"Error initialising TLDExtract: {e}")
-    extract = TLDExtract(cache_dir=None)
 
 # Get some environment variables and Launch the Gradio app
 COGNITO_AUTH = convert_string_to_boolean(get_or_create_env_var("COGNITO_AUTH", "False"))

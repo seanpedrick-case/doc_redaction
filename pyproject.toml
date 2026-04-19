@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc_redaction"
-version = "2.0.4"
+version = "2.1.0"
 description = "Redact PDF/image-based documents, Word, or CSV/XLSX files using a Gradio-based GUI interface"
 readme = "README.md"
 authors = [
@@ -137,6 +137,9 @@ target-version = ['py310']
 
 # Configuration for pytest:
 [tool.pytest.ini_options]
+markers = [
+    "integration: optional slow tests (CLI PDF smoke; set PYTEST_CLI_INTEGRATION=1 where needed)",
+]
 filterwarnings = [
     "ignore::DeprecationWarning:click.parser",
     "ignore::DeprecationWarning:weasel.util.config",
@@ -156,4 +159,6 @@ addopts = [
     "--tb=short",
     "--strict-markers",
     "--disable-warnings",
+    "-m",
+    "not integration",
 ]
