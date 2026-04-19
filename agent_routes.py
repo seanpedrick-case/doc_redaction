@@ -11,7 +11,7 @@ import io
 import os
 import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import JSONResponse
@@ -37,6 +37,7 @@ GRADIO_API_NAMES: tuple[str, ...] = (
     "summarise_document",
     "combine_review_csvs",
     "combine_review_pdfs",
+    "export_review_redaction_overlay",
 )
 
 
@@ -474,6 +475,102 @@ def post_combine_review_csvs(
     )
 
 
+class AgentExportReviewRedactionOverlayRequest(BaseModel):
+    """Parity with Gradio ``api_name='export_review_redaction_overlay'``."""
+
+    page_image_path: str = Field(
+        ...,
+        description="Path to page raster (PNG/JPEG) used as underlay; must be under allowed roots.",
+    )
+    boxes: List[Dict[str, Any]] = Field(
+        ...,
+        min_length=1,
+        description="Annotator-style boxes: label, color, xmin, ymin, xmax, ymax (normalized 0–1).",
+    )
+    page_number: int = Field(
+        1, ge=1, description="1-based page index for the output filename."
+    )
+    doc_base_name: str = Field(
+        "review",
+        description="Basename for output file (e.g. document name without extension).",
+    )
+    review_df_records: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description="Optional rows (include at least 'label') for stable label→line-pattern mapping.",
+    )
+
+
+@router.post(
+    "/export_review_redaction_overlay",
+    response_model=AgentTaskResponse,
+    summary="export_review_redaction_overlay (Gradio api_name)",
+    description=(
+        "Renders hollow redaction outlines and a top-right legend on the page image; "
+        "writes ``{doc_base_name}_page{n}_redaction_overlay.png`` under OUTPUT_FOLDER. "
+        "Uses ``tools.redaction_review.visualise_review_redaction_boxes``."
+    ),
+)
+def post_export_review_redaction_overlay(
+    body: AgentExportReviewRedactionOverlayRequest,
+    _: None = Depends(_optional_agent_api_key),
+) -> AgentTaskResponse:
+    import pandas as pd
+
+    from tools.redaction_review import visualise_review_redaction_boxes
+
+    img_path = _path_must_be_allowed_file(body.page_image_path)
+    annotator: dict[str, Any] = {"image": img_path, "boxes": body.boxes}
+    review_df = (
+        pd.DataFrame(body.review_df_records)
+        if body.review_df_records
+        else pd.DataFrame()
+    )
+    out_folder_path = Path(OUTPUT_FOLDER).expanduser().resolve()
+    if not validate_path_safety(str(out_folder_path)):
+        raise HTTPException(status_code=400, detail="Unsafe OUTPUT_FOLDER path")
+    allowed_roots = _allowed_path_roots()
+    under_root = False
+    for root in allowed_roots:
+        try:
+            out_folder_path.relative_to(root)
+            under_root = True
+            break
+        except ValueError:
+            continue
+    if not under_root:
+        raise HTTPException(
+            status_code=403,
+            detail="OUTPUT_FOLDER must resolve under repo, INPUT_FOLDER, or OUTPUT_FOLDER",
+        )
+    out_folder_path.mkdir(parents=True, exist_ok=True)
+    out_folder = str(out_folder_path)
+
+    path = visualise_review_redaction_boxes(
+        annotator,
+        review_df=review_df,
+        output_folder=out_folder,
+        page_number=body.page_number,
+        doc_base_name=body.doc_base_name,
+    )
+    if not path:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Could not produce overlay PNG (invalid image/boxes or write failed). "
+                "Ensure boxes are valid and the image loads."
+            ),
+        )
+    return AgentTaskResponse(
+        status="completed",
+        gradio_api_name="export_review_redaction_overlay",
+        task="export_review_redaction_overlay",
+        output_dir=out_folder,
+        input_dir="",
+        message="Redaction overlay PNG written",
+        output_paths=[path],
+    )
+
+
 def _gradio_only(api_name: str, detail: str) -> JSONResponse:
     return JSONResponse(
         status_code=501,
@@ -549,6 +646,12 @@ def list_operations() -> dict[str, Any]:
                 "method": "POST",
                 "path": "/agent/combine_review_pdfs",
                 "implementation": "cli_redact combine_review_pdfs",
+            },
+            {
+                "gradio_api_name": "export_review_redaction_overlay",
+                "method": "POST",
+                "path": "/agent/export_review_redaction_overlay",
+                "implementation": "visualise_review_redaction_boxes",
             },
             {
                 "gradio_api_name": "combine_review_csvs",

@@ -293,6 +293,7 @@ from tools.redaction_review import (
     df_select_callback_ocr,
     df_select_callback_textract_api,
     exclude_selected_items_from_redaction,
+    export_review_redaction_overlay_for_gradio,
     get_all_rows_with_same_text,
     get_all_rows_with_same_text_redact,
     get_and_merge_current_page_annotations,
@@ -2818,6 +2819,23 @@ with blocks:
                         use_default_label=False,
                         image_type="numpy",
                     )
+
+                    with gr.Accordion(
+                        label="Export redaction overlay image",
+                        open=False,
+                    ):
+                        gr.Markdown(
+                            "Save a single-page image of the current annotator view: "
+                            "page image with hollow redaction outlines (colour and line "
+                            "style by label) and a legend in the top-right corner."
+                        )
+                        export_redaction_overlay_btn = gr.Button(
+                            "Export redaction overlay image"
+                        )
+                        redaction_overlay_output_file = gr.File(
+                            label="Redaction overlay output",
+                            interactive=False,
+                        )
 
                     with gr.Row(equal_height=True):
                         annotation_last_page_button_bottom = gr.Button(
@@ -6814,6 +6832,19 @@ with blocks:
         ],
         show_progress_on=[input_pdf_for_review],
         api_visibility="undocumented",
+    )
+
+    export_redaction_overlay_btn.click(
+        export_review_redaction_overlay_for_gradio,
+        inputs=[
+            annotator,
+            annotate_current_page,
+            review_file_df,
+            doc_full_file_name_textbox,
+            output_folder_textbox,
+        ],
+        outputs=[redaction_overlay_output_file],
+        api_name="export_review_redaction_overlay",
     )
 
     ###

@@ -811,13 +811,14 @@ class TestCLIRedactExamples(unittest.TestCase):
         if not os.path.isfile(input_file):
             self.skipTest(f"Example file not found: {input_file}")
 
-        # Skip this test if AWS credentials are not available
+        # Page range must exist on all test PDFs: CI's setup_test_data.py builds a 3-page
+        # Partnership stub; the repo's full example PDF has more pages. Pages 1–2 are valid in both.
         run_cli_redact(
             script_path=self.script_path,
             input_file=input_file,
             output_dir=self.temp_output_dir,
-            page_min=6,
-            page_max=7,
+            page_min=1,
+            page_max=2,
             ocr_method="AWS Textract",
             handwrite_signature_extraction=[
                 "Extract handwriting",

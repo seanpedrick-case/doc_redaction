@@ -12600,3 +12600,186 @@ def add_confidence_legend(
             font_scale_label,
             margin,
         )
+
+
+def _draw_dashed_line_2d(
+    image_cv: np.ndarray,
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    color_bgr: Tuple[int, int, int],
+    thickness: int,
+    dash_len: int,
+    gap_len: int,
+) -> None:
+    """Draw a polyline from (x1,y1) to (x2,y2) with alternating dash/gap segments."""
+    length = float(np.hypot(x2 - x1, y2 - y1))
+    if length < 1e-6:
+        return
+    ux = (x2 - x1) / length
+    uy = (y2 - y1) / length
+    pos = 0.0
+    draw = True
+    while pos < length:
+        seg = dash_len if draw else gap_len
+        next_pos = min(pos + seg, length)
+        if draw:
+            cv2.line(
+                image_cv,
+                (int(round(x1 + ux * pos)), int(round(y1 + uy * pos))),
+                (int(round(x1 + ux * next_pos)), int(round(y1 + uy * next_pos))),
+                color_bgr,
+                thickness,
+                cv2.LINE_AA,
+            )
+        pos = next_pos
+        draw = not draw
+
+
+def draw_rectangle_outline_pattern(
+    image_cv: np.ndarray,
+    x1: int,
+    y1: int,
+    x2: int,
+    y2: int,
+    color_bgr: Tuple[int, int, int],
+    thickness: int = 2,
+    pattern: str = "solid",
+) -> None:
+    """
+    Draw a hollow rectangle outline. ``pattern`` is one of: solid, dashed, dotted.
+    """
+    x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+    if x2 <= x1 or y2 <= y1:
+        return
+    if pattern == "solid":
+        cv2.rectangle(
+            image_cv,
+            (x1, y1),
+            (x2, y2),
+            color_bgr,
+            thickness,
+            cv2.LINE_AA,
+        )
+        return
+    dash_len, gap_len = (8, 4) if pattern == "dashed" else (2, 4)
+    _draw_dashed_line_2d(
+        image_cv, x1, y1, x2, y1, color_bgr, thickness, dash_len, gap_len
+    )
+    _draw_dashed_line_2d(
+        image_cv, x2, y1, x2, y2, color_bgr, thickness, dash_len, gap_len
+    )
+    _draw_dashed_line_2d(
+        image_cv, x2, y2, x1, y2, color_bgr, thickness, dash_len, gap_len
+    )
+    _draw_dashed_line_2d(
+        image_cv, x1, y2, x1, y1, color_bgr, thickness, dash_len, gap_len
+    )
+
+
+def _draw_redaction_legend_swatch(
+    image_cv: np.ndarray,
+    bx: int,
+    by: int,
+    box_size: int,
+    color_bgr: Tuple[int, int, int],
+    pattern: str,
+    thickness: int,
+) -> None:
+    """Small hollow rectangle with pattern for legend (matches box drawing style)."""
+    x2 = bx + box_size
+    y2 = by + box_size
+    draw_rectangle_outline_pattern(
+        image_cv, bx, by, x2, y2, color_bgr, max(1, thickness), pattern
+    )
+
+
+def add_redaction_label_legend(
+    image_cv: np.ndarray,
+    legend_rows: List[Tuple[Tuple[int, int, int], str, str]],
+    title: str = "Redaction labels",
+) -> None:
+    """
+    Add a top-right legend for redaction label colours and outline patterns.
+
+    Args:
+        image_cv: OpenCV BGR image (modified in place).
+        legend_rows: List of (BGR colour, pattern name, display label).
+        title: Legend title text.
+    """
+    if not legend_rows:
+        return
+
+    height, width = image_cv.shape[:2]
+    num_items = len(legend_rows)
+
+    legend_width = max(90, min(220, int(width * 0.14)))
+    scale = legend_width / 200.0
+
+    font_scale_title = max(0.28, round(0.55 * scale, 2))
+    font_scale_label = max(0.22, round(0.45 * scale, 2))
+    item_spacing = max(12, int(22 * scale))
+    box_size = max(7, int(13 * scale))
+    margin = max(4, int(8 * scale))
+
+    (_, title_h), _ = cv2.getTextSize(
+        title, cv2.FONT_HERSHEY_SIMPLEX, font_scale_title, 1
+    )
+    legend_height = title_h + margin * 3 + num_items * item_spacing + margin
+
+    outer_pad = max(4, int(14 * scale))
+    legend_x = width - legend_width - outer_pad
+    legend_y = outer_pad
+
+    overlay = image_cv.copy()
+    cv2.rectangle(
+        overlay,
+        (legend_x, legend_y),
+        (legend_x + legend_width, legend_y + legend_height),
+        (255, 255, 255),
+        -1,
+    )
+    cv2.addWeighted(overlay, 0.5, image_cv, 0.5, 0, image_cv)
+
+    (title_w, title_h), _ = cv2.getTextSize(
+        title, cv2.FONT_HERSHEY_SIMPLEX, font_scale_title, 1
+    )
+    title_x = legend_x + max(0, (legend_width - title_w) // 2)
+    title_y = legend_y + title_h + margin
+    cv2.putText(
+        image_cv,
+        title,
+        (title_x, title_y),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        font_scale_title,
+        (0, 0, 0),
+        1,
+    )
+
+    start_y = title_y + item_spacing
+    swatch_thickness = max(1, int(round(1.5 * scale)))
+
+    for idx, (col_bgr, pattern, lbl) in enumerate(legend_rows):
+        iy = start_y + idx * item_spacing
+        bx = legend_x + margin
+        by = iy - box_size
+        lbl_disp = lbl if len(lbl) <= 42 else lbl[:39] + "..."
+        _draw_redaction_legend_swatch(
+            image_cv,
+            bx,
+            by,
+            box_size,
+            col_bgr,
+            pattern,
+            swatch_thickness,
+        )
+        cv2.putText(
+            image_cv,
+            lbl_disp,
+            (bx + box_size + margin, iy - max(1, margin // 3)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            font_scale_label,
+            (0, 0, 0),
+            1,
+        )

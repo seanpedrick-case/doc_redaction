@@ -5,7 +5,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 from xml.etree.ElementTree import Element, SubElement, tostring
 
 import defusedxml
@@ -15,6 +15,7 @@ import defusedxml.minidom as defused_minidom
 # Defuse the standard library XML modules for security
 defusedxml.defuse_stdlib()
 
+import cv2
 import gradio as gr
 import numpy as np
 import pandas as pd
@@ -51,14 +52,22 @@ from tools.file_conversion import (
     remove_duplicate_images_with_blank_boxes,
     save_pdf_with_or_without_compression,
 )
-from tools.file_redaction import redact_page_with_pymupdf, set_cropbox_safely
+from tools.file_redaction import (
+    add_redaction_label_legend,
+    define_box_colour,
+    draw_rectangle_outline_pattern,
+    redact_page_with_pymupdf,
+    set_cropbox_safely,
+)
 from tools.helper_functions import (
     _generate_unique_ids,
     detect_file_type,
     get_file_name_without_type,
 )
 from tools.secure_path_utils import (
+    sanitize_filename,
     secure_file_write,
+    secure_path_join,
 )
 
 if not MAX_IMAGE_PIXELS:
@@ -4308,3 +4317,233 @@ def convert_xfdf_to_dataframe(
     )
 
     return output_paths
+
+
+# --- Review tab: export single-page redaction overlay (debug / documentation) ---
+
+REVIEW_OVERLAY_PATTERNS = ("solid", "dashed", "dotted")
+
+
+def _sorted_unique_labels_from_review_df(review_df: pd.DataFrame) -> List[str]:
+    if review_df is None or review_df.empty or "label" not in review_df.columns:
+        return []
+    try:
+        s = (
+            review_df["label"]
+            .dropna()
+            .astype(str)
+            .loc[lambda x: x.str.len() > 0]
+            .unique()
+            .tolist()
+        )
+        return sorted(s)
+    except Exception:
+        return []
+
+
+def build_label_to_pattern_map(
+    review_df: pd.DataFrame, fallback_labels: List[str]
+) -> Dict[str, str]:
+    """
+    Map each label string to a line pattern (solid / dashed / dotted).
+    Uses sorted unique labels from ``review_df`` when available so the mapping is
+    stable across pages; otherwise falls back to sorted ``fallback_labels``.
+    """
+    labels = _sorted_unique_labels_from_review_df(review_df)
+    if not labels:
+        labels = sorted(set(fallback_labels))
+    out: Dict[str, str] = {}
+    for i, lab in enumerate(labels):
+        out[lab] = REVIEW_OVERLAY_PATTERNS[i % len(REVIEW_OVERLAY_PATTERNS)]
+    return out
+
+
+def _annotation_box_to_bgr(box: dict) -> Tuple[int, int, int]:
+    rgb01 = define_box_colour(True, {"color": box.get("color")}, CUSTOM_BOX_COLOUR)
+    return (
+        int(rgb01[2] * 255),
+        int(rgb01[1] * 255),
+        int(rgb01[0] * 255),
+    )
+
+
+def _norm_box_to_pixel_coords(
+    xmin: float,
+    ymin: float,
+    xmax: float,
+    ymax: float,
+    w: int,
+    h: int,
+) -> Tuple[int, int, int, int]:
+    x1 = int(np.clip(round(float(xmin) * w), 0, max(0, w - 1)))
+    x2 = int(np.clip(round(float(xmax) * w), 0, max(0, w - 1)))
+    y1 = int(np.clip(round(float(ymin) * h), 0, max(0, h - 1)))
+    y2 = int(np.clip(round(float(ymax) * h), 0, max(0, h - 1)))
+    if x2 <= x1:
+        x2 = min(w - 1, x1 + 1) if w > 1 else x1
+    if y2 <= y1:
+        y2 = min(h - 1, y1 + 1) if h > 1 else y1
+    return x1, y1, x2, y2
+
+
+def _load_underlay_rgb_from_annotator(
+    page_annotator: AnnotatedImageData,
+) -> Optional[np.ndarray]:
+    """Return RGB uint8 HxWx3 or None."""
+    img_val = page_annotator.get("image")
+    if img_val is None:
+        return None
+    if isinstance(img_val, np.ndarray) and img_val.size > 0:
+        arr = img_val.astype(np.uint8)
+        if arr.ndim == 2:
+            return np.stack([arr, arr, arr], axis=-1)
+        if arr.ndim == 3 and arr.shape[2] >= 3:
+            return arr[:, :, :3]
+        return None
+    if isinstance(img_val, str) and img_val and os.path.isfile(img_val):
+        try:
+            im = Image.open(img_val)
+            return np.asarray(im.convert("RGB"))
+        except Exception:
+            return None
+    if isinstance(img_val, Image.Image):
+        try:
+            return np.asarray(img_val.convert("RGB"))
+        except Exception:
+            return None
+    return None
+
+
+def visualise_review_redaction_boxes(
+    page_annotator: Optional[AnnotatedImageData],
+    review_df: Optional[pd.DataFrame] = None,
+    output_folder: str = OUTPUT_FOLDER,
+    page_number: int = 1,
+    doc_base_name: str = "review",
+    outline_thickness: int = 2,
+) -> Optional[str]:
+    """
+    Draw hollow redaction boxes on the page image and add a top-right legend.
+
+    Box coordinates are normalized 0–1 in annotator space (``xmin``..``ymax``).
+    Returns the path to the written PNG, or None if nothing could be exported.
+    """
+    if not page_annotator or not isinstance(page_annotator, dict):
+        return None
+
+    boxes = page_annotator.get("boxes") or []
+    if not boxes:
+        return None
+
+    rgb = _load_underlay_rgb_from_annotator(page_annotator)
+    if rgb is None:
+        return None
+
+    h, w = rgb.shape[:2]
+    if h < 2 or w < 2:
+        return None
+
+    image_bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+
+    fallback_labels = [str(b.get("label") or "Redaction") for b in boxes]
+    if review_df is None or not isinstance(review_df, pd.DataFrame):
+        review_df = pd.DataFrame()
+    pattern_map = build_label_to_pattern_map(review_df, fallback_labels)
+
+    for box in boxes:
+        if not isinstance(box, dict):
+            continue
+        try:
+            xmin = float(box.get("xmin", 0))
+            ymin = float(box.get("ymin", 0))
+            xmax = float(box.get("xmax", 0))
+            ymax = float(box.get("ymax", 0))
+        except (TypeError, ValueError):
+            continue
+        lab = str(box.get("label") or "Redaction")
+        pat = pattern_map.get(lab, "solid")
+        bgr = _annotation_box_to_bgr(box)
+        x1, y1, x2, y2 = _norm_box_to_pixel_coords(xmin, ymin, xmax, ymax, w, h)
+        draw_rectangle_outline_pattern(
+            image_bgr,
+            x1,
+            y1,
+            x2,
+            y2,
+            bgr,
+            outline_thickness,
+            pat,
+        )
+
+    unique_labels = sorted({str(b.get("label") or "Redaction") for b in boxes})
+    legend_rows: List[Tuple[Tuple[int, int, int], str, str]] = []
+    for lab in unique_labels:
+        first = next(
+            (b for b in boxes if str(b.get("label") or "Redaction") == lab), None
+        )
+        if first is None:
+            continue
+        legend_rows.append(
+            (_annotation_box_to_bgr(first), pattern_map.get(lab, "solid"), lab)
+        )
+
+    add_redaction_label_legend(image_bgr, legend_rows, title="Redaction labels")
+
+    base = get_file_name_without_type(os.path.basename(str(doc_base_name)))
+    if not base or not str(base).strip():
+        base = "review"
+    safe_base = sanitize_filename(str(base))
+    out_fn = f"{safe_base}_page{int(page_number)}_redaction_overlay.png"
+    try:
+        out_path = secure_path_join(output_folder, out_fn)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(out_path), image_bgr)
+        return str(out_path)
+    except Exception:
+        return None
+
+
+def export_review_redaction_overlay_for_gradio(
+    page_annotator: Optional[AnnotatedImageData],
+    annotate_current_page: float,
+    review_df: pd.DataFrame,
+    doc_full_file_name_textbox: str,
+    output_folder_textbox: str,
+) -> Optional[str]:
+    """
+    Gradio handler: write overlay PNG and return the file path for download.
+    Shows a short ``gr.Info`` when export cannot complete.
+
+    Uses ``output_folder_textbox`` when non-empty; otherwise falls back to
+    ``OUTPUT_FOLDER`` from config.
+    """
+    if page_annotator is None or not isinstance(page_annotator, dict):
+        gr.Info("No annotator data loaded.", duration=5)
+        return None
+    try:
+        page_num = max(1, int(annotate_current_page or 1))
+    except (TypeError, ValueError):
+        page_num = 1
+    doc_name = doc_full_file_name_textbox or "review"
+    out_dir = (
+        output_folder_textbox.strip()
+        if isinstance(output_folder_textbox, str) and output_folder_textbox.strip()
+        else OUTPUT_FOLDER
+    )
+    path = visualise_review_redaction_boxes(
+        page_annotator,
+        review_df=review_df,
+        output_folder=out_dir,
+        page_number=page_num,
+        doc_base_name=doc_name,
+    )
+    if path:
+        return path
+    boxes = page_annotator.get("boxes") or []
+    if not boxes:
+        gr.Info("No redaction boxes on the current page to export.", duration=6)
+    elif _load_underlay_rgb_from_annotator(page_annotator) is None:
+        gr.Info("Could not load the page image (path missing or invalid).", duration=6)
+    else:
+        gr.Info("Could not save the redaction overlay image.", duration=6)
+    return None

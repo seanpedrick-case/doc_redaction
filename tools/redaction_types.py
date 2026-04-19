@@ -116,7 +116,10 @@ def to_legacy_kwargs(
     options: RedactionOptions, context: RedactionContext
 ) -> Dict[str, Any]:
     """Merge options + context into the flat kwargs dict expected by `_choose_and_run_redactor_impl`."""
-    return {**asdict(options), **asdict(context)}
+    # Do not use ``asdict(context)``: it deep-copies nested structures and fails on PyMuPDF
+    # ``Document`` / SWIG objects held in ``pymupdf_doc`` (TypeError: cannot pickle SwigPyObject).
+    ctx_flat = {f.name: getattr(context, f.name) for f in fields(RedactionContext)}
+    return {**asdict(options), **ctx_flat}
 
 
 def from_legacy_dict(flat: Dict[str, Any]) -> tuple[RedactionOptions, RedactionContext]:
