@@ -2162,6 +2162,45 @@ USE_POLARS_FOR_REVIEW = convert_string_to_boolean(
     get_or_create_env_var("USE_POLARS_FOR_REVIEW", "True")
 )
 
+# Review overlay PNG export: draw the first N characters of each redaction label on the image (0 = disabled).
+try:
+    _review_abbrev_n = int(
+        get_or_create_env_var("REVIEW_OVERLAY_LABEL_ABBREV_CHARS", "0").strip() or "0"
+    )
+except ValueError:
+    _review_abbrev_n = 0
+REVIEW_OVERLAY_LABEL_ABBREV_CHARS = max(0, min(24, _review_abbrev_n))
+
+# Review overlay abbreviation font: 0 = automatic from image width (max(9, min(16, w//90))); else fixed pixel size (clamped 6–96).
+try:
+    _review_overlay_label_font = int(
+        get_or_create_env_var("REVIEW_OVERLAY_LABEL_FONT_PX", "0").strip() or "0"
+    )
+except ValueError:
+    _review_overlay_label_font = 0
+REVIEW_OVERLAY_LABEL_FONT_PX = max(0, min(96, _review_overlay_label_font))
+
+# Review overlay export: if width*height exceeds this, scale down (preserving aspect) before saving. 0 = no limit.
+try:
+    _review_overlay_max_px = int(
+        get_or_create_env_var("REVIEW_OVERLAY_MAX_PIXELS", "4000000").strip() or "0"
+    )
+except ValueError:
+    _review_overlay_max_px = 4_000_000
+REVIEW_OVERLAY_MAX_PIXELS = max(0, _review_overlay_max_px)
+
+# Target maximum file size for review overlay JPEG output (default 500 KiB, same order as OCR page visualisations).
+try:
+    _review_overlay_max_bytes = int(
+        get_or_create_env_var("REVIEW_OVERLAY_MAX_FILE_BYTES", str(500 * 1024)).strip()
+        or str(500 * 1024)
+    )
+except ValueError:
+    _review_overlay_max_bytes = 500 * 1024
+REVIEW_OVERLAY_MAX_FILE_BYTES = max(
+    50_000, min(20 * 1024 * 1024, _review_overlay_max_bytes)
+)
+
 # When True and multiple file paths are given, process each file in parallel in apply_redactions_to_review_df_and_files. Off by default.
 ENABLE_PARALLEL_FILES_APPLY_REDACTIONS = convert_string_to_boolean(
     get_or_create_env_var("ENABLE_PARALLEL_FILES_APPLY_REDACTIONS", "True")

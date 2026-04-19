@@ -2820,23 +2820,6 @@ with blocks:
                         image_type="numpy",
                     )
 
-                    with gr.Accordion(
-                        label="Export redaction overlay image",
-                        open=False,
-                    ):
-                        gr.Markdown(
-                            "Save a single-page image of the current annotator view: "
-                            "page image with hollow redaction outlines (colour and line "
-                            "style by label) and a legend in the top-right corner."
-                        )
-                        export_redaction_overlay_btn = gr.Button(
-                            "Export redaction overlay image"
-                        )
-                        redaction_overlay_output_file = gr.File(
-                            label="Redaction overlay output",
-                            interactive=False,
-                        )
-
                     with gr.Row(equal_height=True):
                         annotation_last_page_button_bottom = gr.Button(
                             "Previous page", scale=4
@@ -2861,6 +2844,23 @@ with blocks:
                         )
                         annotation_next_page_button_bottom = gr.Button(
                             "Next page", scale=4
+                        )
+
+                    with gr.Accordion(
+                        label="Export redaction overlay image",
+                        open=False,
+                    ):
+                        gr.Markdown(
+                            "Save a single-page JPEG of the current annotator view: "
+                            "page image with hollow redaction outlines (colour and line "
+                            "style by label) and a legend in the top-right."
+                        )
+                        export_redaction_overlay_btn = gr.Button(
+                            "Export redaction overlay image"
+                        )
+                        redaction_overlay_output_file = gr.File(
+                            label="Redaction overlay output",
+                            interactive=False,
                         )
 
                 with gr.Column(scale=1):

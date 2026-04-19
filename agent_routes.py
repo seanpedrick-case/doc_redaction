@@ -498,6 +498,12 @@ class AgentExportReviewRedactionOverlayRequest(BaseModel):
         None,
         description="Optional rows (include at least 'label') for stable label→line-pattern mapping.",
     )
+    label_abbrev_chars: Optional[int] = Field(
+        None,
+        ge=0,
+        le=24,
+        description="Draw this many leading characters of each label on the image; omit to use REVIEW_OVERLAY_LABEL_ABBREV_CHARS from config (0 = off).",
+    )
 
 
 @router.post(
@@ -506,7 +512,8 @@ class AgentExportReviewRedactionOverlayRequest(BaseModel):
     summary="export_review_redaction_overlay (Gradio api_name)",
     description=(
         "Renders hollow redaction outlines and a top-right legend on the page image; "
-        "writes ``{doc_base_name}_page{n}_redaction_overlay.png`` under OUTPUT_FOLDER. "
+        "writes ``redaction_overlay/{doc_base_name}_page{n}_redaction_overlay.jpg`` under OUTPUT_FOLDER "
+        "(scaled per REVIEW_OVERLAY_MAX_PIXELS, JPEG capped by REVIEW_OVERLAY_MAX_FILE_BYTES). "
         "Uses ``tools.redaction_review.visualise_review_redaction_boxes``."
     ),
 )
@@ -551,6 +558,7 @@ def post_export_review_redaction_overlay(
         output_folder=out_folder,
         page_number=body.page_number,
         doc_base_name=body.doc_base_name,
+        label_abbrev_chars=body.label_abbrev_chars,
     )
     if not path:
         raise HTTPException(

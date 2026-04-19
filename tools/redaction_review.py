@@ -1,4 +1,5 @@
 import gc
+import math
 import os
 import re
 import time
@@ -22,7 +23,7 @@ import pandas as pd
 import polars as pl
 import pymupdf
 from gradio_image_annotation.image_annotator import AnnotatedImageData
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 from pymupdf import Document, Rect
 
 from tools.config import (
@@ -36,6 +37,10 @@ from tools.config import (
     OUTPUT_FOLDER,
     PROFILE_REDACTION_APPLY,
     RETURN_PDF_FOR_REVIEW,
+    REVIEW_OVERLAY_LABEL_ABBREV_CHARS,
+    REVIEW_OVERLAY_LABEL_FONT_PX,
+    REVIEW_OVERLAY_MAX_FILE_BYTES,
+    REVIEW_OVERLAY_MAX_PIXELS,
     TWO_PASS_REVIEW_PDF_LOW_MEMORY,
     USE_POLARS_FOR_REVIEW,
 )
@@ -63,6 +68,7 @@ from tools.helper_functions import (
     _generate_unique_ids,
     detect_file_type,
     get_file_name_without_type,
+    get_ocr_visualisation_font_path,
 )
 from tools.secure_path_utils import (
     sanitize_filename,
@@ -4332,6 +4338,7 @@ def _sorted_unique_labels_from_review_df(review_df: pd.DataFrame) -> List[str]:
             review_df["label"]
             .dropna()
             .astype(str)
+            .str.strip()
             .loc[lambda x: x.str.len() > 0]
             .unique()
             .tolist()
@@ -4386,6 +4393,44 @@ def _norm_box_to_pixel_coords(
     return x1, y1, x2, y2
 
 
+def _box_coords_to_pixel_rect(
+    xmin: float,
+    ymin: float,
+    xmax: float,
+    ymax: float,
+    w: int,
+    h: int,
+) -> Tuple[int, int, int, int]:
+    """
+    Map box corners to pixel integers on a ``w`` x ``h`` underlay.
+
+    ``gradio_image_annotation`` returns **absolute pixel** coordinates in the
+    backend; review CSV / OCR data use **normalized 0–1** coordinates. If the
+    largest corner value is <= 1, treat as normalized; otherwise as pixels.
+    """
+    try:
+        fx = float(xmin)
+        fy = float(ymin)
+        fxb = float(xmax)
+        fyb = float(ymax)
+    except (TypeError, ValueError):
+        return 0, 0, max(0, w - 1), max(0, h - 1)
+
+    max_c = max(fx, fy, fxb, fyb)
+    if max_c <= 1.0001:
+        return _norm_box_to_pixel_coords(fx, fy, fxb, fyb, w, h)
+
+    x1 = int(np.clip(round(fx), 0, max(0, w - 1)))
+    x2 = int(np.clip(round(fxb), 0, max(0, w - 1)))
+    y1 = int(np.clip(round(fy), 0, max(0, h - 1)))
+    y2 = int(np.clip(round(fyb), 0, max(0, h - 1)))
+    if x2 <= x1:
+        x2 = min(w - 1, x1 + 1) if w > 1 else x1
+    if y2 <= y1:
+        y2 = min(h - 1, y1 + 1) if h > 1 else y1
+    return x1, y1, x2, y2
+
+
 def _load_underlay_rgb_from_annotator(
     page_annotator: AnnotatedImageData,
 ) -> Optional[np.ndarray]:
@@ -4414,6 +4459,100 @@ def _load_underlay_rgb_from_annotator(
     return None
 
 
+def _draw_review_overlay_label_abbrevs(
+    image_bgr: np.ndarray,
+    placements: List[Tuple[str, int, int, int, int, Tuple[int, int, int]]],
+    abbrev_chars: int,
+) -> None:
+    """
+    Draw the first ``abbrev_chars`` characters of each label centred above the box top edge.
+    Uses the same outline colour as the box (BGR tuple per placement). Modifies ``image_bgr`` in place.
+    Font size follows ``REVIEW_OVERLAY_LABEL_FONT_PX`` from config (0 = scale from image width).
+    """
+    if abbrev_chars <= 0 or not placements:
+        return
+    h, w = image_bgr.shape[:2]
+    rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+    pil_im = Image.fromarray(rgb)
+    draw = ImageDraw.Draw(pil_im)
+    if REVIEW_OVERLAY_LABEL_FONT_PX > 0:
+        font_px = max(6, min(96, int(REVIEW_OVERLAY_LABEL_FONT_PX)))
+    else:
+        font_px = max(11, min(16, w // 90))
+    font_path = get_ocr_visualisation_font_path()
+    try:
+        font = (
+            ImageFont.truetype(font_path, font_px)
+            if font_path
+            else ImageFont.load_default()
+        )
+    except OSError:
+        font = ImageFont.load_default()
+
+    for lab, x1, y1, x2, y2, bgr in placements:
+        abbrev = (lab or "")[:abbrev_chars]
+        if not abbrev.strip():
+            continue
+        fill_rgb = (int(bgr[2]), int(bgr[1]), int(bgr[0]))
+        cx = (x1 + x2) // 2
+        bbox = draw.textbbox((0, 0), abbrev, font=font)
+        tw = bbox[2] - bbox[0]
+        th = bbox[3] - bbox[1]
+        tx = int(np.clip(cx - tw // 2, 0, max(0, w - tw)))
+        # Clear gap so label baseline/text bottom does not sit on the box top edge
+        gap_above_box = max(8, font_px // 2 + 4)
+        ty = int(np.clip(y1 - th - gap_above_box, 0, max(0, h - th)))
+        stroke_w = max(1, font_px // 10)
+        try:
+            draw.text(
+                (tx, ty),
+                abbrev,
+                font=font,
+                fill=fill_rgb,
+                stroke_width=stroke_w,
+                stroke_fill=(255, 255, 255),
+            )
+        except TypeError:
+            draw.text((tx, ty), abbrev, font=font, fill=fill_rgb)
+
+    out_rgb = np.asarray(pil_im)
+    image_bgr[:] = cv2.cvtColor(out_rgb, cv2.COLOR_RGB2BGR)
+
+
+def _resize_bgr_to_max_pixels(image_bgr: np.ndarray, max_pixels: int) -> np.ndarray:
+    """Downscale if ``width * height`` exceeds ``max_pixels`` (aspect preserved). ``max_pixels`` 0 = no resize."""
+    if max_pixels <= 0:
+        return image_bgr
+    h, w = image_bgr.shape[:2]
+    if w * h <= max_pixels:
+        return image_bgr
+    scale = math.sqrt(max_pixels / float(w * h))
+    nw = max(1, int(w * scale))
+    nh = max(1, int(h * scale))
+    return cv2.resize(image_bgr, (nw, nh), interpolation=cv2.INTER_AREA)
+
+
+def _write_review_overlay_jpeg(
+    image_bgr: np.ndarray, path: str, max_file_bytes: int
+) -> None:
+    """Write JPEG, lowering quality until file size is at or below ``max_file_bytes`` (cf. OCR page visualisations)."""
+    quality = 95
+    while quality >= 10:
+        cv2.imwrite(
+            path,
+            image_bgr,
+            [int(cv2.IMWRITE_JPEG_QUALITY), quality],
+        )
+        if os.path.isfile(path) and os.path.getsize(path) <= max_file_bytes:
+            return
+        quality -= 5
+    cv2.imwrite(
+        path,
+        image_bgr,
+        [int(cv2.IMWRITE_JPEG_QUALITY), 10],
+    )
+
+
 def visualise_review_redaction_boxes(
     page_annotator: Optional[AnnotatedImageData],
     review_df: Optional[pd.DataFrame] = None,
@@ -4421,12 +4560,18 @@ def visualise_review_redaction_boxes(
     page_number: int = 1,
     doc_base_name: str = "review",
     outline_thickness: int = 2,
+    label_abbrev_chars: Optional[int] = None,
 ) -> Optional[str]:
     """
     Draw hollow redaction boxes on the page image and add a top-right legend.
 
-    Box coordinates are normalized 0–1 in annotator space (``xmin``..``ymax``).
-    Returns the path to the written PNG, or None if nothing could be exported.
+    Box coordinates may be **normalized 0–1** (review CSV / OCR) or **absolute
+    pixels** in the same space as the underlay (Gradio ``image_annotator``).
+    JPEG is written under ``output_folder/redaction_overlay/`` (scaled per
+    ``REVIEW_OVERLAY_MAX_PIXELS``, compressed toward ``REVIEW_OVERLAY_MAX_FILE_BYTES``).
+
+    ``label_abbrev_chars``: override for how many leading characters of each label to
+    paint above the box; ``None`` uses ``REVIEW_OVERLAY_LABEL_ABBREV_CHARS`` from config (0 = off).
     """
     if not page_annotator or not isinstance(page_annotator, dict):
         return None
@@ -4445,10 +4590,14 @@ def visualise_review_redaction_boxes(
 
     image_bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
 
-    fallback_labels = [str(b.get("label") or "Redaction") for b in boxes]
+    fallback_labels = [
+        str(b.get("label") or "Redaction").strip() or "Redaction" for b in boxes
+    ]
     if review_df is None or not isinstance(review_df, pd.DataFrame):
         review_df = pd.DataFrame()
     pattern_map = build_label_to_pattern_map(review_df, fallback_labels)
+
+    placements: List[Tuple[str, int, int, int, int, Tuple[int, int, int]]] = []
 
     for box in boxes:
         if not isinstance(box, dict):
@@ -4460,10 +4609,11 @@ def visualise_review_redaction_boxes(
             ymax = float(box.get("ymax", 0))
         except (TypeError, ValueError):
             continue
-        lab = str(box.get("label") or "Redaction")
+        lab = str(box.get("label") or "Redaction").strip() or "Redaction"
         pat = pattern_map.get(lab, "solid")
         bgr = _annotation_box_to_bgr(box)
-        x1, y1, x2, y2 = _norm_box_to_pixel_coords(xmin, ymin, xmax, ymax, w, h)
+        x1, y1, x2, y2 = _box_coords_to_pixel_rect(xmin, ymin, xmax, ymax, w, h)
+        placements.append((lab, x1, y1, x2, y2, bgr))
         draw_rectangle_outline_pattern(
             image_bgr,
             x1,
@@ -4475,11 +4625,26 @@ def visualise_review_redaction_boxes(
             pat,
         )
 
-    unique_labels = sorted({str(b.get("label") or "Redaction") for b in boxes})
+    abbrev_n = (
+        label_abbrev_chars
+        if label_abbrev_chars is not None
+        else REVIEW_OVERLAY_LABEL_ABBREV_CHARS
+    )
+    if abbrev_n and abbrev_n > 0:
+        _draw_review_overlay_label_abbrevs(image_bgr, placements, abbrev_n)
+
+    unique_labels = sorted(
+        {str(b.get("label") or "Redaction").strip() or "Redaction" for b in boxes}
+    )
     legend_rows: List[Tuple[Tuple[int, int, int], str, str]] = []
     for lab in unique_labels:
         first = next(
-            (b for b in boxes if str(b.get("label") or "Redaction") == lab), None
+            (
+                b
+                for b in boxes
+                if (str(b.get("label") or "Redaction").strip() or "Redaction") == lab
+            ),
+            None,
         )
         if first is None:
             continue
@@ -4489,15 +4654,19 @@ def visualise_review_redaction_boxes(
 
     add_redaction_label_legend(image_bgr, legend_rows, title="Redaction labels")
 
+    image_bgr = _resize_bgr_to_max_pixels(image_bgr, REVIEW_OVERLAY_MAX_PIXELS)
+
     base = get_file_name_without_type(os.path.basename(str(doc_base_name)))
     if not base or not str(base).strip():
         base = "review"
     safe_base = sanitize_filename(str(base))
-    out_fn = f"{safe_base}_page{int(page_number)}_redaction_overlay.png"
+    out_fn = f"{safe_base}_page{int(page_number)}_redaction_overlay.jpg"
     try:
-        out_path = secure_path_join(output_folder, out_fn)
+        out_path = secure_path_join(output_folder, "redaction_overlay", out_fn)
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        cv2.imwrite(str(out_path), image_bgr)
+        _write_review_overlay_jpeg(
+            image_bgr, str(out_path), REVIEW_OVERLAY_MAX_FILE_BYTES
+        )
         return str(out_path)
     except Exception:
         return None

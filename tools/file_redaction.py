@@ -12637,6 +12637,31 @@ def _draw_dashed_line_2d(
         draw = not draw
 
 
+def _dash_gap_for_pattern_span(span_px: int, pattern: str) -> Tuple[int, int]:
+    """
+    Dash and gap lengths for an edge of length ``span_px`` so dashed/dotted styles
+    repeat visibly. Matches legend line samples to main-image box edges for the same
+    ``pattern`` when spans are similar.
+    """
+    span_px = max(1, int(span_px))
+    if pattern == "solid":
+        return (1, 0)
+    if pattern == "dashed":
+        if span_px >= 48:
+            return (8, 4)
+        period = max(6, span_px // 3)
+        dash_len = max(3, (period * 2 + 2) // 3)
+        gap_len = max(2, period - dash_len)
+        return (dash_len, gap_len)
+    # dotted
+    if span_px >= 32:
+        return (2, 4)
+    period = max(4, span_px // 4)
+    dash_len = max(2, min(3, max(1, period // 4)))
+    gap_len = max(2, dash_len * 2)
+    return (dash_len, gap_len)
+
+
 def draw_rectangle_outline_pattern(
     image_cv: np.ndarray,
     x1: int,
@@ -12663,7 +12688,8 @@ def draw_rectangle_outline_pattern(
             cv2.LINE_AA,
         )
         return
-    dash_len, gap_len = (8, 4) if pattern == "dashed" else (2, 4)
+    min_side = min(x2 - x1, y2 - y1)
+    dash_len, gap_len = _dash_gap_for_pattern_span(min_side, pattern)
     _draw_dashed_line_2d(
         image_cv, x1, y1, x2, y1, color_bgr, thickness, dash_len, gap_len
     )
@@ -12678,20 +12704,41 @@ def draw_rectangle_outline_pattern(
     )
 
 
-def _draw_redaction_legend_swatch(
+def _draw_redaction_legend_pattern_sample(
     image_cv: np.ndarray,
-    bx: int,
-    by: int,
-    box_size: int,
+    x0: int,
+    y_mid: int,
+    line_width: int,
     color_bgr: Tuple[int, int, int],
     pattern: str,
     thickness: int,
 ) -> None:
-    """Small hollow rectangle with pattern for legend (matches box drawing style)."""
-    x2 = bx + box_size
-    y2 = by + box_size
-    draw_rectangle_outline_pattern(
-        image_cv, bx, by, x2, y2, color_bgr, max(1, thickness), pattern
+    """
+    Horizontal line showing the same dash/dot style as ``draw_rectangle_outline_pattern``,
+    long enough for dashed/dotted to read (unlike a tiny square swatch).
+    """
+    x1 = x0 + int(line_width)
+    if pattern == "solid":
+        cv2.line(
+            image_cv,
+            (x0, y_mid),
+            (x1, y_mid),
+            color_bgr,
+            thickness,
+            cv2.LINE_AA,
+        )
+        return
+    dash_len, gap_len = _dash_gap_for_pattern_span(int(line_width), pattern)
+    _draw_dashed_line_2d(
+        image_cv,
+        float(x0),
+        float(y_mid),
+        float(x1),
+        float(y_mid),
+        color_bgr,
+        thickness,
+        dash_len,
+        gap_len,
     )
 
 
@@ -12759,17 +12806,18 @@ def add_redaction_label_legend(
 
     start_y = title_y + item_spacing
     swatch_thickness = max(1, int(round(1.5 * scale)))
+    swatch_line_w = max(28, min(56, legend_width - 2 * margin - 78))
 
     for idx, (col_bgr, pattern, lbl) in enumerate(legend_rows):
         iy = start_y + idx * item_spacing
         bx = legend_x + margin
-        by = iy - box_size
+        y_line = iy - max(5, box_size // 3)
         lbl_disp = lbl if len(lbl) <= 42 else lbl[:39] + "..."
-        _draw_redaction_legend_swatch(
+        _draw_redaction_legend_pattern_sample(
             image_cv,
             bx,
-            by,
-            box_size,
+            y_line,
+            swatch_line_w,
             col_bgr,
             pattern,
             swatch_thickness,
@@ -12777,7 +12825,7 @@ def add_redaction_label_legend(
         cv2.putText(
             image_cv,
             lbl_disp,
-            (bx + box_size + margin, iy - max(1, margin // 3)),
+            (bx + swatch_line_w + margin, iy - max(1, margin // 3)),
             cv2.FONT_HERSHEY_SIMPLEX,
             font_scale_label,
             (0, 0, 0),
