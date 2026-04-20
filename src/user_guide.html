@@ -2,13 +2,16 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
 
 <meta charset="utf-8">
-<meta name="generator" content="quarto-1.8.27">
+<meta name="generator" content="quarto-1.9.36">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 
 <title>User guide – Document Redaction App</title>
 <style>
+/* Default styles provided by pandoc.
+** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+*/
 code{white-space: pre-wrap;}
 span.smallcaps{font-variant: small-caps;}
 div.columns{display: flex; gap: min(4vw, 1.5em);}
@@ -67,15 +70,14 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <meta name="quarto:offset" content="../">
 <script src="../site_libs/quarto-html/quarto.js" type="module"></script>
 <script src="../site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
-<script src="../site_libs/quarto-html/axe/axe-check.js" type="module"></script>
 <script src="../site_libs/quarto-html/popper.min.js"></script>
 <script src="../site_libs/quarto-html/tippy.umd.min.js"></script>
 <script src="../site_libs/quarto-html/anchor.min.js"></script>
 <link href="../site_libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-ed96de9b727972fe78a7b5d16c58bf87.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-845c23b38eaddc0f92fda52bfe77a8c8.css" rel="stylesheet" id="quarto-text-highlighting-styles">
 <script src="../site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="../site_libs/bootstrap/bootstrap-e31584831b205ffbb2d98406f31c2a5b.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-a0f9fd0d421825b736dc1bbcbcba2219.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -219,6 +221,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
   <li><a href="#merging-previous-redaction-review-files" id="toc-merging-previous-redaction-review-files" class="nav-link" data-scroll-target="#merging-previous-redaction-review-files">Merging previous redaction review files</a></li>
   <li><a href="#loading-in-ocr-results-to-search-for-new-redactions" id="toc-loading-in-ocr-results-to-search-for-new-redactions" class="nav-link" data-scroll-target="#loading-in-ocr-results-to-search-for-new-redactions">Loading in OCR results to search for new redactions</a></li>
   <li><a href="#using-a-previous-ocr-results-file-to-skip-redoing-ocr-for-future-redaction-tasks" id="toc-using-a-previous-ocr-results-file-to-skip-redoing-ocr-for-future-redaction-tasks" class="nav-link" data-scroll-target="#using-a-previous-ocr-results-file-to-skip-redoing-ocr-for-future-redaction-tasks">Using a previous OCR results file to skip redoing OCR for future redaction tasks</a></li>
+  <li><a href="#exporting-page-visualisations-review-redactions-tab" id="toc-exporting-page-visualisations-review-redactions-tab" class="nav-link" data-scroll-target="#exporting-page-visualisations-review-redactions-tab">Exporting page visualisations (Review redactions tab)</a></li>
   </ul></li>
   <li><a href="#document-summarisation" id="toc-document-summarisation" class="nav-link" data-scroll-target="#document-summarisation">Document summarisation</a></li>
   <li><a href="#redacting-word-tabular-data-files-xlsxcsv-or-open-text" id="toc-redacting-word-tabular-data-files-xlsxcsv-or-open-text" class="nav-link" data-scroll-target="#redacting-word-tabular-data-files-xlsxcsv-or-open-text">Redacting Word, tabular data files (XLSX/CSV) or open text</a>
@@ -851,6 +854,19 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <p>If you have a large document that you want to redact a second time in future, you can save time and money by retaining output files from the first run, and uploading them alongside the document next time you use the app for redaction.</p>
 <p>Every time you redact, a file with the suffix ‘.json’ is produced. This file contains all the OCR results from your analysis. To use this file next time and skip waiting and paying for the OCR process, you can upload this alongside your document. On the ‘Redact PDFs/images’ tab, the file input area allows you to upload multiple files at the same time. With your document file and the .json file in the same folder, click on Drop files here or click to upload, and select both the PDF file and the .json file from the previous analysis output. The app should load both in.</p>
 <p>To check the previous OCR result upload has been successful, lower down the page you should see two checkboxes, called ‘Existing Textract output file found’ and ‘Existing local OCR output found’. If one of these has become checked, then the OCR output has been successfully uploaded. When you next redact the document with the given method, it should load in the existing OCR results to skip re-analysis.</p>
+</section>
+<section id="exporting-page-visualisations-review-redactions-tab" class="level3">
+<h3 class="anchored" data-anchor-id="exporting-page-visualisations-review-redactions-tab">Exporting page visualisations (Review redactions tab)</h3>
+<p>Under the page viewer on the <strong>Review redactions</strong> tab there is an accordion that lets you export helpful single-page images so you can easily review the current OCR and redaction outputs for each page:</p>
+<ul>
+<li><strong>Export OCR visualisation image</strong>: saves a PNG showing <strong>word-level OCR bounding boxes</strong> and confidence colouring (plus legend), using the OCR results loaded for the document.</li>
+<li><strong>Export redaction overlay image</strong>: saves a JPEG of the current page image with <strong>redaction box outlines</strong> (colour/line style by label) plus a <strong>legend</strong> in the top-right.</li>
+</ul>
+<p>Both exports write into your output folder:</p>
+<ul>
+<li>Redaction overlay: <code>redaction_overlay/</code> (e.g.&nbsp;<code>*_redaction_overlay.jpg</code>)</li>
+<li>OCR visualisation: <code>review_ocr_visualisations/</code> (e.g.&nbsp;<code>*_review_ocr_visualisations.png</code>)</li>
+</ul>
 </section>
 </section>
 <section id="document-summarisation" class="level2">

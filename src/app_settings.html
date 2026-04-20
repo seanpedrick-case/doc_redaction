@@ -2,13 +2,16 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
 
 <meta charset="utf-8">
-<meta name="generator" content="quarto-1.8.27">
+<meta name="generator" content="quarto-1.9.36">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 
 <title>App settings management guide – Document Redaction App</title>
 <style>
+/* Default styles provided by pandoc.
+** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+*/
 code{white-space: pre-wrap;}
 span.smallcaps{font-variant: small-caps;}
 div.columns{display: flex; gap: min(4vw, 1.5em);}
@@ -32,15 +35,14 @@ ul.task-list li input[type="checkbox"] {
 <meta name="quarto:offset" content="../">
 <script src="../site_libs/quarto-html/quarto.js" type="module"></script>
 <script src="../site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
-<script src="../site_libs/quarto-html/axe/axe-check.js" type="module"></script>
 <script src="../site_libs/quarto-html/popper.min.js"></script>
 <script src="../site_libs/quarto-html/tippy.umd.min.js"></script>
 <script src="../site_libs/quarto-html/anchor.min.js"></script>
 <link href="../site_libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-ed96de9b727972fe78a7b5d16c58bf87.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-845c23b38eaddc0f92fda52bfe77a8c8.css" rel="stylesheet" id="quarto-text-highlighting-styles">
 <script src="../site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="../site_libs/bootstrap/bootstrap-e31584831b205ffbb2d98406f31c2a5b.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-a0f9fd0d421825b736dc1bbcbcba2219.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -164,7 +166,10 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
   </ul></li>
   <li><a href="#language-options" id="toc-language-options" class="nav-link" data-scroll-target="#language-options">Language Options</a></li>
   <li><a href="#duplicate-detection-settings" id="toc-duplicate-detection-settings" class="nav-link" data-scroll-target="#duplicate-detection-settings">Duplicate Detection Settings</a></li>
-  <li><a href="#file-output-options" id="toc-file-output-options" class="nav-link" data-scroll-target="#file-output-options">File Output Options</a></li>
+  <li><a href="#file-output-options" id="toc-file-output-options" class="nav-link" data-scroll-target="#file-output-options">File Output Options</a>
+  <ul class="collapse">
+  <li><a href="#review-redaction-overlay-export" id="toc-review-redaction-overlay-export" class="nav-link" data-scroll-target="#review-redaction-overlay-export">Review redaction overlay export</a></li>
+  </ul></li>
   <li><a href="#direct-mode-lambda-configuration" id="toc-direct-mode-lambda-configuration" class="nav-link" data-scroll-target="#direct-mode-lambda-configuration">Direct Mode &amp; Lambda Configuration</a>
   <ul class="collapse">
   <li><a href="#direct-mode" id="toc-direct-mode" class="nav-link" data-scroll-target="#direct-mode">Direct Mode</a></li>
@@ -510,11 +515,6 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <ul>
 <li><strong>Description:</strong> Maximum time value for processing operations.</li>
 <li><strong>Default Value:</strong> <code>999999</code></li>
-</ul></li>
-<li><strong><code>TLDEXTRACT_CACHE</code></strong>
-<ul>
-<li><strong>Description:</strong> Path to the cache directory used by the <code>tldextract</code> library.</li>
-<li><strong>Default Value:</strong> <code>'tmp/tld/'</code></li>
 </ul></li>
 <li><strong><code>COGNITO_AUTH</code></strong>
 <ul>
@@ -1412,7 +1412,30 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 </section>
 <section id="file-output-options" class="level2">
 <h2 class="anchored" data-anchor-id="file-output-options">File Output Options</h2>
+<section id="review-redaction-overlay-export" class="level3">
+<h3 class="anchored" data-anchor-id="review-redaction-overlay-export">Review redaction overlay export</h3>
+<p>These variables apply when exporting the <strong>Review redactions</strong> tab overlay image (JPEG with hollow boxes, optional label abbreviations, and a legend). Output path: <code>{OUTPUT_FOLDER}/redaction_overlay/{basename}_page{n}_redaction_overlay.jpg</code>. The FastAPI agent route <code>POST /agent/export_review_redaction_overlay</code> uses the same rendering when given <code>page_image_path</code> and <code>boxes</code>.</p>
 <ul>
+<li><strong><code>REVIEW_OVERLAY_LABEL_ABBREV_CHARS</code></strong>
+<ul>
+<li><strong>Description:</strong> Number of leading characters of each redaction <strong>label</strong> to draw above each box (centred, with a small gap above the box top edge). Set to <code>0</code> to disable label text on the image. Values are clamped to <strong>0–24</strong> after parsing.</li>
+<li><strong>Default Value:</strong> <code>0</code></li>
+</ul></li>
+<li><strong><code>REVIEW_OVERLAY_LABEL_FONT_PX</code></strong>
+<ul>
+<li><strong>Description:</strong> Font size in pixels for those abbreviation labels. <strong><code>0</code></strong> means automatic sizing from image width: roughly <code>max(9, min(16, width // 90))</code>. Any <strong>positive</strong> value selects a fixed TrueType size, clamped to <strong>6–96</strong> pixels.</li>
+<li><strong>Default Value:</strong> <code>0</code></li>
+</ul></li>
+<li><strong><code>REVIEW_OVERLAY_MAX_PIXELS</code></strong>
+<ul>
+<li><strong>Description:</strong> If the overlay image’s <strong>width × height</strong> exceeds this value, it is <strong>downscaled</strong> (aspect ratio preserved) before JPEG encoding. Set to <strong><code>0</code></strong> to disable this cap (no resize for size reasons alone).</li>
+<li><strong>Default Value:</strong> <code>4000000</code> (4 megapixels)</li>
+</ul></li>
+<li><strong><code>REVIEW_OVERLAY_MAX_FILE_BYTES</code></strong>
+<ul>
+<li><strong>Description:</strong> Target <strong>maximum JPEG file size</strong> in bytes. The writer lowers JPEG quality in steps (similar to <code>SAVE_PAGE_OCR_VISUALISATIONS</code> page images) until the file is at or under this limit, down to a minimum quality. Values are clamped to a safe range after parsing.</li>
+<li><strong>Default Value:</strong> <code>512000</code> (500 × 1024 bytes, i.e.&nbsp;500 KiB)</li>
+</ul></li>
 <li><strong><code>USE_GUI_BOX_COLOURS_FOR_OUTPUTS</code></strong>
 <ul>
 <li><strong>Description:</strong> If <code>"True"</code>, the final redacted PDF will use the same redaction box colors as shown in the review UI.</li>
@@ -1466,6 +1489,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <li><strong>Default Value:</strong> <code>'DOCUMENT_REDACTION_BUCKET'</code></li>
 </ul></li>
 </ul>
+</section>
 </section>
 <section id="direct-mode-lambda-configuration" class="level2">
 <h2 class="anchored" data-anchor-id="direct-mode-lambda-configuration">Direct Mode &amp; Lambda Configuration</h2>
