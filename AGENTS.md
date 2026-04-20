@@ -32,12 +32,12 @@ When `RUN_FASTAPI` is true, routes are mounted under **`/agent`** ([agent_routes
 
 - **Catalog**: `GET /agent/operations` — maps each Gradio `api_name` to an HTTP path and notes whether the route is implemented via CLI or returns HTTP 501 for Gradio-only flows.
 - **Implemented POST routes** (names align with `api_name` in [app.py](app.py)):  
-  `redact_document`, `redact_data`, `find_duplicate_pages`, `find_duplicate_tabular`, `summarise_document`, `combine_review_pdfs`, `combine_review_csvs`, `export_review_redaction_overlay`, `export_review_page_ocr_visualisation`.
-- **Gradio-only stubs** (501 + JSON hint): `load_and_prepare_documents_or_data`, `apply_review_redactions`, `word_level_ocr_text_search`.
+  `redact_document`, `redact_data`, `find_duplicate_pages`, `find_duplicate_tabular`, `summarise_document`, `combine_review_pdfs`, `combine_review_csvs`, `export_review_redaction_overlay`, `export_review_page_ocr_visualisation`, `apply_review_redactions` (headless prepare + apply via [tools/simplified_api.py](tools/simplified_api.py); JSON body: `pdf_path`, `review_csv_path` basename must contain `_review_file`, optional `output_dir` / `input_dir` / `text_extract_method` / `efficient_ocr`).
+- **Gradio-only stubs** (501 + JSON hint): `load_and_prepare_documents_or_data`, `word_level_ocr_text_search`.
 - **Auth**: If `AGENT_API_KEY` is set in the environment, send header `X-Agent-API-Key` with that value.
 - **Paths**: Inputs must resolve to files under the repo root, `INPUT_FOLDER`, or `OUTPUT_FOLDER` (see router validation).
 
-Implementation uses **`cli_redact.main(direct_mode_args=...)`** where a CLI task exists; same behaviour as [cli_redact.py](cli_redact.py).
+Implementation uses **`cli_redact.main(direct_mode_args=...)`** where a CLI task exists (same behaviour as [cli_redact.py](cli_redact.py)); `apply_review_redactions` calls [tools/simplified_api.py](tools/simplified_api.py) instead.
 
 ### 2. Gradio Client API (e.g. Hugging Face Spaces)
 
@@ -48,7 +48,7 @@ For remote Spaces or any Gradio deployment exposing the HTTP API:
 - **Poll**: `GET https://<host>/gradio_api/call/{api_name}/{event_id}`
 - **Hugging Face**: `Authorization: Bearer $HF_TOKEN`
 
-Named `api_name` values in this app include: `redact_document`, `load_and_prepare_documents_or_data`, `apply_review_redactions`, `word_level_ocr_text_search`, `redact_data`, `find_duplicate_pages`, `find_duplicate_tabular`, `summarise_document`, `combine_review_csvs`, `combine_review_pdfs`, `export_review_redaction_overlay`, `export_review_page_ocr_visualisation`. Many endpoints require **many positional arguments** (full Gradio state); prefer the **FastAPI `/agent`** routes for agent workflows unless you are generating the full `data` array from `/gradio_api/info`.
+Named `api_name` values in this app include: `redact_document`, `load_and_prepare_documents_or_data`, `apply_review_redactions`, **`apply_review_redactions_from_uploads`** (simple `gr.api`: PDF + `*_review_file.csv` + optional `output_dir`; `api_name='/apply_review_redactions_from_uploads'`), **`summarise_document_from_upload`** (simple `gr.api`: PDF + optional CLI-like summarisation/OCR knobs; `api_name='/summarise_document_from_upload'`; PDF-only — for OCR-CSV-only flows use `summarise_document` or CLI), `word_level_ocr_text_search`, `redact_data`, `find_duplicate_pages`, `find_duplicate_tabular`, `summarise_document`, `combine_review_csvs`, `combine_review_pdfs`, `export_review_redaction_overlay`, `export_review_page_ocr_visualisation`. Many endpoints require **many positional arguments** (full Gradio state); prefer the short `gr.api` routes above or **`POST /agent/apply_review_redactions`** where applicable instead of building the full `data` array from `/gradio_api/info`.
 
 ## CLI parity
 

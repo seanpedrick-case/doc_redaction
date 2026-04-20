@@ -307,7 +307,7 @@ def export_review_page_ocr_visualisation(
 
 
 # ---------------------------------------------------------------------------
-# Gradio-only (not implemented in CLI/agent routes)
+# Gradio-session-only (no single CLI task)
 # ---------------------------------------------------------------------------
 
 
@@ -317,10 +317,31 @@ def load_and_prepare_documents_or_data(*args: Any, **kwargs: Any) -> list[str]:
     )
 
 
-def apply_review_redactions(*args: Any, **kwargs: Any) -> list[str]:
-    raise NotImplementedError(
-        "apply_review_redactions depends on Gradio annotator state and is not exposed as a CLI-first Python function."
+def apply_review_redactions(
+    pdf_path: str,
+    review_csv_path: str,
+    *,
+    output_dir: str | None = None,
+    input_dir: str | None = None,
+    text_extract_method: str | None = None,
+    efficient_ocr: bool | None = None,
+) -> list[str]:
+    """
+    Headless parity with Gradio ``api_name='apply_review_redactions'``.
+
+    Returns output file paths (redacted PDF, review CSV, logs, etc.).
+    """
+    from tools.simplified_api import run_apply_review_redactions
+
+    r = run_apply_review_redactions(
+        pdf_path=pdf_path,
+        review_csv_path=review_csv_path,
+        output_dir=output_dir,
+        input_dir=input_dir,
+        text_extract_method=text_extract_method,
+        efficient_ocr=efficient_ocr,
     )
+    return list(r.get("output_paths") or [])
 
 
 def word_level_ocr_text_search(*args: Any, **kwargs: Any) -> list[str]:

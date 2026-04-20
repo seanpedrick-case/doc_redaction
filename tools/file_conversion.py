@@ -1363,6 +1363,7 @@ def prepare_image_or_pdf_with_efficient_ocr(
     pymupdf_doc,
     page_min,
     page_max,
+    progress: Progress | None = None,
 ):
     """When EFFICIENT_OCR is enabled, skip loading all images; they are created later only for pages that need OCR."""
     prepare_images = (
@@ -1372,26 +1373,29 @@ def prepare_image_or_pdf_with_efficient_ocr(
             prepare_images_bool_false if prepare_images_bool_false is not None else True
         )
     )
-    return prepare_image_or_pdf(
-        file_paths,
-        text_extract_method,
-        all_page_line_level_ocr_results_df_base,
-        all_page_line_level_ocr_results_with_words_df_base,
-        latest_file_completed_num,
-        out_message,
-        first_loop_state,
-        number_of_pages,
-        all_annotations_object,
-        prepare_for_review,
-        in_fully_redacted_list,
-        output_folder,
-        input_folder,
-        prepare_images,
-        page_sizes,
-        pymupdf_doc,
-        page_min,
-        page_max,
+    _pdf_kwargs: dict[str, Any] = dict(
+        file_paths=file_paths,
+        text_extract_method=text_extract_method,
+        all_line_level_ocr_results_df=all_page_line_level_ocr_results_df_base,
+        all_page_line_level_ocr_results_with_words_df=all_page_line_level_ocr_results_with_words_df_base,
+        latest_file_completed=latest_file_completed_num,
+        out_message=out_message,
+        first_loop_state=first_loop_state,
+        number_of_pages=number_of_pages,
+        all_annotations_object=all_annotations_object,
+        prepare_for_review=prepare_for_review,
+        in_fully_redacted_list=in_fully_redacted_list,
+        output_folder=output_folder,
+        input_folder=input_folder,
+        prepare_images=prepare_images,
+        page_sizes=page_sizes,
+        pymupdf_doc=pymupdf_doc,
+        page_min=page_min,
+        page_max=page_max,
     )
+    if progress is not None:
+        _pdf_kwargs["progress"] = progress
+    return prepare_image_or_pdf(**_pdf_kwargs)
 
 
 def prepare_image_or_pdf(

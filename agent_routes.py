@@ -34,6 +34,8 @@ GRADIO_API_NAMES: tuple[str, ...] = (
     "redact_document",
     "load_and_prepare_documents_or_data",
     "apply_review_redactions",
+    "apply_review_redactions_from_uploads",
+    "summarise_document_from_upload",
     "word_level_ocr_text_search",
     "redact_data",
     "find_duplicate_pages",
@@ -489,6 +491,38 @@ class AgentCombineReviewCsvsRequest(BaseModel):
     )
 
 
+class AgentApplyReviewRedactionsRequest(BaseModel):
+    """Headless parity with Gradio ``api_name='apply_review_redactions'`` (prepare + apply)."""
+
+    pdf_path: str = Field(
+        ...,
+        description="Path to the source PDF under allowed roots.",
+    )
+    review_csv_path: str = Field(
+        ...,
+        description=(
+            "Path to the review plan CSV; basename must contain '_review_file' "
+            "(e.g. mydoc_review_file.csv)."
+        ),
+    )
+    output_dir: Optional[str] = Field(
+        None,
+        description="Output directory (created if missing); defaults to OUTPUT_FOLDER.",
+    )
+    input_dir: Optional[str] = Field(
+        None,
+        description="Input/working directory for page images; defaults to INPUT_FOLDER.",
+    )
+    text_extract_method: Optional[str] = Field(
+        None,
+        description="OCR/text mode passed to prepare (defaults to CLI ocr_method).",
+    )
+    efficient_ocr: Optional[bool] = Field(
+        None,
+        description="If set, overrides EFFICIENT_OCR for the prepare step.",
+    )
+
+
 @router.post(
     "/combine_review_csvs",
     response_model=AgentTaskResponse,
@@ -719,7 +753,25 @@ def _gradio_only(api_name: str, detail: str) -> JSONResponse:
         content={
             "gradio_api_name": api_name,
             "detail": detail,
-            "hint": "Use the Gradio UI or gradio_client with this api_name.",
+            "hint": (
+                "This flow is Gradio-session stateful. Call the named route on the "
+                "Gradio HTTP API, not /agent."
+            ),
+            "gradio_http": {
+                "discover_schema": "GET /gradio_api/info",
+                "start_call": f"POST /gradio_api/call/{api_name}",
+                "request_body_shape": '{"data": [<args in schema order>]}',
+                "poll": f"GET /gradio_api/call/{api_name}/{{event_id}}",
+            },
+            "gradio_client_notes": [
+                "Pass api_name explicitly; do not rely on inferring the endpoint from "
+                "Python function names (large Blocks apps will look ambiguous).",
+                "If predict() still cannot resolve the route, open GET /gradio_api/info "
+                "and use the numeric fn_index with gradio_client, or call the HTTP "
+                "endpoints directly.",
+                "The length of data must match the parameter list for this deployment; "
+                "copy order and types from /gradio_api/info.",
+            ],
         },
     )
 
@@ -732,11 +784,56 @@ def post_load_and_prepare_documents_or_data() -> JSONResponse:
     )
 
 
-@router.post("/apply_review_redactions")
-def post_apply_review_redactions() -> JSONResponse:
-    return _gradio_only(
-        "apply_review_redactions",
-        "Review PDF/annotation state is managed in the Gradio UI.",
+@router.post(
+    "/apply_review_redactions",
+    response_model=AgentTaskResponse,
+    summary="apply_review_redactions (Gradio api_name)",
+    description=(
+        "Runs prepare_image_or_pdf_with_efficient_ocr([pdf, review_csv]) then "
+        "apply_redactions_to_review_df_and_files — same core pipeline as the Review tab, "
+        "without Gradio session state. Requires paths under allowed roots."
+    ),
+)
+def post_apply_review_redactions(
+    body: AgentApplyReviewRedactionsRequest,
+    _: None = Depends(_optional_agent_api_key),
+) -> AgentTaskResponse:
+    from tools.simplified_api import run_apply_review_redactions
+
+    pdf = _path_must_be_allowed_file(body.pdf_path)
+    csv = _path_must_be_allowed_file(body.review_csv_path)
+    out_dir: str | None = None
+    if body.output_dir is not None:
+        out_dir = _path_must_be_allowed_directory(body.output_dir, must_exist=False)
+    in_dir: str | None = None
+    if body.input_dir is not None:
+        in_dir = _path_must_be_allowed_directory(body.input_dir, must_exist=False)
+
+    try:
+        result = run_apply_review_redactions(
+            pdf_path=pdf,
+            review_csv_path=csv,
+            output_dir=out_dir,
+            input_dir=in_dir,
+            text_extract_method=body.text_extract_method,
+            efficient_ocr=body.efficient_ocr,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"apply_review_redactions failed: {e}",
+        ) from e
+
+    return AgentTaskResponse(
+        status="completed",
+        gradio_api_name="apply_review_redactions",
+        task="apply_review_redactions",
+        output_dir=result["output_dir"],
+        input_dir=result["input_dir"],
+        message=result["message"],
+        output_paths=result.get("output_paths"),
     )
 
 
@@ -752,6 +849,18 @@ def post_word_level_ocr_text_search() -> JSONResponse:
 def list_operations() -> dict[str, Any]:
     return {
         "gradio_api_names": list(GRADIO_API_NAMES),
+        "gradio_session_state_endpoints": {
+            "description": (
+                "These api_name values are exposed on the Gradio HTTP API but return "
+                "501 on /agent because they depend on in-memory Gradio state."
+            ),
+            "discover_schema": "GET /gradio_api/info",
+            "call_pattern": 'POST /gradio_api/call/<api_name> with JSON body {"data": [...]}',
+            "names": [
+                "load_and_prepare_documents_or_data",
+                "word_level_ocr_text_search",
+            ],
+        },
         "routes": [
             {
                 "gradio_api_name": "redact_document",
@@ -817,7 +926,7 @@ def list_operations() -> dict[str, Any]:
                 "gradio_api_name": "apply_review_redactions",
                 "method": "POST",
                 "path": "/agent/apply_review_redactions",
-                "implementation": "not_implemented_http",
+                "implementation": "tools.simplified_api.run_apply_review_redactions",
             },
             {
                 "gradio_api_name": "word_level_ocr_text_search",

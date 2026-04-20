@@ -4918,7 +4918,8 @@ with blocks:
         outputs=None,
         api_visibility="undocumented",
     ).failure(  # Failure case enables branching for when duplicate analysis textbox is enabled
-        fn=lambda: None
+        fn=lambda: None,
+        api_visibility="undocumented",
     ).then(
         fn=reset_aws_call_vars,
         outputs=[
@@ -5259,6 +5260,7 @@ with blocks:
             total_pdf_page_count,
         ],
         show_progress_on=[redaction_output_summary_textbox],
+        api_visibility="undocumented",
     ).success(
         fn=lambda *args: usage_callback.flag(
             list(args),
@@ -5317,6 +5319,7 @@ with blocks:
         ),
         outputs=[flag_value_placeholder],
         preprocess=False,
+        api_visibility="undocumented",
     ).success(
         fn=upload_log_file_to_s3,
         inputs=[usage_logs_state, usage_s3_logs_loc_state],
@@ -5397,7 +5400,8 @@ with blocks:
         outputs=None,
         api_visibility="undocumented",
     ).failure(  # Failure case enables branching for when duplicate analysis textbox is enabled
-        fn=lambda: None
+        fn=lambda: None,
+        api_visibility="undocumented",
     ).then(
         fn=reset_aws_call_vars,
         outputs=[
@@ -6046,6 +6050,7 @@ with blocks:
             all_page_line_level_ocr_results_with_words_df_base,
         ],
         show_progress_on=[redaction_output_summary_textbox, input_pdf_for_review],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -6145,6 +6150,7 @@ with blocks:
             all_page_line_level_ocr_results_with_words_df_base,
         ],
         show_progress_on=[redaction_output_summary_textbox],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -8270,6 +8276,7 @@ with blocks:
             all_page_line_level_ocr_results_with_words_df_base,
         ],
         show_progress_on=[adobe_review_files_out],
+        api_visibility="undocumented",
     ).success(
         fn=convert_xfdf_to_dataframe,
         inputs=[
@@ -9405,7 +9412,7 @@ with blocks:
         ],
         show_progress=True,
         show_progress_on=[summarisation_status],
-        api_name="summarise_document",
+        api_name="undocumented",
     ).success(
         fn=lambda: "summarisation",
         outputs=[task_textbox],
@@ -10071,6 +10078,40 @@ with blocks:
             outputs=[s3_logs_output_textbox],
             api_visibility="undocumented",
         )
+
+    ###
+    # Simple Gradio HTTP API: PDF + review CSV → redacted outputs (gr.api; short data[]).
+    ###
+    from tools.simplified_api import (
+        apply_review_redactions_from_uploads_for_gradio_api,
+    )
+
+    gr.api(
+        apply_review_redactions_from_uploads_for_gradio_api,
+        api_name="apply_review_redactions_from_uploads",
+        api_description=(
+            "Apply redactions in one call from the original PDF and a *_review_file.csv "
+            "(same pipeline as POST /agent/apply_review_redactions). Returns a list of "
+            "output paths and a message. Does not update the Review tab UI session."
+        ),
+    )
+
+    from tools.simplified_api import (
+        summarise_document_from_upload_for_gradio_api,
+    )
+
+    gr.api(
+        summarise_document_from_upload_for_gradio_api,
+        api_name="summarise_document_from_upload",
+        api_description=(
+            "Summarise a PDF in one call (CLI-aligned: OCR/text extract then LLM summary). "
+            "Required: pdf_file. Optional: ocr_method, summarisation_inference_method, "
+            "summarisation_format (concise|detailed), summarisation_context, "
+            "summarisation_additional_instructions, summarisation_temperature, "
+            "summarisation_max_pages_per_group, summarisation_api_key, output_dir, "
+            "input_dir, page_min, page_max — unset fields use cli_redact defaults."
+        ),
+    )
 
     ###
     # APP RUN SETTINGS
