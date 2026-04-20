@@ -91,7 +91,6 @@ TMP_DIR = "/tmp"
 INPUT_DIR = os.path.join(TMP_DIR, "input")
 OUTPUT_DIR = os.path.join(TMP_DIR, "output")
 os.environ["TESSERACT_DATA_FOLDER"] = os.path.join(TMP_DIR, "share/tessdata")
-os.environ["TLDEXTRACT_CACHE"] = os.path.join(TMP_DIR, "tld")
 os.environ["MPLCONFIGDIR"] = os.path.join(TMP_DIR, "matplotlib_cache")
 os.environ["GRADIO_TEMP_DIR"] = os.path.join(TMP_DIR, "gradio_tmp")
 os.environ["FEEDBACK_LOGS_FOLDER"] = os.path.join(TMP_DIR, "feedback")

@@ -2,7 +2,6 @@ import logging
 import os
 import re
 import socket
-import tempfile
 import urllib.parse
 from datetime import datetime
 from pathlib import Path
@@ -10,7 +9,6 @@ from typing import List
 
 import bleach
 from dotenv import load_dotenv
-from tldextract import TLDExtract
 
 from tools.secure_path_utils import (
     secure_file_read,
@@ -79,8 +77,8 @@ def ensure_folder_within_app_directory(
     has_trailing_sep = folder_path.endswith(("/", "\\"))
 
     # Handle special case for "TEMP" - this is handled separately in the code
-    if folder_path == "TEMP":
-        return folder_path
+    # if folder_path == "TEMP":
+    #     return folder_path
 
     # Handle absolute paths. Do not call Path.resolve() on untrusted input (CodeQL
     # py/path-injection); use normpath + abspath + commonpath like validate_path_safety.
@@ -403,25 +401,26 @@ S3_OUTPUTS_BUCKET = get_or_create_env_var(
     "S3_OUTPUTS_BUCKET", DOCUMENT_REDACTION_BUCKET
 )
 
-# Allow for files to be saved in a temporary folder for increased security in some instances
-if OUTPUT_FOLDER == "TEMP" or INPUT_FOLDER == "TEMP":
-    # Use mkdtemp so the directory persists for the lifetime of the process.
-    # TemporaryDirectory() as a context manager deletes the directory immediately on exit.
-    import atexit
-    import shutil
+# Allow for files to be saved in a temporary folder for increased security in some instances - deprecated
+# if OUTPUT_FOLDER == "TEMP" or INPUT_FOLDER == "TEMP":
+#     # Use mkdtemp so the directory persists for the lifetime of the process.
+#     # TemporaryDirectory() as a context manager deletes the directory immediately on exit.
+#     import atexit
+#     import shutil
 
-    temp_dir = tempfile.mkdtemp()
-    print(f"Temporary directory created at: {temp_dir}")
-    atexit.register(shutil.rmtree, temp_dir, ignore_errors=True)
+#     temp_dir = tempfile.mkdtemp()
+#     print(f"Temporary directory created at: {temp_dir}")
+#     atexit.register(shutil.rmtree, temp_dir, ignore_errors=True)
 
-    if OUTPUT_FOLDER == "TEMP":
-        OUTPUT_FOLDER = temp_dir + "/"
-    if INPUT_FOLDER == "TEMP":
-        INPUT_FOLDER = temp_dir + "/"
-else:
-    # Ensure folders are within app directory (skip validation for TEMP as it's handled above)
-    OUTPUT_FOLDER = ensure_folder_within_app_directory(OUTPUT_FOLDER)
-    INPUT_FOLDER = ensure_folder_within_app_directory(INPUT_FOLDER)
+#     if OUTPUT_FOLDER == "TEMP":
+#         OUTPUT_FOLDER = temp_dir + "/"
+#     if INPUT_FOLDER == "TEMP":
+#         INPUT_FOLDER = temp_dir + "/"
+# else:
+#     # Ensure folders are within app directory (skip validation for TEMP as it's handled above)
+
+OUTPUT_FOLDER = ensure_folder_within_app_directory(OUTPUT_FOLDER)
+INPUT_FOLDER = ensure_folder_within_app_directory(INPUT_FOLDER)
 
 GRADIO_TEMP_DIR = get_or_create_env_var(
     "GRADIO_TEMP_DIR", ""
@@ -2163,6 +2162,45 @@ USE_POLARS_FOR_REVIEW = convert_string_to_boolean(
     get_or_create_env_var("USE_POLARS_FOR_REVIEW", "True")
 )
 
+# Review overlay PNG export: draw the first N characters of each redaction label on the image (0 = disabled).
+try:
+    _review_abbrev_n = int(
+        get_or_create_env_var("REVIEW_OVERLAY_LABEL_ABBREV_CHARS", "0").strip() or "0"
+    )
+except ValueError:
+    _review_abbrev_n = 0
+REVIEW_OVERLAY_LABEL_ABBREV_CHARS = max(0, min(24, _review_abbrev_n))
+
+# Review overlay abbreviation font: 0 = automatic from image width (max(9, min(16, w//90))); else fixed pixel size (clamped 6–96).
+try:
+    _review_overlay_label_font = int(
+        get_or_create_env_var("REVIEW_OVERLAY_LABEL_FONT_PX", "0").strip() or "0"
+    )
+except ValueError:
+    _review_overlay_label_font = 0
+REVIEW_OVERLAY_LABEL_FONT_PX = max(0, min(96, _review_overlay_label_font))
+
+# Review overlay export: if width*height exceeds this, scale down (preserving aspect) before saving. 0 = no limit.
+try:
+    _review_overlay_max_px = int(
+        get_or_create_env_var("REVIEW_OVERLAY_MAX_PIXELS", "4000000").strip() or "0"
+    )
+except ValueError:
+    _review_overlay_max_px = 4_000_000
+REVIEW_OVERLAY_MAX_PIXELS = max(0, _review_overlay_max_px)
+
+# Target maximum file size for review overlay JPEG output (default 500 KiB, same order as OCR page visualisations).
+try:
+    _review_overlay_max_bytes = int(
+        get_or_create_env_var("REVIEW_OVERLAY_MAX_FILE_BYTES", str(500 * 1024)).strip()
+        or str(500 * 1024)
+    )
+except ValueError:
+    _review_overlay_max_bytes = 500 * 1024
+REVIEW_OVERLAY_MAX_FILE_BYTES = max(
+    50_000, min(20 * 1024 * 1024, _review_overlay_max_bytes)
+)
+
 # When True and multiple file paths are given, process each file in parallel in apply_redactions_to_review_df_and_files. Off by default.
 ENABLE_PARALLEL_FILES_APPLY_REDACTIONS = convert_string_to_boolean(
     get_or_create_env_var("ENABLE_PARALLEL_FILES_APPLY_REDACTIONS", "True")
@@ -2193,13 +2231,27 @@ USER_GUIDE_URL = validate_safe_url(
 
 DEFAULT_INTRO_TEXT = f"""# Document redaction
 
-    Redact personally identifiable information (PII) from documents (pdf, png, jpg), Word files (docx), or tabular data (xlsx/csv/parquet). Please see the [User Guide]({USER_GUIDE_URL}) for a full walkthrough of all the features in the app.
-    
-    To extract text from documents, the 'Local' options are PikePDF for PDFs with selectable text, and OCR with Tesseract. Use AWS Textract to extract more complex elements e.g. handwriting, signatures, or unclear text. For PII identification, 'Local' (based on spaCy) gives good results if you are looking for common names or terms, or a custom list of terms to redact (see Redaction settings).  AWS Comprehend gives better results at a small cost.
-
-    Additional options on the 'Redaction settings' include, the type of information to redact (e.g. people, places), custom terms to include/ exclude from redaction, fuzzy matching, language settings, and whole page redaction. After redaction is complete, you can view and modify suggested redactions on the 'Review redactions' tab to quickly create a final redacted document.
-
-    NOTE: The app is not 100% accurate, and it will miss some personal information. It is essential that all outputs are reviewed **by a human** before using the final outputs."""
+    Redact personally identifiable information (PII) from:\n
+    - **Documents**: PDF / PNG / JPG\n
+    - **Word**: DOCX\n
+    - **Tabular data**: XLSX / CSV / Parquet\n
+    See the [User Guide]({USER_GUIDE_URL}) for full guidance.\n
+\n
+    ## Quick start\n
+    1. Go to **Redact PDF/image**.\n
+    2. Upload a file.\n
+    3. Choose **Text extraction**:\n
+       - **Local text**: best for PDFs with selectable text.\n
+       - **Local OCR**: for scans/images.\n
+       - **AWS Textract**: best for difficult scans, handwriting, signatures, or forms (paid).\n
+    4. Choose **PII detection**:\n
+       - **Local** (spaCy): good general PII + custom lists.\n
+       - **AWS Comprehend**: often higher recall (paid).\n
+    5. Click **Extract text and redact document**.\n
+    6. Review and edit results in **Review redactions**, then export the final redacted PDF.\n
+\n
+    ## Important\n
+    The app is not 100% accurate and may miss PII. **A human must review** all outputs before use."""
 
 INTRO_TEXT = get_or_create_env_var("INTRO_TEXT", DEFAULT_INTRO_TEXT)
 
@@ -2231,13 +2283,10 @@ if not INTRO_TEXT or not INTRO_TEXT.strip():
     print("Warning: Intro text is empty after sanitization, using default intro text")
     INTRO_TEXT = sanitize_markdown_text(DEFAULT_INTRO_TEXT)
 
-TLDEXTRACT_CACHE = get_or_create_env_var("TLDEXTRACT_CACHE", "tmp/tld/")
-TLDEXTRACT_CACHE = ensure_folder_within_app_directory(TLDEXTRACT_CACHE)
-try:
-    extract = TLDExtract(cache_dir=TLDEXTRACT_CACHE)
-except Exception as e:
-    print(f"Error initialising TLDExtract: {e}")
-    extract = TLDExtract(cache_dir=None)
+# App fills screen width or not
+FILL_SCREEN_WIDTH = convert_string_to_boolean(
+    get_or_create_env_var("FILL_SCREEN_WIDTH", "False")
+)
 
 # Get some environment variables and Launch the Gradio app
 COGNITO_AUTH = convert_string_to_boolean(get_or_create_env_var("COGNITO_AUTH", "False"))

@@ -145,6 +145,12 @@ from tools.load_spacy_model_custom_recognisers import (
     nlp_analyser,
     score_threshold,
 )
+from tools.redaction_types import (
+    RedactionContext,
+    RedactionOptions,
+    from_legacy_dict,
+    to_legacy_kwargs,
+)
 from tools.secure_path_utils import (
     secure_file_write,
     validate_folder_containment,
@@ -1000,12 +1006,12 @@ def run_custom_vlm_only_pass(
     )
 
 
-def choose_and_run_redactor(
+def _choose_and_run_redactor_impl(
     file_paths: List[str],
-    prepared_pdf_file_paths: List[str],
-    pdf_image_file_paths: List[str],
-    chosen_redact_entities: List[str],
-    chosen_redact_comprehend_entities: List[str],
+    prepared_pdf_file_paths: Optional[List[str]] = None,
+    pdf_image_file_paths: Optional[List[str]] = None,
+    chosen_redact_entities: Optional[List[str]] = None,
+    chosen_redact_comprehend_entities: Optional[List[str]] = None,
     chosen_llm_entities: List[str] = None,
     text_extraction_method: str = None,
     in_allow_list: List[str] = list(),
@@ -1015,7 +1021,6 @@ def choose_and_run_redactor(
     combined_out_message: List = list(),
     out_file_paths: List = list(),
     log_files_output_paths: List = list(),
-    first_loop_state: bool = False,
     page_min: int = 0,
     page_max: int = 0,
     estimated_time_taken_state: float = 0.0,
@@ -1025,10 +1030,7 @@ def choose_and_run_redactor(
     all_page_line_level_ocr_results_df: pd.DataFrame = None,
     all_pages_decision_process_table: pd.DataFrame = None,
     pymupdf_doc=list(),
-    current_loop_page: int = 0,
-    page_break_return: bool = False,
     pii_identification_method: str = "Local",
-    comprehend_query_number: int = 0,
     max_fuzzy_spelling_mistakes_num: int = 1,
     match_fuzzy_whole_phrase_bool: bool = True,
     aws_access_key_textbox: str = "",
@@ -1043,7 +1045,6 @@ def choose_and_run_redactor(
     duplication_file_path_outputs: list = list(),
     review_file_path: str = "",
     input_folder: str = INPUT_FOLDER,
-    total_textract_query_number: int = 0,
     ocr_file_path: str = "",
     all_page_line_level_ocr_results: list[dict] = list(),
     all_page_line_level_ocr_results_with_words: list[dict] = list(),
@@ -1059,12 +1060,6 @@ def choose_and_run_redactor(
     efficient_ocr_min_embedded_image_px: Optional[int] = None,
     hybrid_textract_bedrock_vlm: bool = HYBRID_TEXTRACT_BEDROCK_VLM,
     overwrite_existing_ocr_results: bool = OVERWRITE_EXISTING_OCR_RESULTS,
-    llm_model_name="",
-    llm_total_input_tokens=0,
-    llm_total_output_tokens=0,
-    vlm_model_name="",
-    vlm_total_input_tokens=0,
-    vlm_total_output_tokens=0,
     save_page_ocr_visualisations: bool = SAVE_PAGE_OCR_VISUALISATIONS,
     ocr_first_pass_max_workers: Optional[int] = None,
     prepare_images: bool = True,
@@ -1088,7 +1083,6 @@ def choose_and_run_redactor(
     - combined_out_message (list, optional): A list to store output messages. Defaults to an empty list.
     - out_file_paths (list, optional): A list to store paths to the output files. Defaults to an empty list.
     - log_files_output_paths (list, optional): A list to store paths to the log files. Defaults to an empty list.
-    - first_loop_state (bool, optional): A flag indicating if this is the first iteration. Defaults to False.
     - page_min (int, optional): The minimum page number to start redaction from. Defaults to 0 (first page).
     - page_max (int, optional): The maximum page number to end redaction at. Defaults to 0 (last page).
     - estimated_time_taken_state (float, optional): The estimated time taken for the redaction process. Defaults to 0.0.
@@ -1098,10 +1092,7 @@ def choose_and_run_redactor(
     - all_page_line_level_ocr_results_df (pd.DataFrame, optional): A DataFrame containing all line-level OCR results. Defaults to an empty DataFrame.
     - all_pages_decision_process_table (pd.DataFrame, optional): A DataFrame containing all decision process tables. Defaults to an empty DataFrame.
     - pymupdf_doc (optional): A list containing the PDF document object. Defaults to an empty list.
-    - current_loop_page (int, optional): The current page being processed in the loop. Defaults to 0.
-    - page_break_return (bool, optional): A flag indicating if the function should return after a page break. Defaults to False.
     - pii_identification_method (str, optional): The method to redact personal information. Either 'Local' (spacy model), or 'AWS Comprehend' (AWS Comprehend API).
-    - comprehend_query_number (int, optional): A counter tracking the number of queries to AWS Comprehend.
     - max_fuzzy_spelling_mistakes_num (int, optional): The maximum number of spelling mistakes allowed in a searched phrase for fuzzy matching. Can range from 0-9.
     - match_fuzzy_whole_phrase_bool (bool, optional): A boolean where 'True' means that the whole phrase is fuzzy matched, and 'False' means that each word is fuzzy matched separately (excluding stop words).
     - aws_access_key_textbox (str, optional): AWS access key for account with Textract and Comprehend permissions.
@@ -1116,7 +1107,6 @@ def choose_and_run_redactor(
     - duplication_file_outputs (list, optional): List to allow for export to the duplication function page.
     - review_file_path (str, optional): The latest review file path created by the app
     - input_folder (str, optional): The custom input path, if provided
-    - total_textract_query_number (int, optional): The number of textract queries up until this point.
     - ocr_file_path (str, optional): The latest ocr file path created by the app.
     - all_page_line_level_ocr_results (list, optional): All line level text on the page with bounding boxes.
     - all_page_line_level_ocr_results_with_words (list, optional): All word level text on the page with bounding boxes.
@@ -1129,12 +1119,6 @@ def choose_and_run_redactor(
     - inference_server_vlm_model (str, optional): The name of the inference server VLM model to use for OCR. Defaults to an empty string.
     - efficient_ocr (bool, optional): Boolean to determine whether to use efficient OCR.
     - efficient_ocr_min_words (int, optional): The minimum number of words on a page for efficient OCR.
-    - llm_model_name (str, optional): The name of the LLM model to use for the redaction process. Defaults to an empty string.
-    - llm_total_input_tokens (int, optional): The total number of input tokens for the LLM model. Defaults to 0.
-    - llm_total_output_tokens (int, optional): The total number of output tokens for the LLM model. Defaults to 0.
-    - vlm_model_name (str, optional): The name of the VLM model to use for the redaction process. Defaults to an empty string.
-    - vlm_total_input_tokens (int, optional): The total number of input tokens for the VLM model. Defaults to 0.
-    - vlm_total_output_tokens (int, optional): The total number of output tokens for the VLM model. Defaults to 0.
     - save_page_ocr_visualisations (bool, optional): Boolean to determine whether to save page OCR visualisations. Defaults to SAVE_PAGE_OCR_VISUALISATIONS.
     - prepare_images (bool, optional): Boolean to determine whether to load images for the PDF.
     - RETURN_REDACTED_PDF (bool, optional): Boolean to determine whether to return a redacted PDF at the end of the redaction process.
@@ -1300,24 +1284,21 @@ def choose_and_run_redactor(
                 ]
             )
 
-    # If this is the first time around, set variables to 0/blank
-    if first_loop_state is True:
-        # print("First_loop_state is True")
-        latest_file_completed = 0
-        current_loop_page = 0
-        out_file_paths = list()
-        log_files_output_paths = list()
-        estimated_time_taken_state = 0
-        comprehend_query_number = 0
-        total_textract_query_number = 0
+    # Initialize per-run counters/state (these are still returned as outputs)
+    latest_file_completed = 0
+    current_loop_page = 0
+    out_file_paths = list()
+    log_files_output_paths = list()
+    estimated_time_taken_state = 0
+    comprehend_query_number = 0
+    total_textract_query_number = 0
 
-        # Initialize VLM and LLM token tracking variables
-        llm_model_name = ""
-        llm_total_input_tokens = 0
-        llm_total_output_tokens = 0
-        vlm_model_name = ""
-        vlm_total_input_tokens = 0
-        vlm_total_output_tokens = 0
+    llm_model_name = ""
+    llm_total_input_tokens = 0
+    llm_total_output_tokens = 0
+    vlm_model_name = ""
+    vlm_total_input_tokens = 0
+    vlm_total_output_tokens = 0
     # elif current_loop_page == 0:
     # comprehend_query_number = 0
     # Do not reset total_textract_query_number here: EFFICIENT_OCR and other paths
@@ -4078,6 +4059,87 @@ def choose_and_run_redactor(
     )
 
 
+def run_redaction(
+    file_paths: List[str],
+    options: RedactionOptions,
+    context: Optional[RedactionContext] = None,
+    progress=gr.Progress(track_tqdm=True),
+):
+    """Run redaction using typed options and optional session context."""
+    ctx = context if context is not None else RedactionContext()
+    kw = to_legacy_kwargs(options, ctx)
+    return _choose_and_run_redactor_impl(file_paths, **kw, progress=progress)
+
+
+def choose_and_run_redactor(
+    file_paths: List[str],
+    prepared_pdf_file_paths: Optional[List[str]] = None,
+    pdf_image_file_paths: Optional[List[str]] = None,
+    chosen_redact_entities: Optional[List[str]] = None,
+    chosen_redact_comprehend_entities: Optional[List[str]] = None,
+    chosen_llm_entities: List[str] = None,
+    text_extraction_method: str = None,
+    in_allow_list: List[str] = list(),
+    in_deny_list: List[str] = list(),
+    redact_whole_page_list: List[str] = list(),
+    latest_file_completed: int = 0,
+    combined_out_message: List = list(),
+    out_file_paths: List = list(),
+    log_files_output_paths: List = list(),
+    page_min: int = 0,
+    page_max: int = 0,
+    estimated_time_taken_state: float = 0.0,
+    handwrite_signature_checkbox: List[str] = list(["Extract handwriting"]),
+    all_request_metadata_str: str = "",
+    annotations_all_pages: List[dict] = list(),
+    all_page_line_level_ocr_results_df: pd.DataFrame = None,
+    all_pages_decision_process_table: pd.DataFrame = None,
+    pymupdf_doc=list(),
+    pii_identification_method: str = "Local",
+    max_fuzzy_spelling_mistakes_num: int = 1,
+    match_fuzzy_whole_phrase_bool: bool = True,
+    aws_access_key_textbox: str = "",
+    aws_secret_key_textbox: str = "",
+    annotate_max_pages: int = 1,
+    review_file_state: pd.DataFrame = list(),
+    output_folder: str = OUTPUT_FOLDER,
+    document_cropboxes: List = list(),
+    page_sizes: List[dict] = list(),
+    textract_output_found: bool = False,
+    text_extraction_only: bool = False,
+    duplication_file_path_outputs: list = list(),
+    review_file_path: str = "",
+    input_folder: str = INPUT_FOLDER,
+    ocr_file_path: str = "",
+    all_page_line_level_ocr_results: list[dict] = list(),
+    all_page_line_level_ocr_results_with_words: list[dict] = list(),
+    all_page_line_level_ocr_results_with_words_df: pd.DataFrame = None,
+    chosen_local_ocr_model: str = DEFAULT_LOCAL_OCR_MODEL,
+    language: str = DEFAULT_LANGUAGE,
+    ocr_review_files: list = list(),
+    custom_llm_instructions: str = "",
+    inference_server_vlm_model: str = "",
+    efficient_ocr: bool = EFFICIENT_OCR,
+    efficient_ocr_min_words: Union[int, float, None] = EFFICIENT_OCR_MIN_WORDS,
+    efficient_ocr_min_image_coverage_fraction: Optional[float] = None,
+    efficient_ocr_min_embedded_image_px: Optional[int] = None,
+    hybrid_textract_bedrock_vlm: bool = HYBRID_TEXTRACT_BEDROCK_VLM,
+    overwrite_existing_ocr_results: bool = OVERWRITE_EXISTING_OCR_RESULTS,
+    save_page_ocr_visualisations: bool = SAVE_PAGE_OCR_VISUALISATIONS,
+    ocr_first_pass_max_workers: Optional[int] = None,
+    prepare_images: bool = True,
+    RETURN_REDACTED_PDF: bool = RETURN_REDACTED_PDF,
+    RETURN_PDF_FOR_REVIEW: bool = RETURN_PDF_FOR_REVIEW,
+    progress=gr.Progress(track_tqdm=True),
+):
+    """Compatibility wrapper: builds RedactionOptions/RedactionContext and calls run_redaction."""
+    flat = dict(locals())
+    flat.pop("file_paths", None)
+    prog = flat.pop("progress")
+    opts, ctx = from_legacy_dict(flat)
+    return run_redaction(file_paths, opts, ctx, progress=prog)
+
+
 def convert_pikepdf_coords_to_pymupdf(
     pymupdf_page: Page, pikepdf_bbox, type="pikepdf_annot"
 ):
@@ -5393,6 +5455,8 @@ def merge_img_bboxes(
     ],
     horizontal_threshold: int = 50,
     vertical_threshold: int = 12,
+    max_word_gap_px: int | None = None,
+    max_word_gap_height_multiplier: float = 3.0,
 ):
     """
     Merges bounding boxes for image annotations based on the provided results from signature and handwriting recognizers.
@@ -5405,6 +5469,11 @@ def merge_img_bboxes(
         handwrite_signature_checkbox (List[str], optional): A list of options indicating whether to extract handwriting and signatures. Defaults to ["Extract handwriting", "Extract signatures"].
         horizontal_threshold (int, optional): The threshold for merging bounding boxes horizontally. Defaults to 50.
         vertical_threshold (int, optional): The threshold for merging bounding boxes vertically. Defaults to 12.
+        max_word_gap_px (int | None, optional): Maximum horizontal pixel gap allowed between consecutive OCR words
+            when reconstructing a single bbox from multiple word boxes. If None, this is derived from
+            `horizontal_threshold` and word height. Defaults to None.
+        max_word_gap_height_multiplier (float, optional): Additional guard rail for word merging: consecutive words
+            must also be within (multiplier * typical_word_height) pixels horizontally. Defaults to 3.0.
 
     Returns:
         None: This function modifies the bounding boxes in place and does not return a value.
@@ -5504,38 +5573,92 @@ def merge_img_bboxes(
                                 current_char += 1  # +1 for space if the word doesn't already end with a space
 
                         if relevant_words:
-                            left = min(
-                                word["bounding_box"][0] for word in relevant_words
-                            )
-                            top = min(
-                                word["bounding_box"][1] for word in relevant_words
-                            )
-                            right = max(
-                                word["bounding_box"][2] for word in relevant_words
-                            )
-                            bottom = max(
-                                word["bounding_box"][3] for word in relevant_words
+                            # Sort by x so we can guard against large physical gaps between consecutive words.
+                            relevant_words_sorted = sorted(
+                                relevant_words, key=lambda w: w["bounding_box"][0]
                             )
 
-                            combined_text = " ".join(
-                                word["text"] for word in relevant_words
+                            # Derive a sensible max word-gap if not provided:
+                            # - keep existing `horizontal_threshold` behaviour as an absolute cap
+                            # - also cap by a multiple of typical word height (helps across varying DPI/font sizes)
+                            word_heights = [
+                                max(0, int(w["bounding_box"][3] - w["bounding_box"][1]))
+                                for w in relevant_words_sorted
+                            ]
+                            typical_word_height = 0
+                            if word_heights:
+                                word_heights_sorted = sorted(word_heights)
+                                typical_word_height = word_heights_sorted[
+                                    len(word_heights_sorted) // 2
+                                ]
+
+                            derived_gap_px = None
+                            if typical_word_height > 0:
+                                derived_gap_px = int(
+                                    max_word_gap_height_multiplier * typical_word_height
+                                )
+
+                            gap_px_limit = (
+                                max_word_gap_px
+                                if max_word_gap_px is not None
+                                else (
+                                    min(horizontal_threshold, derived_gap_px)
+                                    if derived_gap_px is not None
+                                    else horizontal_threshold
+                                )
                             )
 
-                            reconstructed_bbox = CustomImageRecognizerResult(
-                                bbox.entity_type,
-                                bbox.start,
-                                bbox.end,
-                                bbox.score,
-                                left,
-                                top,
-                                right - left,  # width
-                                bottom - top,  # height,
-                                combined_text,
-                            )
-                            # reconstructed_bboxes.append(bbox)  # Add original bbox
-                            reconstructed_bboxes.append(
-                                reconstructed_bbox
-                            )  # Add merged bbox
+                            # Cluster words into contiguous groups; don't span large whitespace gaps.
+                            word_clusters: list[list[dict]] = []
+                            current_cluster: list[dict] = []
+                            for w in relevant_words_sorted:
+                                if not current_cluster:
+                                    current_cluster = [w]
+                                    continue
+
+                                prev = current_cluster[-1]
+                                prev_right = prev["bounding_box"][2]
+                                cur_left = w["bounding_box"][0]
+                                gap = cur_left - prev_right
+
+                                # If the OCR token sequence implies adjacency but the physical gap is large,
+                                # split into separate clusters (prevents over-wide merged redaction boxes).
+                                if gap > gap_px_limit:
+                                    word_clusters.append(current_cluster)
+                                    current_cluster = [w]
+                                else:
+                                    current_cluster.append(w)
+
+                            if current_cluster:
+                                word_clusters.append(current_cluster)
+
+                            # Create one reconstructed bbox per cluster (often 1, but can be >1 when OCR words
+                            # are consecutive in text yet far apart in image coordinates).
+                            for cluster in word_clusters:
+                                left = min(word["bounding_box"][0] for word in cluster)
+                                top = min(word["bounding_box"][1] for word in cluster)
+                                right = max(word["bounding_box"][2] for word in cluster)
+                                bottom = max(
+                                    word["bounding_box"][3] for word in cluster
+                                )
+
+                                combined_text = " ".join(
+                                    word["text"] for word in cluster
+                                )
+
+                                reconstructed_bboxes.append(
+                                    CustomImageRecognizerResult(
+                                        bbox.entity_type,
+                                        bbox.start,
+                                        bbox.end,
+                                        bbox.score,
+                                        left,
+                                        top,
+                                        right - left,  # width
+                                        bottom - top,  # height,
+                                        combined_text,
+                                    )
+                                )
                             break
             else:
                 reconstructed_bboxes.append(bbox)
@@ -5550,10 +5673,14 @@ def merge_img_bboxes(
 
             merged_box = group[0]
             for next_box in group[1:]:
-                if (
-                    next_box.left - (merged_box.left + merged_box.width)
-                    <= horizontal_threshold
-                ):
+                gap = next_box.left - (merged_box.left + merged_box.width)
+                # Extra guard rail: require both the absolute threshold and a height-scaled threshold.
+                # This reduces accidental merges across big whitespace when text is small.
+                height_scaled_limit = int(
+                    max_word_gap_height_multiplier
+                    * max(1, min(merged_box.height, next_box.height))
+                )
+                if gap <= horizontal_threshold and gap <= height_scaled_limit:
                     if next_box.text != merged_box.text:
                         new_text = merged_box.text + " " + next_box.text
                     else:
@@ -10282,7 +10409,7 @@ def _words_from_line_chars_pymupdf(
         off_x, off_y: Page offset to add to bounding boxes.
 
     Returns:
-        List of {"text", "boundingBox": [x0,y0,x1,y1], "conf": 100.0}.
+        List of {"text", "bounding_box": [x0,y0,x1,y1], "conf": 100.0}.
     """
     if not line_chars:
         return []
@@ -10307,7 +10434,7 @@ def _words_from_line_chars_pymupdf(
         line_words.append(
             {
                 "text": current_word_text.strip(),
-                "boundingBox": [
+                "bounding_box": [
                     round(x0 + off_x, 2),
                     round(y0 + off_y, 2),
                     round(x1 + off_x, 2),
@@ -10332,7 +10459,7 @@ def _words_from_line_chars_pymupdf(
             line_words.append(
                 {
                     "text": char_text,
-                    "boundingBox": [
+                    "bounding_box": [
                         round(x0 + off_x, 2),
                         round(y0 + off_y, 2),
                         round(x1 + off_x, 2),
@@ -11789,6 +11916,7 @@ def visualise_ocr_words_bounding_boxes(
     image: Union[str, Image.Image],
     ocr_results: Dict[str, Any],
     image_name: str = None,
+    page_number: Optional[int] = None,
     output_folder: str = OUTPUT_FOLDER,
     text_extraction_method: str = None,
     visualisation_folder: str = None,
@@ -11908,6 +12036,25 @@ def visualise_ocr_words_bounding_boxes(
     needs_coordinate_conversion = False
     source_width = width
     source_height = height
+    coords_are_normalized = False
+
+    def _get_word_bbox(word_data: Dict[str, Any]):
+        """
+        Word bbox compatibility helper.
+        Different pipelines/components use different key styles:
+        - our OCR results: "bounding_box"
+        - some serialized/review flows: "boundingBox"
+        - occasionally: "bbox"
+        """
+        if not isinstance(word_data, dict):
+            return (0, 0, 0, 0)
+        bb = (
+            word_data.get("bounding_box")
+            or word_data.get("boundingBox")
+            or word_data.get("bbox")
+            or (0, 0, 0, 0)
+        )
+        return bb
 
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
         # Collect all bounding box coordinates to detect coordinate system
@@ -11921,7 +12068,7 @@ def visualise_ocr_words_bounding_boxes(
             for word_data in words:
                 if not isinstance(word_data, dict):
                     continue
-                bbox = word_data.get("bounding_box", (0, 0, 0, 0))
+                bbox = _get_word_bbox(word_data)
                 if len(bbox) == 4:
                     x1, y1, x2, y2 = bbox
                     all_x_coords.extend([x1, x2])
@@ -11940,11 +12087,71 @@ def visualise_ocr_words_bounding_boxes(
             for word_data in words:
                 if not isinstance(word_data, dict):
                     continue
-                bbox = word_data.get("bounding_box", (0, 0, 0, 0))
+                bbox = _get_word_bbox(word_data)
                 if len(bbox) == 4:
                     x1, y1, x2, y2 = bbox
                     all_x_coords.extend([x1, x2])
                     all_y_coords.extend([y1, y2])
+
+    # Decide whether OCR bbox coordinates are in:
+    # - normalized fractions [0,1] (common in some OCR pipelines), or
+    # - a different absolute coordinate space than the visualization image (e.g. PDF points).
+    # If so, compute scaling factors to map them into current image pixel space.
+    if all_x_coords and all_y_coords:
+        try:
+            max_x = float(max(all_x_coords))
+            max_y = float(max(all_y_coords))
+            min_x = float(min(all_x_coords))
+            min_y = float(min(all_y_coords))
+        except Exception:
+            max_x = max_y = 0.0
+            min_x = min_y = 0.0
+
+        # Normalized coordinates: typically 0..1 (sometimes slightly above due to rounding).
+        if (
+            min_x >= 0.0
+            and min_y >= 0.0
+            and max_x <= 1.5
+            and max_y <= 1.5
+            and (max_x > 0.0 or max_y > 0.0)
+        ):
+            coords_are_normalized = True
+            source_width = 1.0
+            source_height = 1.0
+            needs_coordinate_conversion = True
+        else:
+            # Absolute coords: infer whether they are in a different coordinate space than the
+            # visualization image and scale accordingly.
+            #
+            # Case A: coords larger than the image → likely PDF points / other space → scale down.
+            if max_x > width * 1.2 or max_y > height * 1.2:
+                source_width = max_x
+                source_height = max_y
+                needs_coordinate_conversion = True
+            else:
+                # Case B: coords much smaller than the image but still in a plausible PDF-point range
+                # (e.g. letter ~612x792, A4 ~595x842). When we render a PDF page to an image at a
+                # higher DPI, the image is typically 2–6x larger than the PDF points. In that case,
+                # we should scale UP so boxes/text land at the correct positions on the image.
+                #
+                # Heuristic: if the image is "large" and the bbox max looks like points, scale up.
+                try:
+                    ratio_x = (width / max_x) if max_x else 1.0
+                    ratio_y = (height / max_y) if max_y else 1.0
+                except Exception:
+                    ratio_x = ratio_y = 1.0
+
+                looks_like_points = (
+                    # Typical PDF-point page sizes are a few hundred to ~1500.
+                    (300.0 <= max_x <= 2000.0)
+                    and (300.0 <= max_y <= 2500.0)
+                    # And the rendered image is meaningfully larger.
+                    and (ratio_x >= 1.5 or ratio_y >= 1.5)
+                )
+                if looks_like_points:
+                    source_width = max_x
+                    source_height = max_y
+                    needs_coordinate_conversion = True
 
     # Calculate scaling factors if conversion is needed
     if needs_coordinate_conversion:
@@ -11989,7 +12196,7 @@ def visualise_ocr_words_bounding_boxes(
                 continue
 
             # Get bounding box coordinates
-            bbox = word_data.get("bounding_box", (0, 0, 0, 0))
+            bbox = _get_word_bbox(word_data)
             if len(bbox) != 4:
                 continue
 
@@ -11997,10 +12204,17 @@ def visualise_ocr_words_bounding_boxes(
 
             # Convert coordinates if needed (from PyMuPDF to image space)
             if needs_coordinate_conversion:
-                x1 = x1 * scale_x
-                y1 = y1 * scale_y
-                x2 = x2 * scale_x
-                y2 = y2 * scale_y
+                if coords_are_normalized:
+                    # Normalized coords in [0,1] → image pixels
+                    x1 = x1 * width
+                    y1 = y1 * height
+                    x2 = x2 * width
+                    y2 = y2 * height
+                else:
+                    x1 = x1 * scale_x
+                    y1 = y1 * scale_y
+                    x2 = x2 * scale_x
+                    y2 = y2 * scale_y
 
             # Ensure coordinates are within image bounds
             x1 = max(0, min(int(x1), width))
@@ -12079,12 +12293,18 @@ def visualise_ocr_words_bounding_boxes(
             if int(_wd.get("conf", _wd.get("confidence", 0))) == -1:
                 continue
             _bb = _wd.get("bounding_box", (0, 0, 0, 0))
+            if (not _bb or len(_bb) != 4) and isinstance(_wd, dict):
+                _bb = _wd.get("boundingBox") or _wd.get("bbox") or (0, 0, 0, 0)
             if len(_bb) != 4:
                 continue
             _bx1, _by1, _bx2, _by2 = _bb
             if needs_coordinate_conversion:
-                _bx1, _by1 = _bx1 * scale_x, _by1 * scale_y
-                _bx2, _by2 = _bx2 * scale_x, _by2 * scale_y
+                if coords_are_normalized:
+                    _bx1, _by1 = _bx1 * width, _by1 * height
+                    _bx2, _by2 = _bx2 * width, _by2 * height
+                else:
+                    _bx1, _by1 = _bx1 * scale_x, _by1 * scale_y
+                    _bx2, _by2 = _bx2 * scale_x, _by2 * scale_y
             _bx1 = max(0, min(int(_bx1), width))
             _by1 = max(0, min(int(_by1), height))
             _bx2 = max(0, min(int(_bx2), width))
@@ -12114,6 +12334,7 @@ def visualise_ocr_words_bounding_boxes(
     viz_global_max_font_pt = min(viz_global_max_font_pt, absolute_max_font_pt)
 
     # Process each line's words for text overlay
+    drawn_words = 0
     for line_key, line_data in ocr_results.items():
         if not isinstance(line_data, dict) or "words" not in line_data:
             continue
@@ -12138,7 +12359,7 @@ def visualise_ocr_words_bounding_boxes(
                 continue
 
             # Get bounding box coordinates
-            bbox = word_data.get("bounding_box", (0, 0, 0, 0))
+            bbox = _get_word_bbox(word_data)
             if len(bbox) != 4:
                 continue
 
@@ -12146,10 +12367,16 @@ def visualise_ocr_words_bounding_boxes(
 
             # Convert coordinates if needed (from PyMuPDF to image space)
             if needs_coordinate_conversion:
-                x1 = x1 * scale_x
-                y1 = y1 * scale_y
-                x2 = x2 * scale_x
-                y2 = y2 * scale_y
+                if coords_are_normalized:
+                    x1 = x1 * width
+                    y1 = y1 * height
+                    x2 = x2 * width
+                    y2 = y2 * height
+                else:
+                    x1 = x1 * scale_x
+                    y1 = y1 * scale_y
+                    x2 = x2 * scale_x
+                    y2 = y2 * scale_y
 
             # Ensure coordinates are within image bounds
             x1 = max(0, min(int(x1), width))
@@ -12243,6 +12470,7 @@ def visualise_ocr_words_bounding_boxes(
                     font=pil_font,
                     fill=_ocr_viz_bgr_to_rgb(text_color),
                 )
+                drawn_words += 1
 
                 if is_replaced:
                     draw_pil.rectangle(
@@ -12334,6 +12562,7 @@ def visualise_ocr_words_bounding_boxes(
                         font=pil_font,
                         fill=_ocr_viz_bgr_to_rgb(text_color),
                     )
+                    drawn_words += 1
                     tw, _ = _pil_ocr_viz_text_size(pil_font, wtext)
                     current_x += tw
                     if i < n - 1:
@@ -12373,23 +12602,27 @@ def visualise_ocr_words_bounding_boxes(
 
         # Generate filename
         if image_name:
-            # Extract page number from image_name if it follows the pattern _<number> at the end
-            # This handles cases like "document_1", "document.pdf_1", etc.
-            page_number = None
-            page_match = re.search(r"_(\d+)$", image_name)
-            if page_match:
-                page_number = page_match.group(1)
-                # Remove the page number suffix from image_name for base_name extraction
-                image_name_without_page = image_name[: page_match.start()]
-            else:
-                image_name_without_page = image_name
+            # Prefer explicit page_number. If not provided, fall back to parsing it
+            # from image_name suffix (legacy behaviour).
+            page_number_str = str(int(page_number)) if page_number is not None else None
+            image_name_without_page = image_name
+            if page_number_str is None:
+                # Extract page number from image_name if it follows the pattern _<number> at the end
+                # This handles cases like "document_1", "document.pdf_1", etc.
+                page_match = re.search(r"_(\d+)$", image_name)
+                if page_match:
+                    page_number_str = page_match.group(1)
+                    # Remove the page number suffix from image_name for base_name extraction
+                    image_name_without_page = image_name[: page_match.start()]
 
             # Remove file extension if present
             base_name = os.path.splitext(image_name_without_page)[0]
 
             # Include page number in filename if it was found
-            if page_number:
-                filename = f"{base_name}_page_{page_number}_{visualisation_folder}.jpg"
+            if page_number_str:
+                filename = (
+                    f"{base_name}_page_{page_number_str}_{visualisation_folder}.jpg"
+                )
             else:
                 filename = f"{base_name}_{visualisation_folder}.jpg"
         else:
@@ -12537,4 +12770,235 @@ def add_confidence_legend(
             label,
             font_scale_label,
             margin,
+        )
+
+
+def _draw_dashed_line_2d(
+    image_cv: np.ndarray,
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    color_bgr: Tuple[int, int, int],
+    thickness: int,
+    dash_len: int,
+    gap_len: int,
+) -> None:
+    """Draw a polyline from (x1,y1) to (x2,y2) with alternating dash/gap segments."""
+    length = float(np.hypot(x2 - x1, y2 - y1))
+    if length < 1e-6:
+        return
+    ux = (x2 - x1) / length
+    uy = (y2 - y1) / length
+    pos = 0.0
+    draw = True
+    while pos < length:
+        seg = dash_len if draw else gap_len
+        next_pos = min(pos + seg, length)
+        if draw:
+            cv2.line(
+                image_cv,
+                (int(round(x1 + ux * pos)), int(round(y1 + uy * pos))),
+                (int(round(x1 + ux * next_pos)), int(round(y1 + uy * next_pos))),
+                color_bgr,
+                thickness,
+                cv2.LINE_AA,
+            )
+        pos = next_pos
+        draw = not draw
+
+
+def _dash_gap_for_pattern_span(span_px: int, pattern: str) -> Tuple[int, int]:
+    """
+    Dash and gap lengths for an edge of length ``span_px`` so dashed/dotted styles
+    repeat visibly. Matches legend line samples to main-image box edges for the same
+    ``pattern`` when spans are similar.
+    """
+    span_px = max(1, int(span_px))
+    if pattern == "solid":
+        return (1, 0)
+    if pattern == "dashed":
+        if span_px >= 48:
+            return (8, 4)
+        period = max(6, span_px // 3)
+        dash_len = max(3, (period * 2 + 2) // 3)
+        gap_len = max(2, period - dash_len)
+        return (dash_len, gap_len)
+    # dotted
+    if span_px >= 32:
+        return (2, 4)
+    period = max(4, span_px // 4)
+    dash_len = max(2, min(3, max(1, period // 4)))
+    gap_len = max(2, dash_len * 2)
+    return (dash_len, gap_len)
+
+
+def draw_rectangle_outline_pattern(
+    image_cv: np.ndarray,
+    x1: int,
+    y1: int,
+    x2: int,
+    y2: int,
+    color_bgr: Tuple[int, int, int],
+    thickness: int = 2,
+    pattern: str = "solid",
+) -> None:
+    """
+    Draw a hollow rectangle outline. ``pattern`` is one of: solid, dashed, dotted.
+    """
+    x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+    if x2 <= x1 or y2 <= y1:
+        return
+    if pattern == "solid":
+        cv2.rectangle(
+            image_cv,
+            (x1, y1),
+            (x2, y2),
+            color_bgr,
+            thickness,
+            cv2.LINE_AA,
+        )
+        return
+    min_side = min(x2 - x1, y2 - y1)
+    dash_len, gap_len = _dash_gap_for_pattern_span(min_side, pattern)
+    _draw_dashed_line_2d(
+        image_cv, x1, y1, x2, y1, color_bgr, thickness, dash_len, gap_len
+    )
+    _draw_dashed_line_2d(
+        image_cv, x2, y1, x2, y2, color_bgr, thickness, dash_len, gap_len
+    )
+    _draw_dashed_line_2d(
+        image_cv, x2, y2, x1, y2, color_bgr, thickness, dash_len, gap_len
+    )
+    _draw_dashed_line_2d(
+        image_cv, x1, y2, x1, y1, color_bgr, thickness, dash_len, gap_len
+    )
+
+
+def _draw_redaction_legend_pattern_sample(
+    image_cv: np.ndarray,
+    x0: int,
+    y_mid: int,
+    line_width: int,
+    color_bgr: Tuple[int, int, int],
+    pattern: str,
+    thickness: int,
+) -> None:
+    """
+    Horizontal line showing the same dash/dot style as ``draw_rectangle_outline_pattern``,
+    long enough for dashed/dotted to read (unlike a tiny square swatch).
+    """
+    x1 = x0 + int(line_width)
+    if pattern == "solid":
+        cv2.line(
+            image_cv,
+            (x0, y_mid),
+            (x1, y_mid),
+            color_bgr,
+            thickness,
+            cv2.LINE_AA,
+        )
+        return
+    dash_len, gap_len = _dash_gap_for_pattern_span(int(line_width), pattern)
+    _draw_dashed_line_2d(
+        image_cv,
+        float(x0),
+        float(y_mid),
+        float(x1),
+        float(y_mid),
+        color_bgr,
+        thickness,
+        dash_len,
+        gap_len,
+    )
+
+
+def add_redaction_label_legend(
+    image_cv: np.ndarray,
+    legend_rows: List[Tuple[Tuple[int, int, int], str, str]],
+    title: str = "Redaction labels",
+) -> None:
+    """
+    Add a top-right legend for redaction label colours and outline patterns.
+
+    Args:
+        image_cv: OpenCV BGR image (modified in place).
+        legend_rows: List of (BGR colour, pattern name, display label).
+        title: Legend title text.
+    """
+    if not legend_rows:
+        return
+
+    height, width = image_cv.shape[:2]
+    num_items = len(legend_rows)
+
+    legend_width = max(90, min(220, int(width * 0.14)))
+    scale = legend_width / 200.0
+
+    font_scale_title = max(0.28, round(0.55 * scale, 2))
+    font_scale_label = max(0.22, round(0.45 * scale, 2))
+    item_spacing = max(12, int(22 * scale))
+    box_size = max(7, int(13 * scale))
+    margin = max(4, int(8 * scale))
+
+    (_, title_h), _ = cv2.getTextSize(
+        title, cv2.FONT_HERSHEY_SIMPLEX, font_scale_title, 1
+    )
+    legend_height = title_h + margin * 3 + num_items * item_spacing + margin
+
+    outer_pad = max(4, int(14 * scale))
+    legend_x = width - legend_width - outer_pad
+    legend_y = outer_pad
+
+    overlay = image_cv.copy()
+    cv2.rectangle(
+        overlay,
+        (legend_x, legend_y),
+        (legend_x + legend_width, legend_y + legend_height),
+        (255, 255, 255),
+        -1,
+    )
+    cv2.addWeighted(overlay, 0.5, image_cv, 0.5, 0, image_cv)
+
+    (title_w, title_h), _ = cv2.getTextSize(
+        title, cv2.FONT_HERSHEY_SIMPLEX, font_scale_title, 1
+    )
+    title_x = legend_x + max(0, (legend_width - title_w) // 2)
+    title_y = legend_y + title_h + margin
+    cv2.putText(
+        image_cv,
+        title,
+        (title_x, title_y),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        font_scale_title,
+        (0, 0, 0),
+        1,
+    )
+
+    start_y = title_y + item_spacing
+    swatch_thickness = max(1, int(round(1.5 * scale)))
+    swatch_line_w = max(28, min(56, legend_width - 2 * margin - 78))
+
+    for idx, (col_bgr, pattern, lbl) in enumerate(legend_rows):
+        iy = start_y + idx * item_spacing
+        bx = legend_x + margin
+        y_line = iy - max(5, box_size // 3)
+        lbl_disp = lbl if len(lbl) <= 42 else lbl[:39] + "..."
+        _draw_redaction_legend_pattern_sample(
+            image_cv,
+            bx,
+            y_line,
+            swatch_line_w,
+            col_bgr,
+            pattern,
+            swatch_thickness,
+        )
+        cv2.putText(
+            image_cv,
+            lbl_disp,
+            (bx + swatch_line_w + margin, iy - max(1, margin // 3)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            font_scale_label,
+            (0, 0, 0),
+            1,
         )

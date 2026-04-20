@@ -37,19 +37,26 @@ class TestGUIAppOnly(unittest.TestCase):
 
         try:
             # Import the app module
+            import gradio as gr
+            from fastapi import FastAPI
+
             import app
 
-            # Check if the app object exists and is a Gradio Blocks object
+            # `app.app` is the ASGI app: either FastAPI (Gradio mounted via RUN_FASTAPI)
+            # or, in some layouts, Gradio Blocks directly.
             self.assertTrue(
                 hasattr(app, "app"), "App object should exist in the module"
             )
+            self.assertIsInstance(app.app, (FastAPI, gr.Blocks))
 
-            # Check if it's a Gradio Blocks instance
-            import gradio as gr
-
-            self.assertIsInstance(
-                app.app, gr.Blocks, "App should be a Gradio Blocks instance"
-            )
+            if isinstance(app.app, FastAPI):
+                self.assertIsInstance(
+                    app.blocks,
+                    gr.Blocks,
+                    "Gradio UI should live on module attribute `blocks` when using FastAPI",
+                )
+            else:
+                self.assertIsInstance(app.app, gr.Blocks)
 
             print("✅ GUI app import and initialization passed")
 
@@ -78,8 +85,17 @@ class TestGUIAppOnly(unittest.TestCase):
 
             def launch_app():
                 try:
-                    # Launch the app in headless mode with a short timeout
-                    app.app.launch(
+                    import gradio as gr
+
+                    # When RUN_FASTAPI is true, `app.app` is FastAPI; Gradio Blocks is `app.blocks`.
+                    gradio_ui = (
+                        app.blocks
+                        if hasattr(app, "blocks")
+                        and isinstance(app.blocks, gr.Blocks)
+                        and not isinstance(app.app, gr.Blocks)
+                        else app.app
+                    )
+                    gradio_ui.launch(
                         show_error=True,
                         inbrowser=False,  # Don't open browser
                         server_port=0,  # Use any available port

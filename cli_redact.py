@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import re
 import time
@@ -308,15 +309,11 @@ full_llm_entity_list = FULL_LLM_ENTITY_LIST
 default_handwrite_signature_checkbox = DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX
 
 
-# --- Main CLI Function ---
-def main(direct_mode_args={}):
-    """
-    A unified command-line interface to prepare, redact, and anonymise various document types.
+# --- CLI parser and main ---
 
-    Args:
-        direct_mode_args (dict, optional): Dictionary of arguments for direct mode execution.
-                                          If provided, uses these instead of parsing command line arguments.
-    """
+
+def build_cli_argument_parser() -> argparse.ArgumentParser:
+    """Build the CLI ArgumentParser (shared by main(), Agent API, and tests)."""
     parser = argparse.ArgumentParser(
         description="A versatile CLI for redacting PII from PDF/image files and anonymising Word/tabular data.",
         formatter_class=argparse.RawTextHelpFormatter,
@@ -449,9 +446,11 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
             "textract",
             "summarise",
             "combine_review_pdfs",
+            "export_review_redaction_overlay",
+            "export_review_page_ocr_visualisation",
         ],
         default="redact",
-        help="Task to perform: redact (PII redaction/anonymisation), deduplicate (find duplicate content), textract (AWS Textract batch operations), summarise (LLM-based document summarisation from OCR CSV files), or combine_review_pdfs (merge redaction comments from multiple '_redactions_for_review' PDFs into one file).",
+        help="Task to perform: redact (PII redaction/anonymisation), deduplicate (find duplicate content), textract (AWS Textract batch operations), summarise (LLM-based document summarisation from OCR CSV files), combine_review_pdfs (merge redaction comments from multiple '_redactions_for_review' PDFs into one file), export_review_redaction_overlay (write a redaction overlay JPEG for a page image + boxes JSON), or export_review_page_ocr_visualisation (write an OCR visualisation PNG for a page image + OCR JSON).",
     )
 
     # --- General Arguments (apply to all file types) ---
@@ -466,6 +465,47 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
     )
     general_group.add_argument(
         "--input_dir", default=INPUT_FOLDER, help="Directory for all input files."
+    )
+
+    export_group = parser.add_argument_group(
+        "Review export (page image visualisations)"
+    )
+    export_group.add_argument(
+        "--page_image_path",
+        default="",
+        help="Path to a single page raster image (PNG/JPG) used as underlay for export tasks.",
+    )
+    export_group.add_argument(
+        "--page_number",
+        type=int,
+        default=1,
+        help="1-based page number (used for naming).",
+    )
+    export_group.add_argument(
+        "--doc_base_name",
+        default="review",
+        help="Basename for output file naming (e.g. document name without extension).",
+    )
+    export_group.add_argument(
+        "--boxes_json_path",
+        default="",
+        help="Path to JSON file containing a list of annotator-style boxes for overlay export.",
+    )
+    export_group.add_argument(
+        "--review_df_json_path",
+        default="",
+        help="Optional path to JSON file containing review dataframe records (list[dict]) for stable label ordering/pattern mapping.",
+    )
+    export_group.add_argument(
+        "--label_abbrev_chars",
+        type=int,
+        default=-1,
+        help="Optional override: draw N leading label characters on overlay image (use -1 to use config default).",
+    )
+    export_group.add_argument(
+        "--ocr_results_json_path",
+        default="",
+        help="Path to JSON file containing OCR-with-words results dict for OCR visualisation export.",
     )
     general_group.add_argument(
         "--language", default=DEFAULT_LANGUAGE, help="Language of the document content."
@@ -1015,6 +1055,23 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
         default=120,
         help="Maximum number of polling attempts for Textract job completion.",
     )
+    return parser
+
+
+def get_cli_default_args_dict() -> dict:
+    """All CLI flag defaults as a dict; merge agent overrides then call main(direct_mode_args=...)."""
+    return vars(build_cli_argument_parser().parse_args([]))
+
+
+def main(direct_mode_args={}):
+    """
+    A unified command-line interface to prepare, redact, and anonymise various document types.
+
+    Args:
+        direct_mode_args (dict, optional): Dictionary of arguments for direct mode execution.
+                                          If provided, uses these instead of parsing command line arguments.
+    """
+    parser = build_cli_argument_parser()
     # Parse arguments - either from command line or direct mode
     if direct_mode_args:
         # Use direct mode arguments
@@ -1128,7 +1185,12 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
         extraction_options.append("Extract layout")
     args.handwrite_signature_extraction = extraction_options
 
-    if args.task in ["redact", "deduplicate", "summarise", "combine_review_pdfs"]:
+    if args.task in [
+        "redact",
+        "deduplicate",
+        "summarise",
+        "combine_review_pdfs",
+    ]:
         if args.input_file:
             if isinstance(args.input_file, str):
                 args.input_file = [args.input_file]
@@ -1137,6 +1199,8 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
             file_extension = file_extension.lower()
         else:
             raise ValueError(f"Error: --input_file is required for '{args.task}' task.")
+    else:
+        file_extension = ""
 
     # Initialise usage logger if logging is enabled
     usage_logger = None
@@ -1214,7 +1278,8 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
             start_time = time.time()
             try:
                 from tools.file_conversion import prepare_image_or_pdf
-                from tools.file_redaction import choose_and_run_redactor
+                from tools.file_redaction import run_redaction
+                from tools.redaction_types import RedactionContext, RedactionOptions
 
                 # Step 1: Prepare the document
                 print("\nStep 1: Preparing document...")
@@ -1249,7 +1314,7 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
                 )
                 print(f"Preparation complete. {prep_summary}")
 
-                # Note: VLM and LLM clients are initialized inside choose_and_run_redactor
+                # Note: VLM and LLM clients are initialized inside run_redaction
                 # based on text_extraction_method and pii_identification_method.
                 # Model choices (vlm_model_choice, llm_model_choice) can be overridden via
                 # environment variables (CLOUD_VLM_MODEL_CHOICE, CLOUD_LLM_PII_MODEL_CHOICE) before running the CLI.
@@ -1301,82 +1366,93 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
                     llm_total_input_tokens,
                     llm_total_output_tokens,
                     _,
-                ) = choose_and_run_redactor(
-                    file_paths=args.input_file,
-                    prepared_pdf_file_paths=prepared_pdf_paths,
-                    pdf_image_file_paths=image_file_paths,
-                    chosen_redact_entities=args.local_redact_entities,
-                    chosen_redact_comprehend_entities=args.aws_redact_entities,
-                    chosen_llm_entities=args.llm_redact_entities,
-                    text_extraction_method=args.ocr_method,
-                    in_allow_list=args.allow_list_file,
-                    in_deny_list=args.deny_list_file,
-                    redact_whole_page_list=args.redact_whole_page_file,
-                    first_loop_state=True,
-                    page_min=args.page_min,
-                    page_max=args.page_max,
-                    handwrite_signature_checkbox=args.handwrite_signature_extraction,
-                    max_fuzzy_spelling_mistakes_num=args.fuzzy_mistakes,
-                    match_fuzzy_whole_phrase_bool=args.match_fuzzy_whole_phrase_bool,
-                    pymupdf_doc=pdf_doc,
-                    annotations_all_pages=image_annotations,
-                    page_sizes=page_sizes,
-                    document_cropboxes=original_cropboxes,
-                    pii_identification_method=args.pii_detector,
-                    aws_access_key_textbox=args.aws_access_key,
-                    aws_secret_key_textbox=args.aws_secret_key,
-                    language=args.language,
-                    output_folder=args.output_dir,
-                    input_folder=args.input_dir,
-                    custom_llm_instructions=args.custom_llm_instructions,
-                    inference_server_vlm_model=(
-                        args.inference_server_vlm_model
-                        if args.inference_server_vlm_model
-                        else DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                ) = run_redaction(
+                    args.input_file,
+                    RedactionOptions(
+                        chosen_redact_entities=args.local_redact_entities,
+                        chosen_redact_comprehend_entities=args.aws_redact_entities,
+                        chosen_llm_entities=args.llm_redact_entities,
+                        text_extraction_method=args.ocr_method,
+                        in_allow_list=args.allow_list_file,
+                        in_deny_list=args.deny_list_file,
+                        redact_whole_page_list=args.redact_whole_page_file,
+                        page_min=args.page_min,
+                        page_max=args.page_max,
+                        handwrite_signature_checkbox=args.handwrite_signature_extraction,
+                        max_fuzzy_spelling_mistakes_num=args.fuzzy_mistakes,
+                        match_fuzzy_whole_phrase_bool=args.match_fuzzy_whole_phrase_bool,
+                        pii_identification_method=args.pii_detector,
+                        aws_access_key_textbox=args.aws_access_key,
+                        aws_secret_key_textbox=args.aws_secret_key,
+                        language=args.language,
+                        output_folder=args.output_dir,
+                        input_folder=args.input_dir,
+                        custom_llm_instructions=args.custom_llm_instructions,
+                        inference_server_vlm_model=(
+                            args.inference_server_vlm_model
+                            if args.inference_server_vlm_model
+                            else DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                        ),
+                        efficient_ocr=getattr(args, "efficient_ocr", EFFICIENT_OCR),
+                        efficient_ocr_min_words=(
+                            args.efficient_ocr_min_words
+                            if getattr(args, "efficient_ocr_min_words", None)
+                            is not None
+                            else EFFICIENT_OCR_MIN_WORDS
+                        ),
+                        efficient_ocr_min_image_coverage_fraction=(
+                            args.efficient_ocr_min_image_coverage_fraction
+                            if getattr(
+                                args,
+                                "efficient_ocr_min_image_coverage_fraction",
+                                None,
+                            )
+                            is not None
+                            else EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION
+                        ),
+                        efficient_ocr_min_embedded_image_px=(
+                            args.efficient_ocr_min_embedded_image_px
+                            if getattr(
+                                args, "efficient_ocr_min_embedded_image_px", None
+                            )
+                            is not None
+                            else EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX
+                        ),
+                        ocr_first_pass_max_workers=(
+                            args.ocr_first_pass_max_workers
+                            if getattr(args, "ocr_first_pass_max_workers", None)
+                            is not None
+                            else OCR_FIRST_PASS_MAX_WORKERS
+                        ),
+                        hybrid_textract_bedrock_vlm=getattr(
+                            args,
+                            "hybrid_textract_bedrock_vlm",
+                            HYBRID_TEXTRACT_BEDROCK_VLM,
+                        ),
+                        overwrite_existing_ocr_results=getattr(
+                            args,
+                            "overwrite_existing_ocr_results",
+                            OVERWRITE_EXISTING_OCR_RESULTS,
+                        ),
+                        save_page_ocr_visualisations=(
+                            getattr(args, "save_page_ocr_visualisations", None)
+                            if getattr(args, "save_page_ocr_visualisations", None)
+                            is not None
+                            else SAVE_PAGE_OCR_VISUALISATIONS
+                        ),
                     ),
-                    efficient_ocr=getattr(args, "efficient_ocr", EFFICIENT_OCR),
-                    efficient_ocr_min_words=(
-                        args.efficient_ocr_min_words
-                        if getattr(args, "efficient_ocr_min_words", None) is not None
-                        else EFFICIENT_OCR_MIN_WORDS
-                    ),
-                    efficient_ocr_min_image_coverage_fraction=(
-                        args.efficient_ocr_min_image_coverage_fraction
-                        if getattr(
-                            args, "efficient_ocr_min_image_coverage_fraction", None
-                        )
-                        is not None
-                        else EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION
-                    ),
-                    efficient_ocr_min_embedded_image_px=(
-                        args.efficient_ocr_min_embedded_image_px
-                        if getattr(args, "efficient_ocr_min_embedded_image_px", None)
-                        is not None
-                        else EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX
-                    ),
-                    ocr_first_pass_max_workers=(
-                        args.ocr_first_pass_max_workers
-                        if getattr(args, "ocr_first_pass_max_workers", None) is not None
-                        else OCR_FIRST_PASS_MAX_WORKERS
-                    ),
-                    hybrid_textract_bedrock_vlm=getattr(
-                        args, "hybrid_textract_bedrock_vlm", HYBRID_TEXTRACT_BEDROCK_VLM
-                    ),
-                    overwrite_existing_ocr_results=getattr(
-                        args,
-                        "overwrite_existing_ocr_results",
-                        OVERWRITE_EXISTING_OCR_RESULTS,
-                    ),
-                    save_page_ocr_visualisations=(
-                        getattr(args, "save_page_ocr_visualisations", None)
-                        if getattr(args, "save_page_ocr_visualisations", None)
-                        is not None
-                        else SAVE_PAGE_OCR_VISUALISATIONS
+                    RedactionContext(
+                        prepared_pdf_file_paths=prepared_pdf_paths,
+                        pdf_image_file_paths=image_file_paths,
+                        pymupdf_doc=pdf_doc,
+                        annotations_all_pages=image_annotations,
+                        page_sizes=page_sizes,
+                        document_cropboxes=original_cropboxes,
                     ),
                     # Note: bedrock_runtime, gemini_client, gemini_config, azure_openai_client
-                    # are initialized inside choose_and_run_redactor based on text_extraction_method
+                    # are initialized inside run_redaction based on text_extraction_method
                     # but we can pass vlm_model_choice through custom_llm_instructions or other means
-                    # The clients will be initialized in choose_and_run_redactor based on the method
+                    # The clients will be initialized in run_redaction based on the method
                 )
 
                 # Calculate processing time
@@ -2154,7 +2230,8 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
                     f"Detected PDF input. Extracting text with '{args.ocr_method}' then summarising..."
                 )
                 from tools.file_conversion import prepare_image_or_pdf
-                from tools.file_redaction import choose_and_run_redactor
+                from tools.file_redaction import run_redaction
+                from tools.redaction_types import RedactionContext, RedactionOptions
 
                 prepare_images = args.ocr_method in ["Local OCR", "AWS Textract"]
                 (
@@ -2227,81 +2304,91 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
                     _,
                     _,
                     _,
-                ) = choose_and_run_redactor(
-                    file_paths=[pdf_path],
-                    prepared_pdf_file_paths=prepared_pdf_paths,
-                    pdf_image_file_paths=image_file_paths,
-                    chosen_redact_entities=args.local_redact_entities or [],
-                    chosen_redact_comprehend_entities=args.aws_redact_entities or [],
-                    chosen_llm_entities=args.llm_redact_entities or [],
-                    text_extraction_method=args.ocr_method,
-                    in_allow_list=args.allow_list_file,
-                    in_deny_list=args.deny_list_file,
-                    redact_whole_page_list=args.redact_whole_page_file,
-                    first_loop_state=True,
-                    page_min=args.page_min,
-                    page_max=args.page_max,
-                    handwrite_signature_checkbox=args.handwrite_signature_extraction
-                    or [],
-                    max_fuzzy_spelling_mistakes_num=getattr(
-                        args, "fuzzy_mistakes", DEFAULT_FUZZY_SPELLING_MISTAKES_NUM
+                ) = run_redaction(
+                    [pdf_path],
+                    RedactionOptions(
+                        chosen_redact_entities=args.local_redact_entities or [],
+                        chosen_redact_comprehend_entities=args.aws_redact_entities
+                        or [],
+                        chosen_llm_entities=args.llm_redact_entities or [],
+                        text_extraction_method=args.ocr_method,
+                        in_allow_list=args.allow_list_file,
+                        in_deny_list=args.deny_list_file,
+                        redact_whole_page_list=args.redact_whole_page_file,
+                        page_min=args.page_min,
+                        page_max=args.page_max,
+                        handwrite_signature_checkbox=args.handwrite_signature_extraction
+                        or [],
+                        max_fuzzy_spelling_mistakes_num=getattr(
+                            args, "fuzzy_mistakes", DEFAULT_FUZZY_SPELLING_MISTAKES_NUM
+                        ),
+                        match_fuzzy_whole_phrase_bool=getattr(
+                            args, "match_fuzzy_whole_phrase_bool", True
+                        ),
+                        pii_identification_method=args.pii_detector or "Local",
+                        aws_access_key_textbox=args.aws_access_key or "",
+                        aws_secret_key_textbox=args.aws_secret_key or "",
+                        language=args.language,
+                        output_folder=args.output_dir,
+                        input_folder=args.input_dir,
+                        custom_llm_instructions=args.custom_llm_instructions or "",
+                        inference_server_vlm_model=(
+                            getattr(args, "inference_server_vlm_model", None)
+                            or DEFAULT_INFERENCE_SERVER_VLM_MODEL
+                        ),
+                        efficient_ocr=getattr(args, "efficient_ocr", EFFICIENT_OCR),
+                        efficient_ocr_min_words=(
+                            getattr(args, "efficient_ocr_min_words", None)
+                            or EFFICIENT_OCR_MIN_WORDS
+                        ),
+                        efficient_ocr_min_image_coverage_fraction=(
+                            getattr(
+                                args, "efficient_ocr_min_image_coverage_fraction", None
+                            )
+                            if getattr(
+                                args, "efficient_ocr_min_image_coverage_fraction", None
+                            )
+                            is not None
+                            else EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION
+                        ),
+                        efficient_ocr_min_embedded_image_px=(
+                            getattr(args, "efficient_ocr_min_embedded_image_px", None)
+                            if getattr(
+                                args, "efficient_ocr_min_embedded_image_px", None
+                            )
+                            is not None
+                            else EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX
+                        ),
+                        ocr_first_pass_max_workers=(
+                            getattr(args, "ocr_first_pass_max_workers", None)
+                            or OCR_FIRST_PASS_MAX_WORKERS
+                        ),
+                        hybrid_textract_bedrock_vlm=getattr(
+                            args,
+                            "hybrid_textract_bedrock_vlm",
+                            HYBRID_TEXTRACT_BEDROCK_VLM,
+                        ),
+                        overwrite_existing_ocr_results=getattr(
+                            args,
+                            "overwrite_existing_ocr_results",
+                            OVERWRITE_EXISTING_OCR_RESULTS,
+                        ),
+                        save_page_ocr_visualisations=(
+                            getattr(args, "save_page_ocr_visualisations", None)
+                            if getattr(args, "save_page_ocr_visualisations", None)
+                            is not None
+                            else SAVE_PAGE_OCR_VISUALISATIONS
+                        ),
+                        text_extraction_only=True,
                     ),
-                    match_fuzzy_whole_phrase_bool=getattr(
-                        args, "match_fuzzy_whole_phrase_bool", True
+                    RedactionContext(
+                        prepared_pdf_file_paths=prepared_pdf_paths,
+                        pdf_image_file_paths=image_file_paths,
+                        pymupdf_doc=pdf_doc,
+                        annotations_all_pages=image_annotations,
+                        page_sizes=page_sizes,
+                        document_cropboxes=original_cropboxes,
                     ),
-                    pymupdf_doc=pdf_doc,
-                    annotations_all_pages=image_annotations,
-                    page_sizes=page_sizes,
-                    document_cropboxes=original_cropboxes,
-                    pii_identification_method=args.pii_detector or "Local",
-                    aws_access_key_textbox=args.aws_access_key or "",
-                    aws_secret_key_textbox=args.aws_secret_key or "",
-                    language=args.language,
-                    output_folder=args.output_dir,
-                    input_folder=args.input_dir,
-                    custom_llm_instructions=args.custom_llm_instructions or "",
-                    inference_server_vlm_model=(
-                        getattr(args, "inference_server_vlm_model", None)
-                        or DEFAULT_INFERENCE_SERVER_VLM_MODEL
-                    ),
-                    efficient_ocr=getattr(args, "efficient_ocr", EFFICIENT_OCR),
-                    efficient_ocr_min_words=(
-                        getattr(args, "efficient_ocr_min_words", None)
-                        or EFFICIENT_OCR_MIN_WORDS
-                    ),
-                    efficient_ocr_min_image_coverage_fraction=(
-                        getattr(args, "efficient_ocr_min_image_coverage_fraction", None)
-                        if getattr(
-                            args, "efficient_ocr_min_image_coverage_fraction", None
-                        )
-                        is not None
-                        else EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION
-                    ),
-                    efficient_ocr_min_embedded_image_px=(
-                        getattr(args, "efficient_ocr_min_embedded_image_px", None)
-                        if getattr(args, "efficient_ocr_min_embedded_image_px", None)
-                        is not None
-                        else EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX
-                    ),
-                    ocr_first_pass_max_workers=(
-                        getattr(args, "ocr_first_pass_max_workers", None)
-                        or OCR_FIRST_PASS_MAX_WORKERS
-                    ),
-                    hybrid_textract_bedrock_vlm=getattr(
-                        args, "hybrid_textract_bedrock_vlm", HYBRID_TEXTRACT_BEDROCK_VLM
-                    ),
-                    overwrite_existing_ocr_results=getattr(
-                        args,
-                        "overwrite_existing_ocr_results",
-                        OVERWRITE_EXISTING_OCR_RESULTS,
-                    ),
-                    save_page_ocr_visualisations=(
-                        getattr(args, "save_page_ocr_visualisations", None)
-                        if getattr(args, "save_page_ocr_visualisations", None)
-                        is not None
-                        else SAVE_PAGE_OCR_VISUALISATIONS
-                    ),
-                    text_extraction_only=True,
                 )
 
                 if ocr_df is None or (
@@ -2456,10 +2543,114 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
 
             traceback.print_exc()
 
+    elif args.task == "export_review_redaction_overlay":
+        print("--- Export review redaction overlay image ---")
+        try:
+            from tools.redaction_review import visualise_review_redaction_boxes
+
+            if not args.page_image_path:
+                print(
+                    "Error: --page_image_path is required for export_review_redaction_overlay."
+                )
+                return
+            if not args.boxes_json_path:
+                print(
+                    "Error: --boxes_json_path is required for export_review_redaction_overlay."
+                )
+                return
+
+            with open(args.boxes_json_path, "r", encoding="utf-8") as f:
+                boxes = json.load(f)
+            if not isinstance(boxes, list) or not boxes:
+                print("Error: boxes JSON must be a non-empty list of box dicts.")
+                return
+
+            review_df = pd.DataFrame()
+            if args.review_df_json_path:
+                with open(args.review_df_json_path, "r", encoding="utf-8") as f:
+                    recs = json.load(f)
+                if isinstance(recs, list) and recs:
+                    review_df = pd.DataFrame(recs)
+
+            annotator = {"image": args.page_image_path, "boxes": boxes}
+            out = visualise_review_redaction_boxes(
+                annotator,
+                review_df=review_df,
+                output_folder=args.output_dir,
+                page_number=int(args.page_number or 1),
+                doc_base_name=str(args.doc_base_name or "review"),
+                label_abbrev_chars=(
+                    None
+                    if int(args.label_abbrev_chars) < 0
+                    else int(args.label_abbrev_chars)
+                ),
+            )
+            if out:
+                print(f"Overlay image written to: {out}")
+            else:
+                print("No output produced (invalid image/boxes or write failed).")
+        except Exception as e:
+            print(f"\nAn error occurred while exporting overlay image: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+    elif args.task == "export_review_page_ocr_visualisation":
+        print("--- Export review page OCR visualisation image ---")
+        try:
+            from PIL import Image
+
+            from tools.file_redaction import visualise_ocr_words_bounding_boxes
+            from tools.helper_functions import get_file_name_without_type
+            from tools.secure_path_utils import sanitize_filename
+
+            if not args.page_image_path:
+                print(
+                    "Error: --page_image_path is required for export_review_page_ocr_visualisation."
+                )
+                return
+            if not args.ocr_results_json_path:
+                print(
+                    "Error: --ocr_results_json_path is required for export_review_page_ocr_visualisation."
+                )
+                return
+
+            with open(args.ocr_results_json_path, "r", encoding="utf-8") as f:
+                ocr_results = json.load(f)
+            if not isinstance(ocr_results, dict) or not ocr_results:
+                print("Error: ocr_results JSON must be a non-empty dict.")
+                return
+
+            base = get_file_name_without_type(os.path.basename(str(args.doc_base_name)))
+            if not base or not str(base).strip():
+                base = "review"
+            safe_base = sanitize_filename(str(base))
+            image_name = f"{safe_base}_page{int(args.page_number or 1)}.png"
+
+            log_paths: list[str] = []
+            log_paths = visualise_ocr_words_bounding_boxes(
+                Image.open(args.page_image_path).convert("RGB"),
+                ocr_results,
+                image_name=image_name,
+                output_folder=args.output_dir,
+                visualisation_folder="review_ocr_visualisations",
+                add_legend=True,
+                log_files_output_paths=log_paths,
+            )
+            if log_paths:
+                print(f"OCR visualisation written to: {log_paths[-1]}")
+            else:
+                print("No output produced (invalid image/ocr_results or write failed).")
+        except Exception as e:
+            print(f"\nAn error occurred while exporting OCR visualisation image: {e}")
+            import traceback
+
+            traceback.print_exc()
+
     else:
         print(f"Error: Invalid task '{args.task}'.")
         print(
-            "Valid options: 'redact', 'deduplicate', 'textract', 'summarise', or 'combine_review_pdfs'"
+            "Valid options: 'redact', 'deduplicate', 'textract', 'summarise', 'combine_review_pdfs', 'export_review_redaction_overlay', or 'export_review_page_ocr_visualisation'"
         )
 
 

@@ -18,6 +18,7 @@ usage/*
 feedback/*
 config/*
 user_guide/*
+skills/*
 cdk/config/*
 cdk/cdk.out/*
 cdk/archive/*

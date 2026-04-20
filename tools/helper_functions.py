@@ -74,7 +74,12 @@ from tools.config import (
     ensure_folder_within_app_directory,
     textract_language_choices,
 )
-from tools.secure_path_utils import sanitize_filename, secure_path_join
+from tools.secure_path_utils import (
+    sanitize_filename,
+    secure_path_join,
+    validate_folder_containment,
+    validate_path_safety,
+)
 
 
 def reset_state_vars():
@@ -515,11 +520,20 @@ def save_default_cost_code_for_session(
     if cost_code_choice not in valid_codes:
         return "Selected cost code not in the list. Choose a cost code from the table."
     try:
-        csv_path = str(
-            _validate_session_default_cost_codes_csv_path(
-                get_session_default_cost_codes_csv_path(output_folder)
-            )
+        csv_path_obj = _validate_session_default_cost_codes_csv_path(
+            get_session_default_cost_codes_csv_path(output_folder)
         )
+        csv_path = str(csv_path_obj)
+        # Help CodeQL see a containment check against trusted roots.
+        ok = False
+        for root in _session_default_cost_codes_parent_dirs():
+            if validate_path_safety(csv_path, base_path=str(root)):
+                ok = True
+                break
+        if not ok:
+            raise PermissionError(
+                "Session default cost codes CSV path outside allowed roots"
+            )
     except (ValueError, PermissionError, OSError):
         return "Cannot save default cost code: invalid or unsafe storage path."
     ensure_folder_exists(os.path.dirname(csv_path))
@@ -593,11 +607,23 @@ def _read_session_default_from_csv_path(
     If saved_at exists, uses the latest row by saved_at for that session_hash.
     """
     try:
-        csv_path = str(
-            _validate_session_default_cost_codes_csv_path(
-                csv_path, allow_download_temp=allow_download_temp
-            )
+        csv_path_obj = _validate_session_default_cost_codes_csv_path(
+            csv_path, allow_download_temp=allow_download_temp
         )
+        csv_path = str(csv_path_obj)
+        # Help CodeQL see a containment check against trusted roots.
+        if allow_download_temp:
+            ok = validate_path_safety(csv_path, base_path=tempfile.gettempdir())
+        else:
+            ok = False
+            for root in _session_default_cost_codes_parent_dirs():
+                if validate_path_safety(csv_path, base_path=str(root)):
+                    ok = True
+                    break
+        if not ok:
+            raise PermissionError(
+                "Session default cost codes CSV path outside allowed roots"
+            )
     except (ValueError, PermissionError, OSError):
         return ""
     if not os.path.exists(csv_path):
@@ -725,6 +751,10 @@ def ensure_folder_exists(output_folder: str):
         )
         return
     if not safe_folder or not str(safe_folder).strip():
+        return
+
+    # Extra explicit containment check for static analyzers (CodeQL py/path-injection).
+    if not validate_path_safety(str(safe_folder), base_path=os.getcwd()):
         return
 
     if not os.path.exists(safe_folder):
@@ -952,9 +982,12 @@ def check_for_existing_textract_file(
     # Generate suffix based on checkbox options
     suffix = get_textract_file_suffix(handwrite_signature_checkbox)
     try:
+        out_dir = os.path.normpath(str(output_folder))
+        if not validate_folder_containment(out_dir, OUTPUT_FOLDER):
+            out_dir = OUTPUT_FOLDER
         safe_stem = sanitize_filename(doc_file_name_no_extension_textbox)
         filename = safe_stem + suffix + "_textract.json"
-        textract_output_path = secure_path_join(output_folder, filename)
+        textract_output_path = secure_path_join(out_dir, filename)
     except (ValueError, PermissionError, OSError):
         return False
 
@@ -982,9 +1015,12 @@ def check_for_relevant_ocr_output_with_words(
         return False
 
     try:
+        out_dir = os.path.normpath(str(output_folder))
+        if not validate_folder_containment(out_dir, OUTPUT_FOLDER):
+            out_dir = OUTPUT_FOLDER
         safe_stem = sanitize_filename(doc_file_name_no_extension_textbox)
         doc_file_with_ending = safe_stem + file_ending
-        local_ocr_output_path = secure_path_join(output_folder, doc_file_with_ending)
+        local_ocr_output_path = secure_path_join(out_dir, doc_file_with_ending)
     except (ValueError, PermissionError, OSError):
         return False
 
@@ -1292,6 +1328,10 @@ def _generate_unique_ids(
 
 def load_all_output_files(folder_path: str = OUTPUT_FOLDER) -> List[str]:
     """Get the file paths of all files in the given folder and its subfolders."""
+
+    # Gradio can sometimes pass None here during chained load/update events
+    # (e.g. if a prior event errored and the textbox/state wasn't populated).
+    folder_path = folder_path or OUTPUT_FOLDER
 
     safe_folder_path_resolved = Path(folder_path).resolve()
 

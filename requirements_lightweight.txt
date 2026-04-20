@@ -5,7 +5,7 @@ bleach<=6.3.0
 polars<=1.38.1
 pyarrow<=23.0.1
 openpyxl<=3.1.5
-boto3<=1.42.80
+boto3<=1.42.91
 python-dotenv<=1.0.1
 defusedxml<=0.7.1
 Faker<=40.8.0
@@ -16,7 +16,7 @@ tabulate<=0.10.0
 
 # --- Machine learning / NLP ---
 scikit-learn<=1.8.0
-spacy<=3.8.11
+spacy<=3.8.14
 spaczz<=0.6.1
 en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0.tar.gz
 

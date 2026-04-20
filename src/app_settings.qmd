@@ -256,10 +256,6 @@ Configurations for the Gradio UI, server behavior, and application limits.
     * **Description:** Maximum time value for processing operations.
     * **Default Value:** `999999`
 
-* **`TLDEXTRACT_CACHE`**
-    * **Description:** Path to the cache directory used by the `tldextract` library.
-    * **Default Value:** `'tmp/tld/'`
-
 * **`COGNITO_AUTH`**
     * **Description:** Enables or disables AWS Cognito authentication. Set to `'True'` to enable.
     * **Default Value:** `'False'`
@@ -959,6 +955,26 @@ Settings for multi-language support.
     * **Default Value:** `"False"`
 
 ## File Output Options
+
+### Review redaction overlay export
+
+These variables apply when exporting the **Review redactions** tab overlay image (JPEG with hollow boxes, optional label abbreviations, and a legend). Output path: `{OUTPUT_FOLDER}/redaction_overlay/{basename}_page{n}_redaction_overlay.jpg`. The FastAPI agent route `POST /agent/export_review_redaction_overlay` uses the same rendering when given `page_image_path` and `boxes`.
+
+* **`REVIEW_OVERLAY_LABEL_ABBREV_CHARS`**
+    * **Description:** Number of leading characters of each redaction **label** to draw above each box (centred, with a small gap above the box top edge). Set to `0` to disable label text on the image. Values are clamped to **0–24** after parsing.
+    * **Default Value:** `0`
+
+* **`REVIEW_OVERLAY_LABEL_FONT_PX`**
+    * **Description:** Font size in pixels for those abbreviation labels. **`0`** means automatic sizing from image width: roughly `max(9, min(16, width // 90))`. Any **positive** value selects a fixed TrueType size, clamped to **6–96** pixels.
+    * **Default Value:** `0`
+
+* **`REVIEW_OVERLAY_MAX_PIXELS`**
+    * **Description:** If the overlay image’s **width × height** exceeds this value, it is **downscaled** (aspect ratio preserved) before JPEG encoding. Set to **`0`** to disable this cap (no resize for size reasons alone).
+    * **Default Value:** `4000000` (4 megapixels)
+
+* **`REVIEW_OVERLAY_MAX_FILE_BYTES`**
+    * **Description:** Target **maximum JPEG file size** in bytes. The writer lowers JPEG quality in steps (similar to `SAVE_PAGE_OCR_VISUALISATIONS` page images) until the file is at or under this limit, down to a minimum quality. Values are clamped to a safe range after parsing.
+    * **Default Value:** `512000` (500 × 1024 bytes, i.e. 500 KiB)
 
 * **`USE_GUI_BOX_COLOURS_FOR_OUTPUTS`**
     * **Description:** If `"True"`, the final redacted PDF will use the same redaction box colors as shown in the review UI.

@@ -29,7 +29,7 @@ run_gui_test.bat
 .\run_gui_test.ps1
 ```
 
-### `test.py` (Updated)
+### `cli_epilog_suite.py` (CLI epilog unittest suite)
 The main test suite now includes both CLI and GUI tests. The GUI tests are in the `TestGUIApp` class.
 
 **Usage:**
@@ -38,7 +38,7 @@ Option 1 - Manual activation:
 ```bash
 conda activate redaction
 cd test
-python test.py
+python cli_epilog_suite.py
 ```
 
 Option 2 - Using helper scripts (Windows):

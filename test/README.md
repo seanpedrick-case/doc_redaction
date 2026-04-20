@@ -37,22 +37,28 @@ The test suite includes tests for:
 
 ## Running the Tests
 
-### Method 1: Run the test suite directly
+Two different suites live under `test/`:
+
+1. **Fast pytest suite** (unit/smoke tests in `test_*.py`): run from the **repository root** with `pytest test/` (or `pytest` — see `pyproject.toml`). By default, tests marked `integration` are **excluded** via `addopts`. To collect **all** tests (including integration): `pytest test/ -m "integration or not integration"`. To run **only** integration tests: `pytest test/ -m integration`.
+
+2. **CLI epilog suite** (comprehensive subprocess/unittest coverage of `cli_redact.py` examples): implemented in [`cli_epilog_suite.py`](cli_epilog_suite.py). This is **not** the same as `pytest`; it is heavier and may require example files and optional AWS credentials.
+
+### Method 1: Run the CLI epilog suite directly
 ```bash
 cd test
-python test.py
+python cli_epilog_suite.py
 ```
 
-### Method 2: Use the convenience script
+### Method 2: Use the convenience script (same as Method 1)
 ```bash
 cd test
 python run_tests.py
 ```
 
-### Method 3: Run with unittest
+### Method 3: Run unittest by class name
 ```bash
 cd test
-python -m unittest test.test.TestCLIRedactExamples -v
+python -m unittest test.cli_epilog_suite.TestCLIRedactExamples -v
 ```
 
 ## Test Behavior
@@ -68,7 +74,7 @@ The test suite uses Python's `unittest` framework with the following structure:
 
 - `TestCLIRedactExamples`: Main test class containing all test methods
 - `run_cli_redact()`: Helper function that executes the CLI script with specified parameters
-- `run_all_tests()`: Main function that runs all tests and provides a summary
+- `run_all_tests()`: Main function that runs all tests and provides a summary (defined in [`cli_epilog_suite.py`](cli_epilog_suite.py); re-exported from the `test` package `__init__.py`)
 
 ## Example Output
 

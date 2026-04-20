@@ -114,6 +114,7 @@ from tools.config import (
     FEEDBACK_LOG_FILE_NAME,
     FEEDBACK_LOGS_FOLDER,
     FILE_INPUT_HEIGHT,
+    FILL_SCREEN_WIDTH,
     FULL_COMPREHEND_ENTITY_LIST,
     FULL_ENTITY_LIST,
     FULL_LLM_ENTITY_LIST,
@@ -213,7 +214,7 @@ from tools.file_conversion import (
     prepare_image_or_pdf,
     prepare_image_or_pdf_with_efficient_ocr,
 )
-from tools.file_redaction import choose_and_run_redactor
+from tools.file_redaction import choose_and_run_redactor, run_redaction
 from tools.find_duplicate_pages import (
     apply_whole_page_redactions_from_list,
     create_annotation_objects_from_duplicates,
@@ -293,6 +294,8 @@ from tools.redaction_review import (
     df_select_callback_ocr,
     df_select_callback_textract_api,
     exclude_selected_items_from_redaction,
+    export_review_page_ocr_visualisation_for_gradio,
+    export_review_redaction_overlay_for_gradio,
     get_all_rows_with_same_text,
     get_all_rows_with_same_text_redact,
     get_and_merge_current_page_annotations,
@@ -310,7 +313,9 @@ from tools.redaction_review import (
     update_other_annotator_number_from_current,
     update_redact_choice_df_from_page_dropdown,
     update_selected_review_df_row_colour,
+    validate_review_file_df,
 )
+from tools.redaction_types import RedactionContext, RedactionOptions
 from tools.summaries import (
     _summarisation_upload_to_paths,
     _upload_contains_pdf,
@@ -928,16 +933,16 @@ css = """
 /* Target tab navigation buttons only - not buttons inside tab content */
 /* Gradio renders tab buttons with role="tab" in the navigation area */
 button[role="tab"] {
-    font-size: 1.2em !important;
-    padding: 0.75em 1.4em !important;
+    font-size: 1.1em !important;
+    padding: 0.75em 1.2em !important;
 }
 
 /* Alternative selectors for different Gradio versions */
 .tab-nav button,
 nav button[role="tab"],
 div[class*="tab-nav"] button {
-    font-size: 1.2em !important;
-    padding: 0.75em 1.4em !important;
+    font-size: 1.1em !important;
+    padding: 0.75em 1.2em !important;
 }
 """
 
@@ -947,14 +952,14 @@ if RUN_FASTAPI:
         analytics_enabled=False,
         title="Document Redaction App",
         delete_cache=(43200, 43200),  # Temporary file cache deleted every 12 hours
-        fill_width=True,
+        fill_width=FILL_SCREEN_WIDTH,
     )
 else:
     blocks = gr.Blocks(
         analytics_enabled=False,
         title="Document Redaction App",
         delete_cache=(43200, 43200),  # Temporary file cache deleted every 12 hours
-        fill_width=True,
+        fill_width=FILL_SCREEN_WIDTH,
     )
 
 with blocks:
@@ -1367,6 +1372,13 @@ with blocks:
         label="new_duplicate_search_annotation_object",
         allow_custom_value=True,
         visible=False,
+    )
+
+    # This components are currently unused
+    annotate_zoom_in = gr.Button("Zoom in", visible=False)
+    annotate_zoom_out = gr.Button("Zoom out", visible=False)
+    clear_all_redactions_on_page_btn = gr.Button(
+        "Clear all redactions on page", visible=False
     )
 
     ###
@@ -2737,15 +2749,8 @@ with blocks:
                             variant="secondary",
                             visible=False,
                         )
-            with gr.Row():
-                annotate_zoom_in = gr.Button("Zoom in", visible=False)
-                annotate_zoom_out = gr.Button("Zoom out", visible=False)
-            with gr.Row():
-                clear_all_redactions_on_page_btn = gr.Button(
-                    "Clear all redactions on page", visible=False
-                )
 
-            with gr.Accordion(label="View review file data", open=False):
+            with gr.Accordion(label="View and edit review table data", open=False):
                 review_file_df = gr.Dataframe(
                     value=pd.DataFrame(),
                     headers=[
@@ -2757,17 +2762,37 @@ with blocks:
                         "ymin",
                         "xmax",
                         "ymax",
-                        "text",
                         "id",
+                        "text",
                     ],
                     row_count=(0, "dynamic"),
                     label="Review file data",
                     visible=True,
                     type="pandas",
-                    wrap=True,
+                    max_chars=30,
+                    wrap=False,
                     show_search="search",
-                    max_height=400,
+                    column_count=10,
+                    column_widths=[
+                        "10%",
+                        "5%",
+                        "10%",
+                        "15%",
+                        "8.75%",
+                        "8.75%",
+                        "8.75%",
+                        "8.75%",
+                        "10%",
+                        "15%",
+                    ],
+                    static_columns=[0, 1, 8],
+                    buttons=["fullscreen", "copy"],
+                    # max_height=400,
                 )
+                with gr.Row():
+                    review_file_df_update_btn = gr.Button(
+                        "Update review file data", variant="secondary"
+                    )
 
             with gr.Row():
                 with gr.Column(scale=2):
@@ -2843,6 +2868,32 @@ with blocks:
                         annotation_next_page_button_bottom = gr.Button(
                             "Next page", scale=4
                         )
+
+                    with gr.Accordion(
+                        label="Export image overview of page OCR results or redaction boxes",
+                        open=False,
+                    ):
+                        gr.Markdown(
+                            "Save a single-page JPEG of the current annotator view: "
+                            "page image with hollow redaction outlines (colour and line "
+                            "style by label) and a legend in the top-right."
+                        )
+                        with gr.Row(equal_height=True):
+                            with gr.Column():
+                                export_review_ocr_visualisation_btn = gr.Button(
+                                    "Export OCR visualisation image"
+                                )
+                            with gr.Column():
+                                export_redaction_overlay_btn = gr.Button(
+                                    "Export redaction overlay image"
+                                )
+                        with gr.Row():
+                            redaction_overlay_output_file = gr.File(
+                                label="OCR/Redaction overlay output",
+                                interactive=False,
+                                file_count="single",
+                                file_types=[".jpg"],
+                            )
 
                 with gr.Column(scale=1):
                     annotation_button_apply = gr.Button(
@@ -3782,6 +3833,7 @@ with blocks:
                         choices=MAPPED_LANGUAGE_CHOICES,
                         label="Chosen language",
                         multiselect=False,
+                        allow_custom_value=False,
                         visible=True,
                     )
                     chosen_language_drop = gr.Dropdown(
@@ -3789,6 +3841,7 @@ with blocks:
                         choices=LANGUAGE_CHOICES,
                         label="Chosen language short code",
                         multiselect=False,
+                        allow_custom_value=True,
                         visible=True,
                         interactive=False,
                     )
@@ -4640,7 +4693,6 @@ with blocks:
             redaction_output_summary_textbox,
             output_file_list_state,
             log_files_output_list_state,
-            first_loop_state,
             page_min,
             page_max,
             actual_time_taken_number,
@@ -4650,10 +4702,7 @@ with blocks:
             all_page_line_level_ocr_results_df_base,
             all_decision_process_table_state,
             pdf_doc_state,
-            current_loop_page_number,
-            page_break_return,
             pii_identification_method_drop,
-            comprehend_query_number,
             max_fuzzy_spelling_mistakes_num,
             match_fuzzy_whole_phrase_bool,
             aws_access_key_textbox,
@@ -4668,7 +4717,6 @@ with blocks:
             duplication_file_path_outputs_list_state,
             latest_review_file_path,
             input_folder_textbox,
-            textract_query_number,
             latest_ocr_file_path,
             all_page_line_level_ocr_results,
             all_page_line_level_ocr_results_with_words,
@@ -4684,12 +4732,6 @@ with blocks:
             efficient_ocr_min_embedded_image_px_number,
             high_quality_textract_ocr_checkbox,
             overwrite_existing_ocr_checkbox,
-            llm_model_name_textbox,
-            llm_total_input_tokens_number,
-            llm_total_output_tokens_number,
-            vlm_model_name_textbox,
-            vlm_total_input_tokens_number,
-            vlm_total_output_tokens_number,
             save_page_ocr_visualisations_checkbox,
         ],
         outputs=[
@@ -4735,7 +4777,7 @@ with blocks:
             llm_total_output_tokens_number,
             total_pdf_page_count,
         ],
-        api_name="redact_doc",
+        api_name="redact_document",
         show_progress_on=[redaction_output_summary_textbox],
     ).success(
         fn=lambda *args: usage_callback.flag(
@@ -4795,7 +4837,7 @@ with blocks:
         ),
         outputs=[flag_value_placeholder],
         preprocess=False,
-        api_name="usage_logs",
+        api_visibility="undocumented",
     ).success(
         fn=upload_log_file_to_s3,
         inputs=[usage_logs_state, usage_s3_logs_loc_state],
@@ -5132,7 +5174,6 @@ with blocks:
             redaction_output_summary_textbox,
             output_file_list_state,
             log_files_output_list_state,
-            first_loop_state,
             page_min,
             page_max,
             actual_time_taken_number,
@@ -5142,10 +5183,7 @@ with blocks:
             all_page_line_level_ocr_results_df_base,
             all_decision_process_table_state,
             pdf_doc_state,
-            current_loop_page_number,
-            page_break_return,
             pii_identification_method_drop,
-            comprehend_query_number,
             max_fuzzy_spelling_mistakes_num,
             match_fuzzy_whole_phrase_bool,
             aws_access_key_textbox,
@@ -5160,7 +5198,6 @@ with blocks:
             duplication_file_path_outputs_list_state,
             latest_review_file_path,
             input_folder_textbox,
-            textract_query_number,
             latest_ocr_file_path,
             all_page_line_level_ocr_results,
             all_page_line_level_ocr_results_with_words,
@@ -5176,12 +5213,6 @@ with blocks:
             efficient_ocr_min_embedded_image_px_number,
             high_quality_textract_ocr_checkbox,
             overwrite_existing_ocr_checkbox,
-            llm_model_name_textbox,
-            llm_total_input_tokens_number,
-            llm_total_output_tokens_number,
-            vlm_model_name_textbox,
-            vlm_total_input_tokens_number,
-            vlm_total_output_tokens_number,
             save_page_ocr_visualisations_checkbox,
         ],
         outputs=[
@@ -5227,7 +5258,6 @@ with blocks:
             llm_total_output_tokens_number,
             total_pdf_page_count,
         ],
-        api_name="redact_doc",
         show_progress_on=[redaction_output_summary_textbox],
     ).success(
         fn=lambda *args: usage_callback.flag(
@@ -5287,7 +5317,6 @@ with blocks:
         ),
         outputs=[flag_value_placeholder],
         preprocess=False,
-        api_name="usage_logs",
     ).success(
         fn=upload_log_file_to_s3,
         inputs=[usage_logs_state, usage_s3_logs_loc_state],
@@ -5615,7 +5644,7 @@ with blocks:
             task_textbox,
         ],
         show_progress_on=[job_current_status],
-        api_visibility="undocumented",
+        api_visibility="send_document_to_textract_api",
     ).success(
         check_for_provided_job_id,
         inputs=[job_id_textbox],
@@ -5674,7 +5703,7 @@ with blocks:
             doc_file_name_no_extension_textbox,
         ],
         show_progress_on=[job_current_status],
-        api_visibility="undocumented",
+        api_visibility="download_textract_job_output",
     ).success(
         fn=check_for_existing_textract_file,
         inputs=[doc_file_name_no_extension_textbox, output_folder_textbox],
@@ -5751,7 +5780,7 @@ with blocks:
             all_page_line_level_ocr_results_with_words_df_base,
         ],
         show_progress_on=[redaction_output_summary_textbox],
-        api_visibility="undocumented",
+        api_name="load_and_prepare_documents_or_data",
     ).success(
         fn=check_for_existing_textract_file,
         inputs=[
@@ -5817,7 +5846,6 @@ with blocks:
             redaction_output_summary_textbox,
             output_file_list_state,
             log_files_output_list_state,
-            first_loop_state,
             page_min,
             page_max,
             actual_time_taken_number,
@@ -5827,10 +5855,7 @@ with blocks:
             all_page_line_level_ocr_results_df_base,
             all_decision_process_table_state,
             pdf_doc_state,
-            current_loop_page_number,
-            page_break_return,
             no_redaction_method_drop,
-            comprehend_query_number,
             max_fuzzy_spelling_mistakes_num,
             match_fuzzy_whole_phrase_bool,
             aws_access_key_textbox,
@@ -5846,7 +5871,6 @@ with blocks:
             duplication_file_path_outputs_list_state,
             latest_review_file_path,
             input_folder_textbox,
-            textract_query_number,
             latest_ocr_file_path,
             all_page_line_level_ocr_results,
             all_page_line_level_ocr_results_with_words,
@@ -5862,12 +5886,6 @@ with blocks:
             efficient_ocr_min_embedded_image_px_number,
             high_quality_textract_ocr_checkbox,
             overwrite_existing_ocr_checkbox,
-            llm_model_name_textbox,
-            llm_total_input_tokens_number,
-            llm_total_output_tokens_number,
-            vlm_model_name_textbox,
-            vlm_total_input_tokens_number,
-            vlm_total_output_tokens_number,
             save_page_ocr_visualisations_checkbox,
         ],
         outputs=[
@@ -6027,7 +6045,6 @@ with blocks:
             relevant_ocr_output_with_words_found_checkbox,
             all_page_line_level_ocr_results_with_words_df_base,
         ],
-        api_name="prepare_doc",
         show_progress_on=[redaction_output_summary_textbox, input_pdf_for_review],
     ).success(
         update_annotator_object_and_filter_df,
@@ -6128,7 +6145,6 @@ with blocks:
             all_page_line_level_ocr_results_with_words_df_base,
         ],
         show_progress_on=[redaction_output_summary_textbox],
-        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -6187,7 +6203,19 @@ with blocks:
     )
 
     # Manual updates to review df
-    review_file_df.input(
+    # review_file_df_format_check_btn.click(
+    #     validate_review_file_df,
+    #     inputs=[review_file_df],
+    #     outputs=[],
+    #     api_visibility="undocumented",
+    # )
+
+    review_file_df_update_btn.click(
+        validate_review_file_df,
+        inputs=[review_file_df],
+        outputs=[],
+        api_visibility="undocumented",
+    ).success(
         update_annotator_page_from_review_df,
         inputs=[
             review_file_df,
@@ -6776,7 +6804,7 @@ with blocks:
         ],
         scroll_to_output=True,
         show_progress_on=[input_pdf_for_review],
-        api_visibility="undocumented",
+        api_name="apply_review_redactions",
     )
 
     # Save current page manual redactions
@@ -6850,6 +6878,33 @@ with blocks:
         ],
         show_progress_on=[input_pdf_for_review],
         api_visibility="undocumented",
+    )
+
+    export_review_ocr_visualisation_btn.click(
+        export_review_page_ocr_visualisation_for_gradio,
+        inputs=[
+            annotator,
+            annotate_current_page,
+            all_page_line_level_ocr_results_with_words,
+            all_page_line_level_ocr_results_with_words_df_base,
+            doc_full_file_name_textbox,
+            output_folder_textbox,
+        ],
+        outputs=[redaction_overlay_output_file],
+        api_name="export_review_page_ocr_visualisation",
+    )
+
+    export_redaction_overlay_btn.click(
+        export_review_redaction_overlay_for_gradio,
+        inputs=[
+            annotator,
+            annotate_current_page,
+            review_file_df,
+            doc_full_file_name_textbox,
+            output_folder_textbox,
+        ],
+        outputs=[redaction_overlay_output_file],
+        api_name="export_review_redaction_overlay",
     )
 
     ###
@@ -8215,7 +8270,6 @@ with blocks:
             all_page_line_level_ocr_results_with_words_df_base,
         ],
         show_progress_on=[adobe_review_files_out],
-        api_visibility="undocumented",
     ).success(
         fn=convert_xfdf_to_dataframe,
         inputs=[
@@ -8309,7 +8363,7 @@ with blocks:
             llm_total_output_tokens_number,
             llm_model_name_textbox,
         ],
-        api_name="redact_data",
+        api_visibility="undocumented",
         show_progress_on=[text_output_summary],
     ).success(
         fn=lambda *args: usage_callback.flag(
@@ -8561,7 +8615,7 @@ with blocks:
             duplicate_pages_list_state,
         ],
         show_progress_on=[results_df_preview, redaction_output_summary_textbox],
-        api_visibility="undocumented",
+        api_name="find_duplicate_pages",
     ).success(
         fn=export_outputs_to_s3,
         # duplicate_files_out returns a single file path; export helper will normalise it
@@ -8795,7 +8849,7 @@ with blocks:
             actual_time_taken_number,
             task_textbox,
         ],
-        api_name="tabular_clean_duplicates",
+        api_name="find_duplicate_tabular",
         show_progress_on=[tabular_results_df],
     ).success(
         fn=lambda: "deduplicate", outputs=[task_textbox], api_visibility="undocumented"
@@ -8914,7 +8968,6 @@ with blocks:
         all_page_line_level_ocr_results_with_words_df_base,
         latest_file_completed_num,
         redaction_output_summary_textbox,
-        first_loop_state,
         annotate_max_pages,
         all_image_annotations_state,
         prepare_for_review_bool_false,
@@ -8938,10 +8991,7 @@ with blocks:
         handwrite_signature_checkbox,
         textract_metadata_textbox,
         all_decision_process_table_state,
-        current_loop_page_number,
-        page_break_return,
         pii_identification_method_drop,
-        comprehend_query_number,
         max_fuzzy_spelling_mistakes_num,
         match_fuzzy_whole_phrase_bool,
         review_file_df,
@@ -8950,7 +9000,6 @@ with blocks:
         only_extract_text_radio,
         duplication_file_path_outputs_list_state,
         latest_review_file_path,
-        textract_query_number,
         latest_ocr_file_path,
         all_page_line_level_ocr_results,
         all_page_line_level_ocr_results_with_words,
@@ -8966,12 +9015,6 @@ with blocks:
         high_quality_textract_ocr_checkbox,
         overwrite_existing_ocr_checkbox,
         save_page_ocr_visualisations_checkbox,
-        llm_model_name_textbox,
-        llm_total_input_tokens_number,
-        llm_total_output_tokens_number,
-        vlm_model_name_textbox,
-        vlm_total_input_tokens_number,
-        vlm_total_output_tokens_number,
     ):
         """
         If the summarisation upload contains a PDF, run text extraction (prepare + redactor
@@ -9071,7 +9114,7 @@ with blocks:
             ),
             latest_file_completed_num,
             redaction_output_summary_textbox or [],
-            first_loop_state,
+            True,
             annotate_max_pages or 1,
             all_image_annotations_state or [],
             prepare_for_review_bool_false,
@@ -9104,101 +9147,108 @@ with blocks:
         ocr_with_words_df_from_prepare = prepare_result[14]
         pdf_doc_from_prepare = prepare_result[5]
 
-        redactor_result = choose_and_run_redactor(
+        redactor_result = run_redaction(
             [pdf_path],
-            prepared_pdf_paths,
-            pdf_image_paths,
-            in_redact_entities or [],
-            in_redact_comprehend_entities or [],
-            in_redact_llm_entities or [],
-            text_extract_method_radio,
-            in_allow_list_state or [],
-            in_deny_list_state or [],
-            (
-                in_fully_redacted_list_state
-                if in_fully_redacted_list_state is not None
-                else []
+            RedactionOptions(
+                chosen_redact_entities=in_redact_entities or [],
+                chosen_redact_comprehend_entities=in_redact_comprehend_entities or [],
+                chosen_llm_entities=in_redact_llm_entities or [],
+                text_extraction_method=text_extract_method_radio,
+                in_allow_list=in_allow_list_state or [],
+                in_deny_list=in_deny_list_state or [],
+                redact_whole_page_list=(
+                    in_fully_redacted_list_state
+                    if in_fully_redacted_list_state is not None
+                    else []
+                ),
+                page_min=page_min or 0,
+                page_max=page_max or 0,
+                handwrite_signature_checkbox=handwrite_signature_checkbox or [],
+                pii_identification_method=pii_identification_method_drop or "Local",
+                max_fuzzy_spelling_mistakes_num=(
+                    max_fuzzy_spelling_mistakes_num
+                    if max_fuzzy_spelling_mistakes_num is not None
+                    else 1
+                ),
+                match_fuzzy_whole_phrase_bool=(
+                    match_fuzzy_whole_phrase_bool
+                    if match_fuzzy_whole_phrase_bool is not None
+                    else True
+                ),
+                aws_access_key_textbox=aws_access_key_textbox or "",
+                aws_secret_key_textbox=aws_secret_key_textbox or "",
+                annotate_max_pages=annotate_max_pages or 1,
+                output_folder=output_folder,
+                input_folder=input_folder_textbox or "",
+                textract_output_found=textract_found_after_prepare,
+                text_extraction_only=True,  # summarisation route never runs PII detection
+                chosen_local_ocr_model=local_ocr_method_radio or "",
+                language=chosen_language_drop or "",
+                custom_llm_instructions=custom_llm_instructions_textbox or "",
+                inference_server_vlm_model=inference_server_vlm_model_textbox or "",
+                efficient_ocr=(
+                    efficient_ocr_checkbox
+                    if efficient_ocr_checkbox is not None
+                    else False
+                ),
+                efficient_ocr_min_words=efficient_ocr_min_words_number,
+                efficient_ocr_min_image_coverage_fraction=efficient_ocr_min_image_coverage_number,
+                efficient_ocr_min_embedded_image_px=efficient_ocr_min_embedded_image_px_number,
+                hybrid_textract_bedrock_vlm=(
+                    high_quality_textract_ocr_checkbox
+                    if high_quality_textract_ocr_checkbox is not None
+                    else False
+                ),
+                overwrite_existing_ocr_results=(
+                    overwrite_existing_ocr_checkbox
+                    if overwrite_existing_ocr_checkbox is not None
+                    else False
+                ),
+                save_page_ocr_visualisations=(
+                    save_page_ocr_visualisations_checkbox
+                    if save_page_ocr_visualisations_checkbox is not None
+                    else SAVE_PAGE_OCR_VISUALISATIONS
+                ),
             ),
-            latest_file_completed_num or 0,
-            redaction_output_summary_textbox or [],
-            output_file_list_state or [],
-            log_files_output_list_state or [],
-            first_loop_state,
-            page_min or 0,
-            page_max or 0,
-            actual_time_taken_number or 0.0,
-            handwrite_signature_checkbox or [],
-            textract_metadata_textbox or "",
-            all_image_annotations_state or [],
-            ocr_df_base_from_prepare,
-            (
-                all_decision_process_table_state
-                if all_decision_process_table_state is not None
-                else pd.DataFrame()
-            ),
-            pdf_doc_from_prepare,
-            current_loop_page_number or 0,
-            page_break_return or False,
-            pii_identification_method_drop or "Local",
-            comprehend_query_number or 0,
-            (
-                max_fuzzy_spelling_mistakes_num
-                if max_fuzzy_spelling_mistakes_num is not None
-                else 1
-            ),
-            (
-                match_fuzzy_whole_phrase_bool
-                if match_fuzzy_whole_phrase_bool is not None
-                else True
-            ),
-            aws_access_key_textbox or "",
-            aws_secret_key_textbox or "",
-            annotate_max_pages or 1,
-            review_file_from_prepare,
-            output_folder,
-            document_cropboxes_from_prepare,
-            page_sizes_from_prepare,
-            textract_found_after_prepare,
-            True,  # text_extraction_only: summarisation route never runs PII detection
-            duplication_file_path_outputs_list_state or [],
-            latest_review_file_path or "",
-            input_folder_textbox or "",
-            textract_query_number or 0,
-            latest_ocr_file_path or "",
-            all_page_line_level_ocr_results or [],
-            all_page_line_level_ocr_results_with_words or [],
-            ocr_with_words_df_from_prepare,
-            local_ocr_method_radio or "",
-            chosen_language_drop or "",
-            input_review_files or [],
-            custom_llm_instructions_textbox or "",
-            inference_server_vlm_model_textbox or "",
-            efficient_ocr_checkbox if efficient_ocr_checkbox is not None else False,
-            efficient_ocr_min_words_number,
-            efficient_ocr_min_image_coverage_number,
-            efficient_ocr_min_embedded_image_px_number,
-            (
-                high_quality_textract_ocr_checkbox
-                if high_quality_textract_ocr_checkbox is not None
-                else False
-            ),
-            (
-                overwrite_existing_ocr_checkbox
-                if overwrite_existing_ocr_checkbox is not None
-                else False
-            ),
-            llm_model_name_textbox or "",
-            llm_total_input_tokens_number or 0,
-            llm_total_output_tokens_number or 0,
-            vlm_model_name_textbox or "",
-            vlm_total_input_tokens_number or 0,
-            vlm_total_output_tokens_number or 0,
-            save_page_ocr_visualisations=(
-                save_page_ocr_visualisations_checkbox
-                if save_page_ocr_visualisations_checkbox is not None
-                else SAVE_PAGE_OCR_VISUALISATIONS
+            RedactionContext(
+                prepared_pdf_file_paths=prepared_pdf_paths,
+                pdf_image_file_paths=pdf_image_paths,
+                latest_file_completed=latest_file_completed_num or 0,
+                combined_out_message=redaction_output_summary_textbox or [],
+                out_file_paths=output_file_list_state or [],
+                log_files_output_paths=log_files_output_list_state or [],
+                estimated_time_taken_state=actual_time_taken_number or 0.0,
+                all_request_metadata_str=textract_metadata_textbox or "",
+                annotations_all_pages=all_image_annotations_state or [],
+                all_page_line_level_ocr_results_df=ocr_df_base_from_prepare,
+                all_pages_decision_process_table=(
+                    all_decision_process_table_state
+                    if all_decision_process_table_state is not None
+                    else pd.DataFrame()
+                ),
+                pymupdf_doc=pdf_doc_from_prepare,
+                review_file_state=review_file_from_prepare,
+                document_cropboxes=document_cropboxes_from_prepare,
+                page_sizes=page_sizes_from_prepare,
+                duplication_file_path_outputs=duplication_file_path_outputs_list_state
+                or [],
+                review_file_path=latest_review_file_path or "",
+                ocr_file_path=latest_ocr_file_path or "",
+                all_page_line_level_ocr_results=all_page_line_level_ocr_results or [],
+                all_page_line_level_ocr_results_with_words=all_page_line_level_ocr_results_with_words
+                or [],
+                all_page_line_level_ocr_results_with_words_df=ocr_with_words_df_from_prepare,
+                ocr_review_files=input_review_files or [],
             ),
         )
+
+        # Token/model counters are returned by the redactor (we no longer pass them in)
+        redactor_result[-7]
+        redactor_result[-6]
+        redactor_result[-5]
+        llm_model_name_out = redactor_result[-4]
+        llm_total_input_tokens_out = redactor_result[-3]
+        llm_total_output_tokens_out = redactor_result[-2]
 
         ocr_df_for_summary = redactor_result[12]
         out_file_paths = redactor_result[1]
@@ -9210,9 +9260,9 @@ with blocks:
             return (
                 [],
                 "No OCR text extracted from PDF. Cannot summarise.",
-                llm_model_name_textbox or "",
-                llm_total_input_tokens_number or 0,
-                llm_total_output_tokens_number or 0,
+                llm_model_name_out or "",
+                llm_total_input_tokens_out or 0,
+                llm_total_output_tokens_out or 0,
                 "",
                 0.0,
                 out_file_paths,
@@ -9291,7 +9341,6 @@ with blocks:
             all_page_line_level_ocr_results_with_words_df_base,
             latest_file_completed_num,
             redaction_output_summary_textbox,
-            first_loop_state,
             annotate_max_pages,
             all_image_annotations_state,
             prepare_for_review_bool_false,
@@ -9315,10 +9364,7 @@ with blocks:
             handwrite_signature_checkbox,
             textract_metadata_textbox,
             all_decision_process_table_state,
-            current_loop_page_number,
-            page_break_return,
             pii_identification_method_drop,
-            comprehend_query_number,
             max_fuzzy_spelling_mistakes_num,
             match_fuzzy_whole_phrase_bool,
             review_file_df,
@@ -9327,7 +9373,6 @@ with blocks:
             only_extract_text_radio,
             duplication_file_path_outputs_list_state,
             latest_review_file_path,
-            textract_query_number,
             latest_ocr_file_path,
             all_page_line_level_ocr_results,
             all_page_line_level_ocr_results_with_words,
@@ -9343,12 +9388,6 @@ with blocks:
             high_quality_textract_ocr_checkbox,
             overwrite_existing_ocr_checkbox,
             save_page_ocr_visualisations_checkbox,
-            llm_model_name_textbox,
-            llm_total_input_tokens_number,
-            llm_total_output_tokens_number,
-            vlm_model_name_textbox,
-            vlm_total_input_tokens_number,
-            vlm_total_output_tokens_number,
         ],
         outputs=[
             summarisation_output_files,
@@ -9366,7 +9405,7 @@ with blocks:
         ],
         show_progress=True,
         show_progress_on=[summarisation_status],
-        api_visibility="undocumented",
+        api_name="summarise_document",
     ).success(
         fn=lambda: "summarisation",
         outputs=[task_textbox],
@@ -9429,7 +9468,7 @@ with blocks:
         ),
         outputs=[flag_value_placeholder],
         preprocess=False,
-        api_name="usage_logs_summarisation",
+        api_visibility="undocumented",
     ).success(
         fn=upload_log_file_to_s3,
         inputs=[usage_logs_state, usage_s3_logs_loc_state],
@@ -10062,6 +10101,10 @@ with blocks:
             def health_check():
                 """Simple health check endpoint."""
                 return {"status": "ok"}
+
+            from agent_routes import router as agent_router
+
+            app.include_router(agent_router, prefix="/agent")
 
             app = gr.mount_gradio_app(
                 app,

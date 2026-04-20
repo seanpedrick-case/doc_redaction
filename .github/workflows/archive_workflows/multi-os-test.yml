@@ -13,6 +13,8 @@ permissions:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    env:
+      SHOW_VLM_MODEL_OPTIONS: "False"
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest] # windows-latest, not included as tesseract cannot be installed silently
@@ -41,7 +43,11 @@ jobs:
           tesseract-ocr-eng \
           poppler-utils \
           libgl1-mesa-dri \
-          libglib2.0-0
+          libglib2.0-0 \
+          libsm6 \
+          libxext6 \
+          libxrender-dev \
+          libgomp1
     
     - name: Install system dependencies (macOS)
       if: matrix.os == 'macos-latest'
@@ -102,8 +108,8 @@ jobs:
     - name: Run CLI tests
       run: |
         cd test
-        python test.py
+        python cli_epilog_suite.py
     
     - name: Run tests with pytest
       run: |
-        pytest test/test.py -v --tb=short
+        pytest test/ -v --tb=short

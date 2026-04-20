@@ -163,7 +163,7 @@ pip install pytest pytest-cov reportlab pillow
 ## 🛠️ Customization
 
 ### **Adding New Tests:**
-1. Add test methods to `test/test.py`
+1. Add test methods to `test/cli_epilog_suite.py` (CLI epilog unittest suite) or add pytest tests in `test/test_*.py`
 2. Update `setup_test_data.py` if needed
 3. Tests run automatically in all workflows
 
@@ -178,6 +178,11 @@ env:
   PYTHON_VERSION: "3.11"
   # Add your custom variables here
 ```
+
+CI jobs set `SHOW_VLM_MODEL_OPTIONS: "False"` so optional PyTorch/transformers VLM imports are not required (`requirements_lightweight.txt` does not install `torch`).
+
+### **Pip cache key**
+The `test-unit` job caches pip using `hashFiles('requirements_lightweight.txt')` so dependency changes invalidate the cache correctly.
 
 ## 🚨 Troubleshooting
 
@@ -199,10 +204,14 @@ env:
    - ✅ **Default**: 10-minute timeout per test
    - ✅ **Solution**: Tests are designed to be fast
 
+5. **`ModuleNotFoundError: No module named 'torch'`** (or transformers)
+   - ✅ **Cause**: `SHOW_VLM_MODEL_OPTIONS` was enabled without installing VLM extras
+   - ✅ **CI**: Workflows set `SHOW_VLM_MODEL_OPTIONS: "False"`; keep this for lightweight installs
+
 ### **Debug Mode:**
 Add `--verbose` to pytest commands for detailed output:
 ```yaml
-pytest test/test.py -v --tb=short
+pytest test/ -v --tb=short
 ```
 
 ## 📈 Performance

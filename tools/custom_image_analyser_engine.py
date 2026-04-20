@@ -12536,7 +12536,10 @@ def merge_text_bounding_boxes(
                 original_bounding_boxes.append(
                     {
                         "text": "".join(char_text),
+                        # Keep both keys for compatibility across UI/table/render paths.
+                        # OCR word/line results use "bounding_box"; decision/review tables often use "boundingBox".
                         "boundingBox": bbox,
+                        "bounding_box": bbox,
                         "result": copy.deepcopy(result),
                     }
                 )
@@ -12598,6 +12601,7 @@ def merge_text_bounding_boxes(
                             {
                                 "text": "".join(merged_text),
                                 "boundingBox": merged_box,
+                                "bounding_box": merged_box,
                                 "result": merged_result,
                             }
                         )
@@ -12632,7 +12636,9 @@ def recreate_page_line_level_ocr_results_with_page(
     page = page_line_level_ocr_results_with_words["page"]
 
     for line_data in page_line_level_ocr_results_with_words["results"].values():
-        bbox = line_data["bounding_box"]
+        bbox = line_data.get("bounding_box") or line_data.get("boundingBox")
+        if not bbox:
+            continue
         text = line_data["text"]
         if line_data["line"]:
             line_number = line_data["line"]

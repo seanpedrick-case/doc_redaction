@@ -64,7 +64,7 @@ python .github/scripts/setup_test_data.py
 
 # Run tests
 cd test
-python test.py
+python cli_epilog_suite.py
 ```
 
 ### GitHub Actions Triggers
@@ -123,7 +123,7 @@ The workflows automatically create test data when example files are missing:
 ## Customization
 
 ### Adding New Tests:
-1. Add test methods to `test/test.py`
+1. Add test methods to `test/cli_epilog_suite.py` or pytest files under `test/test_*.py`
 2. Update test data in `setup_test_data.py` if needed
 3. Tests will automatically run in all workflows
 
