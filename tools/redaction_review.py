@@ -1,3 +1,4 @@
+import ast
 import gc
 import math
 import os
@@ -63,6 +64,7 @@ from tools.file_redaction import (
     draw_rectangle_outline_pattern,
     redact_page_with_pymupdf,
     set_cropbox_safely,
+    visualise_ocr_words_bounding_boxes,
 )
 from tools.helper_functions import (
     _generate_unique_ids,
@@ -413,15 +415,6 @@ def update_recogniser_dataframes(
             )
         )
 
-        # recogniser_dataframe_out_gr = gr.Dataframe(
-        #     review_dataframe[["page", "label", "text", "id"]],
-        #     show_search="filter",
-        #     type="pandas",
-        #     headers=["page", "label", "text", "id"],
-        #     wrap=True,
-        #     max_height=400,
-        # )
-
         recogniser_dataframe_out_gr = review_dataframe[["page", "label", "text", "id"]]
 
         recogniser_entities_for_drop = update_dropdown_list_based_on_dataframe(
@@ -557,7 +550,6 @@ def update_annotator_page_from_review_df(
             print("Warning: Page sizes DataFrame became empty after processing.")
 
     if not review_df.empty:
-        # Filter review_df for the current page
         # Ensure 'page' column in review_df is comparable to page_num_reported
         if "page" in review_df.columns:
             review_df["page"] = (
@@ -589,12 +581,79 @@ def update_annotator_page_from_review_df(
                 "image"
             ] = replaced_image_path
 
+            # ------------------------------------------------------------------
+            # Update annotation boxes for ALL pages from review_df (cheap),
+            # while only doing image placeholder replacement for the current page.
+            # ------------------------------------------------------------------
+            expected_annotation_keys = [
+                "label",
+                "color",
+                "xmin",
+                "ymin",
+                "xmax",
+                "ymax",
+                "text",
+                "id",
+            ]
+
+            # Ensure missing columns exist in review_df so downstream conversions are stable.
+            for key in expected_annotation_keys:
+                if key not in review_df.columns:
+                    default_value = (
+                        0.0 if key in ["xmin", "ymin", "xmax", "ymax"] else ""
+                    )
+                    review_df[key] = default_value
+
+            # Ensure coord columns are numeric for ALL pages (prevents TypeError later).
+            for coord in ["xmin", "ymin", "xmax", "ymax"]:
+                review_df[coord] = (
+                    pd.to_numeric(review_df[coord], errors="coerce")
+                    .fillna(0.0)
+                    .clip(lower=0.0, upper=1.0)
+                )
+
+            # Rebuild boxes per page from review_df and page_sizes_df.
+            # We assume `out_image_annotations_state` is page-ordered (index i => page i+1).
+            if not page_sizes_df.empty and "page" in page_sizes_df.columns:
+                max_pages = min(
+                    len(out_image_annotations_state), int(page_sizes_df["page"].max())
+                )
+            else:
+                max_pages = len(out_image_annotations_state)
+
+            for page_number in range(1, max_pages + 1):
+                page_idx = page_number - 1
+                page_review = review_df[review_df["page"] == page_number].copy()
+                if page_review.empty:
+                    # If a page has no rows in review_df, keep existing boxes as-is.
+                    continue
+
+                # Convert to annotator coordinate space for this page.
+                try:
+                    page_review = multiply_coordinates_by_page_sizes(
+                        page_review, page_sizes_df
+                    )
+                except Exception as e:
+                    print(
+                        f"Warning: Could not multiply coordinates for page {page_number}: {e}. "
+                        "Using unscaled coordinates for this page."
+                    )
+
+                page_boxes = page_review[expected_annotation_keys].to_dict(
+                    orient="records"
+                )
+                out_image_annotations_state[page_idx]["boxes"] = page_boxes
+
+            # Keep the current page df for downstream logic (if used below).
             current_page_review_df = review_df[
                 review_df["page"] == gradio_annotator_current_page_number
             ].copy()
-            current_page_review_df = multiply_coordinates_by_page_sizes(
-                current_page_review_df, page_sizes_df
-            )
+            try:
+                current_page_review_df = multiply_coordinates_by_page_sizes(
+                    current_page_review_df, page_sizes_df
+                )
+            except Exception:
+                pass
 
         else:
             print(
@@ -4716,3 +4775,377 @@ def export_review_redaction_overlay_for_gradio(
     else:
         gr.Info("Could not save the redaction overlay image.", duration=6)
     return None
+
+
+def export_review_page_ocr_visualisation_for_gradio(
+    page_annotator: Optional[AnnotatedImageData],
+    annotate_current_page: float,
+    all_page_line_level_ocr_results_with_words: list,
+    all_page_line_level_ocr_results_with_words_df_base: Optional[pd.DataFrame],
+    doc_full_file_name_textbox: str,
+    output_folder_textbox: str,
+) -> Optional[str]:
+    """
+    Gradio handler: write an OCR visualisation image for the **current page** and return
+    the file path for download.
+
+    Uses ``visualise_ocr_words_bounding_boxes`` with a fixed subfolder
+    ``review_ocr_visualisations`` under the chosen output folder.
+    """
+    if page_annotator is None or not isinstance(page_annotator, dict):
+        gr.Info("No annotator data loaded.", duration=5)
+        return None
+    try:
+        page_num = max(1, int(annotate_current_page or 1))
+    except (TypeError, ValueError):
+        page_num = 1
+
+    out_dir = (
+        output_folder_textbox.strip()
+        if isinstance(output_folder_textbox, str) and output_folder_textbox.strip()
+        else OUTPUT_FOLDER
+    )
+
+    def _results_from_df(df: pd.DataFrame, page_num_1based: int) -> Optional[dict]:
+        if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+            return None
+        if "page" not in df.columns:
+            return None
+        # page column can be str or int
+        try:
+            page_mask = df["page"].astype(str) == str(int(page_num_1based))
+        except Exception:
+            page_mask = df["page"] == page_num_1based
+        page_df = df.loc[page_mask].copy()
+        if page_df.empty:
+            return None
+
+        # Expected word-level columns produced by `word_level_ocr_output_to_dataframe`
+        # (tools/file_conversion.py): word_x0/y0/x1/y1, word_text, word_conf, line.
+        required_any = {"word_x0", "word_y0", "word_x1", "word_y1", "word_text", "line"}
+        if not required_any.issubset(set(page_df.columns)):
+            return None
+
+        # Sort for stable output
+        sort_cols = [
+            c for c in ["line", "word_y0", "word_x0", "index"] if c in page_df.columns
+        ]
+        if sort_cols:
+            page_df = page_df.sort_values(sort_cols, kind="mergesort")
+
+        results: dict = {}
+        for line_no, g in page_df.groupby("line", sort=True):
+            try:
+                line_int = int(line_no)
+            except Exception:
+                continue
+            words = []
+            for _, row in g.iterrows():
+                try:
+                    bb = [
+                        float(row["word_x0"]),
+                        float(row["word_y0"]),
+                        float(row["word_x1"]),
+                        float(row["word_y1"]),
+                    ]
+                except Exception:
+                    continue
+                txt = str(row.get("word_text", "") or "")
+                if not txt.strip():
+                    continue
+                try:
+                    conf = float(row.get("word_conf", row.get("conf", 100.0)))
+                except Exception:
+                    conf = 100.0
+                words.append({"text": txt, "bounding_box": bb, "conf": conf})
+            if not words:
+                continue
+            # line bbox from word bboxes
+            x0 = min(w["bounding_box"][0] for w in words)
+            y0 = min(w["bounding_box"][1] for w in words)
+            x1 = max(w["bounding_box"][2] for w in words)
+            y1 = max(w["bounding_box"][3] for w in words)
+            line_text = " ".join(w["text"] for w in words)
+            results[f"text_line_{line_int}"] = {
+                "line": line_int,
+                "text": line_text,
+                "bounding_box": [x0, y0, x1, y1],
+                "words": words,
+                "conf": sum(w.get("conf", 100.0) for w in words) / max(1, len(words)),
+            }
+        return results or None
+
+    # Prefer the dataframe-derived coordinates when available (these are already normalised
+    # to the coordinate space used by the app for review/annotation).
+    results: Optional[dict] = None
+    if isinstance(all_page_line_level_ocr_results_with_words_df_base, pd.DataFrame):
+        results = _results_from_df(
+            all_page_line_level_ocr_results_with_words_df_base, page_num
+        )
+
+    # Fall back to legacy list-of-dicts structure.
+    if results is None:
+        ocr_for_page: Optional[dict] = None
+        if isinstance(all_page_line_level_ocr_results_with_words, list):
+            for entry in all_page_line_level_ocr_results_with_words:
+                if not isinstance(entry, dict):
+                    continue
+                try:
+                    if int(entry.get("page") or 0) == int(page_num):
+                        ocr_for_page = entry
+                        break
+                except Exception:
+                    continue
+        if not ocr_for_page or not isinstance(ocr_for_page, dict):
+            gr.Info("No OCR-with-words data available for this page.", duration=6)
+            return None
+        results = ocr_for_page.get("results")
+        if not isinstance(results, dict) or not results:
+            gr.Info("No OCR-with-words results found for this page.", duration=6)
+            return None
+
+    underlay_rgb = _load_underlay_rgb_from_annotator(page_annotator)
+    if underlay_rgb is None:
+        gr.Info("Could not load the page image (path missing or invalid).", duration=6)
+        return None
+
+    base = get_file_name_without_type(os.path.basename(str(doc_full_file_name_textbox)))
+    if not base or not str(base).strip():
+        base = "review"
+    safe_base = sanitize_filename(str(base))
+    image_name = f"{safe_base}_{int(page_num)}.png"
+
+    try:
+        log_paths: List[str] = []
+        log_paths = visualise_ocr_words_bounding_boxes(
+            Image.fromarray(underlay_rgb),
+            results,
+            image_name=image_name,
+            page_number=int(page_num),
+            output_folder=out_dir,
+            visualisation_folder="review_ocr_visualisations",
+            add_legend=True,
+            log_files_output_paths=log_paths,
+        )
+        if log_paths:
+            return str(log_paths[-1])
+    except Exception:
+        gr.Info("Could not save the OCR visualisation image.", duration=6)
+        return None
+
+    gr.Info("Could not save the OCR visualisation image.", duration=6)
+    return None
+
+
+def _warn_and_halt_review_df_validation(msg: str) -> None:
+    """
+    Show a GUI warning and halt chained Gradio events.
+
+    We display`gr.Error` to stop the event chain.
+    """
+
+    print(f"[review_file_df validation] {msg}")
+    raise gr.Error(msg)
+
+
+def validate_review_file_df(review_file_df: pd.DataFrame) -> None:
+    """
+    Validate `review_file_df` shape/values before applying manual updates.
+
+    If invalid, shows a GUI warning and halts chained Gradio events.
+    """
+
+    if review_file_df is None or not isinstance(review_file_df, pd.DataFrame):
+        _warn_and_halt_review_df_validation(
+            "Review file table is missing or not a DataFrame."
+        )
+
+    required_cols = ["label", "text", "color", "xmin", "ymin", "xmax", "ymax"]
+    missing = [c for c in required_cols if c not in review_file_df.columns]
+    if missing:
+        _warn_and_halt_review_df_validation(
+            f"Review file table is missing required columns: {missing}"
+        )
+
+    # ---- label checks ----
+    label_series = review_file_df["label"]
+    bad_label_rows: list[int] = []
+    bad_label_reasons: dict[int, str] = {}
+
+    # Conservative blacklist for potentially dangerous injection-like content.
+    forbidden_substrings = [
+        "<",
+        ">",
+        "script",
+        "javascript:",
+        "onerror=",
+        "onload=",
+        "</",
+    ]
+
+    for i, v in label_series.items():
+        if pd.isna(v):
+            bad_label_rows.append(i)
+            bad_label_reasons[i] = "label is null"
+            continue
+        s = str(v)
+        if len(s) >= 50:
+            bad_label_rows.append(i)
+            bad_label_reasons[i] = f"label length {len(s)} >= 50"
+            continue
+        s_lower = s.lower()
+        if any(sub in s_lower for sub in forbidden_substrings):
+            bad_label_rows.append(i)
+            bad_label_reasons[i] = "label contains potentially dangerous text"
+            continue
+        # Block obvious control characters (newlines/tabs are usually accidental in table edits).
+        if re.search(r"[\r\n\t]", s):
+            bad_label_rows.append(i)
+            bad_label_reasons[i] = "label contains control characters"
+
+    if bad_label_rows:
+        sample = ", ".join(
+            [
+                f"row {r}: {bad_label_reasons.get(r, 'invalid')}"
+                for r in bad_label_rows[:8]
+            ]
+        )
+        msg = (
+            "Invalid values found in column 'label'. "
+            "Labels must be < 50 chars and must not contain script-like content. "
+            f"Examples: {sample}"
+        )
+        _warn_and_halt_review_df_validation(msg)
+
+    # ---- text checks ----
+    text_series = review_file_df["text"]
+    bad_text_rows: list[int] = []
+    bad_text_reasons: dict[int, str] = {}
+
+    for i, v in text_series.items():
+        if pd.isna(v):
+            # Treat null text as valid (some redaction boxes might not have text).
+            continue
+        s = str(v)
+        if len(s) > 1000:
+            bad_text_rows.append(i)
+            bad_text_reasons[i] = f"text length {len(s)} > 1000"
+            continue
+        s_lower = s.lower()
+        if any(sub in s_lower for sub in forbidden_substrings):
+            bad_text_rows.append(i)
+            bad_text_reasons[i] = "text contains potentially dangerous text"
+
+    if bad_text_rows:
+        sample = ", ".join(
+            [
+                f"row {r}: {bad_text_reasons.get(r, 'invalid')}"
+                for r in bad_text_rows[:8]
+            ]
+        )
+        msg = (
+            "Invalid values found in column 'text'. "
+            "Text must be <= 1000 chars and must not contain script-like content. "
+            f"Examples: {sample}"
+        )
+        _warn_and_halt_review_df_validation(msg)
+
+    # ---- color checks ----
+    color_series = review_file_df["color"]
+    bad_color_rows: list[int] = []
+    bad_color_reasons: dict[int, str] = {}
+
+    for i, v in color_series.items():
+        if pd.isna(v):
+            bad_color_rows.append(i)
+            bad_color_reasons[i] = "color is null"
+            continue
+        parsed = None
+        if isinstance(v, (tuple, list, np.ndarray)):
+            parsed = tuple(v) if not isinstance(v, tuple) else v
+        else:
+            s = str(v).strip()
+            try:
+                parsed = ast.literal_eval(s)
+            except Exception:
+                bad_color_rows.append(i)
+                bad_color_reasons[i] = (
+                    "color is not a valid tuple/list (or tuple string)"
+                )
+                continue
+
+        if not isinstance(parsed, (tuple, list)) or len(parsed) != 3:
+            bad_color_rows.append(i)
+            bad_color_reasons[i] = "color must be a 3-number tuple"
+            continue
+
+        ok = True
+        for part in parsed:
+            try:
+                n = int(part)
+            except Exception:
+                ok = False
+                break
+            if n < 0 or n > 255:
+                ok = False
+                break
+
+        if not ok:
+            bad_color_rows.append(i)
+            bad_color_reasons[i] = "color values must be integers between 0 and 255"
+
+    if bad_color_rows:
+        sample = ", ".join(
+            [
+                f"row {r}: {bad_color_reasons.get(r, 'invalid')}"
+                for r in bad_color_rows[:8]
+            ]
+        )
+        msg = (
+            "Invalid values found in column 'color'. "
+            "Expected a tuple/list like (12, 34, 56) (or the string '(12, 34, 56)') with each value 0–255. "
+            f"Examples: {sample}"
+        )
+        _warn_and_halt_review_df_validation(msg)
+
+    # ---- bounding box checks ----
+    bbox_cols = ["xmin", "ymin", "xmax", "ymax"]
+    bbox_numeric = review_file_df[bbox_cols].apply(pd.to_numeric, errors="coerce")
+
+    bad_bbox_rows: list[int] = []
+    bad_bbox_reasons: dict[int, str] = {}
+
+    for i, row in bbox_numeric.iterrows():
+        if row.isna().any():
+            bad_bbox_rows.append(i)
+            bad_bbox_reasons[i] = "bbox values must all be numeric"
+            continue
+        xmin, ymin, xmax, ymax = row["xmin"], row["ymin"], row["xmax"], row["ymax"]
+        if not (
+            0 <= xmin <= 1 and 0 <= xmax <= 1 and 0 <= ymin <= 1 and 0 <= ymax <= 1
+        ):
+            bad_bbox_rows.append(i)
+            bad_bbox_reasons[i] = "bbox values must be between 0 and 1"
+            continue
+        if xmin > xmax:
+            bad_bbox_rows.append(i)
+            bad_bbox_reasons[i] = "xmin cannot be greater than xmax"
+            continue
+        if ymin > ymax:
+            bad_bbox_rows.append(i)
+            bad_bbox_reasons[i] = "ymin cannot be greater than ymax"
+            continue
+
+    if bad_bbox_rows:
+        sample = ", ".join(
+            [
+                f"row {r}: {bad_bbox_reasons.get(r, 'invalid')}"
+                for r in bad_bbox_rows[:8]
+            ]
+        )
+        msg = (
+            "Invalid bounding box values found in columns xmin/ymin/xmax/ymax. "
+            "Values must be numeric, within 0–1, and satisfy xmin<=xmax and ymin<=ymax. "
+            f"Examples: {sample}"
+        )
+        _warn_and_halt_review_df_validation(msg)

@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import re
 import time
@@ -445,9 +446,11 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
             "textract",
             "summarise",
             "combine_review_pdfs",
+            "export_review_redaction_overlay",
+            "export_review_page_ocr_visualisation",
         ],
         default="redact",
-        help="Task to perform: redact (PII redaction/anonymisation), deduplicate (find duplicate content), textract (AWS Textract batch operations), summarise (LLM-based document summarisation from OCR CSV files), or combine_review_pdfs (merge redaction comments from multiple '_redactions_for_review' PDFs into one file).",
+        help="Task to perform: redact (PII redaction/anonymisation), deduplicate (find duplicate content), textract (AWS Textract batch operations), summarise (LLM-based document summarisation from OCR CSV files), combine_review_pdfs (merge redaction comments from multiple '_redactions_for_review' PDFs into one file), export_review_redaction_overlay (write a redaction overlay JPEG for a page image + boxes JSON), or export_review_page_ocr_visualisation (write an OCR visualisation PNG for a page image + OCR JSON).",
     )
 
     # --- General Arguments (apply to all file types) ---
@@ -462,6 +465,47 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
     )
     general_group.add_argument(
         "--input_dir", default=INPUT_FOLDER, help="Directory for all input files."
+    )
+
+    export_group = parser.add_argument_group(
+        "Review export (page image visualisations)"
+    )
+    export_group.add_argument(
+        "--page_image_path",
+        default="",
+        help="Path to a single page raster image (PNG/JPG) used as underlay for export tasks.",
+    )
+    export_group.add_argument(
+        "--page_number",
+        type=int,
+        default=1,
+        help="1-based page number (used for naming).",
+    )
+    export_group.add_argument(
+        "--doc_base_name",
+        default="review",
+        help="Basename for output file naming (e.g. document name without extension).",
+    )
+    export_group.add_argument(
+        "--boxes_json_path",
+        default="",
+        help="Path to JSON file containing a list of annotator-style boxes for overlay export.",
+    )
+    export_group.add_argument(
+        "--review_df_json_path",
+        default="",
+        help="Optional path to JSON file containing review dataframe records (list[dict]) for stable label ordering/pattern mapping.",
+    )
+    export_group.add_argument(
+        "--label_abbrev_chars",
+        type=int,
+        default=-1,
+        help="Optional override: draw N leading label characters on overlay image (use -1 to use config default).",
+    )
+    export_group.add_argument(
+        "--ocr_results_json_path",
+        default="",
+        help="Path to JSON file containing OCR-with-words results dict for OCR visualisation export.",
     )
     general_group.add_argument(
         "--language", default=DEFAULT_LANGUAGE, help="Language of the document content."
@@ -1141,7 +1185,12 @@ def main(direct_mode_args={}):
         extraction_options.append("Extract layout")
     args.handwrite_signature_extraction = extraction_options
 
-    if args.task in ["redact", "deduplicate", "summarise", "combine_review_pdfs"]:
+    if args.task in [
+        "redact",
+        "deduplicate",
+        "summarise",
+        "combine_review_pdfs",
+    ]:
         if args.input_file:
             if isinstance(args.input_file, str):
                 args.input_file = [args.input_file]
@@ -1150,6 +1199,8 @@ def main(direct_mode_args={}):
             file_extension = file_extension.lower()
         else:
             raise ValueError(f"Error: --input_file is required for '{args.task}' task.")
+    else:
+        file_extension = ""
 
     # Initialise usage logger if logging is enabled
     usage_logger = None
@@ -2492,10 +2543,114 @@ def main(direct_mode_args={}):
 
             traceback.print_exc()
 
+    elif args.task == "export_review_redaction_overlay":
+        print("--- Export review redaction overlay image ---")
+        try:
+            from tools.redaction_review import visualise_review_redaction_boxes
+
+            if not args.page_image_path:
+                print(
+                    "Error: --page_image_path is required for export_review_redaction_overlay."
+                )
+                return
+            if not args.boxes_json_path:
+                print(
+                    "Error: --boxes_json_path is required for export_review_redaction_overlay."
+                )
+                return
+
+            with open(args.boxes_json_path, "r", encoding="utf-8") as f:
+                boxes = json.load(f)
+            if not isinstance(boxes, list) or not boxes:
+                print("Error: boxes JSON must be a non-empty list of box dicts.")
+                return
+
+            review_df = pd.DataFrame()
+            if args.review_df_json_path:
+                with open(args.review_df_json_path, "r", encoding="utf-8") as f:
+                    recs = json.load(f)
+                if isinstance(recs, list) and recs:
+                    review_df = pd.DataFrame(recs)
+
+            annotator = {"image": args.page_image_path, "boxes": boxes}
+            out = visualise_review_redaction_boxes(
+                annotator,
+                review_df=review_df,
+                output_folder=args.output_dir,
+                page_number=int(args.page_number or 1),
+                doc_base_name=str(args.doc_base_name or "review"),
+                label_abbrev_chars=(
+                    None
+                    if int(args.label_abbrev_chars) < 0
+                    else int(args.label_abbrev_chars)
+                ),
+            )
+            if out:
+                print(f"Overlay image written to: {out}")
+            else:
+                print("No output produced (invalid image/boxes or write failed).")
+        except Exception as e:
+            print(f"\nAn error occurred while exporting overlay image: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+    elif args.task == "export_review_page_ocr_visualisation":
+        print("--- Export review page OCR visualisation image ---")
+        try:
+            from PIL import Image
+
+            from tools.file_redaction import visualise_ocr_words_bounding_boxes
+            from tools.helper_functions import get_file_name_without_type
+            from tools.secure_path_utils import sanitize_filename
+
+            if not args.page_image_path:
+                print(
+                    "Error: --page_image_path is required for export_review_page_ocr_visualisation."
+                )
+                return
+            if not args.ocr_results_json_path:
+                print(
+                    "Error: --ocr_results_json_path is required for export_review_page_ocr_visualisation."
+                )
+                return
+
+            with open(args.ocr_results_json_path, "r", encoding="utf-8") as f:
+                ocr_results = json.load(f)
+            if not isinstance(ocr_results, dict) or not ocr_results:
+                print("Error: ocr_results JSON must be a non-empty dict.")
+                return
+
+            base = get_file_name_without_type(os.path.basename(str(args.doc_base_name)))
+            if not base or not str(base).strip():
+                base = "review"
+            safe_base = sanitize_filename(str(base))
+            image_name = f"{safe_base}_page{int(args.page_number or 1)}.png"
+
+            log_paths: list[str] = []
+            log_paths = visualise_ocr_words_bounding_boxes(
+                Image.open(args.page_image_path).convert("RGB"),
+                ocr_results,
+                image_name=image_name,
+                output_folder=args.output_dir,
+                visualisation_folder="review_ocr_visualisations",
+                add_legend=True,
+                log_files_output_paths=log_paths,
+            )
+            if log_paths:
+                print(f"OCR visualisation written to: {log_paths[-1]}")
+            else:
+                print("No output produced (invalid image/ocr_results or write failed).")
+        except Exception as e:
+            print(f"\nAn error occurred while exporting OCR visualisation image: {e}")
+            import traceback
+
+            traceback.print_exc()
+
     else:
         print(f"Error: Invalid task '{args.task}'.")
         print(
-            "Valid options: 'redact', 'deduplicate', 'textract', 'summarise', or 'combine_review_pdfs'"
+            "Valid options: 'redact', 'deduplicate', 'textract', 'summarise', 'combine_review_pdfs', 'export_review_redaction_overlay', or 'export_review_page_ocr_visualisation'"
         )
 
 

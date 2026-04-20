@@ -2283,6 +2283,11 @@ if not INTRO_TEXT or not INTRO_TEXT.strip():
     print("Warning: Intro text is empty after sanitization, using default intro text")
     INTRO_TEXT = sanitize_markdown_text(DEFAULT_INTRO_TEXT)
 
+# App fills screen width or not
+FILL_SCREEN_WIDTH = convert_string_to_boolean(
+    get_or_create_env_var("FILL_SCREEN_WIDTH", "False")
+)
+
 # Get some environment variables and Launch the Gradio app
 COGNITO_AUTH = convert_string_to_boolean(get_or_create_env_var("COGNITO_AUTH", "False"))
 

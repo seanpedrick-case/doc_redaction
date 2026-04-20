@@ -38,6 +38,7 @@ GRADIO_API_NAMES: tuple[str, ...] = (
     "combine_review_csvs",
     "combine_review_pdfs",
     "export_review_redaction_overlay",
+    "export_review_page_ocr_visualisation",
 )
 
 
@@ -506,6 +507,26 @@ class AgentExportReviewRedactionOverlayRequest(BaseModel):
     )
 
 
+class AgentExportReviewPageOcrVisualisationRequest(BaseModel):
+    """Parity with Gradio ``api_name='export_review_page_ocr_visualisation'``."""
+
+    page_image_path: str = Field(
+        ...,
+        description="Path to page raster (PNG/JPEG) used as underlay; must be under allowed roots.",
+    )
+    ocr_results: Dict[str, Any] = Field(
+        ...,
+        description="Word-level OCR results dict (line_key -> {words:[{text, bounding_box, conf, ...}]}).",
+    )
+    page_number: int = Field(
+        1, ge=1, description="1-based page index (used for naming)."
+    )
+    doc_base_name: str = Field(
+        "review",
+        description="Basename for output file (e.g. document name without extension).",
+    )
+
+
 @router.post(
     "/export_review_redaction_overlay",
     response_model=AgentTaskResponse,
@@ -576,6 +597,78 @@ def post_export_review_redaction_overlay(
         input_dir="",
         message="Redaction overlay PNG written",
         output_paths=[path],
+    )
+
+
+@router.post(
+    "/export_review_page_ocr_visualisation",
+    response_model=AgentTaskResponse,
+    summary="export_review_page_ocr_visualisation (Gradio api_name)",
+    description=(
+        "Renders a per-page OCR visualisation using tools.file_redaction.visualise_ocr_words_bounding_boxes; "
+        "writes under OUTPUT_FOLDER/review_ocr_visualisations/."
+    ),
+)
+def post_export_review_page_ocr_visualisation(
+    body: AgentExportReviewPageOcrVisualisationRequest,
+    _: None = Depends(_optional_agent_api_key),
+) -> AgentTaskResponse:
+    from PIL import Image
+
+    from tools.file_redaction import visualise_ocr_words_bounding_boxes
+
+    img_path = _path_must_be_allowed_file(body.page_image_path)
+
+    out_folder_path = Path(OUTPUT_FOLDER).expanduser().resolve()
+    if not validate_path_safety(str(out_folder_path)):
+        raise HTTPException(status_code=400, detail="Unsafe OUTPUT_FOLDER path")
+    allowed_roots = _allowed_path_roots()
+    under_root = False
+    for root in allowed_roots:
+        try:
+            out_folder_path.relative_to(root)
+            under_root = True
+            break
+        except ValueError:
+            continue
+    if not under_root:
+        raise HTTPException(
+            status_code=403,
+            detail="OUTPUT_FOLDER must resolve under repo, INPUT_FOLDER, or OUTPUT_FOLDER",
+        )
+    out_folder_path.mkdir(parents=True, exist_ok=True)
+    out_folder = str(out_folder_path)
+
+    safe_base = str(body.doc_base_name or "review")
+    image_name = f"{safe_base}_page{int(body.page_number)}.png"
+    log_paths: list[str] = []
+    try:
+        log_paths = visualise_ocr_words_bounding_boxes(
+            Image.open(img_path).convert("RGB"),
+            body.ocr_results,
+            image_name=image_name,
+            output_folder=out_folder,
+            visualisation_folder="review_ocr_visualisations",
+            add_legend=True,
+            log_files_output_paths=log_paths,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    if not log_paths:
+        raise HTTPException(
+            status_code=500,
+            detail="Could not produce OCR visualisation (invalid image/ocr_results or write failed).",
+        )
+    out_path = log_paths[-1]
+    return AgentTaskResponse(
+        status="completed",
+        gradio_api_name="export_review_page_ocr_visualisation",
+        task="export_review_page_ocr_visualisation",
+        output_dir=out_folder,
+        input_dir="",
+        message="OCR visualisation written",
+        output_paths=[out_path],
     )
 
 
@@ -660,6 +753,12 @@ def list_operations() -> dict[str, Any]:
                 "method": "POST",
                 "path": "/agent/export_review_redaction_overlay",
                 "implementation": "visualise_review_redaction_boxes",
+            },
+            {
+                "gradio_api_name": "export_review_page_ocr_visualisation",
+                "method": "POST",
+                "path": "/agent/export_review_page_ocr_visualisation",
+                "implementation": "visualise_ocr_words_bounding_boxes",
             },
             {
                 "gradio_api_name": "combine_review_csvs",

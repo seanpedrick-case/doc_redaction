@@ -5455,6 +5455,8 @@ def merge_img_bboxes(
     ],
     horizontal_threshold: int = 50,
     vertical_threshold: int = 12,
+    max_word_gap_px: int | None = None,
+    max_word_gap_height_multiplier: float = 3.0,
 ):
     """
     Merges bounding boxes for image annotations based on the provided results from signature and handwriting recognizers.
@@ -5467,6 +5469,11 @@ def merge_img_bboxes(
         handwrite_signature_checkbox (List[str], optional): A list of options indicating whether to extract handwriting and signatures. Defaults to ["Extract handwriting", "Extract signatures"].
         horizontal_threshold (int, optional): The threshold for merging bounding boxes horizontally. Defaults to 50.
         vertical_threshold (int, optional): The threshold for merging bounding boxes vertically. Defaults to 12.
+        max_word_gap_px (int | None, optional): Maximum horizontal pixel gap allowed between consecutive OCR words
+            when reconstructing a single bbox from multiple word boxes. If None, this is derived from
+            `horizontal_threshold` and word height. Defaults to None.
+        max_word_gap_height_multiplier (float, optional): Additional guard rail for word merging: consecutive words
+            must also be within (multiplier * typical_word_height) pixels horizontally. Defaults to 3.0.
 
     Returns:
         None: This function modifies the bounding boxes in place and does not return a value.
@@ -5566,38 +5573,92 @@ def merge_img_bboxes(
                                 current_char += 1  # +1 for space if the word doesn't already end with a space
 
                         if relevant_words:
-                            left = min(
-                                word["bounding_box"][0] for word in relevant_words
-                            )
-                            top = min(
-                                word["bounding_box"][1] for word in relevant_words
-                            )
-                            right = max(
-                                word["bounding_box"][2] for word in relevant_words
-                            )
-                            bottom = max(
-                                word["bounding_box"][3] for word in relevant_words
+                            # Sort by x so we can guard against large physical gaps between consecutive words.
+                            relevant_words_sorted = sorted(
+                                relevant_words, key=lambda w: w["bounding_box"][0]
                             )
 
-                            combined_text = " ".join(
-                                word["text"] for word in relevant_words
+                            # Derive a sensible max word-gap if not provided:
+                            # - keep existing `horizontal_threshold` behaviour as an absolute cap
+                            # - also cap by a multiple of typical word height (helps across varying DPI/font sizes)
+                            word_heights = [
+                                max(0, int(w["bounding_box"][3] - w["bounding_box"][1]))
+                                for w in relevant_words_sorted
+                            ]
+                            typical_word_height = 0
+                            if word_heights:
+                                word_heights_sorted = sorted(word_heights)
+                                typical_word_height = word_heights_sorted[
+                                    len(word_heights_sorted) // 2
+                                ]
+
+                            derived_gap_px = None
+                            if typical_word_height > 0:
+                                derived_gap_px = int(
+                                    max_word_gap_height_multiplier * typical_word_height
+                                )
+
+                            gap_px_limit = (
+                                max_word_gap_px
+                                if max_word_gap_px is not None
+                                else (
+                                    min(horizontal_threshold, derived_gap_px)
+                                    if derived_gap_px is not None
+                                    else horizontal_threshold
+                                )
                             )
 
-                            reconstructed_bbox = CustomImageRecognizerResult(
-                                bbox.entity_type,
-                                bbox.start,
-                                bbox.end,
-                                bbox.score,
-                                left,
-                                top,
-                                right - left,  # width
-                                bottom - top,  # height,
-                                combined_text,
-                            )
-                            # reconstructed_bboxes.append(bbox)  # Add original bbox
-                            reconstructed_bboxes.append(
-                                reconstructed_bbox
-                            )  # Add merged bbox
+                            # Cluster words into contiguous groups; don't span large whitespace gaps.
+                            word_clusters: list[list[dict]] = []
+                            current_cluster: list[dict] = []
+                            for w in relevant_words_sorted:
+                                if not current_cluster:
+                                    current_cluster = [w]
+                                    continue
+
+                                prev = current_cluster[-1]
+                                prev_right = prev["bounding_box"][2]
+                                cur_left = w["bounding_box"][0]
+                                gap = cur_left - prev_right
+
+                                # If the OCR token sequence implies adjacency but the physical gap is large,
+                                # split into separate clusters (prevents over-wide merged redaction boxes).
+                                if gap > gap_px_limit:
+                                    word_clusters.append(current_cluster)
+                                    current_cluster = [w]
+                                else:
+                                    current_cluster.append(w)
+
+                            if current_cluster:
+                                word_clusters.append(current_cluster)
+
+                            # Create one reconstructed bbox per cluster (often 1, but can be >1 when OCR words
+                            # are consecutive in text yet far apart in image coordinates).
+                            for cluster in word_clusters:
+                                left = min(word["bounding_box"][0] for word in cluster)
+                                top = min(word["bounding_box"][1] for word in cluster)
+                                right = max(word["bounding_box"][2] for word in cluster)
+                                bottom = max(
+                                    word["bounding_box"][3] for word in cluster
+                                )
+
+                                combined_text = " ".join(
+                                    word["text"] for word in cluster
+                                )
+
+                                reconstructed_bboxes.append(
+                                    CustomImageRecognizerResult(
+                                        bbox.entity_type,
+                                        bbox.start,
+                                        bbox.end,
+                                        bbox.score,
+                                        left,
+                                        top,
+                                        right - left,  # width
+                                        bottom - top,  # height,
+                                        combined_text,
+                                    )
+                                )
                             break
             else:
                 reconstructed_bboxes.append(bbox)
@@ -5612,10 +5673,14 @@ def merge_img_bboxes(
 
             merged_box = group[0]
             for next_box in group[1:]:
-                if (
-                    next_box.left - (merged_box.left + merged_box.width)
-                    <= horizontal_threshold
-                ):
+                gap = next_box.left - (merged_box.left + merged_box.width)
+                # Extra guard rail: require both the absolute threshold and a height-scaled threshold.
+                # This reduces accidental merges across big whitespace when text is small.
+                height_scaled_limit = int(
+                    max_word_gap_height_multiplier
+                    * max(1, min(merged_box.height, next_box.height))
+                )
+                if gap <= horizontal_threshold and gap <= height_scaled_limit:
                     if next_box.text != merged_box.text:
                         new_text = merged_box.text + " " + next_box.text
                     else:
@@ -10344,7 +10409,7 @@ def _words_from_line_chars_pymupdf(
         off_x, off_y: Page offset to add to bounding boxes.
 
     Returns:
-        List of {"text", "boundingBox": [x0,y0,x1,y1], "conf": 100.0}.
+        List of {"text", "bounding_box": [x0,y0,x1,y1], "conf": 100.0}.
     """
     if not line_chars:
         return []
@@ -10369,7 +10434,7 @@ def _words_from_line_chars_pymupdf(
         line_words.append(
             {
                 "text": current_word_text.strip(),
-                "boundingBox": [
+                "bounding_box": [
                     round(x0 + off_x, 2),
                     round(y0 + off_y, 2),
                     round(x1 + off_x, 2),
@@ -10394,7 +10459,7 @@ def _words_from_line_chars_pymupdf(
             line_words.append(
                 {
                     "text": char_text,
-                    "boundingBox": [
+                    "bounding_box": [
                         round(x0 + off_x, 2),
                         round(y0 + off_y, 2),
                         round(x1 + off_x, 2),
@@ -11851,6 +11916,7 @@ def visualise_ocr_words_bounding_boxes(
     image: Union[str, Image.Image],
     ocr_results: Dict[str, Any],
     image_name: str = None,
+    page_number: Optional[int] = None,
     output_folder: str = OUTPUT_FOLDER,
     text_extraction_method: str = None,
     visualisation_folder: str = None,
@@ -11970,6 +12036,25 @@ def visualise_ocr_words_bounding_boxes(
     needs_coordinate_conversion = False
     source_width = width
     source_height = height
+    coords_are_normalized = False
+
+    def _get_word_bbox(word_data: Dict[str, Any]):
+        """
+        Word bbox compatibility helper.
+        Different pipelines/components use different key styles:
+        - our OCR results: "bounding_box"
+        - some serialized/review flows: "boundingBox"
+        - occasionally: "bbox"
+        """
+        if not isinstance(word_data, dict):
+            return (0, 0, 0, 0)
+        bb = (
+            word_data.get("bounding_box")
+            or word_data.get("boundingBox")
+            or word_data.get("bbox")
+            or (0, 0, 0, 0)
+        )
+        return bb
 
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
         # Collect all bounding box coordinates to detect coordinate system
@@ -11983,7 +12068,7 @@ def visualise_ocr_words_bounding_boxes(
             for word_data in words:
                 if not isinstance(word_data, dict):
                     continue
-                bbox = word_data.get("bounding_box", (0, 0, 0, 0))
+                bbox = _get_word_bbox(word_data)
                 if len(bbox) == 4:
                     x1, y1, x2, y2 = bbox
                     all_x_coords.extend([x1, x2])
@@ -12002,11 +12087,71 @@ def visualise_ocr_words_bounding_boxes(
             for word_data in words:
                 if not isinstance(word_data, dict):
                     continue
-                bbox = word_data.get("bounding_box", (0, 0, 0, 0))
+                bbox = _get_word_bbox(word_data)
                 if len(bbox) == 4:
                     x1, y1, x2, y2 = bbox
                     all_x_coords.extend([x1, x2])
                     all_y_coords.extend([y1, y2])
+
+    # Decide whether OCR bbox coordinates are in:
+    # - normalized fractions [0,1] (common in some OCR pipelines), or
+    # - a different absolute coordinate space than the visualization image (e.g. PDF points).
+    # If so, compute scaling factors to map them into current image pixel space.
+    if all_x_coords and all_y_coords:
+        try:
+            max_x = float(max(all_x_coords))
+            max_y = float(max(all_y_coords))
+            min_x = float(min(all_x_coords))
+            min_y = float(min(all_y_coords))
+        except Exception:
+            max_x = max_y = 0.0
+            min_x = min_y = 0.0
+
+        # Normalized coordinates: typically 0..1 (sometimes slightly above due to rounding).
+        if (
+            min_x >= 0.0
+            and min_y >= 0.0
+            and max_x <= 1.5
+            and max_y <= 1.5
+            and (max_x > 0.0 or max_y > 0.0)
+        ):
+            coords_are_normalized = True
+            source_width = 1.0
+            source_height = 1.0
+            needs_coordinate_conversion = True
+        else:
+            # Absolute coords: infer whether they are in a different coordinate space than the
+            # visualization image and scale accordingly.
+            #
+            # Case A: coords larger than the image → likely PDF points / other space → scale down.
+            if max_x > width * 1.2 or max_y > height * 1.2:
+                source_width = max_x
+                source_height = max_y
+                needs_coordinate_conversion = True
+            else:
+                # Case B: coords much smaller than the image but still in a plausible PDF-point range
+                # (e.g. letter ~612x792, A4 ~595x842). When we render a PDF page to an image at a
+                # higher DPI, the image is typically 2–6x larger than the PDF points. In that case,
+                # we should scale UP so boxes/text land at the correct positions on the image.
+                #
+                # Heuristic: if the image is "large" and the bbox max looks like points, scale up.
+                try:
+                    ratio_x = (width / max_x) if max_x else 1.0
+                    ratio_y = (height / max_y) if max_y else 1.0
+                except Exception:
+                    ratio_x = ratio_y = 1.0
+
+                looks_like_points = (
+                    # Typical PDF-point page sizes are a few hundred to ~1500.
+                    (300.0 <= max_x <= 2000.0)
+                    and (300.0 <= max_y <= 2500.0)
+                    # And the rendered image is meaningfully larger.
+                    and (ratio_x >= 1.5 or ratio_y >= 1.5)
+                )
+                if looks_like_points:
+                    source_width = max_x
+                    source_height = max_y
+                    needs_coordinate_conversion = True
 
     # Calculate scaling factors if conversion is needed
     if needs_coordinate_conversion:
@@ -12051,7 +12196,7 @@ def visualise_ocr_words_bounding_boxes(
                 continue
 
             # Get bounding box coordinates
-            bbox = word_data.get("bounding_box", (0, 0, 0, 0))
+            bbox = _get_word_bbox(word_data)
             if len(bbox) != 4:
                 continue
 
@@ -12059,10 +12204,17 @@ def visualise_ocr_words_bounding_boxes(
 
             # Convert coordinates if needed (from PyMuPDF to image space)
             if needs_coordinate_conversion:
-                x1 = x1 * scale_x
-                y1 = y1 * scale_y
-                x2 = x2 * scale_x
-                y2 = y2 * scale_y
+                if coords_are_normalized:
+                    # Normalized coords in [0,1] → image pixels
+                    x1 = x1 * width
+                    y1 = y1 * height
+                    x2 = x2 * width
+                    y2 = y2 * height
+                else:
+                    x1 = x1 * scale_x
+                    y1 = y1 * scale_y
+                    x2 = x2 * scale_x
+                    y2 = y2 * scale_y
 
             # Ensure coordinates are within image bounds
             x1 = max(0, min(int(x1), width))
@@ -12141,12 +12293,18 @@ def visualise_ocr_words_bounding_boxes(
             if int(_wd.get("conf", _wd.get("confidence", 0))) == -1:
                 continue
             _bb = _wd.get("bounding_box", (0, 0, 0, 0))
+            if (not _bb or len(_bb) != 4) and isinstance(_wd, dict):
+                _bb = _wd.get("boundingBox") or _wd.get("bbox") or (0, 0, 0, 0)
             if len(_bb) != 4:
                 continue
             _bx1, _by1, _bx2, _by2 = _bb
             if needs_coordinate_conversion:
-                _bx1, _by1 = _bx1 * scale_x, _by1 * scale_y
-                _bx2, _by2 = _bx2 * scale_x, _by2 * scale_y
+                if coords_are_normalized:
+                    _bx1, _by1 = _bx1 * width, _by1 * height
+                    _bx2, _by2 = _bx2 * width, _by2 * height
+                else:
+                    _bx1, _by1 = _bx1 * scale_x, _by1 * scale_y
+                    _bx2, _by2 = _bx2 * scale_x, _by2 * scale_y
             _bx1 = max(0, min(int(_bx1), width))
             _by1 = max(0, min(int(_by1), height))
             _bx2 = max(0, min(int(_bx2), width))
@@ -12176,6 +12334,7 @@ def visualise_ocr_words_bounding_boxes(
     viz_global_max_font_pt = min(viz_global_max_font_pt, absolute_max_font_pt)
 
     # Process each line's words for text overlay
+    drawn_words = 0
     for line_key, line_data in ocr_results.items():
         if not isinstance(line_data, dict) or "words" not in line_data:
             continue
@@ -12200,7 +12359,7 @@ def visualise_ocr_words_bounding_boxes(
                 continue
 
             # Get bounding box coordinates
-            bbox = word_data.get("bounding_box", (0, 0, 0, 0))
+            bbox = _get_word_bbox(word_data)
             if len(bbox) != 4:
                 continue
 
@@ -12208,10 +12367,16 @@ def visualise_ocr_words_bounding_boxes(
 
             # Convert coordinates if needed (from PyMuPDF to image space)
             if needs_coordinate_conversion:
-                x1 = x1 * scale_x
-                y1 = y1 * scale_y
-                x2 = x2 * scale_x
-                y2 = y2 * scale_y
+                if coords_are_normalized:
+                    x1 = x1 * width
+                    y1 = y1 * height
+                    x2 = x2 * width
+                    y2 = y2 * height
+                else:
+                    x1 = x1 * scale_x
+                    y1 = y1 * scale_y
+                    x2 = x2 * scale_x
+                    y2 = y2 * scale_y
 
             # Ensure coordinates are within image bounds
             x1 = max(0, min(int(x1), width))
@@ -12305,6 +12470,7 @@ def visualise_ocr_words_bounding_boxes(
                     font=pil_font,
                     fill=_ocr_viz_bgr_to_rgb(text_color),
                 )
+                drawn_words += 1
 
                 if is_replaced:
                     draw_pil.rectangle(
@@ -12396,6 +12562,7 @@ def visualise_ocr_words_bounding_boxes(
                         font=pil_font,
                         fill=_ocr_viz_bgr_to_rgb(text_color),
                     )
+                    drawn_words += 1
                     tw, _ = _pil_ocr_viz_text_size(pil_font, wtext)
                     current_x += tw
                     if i < n - 1:
@@ -12435,23 +12602,27 @@ def visualise_ocr_words_bounding_boxes(
 
         # Generate filename
         if image_name:
-            # Extract page number from image_name if it follows the pattern _<number> at the end
-            # This handles cases like "document_1", "document.pdf_1", etc.
-            page_number = None
-            page_match = re.search(r"_(\d+)$", image_name)
-            if page_match:
-                page_number = page_match.group(1)
-                # Remove the page number suffix from image_name for base_name extraction
-                image_name_without_page = image_name[: page_match.start()]
-            else:
-                image_name_without_page = image_name
+            # Prefer explicit page_number. If not provided, fall back to parsing it
+            # from image_name suffix (legacy behaviour).
+            page_number_str = str(int(page_number)) if page_number is not None else None
+            image_name_without_page = image_name
+            if page_number_str is None:
+                # Extract page number from image_name if it follows the pattern _<number> at the end
+                # This handles cases like "document_1", "document.pdf_1", etc.
+                page_match = re.search(r"_(\d+)$", image_name)
+                if page_match:
+                    page_number_str = page_match.group(1)
+                    # Remove the page number suffix from image_name for base_name extraction
+                    image_name_without_page = image_name[: page_match.start()]
 
             # Remove file extension if present
             base_name = os.path.splitext(image_name_without_page)[0]
 
             # Include page number in filename if it was found
-            if page_number:
-                filename = f"{base_name}_page_{page_number}_{visualisation_folder}.jpg"
+            if page_number_str:
+                filename = (
+                    f"{base_name}_page_{page_number_str}_{visualisation_folder}.jpg"
+                )
             else:
                 filename = f"{base_name}_{visualisation_folder}.jpg"
         else:

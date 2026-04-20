@@ -435,6 +435,18 @@ Every time you redact, a file with the suffix '.json' is produced. This file con
 
 To check the previous OCR result upload has been successful, lower down the page you should see two checkboxes, called 'Existing Textract output file found' and 'Existing local OCR output found'. If one of these has become checked, then the OCR output has been successfully uploaded. When you next redact the document with the given method, it should load in the existing OCR results to skip re-analysis.
 
+### Exporting page visualisations (Review redactions tab)
+
+Under the page viewer on the **Review redactions** tab there is an accordion that lets you export helpful single-page images so you can easily review the current OCR and redaction outputs for each page:
+
+- **Export OCR visualisation image**: saves a PNG showing **word-level OCR bounding boxes** and confidence colouring (plus legend), using the OCR results loaded for the document.
+- **Export redaction overlay image**: saves a JPEG of the current page image with **redaction box outlines** (colour/line style by label) plus a **legend** in the top-right.
+
+Both exports write into your output folder:
+
+- Redaction overlay: `redaction_overlay/` (e.g. `*_redaction_overlay.jpg`)
+- OCR visualisation: `review_ocr_visualisations/` (e.g. `*_review_ocr_visualisations.png`)
+
 ## Document summarisation
 
 When summarisation is enabled, a **Document summarisation** tab is shown in the app. It lets you generate LLM-based summaries from PDFs, or from OCR output CSVs (e.g. from a previous redaction run).

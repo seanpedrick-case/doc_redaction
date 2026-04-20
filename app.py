@@ -114,6 +114,7 @@ from tools.config import (
     FEEDBACK_LOG_FILE_NAME,
     FEEDBACK_LOGS_FOLDER,
     FILE_INPUT_HEIGHT,
+    FILL_SCREEN_WIDTH,
     FULL_COMPREHEND_ENTITY_LIST,
     FULL_ENTITY_LIST,
     FULL_LLM_ENTITY_LIST,
@@ -293,6 +294,7 @@ from tools.redaction_review import (
     df_select_callback_ocr,
     df_select_callback_textract_api,
     exclude_selected_items_from_redaction,
+    export_review_page_ocr_visualisation_for_gradio,
     export_review_redaction_overlay_for_gradio,
     get_all_rows_with_same_text,
     get_all_rows_with_same_text_redact,
@@ -311,6 +313,7 @@ from tools.redaction_review import (
     update_other_annotator_number_from_current,
     update_redact_choice_df_from_page_dropdown,
     update_selected_review_df_row_colour,
+    validate_review_file_df,
 )
 from tools.redaction_types import RedactionContext, RedactionOptions
 from tools.summaries import (
@@ -930,16 +933,16 @@ css = """
 /* Target tab navigation buttons only - not buttons inside tab content */
 /* Gradio renders tab buttons with role="tab" in the navigation area */
 button[role="tab"] {
-    font-size: 1.2em !important;
-    padding: 0.75em 1.4em !important;
+    font-size: 1.1em !important;
+    padding: 0.75em 1.2em !important;
 }
 
 /* Alternative selectors for different Gradio versions */
 .tab-nav button,
 nav button[role="tab"],
 div[class*="tab-nav"] button {
-    font-size: 1.2em !important;
-    padding: 0.75em 1.4em !important;
+    font-size: 1.1em !important;
+    padding: 0.75em 1.2em !important;
 }
 """
 
@@ -949,14 +952,14 @@ if RUN_FASTAPI:
         analytics_enabled=False,
         title="Document Redaction App",
         delete_cache=(43200, 43200),  # Temporary file cache deleted every 12 hours
-        fill_width=True,
+        fill_width=FILL_SCREEN_WIDTH,
     )
 else:
     blocks = gr.Blocks(
         analytics_enabled=False,
         title="Document Redaction App",
         delete_cache=(43200, 43200),  # Temporary file cache deleted every 12 hours
-        fill_width=True,
+        fill_width=FILL_SCREEN_WIDTH,
     )
 
 with blocks:
@@ -1369,6 +1372,13 @@ with blocks:
         label="new_duplicate_search_annotation_object",
         allow_custom_value=True,
         visible=False,
+    )
+
+    # This components are currently unused
+    annotate_zoom_in = gr.Button("Zoom in", visible=False)
+    annotate_zoom_out = gr.Button("Zoom out", visible=False)
+    clear_all_redactions_on_page_btn = gr.Button(
+        "Clear all redactions on page", visible=False
     )
 
     ###
@@ -2739,15 +2749,8 @@ with blocks:
                             variant="secondary",
                             visible=False,
                         )
-            with gr.Row():
-                annotate_zoom_in = gr.Button("Zoom in", visible=False)
-                annotate_zoom_out = gr.Button("Zoom out", visible=False)
-            with gr.Row():
-                clear_all_redactions_on_page_btn = gr.Button(
-                    "Clear all redactions on page", visible=False
-                )
 
-            with gr.Accordion(label="View review file data", open=False):
+            with gr.Accordion(label="View and edit review table data", open=False):
                 review_file_df = gr.Dataframe(
                     value=pd.DataFrame(),
                     headers=[
@@ -2759,17 +2762,37 @@ with blocks:
                         "ymin",
                         "xmax",
                         "ymax",
-                        "text",
                         "id",
+                        "text",
                     ],
                     row_count=(0, "dynamic"),
                     label="Review file data",
                     visible=True,
                     type="pandas",
-                    wrap=True,
+                    max_chars=30,
+                    wrap=False,
                     show_search="search",
-                    max_height=400,
+                    column_count=10,
+                    column_widths=[
+                        "10%",
+                        "5%",
+                        "10%",
+                        "15%",
+                        "8.75%",
+                        "8.75%",
+                        "8.75%",
+                        "8.75%",
+                        "10%",
+                        "15%",
+                    ],
+                    static_columns=[0, 1, 8],
+                    buttons=["fullscreen", "copy"],
+                    # max_height=400,
                 )
+                with gr.Row():
+                    review_file_df_update_btn = gr.Button(
+                        "Update review file data", variant="secondary"
+                    )
 
             with gr.Row():
                 with gr.Column(scale=2):
@@ -2847,7 +2870,7 @@ with blocks:
                         )
 
                     with gr.Accordion(
-                        label="Export redaction overlay image",
+                        label="Export image overview of page OCR results or redaction boxes",
                         open=False,
                     ):
                         gr.Markdown(
@@ -2855,13 +2878,22 @@ with blocks:
                             "page image with hollow redaction outlines (colour and line "
                             "style by label) and a legend in the top-right."
                         )
-                        export_redaction_overlay_btn = gr.Button(
-                            "Export redaction overlay image"
-                        )
-                        redaction_overlay_output_file = gr.File(
-                            label="Redaction overlay output",
-                            interactive=False,
-                        )
+                        with gr.Row(equal_height=True):
+                            with gr.Column():
+                                export_review_ocr_visualisation_btn = gr.Button(
+                                    "Export OCR visualisation image"
+                                )
+                            with gr.Column():
+                                export_redaction_overlay_btn = gr.Button(
+                                    "Export redaction overlay image"
+                                )
+                        with gr.Row():
+                            redaction_overlay_output_file = gr.File(
+                                label="OCR/Redaction overlay output",
+                                interactive=False,
+                                file_count="single",
+                                file_types=[".jpg"],
+                            )
 
                 with gr.Column(scale=1):
                     annotation_button_apply = gr.Button(
@@ -3801,6 +3833,7 @@ with blocks:
                         choices=MAPPED_LANGUAGE_CHOICES,
                         label="Chosen language",
                         multiselect=False,
+                        allow_custom_value=False,
                         visible=True,
                     )
                     chosen_language_drop = gr.Dropdown(
@@ -3808,6 +3841,7 @@ with blocks:
                         choices=LANGUAGE_CHOICES,
                         label="Chosen language short code",
                         multiselect=False,
+                        allow_custom_value=True,
                         visible=True,
                         interactive=False,
                     )
@@ -6169,7 +6203,19 @@ with blocks:
     )
 
     # Manual updates to review df
-    review_file_df.input(
+    # review_file_df_format_check_btn.click(
+    #     validate_review_file_df,
+    #     inputs=[review_file_df],
+    #     outputs=[],
+    #     api_visibility="undocumented",
+    # )
+
+    review_file_df_update_btn.click(
+        validate_review_file_df,
+        inputs=[review_file_df],
+        outputs=[],
+        api_visibility="undocumented",
+    ).success(
         update_annotator_page_from_review_df,
         inputs=[
             review_file_df,
@@ -6832,6 +6878,20 @@ with blocks:
         ],
         show_progress_on=[input_pdf_for_review],
         api_visibility="undocumented",
+    )
+
+    export_review_ocr_visualisation_btn.click(
+        export_review_page_ocr_visualisation_for_gradio,
+        inputs=[
+            annotator,
+            annotate_current_page,
+            all_page_line_level_ocr_results_with_words,
+            all_page_line_level_ocr_results_with_words_df_base,
+            doc_full_file_name_textbox,
+            output_folder_textbox,
+        ],
+        outputs=[redaction_overlay_output_file],
+        api_name="export_review_page_ocr_visualisation",
     )
 
     export_redaction_overlay_btn.click(

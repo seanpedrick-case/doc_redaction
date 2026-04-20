@@ -1293,6 +1293,10 @@ def _generate_unique_ids(
 def load_all_output_files(folder_path: str = OUTPUT_FOLDER) -> List[str]:
     """Get the file paths of all files in the given folder and its subfolders."""
 
+    # Gradio can sometimes pass None here during chained load/update events
+    # (e.g. if a prior event errored and the textbox/state wasn't populated).
+    folder_path = folder_path or OUTPUT_FOLDER
+
     safe_folder_path_resolved = Path(folder_path).resolve()
 
     return gr.FileExplorer(
