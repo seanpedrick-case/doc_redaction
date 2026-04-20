@@ -25,6 +25,10 @@ router = APIRouter(tags=["Agent"])
 REPO_ROOT = Path(__file__).resolve().parent
 _MAX_INSTRUCTION_LEN = 16_000
 
+# NOTE: Paths from request bodies are untrusted. Avoid Path.resolve() on untrusted
+# input (CodeQL py/path-injection); instead normalize via os.path and enforce
+# containment under trusted roots.
+
 # Mirrors app.py api_name values (Gradio).
 GRADIO_API_NAMES: tuple[str, ...] = (
     "redact_document",
@@ -52,54 +56,79 @@ def _allowed_path_roots() -> list[Path]:
     return roots
 
 
+def _sanitize_untrusted_path_input(path_str: str) -> str:
+    """Basic raw-input validation before any path normalization."""
+    if not isinstance(path_str, str):
+        raise HTTPException(status_code=400, detail="Path must be a string.")
+    cleaned = path_str.strip()
+    if not cleaned:
+        raise HTTPException(status_code=400, detail="Path must not be empty.")
+    if "\x00" in cleaned:
+        raise HTTPException(status_code=400, detail="Path contains invalid null byte.")
+    return cleaned
+
+
+def _normalize_untrusted_path_to_abs(path_str: str) -> str:
+    """
+    Expand ~, then normalize to an absolute path.
+
+    Relative paths are interpreted relative to REPO_ROOT (matching prior behaviour).
+    """
+    safe_input = _sanitize_untrusted_path_input(path_str)
+    expanded = os.path.expanduser(safe_input)
+    if os.path.isabs(expanded):
+        return os.path.normpath(os.path.abspath(expanded))
+    return os.path.normpath(os.path.abspath(os.path.join(str(REPO_ROOT), expanded)))
+
+
+def _must_be_under_allowed_roots(candidate_abs: str, original: str) -> None:
+    """Enforce candidate is contained under repo, INPUT_FOLDER, or OUTPUT_FOLDER."""
+    allowed_roots = [
+        os.path.normpath(os.path.abspath(str(p))) for p in _allowed_path_roots()
+    ]
+    for root in allowed_roots:
+        try:
+            common = os.path.commonpath([candidate_abs, root])
+        except ValueError:
+            # Different drive on Windows or invalid path mix
+            continue
+        if common == root:
+            return
+    raise HTTPException(
+        status_code=403,
+        detail="Path must be under the app repo, INPUT_FOLDER, or OUTPUT_FOLDER",
+    )
+
+
 def _path_must_be_allowed_file(path_str: str) -> str:
     """Resolve path, ensure it is under an allowed root and exists as a file."""
-    raw = Path(path_str).expanduser()
-    if raw.is_absolute():
-        candidate = raw.resolve()
-    else:
-        candidate = (REPO_ROOT / raw).resolve()
-
-    if not validate_path_safety(str(candidate)):
+    candidate_abs = _normalize_untrusted_path_to_abs(path_str)
+    if not validate_path_safety(candidate_abs):
         raise HTTPException(status_code=400, detail=f"Unsafe path rejected: {path_str}")
-
-    allowed = _allowed_path_roots()
-    ok = False
-    for root in allowed:
-        try:
-            candidate.relative_to(root)
-            ok = True
-            break
-        except ValueError:
-            continue
-    if not ok:
-        raise HTTPException(
-            status_code=403,
-            detail="Path must be under the app repo, INPUT_FOLDER, or OUTPUT_FOLDER",
-        )
+    _must_be_under_allowed_roots(candidate_abs, path_str)
+    candidate = Path(candidate_abs)
     if not candidate.is_file():
         raise HTTPException(
             status_code=400, detail=f"Not a file or missing: {candidate}"
         )
-    return str(candidate)
+    return candidate_abs
 
 
-def _path_must_be_allowed_directory(path_str: str) -> str:
-    raw = Path(path_str).expanduser()
-    candidate = raw.resolve() if raw.is_absolute() else (REPO_ROOT / raw).resolve()
-    if not validate_path_safety(str(candidate)):
+def _path_must_be_allowed_directory(path_str: str, *, must_exist: bool = True) -> str:
+    """
+    Normalize and validate a directory path under allowed roots.
+
+    By default the directory must already exist; callers can opt out (e.g. output_dir
+    that will be created later by the CLI).
+    """
+    candidate_abs = _normalize_untrusted_path_to_abs(path_str)
+    if not validate_path_safety(candidate_abs):
         raise HTTPException(status_code=400, detail=f"Unsafe path rejected: {path_str}")
-    for root in _allowed_path_roots():
-        try:
-            candidate.relative_to(root)
-            break
-        except ValueError:
-            continue
-    else:
-        raise HTTPException(status_code=403, detail="Directory outside allowed roots")
-    if not candidate.is_dir():
+    _must_be_under_allowed_roots(candidate_abs, path_str)
+    candidate = Path(candidate_abs)
+    if must_exist and not candidate.is_dir():
         raise HTTPException(status_code=400, detail=f"Not a directory: {candidate}")
-    return str(candidate)
+    return candidate_abs
 
 
 def _optional_agent_api_key(x_agent_api_key: Optional[str] = Header(None)) -> None:
@@ -182,9 +211,15 @@ def _merge_redact_direct_mode(body: AgentRedactDocumentRequest) -> dict[str, Any
     if body.instruction is not None:
         merged["custom_llm_instructions"] = body.instruction
     if body.output_dir is not None:
-        merged["output_dir"] = str(Path(body.output_dir).expanduser().resolve())
+        # Output folders may not exist yet (CLI will create). Still constrain to allowed roots.
+        merged["output_dir"] = _path_must_be_allowed_directory(
+            body.output_dir, must_exist=False
+        )
     if body.input_dir is not None:
-        merged["input_dir"] = str(Path(body.input_dir).expanduser().resolve())
+        # Input dir should exist if provided.
+        merged["input_dir"] = _path_must_be_allowed_directory(
+            body.input_dir, must_exist=True
+        )
     if body.ocr_method is not None:
         merged["ocr_method"] = body.ocr_method
     if body.pii_detector is not None:
@@ -461,8 +496,7 @@ def post_combine_review_csvs(
 
     paths = [_NamedPath(_path_must_be_allowed_file(p)) for p in body.input_files]
     out_dir = body.output_dir or OUTPUT_FOLDER
-    out_dir_resolved = str(Path(out_dir).expanduser().resolve())
-    _path_must_be_allowed_directory(out_dir_resolved)
+    out_dir_resolved = _path_must_be_allowed_directory(str(out_dir), must_exist=True)
     sep = "/" if not out_dir_resolved.endswith(("/", "\\")) else ""
     out_files = merge_csv_files(paths, output_folder=out_dir_resolved + sep)
     return AgentTaskResponse(

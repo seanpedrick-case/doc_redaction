@@ -7,6 +7,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from xml.etree.ElementTree import Element, SubElement, tostring
 
@@ -76,7 +77,37 @@ from tools.secure_path_utils import (
     sanitize_filename,
     secure_file_write,
     secure_path_join,
+    validate_folder_containment,
+    validate_path_safety,
 )
+
+# This module receives image paths from Gradio state / request bodies. Treat as untrusted.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _normalize_untrusted_path_to_abs(path_str: str) -> str:
+    """Expand ~ then normalize to an absolute path (no Path.resolve() on untrusted input)."""
+    expanded = os.path.expanduser(str(path_str))
+    if os.path.isabs(expanded):
+        return os.path.normpath(os.path.abspath(expanded))
+    return os.path.normpath(os.path.abspath(os.path.join(str(_REPO_ROOT), expanded)))
+
+
+def _is_under_allowed_roots(candidate_abs: str) -> bool:
+    roots = [
+        os.path.normpath(os.path.abspath(str(_REPO_ROOT))),
+        os.path.normpath(os.path.abspath(os.path.expanduser(str(INPUT_FOLDER)))),
+        os.path.normpath(os.path.abspath(os.path.expanduser(str(OUTPUT_FOLDER)))),
+    ]
+    for root in roots:
+        try:
+            if os.path.commonpath([candidate_abs, root]) == root:
+                return True
+        except ValueError:
+            # Different drive (Windows) or invalid inputs
+            continue
+    return False
+
 
 if not MAX_IMAGE_PIXELS:
     Image.MAX_IMAGE_PIXELS = None
@@ -4504,9 +4535,18 @@ def _load_underlay_rgb_from_annotator(
         if arr.ndim == 3 and arr.shape[2] >= 3:
             return arr[:, :, :3]
         return None
-    if isinstance(img_val, str) and img_val and os.path.isfile(img_val):
+    if isinstance(img_val, str) and img_val:
         try:
-            im = Image.open(img_val)
+            if not validate_path_safety(img_val):
+                return None
+            candidate_abs = _normalize_untrusted_path_to_abs(img_val)
+            if not validate_path_safety(candidate_abs):
+                return None
+            if not _is_under_allowed_roots(candidate_abs):
+                return None
+            if not os.path.isfile(candidate_abs):
+                return None
+            im = Image.open(candidate_abs)
             return np.asarray(im.convert("RGB"))
         except Exception:
             return None
@@ -4595,18 +4635,22 @@ def _write_review_overlay_jpeg(
     image_bgr: np.ndarray, path: str, max_file_bytes: int
 ) -> None:
     """Write JPEG, lowering quality until file size is at or below ``max_file_bytes`` (cf. OCR page visualisations)."""
+    out_path = Path(path)
     quality = 95
     while quality >= 10:
         cv2.imwrite(
-            path,
+            str(out_path),
             image_bgr,
             [int(cv2.IMWRITE_JPEG_QUALITY), quality],
         )
-        if os.path.isfile(path) and os.path.getsize(path) <= max_file_bytes:
-            return
+        try:
+            if out_path.is_file() and out_path.stat().st_size <= max_file_bytes:
+                return
+        except OSError:
+            pass
         quality -= 5
     cv2.imwrite(
-        path,
+        str(out_path),
         image_bgr,
         [int(cv2.IMWRITE_JPEG_QUALITY), 10],
     )
@@ -4800,11 +4844,25 @@ def export_review_page_ocr_visualisation_for_gradio(
     except (TypeError, ValueError):
         page_num = 1
 
-    out_dir = (
+    requested_out_dir = (
         output_folder_textbox.strip()
         if isinstance(output_folder_textbox, str) and output_folder_textbox.strip()
         else OUTPUT_FOLDER
     )
+    out_dir = os.path.normpath(str(requested_out_dir))
+    try:
+        if not validate_folder_containment(out_dir, OUTPUT_FOLDER):
+            gr.Info(
+                "Invalid output folder requested; using default output folder.",
+                duration=6,
+            )
+            out_dir = OUTPUT_FOLDER
+    except Exception:
+        gr.Info(
+            "Invalid output folder requested; using default output folder.",
+            duration=6,
+        )
+        out_dir = OUTPUT_FOLDER
 
     def _results_from_df(df: pd.DataFrame, page_num_1based: int) -> Optional[dict]:
         if df is None or not isinstance(df, pd.DataFrame) or df.empty:

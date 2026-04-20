@@ -73,35 +73,43 @@ def secure_path_join(base_path: Union[str, Path], *path_parts: str) -> Path:
         ValueError: If any path component contains dangerous characters
         PermissionError: If the resulting path would escape the base directory
     """
-    base_path = Path(base_path).resolve()
+    # NOTE: Do not call Path.resolve() on untrusted input (CodeQL py/path-injection).
+    # Normalize using os.path and enforce containment via os.path.commonpath instead.
+    base_norm = os.path.normpath(os.path.abspath(os.path.expanduser(str(base_path))))
 
-    # Sanitize each path part - only sanitize if it contains dangerous patterns
-    sanitized_parts = []
+    # Sanitize each provided part as path *components*. If a part contains separators,
+    # split it into components and sanitize each component.
+    components: list[str] = []
     for part in path_parts:
-        if not part:
+        if part is None:
             continue
-        # Only sanitize if the part contains dangerous patterns
-        if re.search(r'[<>:"|?*\x00-\x1f]|\.{2,}', part):
-            sanitized_part = sanitize_filename(part)
-        else:
-            sanitized_part = part
-        sanitized_parts.append(sanitized_part)
+        part_str = str(part).strip()
+        if not part_str:
+            continue
+        if "\x00" in part_str:
+            raise ValueError("Invalid path component contains null byte")
 
-    # Join the paths
-    result_path = base_path
-    for part in sanitized_parts:
-        result_path = result_path / part
+        # Normalize separators then split, so callers may pass "a/b" without escaping.
+        for comp in part_str.replace("\\", "/").split("/"):
+            comp = comp.strip()
+            if not comp or comp == ".":
+                continue
+            if comp == "..":
+                raise PermissionError("Path traversal '..' is not allowed")
+            safe_comp = sanitize_filename(comp)
+            if safe_comp in {"", ".", ".."}:
+                raise ValueError("Invalid sanitized path component")
+            components.append(safe_comp)
 
-    # Resolve the final path
-    result_path = result_path.resolve()
-
-    # Security check: ensure the result is within the base directory
+    candidate = os.path.normpath(os.path.join(base_norm, *components))
     try:
-        result_path.relative_to(base_path)
-    except ValueError:
-        raise PermissionError(f"Path would escape base directory: {result_path}")
+        common = os.path.commonpath([candidate, base_norm])
+    except ValueError as e:
+        raise PermissionError(f"Path would escape base directory: {candidate}") from e
+    if common != base_norm:
+        raise PermissionError(f"Path would escape base directory: {candidate}")
 
-    return result_path
+    return Path(candidate)
 
 
 def secure_file_write(
