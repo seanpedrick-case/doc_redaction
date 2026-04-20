@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc_redaction"
-version = "2.1.0"
+version = "2.1.1"
 description = "Redact PDF/image-based documents, Word, or CSV/XLSX files using a Gradio-based GUI interface"
 readme = "README.md"
 authors = [
@@ -13,7 +13,7 @@ authors = [
 maintainers = [
     { name = "Sean Pedrick-Case", email = "spedrickcase@lambeth.gov.uk" },
 ]
-license = { text = "AGPL-3.0-only" } # This licence type required to use PyMuPDF
+license = "AGPL-3.0-only" # This licence type required to use PyMuPDF
 keywords = [
     "redaction",
     "pdf",
@@ -114,7 +114,29 @@ Homepage = "https://seanpedrick-case.github.io/doc_redaction/"
 Repository = "https://github.com/seanpedrick-case/doc_redaction"
 
 [project.scripts]
-cli_redact = "cli_redact:main"
+cli_redact = "doc_redaction.cli_redact:main"
+
+[tool.setuptools]
+include-package-data = true
+py-modules = [
+    "app",
+    "agent_routes",
+    "cli_redact",
+    "lambda_entrypoint",
+    "load_dynamo_logs",
+    "load_s3_logs",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["doc_redaction*", "tools*"]
+exclude = [
+    "test*",
+    "skills*",
+    "cdk*",
+    "src*",
+    "example_data*",
+]
 
 # Configuration for Ruff linter:
 [tool.ruff]

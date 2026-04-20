@@ -1,0 +1,3 @@
+include favicon.png
+recursive-include intros *.txt
+

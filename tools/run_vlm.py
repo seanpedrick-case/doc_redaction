@@ -175,13 +175,20 @@ def ensure_transformers_vlm_loaded():
 
 
 if SHOW_VLM_MODEL_OPTIONS is True:
-    import torch
+    try:
+        import torch  # type: ignore
+    except ModuleNotFoundError:
+        # Keep base installs usable without heavy optional deps.
+        SHOW_VLM_MODEL_OPTIONS = False
+        torch = None  # type: ignore
+        print(
+            "VLM options disabled because 'torch' is not installed. "
+            "Install with the extra: pip install \"doc_redaction[vlm]\""
+        )
+
+if SHOW_VLM_MODEL_OPTIONS is True:
     from huggingface_hub import snapshot_download
-    from transformers import (
-        AutoConfig,
-        BitsAndBytesConfig,
-        TextIteratorStreamer,
-    )
+    from transformers import AutoConfig, BitsAndBytesConfig, TextIteratorStreamer
 
     from tools.config import (
         MAX_INPUT_TOKEN_LENGTH,

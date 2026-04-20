@@ -171,7 +171,7 @@ def load_spacy_model(language: str = DEFAULT_LANGUAGE):
         # Try importable package first (fast-path when installed as a package)
         try:
             module = __import__(candidate)
-            print(f"✓ Successfully imported spaCy model: {candidate}")
+            print(f"[OK] Successfully imported spaCy model: {candidate}")
             return module.load()
         except Exception as e:
             last_error = e
@@ -179,14 +179,14 @@ def load_spacy_model(language: str = DEFAULT_LANGUAGE):
         # Try spacy.load if package is linked/installed
         try:
             nlp = spacy.load(candidate)
-            print(f"✓ Successfully loaded spaCy model via spacy.load: {candidate}")
+            print(f"[OK] Successfully loaded spaCy model via spacy.load: {candidate}")
             return nlp
         except OSError:
             # Model not found, proceed with download
             print(f"Model {candidate} not found, attempting to download...")
             try:
                 download(candidate)
-                print(f"✓ Successfully downloaded spaCy model: {candidate}")
+                print(f"[OK] Successfully downloaded spaCy model: {candidate}")
 
                 # Refresh spaCy's model registry after download
                 import importlib
@@ -205,20 +205,20 @@ def load_spacy_model(language: str = DEFAULT_LANGUAGE):
 
                 # Try to load the downloaded model
                 nlp = spacy.load(candidate)
-                print(f"✓ Successfully loaded downloaded spaCy model: {candidate}")
+                print(f"[OK] Successfully loaded downloaded spaCy model: {candidate}")
                 return nlp
             except Exception as download_error:
-                print(f"✗ Failed to download or load {candidate}: {download_error}")
+                print(f"[ERR] Failed to download or load {candidate}: {download_error}")
                 # Try alternative loading methods
                 try:
                     # Try importing the module directly after download
                     module = __import__(candidate)
                     print(
-                        f"✓ Successfully loaded {candidate} via direct import after download"
+                        f"[OK] Successfully loaded {candidate} via direct import after download"
                     )
                     return module.load()
                 except Exception as import_error:
-                    print(f"✗ Direct import also failed: {import_error}")
+                    print(f"[ERR] Direct import also failed: {import_error}")
 
                     # Try one more approach - force spaCy to refresh its model registry
                     try:
@@ -229,16 +229,16 @@ def load_spacy_model(language: str = DEFAULT_LANGUAGE):
                             print(f"Found model at path: {model_path}")
                             nlp = spacy.load(model_path)
                             print(
-                                f"✓ Successfully loaded {candidate} from path: {model_path}"
+                                f"[OK] Successfully loaded {candidate} from path: {model_path}"
                             )
                             return nlp
                     except Exception as path_error:
-                        print(f"✗ Path-based loading also failed: {path_error}")
+                        print(f"[ERR] Path-based loading also failed: {path_error}")
 
                     last_error = download_error
                     continue
         except Exception as e:
-            print(f"✗ Failed to load {candidate}: {e}")
+            print(f"[ERR] Failed to load {candidate}: {e}")
             last_error = e
             continue
 

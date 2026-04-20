@@ -18,6 +18,8 @@ usage/*
 feedback/*
 config/*
 user_guide/*
+doc_redaction.egg-info/*
+.venv_pypi_test/*
 skills/*
 cdk/config/*
 cdk/cdk.out/*
