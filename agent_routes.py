@@ -103,13 +103,17 @@ def _must_be_under_allowed_roots(candidate_abs: str, original: str) -> None:
 def _path_must_be_allowed_file(path_str: str) -> str:
     """Resolve path, ensure it is under an allowed root and exists as a file."""
     candidate_abs = _normalize_untrusted_path_to_abs(path_str)
-    if not validate_path_safety(candidate_abs):
+    # Validate both "safe path" patterns and containment under trusted roots.
+    ok = False
+    for root in _allowed_path_roots():
+        if validate_path_safety(candidate_abs, base_path=str(root)):
+            ok = True
+            break
+    if not ok:
         raise HTTPException(status_code=400, detail=f"Unsafe path rejected: {path_str}")
-    _must_be_under_allowed_roots(candidate_abs, path_str)
-    candidate = Path(candidate_abs)
-    if not candidate.is_file():
+    if not os.path.isfile(candidate_abs):
         raise HTTPException(
-            status_code=400, detail=f"Not a file or missing: {candidate}"
+            status_code=400, detail=f"Not a file or missing: {candidate_abs}"
         )
     return candidate_abs
 
@@ -122,12 +126,15 @@ def _path_must_be_allowed_directory(path_str: str, *, must_exist: bool = True) -
     that will be created later by the CLI).
     """
     candidate_abs = _normalize_untrusted_path_to_abs(path_str)
-    if not validate_path_safety(candidate_abs):
+    ok = False
+    for root in _allowed_path_roots():
+        if validate_path_safety(candidate_abs, base_path=str(root)):
+            ok = True
+            break
+    if not ok:
         raise HTTPException(status_code=400, detail=f"Unsafe path rejected: {path_str}")
-    _must_be_under_allowed_roots(candidate_abs, path_str)
-    candidate = Path(candidate_abs)
-    if must_exist and not candidate.is_dir():
-        raise HTTPException(status_code=400, detail=f"Not a directory: {candidate}")
+    if must_exist and not os.path.isdir(candidate_abs):
+        raise HTTPException(status_code=400, detail=f"Not a directory: {candidate_abs}")
     return candidate_abs
 
 

@@ -13,6 +13,7 @@ dist/*
 docs/*
 build_deps/*
 user_guide/*
+skills/*
 cdk/config/*
 tld/*
 cdk/config/*

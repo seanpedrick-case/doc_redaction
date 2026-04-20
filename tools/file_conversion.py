@@ -239,17 +239,25 @@ def process_single_page_for_image_conversion(
                 raise ValueError(
                     "input_folder is empty; cannot determine image output directory"
                 )
-            app_base_dir = Path(os.getcwd()).resolve()
-            candidate_output_dir = Path(safe_folder)
-            if not candidate_output_dir.is_absolute():
-                candidate_output_dir = app_base_dir / candidate_output_dir
-            image_output_dir = candidate_output_dir.resolve()
+            # Avoid Path.resolve() on untrusted input (CodeQL py/path-injection).
+            base_norm = os.path.normpath(os.path.abspath(os.getcwd()))
+            candidate_norm = os.path.expanduser(str(safe_folder).strip())
+            if os.path.isabs(candidate_norm):
+                candidate_abs = os.path.normpath(os.path.abspath(candidate_norm))
+            else:
+                candidate_abs = os.path.normpath(
+                    os.path.abspath(os.path.join(base_norm, candidate_norm))
+                )
             try:
-                image_output_dir.relative_to(app_base_dir)
+                if os.path.commonpath([candidate_abs, base_norm]) != base_norm:
+                    raise ValueError(
+                        f"input_folder must be within app directory: {base_norm}"
+                    )
             except ValueError:
                 raise ValueError(
-                    f"input_folder must be within app directory: {app_base_dir}"
+                    f"input_folder must be within app directory: {base_norm}"
                 ) from None
+            image_output_dir = Path(candidate_abs)
 
             # Ensure the directory exists
             image_output_dir.mkdir(parents=True, exist_ok=True)

@@ -2,7 +2,6 @@ import logging
 import os
 import re
 import socket
-import tempfile
 import urllib.parse
 from datetime import datetime
 from pathlib import Path
@@ -78,8 +77,8 @@ def ensure_folder_within_app_directory(
     has_trailing_sep = folder_path.endswith(("/", "\\"))
 
     # Handle special case for "TEMP" - this is handled separately in the code
-    if folder_path == "TEMP":
-        return folder_path
+    # if folder_path == "TEMP":
+    #     return folder_path
 
     # Handle absolute paths. Do not call Path.resolve() on untrusted input (CodeQL
     # py/path-injection); use normpath + abspath + commonpath like validate_path_safety.
@@ -402,25 +401,26 @@ S3_OUTPUTS_BUCKET = get_or_create_env_var(
     "S3_OUTPUTS_BUCKET", DOCUMENT_REDACTION_BUCKET
 )
 
-# Allow for files to be saved in a temporary folder for increased security in some instances
-if OUTPUT_FOLDER == "TEMP" or INPUT_FOLDER == "TEMP":
-    # Use mkdtemp so the directory persists for the lifetime of the process.
-    # TemporaryDirectory() as a context manager deletes the directory immediately on exit.
-    import atexit
-    import shutil
+# Allow for files to be saved in a temporary folder for increased security in some instances - deprecated
+# if OUTPUT_FOLDER == "TEMP" or INPUT_FOLDER == "TEMP":
+#     # Use mkdtemp so the directory persists for the lifetime of the process.
+#     # TemporaryDirectory() as a context manager deletes the directory immediately on exit.
+#     import atexit
+#     import shutil
 
-    temp_dir = tempfile.mkdtemp()
-    print(f"Temporary directory created at: {temp_dir}")
-    atexit.register(shutil.rmtree, temp_dir, ignore_errors=True)
+#     temp_dir = tempfile.mkdtemp()
+#     print(f"Temporary directory created at: {temp_dir}")
+#     atexit.register(shutil.rmtree, temp_dir, ignore_errors=True)
 
-    if OUTPUT_FOLDER == "TEMP":
-        OUTPUT_FOLDER = temp_dir + "/"
-    if INPUT_FOLDER == "TEMP":
-        INPUT_FOLDER = temp_dir + "/"
-else:
-    # Ensure folders are within app directory (skip validation for TEMP as it's handled above)
-    OUTPUT_FOLDER = ensure_folder_within_app_directory(OUTPUT_FOLDER)
-    INPUT_FOLDER = ensure_folder_within_app_directory(INPUT_FOLDER)
+#     if OUTPUT_FOLDER == "TEMP":
+#         OUTPUT_FOLDER = temp_dir + "/"
+#     if INPUT_FOLDER == "TEMP":
+#         INPUT_FOLDER = temp_dir + "/"
+# else:
+#     # Ensure folders are within app directory (skip validation for TEMP as it's handled above)
+
+OUTPUT_FOLDER = ensure_folder_within_app_directory(OUTPUT_FOLDER)
+INPUT_FOLDER = ensure_folder_within_app_directory(INPUT_FOLDER)
 
 GRADIO_TEMP_DIR = get_or_create_env_var(
     "GRADIO_TEMP_DIR", ""
