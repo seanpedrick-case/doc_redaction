@@ -9,4 +9,3 @@ imports working in PyPI installs and in repo-root executions.
 from __future__ import annotations
 
 __all__: list[str] = []
-

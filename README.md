@@ -11,9 +11,11 @@ short_description: OCR / redact PDF documents and tabular data
 ---
 # Document redaction
 
-version: 2.1.1
+version: 2.2.0
 
 Redact personally identifiable information (PII) from documents (PDF, PNG, JPG), Word files (DOCX), or tabular data (XLSX/CSV/Parquet). Please see the [User Guide](https://seanpedrick-case.github.io/doc_redaction/src/user_guide.html) for a full walkthrough of all the features in the app.
+
+**Use as a library:** After installing from [PyPI](https://pypi.org/project/doc-redaction/) (`pip install doc_redaction`), you can call the same workflows as the Gradio `api_name` routes from Python. See the documentation: [Package API usage (Python)](https://seanpedrick-case.github.io/doc_redaction/src/package_api_usage.html) (source: [src/package_api_usage.qmd](src/package_api_usage.qmd)).
     
 To extract text from documents, the 'Local' options are PikePDF for PDFs with selectable text, and OCR with Tesseract. Use AWS Textract to extract more complex elements e.g. handwriting, signatures, or unclear text. PaddleOCR and VLM support is also provided (see the installation instructions below). 
 
@@ -78,58 +80,60 @@ sudo dnf install -y tesseract poppler-utils
 ---
 
 
-### 2. Installation: Code and Python Packages
+### 2. Installation: Python packages
 
-Once the system prerequisites are installed, you can set up the Python environment.
-
-#### Step 1: Clone the Repository
-
-Open your terminal or Git Bash and clone this repository:
-```bash
-git clone https://github.com/seanpedrick-case/doc_redaction.git
-cd doc_redaction
-```
-
-#### Step 2: Create and Activate a Virtual Environment (Recommended)
-
-It is highly recommended to use a virtual environment to isolate project dependencies and avoid conflicts with other Python projects.
+Once the system prerequisites are installed, create a virtual environment (recommended) and install **doc_redaction**.
 
 ```bash
-# Create the virtual environment
 python -m venv venv
-
-# Activate it
-# On Windows:
+# Windows:
 .\venv\Scripts\activate
-
-# On macOS/Linux:
+# macOS/Linux:
 source venv/bin/activate
 ```
 
-#### Step 3: Install Python Dependencies
+#### Install from PyPI (recommended for users and library use)
 
-##### Lightweight version (without PaddleOCR and VLM support)
-
-This project uses `pyproject.toml` to manage dependencies. You can install everything with a single pip command. This process will also download the required Spacy models and other packages directly from their URLs.
+The package is published on PyPI as **`doc-redaction`** (import name **`doc_redaction`**):
 
 ```bash
-pip install .
+pip install doc_redaction
 ```
 
-Alternatively, you can install from the `requirements_lightweight.txt` file:
+Optional extras (same as in `pyproject.toml`):
+
+```bash
+pip install "doc_redaction[paddle,vlm]"
+```
+
+For programmatic use (CLI-first API matching Gradio `api_name` routes), see **[Package API usage (Python)](https://seanpedrick-case.github.io/doc_redaction/src/package_api_usage.html)**. The console script **`cli_redact`** is available after install.
+
+**Note:** Running the full Gradio app (`python app.py`) from a PyPI-only install expects the application entry files to be on your `PYTHONPATH` or run from a checkout; for the **web UI**, cloning the repository (below) or using **Docker** is usually simpler.
+
+#### Install from source (repository checkout / development)
+
+Clone the repository and install in editable mode:
+
+```bash
+git clone https://github.com/seanpedrick-case/doc_redaction.git
+cd doc_redaction
+pip install -e .
+```
+
+From the same checkout you can use `requirements_lightweight.txt` instead of editable install if you prefer:
+
 ```bash
 pip install -r requirements_lightweight.txt
 ```
 
-##### Full version (with Paddle and VLM support)
-
-Run the following command to install the additional dependencies:
+##### Full install from source (Paddle and VLM)
 
 ```bash
-pip install .[paddle,vlm]
+pip install -e ".[paddle,vlm]"
 ```
 
-Alternatively, you can use the full `requirements.txt` file, that contains references to the PaddleOCR and related Torch/transformers dependencies (for cuda 12.9):
+Alternatively, use the full `requirements.txt` (includes PaddleOCR and Torch/transformers references for CUDA 12.9):
+
 ```bash
 pip install -r requirements.txt
 ```
@@ -176,11 +180,19 @@ Open this URL in your web browser to use the document redaction tool
 
 #### Command line interface
 
-If instead you want to run redactions or other app functions in CLI mode, run the following for instructions:
+If you installed from **PyPI**, use the installed console script:
+
+```bash
+cli_redact --help
+```
+
+From a **repository checkout**, you can also run:
 
 ```bash
 python cli_redact.py --help
 ```
+
+For Python examples that mirror each Gradio `api_name`, see [Package API usage (Python)](https://seanpedrick-case.github.io/doc_redaction/src/package_api_usage.html) (source: [src/package_api_usage.qmd](src/package_api_usage.qmd)).
 
 ---
 

@@ -8,7 +8,7 @@ import paths for PyPI installs.
 
 from __future__ import annotations
 
-__all__ = ["__version__"]
+__all__ = ["__version__", "choose_and_run_redactor", "run_redaction"]
 
 try:
     from importlib.metadata import PackageNotFoundError, version
@@ -20,3 +20,8 @@ try:
 except Exception:  # pragma: no cover
     __version__ = "0.0.0"
 
+# Convenience re-exports (package-qualified import surface)
+from doc_redaction.file_redaction import (
+    choose_and_run_redactor,
+    run_redaction,
+)  # noqa: E402

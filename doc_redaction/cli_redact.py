@@ -24,4 +24,3 @@ def main(direct_mode_args: Dict[str, Any] | None = None):
 
 
 __all__ = ["build_cli_argument_parser", "get_cli_default_args_dict", "main"]
-

@@ -21,4 +21,3 @@ app: Any = getattr(_root_app, "app")
 blocks: Any = getattr(_root_app, "blocks", None)
 
 __all__ = ["app", "blocks"]
-

@@ -1,0 +1,344 @@
+---
+title: "Package API usage (Python)"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-title: "On this page"
+---
+
+This page explains how to use **doc_redaction** as an installed Python package (after `pip install doc_redaction`), without the Gradio UI.
+
+The key design choice is that the callable names in `doc_redaction.api` match the Gradio `api_name` routes defined in `app.py`.
+
+## Installation
+
+### Base install
+
+```bash
+pip install doc_redaction
+```
+
+### Optional extras
+
+If you want local VLM/LLM options, install the optional extra:
+
+```bash
+pip install "doc_redaction[vlm]"
+```
+
+### System dependencies (OCR / PDF)
+
+Some workflows require **Tesseract** and **Poppler** on your system. See the [App installation guide](installation_guide.qmd) for OS-specific instructions.
+
+## Quickstart: import endpoints by `api_name`
+
+All API endpoints are available as importable names from:
+
+```python
+from doc_redaction.api import redact_document
+```
+
+Each section below shows an example for a specific `api_name`.
+
+## Notes before you run the examples
+
+- The examples below use the **CLI-first Python API** exposed from `doc_redaction.api`. These functions execute the same workflows as `cli_redact.py` by calling `cli_redact.main(direct_mode_args=...)` under the hood.
+- Each runnable example writes outputs to an `output_dir` you control and returns a list of created output paths.
+- If you see AWS messages during import (e.g. SSO token expired), that is driven by your environment config and is not required for “local only” runs.
+
+## `redact_document`
+
+**Purpose:** Redact PII in a PDF/image document.
+**Import:**
+
+```python
+from doc_redaction.api import redact_document
+```
+
+**Example (runnable):**
+
+```python
+from pathlib import Path
+
+from doc_redaction.api import redact_document
+
+input_file = "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf"
+output_dir = Path("output_api_example")
+output_dir.mkdir(parents=True, exist_ok=True)
+
+out_paths = redact_document(
+    input_files=input_file,
+    output_dir=str(output_dir),
+    # Optional quick overrides:
+    # ocr_method="Local text",
+    # pii_detector="Local",
+)
+
+print("Created outputs:")
+for p in out_paths:
+    print(" -", p)
+```
+
+## `load_and_prepare_documents_or_data`
+
+**Purpose:** Prepare a PDF/image (e.g. efficient OCR) and generate intermediate artifacts used by later steps.
+```python
+from doc_redaction.api import load_and_prepare_documents_or_data
+```
+
+**Status:** not available as a single CLI-first function.
+
+```python
+from doc_redaction.api import load_and_prepare_documents_or_data
+
+try:
+    load_and_prepare_documents_or_data()
+except NotImplementedError as e:
+    print(e)
+```
+
+## `apply_review_redactions`
+
+**Purpose:** Apply reviewed/edited redactions back onto a document.
+```python
+from doc_redaction.api import apply_review_redactions
+```
+
+**Status:** not available as a single CLI-first function.
+
+```python
+from doc_redaction.api import apply_review_redactions
+
+try:
+    apply_review_redactions()
+except NotImplementedError as e:
+    print(e)
+```
+
+## `export_review_page_ocr_visualisation`
+
+**Purpose:** Export a visualisation of OCR word boxes for review.
+```python
+from doc_redaction.api import export_review_page_ocr_visualisation
+```
+
+**Example (runnable minimal):**
+
+```python
+from doc_redaction.api import export_review_page_ocr_visualisation
+
+page_image_path = "example_data/example_complaint_letter.jpg"
+
+# Minimal demo OCR result with a single word box (normalized coords in [0, 1])
+ocr_results = {
+    "line_1": {
+        "words": [
+            {
+                "text": "Example",
+                "bounding_box": {"left": 0.1, "top": 0.1, "width": 0.2, "height": 0.05},
+                "conf": 0.99,
+            }
+        ]
+    }
+}
+
+out_paths = export_review_page_ocr_visualisation(
+    page_image_path=page_image_path,
+    ocr_results=ocr_results,
+    page_number=1,
+    doc_base_name="complaint_letter_demo",
+)
+print(out_paths)
+```
+
+## `export_review_redaction_overlay`
+
+**Purpose:** Export an overlay representation of redactions (e.g. for Adobe workflows).
+```python
+from doc_redaction.api import export_review_redaction_overlay
+```
+
+**Example (runnable minimal):**
+
+```python
+from doc_redaction.api import export_review_redaction_overlay
+
+page_image_path = "example_data/example_complaint_letter.jpg"
+boxes = [
+    {
+        "label": "PERSON",
+        "color": "#ff0000",
+        "xmin": 0.1,
+        "ymin": 0.1,
+        "xmax": 0.4,
+        "ymax": 0.2,
+    }
+]
+
+out_paths = export_review_redaction_overlay(
+    page_image_path=page_image_path,
+    boxes=boxes,
+    page_number=1,
+    doc_base_name="complaint_letter_demo",
+)
+print(out_paths)
+```
+
+## `word_level_ocr_text_search`
+
+**Purpose:** Search OCR “with words” results and return matches.
+```python
+from doc_redaction.api import word_level_ocr_text_search
+```
+
+**Status:** not available as a single CLI-first function.
+
+```python
+from doc_redaction.api import word_level_ocr_text_search
+
+try:
+    word_level_ocr_text_search()
+except NotImplementedError as e:
+    print(e)
+```
+
+## `redact_data`
+
+**Purpose:** Anonymise/redact tabular files (CSV/XLSX/Parquet) or open text.
+```python
+from doc_redaction.api import redact_data
+```
+
+**Example (runnable, CSV):**
+
+```python
+from pathlib import Path
+
+from doc_redaction.api import redact_data
+
+input_file = "example_data/combined_case_notes.csv"
+output_dir = Path("output_api_example_tabular")
+output_dir.mkdir(parents=True, exist_ok=True)
+
+out_paths = redact_data(
+    input_files=input_file,
+    output_dir=str(output_dir),
+    overrides={
+        # Example overrides; adjust as needed:
+        # "text_columns": ["Case Note", "Client"],
+        # "anon_strategy": "replace_redacted",
+    },
+)
+print(out_paths)
+```
+
+## `find_duplicate_pages`
+
+**Purpose:** Detect duplicate pages in OCR output.
+```python
+from doc_redaction.api import find_duplicate_pages
+```
+
+**Example (runnable):**
+
+```python
+from pathlib import Path
+
+from doc_redaction.api import find_duplicate_pages
+
+ocr_output_csv = "example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv"
+
+output_dir = Path("output_api_example_duplicates")
+output_dir.mkdir(parents=True, exist_ok=True)
+
+out_paths = find_duplicate_pages(
+    input_files=ocr_output_csv,
+    output_dir=str(output_dir),
+    similarity_threshold=0.95,
+)
+print(out_paths)
+```
+
+## `find_duplicate_tabular`
+
+**Purpose:** Detect duplicates in tabular data.
+```python
+from doc_redaction.api import find_duplicate_tabular
+```
+
+**Example (runnable):**
+
+```python
+from doc_redaction.api import find_duplicate_tabular
+
+ocr_like_csv = "example_data/Lambeth_2030-Our_Future_Our_Lambeth.pdf.csv"
+out_paths = find_duplicate_tabular(
+    input_files=ocr_like_csv,
+    similarity_threshold=0.95,
+    text_columns=["text"],
+)
+print(out_paths)
+```
+
+## `summarise_document`
+
+**Purpose:** Summarise an OCR output CSV (or multiple) using configured summarisation backends.
+```python
+from doc_redaction.api import summarise_document
+```
+
+**Example (runnable):**
+
+```python
+from doc_redaction.api import summarise_document
+
+ocr_output_csv = "example_data/example_outputs/Partnership-Agreement-Toolkit_0_0.pdf_ocr_output.csv"
+out_paths = summarise_document(input_files=ocr_output_csv)
+print(out_paths)
+```
+
+## `combine_review_csvs`
+
+**Purpose:** Merge multiple review CSV files.
+```python
+from doc_redaction.api import combine_review_csvs
+```
+
+**Example (runnable):**
+
+```python
+from doc_redaction.api import combine_review_csvs
+
+# Provide paths to one or more review CSVs (e.g. `*_review_file.csv`) that you produced earlier.
+out_paths = combine_review_csvs(
+    input_files=[
+        "example_data/example_outputs/Partnership-Agreement-Toolkit_0_0.pdf_review_file.csv",
+        "example_data/example_outputs/example_of_emails_sent_to_a_professor_before_applying_review_file.csv",
+    ]
+)
+print(out_paths)
+```
+
+## `combine_review_pdfs`
+
+**Purpose:** Combine multiple `_redactions_for_review.pdf` files.
+```python
+from doc_redaction.api import combine_review_pdfs
+```
+
+**Example (template):**
+
+```python
+from doc_redaction.api import combine_review_pdfs
+
+# Provide paths to two or more `_redactions_for_review.pdf` files you produced earlier.
+out_paths = combine_review_pdfs(
+    input_files=[
+        # "output_api_example/..._redactions_for_review.pdf",
+        # "output_api_example/..._redactions_for_review.pdf",
+    ]
+)
+print(out_paths)
+```
+

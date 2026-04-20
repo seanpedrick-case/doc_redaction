@@ -183,7 +183,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         torch = None  # type: ignore
         print(
             "VLM options disabled because 'torch' is not installed. "
-            "Install with the extra: pip install \"doc_redaction[vlm]\""
+            'Install with the extra: pip install "doc_redaction[vlm]"'
         )
 
 if SHOW_VLM_MODEL_OPTIONS is True:
