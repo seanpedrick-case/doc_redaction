@@ -210,4 +210,126 @@ The app generates files with predictable naming:
 | Original | Strategy | Output file |
 |----------|----------|-------------|
 | `combined_case_notes` | `replace with 'REDACTED'` | `combined_case_notes_anon_redact_replace.csv`
-| `combined_case_notes` | `redact completely` |
+| `combined_case_notes` | `redact completely` | `combined_case_notes_anon_redact_remove.csv`
+| `combined_case_notes` | `mask` | `combined_case_notes_anon_mask.csv`
+| `combined_case_notes` | `hash` | `combined_case_notes_anon_hash.csv`
+
+## Retrieving output files (Docker)
+
+Outputs are written under the container's `OUTPUT_FOLDER`. Retrieve via:
+
+```bash
+# Find the file in container
+docker exec doc_redaction-redaction-app-llama-1 \
+  ls -lt /home/user/app/output/ | grep combined_case_notes | head -10
+```
+
+```bash
+# Download the redacted CSV
+docker cp doc_redaction-redaction-app-llama-1:/home/user/app/output/combined_case_notes_anon_redact_replace.csv ./output.csv
+```
+
+## Log file format (decision log)
+
+The `_log.csv` file contains one row per PII entity detected:
+```csv
+entity_type,start,end,data_row,column,entity
+PERSON,0,10,0,Social Worker,Jane Smith
+```
+
+- `entity_type` — spaCy entity label (PERSON, PHONE_NUMBER, etc.)
+- `start,end` — character offsets in the cell value
+- `data_row` — 0-indexed row number
+- `column` — column name
+- `entity` — the detected PII text
+
+**Read with `encoding="utf-8-sig"` in Python** to strip the BOM
+(`\ufeff`) that may appear at the start of CSV files.
+
+### HF Space log caveat
+
+On HF Space the log file path is returned in `result[3]` (not `result[2]`).
+The entity count (`result[2]`) may show `0` even when redaction IS applied
+correctly. **Always verify by reading the output file**, not the log count.
+
+## Deployment variants
+
+### HF Space (Hugging Face)
+
+Public deployment: `https://seanpedrickcase-document-redaction.hf.space`
+Same API. Key differences from local Docker:
+
+| Aspect | Local Docker | HF Space |
+|--------|-------------|----------|
+| PII detection | Local, **Local Inference Server**, AWS Comprehend | Local, AWS Comprehend (no inference server) |
+| OCR models | tesseract, paddle, **hybrid-paddle-inference-server**, inference-server | tesseract, paddle only |
+| VLM entities | CUSTOM_VLM_FACES, CUSTOM_VLM_SIGNATURE available | **NOT** available (no GPU/VLM support) |
+| efficient_ocr default | True | False (saves compute on free tier) |
+| Speed | ~1.5s per request (GPU machine) | ~3–4.5s per request (~2–3× slower, CPU free tier) |
+| File validation | Accepts any file type via API | Strict: only `.pdf, .jpg, .png, .json, .zip` for `/redact_document` |
+| Output access | `docker cp` from container | Read `gradio_client` output paths directly (already cached locally) |
+
+### Speed comparison (tested Apr 21, 2026)
+
+| Strategy | Local Docker | HF Space |
+|----------|-------------|----------|
+| replace with REDACTED | ~1.5s | ~3.5s |
+| redact completely | ~1.5s | ~3.4s |
+| mask | ~1.5s | ~3.6s |
+| hash | ~1.5s | ~4.5s |
+
+## Error handling patterns
+
+### Common errors and fixes
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `Cannot save file into a non-existent directory` | `output_folder` path doesn't exist in container | Use `/home/user/app/output/` or ensure the directory exists |
+| `'meta' field must be explicitly provided. | Raw string passed to `files=` | Wrap with `handle_file(path)` |
+| `Invalid file type. Please upload. | CSVs rejected by `/redact_document | Use `/redact_data` for tabular files |
+| Timeout after ~3s | HF Space free tier spinning down | Accept ~3.5s runtime. No fix. |
+| Entity count shows 0 | HF Space display issue | Read output file to verify. |
+
+### Defensive coding pattern
+
+```python
+import os
+from gradio_client import Client, handle_file
+
+def safe_redact(client, csv_path, strategy="replace with 'REDACTED'"):
+    """Redact a CSV file with error handling."""
+    wrapped = [handle_file(csv_path)]
+    
+    result = client.predict(
+        file_paths=wrapped,
+        in_text="",
+        anon_strategy=strategy,
+        chosen_cols=["Name", "Email"],  # adjust to your columns
+        out_message="Tabular redaction test",
+        output_folder="/home/user/app/output/",
+        api_name="/redact_data"
+    )
+    
+    if not result[1]:
+        raise RuntimeError("No output file returned")
+    
+    return result
+
+# Usage with error handling
+try:
+    result = safe_redact(client, "/path/to/table.csv", "mask")
+    print(f"Output: {result[1][0]}")
+except Exception as e:
+    print(f"Redaction failed: {e}")
+```
+
+## Edge cases & gotchas
+
+- **CSV BOM**: CSV files may have a UTF-8 BOM (`\ufeff`) at the start. Read with `encoding="utf-8-sig"` in Python.
+- **Empty columns**: If a column has no PII detected, it's left unchanged — verify your `chosen_cols` match actual headers.
+- **Excel sheet names with special chars**: Use exact sheet names as they appear (e.g., `"Q1 '23 Data"`).
+- **Large files**: spaCy NER on large CSVs can be slow. Test with a subset first.
+- **DOCX tables**: Only tabular content in DOCX is redacted — body text paragraphs are NOT processed by `/redact_data`. Use `/redact_document` for full DOCX processing.
+- **Parquet encoding**: Ensure Parquet files use UTF-8 string columns. Non-string types may be skipped by spaCy.
+- **Multi-file batches**: Set `latest_file_completed=1.0` only on the last file in a batch to trigger final processing.
+- **HF Space cold starts**: HF Space may take 10-30s on first call after idle. Subsequent calls are ~3-4s. |

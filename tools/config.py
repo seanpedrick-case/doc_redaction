@@ -107,7 +107,7 @@ def ensure_folder_within_app_directory(
         ]
         if any(normalized_path.startswith(prefix) for prefix in system_path_prefixes):
             # System paths are allowed but we log a warning
-            print(f"Warning: Using system path outside app directory: {folder_path}")
+            #print(f"Warning: Using system path outside app directory: {folder_path}")
             return folder_path
         else:
             raise ValueError(
@@ -134,7 +134,7 @@ def ensure_folder_within_app_directory(
             if has_trailing_sep and not result.endswith(os.sep):
                 result = result + os.sep
             print(
-                f"Warning: Sanitized folder path '{folder_path}' to '{result}' for security"
+                f"Warning: Sanitised folder path '{folder_path}' to '{result}' for security"
             )
             return result
         else:
@@ -2264,7 +2264,7 @@ INTRO_TEXT = sanitize_markdown_text(INTRO_TEXT.strip('"').strip("'"))
 
 # Ensure we have valid content after sanitization
 if not INTRO_TEXT or not INTRO_TEXT.strip():
-    print("Warning: Intro text is empty after sanitization, using default intro text")
+    print("Warning: Intro text is empty after sanitisation, using default intro text")
     INTRO_TEXT = sanitize_markdown_text(DEFAULT_INTRO_TEXT)
 
 # App fills screen width or not

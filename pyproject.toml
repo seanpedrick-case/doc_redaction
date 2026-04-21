@@ -115,6 +115,7 @@ Repository = "https://github.com/seanpedrick-case/doc_redaction"
 
 [project.scripts]
 cli_redact = "doc_redaction.cli_redact:main"
+mcp_doc_redaction = "mcp_doc_redaction.server:main"
 
 [tool.setuptools]
 include-package-data = true

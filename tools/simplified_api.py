@@ -298,7 +298,6 @@ def redact_data_from_upload_for_gradio_api(
     data_file: Any,
     redact_entities: list[str] | None = None,
     output_dir: str | None = None,
-    *,
     pii_method: str | None = "Local",
     columns: list[str] | None = None,
     anon_strategy: str | None = "redact",
