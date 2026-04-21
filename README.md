@@ -30,6 +30,7 @@ If you are an LLM/agent interacting with this app over HTTP (e.g. Hugging Face S
 Fetch `/gradio_api/info` and then prefer the simplest route that exists:
 
 - **Apply edited review CSV to a PDF**: `/review_apply`
+- **Redact a PDF/image document**: `/doc_redact`
 - **Summarise a PDF**: `/pdf_summarise`
 - **Redact tabular files (CSV/XLSX/Parquet/DOCX)**: `/tabular_redact`
 
@@ -43,7 +44,7 @@ If those endpoints are not present in your deployment, fall back to the long UI-
 
 ### Optional: MCP server
 
-If you want external agents to call this app reliably without re-implementing Gradio upload/call/poll/download details, consider an **MCP server** that wraps the three main tasks (`redact_document`, `apply_review_redactions`, `redact_tabular`) behind a small tool interface. See [src/agent_mcp.md](src/agent_mcp.md).
+If you want external agents to call this app reliably without re-implementing Gradio upload/call/poll/download details, consider an **MCP server** that wraps the main tasks (`redact_document`, `apply_review_redactions`, `redact_tabular`, `summarise_document`) behind a small tool interface. See [src/agent_mcp.md](src/agent_mcp.md).
 
 **Use as a library:** After installing from [PyPI](https://pypi.org/project/doc-redaction/) (`pip install doc_redaction`), you can call the same workflows as the Gradio `api_name` routes from Python. See the documentation: [Package API usage (Python)](https://seanpedrick-case.github.io/doc_redaction/src/package_api_usage.html) (source: [src/package_api_usage.qmd](src/package_api_usage.qmd)).
     

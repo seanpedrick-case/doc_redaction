@@ -39,6 +39,7 @@ def status() -> dict[str, Any]:
             "endpoint_count": len(keys),
             "endpoints": keys,
             "preferred_short_endpoints_present": {
+                "/doc_redact": "/doc_redact" in named,
                 "/review_apply": "/review_apply" in named,
                 "/pdf_summarise": "/pdf_summarise" in named,
                 "/tabular_redact": "/tabular_redact" in named,
@@ -238,31 +239,33 @@ def redact_document(
     options: RedactDocumentOptions | None = None,
 ) -> dict[str, Any]:
     """
-    Redact a PDF/image using /redact_document. Returns a base64 zip and manifest.
-
-    Note: /redact_document is a long, UI-wired handler in many deployments; this tool
-    may require additional fields depending on the target server’s /gradio_api/info.
+    Redact a PDF/image using /doc_redact. Returns a base64 zip and manifest.
     """
     opt = options or RedactDocumentOptions()
     c = _client()
     try:
-        api_name = "/redact_document"
+        api_name = "/doc_redact"
         if not c.endpoint_exists(api_name):
-            raise RuntimeError(f"Endpoint not available on server: {api_name}")
+            raise RuntimeError(
+                f"Endpoint not available on server: {api_name}. "
+                "Redeploy the app with the simplified gr.api document route enabled."
+            )
 
         path = c.upload_bytes(filename, file_bytes)
-
-        # Minimal attempt: file + entities + method knobs. If the server requires
-        # more args, users should call /gradio_api/info and extend this tool.
         data = [
-            [path],  # file_paths is a list
+            path,
+            list(entities or []),
+            opt.output_dir,
             opt.ocr_method,
             opt.pii_method,
-            [],  # placeholders for other UI inputs; may need extension per deployment
-            list(entities or []),
+            list(opt.allow_list or []),
+            list(opt.deny_list or []),
+            opt.page_min,
+            opt.page_max,
+            "",
         ]
         event_id = c.call(api_name, data)
-        completed = c.poll(api_name, event_id)
+        completed = c.poll(api_name, event_id, timeout_s=3600.0)
 
         file_paths = extract_file_like_paths(completed.payload)
         downloaded: dict[str, bytes] = {}

@@ -472,6 +472,77 @@ def redact_data_from_upload_for_gradio_api(
     return paths, msg
 
 
+def redact_document_from_upload_for_gradio_api(
+    document_file: Any,
+    redact_entities: list[str] | None = None,
+    output_dir: str | None = None,
+    ocr_method: str | None = None,
+    pii_method: str | None = "Local",
+    allow_list: list[str] | None = None,
+    deny_list: list[str] | None = None,
+    page_min: int | None = None,
+    page_max: int | None = None,
+    llm_instruction: str | None = "",
+) -> tuple[list[str], str]:
+    """
+    Short, stateless ``gr.api`` wrapper for PDF/image document redaction.
+
+    Args:
+        document_file: PDF/image path or Gradio upload payload (dict/object with path/name).
+        redact_entities: Entity labels to detect/redact (e.g. PERSON, EMAIL_ADDRESS).
+        output_dir: Directory to write outputs; constrained to OUTPUT_FOLDER.
+        ocr_method: Optional OCR extraction mode override.
+        pii_method: PII detector method (e.g. Local, AWS Comprehend).
+        allow_list / deny_list: Optional explicit token lists for matching behaviour.
+        page_min / page_max: Optional page bounds (0 means all, CLI semantics).
+        llm_instruction: Optional custom instruction for LLM-backed detection.
+
+    Returns:
+        (output_paths, message)
+
+    Prefer calling through the short route `api_name='/doc_redact'`.
+    """
+    from doc_redaction.cli_api import redact_document as cli_redact_document
+
+    document_path = normalize_gradio_file_to_path(document_file)
+    if not document_path:
+        raise ValueError(
+            "document_file is missing or could not be resolved to a path (upload the file first)."
+        )
+    if not os.path.isfile(document_path):
+        raise ValueError(f"document_file not found or not a file: {document_path}")
+
+    out_dir = output_dir
+    if isinstance(out_dir, str) and not out_dir.strip():
+        out_dir = None
+    safe_out_dir = _resolve_dir_within_base(out_dir, OUTPUT_FOLDER)
+    os.makedirs(safe_out_dir, exist_ok=True)
+
+    overrides: dict[str, Any] = {}
+    if redact_entities is not None:
+        overrides["local_redact_entities"] = list(redact_entities)
+    if allow_list is not None:
+        overrides["allow_list"] = list(allow_list)
+    if deny_list is not None:
+        overrides["deny_list"] = list(deny_list)
+    if page_min is not None:
+        overrides["page_min"] = int(page_min)
+    if page_max is not None:
+        overrides["page_max"] = int(page_max)
+
+    paths = cli_redact_document(
+        input_files=[document_path],
+        output_dir=safe_out_dir,
+        ocr_method=ocr_method,
+        pii_detector=pii_method,
+        instruction=llm_instruction,
+        overrides=overrides or None,
+    )
+
+    safe_paths = _filter_files_within_root(paths, safe_out_dir)
+    return safe_paths, "doc_redact completed"
+
+
 def summarise_document_from_upload_for_gradio_api(
     pdf_file: Any,
     ocr_method: str | None = None,
@@ -789,13 +860,43 @@ def tabular_redact_api(
     )
 
 
+def doc_redact_api(
+    document_file: Any,
+    redact_entities: list[str] | None = None,
+    output_dir: str | None = None,
+    *,
+    ocr_method: str | None = None,
+    pii_method: str | None = "Local",
+    allow_list: list[str] | None = None,
+    deny_list: list[str] | None = None,
+    page_min: int | None = None,
+    page_max: int | None = None,
+    llm_instruction: str | None = "",
+) -> tuple[list[str], str]:
+    """Short-name wrapper; prefer calling this via `api_name='/doc_redact'`."""
+    return redact_document_from_upload_for_gradio_api(
+        document_file=document_file,
+        redact_entities=redact_entities,
+        output_dir=output_dir,
+        ocr_method=ocr_method,
+        pii_method=pii_method,
+        allow_list=allow_list,
+        deny_list=deny_list,
+        page_min=page_min,
+        page_max=page_max,
+        llm_instruction=llm_instruction,
+    )
+
+
 __all__ = [
     "HeadlessGradioProgress",
     "apply_review_redactions_from_uploads_for_gradio_api",
     "review_apply_api",
     "normalize_gradio_file_to_path",
     "redact_data_from_upload_for_gradio_api",
+    "redact_document_from_upload_for_gradio_api",
     "tabular_redact_api",
+    "doc_redact_api",
     "run_apply_review_redactions",
     "summarise_document_from_upload_for_gradio_api",
     "pdf_summarise_api",

@@ -25,7 +25,8 @@ All tools should return:
 - `options` (object): OCR method, PII method, allow/deny lists, page range, output knobs
 
 **Implementation notes**
-- Prefer simplified endpoints if exposed by the deployment; otherwise build `data[]` from `/gradio_api/info`
+- Prefer `/doc_redact` when present (short signature)
+- If `/doc_redact` is unavailable, fallback options are deployment-specific (many `/redact_document` routes are UI-chained and not reliably callable with a short payload)
 - Always handle upload → call → poll → download internally
 
 #### 2) `apply_review_redactions`

@@ -29,7 +29,7 @@ python -m mcp_doc_redaction.server
 - `apply_review_redactions(pdf_bytes, review_csv_bytes, ...)` → calls `/review_apply`
 - `summarise_document(pdf_bytes, ...)` → calls `/pdf_summarise`
 - `redact_tabular(file_bytes, ...)` → calls `/tabular_redact` and **fails** if not deployed
-- `redact_document(file_bytes, ...)` → calls `/redact_document` (may need extension for long-signature deployments)
+- `redact_document(file_bytes, ...)` → calls `/doc_redact` (short server-side wrapper)
 
 ## Output format
 

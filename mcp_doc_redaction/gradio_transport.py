@@ -142,7 +142,33 @@ class GradioHttpClient:
                 f"{self.base_url}/gradio_api/call/{api_name.lstrip('/')}/{event_id}"
             )
             r.raise_for_status()
-            payload = r.json()
+            try:
+                payload = r.json()
+            except json.JSONDecodeError:
+                # Some deployments stream SSE-like payloads or transient empty bodies.
+                text = (r.text or "").strip()
+                if not text:
+                    payload = {}
+                else:
+                    data_lines: list[str] = []
+                    for line in text.splitlines():
+                        if line.startswith("data:"):
+                            data_lines.append(line[len("data:") :].strip())
+                    # Try last data line first (usually contains the final JSON)
+                    candidate = next(
+                        (x for x in reversed(data_lines) if x and x != "[DONE]"), ""
+                    )
+                    if candidate:
+                        try:
+                            payload = json.loads(candidate)
+                        except json.JSONDecodeError:
+                            payload = {}
+                    else:
+                        payload = {}
+            if payload is None:
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {"data": payload}
             status = str(payload.get("status") or payload.get("type") or "").lower()
             if status in ("complete", "completed", "success", "succeeded", "done"):
                 return CompletedCall(api_name=api_name, payload=payload)

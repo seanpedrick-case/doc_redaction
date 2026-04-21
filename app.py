@@ -1399,6 +1399,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 - download `GET /gradio_api/file={path}` (may 403 under some auth/proxies)\n
 \n
 **Prefer these short endpoints when present**:\n
+- `/doc_redact` (PDF/JPG/PNG)\n
 - `/review_apply` (PDF + `*_review_file.csv`)\n
 - `/pdf_summarise` (PDF)\n
 - `/tabular_redact` (CSV/XLSX/Parquet/DOCX)\n
@@ -10102,9 +10103,19 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
     # Simple Gradio HTTP API (short routes for agents/MCP).
     ###
     from tools.simplified_api import (
+        doc_redact_api,
         pdf_summarise_api,
         review_apply_api,
         tabular_redact_api,
+    )
+
+    gr.api(
+        doc_redact_api,
+        api_name="doc_redact",
+        api_description=(
+            "Redact a single PDF/image in one call (CLI-aligned). "
+            "Returns (output_paths, message). Does not update the main UI session."
+        ),
     )
 
     gr.api(
