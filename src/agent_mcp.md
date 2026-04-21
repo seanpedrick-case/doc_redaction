@@ -36,7 +36,7 @@ All tools should return:
 - `output_dir` (optional)
 
 **Implementation notes**
-- Prefer `/apply_review_redactions_from_uploads` when present (short signature)
+- Prefer `/review_apply` when present (short signature)
 
 #### 3) `redact_tabular`
 
@@ -46,7 +46,7 @@ All tools should return:
 - `options` (columns, method, allow/deny, anon strategy, etc.)
 
 **Implementation notes**
-- Prefer `/redact_data_from_upload` when present (short signature)
+- Prefer `/tabular_redact` when present (short signature)
 
 #### 4) (Optional) `summarise_document`
 
@@ -55,7 +55,7 @@ All tools should return:
 - `options` (OCR method, format, context, max pages per group, etc.)
 
 **Implementation notes**
-- Prefer `/summarise_document_from_upload`
+- Prefer `/pdf_summarise`
 
 ### Authentication handling
 

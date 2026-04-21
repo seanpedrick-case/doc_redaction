@@ -19,7 +19,8 @@ Redact **tabular and semi-tabular** files using the app:
 - Word (`.docx`)
 
 Registered endpoints:
-- **`/redact_data`** — main tabular redaction
+- **`/tabular_redact`** — short, stateless tabular redaction (preferred when present)
+- **`/redact_data`** — main tabular redaction (long signature)
 - **`/find_duplicate_tabular`** — detect and remove duplicate rows
 
 ## When to use this skill
@@ -35,7 +36,7 @@ For PDFs/images, use `doc-redaction-app` with `api_name="/redact_document"` inst
 3. **Raw Gradio HTTP API** — last resort: `/gradio_api/upload` +
    `/gradio_api/call/...` + poll.
 
-## Tabular Redaction (`/redact_data`)
+## Tabular Redaction (short: `/tabular_redact`, long: `/redact_data`)
 
 ### Quick example (CSV)
 

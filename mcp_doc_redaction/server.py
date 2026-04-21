@@ -39,10 +39,9 @@ def status() -> dict[str, Any]:
             "endpoint_count": len(keys),
             "endpoints": keys,
             "preferred_short_endpoints_present": {
-                "/apply_review_redactions_from_uploads": "/apply_review_redactions_from_uploads"
-                in named,
-                "/summarise_document_from_upload": "/summarise_document_from_upload" in named,
-                "/redact_data_from_upload": "/redact_data_from_upload" in named,
+                "/review_apply": "/review_apply" in named,
+                "/pdf_summarise": "/pdf_summarise" in named,
+                "/tabular_redact": "/tabular_redact" in named,
             },
         }
     finally:
@@ -59,13 +58,13 @@ def apply_review_redactions(
     options: ApplyReviewOptions | None = None,
 ) -> dict[str, Any]:
     """
-    Apply edited review CSV to a PDF (preferred endpoint: /apply_review_redactions_from_uploads).
+    Apply edited review CSV to a PDF (preferred endpoint: /review_apply).
     Returns a base64 zip and a manifest.
     """
     opt = options or ApplyReviewOptions()
     c = _client()
     try:
-        api_name = "/apply_review_redactions_from_uploads"
+        api_name = "/review_apply"
         if not c.endpoint_exists(api_name):
             raise RuntimeError(f"Endpoint not available on server: {api_name}")
 
@@ -107,13 +106,13 @@ def summarise_document(
     options: SummariseOptions | None = None,
 ) -> dict[str, Any]:
     """
-    Summarise a PDF (preferred endpoint: /summarise_document_from_upload).
+    Summarise a PDF (preferred endpoint: /pdf_summarise).
     Returns a base64 zip and a manifest.
     """
     opt = options or SummariseOptions()
     c = _client()
     try:
-        api_name = "/summarise_document_from_upload"
+        api_name = "/pdf_summarise"
         if not c.endpoint_exists(api_name):
             raise RuntimeError(f"Endpoint not available on server: {api_name}")
 
@@ -169,14 +168,14 @@ def redact_tabular(
     options: RedactTabularOptions | None = None,
 ) -> dict[str, Any]:
     """
-    Redact a tabular file (preferred endpoint: /redact_data_from_upload).
+    Redact a tabular file (preferred endpoint: /tabular_redact).
 
     This tool FAILS if the simplified endpoint is not deployed on the target server.
     """
     opt = options or RedactTabularOptions()
     c = _client()
     try:
-        api_name = "/redact_data_from_upload"
+        api_name = "/tabular_redact"
         if not c.endpoint_exists(api_name):
             raise RuntimeError(
                 f"Endpoint not available on server: {api_name}. "

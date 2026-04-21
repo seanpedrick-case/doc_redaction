@@ -29,9 +29,9 @@ If you are an LLM/agent interacting with this app over HTTP (e.g. Hugging Face S
 
 Fetch `/gradio_api/info` and then prefer the simplest route that exists:
 
-- **Apply edited review CSV to a PDF**: `/apply_review_redactions_from_uploads` (PDF + `*_review_file.csv` + optional `output_dir`)
-- **Summarise a PDF**: `/summarise_document_from_upload`
-- **Redact tabular files (CSV/XLSX/Parquet/DOCX)**: `/redact_data_from_upload`
+- **Apply edited review CSV to a PDF**: `/review_apply`
+- **Summarise a PDF**: `/pdf_summarise`
+- **Redact tabular files (CSV/XLSX/Parquet/DOCX)**: `/tabular_redact`
 
 If those endpoints are not present in your deployment, fall back to the long UI-chained routes (`/apply_review_redactions`, `/redact_data`, etc.) and build `data[]` strictly from `/gradio_api/info`.
 

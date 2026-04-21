@@ -30,6 +30,14 @@ Use the Python package **`gradio_client`** with a version **compatible with the 
 - **Call**: `client.predict(..., api_name="/redact_document", **kwargs)` (leading slash matches this app’s `gr.api` / `client.view_api()` names).
 - **Outputs**: returned paths are often under `/tmp/gradio/...` on the server. If your test runner **shares a volume** with the app container, you can **read those paths from disk** instead of HTTP-downloading them.
 
+### Prefer short endpoints when available
+
+For programmatic agents, prefer the short `gr.api` routes when present in `client.view_api()` / `/gradio_api/info`:
+
+- `/review_apply` — apply edited review CSV to a PDF
+- `/pdf_summarise` — summarise a PDF
+- `/tabular_redact` — redact a tabular file (CSV/XLSX/Parquet/DOCX)
+
 ### Working example (`gradio_client` + `redact_document`)
 
 Pattern that has been exercised end-to-end (adjust kwargs to match **`client.view_api()`** for your deployment):
@@ -115,8 +123,9 @@ Saved as a **JSON list** of per-page records. Each page is shaped like `{"page":
 
 When they fit the task, prefer the dedicated wrappers (short `data[]`, less brittle):
 
-- `apply_review_redactions_from_uploads` — PDF + `*_review_file.csv`.
-- `summarise_document_from_upload` — summarise-only path.
+- `review_apply` — PDF + `*_review_file.csv`.
+- `pdf_summarise` — summarise-only path.
+- `tabular_redact` — tabular files (CSV/XLSX/Parquet/DOCX) in one call.
 
 ## Alternative: raw Gradio HTTP API (fallback only)
 

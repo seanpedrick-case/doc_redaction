@@ -26,9 +26,9 @@ python -m mcp_doc_redaction.server
 ## Tools
 
 - `status()` → connectivity + available endpoints from `/gradio_api/info`
-- `apply_review_redactions(pdf_bytes, review_csv_bytes, ...)` → calls `/apply_review_redactions_from_uploads`
-- `summarise_document(pdf_bytes, ...)` → calls `/summarise_document_from_upload`
-- `redact_tabular(file_bytes, ...)` → calls `/redact_data_from_upload` and **fails** if not deployed
+- `apply_review_redactions(pdf_bytes, review_csv_bytes, ...)` → calls `/review_apply`
+- `summarise_document(pdf_bytes, ...)` → calls `/pdf_summarise`
+- `redact_tabular(file_bytes, ...)` → calls `/tabular_redact` and **fails** if not deployed
 - `redact_document(file_bytes, ...)` → calls `/redact_document` (may need extension for long-signature deployments)
 
 ## Output format

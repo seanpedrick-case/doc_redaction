@@ -2,8 +2,9 @@
 Headless and short ``gr.api`` entrypoints for agents and Gradio clients.
 
 Consolidates:
-- Review apply (``run_apply_review_redactions``, ``apply_review_redactions_from_uploads``)
-- PDF summarisation (``summarise_document_from_upload``)
+- Review apply (``run_apply_review_redactions``, short `review_apply`)
+- PDF summarisation (short `pdf_summarise`)
+- Tabular redaction (short `tabular_redact`)
 """
 
 from __future__ import annotations
@@ -268,7 +269,8 @@ def apply_review_redactions_from_uploads_for_gradio_api(
                 - output_paths (list[str]): Paths to generated artifacts.
                 - message (str): Short status string.
 
-    Gradio ``gr.api`` handler for a short programmatic apply: it takes ``pdf_file`` (the original PDF), ``review_csv_file`` (a ``*_review_file.csv`` plan), and optional ``output_dir``. Call via ``gradio_client.Client.predict(..., api_name='/apply_review_redactions_from_uploads')``.
+    Gradio ``gr.api`` handler for a short programmatic apply. Prefer calling it via the
+    short route `api_name='/review_apply'`.
     This path does not update the interactive Review tab session.
     """
     pdf_path = normalize_gradio_file_to_path(pdf_file)
@@ -337,7 +339,7 @@ def redact_data_from_upload_for_gradio_api(
         (output_paths, message)
 
     This wrapper deliberately avoids the long Gradio session-driven ``api_name='redact_data'``
-    signature. Call via ``gradio_client.Client.predict(..., api_name='/redact_data_from_upload')``.
+    signature. Prefer calling it via the short route `api_name='/tabular_redact'`.
     """
     data_path = normalize_gradio_file_to_path(data_file)
     if not data_path:
@@ -632,10 +634,98 @@ def summarise_document_from_upload_for_gradio_api(
     return paths, str(status_message or ""), str(summary_display_text or "")
 
 
+def review_apply_api(
+    pdf_file: Any,
+    review_csv_file: Any,
+    output_dir: str | None = None,
+) -> tuple[list[str], str]:
+    """Short-name wrapper; prefer calling this via `api_name='/review_apply'`."""
+    return apply_review_redactions_from_uploads_for_gradio_api(
+        pdf_file=pdf_file, review_csv_file=review_csv_file, output_dir=output_dir
+    )
+
+
+def pdf_summarise_api(
+    pdf_file: Any,
+    ocr_method: str | None = None,
+    summarisation_inference_method: str | None = None,
+    summarisation_format: str | None = None,
+    summarisation_context: str | None = None,
+    summarisation_additional_instructions: str | None = None,
+    summarisation_temperature: float | None = None,
+    summarisation_max_pages_per_group: int | None = None,
+    summarisation_api_key: str | None = None,
+    output_dir: str | None = None,
+    input_dir: str | None = None,
+    page_min: int | None = None,
+    page_max: int | None = None,
+) -> tuple[list[str], str, str]:
+    """Short-name wrapper; prefer calling this via `api_name='/pdf_summarise'`."""
+    return summarise_document_from_upload_for_gradio_api(
+        pdf_file=pdf_file,
+        ocr_method=ocr_method,
+        summarisation_inference_method=summarisation_inference_method,
+        summarisation_format=summarisation_format,
+        summarisation_context=summarisation_context,
+        summarisation_additional_instructions=summarisation_additional_instructions,
+        summarisation_temperature=summarisation_temperature,
+        summarisation_max_pages_per_group=summarisation_max_pages_per_group,
+        summarisation_api_key=summarisation_api_key,
+        output_dir=output_dir,
+        input_dir=input_dir,
+        page_min=page_min,
+        page_max=page_max,
+    )
+
+
+def tabular_redact_api(
+    data_file: Any,
+    redact_entities: list[str] | None = None,
+    output_dir: str | None = None,
+    *,
+    pii_method: str | None = "Local",
+    columns: list[str] | None = None,
+    anon_strategy: str | None = "redact",
+    allow_list: list[str] | None = None,
+    deny_list: list[str] | None = None,
+    language: str | None = "en",
+    max_fuzzy_spelling_mistakes_num: int | None = 0,
+    do_initial_clean: bool | None = True,
+    llm_instruction: str | None = "",
+    llm_entities: list[str] | None = None,
+    comprehend_entities: list[str] | None = None,
+    aws_access_key: str | None = "",
+    aws_secret_key: str | None = "",
+) -> tuple[list[str], str]:
+    """Short-name wrapper; prefer calling this via `api_name='/tabular_redact'`."""
+    return redact_data_from_upload_for_gradio_api(
+        data_file=data_file,
+        redact_entities=redact_entities,
+        output_dir=output_dir,
+        pii_method=pii_method,
+        columns=columns,
+        anon_strategy=anon_strategy,
+        allow_list=allow_list,
+        deny_list=deny_list,
+        language=language,
+        max_fuzzy_spelling_mistakes_num=max_fuzzy_spelling_mistakes_num,
+        do_initial_clean=do_initial_clean,
+        llm_instruction=llm_instruction,
+        llm_entities=llm_entities,
+        comprehend_entities=comprehend_entities,
+        aws_access_key=aws_access_key,
+        aws_secret_key=aws_secret_key,
+    )
+
+
 __all__ = [
     "HeadlessGradioProgress",
     "apply_review_redactions_from_uploads_for_gradio_api",
+    "review_apply_api",
     "normalize_gradio_file_to_path",
+    "redact_data_from_upload_for_gradio_api",
+    "tabular_redact_api",
     "run_apply_review_redactions",
     "summarise_document_from_upload_for_gradio_api",
+    "pdf_summarise_api",
 ]

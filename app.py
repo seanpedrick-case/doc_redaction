@@ -1399,9 +1399,9 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 - download `GET /gradio_api/file={path}` (may 403 under some auth/proxies)\n
 \n
 **Prefer these short endpoints when present**:\n
-- `/apply_review_redactions_from_uploads` (PDF + `*_review_file.csv`)\n
-- `/summarise_document_from_upload` (PDF)\n
-- `/redact_data_from_upload` (CSV/XLSX/Parquet/DOCX)\n
+- `/review_apply` (PDF + `*_review_file.csv`)\n
+- `/pdf_summarise` (PDF)\n
+- `/tabular_redact` (CSV/XLSX/Parquet/DOCX)\n
 \n
 **Gotcha**: do not wrap server-internal upload paths (e.g. `/tmp/gradio_tmp/...`) in `gradio_client.handle_file()`; pass them as plain strings.\n
             """)
@@ -10099,55 +10099,37 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         )
 
     ###
-    # Simple Gradio HTTP API: PDF + review CSV → redacted outputs (gr.api; short data[]).
+    # Simple Gradio HTTP API (short routes for agents/MCP).
     ###
     from tools.simplified_api import (
-        apply_review_redactions_from_uploads_for_gradio_api,
+        pdf_summarise_api,
+        review_apply_api,
+        tabular_redact_api,
     )
 
     gr.api(
-        apply_review_redactions_from_uploads_for_gradio_api,
-        api_name="apply_review_redactions_from_uploads",
+        review_apply_api,
+        api_name="review_apply",
         api_description=(
-            "Apply redactions in one call from the original PDF and a *_review_file.csv "
-            "(same pipeline as POST /agent/apply_review_redactions). Returns a list of "
-            "output paths and a message. Does not update the Review tab UI session."
+            "Apply redactions in one call from the original PDF and a *_review_file.csv. "
+            "Returns (output_paths, message). Does not update the Review tab UI session."
         ),
     )
 
-    from tools.simplified_api import (
-        summarise_document_from_upload_for_gradio_api,
-    )
-
     gr.api(
-        summarise_document_from_upload_for_gradio_api,
-        api_name="summarise_document_from_upload",
+        pdf_summarise_api,
+        api_name="pdf_summarise",
         api_description=(
             "Summarise a PDF in one call (CLI-aligned: OCR/text extract then LLM summary). "
-            "Required: pdf_file. Optional: ocr_method, summarisation_inference_method, "
-            "summarisation_format (concise|detailed), summarisation_context, "
-            "summarisation_additional_instructions, summarisation_temperature, "
-            "summarisation_max_pages_per_group, summarisation_api_key, output_dir, "
-            "input_dir, page_min, page_max — unset fields use cli_redact defaults."
+            "Returns (output_paths, status_message, summary_text)."
         ),
     )
 
-    ###
-    # Simple Gradio HTTP API: tabular file → redacted outputs (gr.api; short data[]).
-    ###
-    from tools.simplified_api import (
-        redact_data_from_upload_for_gradio_api,
-    )
-
     gr.api(
-        redact_data_from_upload_for_gradio_api,
-        api_name="redact_data_from_upload",
+        tabular_redact_api,
+        api_name="tabular_redact",
         api_description=(
             "Redact a single tabular file (CSV/XLSX/Parquet/DOCX) in one call. "
-            "Required: data_file. Optional: redact_entities, output_dir, pii_method, "
-            "columns, anon_strategy, allow_list, deny_list, language, "
-            "max_fuzzy_spelling_mistakes_num, do_initial_clean, llm_instruction, "
-            "llm_entities, comprehend_entities, aws_access_key, aws_secret_key. "
             "Returns (output_paths, message). Does not update the Tabular UI session."
         ),
     )
