@@ -10,6 +10,7 @@ Consolidates:
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from typing import Any, Mapping
 
 import pandas as pd
@@ -71,6 +72,51 @@ def _folder_with_trailing_sep(folder: str) -> str:
     return folder
 
 
+def _resolve_dir_within_base(candidate_dir: str | None, base_dir: str) -> str:
+    """
+    Resolve candidate_dir (or base_dir when None) and enforce containment in base_dir.
+
+    This is a defense-in-depth guard for agent-facing wrappers: it prevents a caller from
+    writing outputs outside the configured base folders.
+    """
+    base_abs = os.path.normpath(os.path.abspath(os.path.expanduser(base_dir)))
+    raw = candidate_dir if candidate_dir is not None else base_dir
+    resolved = os.path.normpath(os.path.abspath(os.path.expanduser(str(raw))))
+    try:
+        common = os.path.commonpath([resolved, base_abs])
+    except ValueError as exc:
+        raise ValueError(f"Invalid directory path: {raw}") from exc
+    if common != base_abs:
+        raise ValueError(f"Directory must be within configured base folder: {base_abs}")
+    return resolved
+
+
+def _filter_files_within_root(paths: Iterable[Any], root_dir: str) -> list[str]:
+    """
+    Keep only existing files contained within root_dir, returning real paths.
+    """
+    safe_root = os.path.realpath(str(root_dir))
+    seen: set[str] = set()
+    kept: list[str] = []
+    for p in paths:
+        if not p:
+            continue
+        resolved = os.path.realpath(str(p))
+        try:
+            within = os.path.commonpath([safe_root, resolved]) == safe_root
+        except ValueError:
+            within = False
+        if not within:
+            continue
+        if not os.path.isfile(resolved):
+            continue
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        kept.append(resolved)
+    return kept
+
+
 def _validate_review_csv_path(path: str) -> None:
     base = (get_file_name_without_type(path) or "").lower()
     if "_review_file" not in base:
@@ -115,10 +161,10 @@ def run_apply_review_redactions(
         cli = dict(merged_cli_defaults)
 
     out_folder = _folder_with_trailing_sep(
-        os.path.abspath(os.path.expanduser(output_dir or OUTPUT_FOLDER))
+        _resolve_dir_within_base(output_dir, OUTPUT_FOLDER)
     )
     in_folder = _folder_with_trailing_sep(
-        os.path.abspath(os.path.expanduser(input_dir or INPUT_FOLDER))
+        _resolve_dir_within_base(input_dir, INPUT_FOLDER)
     )
 
     os.makedirs(out_folder, exist_ok=True)
@@ -215,12 +261,26 @@ def run_apply_review_redactions(
         else:
             out_paths.extend(str(p) for p in item if p)
 
+    safe_output_root = os.path.realpath(out_folder)
     seen: set[str] = set()
     unique_paths: list[str] = []
     for p in out_paths:
-        if p not in seen:
-            seen.add(p)
-            unique_paths.append(p)
+        if not p:
+            continue
+        resolved = os.path.realpath(str(p))
+        try:
+            within_output_root = (
+                os.path.commonpath([safe_output_root, resolved]) == safe_output_root
+            )
+        except ValueError:
+            within_output_root = False
+        if not within_output_root:
+            continue
+        if not os.path.isfile(resolved):
+            continue
+        if resolved not in seen:
+            seen.add(resolved)
+            unique_paths.append(resolved)
 
     return {
         "output_paths": unique_paths,
@@ -350,6 +410,8 @@ def redact_data_from_upload_for_gradio_api(
     out_dir = output_dir
     if isinstance(out_dir, str) and not out_dir.strip():
         out_dir = None
+    safe_out_dir = _resolve_dir_within_base(out_dir, OUTPUT_FOLDER)
+    os.makedirs(safe_out_dir, exist_ok=True)
 
     entities = list(redact_entities or [])
     chosen_cols = list(columns or [])
@@ -370,7 +432,7 @@ def redact_data_from_upload_for_gradio_api(
         chosen_cols=chosen_cols,
         chosen_redact_entities=entities,
         in_allow_list=list(allow_list or []),
-        output_folder=str(out_dir or OUTPUT_FOLDER),
+        output_folder=str(safe_out_dir),
         in_deny_list=list(deny_list or []),
         max_fuzzy_spelling_mistakes_num=(
             int(max_fuzzy_spelling_mistakes_num)
@@ -391,14 +453,15 @@ def redact_data_from_upload_for_gradio_api(
         ),
     )
 
-    paths: list[str] = []
+    flat_paths: list[str] = []
     for item in (out_file_paths, log_files_output_paths):
         if not item:
             continue
         if isinstance(item, str):
-            paths.append(item)
+            flat_paths.append(item)
         else:
-            paths.extend(str(p) for p in item if p)
+            flat_paths.extend(str(p) for p in item if p)
+    paths = _filter_files_within_root(flat_paths, safe_out_dir)
 
     # out_message is usually a list of strings in this workflow
     if isinstance(out_message, list):
@@ -455,8 +518,16 @@ def summarise_document_from_upload_for_gradio_api(
         return a[key]
 
     ocr_m = str(_pick("ocr_method", ocr_method))
-    out_folder = str(_pick("output_dir", output_dir)).strip() or str(a["output_dir"])
-    in_folder = str(_pick("input_dir", input_dir)).strip() or str(a["input_dir"])
+    out_folder = _resolve_dir_within_base(
+        str(_pick("output_dir", output_dir)).strip() or str(a["output_dir"]),
+        OUTPUT_FOLDER,
+    )
+    in_folder = _resolve_dir_within_base(
+        str(_pick("input_dir", input_dir)).strip() or str(a["input_dir"]),
+        INPUT_FOLDER,
+    )
+    os.makedirs(out_folder, exist_ok=True)
+    os.makedirs(in_folder, exist_ok=True)
     p_min = int(_pick("page_min", page_min))
     p_max = int(_pick("page_max", page_max))
 
@@ -630,8 +701,8 @@ def summarise_document_from_upload_for_gradio_api(
         None,
     )
 
-    paths = list(output_files) if output_files else []
-    return paths, str(status_message or ""), str(summary_display_text or "")
+    safe_paths = _filter_files_within_root(list(output_files or []), out_folder)
+    return safe_paths, str(status_message or ""), str(summary_display_text or "")
 
 
 def review_apply_api(

@@ -30,7 +30,11 @@ def _example_review_csv() -> Path:
 
 @pytest.fixture
 def tmp_out_dir() -> str:
-    return tempfile.mkdtemp(prefix="test_agent_apply_")
+    # Security: `run_apply_review_redactions()` now enforces output_dir is under OUTPUT_FOLDER.
+    from tools.config import OUTPUT_FOLDER
+
+    os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+    return tempfile.mkdtemp(prefix="test_agent_apply_", dir=OUTPUT_FOLDER)
 
 
 def test_run_apply_review_redactions_writes_redacted_pdf(tmp_out_dir: str) -> None:
@@ -47,9 +51,15 @@ def test_run_apply_review_redactions_writes_redacted_pdf(tmp_out_dir: str) -> No
         output_dir=tmp_out_dir,
     )
     paths = result.get("output_paths") or []
+    out_dir = str(result.get("output_dir") or tmp_out_dir)
+    safe_out_root = os.path.realpath(out_dir)
     redacted = [p for p in paths if p.endswith("_redacted.pdf")]
     assert redacted, f"expected *_redacted.pdf in {paths!r}"
-    assert all(os.path.isfile(p) for p in redacted)
+    assert all(
+        os.path.commonpath([safe_out_root, os.path.realpath(p)]) == safe_out_root
+        and os.path.isfile(p)
+        for p in redacted
+    )
 
 
 def test_gradio_api_wrapper_accepts_string_paths(tmp_out_dir: str) -> None:

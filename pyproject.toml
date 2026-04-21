@@ -130,7 +130,7 @@ py-modules = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["doc_redaction*", "tools*"]
+include = ["doc_redaction*", "tools*", "mcp_doc_redaction*"]
 exclude = [
     "test*",
     "skills*",
