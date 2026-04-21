@@ -138,23 +138,39 @@ class GradioHttpClient:
         start = time.time()
         sleep_s = initial_sleep_s
         while True:
-            r = self._client.get(
-                f"{self.base_url}/gradio_api/call/{api_name.lstrip('/')}/{event_id}"
-            )
-            r.raise_for_status()
-            try:
-                payload = r.json()
-            except json.JSONDecodeError:
-                # Some deployments stream SSE-like payloads or transient empty bodies.
-                text = (r.text or "").strip()
+            url = f"{self.base_url}/gradio_api/call/{api_name.lstrip('/')}/{event_id}"
+            payload: Any = {}
+            with self._client.stream("GET", url) as r:
+                r.raise_for_status()
+
+                # Many Gradio deployments return JSON, but some return streaming SSE.
+                # We read only a bounded amount to avoid hanging on an open stream.
+                ct = (r.headers.get("content-type") or "").lower()
+                buf = ""
+                max_chars = 128_000
+                try:
+                    for chunk in r.iter_text():
+                        if not chunk:
+                            continue
+                        buf += chunk
+                        if len(buf) >= max_chars:
+                            break
+                        # Stop early if we've received a clear completion marker
+                        if '"status"' in buf or '"type"' in buf or "\ndata:" in buf:
+                            # keep reading a bit more so we likely capture the latest event
+                            if len(buf) > 4096:
+                                break
+                except Exception:
+                    buf = buf or ""
+
+                text = (buf or "").strip()
                 if not text:
                     payload = {}
-                else:
+                elif "text/event-stream" in ct or text.startswith("data:"):
                     data_lines: list[str] = []
                     for line in text.splitlines():
                         if line.startswith("data:"):
                             data_lines.append(line[len("data:") :].strip())
-                    # Try last data line first (usually contains the final JSON)
                     candidate = next(
                         (x for x in reversed(data_lines) if x and x != "[DONE]"), ""
                     )
@@ -164,6 +180,11 @@ class GradioHttpClient:
                         except json.JSONDecodeError:
                             payload = {}
                     else:
+                        payload = {}
+                else:
+                    try:
+                        payload = json.loads(text)
+                    except json.JSONDecodeError:
                         payload = {}
             if payload is None:
                 payload = {}

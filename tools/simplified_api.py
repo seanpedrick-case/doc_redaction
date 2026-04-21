@@ -864,7 +864,6 @@ def doc_redact_api(
     document_file: Any,
     redact_entities: list[str] | None = None,
     output_dir: str | None = None,
-    *,
     ocr_method: str | None = None,
     pii_method: str | None = "Local",
     allow_list: list[str] | None = None,
