@@ -88,7 +88,7 @@ def _resolve_dir_within_base(candidate_dir: str | None, base_dir: str) -> str:
         raise ValueError(f"Invalid directory path: {raw}") from exc
     if common != base_abs:
         raise ValueError(f"Directory must be within configured base folder: {base_abs}")
-    return resolved
+    return _folder_with_trailing_sep(resolved)
 
 
 def _filter_files_within_root(paths: Iterable[Any], root_dir: str) -> list[str]:
@@ -160,12 +160,8 @@ def run_apply_review_redactions(
     else:
         cli = dict(merged_cli_defaults)
 
-    out_folder = _folder_with_trailing_sep(
-        _resolve_dir_within_base(output_dir, OUTPUT_FOLDER)
-    )
-    in_folder = _folder_with_trailing_sep(
-        _resolve_dir_within_base(input_dir, INPUT_FOLDER)
-    )
+    out_folder = _resolve_dir_within_base(output_dir, OUTPUT_FOLDER)
+    in_folder = _resolve_dir_within_base(input_dir, INPUT_FOLDER)
 
     os.makedirs(out_folder, exist_ok=True)
     os.makedirs(in_folder, exist_ok=True)
