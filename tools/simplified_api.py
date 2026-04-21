@@ -454,10 +454,13 @@ def redact_data_from_upload_for_gradio_api(
     chosen_cols = list(columns or [])
 
     (
+        out_message_out,
         out_file_paths,
-        out_message,
-        _key_string,
+        _out_paths_dup,
+        _latest_completed,
         log_files_output_paths,
+        _log_paths_dup,
+        _actual_time,
         _cq,
         _lt_in,
         _lt_out,
@@ -500,11 +503,11 @@ def redact_data_from_upload_for_gradio_api(
             flat_paths.extend(str(p) for p in item if p)
     paths = _filter_files_within_root(flat_paths, safe_out_dir)
 
-    # out_message is usually a list of strings in this workflow
-    if isinstance(out_message, list):
-        msg = "\n".join(str(x) for x in out_message if x)
+    # anonymise_files_with_open_text returns a single final message string at [0]
+    if isinstance(out_message_out, list):
+        msg = "\n".join(str(x) for x in out_message_out if x)
     else:
-        msg = str(out_message or "")
+        msg = str(out_message_out or "")
     msg = msg.strip() or "redact_data completed"
     return paths, msg
 
