@@ -1,10 +1,11 @@
 ---
 name: doc-redaction-modifications
 description: "Skill for modifying existing redactions using the Document Redaction app. Upload + apply via Gradio review_apply (3-param HTTP) or /agent when paths are allowed; Docker output paths; page-by-page review + verification exports."
-version: 1.3.4
+version: 1.3.5
 author: repo-maintained
 license: AGPL-3.0-only
 changelog:
+  - "v1.3.5 (Apr 21, 2026): Expand `review_ocr_export` vs `review_overlay_export` (vision-LLM workflow, session + FileData caveats); cross-link pytest for OCR visualisation."
   - "v1.3.4 (Apr 21, 2026): Add explicit `word_text` -> bbox -> `*_review_file.csv` row recipe; document tested `word_level_ocr_text_search` behavior (similarity range 0..1, requires in-session word-level OCR state)."
   - "v1.3.3 (Apr 21, 2026): Field test notes — `gradio_client` 2.x has no `Client.upload`; use `handle_file` for local PDF/CSV with `/review_apply`, or raw `/gradio_api/upload` then string paths."
   - "v1.3.2 (Apr 21, 2026): Rename short apply endpoint to `review_apply` (remove old route)."
@@ -228,14 +229,42 @@ Important:
 - Always build the `data` array by first calling `GET {BASE_URL}/gradio_api/info` and using the **actual parameter order** for your deployment.
 - Provide the uploaded internal paths for the PDF and edited review CSV in the positions expected by the endpoint.
 
-### Step 5 — (Optional but recommended) Visual verification for the current page
+### Step 5 — (Optional but recommended) Visual verification images for a page
 
-After load (and/or after apply), generate images to sanity-check the page:
+These routes generate **PNG review images** for a single page. They are useful for **human review** and for **multimodal / vision LLMs** that must judge whether OCR looks trustworthy and whether redaction boxes sit on the right text regions.
 
-- `api_name="review_ocr_export"`: shows OCR word boxes for a page (useful to confirm OCR alignment and that the target text exists where you think it does).
-- `api_name="review_overlay_export"`: shows redaction boxes/legend for a page (useful to confirm box placement/coverage).
+| Gradio `api_name` | What it renders | Good for |
+|-------------------|------------------|----------|
+| **`/review_ocr_export`** | Word-level OCR overlays (boxes / line groupings on top of the page raster) | “Is OCR picking up the right tokens / lines? Any obvious misreads or missing text?” |
+| **`/review_overlay_export`** | **Current** redaction boxes from the Review table (`review_df`) on the page raster | “Do boxes cover the intended spans? Any obvious misses or misaligned rectangles?” |
 
-As with other calls, use `/gradio_api/info` to build the correct `data` array, then:
+**Vision-LLM usage pattern**
+
+1. Run the export for page \(n\).
+2. Download the returned PNG (local temp path from `gradio_client`, or `GET /gradio_api/file=...` for raw HTTP).
+3. Ask the model to compare the image against your policy or against the offline `*_ocr_results_with_words_*.csv` / `*_review_file.csv`.
+
+**Session prerequisites (important)**
+
+- Both exports rely on **in-memory Review / OCR state** (word-level OCR-with-words and the review dataframe tied to the current document). Use the **same** `gradio_client` session that already ran a workflow that populates that state (typically **`/redact_document`**, or the full Review prepare path).
+- On the public HF Space, `/gradio_api/info` often shows a **short parameter list** for these routes (e.g. annotator + page + output folder, plus `review_df` for the overlay route) because heavy inputs are carried as **Gradio session state**—**do not** expect a stateless HTTP call without that session.
+
+**`page_annotator` / `AnnotatedImageData` (Gradio 6)**
+
+- Do **not** pass a bare filename string like `"placeholder_image_0.png"` as `image`; Gradio validates **`AnnotatedImageData`** and raises unless `image` is proper **`FileData`** (field-tested).
+- Prefer: `image=handle_file("/path/to/a/real/page.png")` (local path on the agent machine), or a **`FileData`** dict including **`meta: {"_type": "gradio.FileData"}`** and a server-visible **`path`**.
+- Keep `boxes=[]` unless you are intentionally mirroring manual boxes.
+
+**Outputs**
+
+- Both routes target the same output component in the UI: **`OCR/Redaction overlay output`** — a **single image file path** per call.
+
+**Offline parity in this repo**
+
+- Core PNG generation for OCR visuals is unit-tested in [`test/test_review_ocr_visualisation_export.py`](../../test/test_review_ocr_visualisation_export.py) (calls `export_review_page_ocr_visualisation_for_gradio` directly).
+- Remote Hugging Face smoke tests can be **intermittently blocked** by transport timeouts; treat local pytest as authoritative for export math, and HF as an integration check when the network is healthy.
+
+As with other calls, use `/gradio_api/info` to confirm parameter names for your deployment, then poll and download:
 
 - Poll completion via `GET {BASE_URL}/gradio_api/call/{api_name}/{event_id}`
 - Download images via `GET {BASE_URL}/gradio_api/file={internal_path}`
