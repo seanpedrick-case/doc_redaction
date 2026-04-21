@@ -10155,6 +10155,13 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
     )
 
     if not RUN_DIRECT_MODE:
+        # Expose I/O dirs for GET /gradio_api/file=<path> (MCP, curl, API clients).
+        # Without this, Gradio returns 403 "File not allowed" for outputs under OUTPUT_FOLDER.
+        _gradio_file_allowed_paths: list[str] = [
+            str(Path(OUTPUT_FOLDER).resolve()),
+            str(Path(INPUT_FOLDER).resolve()),
+        ]
+
         # If running through command line with uvicorn
         if RUN_FASTAPI:
             if ALLOWED_ORIGINS:
@@ -10191,6 +10198,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                 path="",
                 favicon_path=Path(FAVICON_PATH),
                 mcp_server=RUN_MCP_SERVER,
+                allowed_paths=_gradio_file_allowed_paths,
             )
 
             # Example command to run in uvicorn (in python): uvicorn.run("app:app", host=GRADIO_SERVER_NAME, port=GRADIO_SERVER_PORT)
@@ -10212,6 +10220,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                         root_path=ROOT_PATH,
                         favicon_path=Path(FAVICON_PATH),
                         mcp_server=RUN_MCP_SERVER,
+                        allowed_paths=_gradio_file_allowed_paths,
                     )
                 else:
                     blocks.launch(
@@ -10226,6 +10235,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                         root_path=ROOT_PATH,
                         favicon_path=Path(FAVICON_PATH),
                         mcp_server=RUN_MCP_SERVER,
+                        allowed_paths=_gradio_file_allowed_paths,
                     )
 
     else:
