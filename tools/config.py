@@ -107,7 +107,7 @@ def ensure_folder_within_app_directory(
         ]
         if any(normalized_path.startswith(prefix) for prefix in system_path_prefixes):
             # System paths are allowed but we log a warning
-            #print(f"Warning: Using system path outside app directory: {folder_path}")
+            # print(f"Warning: Using system path outside app directory: {folder_path}")
             return folder_path
         else:
             raise ValueError(

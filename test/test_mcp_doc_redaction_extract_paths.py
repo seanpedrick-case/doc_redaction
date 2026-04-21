@@ -21,4 +21,3 @@ def test_extract_file_like_paths() -> None:
         "/tmp/gradio/c.json",
         "/tmp/gradio/d.png",
     ]
-

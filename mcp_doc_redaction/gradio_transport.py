@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import json
-import os
 import time
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any
 
 import httpx
 
@@ -120,7 +119,9 @@ class GradioHttpClient:
         )
         r.raise_for_status()
         payload = r.json()
-        event_id = payload.get("event_id") or payload.get("id") or payload.get("eventId")
+        event_id = (
+            payload.get("event_id") or payload.get("id") or payload.get("eventId")
+        )
         if not event_id:
             raise RuntimeError(f"Could not find event_id: {payload!r}")
         return str(event_id)
@@ -156,4 +157,3 @@ class GradioHttpClient:
         r = self._client.get(f"{self.base_url}/gradio_api/file={internal_path}")
         r.raise_for_status()
         return r.content
-

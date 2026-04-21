@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
-import json
 import os
 import zipfile
 from dataclasses import dataclass
@@ -87,4 +86,3 @@ def bundle_artifacts(
 
 def zip_bytes_to_base64(zip_bytes: bytes) -> str:
     return base64.b64encode(zip_bytes).decode("ascii")
-

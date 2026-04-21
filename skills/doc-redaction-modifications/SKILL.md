@@ -106,8 +106,8 @@ Important:
 
 After load (and/or after apply), generate images to sanity-check the page:
 
-- `api_name="export_review_page_ocr_visualisation"`: shows OCR word boxes for a page (useful to confirm OCR alignment and that the target text exists where you think it does).
-- `api_name="export_review_redaction_overlay"`: shows redaction boxes/legend for a page (useful to confirm box placement/coverage).
+- `api_name="review_ocr_export"`: shows OCR word boxes for a page (useful to confirm OCR alignment and that the target text exists where you think it does).
+- `api_name="review_overlay_export"`: shows redaction boxes/legend for a page (useful to confirm box placement/coverage).
 
 As with other calls, use `/gradio_api/info` to build the correct `data` array, then:
 

@@ -17,4 +17,3 @@ def test_bundle_artifacts_dedupes_by_hash() -> None:
     # 2 unique contents + manifest.json inside the zip
     assert len(res.manifest.files) == 2
     assert res.manifest.produced_by == "/x"
-

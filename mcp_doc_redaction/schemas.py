@@ -70,4 +70,3 @@ class ArtifactBundle(BaseModel):
     files: list[ArtifactFile]
     notes: list[str] = Field(default_factory=list)
     extra: dict[str, Any] = Field(default_factory=dict)
-

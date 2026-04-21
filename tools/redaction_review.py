@@ -4995,6 +4995,42 @@ def export_review_page_ocr_visualisation_for_gradio(
     return None
 
 
+def review_overlay_export(
+    page_annotator: Optional[AnnotatedImageData],
+    annotate_current_page: float,
+    review_df: pd.DataFrame,
+    doc_full_file_name_textbox: str,
+    output_folder_textbox: str,
+) -> Optional[str]:
+    """Short-name Gradio handler; wraps `export_review_redaction_overlay_for_gradio`."""
+    return export_review_redaction_overlay_for_gradio(
+        page_annotator=page_annotator,
+        annotate_current_page=annotate_current_page,
+        review_df=review_df,
+        doc_full_file_name_textbox=doc_full_file_name_textbox,
+        output_folder_textbox=output_folder_textbox,
+    )
+
+
+def review_ocr_export(
+    page_annotator: Optional[AnnotatedImageData],
+    annotate_current_page: float,
+    all_page_line_level_ocr_results_with_words: list,
+    all_page_line_level_ocr_results_with_words_df_base: Optional[pd.DataFrame],
+    doc_full_file_name_textbox: str,
+    output_folder_textbox: str,
+) -> Optional[str]:
+    """Short-name Gradio handler; wraps `export_review_page_ocr_visualisation_for_gradio`."""
+    return export_review_page_ocr_visualisation_for_gradio(
+        page_annotator=page_annotator,
+        annotate_current_page=annotate_current_page,
+        all_page_line_level_ocr_results_with_words=all_page_line_level_ocr_results_with_words,
+        all_page_line_level_ocr_results_with_words_df_base=all_page_line_level_ocr_results_with_words_df_base,
+        doc_full_file_name_textbox=doc_full_file_name_textbox,
+        output_folder_textbox=output_folder_textbox,
+    )
+
+
 def _warn_and_halt_review_df_validation(msg: str) -> None:
     """
     Show a GUI warning and halt chained Gradio events.

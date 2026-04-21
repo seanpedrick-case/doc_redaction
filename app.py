@@ -294,14 +294,14 @@ from tools.redaction_review import (
     df_select_callback_ocr,
     df_select_callback_textract_api,
     exclude_selected_items_from_redaction,
-    export_review_page_ocr_visualisation_for_gradio,
-    export_review_redaction_overlay_for_gradio,
     get_all_rows_with_same_text,
     get_all_rows_with_same_text_redact,
     get_and_merge_current_page_annotations,
     increase_bottom_page_count_based_on_top,
     increase_page,
     reset_dropdowns,
+    review_ocr_export,
+    review_overlay_export,
     undo_last_removal,
     update_all_entity_df_dropdowns,
     update_all_page_annotation_object_based_on_previous_page,
@@ -6906,7 +6906,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
     )
 
     export_review_ocr_visualisation_btn.click(
-        export_review_page_ocr_visualisation_for_gradio,
+        review_ocr_export,
         inputs=[
             annotator,
             annotate_current_page,
@@ -6916,11 +6916,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             output_folder_textbox,
         ],
         outputs=[redaction_overlay_output_file],
-        api_name="export_review_page_ocr_visualisation",
+        api_name="review_ocr_export",
     )
 
     export_redaction_overlay_btn.click(
-        export_review_redaction_overlay_for_gradio,
+        review_overlay_export,
         inputs=[
             annotator,
             annotate_current_page,
@@ -6929,7 +6929,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             output_folder_textbox,
         ],
         outputs=[redaction_overlay_output_file],
-        api_name="export_review_redaction_overlay",
+        api_name="review_overlay_export",
     )
 
     ###
