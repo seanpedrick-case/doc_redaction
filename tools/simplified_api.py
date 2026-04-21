@@ -28,6 +28,7 @@ from tools.config import (
     OVERWRITE_EXISTING_OCR_RESULTS,
     SAVE_PAGE_OCR_VISUALISATIONS,
 )
+from tools.data_anonymise import anonymise_files_with_open_text
 from tools.file_conversion import (
     is_pdf,
     prepare_image_or_pdf,
@@ -290,6 +291,120 @@ def apply_review_redactions_from_uploads_for_gradio_api(
     )
     paths = list(result.get("output_paths") or [])
     msg = str(result.get("message") or "ok")
+    return paths, msg
+
+
+def redact_data_from_upload_for_gradio_api(
+    data_file: Any,
+    redact_entities: list[str] | None = None,
+    output_dir: str | None = None,
+    *,
+    pii_method: str | None = "Local",
+    columns: list[str] | None = None,
+    anon_strategy: str | None = "redact",
+    allow_list: list[str] | None = None,
+    deny_list: list[str] | None = None,
+    language: str | None = "en",
+    max_fuzzy_spelling_mistakes_num: int | None = 0,
+    do_initial_clean: bool | None = True,
+    llm_instruction: str | None = "",
+    llm_entities: list[str] | None = None,
+    comprehend_entities: list[str] | None = None,
+    aws_access_key: str | None = "",
+    aws_secret_key: str | None = "",
+) -> tuple[list[str], str]:
+    """
+    Short, stateless ``gr.api`` wrapper for the tabular redaction workflow.
+
+    Args:
+        data_file: CSV/XLSX/Parquet/DOCX file. Accepts a path string, a Gradio upload
+            payload (dict/object with ``path``/``name``), or other FileData-like values.
+        redact_entities: Presidio-style entity labels (e.g. PERSON, PHONE_NUMBER).
+        output_dir: Directory to write redacted files and logs. Defaults to OUTPUT_FOLDER.
+        pii_method: One of the tabular PII methods (commonly ``Local`` or ``AWS Comprehend``;
+            LLM-backed methods depend on deployment config).
+        columns: Column names to process (empty/None typically means “auto / all text-like columns”).
+        anon_strategy: Tabular anonymisation strategy (defaults to ``redact``).
+        allow_list / deny_list: Whitelist/blacklist terms.
+        language: Language code (default ``en``).
+        max_fuzzy_spelling_mistakes_num: 0–9; defaults to 0.
+        do_initial_clean: Whether to clean text before detection.
+        llm_instruction / llm_entities: Used only when an LLM PII method is selected.
+        comprehend_entities: Used only when AWS Comprehend is selected.
+        aws_access_key / aws_secret_key: Only needed for AWS Comprehend deployments that do not
+            use IAM role/SSO.
+
+    Returns:
+        (output_paths, message)
+
+    This wrapper deliberately avoids the long Gradio session-driven ``api_name='redact_data'``
+    signature. Call via ``gradio_client.Client.predict(..., api_name='/redact_data_from_upload')``.
+    """
+    data_path = normalize_gradio_file_to_path(data_file)
+    if not data_path:
+        raise ValueError(
+            "data_file is missing or could not be resolved to a path (upload the file first)."
+        )
+
+    out_dir = output_dir
+    if isinstance(out_dir, str) and not out_dir.strip():
+        out_dir = None
+
+    entities = list(redact_entities or [])
+    chosen_cols = list(columns or [])
+
+    (
+        out_file_paths,
+        out_message,
+        _key_string,
+        log_files_output_paths,
+        _cq,
+        _lt_in,
+        _lt_out,
+        _lm,
+    ) = anonymise_files_with_open_text(
+        file_paths=[data_path],
+        in_text="",
+        anon_strategy=str(anon_strategy or "redact"),
+        chosen_cols=chosen_cols,
+        chosen_redact_entities=entities,
+        in_allow_list=list(allow_list or []),
+        output_folder=str(out_dir or OUTPUT_FOLDER),
+        in_deny_list=list(deny_list or []),
+        max_fuzzy_spelling_mistakes_num=(
+            int(max_fuzzy_spelling_mistakes_num)
+            if max_fuzzy_spelling_mistakes_num is not None
+            else 0
+        ),
+        pii_identification_method=str(pii_method or "Local"),
+        chosen_redact_comprehend_entities=list(comprehend_entities or []),
+        aws_access_key_textbox=str(aws_access_key or ""),
+        aws_secret_key_textbox=str(aws_secret_key or ""),
+        do_initial_clean=(
+            bool(do_initial_clean) if do_initial_clean is not None else True
+        ),
+        language=str(language or "en"),
+        custom_llm_instructions=str(llm_instruction or ""),
+        chosen_llm_entities=(
+            list(llm_entities or []) if llm_entities is not None else None
+        ),
+    )
+
+    paths: list[str] = []
+    for item in (out_file_paths, log_files_output_paths):
+        if not item:
+            continue
+        if isinstance(item, str):
+            paths.append(item)
+        else:
+            paths.extend(str(p) for p in item if p)
+
+    # out_message is usually a list of strings in this workflow
+    if isinstance(out_message, list):
+        msg = "\n".join(str(x) for x in out_message if x)
+    else:
+        msg = str(out_message or "")
+    msg = msg.strip() or "redact_data completed"
     return paths, msg
 
 

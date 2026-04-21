@@ -13,7 +13,6 @@ dist/*
 docs/*
 build_deps/*
 user_guide/*
-skills/*
 doc_redaction.egg-info/*
 .venv_pypi_test/*
 cdk/config/*

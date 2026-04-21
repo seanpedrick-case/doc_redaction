@@ -1387,6 +1387,25 @@ with blocks:
 
     gr.Markdown(INTRO_TEXT)
 
+    with gr.Accordion("API for agents (quickstart)", open=False, visible=False):
+        gr.Markdown("""
+If you are an LLM/agent calling this app programmatically, prefer the **short `gr.api` endpoints** and always use the schema from **`GET /gradio_api/info`**.\n
+\n
+**Universal protocol** (any endpoint):\n
+- `GET /gradio_api/info`\n
+- `POST /gradio_api/upload` (multipart field `files`) → internal paths like `/tmp/gradio_tmp/...`\n
+- `POST /gradio_api/call/{api_name}` with `{"data":[...]}`\n
+- poll `GET /gradio_api/call/{api_name}/{event_id}`\n
+- download `GET /gradio_api/file={path}` (may 403 under some auth/proxies)\n
+\n
+**Prefer these short endpoints when present**:\n
+- `/apply_review_redactions_from_uploads` (PDF + `*_review_file.csv`)\n
+- `/summarise_document_from_upload` (PDF)\n
+- `/redact_data_from_upload` (CSV/XLSX/Parquet/DOCX)\n
+\n
+**Gotcha**: do not wrap server-internal upload paths (e.g. `/tmp/gradio_tmp/...`) in `gradio_client.handle_file()`; pass them as plain strings.\n
+            """)
+
     # Examples for PDF/image redaction
     if SHOW_EXAMPLES:
         gr.Markdown(
@@ -10110,6 +10129,26 @@ with blocks:
             "summarisation_additional_instructions, summarisation_temperature, "
             "summarisation_max_pages_per_group, summarisation_api_key, output_dir, "
             "input_dir, page_min, page_max — unset fields use cli_redact defaults."
+        ),
+    )
+
+    ###
+    # Simple Gradio HTTP API: tabular file → redacted outputs (gr.api; short data[]).
+    ###
+    from tools.simplified_api import (
+        redact_data_from_upload_for_gradio_api,
+    )
+
+    gr.api(
+        redact_data_from_upload_for_gradio_api,
+        api_name="redact_data_from_upload",
+        api_description=(
+            "Redact a single tabular file (CSV/XLSX/Parquet/DOCX) in one call. "
+            "Required: data_file. Optional: redact_entities, output_dir, pii_method, "
+            "columns, anon_strategy, allow_list, deny_list, language, "
+            "max_fuzzy_spelling_mistakes_num, do_initial_clean, llm_instruction, "
+            "llm_entities, comprehend_entities, aws_access_key, aws_secret_key. "
+            "Returns (output_paths, message). Does not update the Tabular UI session."
         ),
     )
 

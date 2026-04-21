@@ -45,6 +45,10 @@ services:
       - "1"
       - --presence-penalty
       - "1"
+      - --repeat-penalty
+      - "1"
+      - --spec-type
+      - "ngram-mod"
       - --chat-template-kwargs
       - "{\"preserve_thinking\": true}"
       - --host
@@ -206,19 +210,19 @@ services:
           - llama-inference
 
   qwen9b_q4_gguf:
-    profiles: ["qwen9b"]
+    profiles: ["9b"]
     image: ghcr.io/ggml-org/llama.cpp:server-cuda12
     command:
       - -hf
-      - unsloth/Qwen3.5-9B-A3B-GGUF
+      - unsloth/Qwen3.5-9B-GGUF
       - --hf-file
-      - Qwen3.5-9B-A3B-UD-IQ4_NL.gguf
+      - Qwen3.5-9B-UD-Q4_K_XL.gguf
       - --mmproj-url
       - https://huggingface.co/unsloth/Qwen3.5-9B-A3B-GGUF/resolve/main/mmproj-F16.gguf
       - --n-gpu-layers
-      - "-1"
+      - "999"
       - --ctx-size
-      - "196608"
+      - "131072"
       - --fit
       - "off"
       - --temp
@@ -434,7 +438,8 @@ services:
       - DEFAULT_TEXT_EXTRACTION_MODEL=Local OCR model - PDFs without selectable text
       - DEFAULT_LOCAL_OCR_MODEL=paddle
       - DEFAULT_PII_DETECTION_MODEL=Local
-      - INFERENCE_SERVER_API_URL=http://llama-inference:8080
+      #- INFERENCE_SERVER_API_URL=http://llama-inference:8080
+      - INFERENCE_SERVER_API_URL=http://192.168.0.138:8080
       - DEFAULT_INFERENCE_SERVER_VLM_MODEL=""
       - DEFAULT_INFERENCE_SERVER_PII_MODEL=""
       - CUSTOM_VLM_BACKEND=inference_vlm

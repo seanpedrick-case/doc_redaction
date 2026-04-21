@@ -1,0 +1,275 @@
+---
+name: doc-redaction-modifications
+description: "Skill for modifying existing redactions using the Document Redaction app. Upload + apply via Gradio apply_review_redactions_from_uploads (3-param HTTP) or /agent when paths are allowed; Docker output paths; page-by-page review + verification exports."
+version: 1.3.1
+author: repo-maintained
+license: AGPL-3.0-only
+changelog:
+  - "v1.3.1 (Apr 20, 2026): `apply_review_redactions_from_uploads` return shape (paths + message); `handle_file` vs server-internal paths."
+  - "v1.3.0 (Apr 20, 2026): Docker/output paths; prefer raw HTTP `apply_review_redactions_from_uploads` when `/agent` paths unusable; `{pdf}_review_file.csv` naming; page-scope note."
+  - "v1.2.1 (Apr 20, 2026): Document Gradio `apply_review_redactions_from_uploads` (simple `gr.api` alongside `/agent`)."
+  - "v1.2 (Apr 20, 2026): Prefer `POST /agent/apply_review_redactions` when FastAPI + server paths are available; Gradio apply remains fallback for Spaces-only."
+  - "v1.1 (Apr 20, 2026): Gradio 6 / gradio_client troubleshooting (explicit api_name, arity, async polling, annotator payload); cross-ref `/agent/operations` + richer 501 hints."
+  - "v1.0 (Apr 20, 2026): Initial remote-first rewrite (Gradio HTTP API default; `/agent` limitations; optional word-level search path; page-by-page visual verification via export overlays)."
+---
+
+## Purpose
+
+Modify an existing redaction run. Pick the surface that matches **where files actually live**:
+
+- **Gradio: `apply_review_redactions_from_uploads`** (`/gradio_api/...`) — **three parameters** (PDF path, review CSV path, optional `output_dir` or `null`). Confirmed via `client.view_api()` / `GET /gradio_api/info`. **Raw HTTP** (`POST /gradio_api/call/apply_review_redactions_from_uploads`, poll until done) is often the **most reliable** headless apply after `POST /gradio_api/upload`, including **Docker** setups where outputs are written **inside** the container (see below).
+- **`POST /agent/apply_review_redactions`** ([`AGENTS.md`](../../AGENTS.md)) — best when `RUN_FASTAPI` is on and both paths are **server-local paths the validator accepts** (repo root, `INPUT_FOLDER`, or `OUTPUT_FOLDER`). **Not** a substitute when your only copies of the PDF/CSV live at **ephemeral Gradio paths** (e.g. `/tmp/gradio_tmp/...` inside the container) that **do not** map to an allowed root **or** to a folder you can read from the host without `docker cp` / a bind mount.
+- **Browser/GUI** — fallback.
+
+`load_and_prepare_documents_or_data` and `word_level_ocr_text_search` remain Gradio-session-heavy; see `/agent` limitations below.
+
+### Docker / container outputs (important)
+
+**`gradio_client`** and the Gradio HTTP API both run apply **correctly**, but artifacts are usually written under the app’s configured **`OUTPUT_FOLDER`** (e.g. `/home/user/app/output/` in a Space or Docker image). That path is **inside** the container unless you **bind-mount** it, use **`docker cp`**, or **`docker exec` + archive (e.g. `tar`)**. Planning only “call the API from the host” without one of those is a common reason outputs feel “missing.” Prefer a **mounted output directory**, **`docker cp`**, or downloading via **`GET /gradio_api/file=...`** when your auth/cookies allow it (see the doc-redaction-app skill for `file=` caveats).
+
+## Recommended posture: review page-by-page
+
+For reliability and auditability, process the document **page-by-page**:
+
+- Edit redactions for one page.
+- Generate visual checks for that page.
+- Only then move to the next page.
+
+This reduces “silent misses” and makes it easy to explain what changed. For **small** documents, applying edits **in one pass** is acceptable; for **larger** PDFs, strict page-by-page review reduces error surface.
+
+## Inputs and outputs
+
+### Inputs (from a prior run)
+
+- Original document (PDF)
+- `*_review_file.csv` (the redaction plan)
+- Word-level OCR output (recommended): `*_ocr_results_with_words_*.csv` (and/or `.json`)
+
+### Outputs (after applying modifications)
+
+- Updated redacted document (typically `*_redacted.pdf`)
+- Updated review CSV — naming is **not** a bare `review_file.csv`. The pipeline derives the name from the **input PDF filename** by appending **`_review_file.csv`** to the name that includes the **`.pdf`** extension, e.g. `partnership_agreement.pdf_review_file.csv` (see `tools/file_redaction.py` / `tools/redaction_review.py`). The **input** CSV you upload must still be a `*_review_file.csv` whose basename contains **`_review_file`** (prepare pipeline requirement).
+- Optional per-page visualisations:
+  - OCR visualisation images
+  - Redaction overlay images
+
+## Default workflow (remote-first, API-driven)
+
+### Step 1 — Download the prior run bundle
+
+Obtain the original PDF + the outputs from the previous run (at minimum `*_review_file.csv`).
+
+### Step 2 — Edit `*_review_file.csv` offline
+
+Operate directly on the review CSV:
+
+- **Remove false positives**: delete rows that should not be redacted.
+- **Add missed redactions**: append rows for missed items.
+
+#### Finding missed items (recommended: offline OCR search)
+
+Search the word-level OCR output (`*_ocr_results_with_words_*.csv`) locally:
+
+- Find occurrences of names/phrases/codes.
+- For each match, derive a redaction box (normalized \(0..1\) coordinates) and add a row to `*_review_file.csv`.
+
+Notes:
+
+- Keep edits **page-scoped** (finish page \(n\), validate, then proceed).
+- Prefer exact matching first; use fuzzy/regex carefully.
+
+### Step 3 — Upload edited artifacts to the app (Gradio HTTP API)
+
+1. Upload the original PDF.
+2. Upload the edited `*_review_file.csv`.
+3. (Optional) Upload word-level OCR outputs if your deployment requires them to populate session state.
+
+Endpoint:
+
+- `POST {BASE_URL}/gradio_api/upload` with multipart key `files`
+
+Store the returned internal paths (e.g. `/tmp/gradio/...`).
+
+### Step 4 — Load the review session state
+
+Call the Gradio endpoint:
+
+- `api_name="load_and_prepare_documents_or_data"`
+
+Important:
+
+- Always build the `data` array by first calling `GET {BASE_URL}/gradio_api/info` and using the **actual parameter order** for your deployment.
+- Provide the uploaded internal paths for the PDF and edited review CSV in the positions expected by the endpoint.
+
+### Step 5 — (Optional but recommended) Visual verification for the current page
+
+After load (and/or after apply), generate images to sanity-check the page:
+
+- `api_name="export_review_page_ocr_visualisation"`: shows OCR word boxes for a page (useful to confirm OCR alignment and that the target text exists where you think it does).
+- `api_name="export_review_redaction_overlay"`: shows redaction boxes/legend for a page (useful to confirm box placement/coverage).
+
+As with other calls, use `/gradio_api/info` to build the correct `data` array, then:
+
+- Poll completion via `GET {BASE_URL}/gradio_api/call/{api_name}/{event_id}`
+- Download images via `GET {BASE_URL}/gradio_api/file={internal_path}`
+
+### Step 6 — Apply review redactions to generate updated outputs
+
+**Practical default (uploads + short HTTP):** after `POST /gradio_api/upload` for the PDF and edited CSV, call:
+
+- `POST {BASE_URL}/gradio_api/call/apply_review_redactions_from_uploads`
+- Body: `{"data": [<pdf_internal_path>, <csv_internal_path>, <output_dir_or_null>]}`  
+  Use JSON `null` for the third slot to keep the app’s default **`OUTPUT_FOLDER`** (still inside the container unless configured otherwise).
+
+Poll `GET {BASE_URL}/gradio_api/call/apply_review_redactions_from_uploads/{event_id}` until complete. The response includes the **list of output paths** the server wrote; collect those paths (or copy from the mounted output dir / `docker cp`).
+
+**`gradio_client`:** `Client.predict(..., api_name="/apply_review_redactions_from_uploads", ...)` with the same three arguments works, but you still must **retrieve bytes** from container-local paths unless the output tree is shared with the host.
+
+**Return value (`gradio_client` / `predict`) — structured extraction**
+
+The handler exposes **two** API outputs: a **list of file paths** and a **status string**. In Python you get a **two-tuple** (same idea as a list `[paths, message]`):
+
+```text
+(paths, message)
+```
+
+- **`paths`** — `list[str]`. Field-tested order for the **primary** artifacts is often:
+  1. Original / source PDF path (as processed on the server)
+  2. Redacted PDF (`*_redacted.pdf`)
+  3. Review / overlay PDF (`*_redactions_for_review.pdf`)
+  4. Updated review CSV (`*.pdf_review_file.csv` or equivalent `*_review_file.csv`)
+
+  The pipeline may **append** extra paths (logs, OCR sidecars). Prefer **matching by filename suffix** (`*_redacted.pdf`, `*_review_file.csv`, etc.) over assuming exactly four entries or fixed indices.
+
+- **`message`** — short human-readable summary (prepare/apply status).
+
+Example:
+
+```python
+paths, msg = client.predict(
+    api_name="/apply_review_redactions_from_uploads",
+    pdf_file=pdf_path_str,       # str from client.upload — not handle_file(...)
+    review_csv_file=csv_path_str,
+    output_dir=None,
+)
+# paths[0] … paths[3] often map to pdf → redacted → review → csv; scan paths for suffixes if more files appear
+```
+
+Use **`client.view_api()`** to confirm output names/types for your Gradio version.
+
+**`handle_file()` vs server paths (common trap)**
+
+`handle_file("/local/doc.pdf")` is for files on **the client machine** (or real URLs). After **`POST /gradio_api/upload`**, you receive **server-internal** strings such as `/tmp/gradio_tmp/...`. Passing those strings into **`handle_file(...)`** raises **`ValueError: File does not exist on local filesystem and is not a valid URL`**, because the client cannot see the container filesystem.
+
+- **Initial redaction** from a **local** PDF: `handle_file` is appropriate.
+- **Review apply** using **uploaded** artifacts: pass **`str`** paths returned from **`client.upload`** (or from raw HTTP upload JSON) **directly** as `pdf_file` / `review_csv_file` — **do not** wrap them in `handle_file`.
+
+**When `/agent` is actually preferable:** `POST {BASE_URL}/agent/apply_review_redactions` with JSON body ([`AGENTS.md`](../../AGENTS.md)) when **both** paths are real, allowed server paths (repo root, `INPUT_FOLDER`, or `OUTPUT_FOLDER`)—for example a shared volume or CI job that writes inputs under `/data/...`. If files exist only under **`/tmp/gradio_tmp/...`** after upload, they are often **not** in an allowed root or not visible on the host; use the **Gradio three-parameter** route above instead of fighting path validation.
+
+Fields for `/agent`: `pdf_path`, `review_csv_path` (basename **must** contain `_review_file`), optional `output_dir` / `input_dir`, etc. Auth: `X-Agent-API-Key` when configured.
+
+**Legacy / avoid unless necessary:** `api_name="apply_review_redactions"` — long `data[]` from a chained UI handler; use **`GET /gradio_api/info`** for exact arity or prefer **`apply_review_redactions_from_uploads`**.
+
+### Step 7 — Download outputs and package results
+
+From the completion payloads, extract all file paths and download them:
+
+- `GET {BASE_URL}/gradio_api/file={internal_path}`
+
+Produce:
+
+- `manifest.json` including: filenames, byte sizes, sha256 hashes, timestamps, and the page-by-page decisions.
+- `outputs.zip` containing all outputs + manifest.
+
+## Optional helper path: `word_level_ocr_text_search`
+
+The Gradio endpoint:
+
+- `api_name="word_level_ocr_text_search"`
+
+is useful when you want the app’s own in-session search UI logic (regex toggle, similarity threshold) applied to the **already-loaded** OCR-with-words dataframe.
+
+Guidance:
+
+- Treat this as **optional**: it depends on correct session state being loaded by `load_and_prepare_documents_or_data`.
+- Prefer offline OCR CSV search if you want fewer moving parts and more deterministic control.
+- Use this endpoint when:
+  - You need **regex/fuzzy search** behaviour that should match the app UI’s semantics.
+  - You want the app to return a filtered “candidates table” that can drive page-by-page review.
+- Typical sequence:
+  1. Upload + call `load_and_prepare_documents_or_data`
+  2. Call `word_level_ocr_text_search` with your search text and options
+  3. Use results to decide what to add/remove in the offline `*_review_file.csv`
+  4. Re-upload edited review CSV and re-load, then call **`apply_review_redactions_from_uploads`** (or the long UI `apply_review_redactions` chain if you are mirroring the full Review tab)
+
+## Gradio 6.x and `gradio_client` (avoiding endpoint and arity errors)
+
+Deployments pin **Gradio ≤ 6.10** (`pyproject.toml`). The Python client often breaks in three ways:
+
+1. **Ambiguous or wrong endpoint resolution** — Do not pass a **Python function name** or a fuzzy label to `predict()`. Always pass an explicit route name from **`GET /gradio_api/info`**:
+
+   - For **headless apply after uploads**, prefer: `Client.predict(..., api_name="/apply_review_redactions_from_uploads", ...)` (three arguments).
+   - The legacy Review-tab chain `apply_review_redactions` has a **long** `data` array; avoid it unless you truly need that UI wiring.
+
+2. **`ValueError` on argument count** — The `data` array must match the schema. **`apply_review_redactions_from_uploads`** stays at **three** slots; **`apply_review_redactions`** and **`load_and_prepare_documents_or_data`** are **long** — build from **`/gradio_api/info`**, not from guesses.
+
+3. **Async / event id** — `POST /gradio_api/call/<api_name>` returns an event id; you must **`GET /gradio_api/call/<api_name>/<event_id>`** until the result is ready. `gradio_client` does this for you when you use its high-level call API correctly; raw HTTP callers must poll.
+
+4. **`handle_file` only for local client paths** — Server paths from **`upload`** (e.g. `/tmp/gradio_tmp/...`) must be passed as **plain strings** to `predict`, not wrapped in `handle_file` (see Step 6 above).
+
+**Recommended stable pattern for headless “apply edited review CSV” (any language):**
+
+- `GET {BASE_URL}/gradio_api/info` → confirm **`apply_review_redactions_from_uploads`** arity (expect **three** slots: PDF path, CSV path, optional output dir).
+- `POST {BASE_URL}/gradio_api/upload` (×2) → internal paths for PDF and `*_review_file.csv`.
+- `POST {BASE_URL}/gradio_api/call/apply_review_redactions_from_uploads` with `{"data":[pdf_path, csv_path, null]}` (or a string `output_dir`).
+- Poll `GET {BASE_URL}/gradio_api/call/apply_review_redactions_from_uploads/{event_id}` until complete.
+- Fetch files with `GET {BASE_URL}/gradio_api/file={path}` **or** copy from the container output directory / bind mount.
+
+For **`load_and_prepare_documents_or_data`** (session UI), still read the full schema from `/gradio_api/info` — that route uses a **long** `data` array.
+
+**`gradio_image_annotation` / annotator payloads:** The image annotator is serialized as a **dict** (not a bare file path). It must look like:
+
+- `{"image": "<internal path from upload or server path>", "boxes": [<box dicts>]}`
+
+Use `boxes: []` when you have no manual boxes; each box typically includes geometry plus string `label` and `color` (the frontend expects string colours). If preprocessing fails inside the annotator component, compare your payload to a working UI session (export from browser devtools or reduce to minimal `image` + empty `boxes`).
+
+**Smaller API surface when stateless exports are enough:** `export_review_redaction_overlay` and `export_review_page_ocr_visualisation` are also exposed under **`/agent`** with small JSON bodies (`AGENTS.md`). Prefer those for one-off images if you already have paths and data.
+
+**Multi-document merge (related):** `combine_review_csvs` / `combine_review_pdfs` are separate `api_name`s for packaging many review artifacts; they do not replace **`apply_review_redactions_from_uploads`** (or `/agent/apply_review_redactions` with valid paths) when you need updated PDFs from a review CSV.
+
+**Discovery from FastAPI:** `GET /agent/operations` lists all `api_name` values and marks which routes are Gradio-session-only (**501**).
+
+## `/agent` route limitations (important)
+
+Even if the deployment exposes FastAPI under `/agent`, some review helpers are not implemented there:
+
+- `/agent/load_and_prepare_documents_or_data` → **501**
+- `/agent/word_level_ocr_text_search` → **501**
+
+Reason: these depend on Gradio session state and in-memory dataframes. The **501 JSON body** includes `gradio_http` and `gradio_client_notes` for programmatic callers.
+
+Implemented for headless review apply:
+
+- `/agent/apply_review_redactions` — runs the same prepare + apply core as the Review tab (`tools/simplified_api.py`).
+
+Where `/agent` *is* also useful:
+
+- Initial redaction tasks that operate on server-visible paths (e.g. `/agent/redact_document`) in deployments with shared filesystem access.
+
+## Browser/GUI fallback
+
+Use only when the API surface is blocked:
+
+- Load the PDF and review CSV in the Review workflow.
+- Apply page-by-page modifications in the UI.
+- Export/Download final redacted outputs.
+
+## No-human success checklist
+
+- [ ] All prior-run artifacts downloaded (PDF + `*_review_file.csv` + OCR-with-words)
+- [ ] Page-by-page edits applied to `*_review_file.csv` with a recorded rationale per page
+- [ ] Session loaded via `load_and_prepare_documents_or_data` (Gradio path) **or** PDF + CSV uploaded and applied via **`apply_review_redactions_from_uploads`** **or** paths on allowed roots for `POST /agent/apply_review_redactions`
+- [ ] Visual verification images generated for sampled pages (or all pages for high-risk documents)
+- [ ] Review apply completed (`POST /agent/apply_review_redactions` and/or **`POST /gradio_api/call/apply_review_redactions_from_uploads`**)
+- [ ] Outputs recovered from **container output dir**, **HTTP `file=`**, or **docker cp** / mount — not assumed to exist on the host by magic
+- [ ] Updated outputs downloaded and packaged (`outputs.zip` + `manifest.json`)

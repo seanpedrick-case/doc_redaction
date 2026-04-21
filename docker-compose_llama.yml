@@ -204,13 +204,13 @@ services:
           - llama-inference
 
   qwen9b_q4_gguf:
-    profiles: ["qwen9b"]
+    profiles: ["9b"]
     image: ghcr.io/ggml-org/llama.cpp:server-cuda12
     command:
       - -hf
-      - unsloth/Qwen3.5-9B-A3B-GGUF
+      - unsloth/Qwen3.5-9B-GGUF
       - --hf-file
-      - Qwen3.5-9B-A3B-UD-IQ4_NL.gguf
+      - Qwen3.5-9B-UD-Q4_K_XL.gguf
       - --mmproj-url
       - https://huggingface.co/unsloth/Qwen3.5-9B-A3B-GGUF/resolve/main/mmproj-F16.gguf
       - --n-gpu-layers

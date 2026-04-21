@@ -15,6 +15,36 @@ version: 2.2.0
 
 Redact personally identifiable information (PII) from documents (PDF, PNG, JPG), Word files (DOCX), or tabular data (XLSX/CSV/Parquet). Please see the [User Guide](https://seanpedrick-case.github.io/doc_redaction/src/user_guide.html) for a full walkthrough of all the features in the app.
 
+## For agents (API quickstart)
+
+If you are an LLM/agent interacting with this app over HTTP (e.g. Hugging Face Spaces), **do not guess inputs** from the UI. Use the Gradio schema as the source of truth:
+
+- **Discover schema**: `GET /gradio_api/info`
+- **Upload files**: `POST /gradio_api/upload` (multipart field `files`) → returns server-internal paths like `/tmp/gradio_tmp/...`
+- **Call**: `POST /gradio_api/call/{api_name}` with body `{"data":[...]}` (argument order must match `/gradio_api/info`)
+- **Poll**: `GET /gradio_api/call/{api_name}/{event_id}` until complete
+- **Download outputs**: `GET /gradio_api/file={path}` (note: some deployments return 403 without session cookies)
+
+### Choose the correct route (prefer short `gr.api` endpoints)
+
+Fetch `/gradio_api/info` and then prefer the simplest route that exists:
+
+- **Apply edited review CSV to a PDF**: `/apply_review_redactions_from_uploads` (PDF + `*_review_file.csv` + optional `output_dir`)
+- **Summarise a PDF**: `/summarise_document_from_upload`
+- **Redact tabular files (CSV/XLSX/Parquet/DOCX)**: `/redact_data_from_upload`
+
+If those endpoints are not present in your deployment, fall back to the long UI-chained routes (`/apply_review_redactions`, `/redact_data`, etc.) and build `data[]` strictly from `/gradio_api/info`.
+
+### Common gotchas
+
+- **Arity errors** (`needed: N, got: M`) mean you called a session-heavy UI handler with the wrong `data[]`. Prefer the short endpoints above.
+- **`handle_file()` gotcha** (for `gradio_client` users): do **not** wrap server-internal upload paths (e.g. `/tmp/gradio_tmp/...`) with `handle_file()`. Pass them as plain strings.
+- **Container-only outputs**: outputs may be written to container paths (e.g. `/home/user/app/output/`). Plan to download via `file=...` or use a mounted output directory in Docker.
+
+### Optional: MCP server
+
+If you want external agents to call this app reliably without re-implementing Gradio upload/call/poll/download details, consider an **MCP server** that wraps the three main tasks (`redact_document`, `apply_review_redactions`, `redact_tabular`) behind a small tool interface. See [src/agent_mcp.md](src/agent_mcp.md).
+
 **Use as a library:** After installing from [PyPI](https://pypi.org/project/doc-redaction/) (`pip install doc_redaction`), you can call the same workflows as the Gradio `api_name` routes from Python. See the documentation: [Package API usage (Python)](https://seanpedrick-case.github.io/doc_redaction/src/package_api_usage.html) (source: [src/package_api_usage.qmd](src/package_api_usage.qmd)).
     
 To extract text from documents, the 'Local' options are PikePDF for PDFs with selectable text, and OCR with Tesseract. Use AWS Textract to extract more complex elements e.g. handwriting, signatures, or unclear text. PaddleOCR and VLM support is also provided (see the installation instructions below). 
