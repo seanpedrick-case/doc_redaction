@@ -53,7 +53,15 @@ services:
       - --seed
       - "42"
       - --n-cpu-moe
-      - "0" # Increase this value to fit within your availableVRAM
+      - "0" # Increase this value to fit within your available VRAM
+      - --image_min_tokens
+      - "560"
+      - --image_max_tokens
+      - "2240"
+      - --batch_size
+      - "4096"
+      - --ubatch_size
+      - "4096"
     ports:
       - "8005:8080"
     volumes:
@@ -116,7 +124,15 @@ services:
       - --seed
       - "42"
       - --n-cpu-moe
-      - "0" # Increase this value to fit within your availableVRAM
+      - "0" # Increase this value to fit within your available VRAM
+      - --image_min_tokens
+      - "560"
+      - --image_max_tokens
+      - "2240"
+      - --batch_size
+      - "4096"
+      - --ubatch_size
+      - "4096"
     ports:
       - "8001:8080"
     volumes:
@@ -178,6 +194,14 @@ services:
       - --no-warmup
       - --seed
       - "42"
+      - --image_min_tokens
+      - "560"
+      - --image_max_tokens
+      - "2240"
+      - --batch_size
+      - "4096"
+      - --ubatch_size
+      - "4096"
     ports:
       - "8000:8080"
     volumes:
@@ -244,6 +268,14 @@ services:
       - "q8_0"
       - --cache-type-v
       - "q8_0"
+      - --image_min_tokens
+      - "560"
+      - --image_max_tokens
+      - "2240"
+      - --batch_size
+      - "4096"
+      - --ubatch_size
+      - "4096"
     ports:
       - "8003:8080"
     volumes:
@@ -297,6 +329,14 @@ services:
       - "q8_0"
       - --cache-type-v
       - "q8_0"
+      - --image_min_tokens
+      - "560"
+      - --image_max_tokens
+      - "2240"
+      - --batch_size
+      - "4096"
+      - --ubatch_size
+      - "4096"
     ports:
       - "8002:8080"
     volumes:
@@ -358,6 +398,14 @@ services:
       - "q8_0"
       - --cache-type-v
       - "q8_0"
+      - --image_min_tokens
+      - "560"
+      - --image_max_tokens
+      - "2240"
+      - --batch_size
+      - "4096"
+      - --ubatch_size
+      - "4096"
     ports:
       - "8002:8080"
     volumes:

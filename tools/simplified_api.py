@@ -10,6 +10,8 @@ Consolidates:
 from __future__ import annotations
 
 import os
+import shutil
+import uuid
 from collections.abc import Iterable
 from typing import Any, Mapping
 
@@ -308,6 +310,36 @@ def normalize_gradio_file_to_path(value: Any) -> str:
     return str(path_attr).strip() if path_attr else ""
 
 
+def _is_gradio_ephemeral_upload_path(path: str) -> bool:
+    """True for Gradio ``/gradio_api/upload`` temp files that may be deleted mid-request."""
+    norm = os.path.normpath(path or "").replace("\\", "/").lower()
+    return "gradio_tmp" in norm or "/tmp/gradio/" in norm
+
+
+def _api_upload_staging_dir() -> str:
+    base = _resolve_dir_within_base(None, INPUT_FOLDER).rstrip(os.sep)
+    return os.path.join(base, "api_upload_staging")
+
+
+def stage_gradio_upload_if_ephemeral(src: str) -> str:
+    """
+    Copy HTTP-uploaded files from Gradio's temp tree into ``INPUT_FOLDER`` staging.
+
+    Long-running pipelines (OCR, redaction) otherwise race Gradio/tmp reapers or
+    concurrent uploads, producing "Failed to open file '/tmp/gradio_tmp/...'".
+    """
+    if not src or not os.path.isfile(src):
+        return src
+    if not _is_gradio_ephemeral_upload_path(src):
+        return src
+    staging = _api_upload_staging_dir()
+    os.makedirs(staging, exist_ok=True)
+    base = os.path.basename(src) or "upload.bin"
+    dest = os.path.join(staging, f"{uuid.uuid4().hex}_{base}")
+    shutil.copy2(src, dest)
+    return dest
+
+
 def apply_review_redactions_from_uploads_for_gradio_api(
     pdf_file: Any,
     review_csv_file: Any,
@@ -339,6 +371,12 @@ def apply_review_redactions_from_uploads_for_gradio_api(
         raise ValueError(
             "review_csv_file is missing or could not be resolved to a path (upload the CSV first)."
         )
+    if not os.path.isfile(pdf_path):
+        raise ValueError(f"pdf_file not found or not a file: {pdf_path}")
+    if not os.path.isfile(csv_path):
+        raise ValueError(f"review_csv_file not found or not a file: {csv_path}")
+    pdf_path = stage_gradio_upload_if_ephemeral(pdf_path)
+    csv_path = stage_gradio_upload_if_ephemeral(csv_path)
     out_dir: str | None = output_dir
     if isinstance(out_dir, str) and not out_dir.strip():
         out_dir = None
@@ -402,6 +440,9 @@ def redact_data_from_upload_for_gradio_api(
         raise ValueError(
             "data_file is missing or could not be resolved to a path (upload the file first)."
         )
+    if not os.path.isfile(data_path):
+        raise ValueError(f"data_file not found or not a file: {data_path}")
+    data_path = stage_gradio_upload_if_ephemeral(data_path)
 
     out_dir = output_dir
     if isinstance(out_dir, str) and not out_dir.strip():
@@ -507,6 +548,7 @@ def redact_document_from_upload_for_gradio_api(
         )
     if not os.path.isfile(document_path):
         raise ValueError(f"document_file not found or not a file: {document_path}")
+    document_path = stage_gradio_upload_if_ephemeral(document_path)
 
     out_dir = output_dir
     if isinstance(out_dir, str) and not out_dir.strip():
@@ -595,6 +637,7 @@ def summarise_document_from_upload_for_gradio_api(
     )
     os.makedirs(out_folder, exist_ok=True)
     os.makedirs(in_folder, exist_ok=True)
+    pdf_path = stage_gradio_upload_if_ephemeral(pdf_path)
     p_min = int(_pick("page_min", page_min))
     p_max = int(_pick("page_max", page_max))
 
@@ -887,6 +930,7 @@ __all__ = [
     "apply_review_redactions_from_uploads_for_gradio_api",
     "review_apply_api",
     "normalize_gradio_file_to_path",
+    "stage_gradio_upload_if_ephemeral",
     "redact_data_from_upload_for_gradio_api",
     "redact_document_from_upload_for_gradio_api",
     "tabular_redact_api",
