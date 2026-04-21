@@ -1,10 +1,12 @@
 ---
 name: doc-redaction-app
-description: "Agent skill for the Document Redaction app. Online-first: gradio_client examples; discover outputs via client.view_api() / runtime len(result); raw /gradio_api HTTP as fallback; optional /agent."
-version: 1.2.3
+description: "Agent skill for the Document Redaction app. Online-first: gradio_client examples; discover outputs via gradio_api/info or view_api() stdout / runtime len(result); raw /gradio_api HTTP as fallback; optional /agent; optional MCP package mcp_doc_redaction/ (server.py, README.md)."
+version: 1.2.5
 author: repo-maintained
 license: AGPL-3.0-only
 changelog:
+  - "v1.2.5 (Apr 21, 2026): Document `mcp_doc_redaction` package path, entrypoints, env vars, tool→route map, and IDE registration."
+  - "v1.2.4 (Apr 21, 2026): Clarify `view_api()` returns None but prints docs; add `/doc_redact` to short routes; Windows client download paths; optional MCP note; note duplicate total_pages in `/redact_document` tuple."
   - "v1.2.3 (Apr 20, 2026): `handle_file` caveat — server paths from `upload` must be plain strings, not handle_file-wrapped."
   - "v1.2.2 (Apr 20, 2026): Drop stale 41-index table; align with deployments where redact_document exposes ~12 API outputs—view_api + introspection only."
   - "v1.2.1 (Apr 20, 2026): Top-level `handle_file` import; `client.view_api()` wording; tuple-length caveats; DataFrame/bbox guidance; `client.upload` vs `handle_file`."
@@ -15,25 +17,72 @@ changelog:
 
 ## Overview
 
-This skill enables an LLM to redact a document **end-to-end without human intervention** when the app is deployed remotely (online-only; no shared filesystem). It supports three access surfaces, in **recommended order**:
+This skill enables an LLM to redact a document **end-to-end without human intervention** when the app is deployed remotely (online-only; no shared filesystem). It supports these access surfaces, in **recommended order**:
 
 1. **`gradio_client` (recommended)** — same Gradio app as the UI, but the official client handles **uploads, queueing, and SSE/streaming**; fewer moving parts than hand-written HTTP polling.
-2. **Raw Gradio HTTP API** (`/gradio_api/*`) — works when you must use plain HTTP, but **file download and polling are deployment-sensitive** (see below).
-3. **FastAPI `/agent` (optional)** — simpler JSON for some tasks, but expects **server-local file paths** unless you only use routes that accept uploads.
+2. **MCP `mcp_doc_redaction` (optional, e.g. in Cursor)** — calls the same deployment using `DOC_REDACTION_BASE_URL` and the short routes `/doc_redact`, `/review_apply`, `/tabular_redact`, `/pdf_summarise` (upload + zip manifest); useful when tools are wired instead of embedding large base64 payloads in chat. See **[MCP package: `mcp_doc_redaction`](#mcp-package-mcp_doc_redaction)** below for paths and wiring.
+3. **Raw Gradio HTTP API** (`/gradio_api/*`) — works when you must use plain HTTP, but **file download and polling are deployment-sensitive** (see below).
+4. **FastAPI `/agent` (optional)** — simpler JSON for some tasks, but expects **server-local file paths** unless you only use routes that accept uploads.
+
+### MCP package: `mcp_doc_redaction`
+
+**Repository layout (clone this repo):**
+
+| Item | Path |
+|------|------|
+| Package root | `mcp_doc_redaction/` (sibling of `app.py`, `tools/`) |
+| MCP tool registration and handlers | `mcp_doc_redaction/server.py` (`FastMCP("doc_redaction")`; functions `status`, `redact_document`, `redact_tabular`, `summarise_document`, `apply_review_redactions`) |
+| Gradio HTTP client (upload, call, poll, download) | `mcp_doc_redaction/gradio_transport.py` |
+| Zip + manifest schemas | `mcp_doc_redaction/artifact_bundle.py`, `mcp_doc_redaction/schemas.py` |
+| Short human readme | `mcp_doc_redaction/README.md` |
+
+**Packaging:** the setuptools config includes this package via `include = ["mcp_doc_redaction*"]` in `pyproject.toml`. The **`[project.scripts]`** entry registers the console command **`mcp_doc_redaction`** → **`mcp_doc_redaction.server:main`**.
+
+**Install and run (from repo root, with a venv that has app deps + MCP SDK):**
+
+- Install the project in editable mode (see project `README.md` / `pyproject.toml`). The optional extra **`[mcp]`** in `pyproject.toml` adds **`gradio[mcp]`**; that is **not** the same as the **`mcp`** PyPI package used by `server.py`.
+- Install the **Model Context Protocol SDK** if needed: **`pip install mcp`** (imports as `mcp.server.fastmcp` / `FastMCP` in `mcp_doc_redaction/server.py`).
+- Start the server either:
+  - **`mcp_doc_redaction`** (console script from `[project.scripts]`), or
+  - **`python -m mcp_doc_redaction.server`**
+
+**Required / optional environment:**
+
+| Variable | Required | Role |
+|----------|----------|------|
+| `DOC_REDACTION_BASE_URL` | Yes (must be non-empty in server code) | HTTPS base URL of the Gradio app, e.g. `https://seanpedrickcase-document-redaction.hf.space` |
+| `HF_TOKEN` | No | Bearer token for private or gated Hugging Face Spaces |
+
+**Tool names → remote Gradio short routes** (binary in / zip+manifest out):
+
+| MCP tool | Gradio `api_name` |
+|----------|-------------------|
+| `status` | *(reads `/gradio_api/info` only)* |
+| `redact_document` | `/doc_redact` |
+| `apply_review_redactions` | `/review_apply` |
+| `summarise_document` | `/pdf_summarise` |
+| `redact_tabular` | `/tabular_redact` |
+
+**Return value:** each processing tool returns **`zip_base64`** (base64-encoded zip of downloaded artifacts plus **`manifest.json`**) and **`manifest`** (parsed dict).
+
+**Cursor / MCP client config:** point the server **command** at your Python interpreter and **`-m mcp_doc_redaction.server`** (or the `mcp_doc_redaction` executable on `PATH`), and set **`env`** / environment so `DOC_REDACTION_BASE_URL` (and `HF_TOKEN` if needed) are present when the process starts. The label shown in the IDE (e.g. `user-doc_redaction_local`) is your **local MCP server name**, not the Python package name.
+
+**Direct Python reuse:** you can import the same call path the MCP uses, e.g. **`from mcp_doc_redaction.server import redact_document`** (pass **`bytes`** and filenames as in the tool signatures), when automation should not go through the MCP wire protocol.
 
 ## Most efficient route (recommended): `gradio_client`
 
 Use the Python package **`gradio_client`** with a version **compatible with the server’s Gradio** (install from the same major line as the deployment, e.g. Space or `requirements.txt`).
 
-- **Discover**: instantiate `client = Client(...)`, then **`client.view_api()`** (or `GET /gradio_api/info`).
+- **Discover**: instantiate `client = Client(...)` (often prints API docs immediately), then **`client.view_api()`** — it **prints** usage to stdout but **typically returns `None`**; do not assign its return value for parsing. Prefer **`GET /gradio_api/info`** (same contract) when you need JSON or a stable machine-readable listing.
 - **Upload**: two patterns work, depending on the endpoint signature: (1) pass **`handle_file("/path/to.pdf")`** inside `predict` kwargs when the file exists **on the client machine** (shown below); (2) call **`client.upload(path)`** and pass the returned **string** (e.g. `/tmp/gradio_tmp/...` on the server) **directly**—**do not** wrap server paths in **`handle_file`**, or you get `ValueError: File does not exist on local filesystem and is not a valid URL`. Same trap when switching from “local redaction” workflows to “already uploaded” review apply (see **doc-redaction-modifications** skill).
 - **Call**: `client.predict(..., api_name="/redact_document", **kwargs)` (leading slash matches this app’s `gr.api` / `client.view_api()` names).
-- **Outputs**: returned paths are often under `/tmp/gradio/...` on the server. If your test runner **shares a volume** with the app container, you can **read those paths from disk** instead of HTTP-downloading them.
+- **Outputs**: on the **server**, paths are often under **`/tmp/gradio/...`**. The **`gradio_client`** may **download** files to the **client** machine instead; on **Windows** that is commonly **`%LOCALAPPDATA%\Temp\gradio\...`**. If your test runner **shares a volume** with the app container, you can **read server paths from disk** instead of HTTP-downloading them.
 
 ### Prefer short endpoints when available
 
-For programmatic agents, prefer the short `gr.api` routes when present in `client.view_api()` / `/gradio_api/info`:
+For programmatic agents, prefer the short `gr.api` routes when present in the printed **`view_api()`** output or **`/gradio_api/info`**:
 
+- `/doc_redact` — PDF/image redaction with **far fewer inputs** than full `/redact_document` (good default for agents that only need upload + entities + OCR/PII options).
 - `/review_apply` — apply edited review CSV to a PDF
 - `/pdf_summarise` — summarise a PDF
 - `/tabular_redact` — redact a tabular file (CSV/XLSX/Parquet/DOCX)
@@ -79,13 +128,15 @@ In **`doc_redaction`** the `combined_out_message` input is connected to a **`gr.
 
 **Never hard-code index 12, 20, 40, etc.** from old docs. Instead:
 
-1. Read **`client.view_api()`** and note each **returned** parameter name and type for `/redact_document`.
+1. Read **`/gradio_api/info`** (or the **`client.view_api()`** printout) and note each **returned** parameter name and type for `/redact_document`.
 2. After `result = client.predict(...)`, assert **`len(result)`** matches that output list.
 3. Locate artifacts by **shape**, not magic indices:
    - **Summary / status** — usually an early **`str`**.
    - **Paths** — **`str`** ending in `.pdf` / `.csv` / `.json`, or **`list`** of such strings.
    - **Tabular review / bbox data** — **`dict`** with **`headers`** and **`data`** (Gradio **Dataframe** serialization). There may be **more than one** such dict (e.g. line OCR vs decision table); pick the one whose **headers** match review/bbox columns, or use the file paths in `result` and read **`*_review_file.csv`** on disk.
    - **Rich OCR** — **`list`** of per-page dicts when exposed; otherwise rely on **`*_ocr_results_with_words_*.json`** under **`/tmp/gradio`** or your download step.
+
+**Duplicate outputs:** the API may list **`total_pages` twice** in the return tuple (two **`Number`** slots); treat them as routine duplication by Gradio, not separate semantics—**verify counts from `output_summary` / files** if unsure.
 
 **Bounding boxes:** encoded as **rows** inside those **`headers`/`data`** tables and/or in **`*_ocr_results_with_words_*.json`** (`words`, `bounding_box` per line). If a field test saw bbox-like data at **`result[6]`**, that only applies when **`len(result) > 6`** and that slot is a dataframe dict—**verify on your deployment**.
 
@@ -123,6 +174,7 @@ Saved as a **JSON list** of per-page records. Each page is shaped like `{"page":
 
 When they fit the task, prefer the dedicated wrappers (short `data[]`, less brittle):
 
+- `doc_redact` — PDF/image redaction without the full `/redact_document` control surface.
 - `review_apply` — PDF + `*_review_file.csv`.
 - `pdf_summarise` — summarise-only path.
 - `tabular_redact` — tabular files (CSV/XLSX/Parquet/DOCX) in one call.

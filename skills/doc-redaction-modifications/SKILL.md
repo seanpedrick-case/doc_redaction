@@ -1,10 +1,12 @@
 ---
 name: doc-redaction-modifications
 description: "Skill for modifying existing redactions using the Document Redaction app. Upload + apply via Gradio review_apply (3-param HTTP) or /agent when paths are allowed; Docker output paths; page-by-page review + verification exports."
-version: 1.3.2
+version: 1.3.4
 author: repo-maintained
 license: AGPL-3.0-only
 changelog:
+  - "v1.3.4 (Apr 21, 2026): Add explicit `word_text` -> bbox -> `*_review_file.csv` row recipe; document tested `word_level_ocr_text_search` behavior (similarity range 0..1, requires in-session word-level OCR state)."
+  - "v1.3.3 (Apr 21, 2026): Field test notes — `gradio_client` 2.x has no `Client.upload`; use `handle_file` for local PDF/CSV with `/review_apply`, or raw `/gradio_api/upload` then string paths."
   - "v1.3.2 (Apr 21, 2026): Rename short apply endpoint to `review_apply` (remove old route)."
   - "v1.3.1 (Apr 20, 2026): (Superseded) Previously used `apply_review_redactions_from_uploads` naming."
   - "v1.3.0 (Apr 20, 2026): Docker/output paths; page-scope note."
@@ -73,6 +75,130 @@ Search the word-level OCR output (`*_ocr_results_with_words_*.csv`) locally:
 
 - Find occurrences of names/phrases/codes.
 - For each match, derive a redaction box (normalized \(0..1\) coordinates) and add a row to `*_review_file.csv`.
+
+Concrete mapping (field-tested on `example_of_emails_sent_to_a_professor_before_applying_ocr_results_with_words_*.csv`):
+
+- OCR columns include: `page`, `word_text`, `word_x0`, `word_y0`, `word_x1`, `word_y1` (plus line-level fields).
+- Review CSV target columns: `image,page,label,color,xmin,ymin,xmax,ymax,id,text`.
+- Suggested row mapping for a `word_text` match:
+  - `image` -> `placeholder_image_{page-1}.png`
+  - `page` -> OCR `page`
+  - `label` -> `CUSTOM` (or your policy label)
+  - `color` -> `(0, 0, 0)` (or deployment default)
+  - `xmin,ymin,xmax,ymax` -> `word_x0,word_y0,word_x1,word_y1`
+  - `id` -> new unique token/string
+  - `text` -> OCR `word_text`
+- Then upload the modified `*_review_file.csv` and run `review_apply`.
+- CSVs may include BOM-prefixed first headers (e.g. `\ufeffpage` / `\ufeffimage`), so read with `utf-8-sig` when scripting edits.
+
+Minimal executable snippet (offline `word_text` search -> append row -> apply):
+
+```python
+import csv
+import random
+import string
+import tempfile
+from pathlib import Path
+from gradio_client import Client, handle_file
+
+BASE_URL = "https://seanpedrickcase-document-redaction.hf.space"
+PDF_PATH = Path("example_data/example_of_emails_sent_to_a_professor_before_applying.pdf")
+REVIEW_CSV = Path("example_data/example_outputs/example_of_emails_sent_to_a_professor_before_applying_review_file.csv")
+OCR_WORDS_CSV = Path("example_data/example_outputs/example_of_emails_sent_to_a_professor_before_applying_ocr_results_with_words_textract.csv")
+SEARCH_WORD = "professor"
+
+# 1) Find a word match in OCR output (column: word_text)
+with OCR_WORDS_CSV.open(newline="", encoding="utf-8-sig") as f:
+    ocr_rows = csv.DictReader(f)
+    match = next((r for r in ocr_rows if (r.get("word_text") or "").lower() == SEARCH_WORD), None)
+if not match:
+    raise RuntimeError(f"No word_text match for '{SEARCH_WORD}'")
+
+# 2) Append a new review row using word bbox columns
+with REVIEW_CSV.open(newline="", encoding="utf-8-sig") as f:
+    existing = list(csv.DictReader(f))
+fieldnames = list(existing[0].keys())  # preserves BOM-prefixed first header if present
+image_col = fieldnames[0]
+page = int(float(match["page"]))
+new_row = {
+    image_col: f"placeholder_image_{max(page - 1, 0)}.png",
+    "page": str(page),
+    "label": "CUSTOM",
+    "color": "(0, 0, 0)",
+    "xmin": match["word_x0"],
+    "ymin": match["word_y0"],
+    "xmax": match["word_x1"],
+    "ymax": match["word_y1"],
+    "id": "".join(random.choice(string.ascii_letters + string.digits) for _ in range(12)),
+    "text": match["word_text"],
+}
+
+tmp_dir = Path(tempfile.mkdtemp(prefix="review_mod_"))
+edited_review_csv = tmp_dir / REVIEW_CSV.name  # keep *_review_file.csv naming
+with edited_review_csv.open("w", newline="", encoding="utf-8") as f:
+    w = csv.DictWriter(f, fieldnames=fieldnames)
+    w.writeheader()
+    w.writerows(existing)
+    w.writerow(new_row)
+
+# 3) Apply edits (short route: /review_apply)
+client = Client(BASE_URL)
+paths, message = client.predict(
+    api_name="/review_apply",
+    pdf_file=handle_file(str(PDF_PATH.resolve())),
+    review_csv_file=handle_file(str(edited_review_csv.resolve())),
+    output_dir=None,
+)
+print("apply message:", message)
+print("output paths:", paths)
+```
+
+Minimal executable snippet (raw HTTP upload + `review_apply` polling):
+
+```python
+import json
+from pathlib import Path
+import httpx
+
+BASE_URL = "https://seanpedrickcase-document-redaction.hf.space"
+PDF_PATH = Path("example_data/example_of_emails_sent_to_a_professor_before_applying.pdf")
+EDITED_REVIEW_CSV = Path("path/to/edited_review_file.csv")  # basename should contain _review_file
+
+with httpx.Client(timeout=120.0) as client:
+    # 1) Upload PDF + edited review CSV
+    up_pdf = client.post(
+        f"{BASE_URL}/gradio_api/upload",
+        files={"files": (PDF_PATH.name, PDF_PATH.read_bytes())},
+    )
+    up_pdf.raise_for_status()
+    pdf_internal = up_pdf.json()[0]
+
+    up_csv = client.post(
+        f"{BASE_URL}/gradio_api/upload",
+        files={"files": (EDITED_REVIEW_CSV.name, EDITED_REVIEW_CSV.read_bytes())},
+    )
+    up_csv.raise_for_status()
+    csv_internal = up_csv.json()[0]
+
+    # 2) Call short apply route with 3-slot data payload
+    call = client.post(
+        f"{BASE_URL}/gradio_api/call/review_apply",
+        content=json.dumps({"data": [pdf_internal, csv_internal, None]}),
+        headers={"Content-Type": "application/json"},
+    )
+    call.raise_for_status()
+    event_id = call.json()["event_id"]
+
+    # 3) Poll until completion (SSE payload includes final `data`)
+    poll = client.get(f"{BASE_URL}/gradio_api/call/review_apply/{event_id}")
+    poll.raise_for_status()
+    sse_text = poll.text
+
+print("event_id:", event_id)
+print("raw poll body starts with:", sse_text[:200])
+# Parse the final `data:` JSON block to extract output file paths, then download with:
+# GET {BASE_URL}/gradio_api/file={internal_path}
+```
 
 Notes:
 
@@ -144,19 +270,24 @@ The handler exposes **two** API outputs: a **list of file paths** and a **status
 
 - **`message`** — short human-readable summary (prepare/apply status).
 
-Example:
+Example (local PDF and `*_review_file.csv` on the agent machine — **field-tested** with `gradio_client` 2.4):
 
 ```python
+from gradio_client import Client, handle_file
+
+client = Client(BASE_URL)  # optional hf_token=... for private Spaces
 paths, msg = client.predict(
     api_name="/review_apply",
-    pdf_file=pdf_path_str,       # str from client.upload — not handle_file(...)
-    review_csv_file=csv_path_str,
+    pdf_file=handle_file("/path/to/document.pdf"),
+    review_csv_file=handle_file("/path/to/document.pdf_review_file.csv"),  # basename must contain `_review_file`
     output_dir=None,
 )
-# paths[0] … paths[3] often map to pdf → redacted → review → csv; scan paths for suffixes if more files appear
+# paths: list of server output paths (often 3–4+); scan for suffixes *_redacted.pdf, *_review_file.csv, etc.
 ```
 
-Use **`client.view_api()`** to confirm output names/types for your Gradio version.
+Some **`gradio_client`** versions expose a helper **`upload`**; **`Client` in 2.4.x does not**. If you use **`POST /gradio_api/upload`** instead, pass the returned **internal path strings** as **`pdf_file`** / **`review_csv_file`** (no `handle_file` wrapper — see trap below).
+
+Use **`client.view_api()`** (printed docs; return may be `None`) or **`GET /gradio_api/info`** to confirm output names/types for your Gradio version.
 
 **`handle_file()` vs server paths (common trap)**
 
@@ -197,11 +328,14 @@ Guidance:
 - Use this endpoint when:
   - You need **regex/fuzzy search** behaviour that should match the app UI’s semantics.
   - You want the app to return a filtered “candidates table” that can drive page-by-page review.
+- Inputs are currently lightweight: `search_text`, `similarity_threshold`, `use_regex_flag`.
+  - `similarity_threshold` is a float in **`0..1`** (passing `100` fails validation).
+- Return shape (tested): `(filtered_df, artifact_paths)` where `filtered_df` has columns like `page,line,word_text,index`.
 - Typical sequence:
-  1. Upload + call `load_and_prepare_documents_or_data`
-  2. Call `word_level_ocr_text_search` with your search text and options
-  3. Use results to decide what to add/remove in the offline `*_review_file.csv`
-  4. Re-upload edited review CSV and re-load, then call **`review_apply`** (or the long UI `apply_review_redactions` chain if you are mirroring the full Review tab)
+  1. Ensure word-level OCR state exists in the same Gradio session (most reliable: run `redact_document` first, or load a state that includes OCR-with-words).
+  2. Call `word_level_ocr_text_search` with your search text and options.
+  3. Use results to decide what to add/remove in the offline `*_review_file.csv`.
+  4. Re-upload edited review CSV and re-load, then call **`review_apply`** (or the long UI `apply_review_redactions` chain if you are mirroring the full Review tab).
 
 ## Gradio 6.x and `gradio_client` (avoiding endpoint and arity errors)
 
