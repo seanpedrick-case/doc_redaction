@@ -23,6 +23,70 @@ def _auth_headers(hf_token: str | None) -> dict[str, str]:
     return {}
 
 
+def _parse_gradio_sse_final_payload(buffer: str) -> dict[str, Any] | None:
+    """
+    Parse Gradio server-sent events and return a payload dict when `event: complete`
+    has been received with parsable `data:` JSON.
+
+    Gradio signals success with SSE lines::
+
+        event: complete
+        data: [...]
+
+    not with ``{\"status\": \"complete\"}``. Without this, HTTP clients poll forever
+    while the Space has already finished.
+
+    Returns None if the buffer does not yet contain a complete ``event: complete`` /
+    ``data:`` pair (e.g. still streaming, or truncated JSON).
+
+    Raises RuntimeError on ``event: error``.
+    """
+    lines = buffer.replace("\r\n", "\n").split("\n")
+    i = 0
+    last_complete: Any | None = None
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if not stripped:
+            i += 1
+            continue
+        if not stripped.lower().startswith("event:"):
+            i += 1
+            continue
+        ev = stripped.split(":", 1)[1].strip().lower()
+        i += 1
+        if i >= len(lines):
+            break
+        dline = lines[i].strip()
+        i += 1
+        if not dline.lower().startswith("data:"):
+            continue
+        raw = dline.split(":", 1)[1].strip() if ":" in dline else ""
+        if ev == "heartbeat":
+            continue
+        if ev == "error":
+            try:
+                detail = json.loads(raw) if raw else raw
+            except json.JSONDecodeError:
+                detail = raw
+            raise RuntimeError(f"Gradio event:error: {detail!r}")
+        if ev == "complete" and raw and raw != "[DONE]":
+            try:
+                last_complete = json.loads(raw)
+            except json.JSONDecodeError:
+                # Truncated ``data:`` line while more chunks are incoming
+                pass
+    if last_complete is None:
+        return None
+    if isinstance(last_complete, dict):
+        return last_complete
+    return {"data": last_complete}
+
+
+def _buffer_looks_like_gradio_sse(buf: str) -> bool:
+    b = buf.lstrip().lower()
+    return b.startswith("event:") or "\nevent:" in b
+
+
 def extract_file_like_paths(value: Any) -> list[str]:
     """
     Recursively extract Gradio file paths from a completed payload.
@@ -139,34 +203,48 @@ class GradioHttpClient:
         sleep_s = initial_sleep_s
         while True:
             url = f"{self.base_url}/gradio_api/call/{api_name.lstrip('/')}/{event_id}"
-            payload: Any = {}
+            payload = {}
             with self._client.stream("GET", url) as r:
                 r.raise_for_status()
 
-                # Many Gradio deployments return JSON, but some return streaming SSE.
-                # We read only a bounded amount to avoid hanging on an open stream.
                 ct = (r.headers.get("content-type") or "").lower()
                 buf = ""
-                max_chars = 128_000
+                max_chars = 2_000_000
+                is_sse = "text/event-stream" in ct
                 try:
                     for chunk in r.iter_text():
-                        if not chunk:
-                            continue
-                        buf += chunk
+                        if chunk:
+                            buf += chunk
+                        if not is_sse and _buffer_looks_like_gradio_sse(buf):
+                            is_sse = True
+                        if is_sse:
+                            try:
+                                done = _parse_gradio_sse_final_payload(buf)
+                            except RuntimeError:
+                                raise
+                            if done is not None:
+                                return CompletedCall(api_name=api_name, payload=done)
+                        elif not is_sse:
+                            if '"status"' in buf or '"type"' in buf:
+                                if len(buf) > 4096:
+                                    break
                         if len(buf) >= max_chars:
                             break
-                        # Stop early if we've received a clear completion marker
-                        if '"status"' in buf or '"type"' in buf or "\ndata:" in buf:
-                            # keep reading a bit more so we likely capture the latest event
-                            if len(buf) > 4096:
-                                break
                 except Exception:
                     buf = buf or ""
 
                 text = (buf or "").strip()
-                if not text:
+                if is_sse or _buffer_looks_like_gradio_sse(text):
+                    try:
+                        done = _parse_gradio_sse_final_payload(buf)
+                    except RuntimeError:
+                        raise
+                    if done is not None:
+                        return CompletedCall(api_name=api_name, payload=done)
                     payload = {}
-                elif "text/event-stream" in ct or text.startswith("data:"):
+                elif not text:
+                    payload = {}
+                elif text.startswith("data:"):
                     data_lines: list[str] = []
                     for line in text.splitlines():
                         if line.startswith("data:"):
@@ -176,22 +254,32 @@ class GradioHttpClient:
                     )
                     if candidate:
                         try:
-                            payload = json.loads(candidate)
+                            parsed: Any = json.loads(candidate)
                         except json.JSONDecodeError:
-                            payload = {}
+                            parsed = {}
+                        payload = (
+                            parsed if isinstance(parsed, dict) else {"data": parsed}
+                        )
                     else:
                         payload = {}
                 else:
                     try:
-                        payload = json.loads(text)
+                        parsed = json.loads(text)
                     except json.JSONDecodeError:
-                        payload = {}
+                        parsed = {}
+                    payload = parsed if isinstance(parsed, dict) else {"data": parsed}
             if payload is None:
                 payload = {}
             if not isinstance(payload, dict):
                 payload = {"data": payload}
             status = str(payload.get("status") or payload.get("type") or "").lower()
             if status in ("complete", "completed", "success", "succeeded", "done"):
+                return CompletedCall(api_name=api_name, payload=payload)
+            if (
+                "data" in payload
+                and status == ""
+                and isinstance(payload.get("data"), list)
+            ):
                 return CompletedCall(api_name=api_name, payload=payload)
             if status in ("error", "failed", "canceled", "cancelled"):
                 raise RuntimeError(f"Call failed: {payload!r}")
