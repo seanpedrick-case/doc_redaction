@@ -95,12 +95,13 @@ def _normalize_untrusted_path_to_abs(path_str: str) -> str:
 
 def _must_be_under_allowed_roots(candidate_abs: str, original: str) -> None:
     """Enforce candidate is contained under repo, INPUT_FOLDER, or OUTPUT_FOLDER."""
+    candidate_real = os.path.realpath(str(candidate_abs))
     allowed_roots = [
-        os.path.normpath(os.path.abspath(str(p))) for p in _allowed_path_roots()
+        os.path.realpath(os.path.abspath(str(p))) for p in _allowed_path_roots()
     ]
     for root in allowed_roots:
         try:
-            common = os.path.commonpath([candidate_abs, root])
+            common = os.path.commonpath([candidate_real, root])
         except ValueError:
             # Different drive on Windows or invalid path mix
             continue
@@ -115,19 +116,21 @@ def _must_be_under_allowed_roots(candidate_abs: str, original: str) -> None:
 def _path_must_be_allowed_file(path_str: str) -> str:
     """Resolve path, ensure it is under an allowed root and exists as a file."""
     candidate_abs = _normalize_untrusted_path_to_abs(path_str)
+    candidate_real = os.path.realpath(candidate_abs)
+
     # Validate both "safe path" patterns and containment under trusted roots.
-    ok = False
-    for root in _allowed_path_roots():
-        if validate_path_safety(candidate_abs, base_path=str(root)):
-            ok = True
-            break
+    _must_be_under_allowed_roots(candidate_real, path_str)
+    ok = any(
+        validate_path_safety(candidate_real, base_path=str(root))
+        for root in _allowed_path_roots()
+    )
     if not ok:
         raise HTTPException(status_code=400, detail=f"Unsafe path rejected: {path_str}")
-    if not os.path.isfile(candidate_abs):
+    if not os.path.isfile(candidate_real):
         raise HTTPException(
-            status_code=400, detail=f"Not a file or missing: {candidate_abs}"
+            status_code=400, detail=f"Not a file or missing: {candidate_real}"
         )
-    return candidate_abs
+    return candidate_real
 
 
 def _path_must_be_allowed_directory(path_str: str, *, must_exist: bool = True) -> str:
@@ -138,16 +141,20 @@ def _path_must_be_allowed_directory(path_str: str, *, must_exist: bool = True) -
     that will be created later by the CLI).
     """
     candidate_abs = _normalize_untrusted_path_to_abs(path_str)
-    ok = False
-    for root in _allowed_path_roots():
-        if validate_path_safety(candidate_abs, base_path=str(root)):
-            ok = True
-            break
+    candidate_real = os.path.realpath(candidate_abs)
+
+    _must_be_under_allowed_roots(candidate_real, path_str)
+    ok = any(
+        validate_path_safety(candidate_real, base_path=str(root))
+        for root in _allowed_path_roots()
+    )
     if not ok:
         raise HTTPException(status_code=400, detail=f"Unsafe path rejected: {path_str}")
-    if must_exist and not os.path.isdir(candidate_abs):
-        raise HTTPException(status_code=400, detail=f"Not a directory: {candidate_abs}")
-    return candidate_abs
+    if must_exist and not os.path.isdir(candidate_real):
+        raise HTTPException(
+            status_code=400, detail=f"Not a directory: {candidate_real}"
+        )
+    return candidate_real
 
 
 def _optional_agent_api_key(x_agent_api_key: Optional[str] = Header(None)) -> None:

@@ -15,47 +15,6 @@ version: 2.2.0
 
 Redact personally identifiable information (PII) from documents (PDF, PNG, JPG), Word files (DOCX), or tabular data (XLSX/CSV/Parquet). Please see the [User Guide](https://seanpedrick-case.github.io/doc_redaction/src/user_guide.html) for a full walkthrough of all the features in the app.
 
-## For agents (API quickstart)
-
-If you are an LLM/agent interacting with this app over HTTP (e.g. Hugging Face Spaces), **do not guess inputs** from the UI. Use the Gradio schema as the source of truth:
-
-- **Discover schema**: `GET /gradio_api/info`
-- **Upload files**: `POST /gradio_api/upload` (multipart field `files`) → returns server-internal paths like `/tmp/gradio_tmp/...`
-- **Call**: `POST /gradio_api/call/{api_name}` with body `{"data":[...]}` (argument order must match `/gradio_api/info`)
-- **Poll**: `GET /gradio_api/call/{api_name}/{event_id}` until complete
-- **Download outputs**: `GET /gradio_api/file={path}` (note: some deployments return 403 without session cookies)
-
-### Choose the correct route (prefer short `gr.api` endpoints)
-
-Fetch `/gradio_api/info` and then prefer the simplest route that exists:
-
-- **Apply edited review CSV to a PDF**: `/review_apply`
-- **Redact a PDF/image document**: `/doc_redact`
-- **Summarise a PDF**: `/pdf_summarise`
-- **Redact tabular files (CSV/XLSX/Parquet/DOCX)**: `/tabular_redact`
-
-If those endpoints are not present in your deployment, fall back to the long UI-chained routes (`/apply_review_redactions`, `/redact_data`, etc.) and build `data[]` strictly from `/gradio_api/info`.
-
-### Common gotchas
-
-- **Arity errors** (`needed: N, got: M`) mean you called a session-heavy UI handler with the wrong `data[]`. Prefer the short endpoints above.
-- **`handle_file()` gotcha** (for `gradio_client` users): do **not** wrap server-internal upload paths (e.g. `/tmp/gradio_tmp/...`) with `handle_file()`. Pass them as plain strings.
-- **Container-only outputs**: outputs may be written to container paths (e.g. `/home/user/app/output/`). Plan to download via `file=...` or use a mounted output directory in Docker.
-
-### Optional: MCP server
-
-If you want external agents to call this app reliably without re-implementing Gradio upload/call/poll/download details, consider an **MCP server** that wraps the main tasks (`redact_document`, `apply_review_redactions`, `redact_tabular`, `summarise_document`) behind a small tool interface. See [src/agent_mcp.md](src/agent_mcp.md).
-
-**Use as a library:** After installing from [PyPI](https://pypi.org/project/doc-redaction/) (`pip install doc_redaction`), you can call the same workflows as the Gradio `api_name` routes from Python. See the documentation: [Package API usage (Python)](https://seanpedrick-case.github.io/doc_redaction/src/package_api_usage.html) (source: [src/package_api_usage.qmd](src/package_api_usage.qmd)).
-    
-To extract text from documents, the 'Local' options are PikePDF for PDFs with selectable text, and OCR with Tesseract. Use AWS Textract to extract more complex elements e.g. handwriting, signatures, or unclear text. PaddleOCR and VLM support is also provided (see the installation instructions below). 
-
-For PII identification, 'Local' (based on spaCy) gives good results if you are looking for common names or terms, or a custom list of terms to redact (see Redaction settings).  AWS Comprehend gives better results at a small cost.
-
-Additional options on the 'Redaction settings' include, the type of information to redact (e.g. people, places), custom terms to include/ exclude from redaction, fuzzy matching, language settings, and whole page redaction. After redaction is complete, you can view and modify suggested redactions on the 'Review redactions' tab to quickly create a final redacted document.
-
-NOTE: The app is not 100% accurate, and it will miss some personal information. It is essential that all outputs are reviewed **by a human** before using the final outputs.
-
 ---
 
 ## 🚀 Quick Start - Installation and first run
@@ -68,10 +27,33 @@ This application relies on two external tools for OCR (Tesseract) and PDF proces
 
 ---
 
+#### Automated dependency setup (recommended)
+
+If you **don’t have admin rights** (or you just want the simplest setup), you can have the project download and configure **Tesseract** and **Poppler** into a local `third_party/` folder inside your checkout.
+
+You need the installer script available first, which means either:
+
+- **Repository checkout**: `git clone ...` and run the command from the repo root (recommended for the web UI), or
+- **PyPI install**: `pip install doc_redaction` and run from a writable folder where you want `third_party/` and `config/app_config.env` to be created/updated.
+
+From the repository root (or your chosen working folder) after creating/activating your venv and installing Python requirements:
+
+```bash
+python -m doc_redaction.install_deps
+```
+
+This writes `TESSERACT_FOLDER` / `POPPLER_FOLDER` into `config/app_config.env` so the app can find the binaries without you editing your system PATH.
+
+To just check whether your machine can already see the tools:
+
+```bash
+python -m doc_redaction.install_deps --verify-only
+```
+
 
 #### **On Windows**
 
-Installation on Windows requires downloading installers and adding the programs to your system's PATH.
+If you don’t use the automated setup above, you can install the dependencies manually by downloading installers and adding the programs to your system's PATH.
 
 1.  **Install Tesseract OCR:**
     *   Download the installer from the official Tesseract at [UB Mannheim page](https://github.com/UB-Mannheim/tesseract/wiki) (e.g., `tesseract-ocr-w64-setup-v5.X.X...exe`).
@@ -139,7 +121,13 @@ pip install "doc_redaction[paddle,vlm]"
 
 For programmatic use (CLI-first API matching Gradio `api_name` routes), see **[Package API usage (Python)](https://seanpedrick-case.github.io/doc_redaction/src/package_api_usage.html)**. The console script **`cli_redact`** is available after install.
 
-**Note:** Running the full Gradio app (`python app.py`) from a PyPI-only install expects the application entry files to be on your `PYTHONPATH` or run from a checkout; for the **web UI**, cloning the repository (below) or using **Docker** is usually simpler.
+**Web UI from a PyPI install:** You *can* start the Gradio UI after `pip install doc_redaction` by running:
+
+```bash
+python -m app
+```
+
+In practice, the **smoothest UI experience** (examples, bundled assets, docs links, etc.) is still usually via a **repository checkout** or **Docker**, but PyPI install is sufficient to launch the UI as long as you run it from a suitable working folder and have the system dependencies available (or run `python -m doc_redaction.install_deps` first).
 
 #### Install from source (repository checkout / development)
 
@@ -300,3 +288,44 @@ These settings are only relevant if you intend to use AWS services like Textract
     *   `ENFORCE_COST_CODES=True`: Makes selecting a cost code mandatory before starting a redaction.
 
 Now you have the app installed, please refer to the [User Guide](https://seanpedrick-case.github.io/doc_redaction/src/user_guide.html) for more information on how to use it for basic and advanced redaction.
+
+## For agents (API quickstart)
+
+If you are an LLM/agent interacting with this app over HTTP (e.g. Hugging Face Spaces), **do not guess inputs** from the UI. Use the Gradio schema as the source of truth:
+
+- **Discover schema**: `GET /gradio_api/info`
+- **Upload files**: `POST /gradio_api/upload` (multipart field `files`) → returns server-internal paths like `/tmp/gradio_tmp/...`
+- **Call**: `POST /gradio_api/call/{api_name}` with body `{"data":[...]}` (argument order must match `/gradio_api/info`)
+- **Poll**: `GET /gradio_api/call/{api_name}/{event_id}` until complete
+- **Download outputs**: `GET /gradio_api/file={path}` (note: some deployments return 403 without session cookies)
+
+### Choose the correct route (prefer short `gr.api` endpoints)
+
+Fetch `/gradio_api/info` and then prefer the simplest route that exists:
+
+- **Apply edited review CSV to a PDF**: `/review_apply`
+- **Redact a PDF/image document**: `/doc_redact`
+- **Summarise a PDF**: `/pdf_summarise`
+- **Redact tabular files (CSV/XLSX/Parquet/DOCX)**: `/tabular_redact`
+
+If those endpoints are not present in your deployment, fall back to the long UI-chained routes (`/apply_review_redactions`, `/redact_data`, etc.) and build `data[]` strictly from `/gradio_api/info`.
+
+### Common gotchas
+
+- **Arity errors** (`needed: N, got: M`) mean you called a session-heavy UI handler with the wrong `data[]`. Prefer the short endpoints above.
+- **`handle_file()` gotcha** (for `gradio_client` users): do **not** wrap server-internal upload paths (e.g. `/tmp/gradio_tmp/...`) with `handle_file()`. Pass them as plain strings.
+- **Container-only outputs**: outputs may be written to container paths (e.g. `/home/user/app/output/`). Plan to download via `file=...` or use a mounted output directory in Docker.
+
+### Optional: MCP server
+
+If you want external agents to call this app reliably without re-implementing Gradio upload/call/poll/download details, consider an **MCP server** that wraps the main tasks (`redact_document`, `apply_review_redactions`, `redact_tabular`, `summarise_document`) behind a small tool interface. See [src/agent_mcp.md](src/agent_mcp.md).
+
+**Use as a library:** After installing from [PyPI](https://pypi.org/project/doc-redaction/) (`pip install doc_redaction`), you can call the same workflows as the Gradio `api_name` routes from Python. See the documentation: [Package API usage (Python)](https://seanpedrick-case.github.io/doc_redaction/src/package_api_usage.html) (source: [src/package_api_usage.qmd](src/package_api_usage.qmd)).
+    
+To extract text from documents, the 'Local' options are PikePDF for PDFs with selectable text, and OCR with Tesseract. Use AWS Textract to extract more complex elements e.g. handwriting, signatures, or unclear text. PaddleOCR and VLM support is also provided (see the installation instructions below). 
+
+For PII identification, 'Local' (based on spaCy) gives good results if you are looking for common names or terms, or a custom list of terms to redact (see Redaction settings).  AWS Comprehend gives better results at a small cost.
+
+Additional options on the 'Redaction settings' include, the type of information to redact (e.g. people, places), custom terms to include/ exclude from redaction, fuzzy matching, language settings, and whole page redaction. After redaction is complete, you can view and modify suggested redactions on the 'Review redactions' tab to quickly create a final redacted document.
+
+NOTE: The app is not 100% accurate, and it will miss some personal information. It is essential that all outputs are reviewed **by a human** before using the final outputs.

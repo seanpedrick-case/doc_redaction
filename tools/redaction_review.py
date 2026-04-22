@@ -4540,13 +4540,14 @@ def _load_underlay_rgb_from_annotator(
             if not validate_path_safety(img_val):
                 return None
             candidate_abs = _normalize_untrusted_path_to_abs(img_val)
-            if not validate_path_safety(candidate_abs):
+            candidate_real = os.path.realpath(candidate_abs)
+            if not validate_path_safety(candidate_real):
                 return None
-            if not _is_under_allowed_roots(candidate_abs):
+            if not _is_under_allowed_roots(candidate_real):
                 return None
-            if not os.path.isfile(candidate_abs):
+            if not os.path.isfile(candidate_real):
                 return None
-            im = Image.open(candidate_abs)
+            im = Image.open(candidate_real)
             return np.asarray(im.convert("RGB"))
         except Exception:
             return None
@@ -4632,10 +4633,13 @@ def _resize_bgr_to_max_pixels(image_bgr: np.ndarray, max_pixels: int) -> np.ndar
 
 
 def _write_review_overlay_jpeg(
-    image_bgr: np.ndarray, path: str, max_file_bytes: int
+    image_bgr: np.ndarray, path: str, max_file_bytes: int, *, base_dir: str
 ) -> None:
     """Write JPEG, lowering quality until file size is at or below ``max_file_bytes`` (cf. OCR page visualisations)."""
     out_path = Path(path)
+    # Defense-in-depth: ensure we only touch paths within the configured output root.
+    if not validate_path_safety(str(out_path), base_path=str(base_dir)):
+        raise ValueError(f"Unsafe output path rejected: {out_path}")
     quality = 95
     while quality >= 10:
         cv2.imwrite(
@@ -4765,10 +4769,16 @@ def visualise_review_redaction_boxes(
     safe_base = sanitize_filename(str(base))
     out_fn = f"{safe_base}_page{int(page_number)}_redaction_overlay.jpg"
     try:
-        out_path = secure_path_join(output_folder, "redaction_overlay", out_fn)
+        out_dir = os.path.normpath(str(output_folder))
+        if not validate_folder_containment(out_dir, OUTPUT_FOLDER):
+            out_dir = OUTPUT_FOLDER
+        out_path = secure_path_join(out_dir, "redaction_overlay", out_fn)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         _write_review_overlay_jpeg(
-            image_bgr, str(out_path), REVIEW_OVERLAY_MAX_FILE_BYTES
+            image_bgr,
+            str(out_path),
+            REVIEW_OVERLAY_MAX_FILE_BYTES,
+            base_dir=str(out_dir),
         )
         return str(out_path)
     except Exception:

@@ -18,16 +18,18 @@ website:
         text: User guide
       - href: src/faq.qmd
         text: User FAQ
-      - href: src/package_api_usage.qmd
-        text: Package API usage (Python)
+      - href: src/python_package_usage.qmd
+        text: Python package usage
       - href: src/installation_guide.qmd
         text: App installation guide (with CDK)
       - href: src/app_settings.qmd
         text: App settings management guide
-      - href: src/redaction_with_vlm_and_llms.qmd
-        text: Redaction with local VLM and LLMs (Qwen 3)
-      - href: src/ocr_and_redaction_with_qwen35.qmd
-        text: OCR and redaction with Qwen 3.5 (Mar 2026)
+      - text: Blog
+        menu:
+          - href: src/redaction_with_vlm_and_llms.qmd
+            text: Redaction with local VLM and LLMs (Qwen 3)
+          - href: src/ocr_and_redaction_with_qwen35.qmd
+            text: OCR and redaction with Qwen 3.5 (Mar 2026)
 
 format:
   html:

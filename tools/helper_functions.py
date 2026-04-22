@@ -991,6 +991,8 @@ def check_for_existing_textract_file(
     except (ValueError, PermissionError, OSError):
         return False
 
+    if not validate_path_safety(str(textract_output_path), base_path=out_dir):
+        return False
     if textract_output_path.exists():
         # print("Existing Textract analysis output file found.")
         return True
@@ -1024,6 +1026,8 @@ def check_for_relevant_ocr_output_with_words(
     except (ValueError, PermissionError, OSError):
         return False
 
+    if not validate_path_safety(str(local_ocr_output_path), base_path=out_dir):
+        return False
     if local_ocr_output_path.exists():
         print("Existing OCR with words analysis output file found.")
         return True

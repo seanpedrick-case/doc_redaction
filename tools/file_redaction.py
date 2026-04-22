@@ -153,8 +153,10 @@ from tools.redaction_types import (
 )
 from tools.secure_path_utils import (
     secure_file_write,
+    secure_path_join,
     validate_folder_containment,
     validate_path_containment,
+    validate_path_safety,
 )
 
 # Extract numbers before 'seconds' using secure regex
@@ -12593,10 +12595,14 @@ def visualise_ocr_words_bounding_boxes(
 
     # Save the visualization
     if output_folder:
-        textract_viz_folder = os.path.join(output_folder, visualisation_folder)
+        out_dir = os.path.normpath(str(output_folder))
+        if not validate_folder_containment(out_dir, OUTPUT_FOLDER):
+            raise ValueError(f"Unsafe output folder: {out_dir}")
+
+        textract_viz_folder = str(secure_path_join(out_dir, visualisation_folder))
 
         # Double-check the constructed path is safe
-        if not validate_folder_containment(textract_viz_folder, OUTPUT_FOLDER):
+        if not validate_path_safety(textract_viz_folder, base_path=out_dir):
             raise ValueError(
                 f"Unsafe textract visualisations folder path: {textract_viz_folder}"
             )
@@ -12632,7 +12638,12 @@ def visualise_ocr_words_bounding_boxes(
             timestamp = int(time.time())
             filename = f"{visualisation_folder}_{timestamp}.jpg"
 
-        output_path = os.path.join(textract_viz_folder, filename)
+        output_path = str(secure_path_join(textract_viz_folder, filename))
+        resolved_output_path = os.path.realpath(output_path)
+        if not validate_path_safety(
+            resolved_output_path, base_path=textract_viz_folder
+        ):
+            raise ValueError(f"Unsafe output path rejected: {output_path}")
 
         # Save the combined image. Ensure that image file size is 500kb or less
 
@@ -12643,11 +12654,13 @@ def visualise_ocr_words_bounding_boxes(
         is_saved = False
         while quality >= 10:
             cv2.imwrite(
-                output_path, combined_image, [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+                resolved_output_path,
+                combined_image,
+                [int(cv2.IMWRITE_JPEG_QUALITY), quality],
             )
             if (
-                os.path.exists(output_path)
-                and os.path.getsize(output_path) <= max_filesize
+                os.path.exists(resolved_output_path)
+                and os.path.getsize(resolved_output_path) <= max_filesize
             ):
                 is_saved = True
                 break
@@ -12656,11 +12669,13 @@ def visualise_ocr_words_bounding_boxes(
         if not is_saved:
             # Save as lowest acceptable quality if cannot get under 500kb, or raise warning
             cv2.imwrite(
-                output_path, combined_image, [int(cv2.IMWRITE_JPEG_QUALITY), 10]
+                resolved_output_path,
+                combined_image,
+                [int(cv2.IMWRITE_JPEG_QUALITY), 10],
             )
             # Optionally log warning here that file could not be compressed below 500kb
 
-        log_files_output_paths.append(output_path)
+        log_files_output_paths.append(resolved_output_path)
 
         return log_files_output_paths
 

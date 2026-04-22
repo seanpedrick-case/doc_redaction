@@ -1,5 +1,5 @@
 ---
-title: "Package API usage (Python)"
+title: "Python package usage (doc_redaction)"
 format:
   html:
     toc: true
@@ -8,6 +8,12 @@ format:
 ---
 
 This page explains how to use **doc_redaction** as an installed Python package (after `pip install doc_redaction`), without the Gradio UI.
+
+If you *do* want the web UI after a PyPI install, you can start it with:
+
+```bash
+python -m app
+```
 
 The key design choice is that the callable names in `doc_redaction.api` match the Gradio `api_name` routes defined in `app.py`.
 
@@ -29,7 +35,17 @@ pip install "doc_redaction[vlm]"
 
 ### System dependencies (OCR / PDF)
 
-Some workflows require **Tesseract** and **Poppler** on your system. See the [App installation guide](installation_guide.qmd) for OS-specific instructions.
+Some workflows require **Tesseract** and **Poppler** on your system. You can either install them manually (see the [App installation guide](installation_guide.qmd)), or (recommended on Windows / no-admin setups) run:
+
+```bash
+python -m doc_redaction.install_deps
+```
+
+To only check what’s already available:
+
+```bash
+python -m doc_redaction.install_deps --verify-only
+```
 
 ## Quickstart: import endpoints by `api_name`
 

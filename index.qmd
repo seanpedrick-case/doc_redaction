@@ -28,7 +28,32 @@ NOTE: The app is not 100% accurate, and it will miss some personal information. 
 
 The application needs **Tesseract** (OCR) and **Poppler** (PDF utilities) on your system before Python packages will work fully.
 
+#### Automated dependency setup (recommended)
+
+If you **don't have admin rights** (or you just want the simplest setup), you can have the project download and configure **Tesseract** and **Poppler** into a local `third_party/` folder inside your checkout.
+
+You need the installer script available first, which means either:
+
+- **Repository checkout**: `git clone ...` and run the command from the repo root (recommended for the web UI), or
+- **PyPI install**: `pip install doc_redaction` and run from a writable folder where you want `third_party/` and `config/app_config.env` to be created/updated.
+
+From the repository root (or your chosen working folder) after creating/activating your venv and installing Python requirements:
+
+```bash
+python -m doc_redaction.install_deps
+```
+
+This writes `TESSERACT_FOLDER` / `POPPLER_FOLDER` into `config/app_config.env` so the app can find the binaries without you editing your system PATH.
+
+To just check whether your machine can already see the tools:
+
+```bash
+python -m doc_redaction.install_deps --verify-only
+```
+
 #### Windows
+
+If you don’t use the automated setup above, install manually:
 
 1. **Tesseract:** Install from the [UB Mannheim Tesseract wiki](https://github.com/UB-Mannheim/tesseract/wiki). During setup, add Tesseract to the system PATH.
 2. **Poppler:** Download from [Poppler for Windows](https://github.com/oschwartz10612/poppler-windows), extract to a permanent folder, and add the `bin` directory to your system PATH.
@@ -66,6 +91,16 @@ The package is published on [PyPI](https://pypi.org/project/doc-redaction/) as *
 ```bash
 pip install doc_redaction
 ```
+
+#### Web UI from a PyPI install
+
+You can start the Gradio web UI after a PyPI install with:
+
+```bash
+python -m app
+```
+
+For the smoothest UI experience (examples/assets/config in expected locations), a **repository checkout** or **Docker** is still usually simpler, but PyPI install is sufficient to launch the UI as long as the system dependencies are available (or you run `python -m doc_redaction.install_deps` first).
 
 Optional extras (PaddleOCR, VLM stack — see `pyproject.toml` on the repository for exact extras):
 

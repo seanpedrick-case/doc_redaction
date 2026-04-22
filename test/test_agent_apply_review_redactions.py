@@ -56,8 +56,11 @@ def test_run_apply_review_redactions_writes_redacted_pdf(tmp_out_dir: str) -> No
     redacted = [p for p in paths if p.endswith("_redacted.pdf")]
     assert redacted, f"expected *_redacted.pdf in {paths!r}"
     assert all(
-        os.path.commonpath([safe_out_root, os.path.realpath(p)]) == safe_out_root
-        and os.path.isfile(p)
+        (
+            (resolved_p := os.path.realpath(p))
+            and os.path.commonpath([safe_out_root, resolved_p]) == safe_out_root
+            and os.path.isfile(resolved_p)
+        )
         for p in redacted
     )
 

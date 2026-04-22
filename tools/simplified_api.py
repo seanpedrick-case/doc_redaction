@@ -50,6 +50,7 @@ from tools.file_redaction import run_redaction
 from tools.helper_functions import get_file_name_without_type
 from tools.redaction_review import apply_redactions_to_review_df_and_files
 from tools.redaction_types import RedactionContext, RedactionOptions
+from tools.secure_path_utils import validate_path_safety
 from tools.summaries import (
     concise_summary_format_prompt,
     detailed_summary_format_prompt,
@@ -90,15 +91,19 @@ def _resolve_dir_within_base(candidate_dir: str | None, base_dir: str) -> str:
     writing outputs outside the configured base folders.
     """
     base_abs = os.path.normpath(os.path.abspath(os.path.expanduser(base_dir)))
+    base_real = os.path.realpath(base_abs)
     raw = candidate_dir if candidate_dir is not None else base_dir
     resolved = os.path.normpath(os.path.abspath(os.path.expanduser(str(raw))))
+    resolved_real = os.path.realpath(resolved)
     try:
-        common = os.path.commonpath([resolved, base_abs])
+        common = os.path.commonpath([resolved_real, base_real])
     except ValueError as exc:
         raise ValueError(f"Invalid directory path: {raw}") from exc
-    if common != base_abs:
-        raise ValueError(f"Directory must be within configured base folder: {base_abs}")
-    return _folder_with_trailing_sep(resolved)
+    if common != base_real:
+        raise ValueError(
+            f"Directory must be within configured base folder: {base_real}"
+        )
+    return _folder_with_trailing_sep(resolved_real)
 
 
 def _filter_files_within_root(paths: Iterable[Any], root_dir: str) -> list[str]:
@@ -117,6 +122,8 @@ def _filter_files_within_root(paths: Iterable[Any], root_dir: str) -> list[str]:
         except ValueError:
             within = False
         if not within:
+            continue
+        if not validate_path_safety(resolved, base_path=safe_root):
             continue
         if not os.path.isfile(resolved):
             continue
@@ -390,6 +397,8 @@ def run_apply_review_redactions(
         except ValueError:
             within_output_root = False
         if not within_output_root:
+            continue
+        if not validate_path_safety(resolved, base_path=safe_output_root):
             continue
         if not os.path.isfile(resolved):
             continue
