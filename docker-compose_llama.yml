@@ -54,8 +54,6 @@ services:
       - "42"
       - --image_min_tokens
       - "300"
-      - --image_max_tokens
-      - "2000" # To fit within batch size 2048 (default)
     ports:
       - "8000:8080"
     volumes:
@@ -121,8 +119,6 @@ services:
       - "0" # Increase this value to fit within your available VRAM
       - --image_min_tokens
       - "300"
-      - --image_max_tokens
-      - "2000" # To fit within batch size 2048 (default)
     ports:
       - "8005:8080"
     volumes:
@@ -188,8 +184,6 @@ services:
       - "0" # Increase this value to fit within your available VRAM
       - --image_min_tokens
       - "300"
-      - --image_max_tokens
-      - "2000" # To fit within batch size 2048 (default)
     ports:
       - "8001:8080"
     volumes:
@@ -253,8 +247,6 @@ services:
       - "42"
       - --image_min_tokens
       - "300"
-      - --image_max_tokens
-      - "2000" # To fit within batch size 2048 (default)
     ports:
       - "8000:8080"
     volumes:
@@ -323,8 +315,6 @@ services:
       - "q8_0"
       - --image_min_tokens
       - "300"
-      - --image_max_tokens
-      - "2000" # To fit within batch size 2048 (default)
     ports:
       - "8003:8080"
     volumes:
@@ -445,8 +435,6 @@ services:
       - "q8_0"
       - --image_min_tokens
       - "300"
-      - --image_max_tokens
-      - "2000" # To fit within batch size 2048 (default)
     ports:
       - "8002:8080"
     volumes:

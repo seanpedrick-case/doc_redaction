@@ -31,7 +31,7 @@ services:
       - --n-gpu-layers
       - "999"
       - --ctx-size
-      - "32768"
+      - "65536"
       - --fit
       - "off"
       - --temp
@@ -46,6 +46,8 @@ services:
       - "1"
       - --presence-penalty
       - "1"
+      - --chat-template-kwargs
+      - "{\"preserve_thinking\": true}"
       - --host
       - "0.0.0.0"
       - --port
@@ -55,8 +57,6 @@ services:
       - "42"
       - --image_min_tokens
       - "300"
-      - --image_max_tokens
-      - "2000" # To fit within batch size 2048 (default)
     ports:
       - "8000:8080"
     volumes:
@@ -126,8 +126,6 @@ services:
       - "0" # Increase this value to fit within your available VRAM
       - --image_min_tokens
       - "300"
-      - --image_max_tokens
-      - "2000" # To fit within batch size 2048 (default)
     ports:
       - "8005:8080"
     volumes:
@@ -193,8 +191,6 @@ services:
       - "0" # Increase this value to fit within your availableVRAM
       - --image_min_tokens
       - "300"
-      - --image_max_tokens
-      - "2000" # To fit within batch size 2048 (default)
     ports:
       - "8001:8080"
     volumes:
@@ -258,8 +254,6 @@ services:
       - "42"
       - --image_min_tokens
       - "300"
-      - --image_max_tokens
-      - "2000" # To fit within batch size 2048 (default)
     ports:
       - "8000:8080"
     volumes:
@@ -328,8 +322,6 @@ services:
       - "q8_0"
       - --image_min_tokens
       - "300"
-      - --image_max_tokens
-      - "2000" # To fit within batch size 2048 (default)
     ports:
       - "8003:8080"
     volumes:
@@ -385,8 +377,6 @@ services:
       - "q8_0"
       - --image_min_tokens
       - "300"
-      - --image_max_tokens
-      - "2000" # To fit within batch size 2048 (default)
     ports:
       - "8002:8080"
     volumes:
@@ -450,8 +440,6 @@ services:
       - "q8_0"
       - --image_min_tokens
       - "300"
-      - --image_max_tokens
-      - "2000" # To fit within batch size 2048 (default)
     ports:
       - "8002:8080"
     volumes:

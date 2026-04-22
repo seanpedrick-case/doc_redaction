@@ -1,7 +1,7 @@
 ---
 name: doc-redaction-app
 description: "Operate the Document Redaction app with a practical default workflow: short Gradio endpoints via gradio_client, explicit handle_file rules, known failure traps, and output verification before sign-off."
-version: 2.0.1
+version: 2.0.2
 author: repo-maintained
 license: AGPL-3.0-only
 ---
@@ -50,6 +50,13 @@ Use exact configured labels where possible for maximum portability across deploy
 - Local client file path: use `handle_file("/local/path/file.pdf")`
 - Server path returned from upload (for example `/tmp/gradio_tmp/...`): pass as plain string
 - Do not wrap server paths in `handle_file(...)`
+
+### 3b) Local downloads after `predict` (critical)
+
+- `client.predict` returns **server-side paths** (and status strings). It does **not** write files to your machine; fetch bytes yourself with HTTP unless you use MCP (bundled zip) or a shared filesystem.
+- Endpoint: `{BASE_URL}/gradio_api/file={encoded_path}` where **`encoded_path` = `urllib.parse.quote(path, safe="")`**. Omitting encoding breaks when paths contain spaces or reserved characters.
+- For gated/private HF Spaces, use the same **`Authorization: Bearer <HF_TOKEN>`** header on download requests as for the client.
+- Paths may appear as plain strings or nested dicts with a `"path"` key; use recursive extraction (see full reference example or `extract_file_like_paths` in `mcp_doc_redaction/gradio_transport.py`).
 
 ### 4) Two high-impact gotchas
 
@@ -131,19 +138,47 @@ For detailed review-editing procedures and scanned-page coordinate patterns, use
 
 ### `gradio_client` default call pattern
 
+Use **`document_file`** (not `pdf_file`) for `/doc_redact`. Hugging Face Spaces and slow TLS benefit from **long `httpx` timeouts**; defaults often raise `ConnectTimeout` on cold start or long jobs.
+
 ```python
 import os
+from pathlib import Path
+from urllib.parse import quote
+
+import httpx
 from gradio_client import Client, handle_file
 
 BASE_URL = os.environ["DOC_REDACTION_BASE_URL"].rstrip("/")
 HF_TOKEN = os.environ.get("HF_TOKEN")
-client = Client(BASE_URL, hf_token=HF_TOKEN) if HF_TOKEN else Client(BASE_URL)
-client.view_api()  # prints endpoint signatures
+httpx_kwargs = {
+    "timeout": httpx.Timeout(connect=120.0, read=1800.0, write=120.0, pool=120.0),
+}
+client = (
+    Client(BASE_URL, hf_token=HF_TOKEN, httpx_kwargs=httpx_kwargs)
+    if HF_TOKEN
+    else Client(BASE_URL, httpx_kwargs=httpx_kwargs)
+)
+# client.view_api()  # prints endpoint signatures
 
 result = client.predict(
     api_name="/doc_redact",
-    pdf_file=handle_file("/local/path/document.pdf"),
+    document_file=handle_file("/local/path/document.pdf"),
 )
+
+# Then download each server path (see §3b). Example:
+headers = {}
+if HF_TOKEN:
+    headers["Authorization"] = f"Bearer {HF_TOKEN.strip()}"
+out_dir = Path("output/run_001")
+out_dir.mkdir(parents=True, exist_ok=True)
+with httpx.Client(timeout=httpx_kwargs["timeout"], headers=headers) as http:
+    for p in result[0]:  # /doc_redact returns (output_paths, message)
+        # If entries are dicts with "path", walk recursively (§3b / extract_file_like_paths).
+        if not isinstance(p, str) or not p.startswith("/"):
+            continue
+        url = f"{BASE_URL}/gradio_api/file={quote(p, safe='')}"
+        dest = out_dir / Path(p).name
+        dest.write_bytes(http.get(url).raise_for_status().content)
 ```
 
 ### Full `/redact_document` cold-start template
@@ -194,7 +229,7 @@ def extract_paths(result):
 2. `POST /gradio_api/upload` with multipart `files`
 3. `POST /gradio_api/call/{api_name}` with `{"data":[...]}`
 4. Poll `GET /gradio_api/call/{api_name}/{event_id}`
-5. Download outputs with `GET /gradio_api/file={path}` (or read shared disk)
+5. Download outputs with `GET {BASE}/gradio_api/file={urllib.parse.quote(path, safe="")}` (always URL-encode `path`; use `Bearer` if the Space is gated). Or read shared disk.
 
 ### MCP usage guidance (when vs not when)
 
