@@ -7,7 +7,7 @@ import spaces
 from fastapi import FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from gradio_image_annotation_redaction import image_annotator
+from gradio_image_annotation import image_annotator
 
 from tools.auth import authenticate_user
 from tools.aws_functions import (

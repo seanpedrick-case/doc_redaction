@@ -1042,7 +1042,7 @@ class TestGUIApp(unittest.TestCase):
 
         except ImportError as e:
             error_msg = f"Failed to import app module: {e}"
-            if "gradio_image_annotation_redaction" in str(e):
+            if "gradio_image_annotation" in str(e):
                 error_msg += "\n\nNOTE: This test requires the 'redaction' conda environment to be activated."
                 error_msg += "\nPlease run: conda activate redaction"
                 error_msg += "\nThen run this test again."
@@ -1098,7 +1098,7 @@ class TestGUIApp(unittest.TestCase):
 
         except Exception as e:
             error_msg = f"Unexpected error during app launch test: {e}"
-            if "gradio_image_annotation_redaction" in str(e):
+            if "gradio_image_annotation" in str(e):
                 error_msg += "\n\nNOTE: This test requires the 'redaction' conda environment to be activated."
                 error_msg += "\nPlease run: conda activate redaction"
                 error_msg += "\nThen run this test again."
@@ -1142,14 +1142,14 @@ class TestGUIApp(unittest.TestCase):
 
         except ImportError as e:
             error_msg = f"Failed to import configuration: {e}"
-            if "gradio_image_annotation_redaction" in str(e):
+            if "gradio_image_annotation" in str(e):
                 error_msg += "\n\nNOTE: This test requires the 'redaction' conda environment to be activated."
                 error_msg += "\nPlease run: conda activate redaction"
                 error_msg += "\nThen run this test again."
             self.fail(error_msg)
         except Exception as e:
             error_msg = f"Unexpected error during configuration test: {e}"
-            if "gradio_image_annotation_redaction" in str(e):
+            if "gradio_image_annotation" in str(e):
                 error_msg += "\n\nNOTE: This test requires the 'redaction' conda environment to be activated."
                 error_msg += "\nPlease run: conda activate redaction"
                 error_msg += "\nThen run this test again."

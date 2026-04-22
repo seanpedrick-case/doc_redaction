@@ -2829,7 +2829,7 @@ def convert_annotation_data_to_dataframe(all_annotations: List[Dict[str, Any]]):
                                     if len(parts) >= 3:
                                         v = [int(float(p)) for p in parts[:3]]
                                     elif s.startswith("#") and len(s) in (4, 7):
-                                        # Hex #rgb or #rrggbb (from gradio_image_annotation_redaction label_colors)
+                                        # Hex #rgb or #rrggbb (from gradio_image_annotation label_colors)
                                         hex_s = s[1:]
                                         if len(hex_s) == 3:
                                             v = [

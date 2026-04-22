@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 import polars as pl
 import pymupdf
-from gradio_image_annotation_redaction.image_annotator import AnnotatedImageData
+from gradio_image_annotation.image_annotator import AnnotatedImageData
 from PIL import Image, ImageDraw, ImageFont
 from pymupdf import Document, Rect
 
@@ -166,7 +166,7 @@ def _concat_frames_without_all_na_warning(
 
 
 def _ensure_box_colour_string(colour):
-    """Ensure colour is a string for gradio_image_annotation_redaction (JS expects .startsWith)."""
+    """Ensure colour is a string for gradio_image_annotation (JS expects .startsWith)."""
     if colour is None:
         return "(0, 0, 0)"
     if isinstance(colour, str):
@@ -731,7 +731,7 @@ def update_annotator_page_from_review_df(
             for key in expected_annotation_keys:
                 if key not in current_page_review_df.columns:
                     # Add missing column with default value. Use 0.0 for coords so
-                    # gradio_image_annotation_redaction never receives None/NaN (causes TypeError in preprocess_boxes).
+                    # gradio_image_annotation never receives None/NaN (causes TypeError in preprocess_boxes).
                     default_value = (
                         0.0 if key in ["xmin", "ymin", "xmax", "ymax"] else ""
                     )
@@ -1886,7 +1886,7 @@ def update_annotator_object_and_filter_df(
     List[AnnotatedImageData],
 ]:
     """
-    Update a gradio_image_annotation_redaction object with new annotation data for the current page
+    Update a gradio_image_annotation object with new annotation data for the current page
     and update filter dataframes, optimizing by processing only the current page's data for display.
 
     Args:
@@ -2142,7 +2142,7 @@ def update_annotator_object_and_filter_df(
                     current_page_annotations_df["color"] = CUSTOM_BOX_COLOUR
             else:
                 current_page_annotations_df["color"] = CUSTOM_BOX_COLOUR
-        # gradio_image_annotation_redaction JS expects colour as string (e.g. .startsWith("rgba"))
+        # gradio_image_annotation JS expects colour as string (e.g. .startsWith("rgba"))
         current_page_annotations_df["color"] = current_page_annotations_df[
             "color"
         ].apply(_ensure_box_colour_string)
@@ -4512,7 +4512,7 @@ def _box_coords_to_pixel_rect(
     """
     Map box corners to pixel integers on a ``w`` x ``h`` underlay.
 
-    ``gradio_image_annotation_redaction`` returns **absolute pixel** coordinates in the
+    ``gradio_image_annotation`` returns **absolute pixel** coordinates in the
     backend; review CSV / OCR data use **normalized 0–1** coordinates. If the
     largest corner value is <= 1, treat as normalized; otherwise as pixels.
     """
