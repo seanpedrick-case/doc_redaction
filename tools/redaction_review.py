@@ -4995,7 +4995,7 @@ def export_review_page_ocr_visualisation_for_gradio(
     return None
 
 
-def review_overlay_export(
+def page_redaction_review_image(
     page_annotator: Optional[AnnotatedImageData],
     annotate_current_page: float,
     review_df: pd.DataFrame,
@@ -5012,7 +5012,7 @@ def review_overlay_export(
     )
 
 
-def review_ocr_export(
+def page_ocr_review_image(
     page_annotator: Optional[AnnotatedImageData],
     annotate_current_page: float,
     all_page_line_level_ocr_results_with_words: list,

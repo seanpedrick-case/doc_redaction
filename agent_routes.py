@@ -17,7 +17,16 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
-from tools.config import INPUT_FOLDER, OUTPUT_FOLDER
+from tools.config import (
+    AWS_LLM_PII_OPTION,
+    AWS_PII_OPTION,
+    INFERENCE_SERVER_PII_OPTION,
+    INPUT_FOLDER,
+    LOCAL_OCR_MODEL_OPTIONS,
+    LOCAL_PII_OPTION,
+    LOCAL_TRANSFORMERS_LLM_PII_OPTION,
+    OUTPUT_FOLDER,
+)
 from tools.secure_path_utils import validate_path_safety
 
 router = APIRouter(tags=["Agent"])
@@ -166,11 +175,31 @@ class AgentRedactDocumentRequest(BaseModel):
     )
     output_dir: Optional[str] = None
     input_dir: Optional[str] = None
-    ocr_method: Optional[str] = None
-    pii_detector: Optional[str] = None
+    ocr_method: Optional[str] = Field(
+        None,
+        description=(
+            "High-level OCR/text mode. Accepted values: 'Local OCR', "
+            "'AWS Textract', 'Local text'. To choose a specific local OCR engine "
+            "(e.g. paddle/tesseract/vlm), set "
+            "overrides.chosen_local_ocr_model."
+        ),
+    )
+    pii_detector: Optional[str] = Field(
+        None,
+        description=(
+            "PII detection method. Recommended configured labels: "
+            f"'{LOCAL_PII_OPTION}', '{AWS_PII_OPTION}', '{AWS_LLM_PII_OPTION}', "
+            f"'{INFERENCE_SERVER_PII_OPTION}', '{LOCAL_TRANSFORMERS_LLM_PII_OPTION}', "
+            "'None'."
+        ),
+    )
     overrides: Optional[dict[str, Any]] = Field(
         None,
-        description="Optional CLI flag overrides; keys must match argparse destination names",
+        description=(
+            "Optional CLI flag overrides; keys must match argparse destination names. "
+            "For local OCR model selection, set 'chosen_local_ocr_model' "
+            f"(allowed models depend on deployment; configured options: {LOCAL_OCR_MODEL_OPTIONS})."
+        ),
     )
 
     model_config = {
@@ -181,6 +210,9 @@ class AgentRedactDocumentRequest(BaseModel):
                         "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf"
                     ],
                     "instruction": "Do not redact the university name.",
+                    "ocr_method": "Local OCR",
+                    "pii_detector": LOCAL_PII_OPTION,
+                    "overrides": {"chosen_local_ocr_model": "paddle"},
                 }
             ]
         }
@@ -283,7 +315,11 @@ def _run_cli_main(direct: dict[str, Any], gradio_api_name: str) -> AgentTaskResp
     description=(
         "Matches Gradio ``api_name='redact_document'``. "
         "``python cli_redact.py --task redact --input_file ...``. "
-        "Optional ``instruction`` maps to ``custom_llm_instructions``."
+        "Optional ``instruction`` maps to ``custom_llm_instructions``. "
+        "OCR modes: 'Local OCR' | 'AWS Textract' | 'Local text'. "
+        "Specific local OCR engines are set via ``overrides.chosen_local_ocr_model`` "
+        f"(for example: {LOCAL_OCR_MODEL_OPTIONS}). "
+        "PII methods should use configured labels shown on the request schema."
     ),
 )
 def post_redact_document(
@@ -300,7 +336,11 @@ def post_redact_document(
     summary="redact_data (Gradio api_name)",
     description=(
         "Matches Gradio ``api_name='redact_data'``. Same CLI ``redact`` task as "
-        "/redact_document; use CSV/XLSX/DOCX paths for tabular/Word flows."
+        "/redact_document; use CSV/XLSX/DOCX paths for tabular/Word flows. "
+        "OCR modes: 'Local OCR' | 'AWS Textract' | 'Local text'. "
+        "Specific local OCR engines are set via ``overrides.chosen_local_ocr_model`` "
+        f"(for example: {LOCAL_OCR_MODEL_OPTIONS}). "
+        "PII methods should use configured labels shown on the request schema."
     ),
 )
 def post_redact_data(
@@ -868,12 +908,44 @@ def list_operations() -> dict[str, Any]:
                 "method": "POST",
                 "path": "/agent/redact_document",
                 "implementation": "cli_redact task redact",
+                "notes": {
+                    "ocr_method": [
+                        "Local OCR",
+                        "AWS Textract",
+                        "Local text",
+                    ],
+                    "chosen_local_ocr_model_override": LOCAL_OCR_MODEL_OPTIONS,
+                    "pii_detector_recommended": [
+                        LOCAL_PII_OPTION,
+                        AWS_PII_OPTION,
+                        AWS_LLM_PII_OPTION,
+                        INFERENCE_SERVER_PII_OPTION,
+                        LOCAL_TRANSFORMERS_LLM_PII_OPTION,
+                        "None",
+                    ],
+                },
             },
             {
                 "gradio_api_name": "redact_data",
                 "method": "POST",
                 "path": "/agent/redact_data",
                 "implementation": "cli_redact task redact",
+                "notes": {
+                    "ocr_method": [
+                        "Local OCR",
+                        "AWS Textract",
+                        "Local text",
+                    ],
+                    "chosen_local_ocr_model_override": LOCAL_OCR_MODEL_OPTIONS,
+                    "pii_detector_recommended": [
+                        LOCAL_PII_OPTION,
+                        AWS_PII_OPTION,
+                        AWS_LLM_PII_OPTION,
+                        INFERENCE_SERVER_PII_OPTION,
+                        LOCAL_TRANSFORMERS_LLM_PII_OPTION,
+                        "None",
+                    ],
+                },
             },
             {
                 "gradio_api_name": "find_duplicate_pages",

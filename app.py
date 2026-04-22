@@ -299,9 +299,9 @@ from tools.redaction_review import (
     get_and_merge_current_page_annotations,
     increase_bottom_page_count_based_on_top,
     increase_page,
+    page_ocr_review_image,
+    page_redaction_review_image,
     reset_dropdowns,
-    review_ocr_export,
-    review_overlay_export,
     undo_last_removal,
     update_all_entity_df_dropdowns,
     update_all_page_annotation_object_based_on_previous_page,
@@ -6907,7 +6907,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
     )
 
     export_review_ocr_visualisation_btn.click(
-        review_ocr_export,
+        page_ocr_review_image,
         inputs=[
             annotator,
             annotate_current_page,
@@ -6917,11 +6917,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             output_folder_textbox,
         ],
         outputs=[redaction_overlay_output_file],
-        api_name="review_ocr_export",
+        api_name="page_ocr_review_image",
     )
 
     export_redaction_overlay_btn.click(
-        review_overlay_export,
+        page_redaction_review_image,
         inputs=[
             annotator,
             annotate_current_page,
@@ -6930,7 +6930,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             output_folder_textbox,
         ],
         outputs=[redaction_overlay_output_file],
-        api_name="review_overlay_export",
+        api_name="page_redaction_review_image",
     )
 
     ###

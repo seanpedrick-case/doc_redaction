@@ -1184,6 +1184,7 @@ def _choose_and_run_redactor_impl(
         )
 
     # CLI mode may provide options to enter method names in a different format
+    print("Text extraction method requested:", text_extraction_method)
     if text_extraction_method == "AWS Textract":
         text_extraction_method = TEXTRACT_TEXT_EXTRACT_OPTION
     if text_extraction_method == "Local OCR":
@@ -1220,6 +1221,8 @@ def _choose_and_run_redactor_impl(
 
     if pii_identification_method == "None":
         pii_identification_method = NO_REDACTION_PII_OPTION
+
+    print("PII identification method requested:", pii_identification_method)
 
     # Normalise the output folder path separator (handles Windows backslash paths)
     if not output_folder.endswith(("/", os.sep)):

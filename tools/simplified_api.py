@@ -10,6 +10,7 @@ Consolidates:
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import uuid
 from collections.abc import Iterable
@@ -18,6 +19,8 @@ from typing import Any, Mapping
 import pandas as pd
 
 from tools.config import (
+    AWS_LLM_PII_OPTION,
+    AWS_PII_OPTION,
     AZURE_OPENAI_INFERENCE_ENDPOINT,
     DEFAULT_FUZZY_SPELLING_MISTAKES_NUM,
     DEFAULT_INFERENCE_SERVER_VLM_MODEL,
@@ -26,7 +29,12 @@ from tools.config import (
     EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION,
     EFFICIENT_OCR_MIN_WORDS,
     HYBRID_TEXTRACT_BEDROCK_VLM,
+    INFERENCE_SERVER_PII_OPTION,
     INPUT_FOLDER,
+    LOCAL_OCR_MODEL_OPTIONS,
+    LOCAL_PII_OPTION,
+    LOCAL_TRANSFORMERS_LLM_PII_OPTION,
+    NO_REDACTION_PII_OPTION,
     OCR_FIRST_PASS_MAX_WORKERS,
     OUTPUT_FOLDER,
     OVERWRITE_EXISTING_OCR_RESULTS,
@@ -126,6 +134,115 @@ def _validate_review_csv_path(path: str) -> None:
             "review_csv_path basename must contain '_review_file' (required by "
             "prepare_image_or_pdf CSV branch), e.g. 'mydoc_review_file.csv'."
         )
+
+
+def _resolve_cli_ocr_inputs(
+    ocr_method: str | None,
+) -> tuple[str | None, dict[str, Any]]:
+    """
+    Normalize user-provided OCR input into CLI-compatible ocr_method/overrides.
+
+    The CLI separates high-level extraction mode (`ocr_method`) from local engine
+    choice (`chosen_local_ocr_model`). This helper accepts convenient inputs like
+    "paddle" and maps them to:
+      - ocr_method="Local OCR"
+      - overrides={"chosen_local_ocr_model": "paddle"}
+    """
+    if ocr_method is None:
+        return None, {}
+
+    raw = str(ocr_method).strip()
+    if not raw:
+        return None, {}
+
+    lower = raw.lower()
+    mode_aliases = {
+        "aws textract": "AWS Textract",
+        "textract": "AWS Textract",
+        "local ocr": "Local OCR",
+        "local": "Local OCR",
+        "local text": "Local text",
+        "text": "Local text",
+        "simple text": "Local text",
+    }
+    if lower in mode_aliases:
+        return mode_aliases[lower], {}
+
+    model_aliases = {
+        "hybrid paddle": "hybrid-paddle",
+        "hybrid vlm": "hybrid-vlm",
+        "hybrid paddle vlm": "hybrid-paddle-vlm",
+        "hybrid paddle inference server": "hybrid-paddle-inference-server",
+        "inference server": "inference-server",
+        "bedrock": "bedrock-vlm",
+        "gemini": "gemini-vlm",
+        "azure": "azure-openai-vlm",
+    }
+    canonical_local_models = (
+        "tesseract",
+        "paddle",
+        "hybrid-paddle",
+        "hybrid-vlm",
+        "hybrid-paddle-vlm",
+        "hybrid-paddle-inference-server",
+        "vlm",
+        "inference-server",
+        "bedrock-vlm",
+        "gemini-vlm",
+        "azure-openai-vlm",
+    )
+    available_models = {
+        str(m).lower(): str(m)
+        for m in (*canonical_local_models, *LOCAL_OCR_MODEL_OPTIONS)
+    }
+    for alias, model in model_aliases.items():
+        available_models[alias] = model
+
+    compact = re.sub(r"[\s_]+", "-", lower)
+    if compact in available_models:
+        chosen_model = available_models[compact]
+        return "Local OCR", {"chosen_local_ocr_model": chosen_model}
+    if lower in available_models:
+        chosen_model = available_models[lower]
+        return "Local OCR", {"chosen_local_ocr_model": chosen_model}
+
+    return raw, {}
+
+
+def _resolve_cli_pii_method(pii_method: str | None) -> str | None:
+    """
+    Normalize PII detector strings to configured display labels.
+
+    Supports common aliases while preserving deployment-specific configured names.
+    """
+    if pii_method is None:
+        return None
+
+    raw = str(pii_method).strip()
+    if not raw:
+        return None
+
+    normalized = re.sub(r"[\s_]+", " ", raw.strip().lower())
+    aliases = {
+        "local": LOCAL_PII_OPTION,
+        "aws": AWS_PII_OPTION,
+        "aws comprehend": AWS_PII_OPTION,
+        "comprehend": AWS_PII_OPTION,
+        "llm (aws bedrock)": AWS_LLM_PII_OPTION,
+        "aws bedrock llm": AWS_LLM_PII_OPTION,
+        "bedrock llm": AWS_LLM_PII_OPTION,
+        "local inference server": INFERENCE_SERVER_PII_OPTION,
+        "inference server": INFERENCE_SERVER_PII_OPTION,
+        "local transformers llm": LOCAL_TRANSFORMERS_LLM_PII_OPTION,
+        "transformers llm": LOCAL_TRANSFORMERS_LLM_PII_OPTION,
+        "none": "None",
+        "no redaction": "None",
+        "only extract text (no redaction)": NO_REDACTION_PII_OPTION,
+    }
+    if normalized in aliases:
+        return aliases[normalized]
+
+    return raw
 
 
 def run_apply_review_redactions(
@@ -531,8 +648,13 @@ def redact_document_from_upload_for_gradio_api(
         document_file: PDF/image path or Gradio upload payload (dict/object with path/name).
         redact_entities: Entity labels to detect/redact (e.g. PERSON, EMAIL_ADDRESS).
         output_dir: Directory to write outputs; constrained to OUTPUT_FOLDER.
-        ocr_method: Optional OCR extraction mode override.
-        pii_method: PII detector method (e.g. Local, AWS Comprehend).
+        ocr_method: OCR extraction mode override. Accepts high-level methods
+            (`Local OCR`, `AWS Textract`, `Local text`) and also local engine
+            shortcuts such as `paddle`/`tesseract`, which are auto-mapped to
+            `Local OCR` plus the matching `chosen_local_ocr_model`.
+        pii_method: PII detector method. Accepts configured labels
+            (`Local`, `AWS Comprehend`, `LLM (AWS Bedrock)`, `Local inference server`,
+            `Local transformers LLM`, `None`) plus common aliases.
         allow_list / deny_list: Optional explicit token lists for matching behaviour.
         page_min / page_max: Optional page bounds (0 means all, CLI semantics).
         llm_instruction: Optional custom instruction for LLM-backed detection.
@@ -571,13 +693,18 @@ def redact_document_from_upload_for_gradio_api(
     if page_max is not None:
         overrides["page_max"] = int(page_max)
 
+    cli_ocr_method, ocr_overrides = _resolve_cli_ocr_inputs(ocr_method)
+    cli_pii_method = _resolve_cli_pii_method(pii_method)
+    merged_overrides = dict(overrides)
+    merged_overrides.update(ocr_overrides)
+
     paths = cli_redact_document(
         input_files=[document_path],
         output_dir=safe_out_dir,
-        ocr_method=ocr_method,
-        pii_detector=pii_method,
+        ocr_method=cli_ocr_method,
+        pii_detector=cli_pii_method,
         instruction=llm_instruction,
-        overrides=overrides or None,
+        overrides=merged_overrides or None,
     )
 
     safe_paths = _filter_files_within_root(paths, safe_out_dir)
