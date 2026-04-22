@@ -4636,9 +4636,17 @@ def _write_review_overlay_jpeg(
     image_bgr: np.ndarray, path: str, max_file_bytes: int, *, base_dir: str
 ) -> None:
     """Write JPEG, lowering quality until file size is at or below ``max_file_bytes`` (cf. OCR page visualisations)."""
-    out_path = Path(path)
+    try:
+        base_path = Path(base_dir).expanduser().resolve(strict=False)
+        out_path = Path(path).expanduser().resolve(strict=False)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ValueError(f"Invalid output path: {path}") from exc
     # Defense-in-depth: ensure we only touch paths within the configured output root.
-    if not validate_path_safety(str(out_path), base_path=str(base_dir)):
+    try:
+        out_path.relative_to(base_path)
+    except ValueError as exc:
+        raise ValueError(f"Unsafe output path rejected: {out_path}") from exc
+    if not validate_path_safety(str(out_path), base_path=str(base_path)):
         raise ValueError(f"Unsafe output path rejected: {out_path}")
     quality = 95
     while quality >= 10:

@@ -14,6 +14,7 @@ import re
 import shutil
 import uuid
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Any, Mapping
 
 import pandas as pd
@@ -103,7 +104,33 @@ def _resolve_dir_within_base(candidate_dir: str | None, base_dir: str) -> str:
         raise ValueError(
             f"Directory must be within configured base folder: {base_real}"
         )
+    if not validate_path_safety(resolved_real, base_path=base_real):
+        raise ValueError(f"Unsafe directory path rejected: {raw}")
     return _folder_with_trailing_sep(resolved_real)
+
+
+def _mkdir_within_base(dir_path: str, base_dir: str) -> str:
+    """
+    Create dir_path (and parents) after enforcing it is within base_dir.
+
+    Uses pathlib containment checks on canonicalized paths. This is largely to satisfy
+    CodeQL path-injection dataflow expectations while preserving existing behaviour
+    (allowing caller overrides within the configured base).
+    """
+    try:
+        base = Path(base_dir).expanduser().resolve(strict=False)
+        candidate = Path(dir_path).expanduser().resolve(strict=False)
+        candidate.relative_to(base)
+    except Exception as exc:
+        raise ValueError(
+            f"Directory must be within configured base folder: {base_dir}"
+        ) from exc
+
+    if not validate_path_safety(str(candidate), base_path=str(base)):
+        raise ValueError(f"Unsafe directory path rejected: {candidate}")
+
+    candidate.mkdir(parents=True, exist_ok=True)
+    return _folder_with_trailing_sep(str(candidate))
 
 
 def _filter_files_within_root(paths: Iterable[Any], root_dir: str) -> list[str]:
@@ -289,8 +316,8 @@ def run_apply_review_redactions(
     out_folder = _resolve_dir_within_base(output_dir, OUTPUT_FOLDER)
     in_folder = _resolve_dir_within_base(input_dir, INPUT_FOLDER)
 
-    os.makedirs(out_folder, exist_ok=True)
-    os.makedirs(in_folder, exist_ok=True)
+    out_folder = _mkdir_within_base(out_folder, OUTPUT_FOLDER)
+    in_folder = _mkdir_within_base(in_folder, INPUT_FOLDER)
 
     textract_method = (
         text_extract_method
@@ -384,23 +411,36 @@ def run_apply_review_redactions(
             out_paths.extend(str(p) for p in item if p)
 
     safe_output_root = os.path.realpath(out_folder)
+
+    def _resolve_safe_output_file(candidate_path: Any, output_root: str) -> str | None:
+        if candidate_path is None:
+            return None
+        candidate_text = str(candidate_path).strip()
+        if not candidate_text:
+            return None
+        resolved_candidate = os.path.realpath(candidate_text)
+        try:
+            within_output_root = (
+                os.path.commonpath([output_root, resolved_candidate]) == output_root
+            )
+        except ValueError:
+            return None
+        if not within_output_root:
+            return None
+        if not validate_path_safety(resolved_candidate, base_path=output_root):
+            return None
+        try:
+            if not Path(resolved_candidate).is_file():
+                return None
+        except OSError:
+            return None
+        return resolved_candidate
+
     seen: set[str] = set()
     unique_paths: list[str] = []
     for p in out_paths:
-        if not p:
-            continue
-        resolved = os.path.realpath(str(p))
-        try:
-            within_output_root = (
-                os.path.commonpath([safe_output_root, resolved]) == safe_output_root
-            )
-        except ValueError:
-            within_output_root = False
-        if not within_output_root:
-            continue
-        if not validate_path_safety(resolved, base_path=safe_output_root):
-            continue
-        if not os.path.isfile(resolved):
+        resolved = _resolve_safe_output_file(p, safe_output_root)
+        if not resolved:
             continue
         if resolved not in seen:
             seen.add(resolved)
@@ -774,8 +814,8 @@ def summarise_document_from_upload_for_gradio_api(
         str(_pick("input_dir", input_dir)).strip() or str(a["input_dir"]),
         INPUT_FOLDER,
     )
-    os.makedirs(out_folder, exist_ok=True)
-    os.makedirs(in_folder, exist_ok=True)
+    out_folder = _mkdir_within_base(out_folder, OUTPUT_FOLDER)
+    in_folder = _mkdir_within_base(in_folder, INPUT_FOLDER)
     pdf_path = stage_gradio_upload_if_ephemeral(pdf_path)
     p_min = int(_pick("page_min", page_min))
     p_max = int(_pick("page_max", page_max))

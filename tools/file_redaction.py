@@ -12595,9 +12595,12 @@ def visualise_ocr_words_bounding_boxes(
 
     # Save the visualization
     if output_folder:
-        out_dir = os.path.normpath(str(output_folder))
-        if not validate_folder_containment(out_dir, OUTPUT_FOLDER):
-            raise ValueError(f"Unsafe output folder: {out_dir}")
+        trusted_base = os.path.realpath(str(OUTPUT_FOLDER))
+        requested_out_dir = os.path.realpath(os.path.normpath(str(output_folder)))
+        if validate_folder_containment(requested_out_dir, trusted_base):
+            out_dir = requested_out_dir
+        else:
+            out_dir = trusted_base
 
         textract_viz_folder = str(secure_path_join(out_dir, visualisation_folder))
 

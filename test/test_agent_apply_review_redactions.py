@@ -59,7 +59,7 @@ def test_run_apply_review_redactions_writes_redacted_pdf(tmp_out_dir: str) -> No
         (
             (resolved_p := os.path.realpath(p))
             and os.path.commonpath([safe_out_root, resolved_p]) == safe_out_root
-            and os.path.isfile(resolved_p)
+            and Path(resolved_p).is_file()
         )
         for p in redacted
     )

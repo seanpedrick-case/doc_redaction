@@ -95,18 +95,17 @@ def _normalize_untrusted_path_to_abs(path_str: str) -> str:
 
 def _must_be_under_allowed_roots(candidate_abs: str, original: str) -> None:
     """Enforce candidate is contained under repo, INPUT_FOLDER, or OUTPUT_FOLDER."""
-    candidate_real = os.path.realpath(str(candidate_abs))
-    allowed_roots = [
-        os.path.realpath(os.path.abspath(str(p))) for p in _allowed_path_roots()
-    ]
-    for root in allowed_roots:
+    try:
+        candidate_path = Path(candidate_abs).expanduser().resolve(strict=False)
+    except (OSError, RuntimeError, ValueError):
+        raise HTTPException(status_code=400, detail=f"Invalid path: {original}")
+    for root in _allowed_path_roots():
         try:
-            common = os.path.commonpath([candidate_real, root])
-        except ValueError:
-            # Different drive on Windows or invalid path mix
-            continue
-        if common == root:
+            root_path = Path(str(root)).expanduser().resolve(strict=False)
+            candidate_path.relative_to(root_path)
             return
+        except ValueError:
+            continue
     raise HTTPException(
         status_code=403,
         detail="Path must be under the app repo, INPUT_FOLDER, or OUTPUT_FOLDER",
@@ -126,11 +125,15 @@ def _path_must_be_allowed_file(path_str: str) -> str:
     )
     if not ok:
         raise HTTPException(status_code=400, detail=f"Unsafe path rejected: {path_str}")
-    if not os.path.isfile(candidate_real):
+    try:
+        candidate_path = Path(candidate_real).expanduser().resolve(strict=False)
+    except (OSError, RuntimeError, ValueError):
+        raise HTTPException(status_code=400, detail=f"Invalid path: {path_str}")
+    if not candidate_path.is_file():
         raise HTTPException(
             status_code=400, detail=f"Not a file or missing: {candidate_real}"
         )
-    return candidate_real
+    return str(candidate_path)
 
 
 def _path_must_be_allowed_directory(path_str: str, *, must_exist: bool = True) -> str:
@@ -150,11 +153,15 @@ def _path_must_be_allowed_directory(path_str: str, *, must_exist: bool = True) -
     )
     if not ok:
         raise HTTPException(status_code=400, detail=f"Unsafe path rejected: {path_str}")
-    if must_exist and not os.path.isdir(candidate_real):
+    try:
+        candidate_path = Path(candidate_real).expanduser().resolve(strict=False)
+    except (OSError, RuntimeError, ValueError):
+        raise HTTPException(status_code=400, detail=f"Invalid path: {path_str}")
+    if must_exist and not candidate_path.is_dir():
         raise HTTPException(
             status_code=400, detail=f"Not a directory: {candidate_real}"
         )
-    return candidate_real
+    return str(candidate_path)
 
 
 def _optional_agent_api_key(x_agent_api_key: Optional[str] = Header(None)) -> None:
