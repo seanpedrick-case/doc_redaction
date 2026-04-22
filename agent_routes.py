@@ -59,12 +59,13 @@ GRADIO_API_NAMES: tuple[str, ...] = (
 
 
 def _allowed_path_roots() -> list[Path]:
-    roots = [REPO_ROOT.resolve()]
+    # Return roots without resolving. These are trusted config values, but avoiding
+    # Path.resolve() keeps CodeQL happy and matches our "no resolve on untrusted"
+    # approach elsewhere.
+    roots = [REPO_ROOT]
     for folder in (INPUT_FOLDER, OUTPUT_FOLDER):
-        try:
-            roots.append(Path(folder).resolve())
-        except (OSError, TypeError, ValueError):
-            continue
+        if folder:
+            roots.append(Path(str(folder)))
     return roots
 
 
@@ -95,17 +96,18 @@ def _normalize_untrusted_path_to_abs(path_str: str) -> str:
 
 def _must_be_under_allowed_roots(candidate_abs: str, original: str) -> None:
     """Enforce candidate is contained under repo, INPUT_FOLDER, or OUTPUT_FOLDER."""
-    try:
-        candidate_path = Path(candidate_abs).expanduser().resolve(strict=False)
-    except (OSError, RuntimeError, ValueError):
-        raise HTTPException(status_code=400, detail=f"Invalid path: {original}")
-    for root in _allowed_path_roots():
+    candidate_real = os.path.realpath(str(candidate_abs))
+    allowed_roots = [
+        os.path.realpath(os.path.abspath(str(p))) for p in _allowed_path_roots()
+    ]
+    for root in allowed_roots:
         try:
-            root_path = Path(str(root)).expanduser().resolve(strict=False)
-            candidate_path.relative_to(root_path)
-            return
+            common = os.path.commonpath([candidate_real, root])
         except ValueError:
+            # Different drive on Windows or invalid path mix
             continue
+        if common == root:
+            return
     raise HTTPException(
         status_code=403,
         detail="Path must be under the app repo, INPUT_FOLDER, or OUTPUT_FOLDER",
@@ -126,14 +128,16 @@ def _path_must_be_allowed_file(path_str: str) -> str:
     if not ok:
         raise HTTPException(status_code=400, detail=f"Unsafe path rejected: {path_str}")
     try:
-        candidate_path = Path(candidate_real).expanduser().resolve(strict=False)
-    except (OSError, RuntimeError, ValueError):
-        raise HTTPException(status_code=400, detail=f"Invalid path: {path_str}")
-    if not candidate_path.is_file():
+        candidate_path = Path(candidate_real)
+        if not candidate_path.is_file():
+            raise HTTPException(
+                status_code=400, detail=f"Not a file or missing: {candidate_real}"
+            )
+    except OSError:
         raise HTTPException(
             status_code=400, detail=f"Not a file or missing: {candidate_real}"
         )
-    return str(candidate_path)
+    return candidate_real
 
 
 def _path_must_be_allowed_directory(path_str: str, *, must_exist: bool = True) -> str:
@@ -153,15 +157,17 @@ def _path_must_be_allowed_directory(path_str: str, *, must_exist: bool = True) -
     )
     if not ok:
         raise HTTPException(status_code=400, detail=f"Unsafe path rejected: {path_str}")
-    try:
-        candidate_path = Path(candidate_real).expanduser().resolve(strict=False)
-    except (OSError, RuntimeError, ValueError):
-        raise HTTPException(status_code=400, detail=f"Invalid path: {path_str}")
-    if must_exist and not candidate_path.is_dir():
-        raise HTTPException(
-            status_code=400, detail=f"Not a directory: {candidate_real}"
-        )
-    return str(candidate_path)
+    if must_exist:
+        try:
+            if not Path(candidate_real).is_dir():
+                raise HTTPException(
+                    status_code=400, detail=f"Not a directory: {candidate_real}"
+                )
+        except OSError:
+            raise HTTPException(
+                status_code=400, detail=f"Not a directory: {candidate_real}"
+            )
+    return candidate_real
 
 
 def _optional_agent_api_key(x_agent_api_key: Optional[str] = Header(None)) -> None:
@@ -683,25 +689,17 @@ def post_export_review_redaction_overlay(
         if body.review_df_records
         else pd.DataFrame()
     )
-    out_folder_path = Path(OUTPUT_FOLDER).expanduser().resolve()
-    if not validate_path_safety(str(out_folder_path)):
+    out_folder_abs = os.path.realpath(
+        os.path.abspath(os.path.expanduser(str(OUTPUT_FOLDER)))
+    )
+    if not validate_path_safety(out_folder_abs):
         raise HTTPException(status_code=400, detail="Unsafe OUTPUT_FOLDER path")
-    allowed_roots = _allowed_path_roots()
-    under_root = False
-    for root in allowed_roots:
-        try:
-            out_folder_path.relative_to(root)
-            under_root = True
-            break
-        except ValueError:
-            continue
-    if not under_root:
-        raise HTTPException(
-            status_code=403,
-            detail="OUTPUT_FOLDER must resolve under repo, INPUT_FOLDER, or OUTPUT_FOLDER",
-        )
-    out_folder_path.mkdir(parents=True, exist_ok=True)
-    out_folder = str(out_folder_path)
+    _must_be_under_allowed_roots(out_folder_abs, str(out_folder_abs))
+    try:
+        Path(out_folder_abs).mkdir(parents=True, exist_ok=True)
+    except OSError:
+        raise HTTPException(status_code=500, detail="Could not create OUTPUT_FOLDER")
+    out_folder = out_folder_abs
 
     path = visualise_review_redaction_boxes(
         annotator,
@@ -749,25 +747,17 @@ def post_export_review_page_ocr_visualisation(
 
     img_path = _path_must_be_allowed_file(body.page_image_path)
 
-    out_folder_path = Path(OUTPUT_FOLDER).expanduser().resolve()
-    if not validate_path_safety(str(out_folder_path)):
+    out_folder_abs = os.path.realpath(
+        os.path.abspath(os.path.expanduser(str(OUTPUT_FOLDER)))
+    )
+    if not validate_path_safety(out_folder_abs):
         raise HTTPException(status_code=400, detail="Unsafe OUTPUT_FOLDER path")
-    allowed_roots = _allowed_path_roots()
-    under_root = False
-    for root in allowed_roots:
-        try:
-            out_folder_path.relative_to(root)
-            under_root = True
-            break
-        except ValueError:
-            continue
-    if not under_root:
-        raise HTTPException(
-            status_code=403,
-            detail="OUTPUT_FOLDER must resolve under repo, INPUT_FOLDER, or OUTPUT_FOLDER",
-        )
-    out_folder_path.mkdir(parents=True, exist_ok=True)
-    out_folder = str(out_folder_path)
+    _must_be_under_allowed_roots(out_folder_abs, str(out_folder_abs))
+    try:
+        Path(out_folder_abs).mkdir(parents=True, exist_ok=True)
+    except OSError:
+        raise HTTPException(status_code=500, detail="Could not create OUTPUT_FOLDER")
+    out_folder = out_folder_abs
 
     safe_base = str(body.doc_base_name or "review")
     image_name = f"{safe_base}_page{int(body.page_number)}.png"

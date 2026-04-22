@@ -109,6 +109,24 @@ def _is_under_allowed_roots(candidate_abs: str) -> bool:
     return False
 
 
+def _validated_allowed_file_path(path_str: str) -> Optional[str]:
+    """Return canonical file path if safe and under allowed roots, else None."""
+    if not path_str or not validate_path_safety(path_str):
+        return None
+    candidate_abs = _normalize_untrusted_path_to_abs(path_str)
+    candidate_real = os.path.realpath(candidate_abs)
+    if not validate_path_safety(candidate_real):
+        return None
+    if not _is_under_allowed_roots(candidate_real):
+        return None
+    try:
+        if not Path(candidate_real).is_file():
+            return None
+    except OSError:
+        return None
+    return candidate_real
+
+
 if not MAX_IMAGE_PIXELS:
     Image.MAX_IMAGE_PIXELS = None
 
@@ -4537,17 +4555,10 @@ def _load_underlay_rgb_from_annotator(
         return None
     if isinstance(img_val, str) and img_val:
         try:
-            if not validate_path_safety(img_val):
+            safe_path = _validated_allowed_file_path(img_val)
+            if not safe_path:
                 return None
-            candidate_abs = _normalize_untrusted_path_to_abs(img_val)
-            candidate_real = os.path.realpath(candidate_abs)
-            if not validate_path_safety(candidate_real):
-                return None
-            if not _is_under_allowed_roots(candidate_real):
-                return None
-            if not os.path.isfile(candidate_real):
-                return None
-            im = Image.open(candidate_real)
+            im = Image.open(safe_path)
             return np.asarray(im.convert("RGB"))
         except Exception:
             return None

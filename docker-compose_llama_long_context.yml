@@ -6,6 +6,7 @@
 # (same filename per repo) and -hf downloads are not shared across profiles.
 # Example CLI commands:
 # docker compose -f docker-compose_llama_long_context.yml --profile 35b_36 up -d
+# docker compose -f docker-compose_llama_long_context.yml --profile 27b_36 up -d
 # docker compose -f docker-compose_llama_long_context.yml --profile 35b up -d
 # docker compose -f docker-compose_llama_long_context.yml --profile 27b up -d
 # docker compose -f docker-compose_llama_long_context.yml --profile 9b up -d
@@ -15,6 +16,71 @@
 
 # Add --build to the above if you want to rebuild the app image.
 services:
+
+  # Qwen 3.6 27B model setup below requires 24GB of VRAM to run.
+  qwen36-27b_q4_gguf:
+    profiles: ["27b_36"]
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda12
+    command:
+      - -hf
+      - unsloth/Qwen3.6-27B-GGUF
+      - --hf-file
+      - Qwen3.6-27B-UD-Q4_K_XL.gguf
+      - --mmproj-url
+      - https://huggingface.co/unsloth/Qwen3.6-27B-GGUF/resolve/main/mmproj-F16.gguf
+      - --n-gpu-layers
+      - "999"
+      - --ctx-size
+      - "32768"
+      - --fit
+      - "off"
+      - --temp
+      - "0.7"
+      - --top-k
+      - "20"
+      - --top-p
+      - "0.8"
+      - --min-p
+      - "0.0"
+      - --frequency-penalty
+      - "1"
+      - --presence-penalty
+      - "1"
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8080"
+      - --no-warmup
+      - --seed
+      - "42"
+      - --image_min_tokens
+      - "300"
+      - --image_max_tokens
+      - "2000" # To fit within batch size 2048 (default)
+    ports:
+      - "8000:8080"
+    volumes:
+      - ./models:/models
+      - hf-llama-cache-qwen36-27b:/root/.cache/llama.cpp
+      - hf-hub-cache-qwen36-27b:/root/.cache/huggingface
+    pull_policy: always
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/v1/models >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 8
+      start_period: 1200s
+    networks:
+      redaction-net-llama:
+        aliases:
+          - llama-inference
 
    # Qwen 3.5 35B model setup below requires 24GB of VRAM with n-cpu-moe set to 0. For lower VRAM systems, n-cpu-moe ~ 40 could work for a 12GB VRAM system, and n-cpu-moe ~ 20 for a 16GB VRAM system.
   qwen36-35b_q4_gguf:
@@ -412,7 +478,7 @@ services:
           - llama-inference
 
   redaction-app-llama:
-    profiles: ["35b_36", "35b", "27b", "9b", "gemma4-31b", "gemma4-26b"]
+    profiles: ["35b_36", "27b_36", "35b", "27b", "9b", "gemma4-31b", "gemma4-26b"]
     image: redaction-app-main
     build:
       context: .              # Look in the current folder
@@ -426,6 +492,9 @@ services:
     shm_size: '8gb'
     depends_on:
       qwen36-35b_q4_gguf:
+        condition: service_healthy
+        required: false
+      qwen36-27b_q4_gguf:
         condition: service_healthy
         required: false
       qwen35-35b_q4_gguf:
@@ -504,12 +573,14 @@ networks:
 
 volumes:
   hf-llama-cache-qwen36-35b:
+  hf-llama-cache-qwen36-27b:
   hf-llama-cache-qwen35-35b:
   hf-llama-cache-qwen35-27b:
   hf-llama-cache-qwen9b:
   hf-llama-cache-gemma4-31b:
   hf-llama-cache-gemma4-26b:
   hf-hub-cache-qwen36-35b:
+  hf-hub-cache-qwen36-27b:
   hf-hub-cache-qwen35-35b:
   hf-hub-cache-qwen35-27b:
   hf-hub-cache-qwen9b:

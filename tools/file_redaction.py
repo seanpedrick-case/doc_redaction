@@ -12597,10 +12597,19 @@ def visualise_ocr_words_bounding_boxes(
     if output_folder:
         trusted_base = os.path.realpath(str(OUTPUT_FOLDER))
         requested_out_dir = os.path.realpath(os.path.normpath(str(output_folder)))
+        out_dir = trusted_base
         if validate_folder_containment(requested_out_dir, trusted_base):
             out_dir = requested_out_dir
         else:
-            out_dir = trusted_base
+            # Defense-in-depth: attempt to map a requested directory to a safe relative
+            # path under the trusted base. If that relative contains traversal, the
+            # secure join will reject it and we stay on trusted_base.
+            try:
+                rel_out_dir = os.path.relpath(requested_out_dir, trusted_base)
+                if rel_out_dir not in (".", ""):
+                    out_dir = str(secure_path_join(trusted_base, rel_out_dir))
+            except Exception:
+                out_dir = trusted_base
 
         textract_viz_folder = str(secure_path_join(out_dir, visualisation_folder))
 
