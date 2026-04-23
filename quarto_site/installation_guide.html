@@ -2,13 +2,16 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
 
 <meta charset="utf-8">
-<meta name="generator" content="quarto-1.8.27">
+<meta name="generator" content="quarto-1.9.36">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 
 <title>App installation guide (with CDK or locally on Windows) – Document Redaction App</title>
 <style>
+/* Default styles provided by pandoc.
+** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+*/
 code{white-space: pre-wrap;}
 span.smallcaps{font-variant: small-caps;}
 div.columns{display: flex; gap: min(4vw, 1.5em);}
@@ -67,15 +70,14 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <meta name="quarto:offset" content="../">
 <script src="../site_libs/quarto-html/quarto.js" type="module"></script>
 <script src="../site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
-<script src="../site_libs/quarto-html/axe/axe-check.js" type="module"></script>
 <script src="../site_libs/quarto-html/popper.min.js"></script>
 <script src="../site_libs/quarto-html/tippy.umd.min.js"></script>
 <script src="../site_libs/quarto-html/anchor.min.js"></script>
 <link href="../site_libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-ed96de9b727972fe78a7b5d16c58bf87.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-845c23b38eaddc0f92fda52bfe77a8c8.css" rel="stylesheet" id="quarto-text-highlighting-styles">
 <script src="../site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="../site_libs/bootstrap/bootstrap-e31584831b205ffbb2d98406f31c2a5b.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-a0f9fd0d421825b736dc1bbcbcba2219.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -139,25 +141,40 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <span class="menu-text">Home</span></a>
   </li>  
   <li class="nav-item">
-    <a class="nav-link" href="../src/user_guide.html"> 
+    <a class="nav-link" href="../quarto_site/user_guide.html"> 
 <span class="menu-text">User guide</span></a>
   </li>  
   <li class="nav-item">
-    <a class="nav-link" href="../src/faq.html"> 
+    <a class="nav-link" href="../quarto_site/faq.html"> 
 <span class="menu-text">User FAQ</span></a>
   </li>  
   <li class="nav-item">
-    <a class="nav-link active" href="../src/installation_guide.html" aria-current="page"> 
+    <a class="nav-link" href="../quarto_site/python_package_usage.html"> 
+<span class="menu-text">Python package usage</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link active" href="../quarto_site/installation_guide.html" aria-current="page"> 
 <span class="menu-text">App installation guide (with CDK)</span></a>
   </li>  
   <li class="nav-item">
-    <a class="nav-link" href="../src/app_settings.html"> 
+    <a class="nav-link" href="../quarto_site/app_settings.html"> 
 <span class="menu-text">App settings management guide</span></a>
   </li>  
-  <li class="nav-item">
-    <a class="nav-link" href="../src/redaction_with_vlm_and_llms.html"> 
-<span class="menu-text">Redaction with local VLM and LLMs</span></a>
+  <li class="nav-item dropdown ">
+    <a class="nav-link dropdown-toggle" href="#" id="nav-menu-blog" role="link" data-bs-toggle="dropdown" aria-expanded="false">
+ <span class="menu-text">Blog</span>
+    </a>
+    <ul class="dropdown-menu" aria-labelledby="nav-menu-blog">    
+        <li>
+    <a class="dropdown-item" href="../quarto_site/ocr_and_redaction_with_qwen35.html">
+ <span class="dropdown-text">OCR and redaction with Qwen 3.5 (Mar 2026)</span></a>
   </li>  
+        <li>
+    <a class="dropdown-item" href="../quarto_site/redaction_with_vlm_and_llms.html">
+ <span class="dropdown-text">Redaction with local VLM and LLMs (Qwen 3)</span></a>
+  </li>  
+    </ul>
+  </li>
 </ul>
           </div> <!-- /navcollapse -->
             <div class="quarto-navbar-tools">
@@ -236,7 +253,8 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Bootstrap the us-east-1 region</span></span>
 <span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="ex">cdk</span> bootstrap aws://<span class="op">&lt;</span>YOUR_AWS_ACCOUNT<span class="op">&gt;</span>/us-east-1</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div></li>
-<li><p>In command line, write: <code>bash     git clone https://github.com/seanpedrick-case/doc_redaction.git</code></p></li>
+<li><p>In command line, write:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> clone https://github.com/seanpedrick-case/doc_redaction.git</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div></li>
 </ul>
 </section>
 <section id="note-on-acm-certificates" class="level2">
@@ -250,26 +268,26 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <section id="create-a-python-environment-load-in-packages-from-requirements.txt." class="level3">
 <h3 class="anchored" data-anchor-id="create-a-python-environment-load-in-packages-from-requirements.txt.">1. Create a python environment, load in packages from <code>requirements.txt</code>.</h3>
 <p>You need a <code>cdk.json</code> in the <code>cdk</code> folder. It should contain the following:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode json code-with-copy"><code class="sourceCode json"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
-<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">"app"</span><span class="fu">:</span> <span class="st">"&lt;PATH TO PYTHON ENVIRONMENT FOLDER WHERE REQUIREMENTS HAVE BEEN LOADED&gt;/python.exe app.py"</span><span class="fu">,</span></span>
-<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">"context"</span><span class="fu">:</span> <span class="fu">{</span></span>
-<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-apigateway:usagePlanKeyOrderInsensitiveId"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/core:stackRelativeExports"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-rds:lowercaseDbIdentifier"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-lambda:recognizeVersionProps"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-lambda:recognizeLayerVersion"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-cloudfront:defaultSecurityPolicyTLSv1.2_2021"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-ecs:arnFormatIncludesClusterName"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/core:newStyleStackSynthesis"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"aws-cdk:enableDiffNoFail"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-ec2:restrictDefaultSecurityGroup"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-apigateway:disableCloudWatchRole"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/core:target-partitions"</span><span class="fu">:</span> <span class="ot">[</span></span>
-<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a>        <span class="st">"aws"</span><span class="ot">,</span></span>
-<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a>        <span class="st">"aws-cn"</span></span>
-<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a>        <span class="ot">]</span></span>
-<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
-<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb3"><pre class="sourceCode json code-with-copy"><code class="sourceCode json"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">"app"</span><span class="fu">:</span> <span class="st">"&lt;PATH TO PYTHON ENVIRONMENT FOLDER WHERE REQUIREMENTS HAVE BEEN LOADED&gt;/python.exe app.py"</span><span class="fu">,</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">"context"</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-apigateway:usagePlanKeyOrderInsensitiveId"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/core:stackRelativeExports"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-rds:lowercaseDbIdentifier"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-lambda:recognizeVersionProps"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-lambda:recognizeLayerVersion"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-cloudfront:defaultSecurityPolicyTLSv1.2_2021"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-ecs:arnFormatIncludesClusterName"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/core:newStyleStackSynthesis"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"aws-cdk:enableDiffNoFail"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-ec2:restrictDefaultSecurityGroup"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-apigateway:disableCloudWatchRole"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/core:target-partitions"</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a>        <span class="st">"aws"</span><span class="ot">,</span></span>
+<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a>        <span class="st">"aws-cn"</span></span>
+<span id="cb3-18"><a href="#cb3-18" aria-hidden="true" tabindex="-1"></a>        <span class="ot">]</span></span>
+<span id="cb3-19"><a href="#cb3-19" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="cb3-20"><a href="#cb3-20" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </section>
 <section id="create-a-cdk_config.env-file-in-the-config-subfolder." class="level3">
 <h3 class="anchored" data-anchor-id="create-a-cdk_config.env-file-in-the-config-subfolder.">2. Create a <code>cdk_config.env</code> file in the <code>config</code> subfolder.</h3>
@@ -277,28 +295,28 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <section id="deploying-the-app-an-a-brand-new-vpc" class="level4">
 <h4 class="anchored" data-anchor-id="deploying-the-app-an-a-brand-new-vpc">Deploying the app an a brand new VPC</h4>
 <p>Here as a minimum it would be useful to put the following details in the cdk_config.env file (below are all example values, other possible variables to use here can be seen in the <code>cdk</code> folder/<code>cdk_config.py</code>).</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb3"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="dt">CDK_PREFIX</span><span class="ot">=</span><span class="st">example-prefix # This prefix will be added to the name of most of the created elements in your stack</span></span>
-<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="dt">NEW_VPC_CIDR</span><span class="ot">=</span><span class="st">10.0.0.0/24 # The CIDR range for your newly created VPC</span></span>
-<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="dt">AWS_REGION</span><span class="ot">=</span><span class="st">&lt;your-region&gt; # Region where elements will be created</span></span>
-<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="dt">AWS_ACCOUNT_ID</span><span class="ot">=</span><span class="st">1234567890 # AWS account ID that has administrator access that you will use for deploying the stack</span></span>
-<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="dt">CDK_FOLDER</span><span class="ot">=</span><span class="st">C:/path_to_cdk_folder/ # The place where the cdk folder code is located</span></span>
-<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a><span class="dt">CONTEXT_FILE</span><span class="ot">=</span><span class="st">C:/path_to_cdk_folder/cdk.context.json</span></span>
-<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a><span class="dt">COGNITO_USER_POOL_DOMAIN_PREFIX</span><span class="ot">=</span><span class="st">redaction-12345 # The prefix of the login / user sign up domain that you want to use with Cognito login. Should not contain the terms amazon, aws, or cognito.</span></span>
-<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a><span class="dt">COGNITO_AUTH</span><span class="ot">=</span><span class="st">0 # Do you want to do in-app authentication (username and password only, not necessary if you are using an SSL certificate as recommended below)  </span></span>
-<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a><span class="dt">USE_CLOUDFRONT</span><span class="ot">=</span><span class="st">True # Recommended. If you intend to use CloudFront as the front URL to your application load balancer (ALB). This has some extra security features that you won't get with just an ALB, e.g. limiting app access by country.</span></span>
-<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a><span class="dt">RUN_USEAST_STACK</span><span class="ot">=</span><span class="st">False # Set this to True only if you have permissions to create a Cloudfront distribution and web ACL on top of it in the us-east-1 region. If you don't, the section below shows how you can create the CloudFront resource manually and map it to your application load balancer (as you should have permissions for that if you are admin in your region).</span></span>
-<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a><span class="dt">CLOUDFRONT_DOMAIN</span><span class="ot">=</span><span class="st">&lt;example&gt;.cloudfront.net # If you already know the domain of the CloudFront distribution that you want to use, you can add this here.</span></span>
-<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a><span class="co"># If you are using an SSL certificate with your ALB (highly recommended):</span></span>
-<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a><span class="dt">ACM_SSL_CERTIFICATE_ARN</span><span class="ot">=</span><span class="st">&lt;SSL Certificate ARN&gt; # This is the ARN of the SSL certificate that you have installed in AWS Certificate Manager</span></span>
-<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a><span class="dt">SSL_CERTIFICATE_DOMAIN</span><span class="ot">=</span><span class="st">redaction.example.com # This is the domain of the SSL certificate that you have installed in AWS Certificate Manager</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb4"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="dt">CDK_PREFIX</span><span class="ot">=</span><span class="st">example-prefix # This prefix will be added to the name of most of the created elements in your stack</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="dt">NEW_VPC_CIDR</span><span class="ot">=</span><span class="st">10.0.0.0/24 # The CIDR range for your newly created VPC</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="dt">AWS_REGION</span><span class="ot">=</span><span class="st">&lt;your-region&gt; # Region where elements will be created</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a><span class="dt">AWS_ACCOUNT_ID</span><span class="ot">=</span><span class="st">1234567890 # AWS account ID that has administrator access that you will use for deploying the stack</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a><span class="dt">CDK_FOLDER</span><span class="ot">=</span><span class="st">C:/path_to_cdk_folder/ # The place where the cdk folder code is located</span></span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a><span class="dt">CONTEXT_FILE</span><span class="ot">=</span><span class="st">C:/path_to_cdk_folder/cdk.context.json</span></span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a><span class="dt">COGNITO_USER_POOL_DOMAIN_PREFIX</span><span class="ot">=</span><span class="st">redaction-12345 # The prefix of the login / user sign up domain that you want to use with Cognito login. Should not contain the terms amazon, aws, or cognito.</span></span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a><span class="dt">COGNITO_AUTH</span><span class="ot">=</span><span class="st">0 # Do you want to do in-app authentication (username and password only, not necessary if you are using an SSL certificate as recommended below)  </span></span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a><span class="dt">USE_CLOUDFRONT</span><span class="ot">=</span><span class="st">True # Recommended. If you intend to use CloudFront as the front URL to your application load balancer (ALB). This has some extra security features that you won't get with just an ALB, e.g. limiting app access by country.</span></span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a><span class="dt">RUN_USEAST_STACK</span><span class="ot">=</span><span class="st">False # Set this to True only if you have permissions to create a Cloudfront distribution and web ACL on top of it in the us-east-1 region. If you don't, the section below shows how you can create the CloudFront resource manually and map it to your application load balancer (as you should have permissions for that if you are admin in your region).</span></span>
+<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a><span class="dt">CLOUDFRONT_DOMAIN</span><span class="ot">=</span><span class="st">&lt;example&gt;.cloudfront.net # If you already know the domain of the CloudFront distribution that you want to use, you can add this here.</span></span>
+<span id="cb4-12"><a href="#cb4-12" aria-hidden="true" tabindex="-1"></a><span class="co"># If you are using an SSL certificate with your ALB (highly recommended):</span></span>
+<span id="cb4-13"><a href="#cb4-13" aria-hidden="true" tabindex="-1"></a><span class="dt">ACM_SSL_CERTIFICATE_ARN</span><span class="ot">=</span><span class="st">&lt;SSL Certificate ARN&gt; # This is the ARN of the SSL certificate that you have installed in AWS Certificate Manager</span></span>
+<span id="cb4-14"><a href="#cb4-14" aria-hidden="true" tabindex="-1"></a><span class="dt">SSL_CERTIFICATE_DOMAIN</span><span class="ot">=</span><span class="st">redaction.example.com # This is the domain of the SSL certificate that you have installed in AWS Certificate Manager</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>Note: If you are using an SSL certificate with Cognito login on the application load balancer (strongly advised), you can set COGNITO_AUTH to 0 above, as you don’t need the second login step to get to the app</strong></p>
 </section>
 <section id="in-an-existing-vpc" class="level4">
 <h4 class="anchored" data-anchor-id="in-an-existing-vpc">In an existing VPC</h4>
 <p>From the above example, remove the variable ‘NEW_VPC_CIDR’ and replace with the below:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb4"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="dt">VPC_NAME</span><span class="ot">=</span><span class="st">example-vpc-name # Name of the VPC within which all the other elements will be created</span></span>
-<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="dt">EXISTING_IGW_ID</span><span class="ot">=</span><span class="st">igw-1234567890 # (optional) The ID for an existing internet gateway that you want to use instead of creating a new one</span></span>
-<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="dt">SINGLE_NAT_GATEWAY_ID</span><span class="ot">=</span><span class="st">nat-123456789 # (optional) The ID for an existing NAT gateway that you want to use instead of creating a new one</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb5"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="dt">VPC_NAME</span><span class="ot">=</span><span class="st">example-vpc-name # Name of the VPC within which all the other elements will be created</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="dt">EXISTING_IGW_ID</span><span class="ot">=</span><span class="st">igw-1234567890 # (optional) The ID for an existing internet gateway that you want to use instead of creating a new one</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a><span class="dt">SINGLE_NAT_GATEWAY_ID</span><span class="ot">=</span><span class="st">nat-123456789 # (optional) The ID for an existing NAT gateway that you want to use instead of creating a new one</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <section id="subnets" class="level5">
 <h5 class="anchored" data-anchor-id="subnets">Subnets</h5>
 <p>If you are using an existing VPC then you may want to deploy the app within existing subnets rather than creating new ones:</p>
@@ -306,15 +324,15 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <li><p>If you define no subnets in environment variables, the app will try to use existing private and public subnets. Bear in mind the app may overlap with IP addresses assigned to existing AWS resources. It is advised to at least specify existing subnets that you know are available, or create your own using one of the below methods.</p></li>
 <li><p>If you want to use existing subnets, you can list them in the following environment variables:</p></li>
 </ul>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb5"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="dt">PUBLIC_SUBNETS_TO_USE</span><span class="ot">=</span><span class="st">["PublicSubnet1", "PublicSubnet2", "PublicSubnet3"]`</span></span>
-<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="dt">PRIVATE_SUBNETS_TO_USE</span><span class="ot">=</span><span class="st">["PrivateSubnet1", "PrivateSubnet2", "PrivateSubnet3"]`</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb6"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="dt">PUBLIC_SUBNETS_TO_USE</span><span class="ot">=</span><span class="st">["PublicSubnet1", "PublicSubnet2", "PublicSubnet3"]`</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="dt">PRIVATE_SUBNETS_TO_USE</span><span class="ot">=</span><span class="st">["PrivateSubnet1", "PrivateSubnet2", "PrivateSubnet3"]`</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <ul>
 <li>If you want to create new subnets, you need to also specify CIDR blocks and availability zones for the new subnets. The app will check with you upon deployment whether these CIDR blocks are available before trying to create.</li>
 </ul>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb6"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="dt">PUBLIC_SUBNET_CIDR_BLOCKS</span><span class="ot">=</span><span class="st">['10.222.333.0/28', '10.222.333.16/28', '10.222.333.32/28']</span></span>
-<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="dt">PUBLIC_SUBNET_AVAILABILITY_ZONES</span><span class="ot">=</span><span class="st">['eu-east-1a', 'eu-east-1b', 'eu-east-1c']</span></span>
-<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="dt">PRIVATE_SUBNET_CIDR_BLOCKS</span><span class="ot">=</span><span class="st">['10.222.333.48/28', '10.222.333.64/28', '10.222.333.80/28']</span></span>
-<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="dt">PRIVATE_SUBNET_AVAILABILITY_ZONES</span><span class="ot">=</span><span class="st">['eu-east-1a', 'eu-east-1b', 'eu-east-1c']</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb7"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="dt">PUBLIC_SUBNET_CIDR_BLOCKS</span><span class="ot">=</span><span class="st">['10.222.333.0/28', '10.222.333.16/28', '10.222.333.32/28']</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="dt">PUBLIC_SUBNET_AVAILABILITY_ZONES</span><span class="ot">=</span><span class="st">['eu-east-1a', 'eu-east-1b', 'eu-east-1c']</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a><span class="dt">PRIVATE_SUBNET_CIDR_BLOCKS</span><span class="ot">=</span><span class="st">['10.222.333.48/28', '10.222.333.64/28', '10.222.333.80/28']</span></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a><span class="dt">PRIVATE_SUBNET_AVAILABILITY_ZONES</span><span class="ot">=</span><span class="st">['eu-east-1a', 'eu-east-1b', 'eu-east-1c']</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>If you try to create subnets in invalid CIDR blocks / availability zones, the console output will tell you and it will show you the currently occupied CIDR blocks to help find a space for new subnets you want to create.</p>
 </section>
 </section>
@@ -340,9 +358,9 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <p>The ‘post_cdk_build_quickstart’ file will upload a config file to S3, as the Fargate task definition references a <code>config.env</code> file.</p>
 <p>if you want to do this manually:</p>
 <p>Create a <code>config.env</code> file to upload to the S3 bucket that has at least the following variables:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb7"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="dt">COGNITO_AUTH</span><span class="ot">=</span><span class="st">0 # If you are using an SSL certificate with your application load balancer, you will be logging in there. Set this to 0 to turn off the default login screen.</span></span>
-<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="dt">RUN_AWS_FUNCTIONS</span><span class="ot">=</span><span class="st">1 # This will enable the app to communicate with AWS services.</span></span>
-<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a><span class="dt">SESSION_OUTPUT_FOLDER</span><span class="ot">=</span><span class="st">True # This will put outputs for each user in separate output folders.</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb8"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="dt">COGNITO_AUTH</span><span class="ot">=</span><span class="st">0 # If you are using an SSL certificate with your application load balancer, you will be logging in there. Set this to 0 to turn off the default login screen.</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="dt">RUN_AWS_FUNCTIONS</span><span class="ot">=</span><span class="st">1 # This will enable the app to communicate with AWS services.</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="dt">SESSION_OUTPUT_FOLDER</span><span class="ot">=</span><span class="st">True # This will put outputs for each user in separate output folders.</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <ul>
 <li>Then, go to S3 and choose the new <code>...-logs</code> bucket that you created. Upload the <code>config.env</code> file into this bucket.</li>
 </ul>

@@ -23,6 +23,41 @@ ul.task-list li input[type="checkbox"] {
   margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
   vertical-align: middle;
 }
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
 </style>
 
 
@@ -106,29 +141,40 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <span class="menu-text">Home</span></a>
   </li>  
   <li class="nav-item">
-    <a class="nav-link" href="./src/user_guide.html"> 
+    <a class="nav-link" href="./quarto_site/user_guide.html"> 
 <span class="menu-text">User guide</span></a>
   </li>  
   <li class="nav-item">
-    <a class="nav-link" href="./src/faq.html"> 
+    <a class="nav-link" href="./quarto_site/faq.html"> 
 <span class="menu-text">User FAQ</span></a>
   </li>  
   <li class="nav-item">
-    <a class="nav-link" href="./src/installation_guide.html"> 
+    <a class="nav-link" href="./quarto_site/python_package_usage.html"> 
+<span class="menu-text">Python package usage</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="./quarto_site/installation_guide.html"> 
 <span class="menu-text">App installation guide (with CDK)</span></a>
   </li>  
   <li class="nav-item">
-    <a class="nav-link" href="./src/app_settings.html"> 
+    <a class="nav-link" href="./quarto_site/app_settings.html"> 
 <span class="menu-text">App settings management guide</span></a>
   </li>  
-  <li class="nav-item">
-    <a class="nav-link" href="./src/redaction_with_vlm_and_llms.html"> 
-<span class="menu-text">Redaction with local VLM and LLMs (Qwen 3)</span></a>
+  <li class="nav-item dropdown ">
+    <a class="nav-link dropdown-toggle" href="#" id="nav-menu-blog" role="link" data-bs-toggle="dropdown" aria-expanded="false">
+ <span class="menu-text">Blog</span>
+    </a>
+    <ul class="dropdown-menu" aria-labelledby="nav-menu-blog">    
+        <li>
+    <a class="dropdown-item" href="./quarto_site/ocr_and_redaction_with_qwen35.html">
+ <span class="dropdown-text">OCR and redaction with Qwen 3.5 (Mar 2026)</span></a>
   </li>  
-  <li class="nav-item">
-    <a class="nav-link" href="./src/ocr_and_redaction_with_qwen35.html"> 
-<span class="menu-text">OCR and redaction with Qwen 3.5 (Mar 2026)</span></a>
+        <li>
+    <a class="dropdown-item" href="./quarto_site/redaction_with_vlm_and_llms.html">
+ <span class="dropdown-text">Redaction with local VLM and LLMs (Qwen 3)</span></a>
   </li>  
+    </ul>
+  </li>
 </ul>
           </div> <!-- /navcollapse -->
             <div class="quarto-navbar-tools">
@@ -163,9 +209,9 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 </header>
 
 
-<p>version: 2.1.0</p>
+<p>version: 2.2.0</p>
 <p>Welcome to the Document Redaction App documentation. This site provides comprehensive documentation for the Document Redaction App.</p>
-<p>Navigate through the sections to learn how to install, use, and manage the application. Below is a brief introduction to the app.</p>
+<p>Navigate through the sections to learn how to install, use, and manage the application. Below is a brief introduction to the app, followed by <strong>complete installation instructions</strong> (PyPI, source, and Docker overview).</p>
 <section id="document-redaction" class="level2">
 <h2 class="anchored" data-anchor-id="document-redaction">Document redaction</h2>
 <p>Redact personally identifiable information (PII) from documents (pdf, png, jpg), Word files (docx), or tabular data (xlsx/csv/parquet). Please see the <a href="https://seanpedrick-case.github.io/doc_redaction/src/user_guide.html">User Guide</a> for a full walkthrough of all the features in the app.</p>
@@ -178,6 +224,119 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <p>To identify text in documents, the ‘Local’ text extraction uses PikePDF, and OCR image analysis uses Tesseract, and works well only for documents with typed text or scanned PDFs with clear text. Use AWS Textract to extract more complex elements e.g.&nbsp;handwriting, signatures, or unclear text. For PII identification, ‘Local’ (based on spaCy) gives good results if you are looking for common names or terms, or a custom list of terms to redact (see Redaction settings). AWS Comprehend gives better results at a small cost.</p>
 <p>Additional options include, choosing the type of information to redact (e.g.&nbsp;people, places), custom terms to include/ exclude from redaction, fuzzy matching, language settings, and whole page redaction. After redaction is complete, you can view and modify suggested redactions on the ‘Review redactions’ tab to quickly create a final redacted document.</p>
 <p>NOTE: The app is not 100% accurate, and it will miss some personal information. It is essential that all outputs are reviewed <strong>by a human</strong> before using the final outputs.</p>
+<hr>
+</section>
+<section id="installation" class="level2">
+<h2 class="anchored" data-anchor-id="installation">Installation</h2>
+<section id="prerequisites-tesseract-and-poppler" class="level3">
+<h3 class="anchored" data-anchor-id="prerequisites-tesseract-and-poppler">Prerequisites: Tesseract and Poppler</h3>
+<p>The application needs <strong>Tesseract</strong> (OCR) and <strong>Poppler</strong> (PDF utilities) on your system before Python packages will work fully.</p>
+<section id="automated-dependency-setup-recommended" class="level4">
+<h4 class="anchored" data-anchor-id="automated-dependency-setup-recommended">Automated dependency setup (recommended)</h4>
+<p>If you <strong>don’t have admin rights</strong> (or you just want the simplest setup), you can have the project download and configure <strong>Tesseract</strong> and <strong>Poppler</strong> into a local <code>third_party/</code> folder inside your checkout.</p>
+<p>You need the installer script available first, which means either:</p>
+<ul>
+<li><strong>Repository checkout</strong>: <code>git clone ...</code> and run the command from the repo root (recommended for the web UI), or</li>
+<li><strong>PyPI install</strong>: <code>pip install doc_redaction</code> and run from a writable folder where you want <code>third_party/</code> and <code>config/app_config.env</code> to be created/updated.</li>
+</ul>
+<p>From the repository root (or your chosen working folder) after creating/activating your venv and installing Python requirements:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> doc_redaction.install_deps</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>This writes <code>TESSERACT_FOLDER</code> / <code>POPPLER_FOLDER</code> into <code>config/app_config.env</code> so the app can find the binaries without you editing your system PATH.</p>
+<p>To just check whether your machine can already see the tools:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> doc_redaction.install_deps <span class="at">--verify-only</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="windows" class="level4">
+<h4 class="anchored" data-anchor-id="windows">Windows</h4>
+<p>If you don’t use the automated setup above, install manually:</p>
+<ol type="1">
+<li><strong>Tesseract:</strong> Install from the <a href="https://github.com/UB-Mannheim/tesseract/wiki">UB Mannheim Tesseract wiki</a>. During setup, add Tesseract to the system PATH.</li>
+<li><strong>Poppler:</strong> Download from <a href="https://github.com/oschwartz10612/poppler-windows">Poppler for Windows</a>, extract to a permanent folder, and add the <code>bin</code> directory to your system PATH.</li>
+</ol>
+<p>Verify in a new terminal: <code>tesseract --version</code> and <code>pdftoppm -v</code>.</p>
+</section>
+<section id="linux-debianubuntu" class="level4">
+<h4 class="anchored" data-anchor-id="linux-debianubuntu">Linux (Debian/Ubuntu)</h4>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb3"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> apt-get update <span class="kw">&amp;&amp;</span> <span class="fu">sudo</span> apt-get install <span class="at">-y</span> tesseract-ocr poppler-utils</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="linux-fedoracentosrhel" class="level4">
+<h4 class="anchored" data-anchor-id="linux-fedoracentosrhel">Linux (Fedora/CentOS/RHEL)</h4>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb4"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> dnf install <span class="at">-y</span> tesseract poppler-utils</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+</section>
+<section id="python-environment" class="level3">
+<h3 class="anchored" data-anchor-id="python-environment">Python environment</h3>
+<p>Use a virtual environment (recommended):</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb5"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> venv venv</span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="co"># Windows:</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a><span class="bu">.</span><span class="dt">\v</span>env<span class="dt">\S</span>cripts<span class="dt">\a</span>ctivate</span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a><span class="co"># macOS/Linux:</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a><span class="bu">source</span> venv/bin/activate</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="install-from-pypi" class="level3">
+<h3 class="anchored" data-anchor-id="install-from-pypi">Install from PyPI</h3>
+<p>The package is published on <a href="https://pypi.org/project/doc-redaction/">PyPI</a> as <strong>doc-redaction</strong>; the import name is <strong><code>doc_redaction</code></strong>.</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb6"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install doc_redaction</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<section id="web-ui-from-a-pypi-install" class="level4">
+<h4 class="anchored" data-anchor-id="web-ui-from-a-pypi-install">Web UI from a PyPI install</h4>
+<p>You can start the Gradio web UI after a PyPI install with:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb7"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> app</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>For the smoothest UI experience (examples/assets/config in expected locations), a <strong>repository checkout</strong> or <strong>Docker</strong> is still usually simpler, but PyPI install is sufficient to launch the UI as long as the system dependencies are available (or you run <code>python -m doc_redaction.install_deps</code> first).</p>
+<p>Optional extras (PaddleOCR, VLM stack — see <code>pyproject.toml</code> on the repository for exact extras):</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb8"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install <span class="st">"doc_redaction[paddle,vlm]"</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>After a PyPI install you get:</p>
+<ul>
+<li>The <strong><code>cli_redact</code></strong> console script (same behaviour as <code>cli_redact.py</code> in the repo).</li>
+<li>The <strong>programmatic API</strong> documented in <a href="src/package_api_usage.qmd">Package API usage (Python)</a>.</li>
+</ul>
+<p><strong>Gradio web UI:</strong> The full <code>app.py</code> UI is easiest to run from a <strong>repository clone</strong> (see below) or via <strong>Docker</strong>; a PyPI install is optimised for library and CLI use.</p>
+</section>
+</section>
+<section id="install-from-source-clone-development" class="level3">
+<h3 class="anchored" data-anchor-id="install-from-source-clone-development">Install from source (clone / development)</h3>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb9"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> clone https://github.com/seanpedrick-case/doc_redaction.git</span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> doc_redaction</span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install <span class="at">-e</span> .</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Lightweight (no Paddle/VLM extras):</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb10"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install <span class="at">-e</span> .</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Full extras from the repo:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb11"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install <span class="at">-e</span> <span class="st">".[paddle,vlm]"</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Alternatively, <code>requirements_lightweight.txt</code> or <code>requirements.txt</code> from the repository root (see <a href="https://github.com/seanpedrick-case/doc_redaction">README on GitHub</a> for GPU notes for Paddle and Torch).</p>
+</section>
+<section id="run-the-gradio-application-source-checkout" class="level3">
+<h3 class="anchored" data-anchor-id="run-the-gradio-application-source-checkout">Run the Gradio application (source checkout)</h3>
+<p>From the repository root, with dependencies installed:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb12"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> app.py</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Open the local URL shown in the terminal (typically <code>http://127.0.0.1:7860</code>).</p>
+</section>
+<section id="command-line-interface" class="level3">
+<h3 class="anchored" data-anchor-id="command-line-interface">Command-line interface</h3>
+<ul>
+<li><strong>PyPI install:</strong> <code>cli_redact --help</code></li>
+<li><strong>Source checkout:</strong> <code>python cli_redact.py --help</code></li>
+</ul>
+</section>
+<section id="using-as-a-python-package-no-gradio-ui" class="level3">
+<h3 class="anchored" data-anchor-id="using-as-a-python-package-no-gradio-ui">Using as a Python package (no Gradio UI)</h3>
+<p>For examples that mirror each Gradio <code>api_name</code> using the CLI-first Python API, see <strong><a href="src/package_api_usage.qmd">Package API usage (Python)</a></strong>.</p>
+</section>
+<section id="docker-and-cloud-deployment" class="level3">
+<h3 class="anchored" data-anchor-id="docker-and-cloud-deployment">Docker and cloud deployment</h3>
+<p>For container-based installs, AWS CDK, and advanced deployment, see the <a href="src/installation_guide.qmd">App installation guide (with CDK)</a> and the <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/Dockerfile">Dockerfile</a> in the repository.</p>
+</section>
+<section id="configuration" class="level3">
+<h3 class="anchored" data-anchor-id="configuration">Configuration</h3>
+<p>Application settings are typically loaded from <code>config/app_config.env</code>. A full variable reference is on the site under <a href="src/app_settings.qmd">App settings management guide</a> and in the GitHub repository documentation.</p>
+<hr>
+</section>
+</section>
+<section id="more-documentation" class="level2">
+<h2 class="anchored" data-anchor-id="more-documentation">More documentation</h2>
+<ul>
+<li><a href="src/user_guide.qmd">User guide</a></li>
+<li><a href="src/package_api_usage.qmd">Package API usage (Python)</a></li>
+<li><a href="src/installation_guide.qmd">App installation guide (with CDK)</a></li>
+<li><a href="src/app_settings.qmd">App settings management guide</a></li>
+</ul>
 
 
 </section>
