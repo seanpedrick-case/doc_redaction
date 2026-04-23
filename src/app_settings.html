@@ -1,0 +1,2221 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.9.36">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+
+<title>App settings management guide – Document Redaction App</title>
+<style>
+/* Default styles provided by pandoc.
+** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+*/
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+</style>
+
+
+<script src="../site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="../site_libs/quarto-nav/headroom.min.js"></script>
+<script src="../site_libs/clipboard/clipboard.min.js"></script>
+<script src="../site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="../site_libs/quarto-search/fuse.min.js"></script>
+<script src="../site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="../">
+<script src="../site_libs/quarto-html/quarto.js" type="module"></script>
+<script src="../site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="../site_libs/quarto-html/popper.min.js"></script>
+<script src="../site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="../site_libs/quarto-html/anchor.min.js"></script>
+<link href="../site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-845c23b38eaddc0f92fda52bfe77a8c8.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="../site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="../site_libs/bootstrap/bootstrap-a0f9fd0d421825b736dc1bbcbcba2219.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "location": "navbar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "end",
+  "type": "overlay",
+  "limit": 50,
+  "keyboard-shortcut": [
+    "f",
+    "/",
+    "s"
+  ],
+  "show-item-context": false,
+  "language": {
+    "search-no-results-text": "No results",
+    "search-matching-documents-text": "matching documents",
+    "search-copy-link-title": "Copy link to search",
+    "search-hide-matches-text": "Hide additional matches",
+    "search-more-match-text": "more match in this document",
+    "search-more-matches-text": "more matches in this document",
+    "search-clear-button-title": "Clear",
+    "search-text-placeholder": "",
+    "search-detached-cancel-button-title": "Cancel",
+    "search-submit-button-title": "Submit",
+    "search-label": "Search"
+  }
+}</script>
+<script async="" src="https://www.googletagmanager.com/gtag/js?id=G-9JNEKNN14K"></script>
+
+<script type="text/javascript">
+
+window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('js', new Date());
+gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
+</script>
+
+
+<link rel="stylesheet" href="styles.css">
+</head>
+
+<body class="nav-fixed quarto-light">
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+    <nav class="navbar navbar-expand-lg " data-bs-theme="dark">
+      <div class="navbar-container container-fluid">
+      <div class="navbar-brand-container mx-auto">
+    <a class="navbar-brand" href="../index.html">
+    <span class="navbar-title">Document Redaction App</span>
+    </a>
+  </div>
+            <div id="quarto-search" class="" title="Search"></div>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" role="menu" aria-expanded="false" aria-label="Toggle navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+  <span class="navbar-toggler-icon"></span>
+</button>
+          <div class="collapse navbar-collapse" id="navbarCollapse">
+            <ul class="navbar-nav navbar-nav-scroll me-auto">
+  <li class="nav-item">
+    <a class="nav-link" href="../index.html"> 
+<span class="menu-text">Home</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../src/user_guide.html"> 
+<span class="menu-text">User guide</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../src/faq.html"> 
+<span class="menu-text">User FAQ</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../src/python_package_usage.html"> 
+<span class="menu-text">Python package usage</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../src/installation_guide.html"> 
+<span class="menu-text">App installation guide (with CDK)</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link active" href="../src/app_settings.html" aria-current="page"> 
+<span class="menu-text">App settings management guide</span></a>
+  </li>  
+  <li class="nav-item dropdown ">
+    <a class="nav-link dropdown-toggle" href="#" id="nav-menu-blog" role="link" data-bs-toggle="dropdown" aria-expanded="false">
+ <span class="menu-text">Blog</span>
+    </a>
+    <ul class="dropdown-menu" aria-labelledby="nav-menu-blog">    
+        <li>
+    <a class="dropdown-item" href="../src/ocr_and_redaction_with_qwen35.html">
+ <span class="dropdown-text">OCR and redaction with Qwen 3.5 (Mar 2026)</span></a>
+  </li>  
+        <li>
+    <a class="dropdown-item" href="../src/redaction_with_vlm_and_llms.html">
+ <span class="dropdown-text">Redaction with local VLM and LLMs (Qwen 3)</span></a>
+  </li>  
+    </ul>
+  </li>
+</ul>
+          </div> <!-- /navcollapse -->
+            <div class="quarto-navbar-tools">
+</div>
+      </div> <!-- /container-fluid -->
+    </nav>
+</header>
+<!-- content -->
+<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
+<!-- sidebar -->
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+        <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">On this page</h2>
+   
+  <ul>
+  <li><a href="#value-format-notes" id="toc-value-format-notes" class="nav-link active" data-scroll-target="#value-format-notes">Value Format Notes</a></li>
+  <li><a href="#app-configuration-file-config.env" id="toc-app-configuration-file-config.env" class="nav-link" data-scroll-target="#app-configuration-file-config.env">App Configuration File (<code>config.env</code>)</a></li>
+  <li><a href="#aws-options" id="toc-aws-options" class="nav-link" data-scroll-target="#aws-options">AWS Options</a></li>
+  <li><a href="#image-options" id="toc-image-options" class="nav-link" data-scroll-target="#image-options">Image Options</a></li>
+  <li><a href="#file-io-options" id="toc-file-io-options" class="nav-link" data-scroll-target="#file-io-options">File I/O Options</a></li>
+  <li><a href="#logging-options" id="toc-logging-options" class="nav-link" data-scroll-target="#logging-options">Logging Options</a></li>
+  <li><a href="#gradio-general-app-options" id="toc-gradio-general-app-options" class="nav-link" data-scroll-target="#gradio-general-app-options">Gradio &amp; General App Options</a></li>
+  <li><a href="#redaction-pii-options" id="toc-redaction-pii-options" class="nav-link" data-scroll-target="#redaction-pii-options">Redaction &amp; PII Options</a>
+  <ul class="collapse">
+  <li><a href="#ui-and-model-selection" id="toc-ui-and-model-selection" class="nav-link" data-scroll-target="#ui-and-model-selection">UI and Model Selection</a></li>
+  <li><a href="#hybrid-textract-bedrock-vlm" id="toc-hybrid-textract-bedrock-vlm" class="nav-link" data-scroll-target="#hybrid-textract-bedrock-vlm">Hybrid Textract + Bedrock VLM</a></li>
+  <li><a href="#bedrock-vlm-and-llm-cost-estimation" id="toc-bedrock-vlm-and-llm-cost-estimation" class="nav-link" data-scroll-target="#bedrock-vlm-and-llm-cost-estimation">Bedrock VLM and LLM cost estimation</a></li>
+  <li><a href="#external-tool-paths" id="toc-external-tool-paths" class="nav-link" data-scroll-target="#external-tool-paths">External Tool Paths</a></li>
+  <li><a href="#local-ocr-tesseract-paddleocr" id="toc-local-ocr-tesseract-paddleocr" class="nav-link" data-scroll-target="#local-ocr-tesseract-paddleocr">Local OCR (Tesseract &amp; PaddleOCR)</a></li>
+  <li><a href="#vision-language-model-vlm-options" id="toc-vision-language-model-vlm-options" class="nav-link" data-scroll-target="#vision-language-model-vlm-options">Vision Language Model (VLM) Options</a></li>
+  <li><a href="#entity-and-search-options" id="toc-entity-and-search-options" class="nav-link" data-scroll-target="#entity-and-search-options">Entity and Search Options</a></li>
+  <li><a href="#textract-feature-selection" id="toc-textract-feature-selection" class="nav-link" data-scroll-target="#textract-feature-selection">Textract Feature Selection</a></li>
+  <li><a href="#tabular-data-options" id="toc-tabular-data-options" class="nav-link" data-scroll-target="#tabular-data-options">Tabular Data Options</a></li>
+  </ul></li>
+  <li><a href="#language-options" id="toc-language-options" class="nav-link" data-scroll-target="#language-options">Language Options</a></li>
+  <li><a href="#duplicate-detection-settings" id="toc-duplicate-detection-settings" class="nav-link" data-scroll-target="#duplicate-detection-settings">Duplicate Detection Settings</a></li>
+  <li><a href="#file-output-options" id="toc-file-output-options" class="nav-link" data-scroll-target="#file-output-options">File Output Options</a>
+  <ul class="collapse">
+  <li><a href="#review-redaction-overlay-export" id="toc-review-redaction-overlay-export" class="nav-link" data-scroll-target="#review-redaction-overlay-export">Review redaction overlay export</a></li>
+  </ul></li>
+  <li><a href="#direct-mode-lambda-configuration" id="toc-direct-mode-lambda-configuration" class="nav-link" data-scroll-target="#direct-mode-lambda-configuration">Direct Mode &amp; Lambda Configuration</a>
+  <ul class="collapse">
+  <li><a href="#direct-mode" id="toc-direct-mode" class="nav-link" data-scroll-target="#direct-mode">Direct Mode</a></li>
+  <li><a href="#lambda-configuration" id="toc-lambda-configuration" class="nav-link" data-scroll-target="#lambda-configuration">Lambda Configuration</a></li>
+  </ul></li>
+  <li><a href="#allow-deny-whole-page-redaction-lists" id="toc-allow-deny-whole-page-redaction-lists" class="nav-link" data-scroll-target="#allow-deny-whole-page-redaction-lists">Allow, Deny, &amp; Whole Page Redaction Lists</a></li>
+  <li><a href="#cost-code-options" id="toc-cost-code-options" class="nav-link" data-scroll-target="#cost-code-options">Cost Code Options</a>
+  <ul class="collapse">
+  <li><a href="#session-default-cost-code-no-extra-environment-variables" id="toc-session-default-cost-code-no-extra-environment-variables" class="nav-link" data-scroll-target="#session-default-cost-code-no-extra-environment-variables">Session default cost code (no extra environment variables)</a></li>
+  </ul></li>
+  <li><a href="#whole-document-api-options-textract-async" id="toc-whole-document-api-options-textract-async" class="nav-link" data-scroll-target="#whole-document-api-options-textract-async">Whole Document API Options (Textract Async)</a></li>
+  </ul>
+</nav>
+    </div>
+<!-- main -->
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">App settings management guide</h1>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<p>Settings for the redaction app can be set from outside by changing values in the <code>.env</code> file stored in your local config folder, or in S3 if running on AWS. This guide provides an overview of how to configure the application using environment variables. The application loads configurations using <code>os.environ.get()</code>. It first attempts to load variables from the file specified by <code>APP_CONFIG_PATH</code> (which defaults to <code>config/app_config.env</code>). If <code>AWS_CONFIG_PATH</code> is also set (e.g., to <code>config/aws_config.env</code>), variables are loaded from that file as well. Environment variables set directly in the system will always take precedence over those defined in these <code>.env</code> files.</p>
+<section id="value-format-notes" class="level3">
+<h3 class="anchored" data-anchor-id="value-format-notes">Value Format Notes</h3>
+<ul>
+<li><p><strong>Boolean Values:</strong> Boolean environment variables accept multiple formats: <code>"True"</code>, <code>"1"</code>, <code>"true"</code>, or <code>"TRUE"</code> for true; <code>"False"</code>, <code>"0"</code>, <code>"false"</code>, or <code>"FALSE"</code> for false.</p></li>
+<li><p><strong>List Values:</strong> List environment variables should be provided as comma-separated strings within square brackets, e.g., <code>"['item1', 'item2', 'item3']"</code>. The application will automatically parse these into Python lists.</p></li>
+<li><p><strong>Temporary Folders:</strong> Setting <code>OUTPUT_FOLDER</code> or <code>INPUT_FOLDER</code> to <code>"TEMP"</code> will create a temporary directory that is automatically cleaned up when the application exits. This is useful for increased security in some deployment scenarios.</p></li>
+</ul>
+</section>
+<section id="app-configuration-file-config.env" class="level2">
+<h2 class="anchored" data-anchor-id="app-configuration-file-config.env">App Configuration File (<code>config.env</code>)</h2>
+<p>This section details variables related to the main application configuration file.</p>
+<ul>
+<li><strong><code>CONFIG_FOLDER</code></strong>
+<ul>
+<li><strong>Description:</strong> The folder where configuration files are stored.</li>
+<li><strong>Default Value:</strong> <code>config/</code></li>
+</ul></li>
+<li><strong><code>APP_CONFIG_PATH</code></strong>
+<ul>
+<li><strong>Description:</strong> Specifies the path to the application configuration <code>.env</code> file. This file contains various settings that control the application’s behavior.</li>
+<li><strong>Default Value:</strong> <code>config/app_config.env</code></li>
+</ul></li>
+</ul>
+</section>
+<section id="aws-options" class="level2">
+<h2 class="anchored" data-anchor-id="aws-options">AWS Options</h2>
+<p>This section covers configurations related to AWS services used by the application.</p>
+<ul>
+<li><strong><code>AWS_CONFIG_PATH</code></strong>
+<ul>
+<li><strong>Description:</strong> Specifies the path to the AWS configuration <code>.env</code> file. This file is intended to store AWS credentials and specific settings.</li>
+<li><strong>Default Value:</strong> <code>''</code> (empty string)</li>
+</ul></li>
+<li><strong><code>RUN_AWS_FUNCTIONS</code></strong>
+<ul>
+<li><strong>Description:</strong> Enables or disables AWS-specific functionalities within the application. Set to <code>"True"</code> to enable.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>AWS_REGION</code></strong>
+<ul>
+<li><strong>Description:</strong> Defines the AWS region where services like S3, Cognito, and Textract are located.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>AWS_CLIENT_ID</code></strong>
+<ul>
+<li><strong>Description:</strong> The client ID for AWS Cognito, used for user authentication.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>AWS_CLIENT_SECRET</code></strong>
+<ul>
+<li><strong>Description:</strong> The client secret for AWS Cognito, used in conjunction with the client ID for authentication.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>AWS_USER_POOL_ID</code></strong>
+<ul>
+<li><strong>Description:</strong> The user pool ID for AWS Cognito, identifying the user directory.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>AWS_ACCESS_KEY</code></strong>
+<ul>
+<li><strong>Description:</strong> The AWS access key ID for programmatic access to AWS services.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>AWS_SECRET_KEY</code></strong>
+<ul>
+<li><strong>Description:</strong> The AWS secret access key corresponding to the AWS access key ID.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>DOCUMENT_REDACTION_BUCKET</code></strong>
+<ul>
+<li><strong>Description:</strong> The name of the S3 bucket used for storing documents related to the redaction process.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, the app will prioritize using AWS SSO credentials over access keys stored in environment variables.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><strong><code>CUSTOM_HEADER</code></strong>
+<ul>
+<li><strong>Description:</strong> Specifies a custom header name to be included in requests, often used for services like AWS CloudFront.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>CUSTOM_HEADER_VALUE</code></strong>
+<ul>
+<li><strong>Description:</strong> The value for the custom header specified by <code>CUSTOM_HEADER</code>.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+</ul>
+</section>
+<section id="image-options" class="level2">
+<h2 class="anchored" data-anchor-id="image-options">Image Options</h2>
+<p>Settings related to image processing within the application.</p>
+<ul>
+<li><strong><code>IMAGES_DPI</code></strong>
+<ul>
+<li><strong>Description:</strong> Dots Per Inch (DPI) setting for image processing, affecting the resolution and quality of processed images.</li>
+<li><strong>Default Value:</strong> <code>'300.0'</code></li>
+</ul></li>
+<li><strong><code>LOAD_TRUNCATED_IMAGES</code></strong>
+<ul>
+<li><strong>Description:</strong> Controls whether the application attempts to load truncated images. Set to <code>'True'</code> to enable.</li>
+<li><strong>Default Value:</strong> <code>'True'</code></li>
+</ul></li>
+<li><strong><code>MAX_IMAGE_PIXELS</code></strong>
+<ul>
+<li><strong>Description:</strong> Sets the maximum number of pixels for an image that the application will process. Leave blank for no limit. This can help prevent issues with very large images.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>MERGE_BOUNDING_BOXES</code></strong>
+<ul>
+<li><strong>Description:</strong> When enabled (<code>'True'</code>), merges nearby bounding boxes (reconstruction, grouping, and horizontal merge). Affects OCR/Textract result processing.</li>
+<li><strong>Default Value:</strong> <code>'True'</code></li>
+</ul></li>
+<li><strong><code>MAX_SPACES_GPU_RUN_TIME</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of seconds to run the GPU on Hugging Face Spaces. Used to limit long-running VLM/OCR jobs when deployed on Spaces.</li>
+<li><strong>Default Value:</strong> <code>60</code></li>
+</ul></li>
+</ul>
+</section>
+<section id="file-io-options" class="level2">
+<h2 class="anchored" data-anchor-id="file-io-options">File I/O Options</h2>
+<p>Configuration for input and output file handling.</p>
+<ul>
+<li><strong><code>SESSION_OUTPUT_FOLDER</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>'True'</code>, the application will save output and input files into session-specific subfolders.</li>
+<li><strong>Default Value:</strong> <code>'False'</code></li>
+</ul></li>
+<li><strong><code>OUTPUT_FOLDER</code></strong> (environment variable: <code>GRADIO_OUTPUT_FOLDER</code>)
+<ul>
+<li><strong>Description:</strong> Specifies the default output folder for generated files. Can be set to <code>"TEMP"</code> to use a temporary directory.</li>
+<li><strong>Default Value:</strong> <code>'output/'</code></li>
+</ul></li>
+<li><strong><code>INPUT_FOLDER</code></strong> (environment variable: <code>GRADIO_INPUT_FOLDER</code>)
+<ul>
+<li><strong>Description:</strong> Specifies the default input folder for files. Can be set to <code>"TEMP"</code> to use a temporary directory.</li>
+<li><strong>Default Value:</strong> <code>'input/'</code></li>
+</ul></li>
+<li><strong><code>GRADIO_TEMP_DIR</code></strong>
+<ul>
+<li><strong>Description:</strong> Defines the path for Gradio’s temporary file storage.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>MPLCONFIGDIR</code></strong>
+<ul>
+<li><strong>Description:</strong> Specifies the cache directory for the Matplotlib library.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+</ul>
+</section>
+<section id="logging-options" class="level2">
+<h2 class="anchored" data-anchor-id="logging-options">Logging Options</h2>
+<p>Settings for configuring application logging.</p>
+<p><strong>Note:</strong> By default, logs are stored in subfolders based on today’s date and the hostname of the instance running the app (e.g., <code>logs/20240101/hostname/</code>). This prevents log files from one instance overwriting logs from another instance, which is especially important when running on S3 or in multi-instance deployments. If you’re always running the app on a single system or just locally, you can disable this behavior by setting <code>USE_LOG_SUBFOLDERS</code> to <code>"False"</code>.</p>
+<ul>
+<li><strong><code>SAVE_LOGS_TO_CSV</code></strong>
+<ul>
+<li><strong>Description:</strong> Enables or disables saving logs to CSV files. Set to <code>'True'</code> to enable.</li>
+<li><strong>Default Value:</strong> <code>'True'</code></li>
+</ul></li>
+<li><strong><code>USE_LOG_SUBFOLDERS</code></strong>
+<ul>
+<li><strong>Description:</strong> If enabled (<code>'True'</code>), logs will be stored in subfolders based on date and hostname.</li>
+<li><strong>Default Value:</strong> <code>'True'</code></li>
+</ul></li>
+<li><strong><code>FEEDBACK_LOGS_FOLDER</code></strong>, <strong><code>ACCESS_LOGS_FOLDER</code></strong>, <strong><code>USAGE_LOGS_FOLDER</code></strong>
+<ul>
+<li><strong>Description:</strong> Base folders for feedback, access, and usage logs respectively.</li>
+<li><strong>Default Values:</strong> <code>'feedback/'</code>, <code>'logs/'</code>, <code>'usage/'</code></li>
+</ul></li>
+<li><strong><code>S3_FEEDBACK_LOGS_FOLDER</code></strong>, <strong><code>S3_ACCESS_LOGS_FOLDER</code></strong>, <strong><code>S3_USAGE_LOGS_FOLDER</code></strong>
+<ul>
+<li><strong>Description:</strong> S3 paths where feedback, access, and usage logs will be stored if <code>RUN_AWS_FUNCTIONS</code> is enabled.</li>
+<li><strong>Default Values:</strong> Dynamically generated based on date and hostname, e.g., <code>'feedback/YYYYMMDD/hostname/'</code>.</li>
+</ul></li>
+<li><strong><code>LOG_FILE_NAME</code></strong>, <strong><code>USAGE_LOG_FILE_NAME</code></strong>, <strong><code>FEEDBACK_LOG_FILE_NAME</code></strong>
+<ul>
+<li><strong>Description:</strong> Specifies the name for log files. <code>USAGE_LOG_FILE_NAME</code> and <code>FEEDBACK_LOG_FILE_NAME</code> default to the value of <code>LOG_FILE_NAME</code>.</li>
+<li><strong>Default Value:</strong> <code>'log.csv'</code></li>
+</ul></li>
+<li><strong><code>DISPLAY_FILE_NAMES_IN_LOGS</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>'True'</code>, file names will be included in log entries.</li>
+<li><strong>Default Value:</strong> <code>'False'</code></li>
+</ul></li>
+<li><strong><code>CSV_ACCESS_LOG_HEADERS</code></strong>, <strong><code>CSV_FEEDBACK_LOG_HEADERS</code></strong>, <strong><code>CSV_USAGE_LOG_HEADERS</code></strong>
+<ul>
+<li><strong>Description:</strong> Defines custom headers for the respective CSV logs as a string representation of a list. If blank, component labels are used.</li>
+<li><strong>Default Value:</strong> Varies; see script for <code>CSV_USAGE_LOG_HEADERS</code> default.</li>
+</ul></li>
+<li><strong><code>SAVE_LOGS_TO_DYNAMODB</code></strong>
+<ul>
+<li><strong>Description:</strong> Enables or disables saving logs to AWS DynamoDB. Set to <code>'True'</code> to enable.</li>
+<li><strong>Default Value:</strong> <code>'False'</code></li>
+</ul></li>
+<li><strong><code>ACCESS_LOG_DYNAMODB_TABLE_NAME</code></strong>, <strong><code>FEEDBACK_LOG_DYNAMODB_TABLE_NAME</code></strong>, <strong><code>USAGE_LOG_DYNAMODB_TABLE_NAME</code></strong>
+<ul>
+<li><strong>Description:</strong> Names of the DynamoDB tables for storing access, feedback, and usage logs.</li>
+<li><strong>Default Values:</strong> <code>'redaction_access_log'</code>, <code>'redaction_feedback'</code>, <code>'redaction_usage'</code></li>
+</ul></li>
+<li><strong><code>DYNAMODB_ACCESS_LOG_HEADERS</code></strong>, <strong><code>DYNAMODB_FEEDBACK_LOG_HEADERS</code></strong>, <strong><code>DYNAMODB_USAGE_LOG_HEADERS</code></strong>
+<ul>
+<li><strong>Description:</strong> Specifies the headers (attributes) for the respective DynamoDB log tables.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>LOGGING</code></strong>
+<ul>
+<li><strong>Description:</strong> Enables or disables general console logging. Set to <code>'True'</code> to enable.</li>
+<li><strong>Default Value:</strong> <code>'False'</code></li>
+</ul></li>
+</ul>
+</section>
+<section id="gradio-general-app-options" class="level2">
+<h2 class="anchored" data-anchor-id="gradio-general-app-options">Gradio &amp; General App Options</h2>
+<p>Configurations for the Gradio UI, server behavior, and application limits.</p>
+<ul>
+<li><strong><code>FAVICON_PATH</code></strong>
+<ul>
+<li><strong>Description:</strong> Path to the favicon icon file for the web interface.</li>
+<li><strong>Default Value:</strong> <code>"favicon.png"</code></li>
+</ul></li>
+<li><strong><code>RUN_FASTAPI</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, the application will be served via FastAPI, allowing for API endpoint integration.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>RUN_MCP_SERVER</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, the application will run as an MCP (Model Context Protocol) server.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>GRADIO_SERVER_NAME</code></strong>
+<ul>
+<li><strong>Description:</strong> The IP address the Gradio server will bind to. Use <code>"0.0.0.0"</code> to allow external access.</li>
+<li><strong>Default Value:</strong> <code>"127.0.0.1"</code></li>
+</ul></li>
+<li><strong><code>GRADIO_SERVER_PORT</code></strong>
+<ul>
+<li><strong>Description:</strong> The network port on which the Gradio server will listen.</li>
+<li><strong>Default Value:</strong> <code>7860</code></li>
+</ul></li>
+<li><strong><code>ALLOWED_ORIGINS</code></strong>
+<ul>
+<li><strong>Description:</strong> A comma-separated list of allowed origins for Cross-Origin Resource Sharing (CORS).</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>ALLOWED_HOSTS</code></strong>
+<ul>
+<li><strong>Description:</strong> A comma-separated list of allowed hostnames.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>ROOT_PATH</code></strong>
+<ul>
+<li><strong>Description:</strong> The root path for the application, useful if running behind a reverse proxy (e.g., <code>/app</code>).</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>FASTAPI_ROOT_PATH</code></strong>
+<ul>
+<li><strong>Description:</strong> The root path for the FastAPI application, used when <code>RUN_FASTAPI</code> is true.</li>
+<li><strong>Default Value:</strong> <code>"/"</code></li>
+</ul></li>
+<li><strong><code>MAX_QUEUE_SIZE</code></strong>
+<ul>
+<li><strong>Description:</strong> The maximum number of requests that can be queued in the Gradio interface.</li>
+<li><strong>Default Value:</strong> <code>20</code></li>
+</ul></li>
+<li><strong><code>MAX_FILE_SIZE</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum file size allowed for uploads (e.g., “250mb”, “1gb”).</li>
+<li><strong>Default Value:</strong> <code>'250mb'</code></li>
+</ul></li>
+<li><strong><code>DEFAULT_CONCURRENCY_LIMIT</code></strong>
+<ul>
+<li><strong>Description:</strong> The default concurrency limit for Gradio event handlers, controlling how many requests can be processed simultaneously.</li>
+<li><strong>Default Value:</strong> <code>3</code></li>
+</ul></li>
+<li><strong><code>MAX_SIMULTANEOUS_FILES</code></strong>
+<ul>
+<li><strong>Description:</strong> The maximum number of files that can be processed at once.</li>
+<li><strong>Default Value:</strong> <code>10</code></li>
+</ul></li>
+<li><strong><code>MAX_DOC_PAGES</code></strong>
+<ul>
+<li><strong>Description:</strong> The maximum number of pages a document can have.</li>
+<li><strong>Default Value:</strong> <code>3000</code></li>
+</ul></li>
+<li><strong><code>MAX_TABLE_ROWS</code></strong> / <strong><code>MAX_TABLE_COLUMNS</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of rows and columns for tabular data processing.</li>
+<li><strong>Default Values:</strong> <code>250000</code> / <code>100</code></li>
+</ul></li>
+<li><strong><code>MAX_OPEN_TEXT_CHARACTERS</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of characters for open text input.</li>
+<li><strong>Default Value:</strong> <code>50000</code></li>
+</ul></li>
+<li><strong><code>PAGE_BREAK_VALUE</code></strong>
+<ul>
+<li><strong>Description:</strong> Number of pages to process before breaking and restarting from the last finished page.</li>
+<li><strong>Default Value:</strong> <code>99999</code></li>
+<li><strong>Note:</strong> This feature is not currently activated in the application.</li>
+</ul></li>
+<li><strong><code>MAX_TIME_VALUE</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum time value for processing operations.</li>
+<li><strong>Default Value:</strong> <code>999999</code></li>
+</ul></li>
+<li><strong><code>COGNITO_AUTH</code></strong>
+<ul>
+<li><strong>Description:</strong> Enables or disables AWS Cognito authentication. Set to <code>'True'</code> to enable.</li>
+<li><strong>Default Value:</strong> <code>'False'</code></li>
+</ul></li>
+<li><strong><code>SHOW_FEEDBACK_BUTTONS</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, displays feedback buttons in the Gradio interface.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>USER_GUIDE_URL</code></strong>
+<ul>
+<li><strong>Description:</strong> A safe URL pointing to the user guide. The URL is validated against a list of allowed domains.</li>
+<li><strong>Default Value:</strong> <code>"https://seanpedrick-case.github.io/doc_redaction"</code></li>
+</ul></li>
+<li><strong><code>INTRO_TEXT</code></strong>
+<ul>
+<li><strong>Description:</strong> Custom introduction text for the app. Should be in Markdown format, html is stripped out. Can also be set to a path to a <code>.txt</code> file (e.g., <code>"intro.txt"</code>), which will be read and used as the intro text. The text is automatically sanitized to remove dangerous HTML/scripts while preserving safe markdown syntax.</li>
+<li><strong>Default Value:</strong> <code>"Too long to display here, see tools/config.py"</code></li>
+</ul></li>
+<li><strong><code>SHOW_EXAMPLES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, displays example files in the Gradio interface.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><strong><code>SHOW_AWS_EXAMPLES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, includes AWS-specific examples.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>SHOW_DIFFICULT_OCR_EXAMPLES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, includes examples that demonstrate difficult OCR scenarios.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, displays all output files in the output folder interface.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>FILE_INPUT_HEIGHT</code></strong>
+<ul>
+<li><strong>Description:</strong> Sets the height (in pixels) of the file input component in the Gradio UI.</li>
+<li><strong>Default Value:</strong> <code>200</code></li>
+</ul></li>
+<li><strong><code>SHOW_QUICKSTART</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, displays a quickstart/walkthrough component in the Gradio interface to guide new users.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>SHOW_SUMMARISATION</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, shows the summarisation tab in the Gradio interface.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>APPLY_DUPLICATES_TO_FILE_AUTOMATICALLY</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, duplicate detection results can be applied to the file automatically in the UI workflow.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>RUN_ALL_EXAMPLES_THROUGH_AWS</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, example documents will be run through AWS (e.g.&nbsp;Textract) when examples are used.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+</ul>
+</section>
+<section id="redaction-pii-options" class="level2">
+<h2 class="anchored" data-anchor-id="redaction-pii-options">Redaction &amp; PII Options</h2>
+<p>Configurations related to text extraction, PII detection, and the redaction process.</p>
+<section id="ui-and-model-selection" class="level3">
+<h3 class="anchored" data-anchor-id="ui-and-model-selection">UI and Model Selection</h3>
+<ul>
+<li><strong><code>EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, the “Extraction and PII Options” accordion in the UI will be open by default.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><strong><code>SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS</code></strong> / <strong><code>SHOW_AWS_TEXT_EXTRACTION_OPTIONS</code></strong>
+<ul>
+<li><strong>Description:</strong> Controls whether local (Tesseract) or AWS (Textract) text extraction options are shown in the UI.</li>
+<li><strong>Default Value:</strong> <code>"True"</code> for both.</li>
+<li><strong>Note:</strong> If both are set to <code>"False"</code>, the application will automatically enable <code>SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS</code> to ensure at least one option is available.</li>
+</ul></li>
+<li><strong><code>SELECTABLE_TEXT_EXTRACT_OPTION</code></strong>, <strong><code>LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION</code></strong>, <strong><code>TEXTRACT_TEXT_EXTRACT_OPTION</code></strong>
+<ul>
+<li><strong>Description:</strong> Labels for text extraction model options displayed in the UI. Customize the display names for “Local model - selectable text”, “Local OCR model - PDFs without selectable text”, and “AWS Textract service - all PDF types” respectively.</li>
+<li><strong>Default Values:</strong> <code>"Local model - selectable text"</code>, <code>"Local OCR model - PDFs without selectable text"</code>, <code>"AWS Textract service - all PDF types"</code></li>
+</ul></li>
+<li><strong><code>BEDROCK_VLM_TEXT_EXTRACT_OPTION</code></strong>, <strong><code>GEMINI_VLM_TEXT_EXTRACT_OPTION</code></strong>, <strong><code>AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION</code></strong>
+<ul>
+<li><strong>Description:</strong> Labels for cloud VLM text extraction options (AWS Bedrock, Google Gemini, Azure/OpenAI) displayed in the UI when the corresponding show options are enabled.</li>
+<li><strong>Default Values:</strong> <code>"AWS Bedrock VLM OCR - all PDF types"</code>, <code>"Google Gemini VLM OCR - all PDF types"</code>, <code>"Azure/OpenAI VLM OCR - all PDF types"</code></li>
+</ul></li>
+<li><strong><code>EFFICIENT_OCR</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, uses a two-step OCR process for PDFs: try selectable text extraction per page first; only run OCR (Tesseract/Textract/VLM) on pages where no text could be extracted. Saves cost and time. Affects both the Gradio app and the CLI.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>EFFICIENT_OCR_MIN_WORDS</code></strong>
+<ul>
+<li><strong>Description:</strong> Minimum number of extractable words on a page to use the text-only route when <code>EFFICIENT_OCR</code> is enabled; below this threshold the page uses OCR.</li>
+<li><strong>Default Value:</strong> <code>20</code></li>
+</ul></li>
+<li><strong><code>EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION</code></strong>
+<ul>
+<li><strong>Description:</strong> When <code>EFFICIENT_OCR</code> is enabled, minimum fraction of the page area (MediaBox) that a single embedded image must cover to route that page through OCR (<code>redact_image_pdf</code>) in addition to the word-count rule. This catches pages with plenty of selectable text but meaningful raster content (e.g.&nbsp;photos) where text may appear only inside the image. Set to <code>0</code> to disable image-based routing and rely on word count only.</li>
+<li><strong>Default Value:</strong> <code>0.01</code> (1% of page area)</li>
+</ul></li>
+<li><strong><code>EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX</code></strong>
+<ul>
+<li><strong>Description:</strong> When <code>EFFICIENT_OCR</code> is enabled and <code>EFFICIENT_OCR_MIN_IMAGE_COVERAGE_FRACTION</code> is greater than zero, each embedded image <strong>placement</strong> on the page is considered for image-based OCR routing only if both its width and height are at least this many <strong>PDF points</strong> (PyMuPDF rect units; roughly pixels at 72 dpi). This avoids tiny marks or artifacts that still exceed the area fraction on very small pages. Set to <code>0</code> to disable the minimum-size filter (only the area fraction applies). Overridable in the Gradio app (Efficient OCR section), via CLI <code>--efficient_ocr_min_embedded_image_px</code>, and in Lambda/direct mode as <code>efficient_ocr_min_embedded_image_px</code> in the arguments payload (env: <code>EFFICIENT_OCR_MIN_EMBEDDED_IMAGE_PX</code>).</li>
+<li><strong>Default Value:</strong> <code>10</code></li>
+</ul></li>
+<li><strong><code>MAX_WORKERS</code></strong>
+<ul>
+<li><strong>Description:</strong> Default maximum number of worker threads for parallel processing across the app. Used as the default or cap for thread pools in review (saving redacted pages, loading page images), file conversion (PDF-to-images, input file listing, annotation processing), file redaction (text extraction, merge/summary, pikepdf annotations), custom image analyser (mapping analyzer results to bounding boxes), and data anonymisation (initial column cleaning). When not set, <code>OCR_FIRST_PASS_MAX_WORKERS</code> and <code>SUMMARY_PAGE_GROUP_MAX_WORKERS</code> default to this value; set those explicitly to override for OCR or summarisation only.</li>
+<li><strong>Default Value:</strong> <code>8</code></li>
+</ul></li>
+<li><strong><code>OCR_FIRST_PASS_MAX_WORKERS</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of threads for the OCR first pass in image-based PDF redaction (e.g.&nbsp;when using AWS Textract). Set to <code>1</code> for sequential processing; use a value greater than <code>1</code> to run OCR on multiple pages in parallel. Only applies when the OCR method supports parallel calls (e.g.&nbsp;Textract). Defaults to <code>MAX_WORKERS</code> if not set. Can be overridden via CLI <code>--ocr_first_pass_max_workers</code> or direct-mode/Lambda env.</li>
+<li><strong>Default Value:</strong> Same as <code>MAX_WORKERS</code> (e.g.&nbsp;<code>8</code>)</li>
+</ul></li>
+<li><strong><code>TESSERACT_MAX_WORKERS</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of worker threads used to run local Tesseract OCR on multiple pages in parallel (page-level parallelism). Keep this lower than <code>MAX_WORKERS</code> to avoid saturating CPU/RAM; increase gradually if you have spare CPU and want faster OCR.</li>
+<li><strong>Default Value:</strong> <code>4</code></li>
+</ul></li>
+<li><strong><code>PADDLE_MAX_WORKERS</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of worker threads used to run local PaddleOCR on multiple pages in parallel when <strong>Paddle</strong> is the chosen local OCR model. Paddle is often GPU-bound and shares one model instance; keep this low (e.g.&nbsp;<code>1</code>–<code>2</code>) to avoid VRAM contention or errors. Set to <code>1</code> for effectively sequential Paddle OCR per document.</li>
+<li><strong>Default Value:</strong> <code>2</code></li>
+</ul></li>
+<li><strong><code>LINE_TO_WORD_SEGMENT_MAX_WORKERS</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of worker threads used to run the line-to-word segmentation process. This is a CPU/memory intensive process and can slow down when matching <code>MAX_WORKERS</code> on busy documents.</li>
+<li><strong>Default Value:</strong> <code>4</code></li>
+</ul></li>
+<li><strong><code>SUMMARY_PAGE_GROUP_MAX_WORKERS</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of threads for page-group summarisation in document summarisation. Set to <code>1</code> for sequential processing (recommended for local LLM models); use a value greater than <code>1</code> to summarise multiple page groups in parallel (typically for API-based models). Defaults to <code>MAX_WORKERS</code> if not set. Can be overridden via CLI <code>--summary_page_group_max_workers</code> or direct-mode/Lambda env.</li>
+<li><strong>Default Value:</strong> Same as <code>MAX_WORKERS</code> (e.g.&nbsp;<code>8</code>)</li>
+</ul></li>
+</ul>
+</section>
+<section id="hybrid-textract-bedrock-vlm" class="level3">
+<h3 class="anchored" data-anchor-id="hybrid-textract-bedrock-vlm">Hybrid Textract + Bedrock VLM</h3>
+<p>When AWS Textract is selected for text extraction, these options allow lines with low confidence to be re-extracted using Bedrock VLM and the result to replace the Textract output for those lines.</p>
+<ul>
+<li><strong><code>SHOW_HYBRID_TEXTRACT_BEDROCK_CHECKBOX</code></strong>
+<ul>
+<li><strong>Description:</strong> When set to <code>'True'</code>, the “High-quality Textract OCR (re-run low-confidence lines with Bedrock VLM)” checkbox is shown in the GUI when AWS Textract options are visible. Set to <code>'False'</code> to hide this option from the UI.</li>
+<li><strong>Default Value:</strong> <code>'False'</code></li>
+</ul></li>
+<li><strong><code>HYBRID_TEXTRACT_BEDROCK_VLM</code></strong>
+<ul>
+<li><strong>Description:</strong> When set to <code>'True'</code> and AWS Textract is selected, lines whose average confidence is below <code>HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD</code> are re-analyzed with Bedrock VLM and the extracted text replaces the Textract result for those lines.</li>
+<li><strong>Default Value:</strong> <code>'False'</code></li>
+</ul></li>
+<li><strong><code>HYBRID_TEXTRACT_BEDROCK_VLM_CONFIDENCE_THRESHOLD</code></strong>
+<ul>
+<li><strong>Description:</strong> Line average confidence (0–100) below this value triggers Bedrock VLM re-extraction when <code>HYBRID_TEXTRACT_BEDROCK_VLM</code> is enabled.</li>
+<li><strong>Default Value:</strong> <code>97</code></li>
+</ul></li>
+<li><strong><code>HYBRID_TEXTRACT_BEDROCK_VLM_PADDING</code></strong>
+<ul>
+<li><strong>Description:</strong> Padding in pixels around the line crop when calling Bedrock VLM for re-extraction.</li>
+<li><strong>Default Value:</strong> <code>5</code></li>
+</ul></li>
+<li><strong><code>SAVE_TEXTRACT_BEDROCK_HYBRID_EXAMPLES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, saves example images or artefacts from the Textract + Bedrock VLM hybrid re-extraction path for debugging (see <code>tools/config.py</code> / hybrid Textract–Bedrock implementation).</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+</ul>
+</section>
+<section id="bedrock-vlm-and-llm-cost-estimation" class="level3">
+<h3 class="anchored" data-anchor-id="bedrock-vlm-and-llm-cost-estimation">Bedrock VLM and LLM cost estimation</h3>
+<p>These variables are used by the app to estimate AWS cost when “AWS Bedrock VLM OCR - all PDF types” or “LLM (AWS Bedrock)” PII detection is selected. Estimates are shown in the UI (e.g.&nbsp;estimated cost and time).</p>
+<ul>
+<li><strong><code>BEDROCK_VLM_INPUT_COST</code></strong>
+<ul>
+<li><strong>Description:</strong> USD per million input tokens for Bedrock VLM OCR cost estimate.</li>
+<li><strong>Default Value:</strong> <code>3.0</code></li>
+</ul></li>
+<li><strong><code>BEDROCK_VLM_OUTPUT_COST</code></strong>
+<ul>
+<li><strong>Description:</strong> USD per million output tokens for Bedrock VLM OCR cost estimate.</li>
+<li><strong>Default Value:</strong> <code>15.0</code></li>
+</ul></li>
+<li><strong><code>BEDROCK_VLM_PIXELS_PER_INPUT_TOKEN</code></strong>
+<ul>
+<li><strong>Description:</strong> Pixels (width × height) per input token; used with <code>VLM_MAX_IMAGE_SIZE</code> to estimate input tokens per page for VLM cost calculation.</li>
+<li><strong>Default Value:</strong> <code>2500</code></li>
+</ul></li>
+<li><strong><code>BEDROCK_LLM_INPUT_COST</code></strong>
+<ul>
+<li><strong>Description:</strong> USD per million input tokens for Bedrock LLM (e.g.&nbsp;PII detection) cost estimate.</li>
+<li><strong>Default Value:</strong> <code>3.0</code></li>
+</ul></li>
+<li><strong><code>BEDROCK_LLM_OUTPUT_COST</code></strong>
+<ul>
+<li><strong>Description:</strong> USD per million output tokens for Bedrock LLM cost estimate.</li>
+<li><strong>Default Value:</strong> <code>15.0</code></li>
+</ul></li>
+<li><strong><code>BEDROCK_LLM_INPUT_TOKENS_PER_PAGE</code></strong>
+<ul>
+<li><strong>Description:</strong> Estimated input tokens per page used for Bedrock LLM cost calculation.</li>
+<li><strong>Default Value:</strong> <code>2000</code></li>
+</ul></li>
+<li><strong><code>BEDROCK_LLM_OUTPUT_TOKENS_PER_PAGE</code></strong>
+<ul>
+<li><strong>Description:</strong> Estimated output tokens per page used for Bedrock LLM cost calculation.</li>
+<li><strong>Default Value:</strong> <code>250</code></li>
+</ul></li>
+<li><strong><code>SHOW_BEDROCK_VLM_MODELS</code></strong>, <strong><code>SHOW_GEMINI_VLM_MODELS</code></strong>, <strong><code>SHOW_AZURE_OPENAI_VLM_MODELS</code></strong>
+<ul>
+<li><strong>Description:</strong> Controls whether AWS Bedrock, Google Gemini, or Azure/OpenAI VLM text extraction options are shown in the UI.</li>
+<li><strong>Default Value:</strong> <code>"False"</code> for all.</li>
+</ul></li>
+<li><strong><code>NO_REDACTION_PII_OPTION</code></strong>, <strong><code>LOCAL_PII_OPTION</code></strong>, <strong><code>AWS_PII_OPTION</code></strong>
+<ul>
+<li><strong>Description:</strong> Labels for PII detection model options displayed in the UI. Customize the display names for “Only extract text (no redaction)”, “Local”, and “AWS Comprehend” respectively.</li>
+<li><strong>Default Values:</strong> <code>"Only extract text (no redaction)"</code>, <code>"Local"</code>, <code>"AWS Comprehend"</code></li>
+</ul></li>
+<li><strong><code>AWS_LLM_PII_OPTION</code></strong>, <strong><code>INFERENCE_SERVER_PII_OPTION</code></strong>, <strong><code>LOCAL_TRANSFORMERS_LLM_PII_OPTION</code></strong>
+<ul>
+<li><strong>Description:</strong> Labels for LLM-based PII detection options: AWS Bedrock, local inference server, and local transformers LLM.</li>
+<li><strong>Default Values:</strong> <code>"LLM (AWS Bedrock)"</code>, <code>"Local inference server"</code>, <code>"Local transformers LLM"</code></li>
+</ul></li>
+<li><strong><code>SHOW_INFERENCE_SERVER_PII_OPTIONS</code></strong>, <strong><code>SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS</code></strong>, <strong><code>SHOW_AWS_BEDROCK_LLM_MODELS</code></strong>
+<ul>
+<li><strong>Description:</strong> Controls whether inference-server, local transformers LLM, or AWS Bedrock LLM PII detection options are shown in the UI.</li>
+<li><strong>Default Value:</strong> <code>"False"</code> for inference-server and transformers; <code>"False"</code> for AWS Bedrock LLM.</li>
+</ul></li>
+<li><strong><code>CHOSEN_LLM_PII_INFERENCE_METHOD</code></strong>
+<ul>
+<li><strong>Description:</strong> Default LLM inference method for PII detection. Options include <code>"aws-bedrock"</code>, <code>"local"</code>, <code>"inference-server"</code>, <code>"azure-openai"</code>, <code>"gemini"</code>. Only methods enabled via the corresponding <code>SHOW_*_LLM_PII_OPTIONS</code> appear in the UI.</li>
+<li><strong>Default Value:</strong> <code>"aws-bedrock"</code></li>
+</ul></li>
+<li><strong><code>SHOW_LOCAL_LLM_PII_OPTIONS</code></strong>, <strong><code>SHOW_INFERENCE_SERVER_LLM_PII_OPTIONS</code></strong>, <strong><code>SHOW_AZURE_LLM_PII_OPTIONS</code></strong>, <strong><code>SHOW_GEMINI_LLM_PII_OPTIONS</code></strong>
+<ul>
+<li><strong>Description:</strong> Controls whether local, inference-server, Azure/OpenAI, or Gemini LLM PII options are shown in the UI.</li>
+<li><strong>Default Value:</strong> <code>"False"</code> for all.</li>
+</ul></li>
+<li><strong><code>SHOW_PII_IDENTIFICATION_OPTIONS</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, shows the PII entity identification/selection options in the UI.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><strong><code>SHOW_GEMINI_LLM_MODELS</code></strong>, <strong><code>SHOW_AZURE_LLM_MODELS</code></strong>, <strong><code>SHOW_INFERENCE_SERVER_LLM_MODELS</code></strong>
+<ul>
+<li><strong>Description:</strong> Controls whether Google Gemini, Azure/OpenAI, or inference-server LLM options appear in the PII detection model list. When enabled, the corresponding models (e.g.&nbsp;gemini-2.5-flash, gpt-4o-mini) can be selected for PII detection.</li>
+<li><strong>Default Value:</strong> <code>"False"</code> for all.</li>
+</ul></li>
+<li><strong><code>SHOW_LOCAL_PII_DETECTION_OPTIONS</code></strong> / <strong><code>SHOW_AWS_PII_DETECTION_OPTIONS</code></strong>
+<ul>
+<li><strong>Description:</strong> Controls whether local or AWS (Comprehend) PII detection options are shown in the UI.</li>
+<li><strong>Default Value:</strong> <code>"True"</code> for both.</li>
+<li><strong>Note:</strong> If both are set to <code>"False"</code>, the application will automatically enable <code>SHOW_LOCAL_PII_DETECTION_OPTIONS</code> to ensure at least one option is available.</li>
+</ul></li>
+<li><strong><code>DEFAULT_TEXT_EXTRACTION_MODEL</code></strong>
+<ul>
+<li><strong>Description:</strong> Sets the default text extraction model selected in the UI.</li>
+<li><strong>Default Value:</strong> Automatically defaults to AWS Textract if <code>SHOW_AWS_TEXT_EXTRACTION_OPTIONS</code> is enabled, otherwise defaults to the local selectable text option.</li>
+</ul></li>
+<li><strong><code>DEFAULT_PII_DETECTION_MODEL</code></strong>
+<ul>
+<li><strong>Description:</strong> Sets the default PII detection model selected in the UI.</li>
+<li><strong>Default Value:</strong> Automatically defaults to AWS Comprehend if <code>SHOW_AWS_PII_DETECTION_OPTIONS</code> is enabled, otherwise defaults to the local model.</li>
+</ul></li>
+<li><strong><code>LOAD_REDACTION_ANNOTATIONS_FROM_PDF</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, the application will load existing redaction annotations from PDFs during the review step.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+</ul>
+</section>
+<section id="external-tool-paths" class="level3">
+<h3 class="anchored" data-anchor-id="external-tool-paths">External Tool Paths</h3>
+<ul>
+<li><strong><code>TESSERACT_FOLDER</code></strong>
+<ul>
+<li><strong>Description:</strong> Path to the local Tesseract OCR installation folder.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+<li><strong>Installation Note:</strong> For Windows, install Tesseract 5.5.0 from <a href="https://github.com/UB-Mannheim/tesseract/wiki">UB-Mannheim/tesseract</a>. This environment variable should point to the Tesseract folder (e.g., <code>tesseract/</code>).</li>
+</ul></li>
+<li><strong><code>TESSERACT_DATA_FOLDER</code></strong>
+<ul>
+<li><strong>Description:</strong> Path to the Tesseract trained data files (<code>tessdata</code>).</li>
+<li><strong>Default Value:</strong> <code>"/usr/share/tessdata"</code></li>
+</ul></li>
+<li><strong><code>POPPLER_FOLDER</code></strong>
+<ul>
+<li><strong>Description:</strong> Path to the local Poppler installation’s <code>bin</code> folder.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+<li><strong>Installation Note:</strong> For Windows, install Poppler from <a href="https://github.com/oschwartz10612/poppler-windows">oschwartz10612/poppler-windows</a>. This variable needs to point to the Poppler bin folder (e.g., <code>poppler/poppler-24.02.0/Library/bin/</code>).</li>
+</ul></li>
+<li><strong><code>PADDLE_MODEL_PATH</code></strong> / <strong><code>SPACY_MODEL_PATH</code></strong>
+<ul>
+<li><strong>Description:</strong> Custom directory for PaddleOCR and spaCy model storage, useful for environments like AWS Lambda.</li>
+<li><strong>Default Value:</strong> <code>''</code> (uses default location).</li>
+</ul></li>
+<li><strong><code>PADDLE_FONT_PATH</code></strong>
+<ul>
+<li><strong>Description:</strong> Custom font path for PaddleOCR. If empty, the application will attempt to use system fonts to avoid downloading <code>simfang.ttf</code> or <code>PingFang-SC-Regular.ttf</code>. Set this if you want to use a specific font file for PaddleOCR text rendering.</li>
+<li><strong>Default Value:</strong> <code>''</code> (uses system fonts).</li>
+</ul></li>
+<li><strong><code>GEMINI_API_KEY</code></strong>
+<ul>
+<li><strong>Description:</strong> API key for Google Gemini. Required when using Gemini for PII detection or VLM OCR (<code>SHOW_GEMINI_LLM_MODELS</code> or <code>SHOW_GEMINI_VLM_MODELS</code>).</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>AZURE_OPENAI_API_KEY</code></strong>
+<ul>
+<li><strong>Description:</strong> API key for Azure or OpenAI. Required when using Azure/OpenAI for PII detection or VLM OCR (<code>SHOW_AZURE_LLM_MODELS</code> or <code>SHOW_AZURE_OPENAI_VLM_MODELS</code>).</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>AZURE_OPENAI_INFERENCE_ENDPOINT</code></strong>
+<ul>
+<li><strong>Description:</strong> Inference endpoint URL for Azure/OpenAI. Used with <code>AZURE_OPENAI_API_KEY</code> when Azure/OpenAI LLM or VLM options are enabled.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>HF_TOKEN</code></strong>
+<ul>
+<li><strong>Description:</strong> Hugging Face token. May be required for downloading gated or private models (e.g.&nbsp;some local transformers LLM or VLM models).</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+</ul>
+</section>
+<section id="local-ocr-tesseract-paddleocr" class="level3">
+<h3 class="anchored" data-anchor-id="local-ocr-tesseract-paddleocr">Local OCR (Tesseract &amp; PaddleOCR)</h3>
+<ul>
+<li><p><strong><code>SHOW_OCR_GUI_OPTIONS</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, OCR-related options (e.g.&nbsp;local OCR model, Paddle options) are shown in the UI.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><p><strong><code>DEFAULT_LOCAL_OCR_MODEL</code></strong></p>
+<ul>
+<li><strong>Description:</strong> Choose the engine for local OCR: <code>"tesseract"</code>, <code>"paddle"</code>, <code>"hybrid-paddle"</code>, <code>"hybrid-vlm"</code>, <code>"hybrid-paddle-vlm"</code>, <code>"hybrid-paddle-inference-server"</code>, <code>"vlm"</code>, or <code>"inference-server"</code>.</li>
+<li><strong>Default Value:</strong> <code>"tesseract"</code></li>
+</ul></li>
+<li><p><strong><code>SHOW_LOCAL_OCR_MODEL_OPTIONS</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, allows the user to select the local OCR model from the UI.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><p><strong><code>HYBRID_OCR_CONFIDENCE_THRESHOLD</code></strong></p>
+<ul>
+<li><strong>Description:</strong> In “hybrid-paddle” mode, this is the Tesseract confidence score below which PaddleOCR will be used for re-extraction.</li>
+<li><strong>Default Value:</strong> <code>95</code></li>
+</ul></li>
+<li><p><strong><code>HYBRID_OCR_PADDING</code></strong></p>
+<ul>
+<li><strong>Description:</strong> In “hybrid-paddle” mode, padding added to the word’s bounding box before re-extraction.</li>
+<li><strong>Default Value:</strong> <code>1</code></li>
+</ul></li>
+<li><p><strong><code>PADDLE_USE_TEXTLINE_ORIENTATION</code></strong></p>
+<ul>
+<li><strong>Description:</strong> Toggles textline orientation detection for PaddleOCR.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><p><strong><code>PADDLE_DET_DB_UNCLIP_RATIO</code></strong></p>
+<ul>
+<li><strong>Description:</strong> Controls the expansion ratio of the detected text region in PaddleOCR.</li>
+<li><strong>Default Value:</strong> <code>1.2</code></li>
+</ul></li>
+<li><p><strong><code>SAVE_EXAMPLE_HYBRID_IMAGES</code></strong></p>
+<ul>
+<li><strong>Description:</strong> Saves comparison images when using “hybrid-paddle” OCR mode.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><p><strong><code>SAVE_PAGE_OCR_VISUALISATIONS</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, saves visualisations of Tesseract, PaddleOCR, and Textract bounding boxes overlaid on the page images.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><p><strong><code>INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, OCR visualisation output files (created when <code>SAVE_PAGE_OCR_VISUALISATIONS</code> is enabled) will be included in the final output file list returned by <code>choose_and_run_redactor</code>. This makes the visualisation files available in the Gradio output interface.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><p><strong><code>SAVE_WORD_SEGMENTER_OUTPUT_IMAGES</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, saves output images from the word segmenter for debugging purposes.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><p><strong><code>PREPROCESS_LOCAL_OCR_IMAGES</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, images will be preprocessed before local OCR. Can slow down processing.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+<li><strong>Note:</strong> Testing has shown that preprocessing doesn’t necessarily improve OCR results and can significantly slow down extraction. Consider setting this to <code>"False"</code> if processing speed is a priority.</li>
+</ul></li>
+<li><p><strong><code>SAVE_PREPROCESS_IMAGES</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, saves the preprocessed images for debugging purposes.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><p><strong><code>SHOW_PADDLE_MODEL_OPTIONS</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, allows the user to select PaddleOCR-related options (paddle, hybrid-paddle) from the UI.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><p><strong><code>MODEL_CACHE_PATH</code></strong></p>
+<ul>
+<li><strong>Description:</strong> Path to the directory where models are cached.</li>
+<li><strong>Default Value:</strong> <code>"./model_cache"</code></li>
+</ul></li>
+<li><p><strong><code>TESSERACT_SEGMENTATION_LEVEL</code></strong></p>
+<ul>
+<li><strong>Description:</strong> Tesseract PSM (Page Segmentation Mode) level to use for OCR. Valid values are 0-13.</li>
+<li><strong>Default Value:</strong> <code>11</code></li>
+</ul></li>
+<li><p><strong><code>TESSERACT_WORD_LEVEL_OCR</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, uses Tesseract word-level OCR instead of line-level.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><p><strong><code>CONVERT_LINE_TO_WORD_LEVEL</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, converts PaddleOCR line-level OCR results to word-level for better precision.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><p><strong><code>LOAD_PADDLE_AT_STARTUP</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, loads the PaddleOCR model at application startup.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><p><strong><code>USE_TRANSFORMERS_VLM_MODEL_AS_LLM</code></strong></p>
+<ul>
+<li><strong>Description:</strong> When set to <code>"True"</code>, use the same local transformers VLM model (e.g.&nbsp;Qwen3-VL-4B-Instruct) for LLM tasks (e.g.&nbsp;PII entity detection in <code>tools/llm_entity_detection.py</code>) as for VLM/OCR. Overrides <code>LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE</code> when local transformers LLM is selected. The VLM weights must be loaded first (e.g.&nbsp;<strong><code>LOAD_TRANSFORMERS_VLM_MODEL_AT_START=True</code></strong>, or by running a VLM OCR task first); otherwise the standard PII model is used.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><p><strong><code>LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE</code></strong></p>
+<ul>
+<li><strong>Description:</strong> Identifier for the local transformers LLM used for PII detection (e.g.&nbsp;<code>"gemma-3-4b"</code>, <code>"qwen-3-4b"</code>). Used for display and to select the correct repo/file/folder. Supported values include gemma-3-4b, gemma-3-12b, gemma-2, qwen-3-4b, GPT-OSS 20B, granite-4-tiny, granite-4-micro. Ignored for local LLM when <code>USE_TRANSFORMERS_VLM_MODEL_AS_LLM</code> is <code>"True"</code> (the VLM model is used instead).</li>
+<li><strong>Default Value:</strong> <code>"gemma-3-4b"</code></li>
+</ul></li>
+<li><p><strong><code>LOCAL_TRANSFORMERS_LLM_PII_REPO_ID</code></strong>, <strong><code>LOCAL_TRANSFORMERS_LLM_PII_MODEL_FILE</code></strong>, <strong><code>LOCAL_TRANSFORMERS_LLM_PII_MODEL_FOLDER</code></strong></p>
+<ul>
+<li><strong>Description:</strong> Hugging Face repo ID, for the local transformers PII detection model. Can be overridden automatically based on <code>LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE</code>.</li>
+<li><strong>Default Values:</strong> e.g.&nbsp;<code>"unsloth/gemma-3-4b-it-bnb-4bit"</code>.</li>
+</ul></li>
+<li><p><strong><code>OVERRIDE_LLM_TRANSFORMERS_REPO_ID</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If non-empty, overrides <strong><code>LOCAL_TRANSFORMERS_LLM_PII_REPO_ID</code></strong> (the Hugging Face repo ID or local path used for the local transformers LLM PII model). Use to point at a different checkpoint or a local folder without changing <code>LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE</code>. Leave empty for no override.</li>
+<li><strong>Default Value:</strong> <code>''</code> (empty)</li>
+</ul></li>
+<li><p><strong><code>LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, loads the local transformers LLM PII model at application startup (reduces latency on first use).</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><p><strong><code>MULTIMODAL_PROMPT_FORMAT</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, uses multimodal prompt format for the local LLM. Set automatically for some model choices (e.g.&nbsp;Gemma 3 4B/12B).</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><p><strong><code>REASONING_SUFFIX</code></strong></p>
+<ul>
+<li><strong>Description:</strong> Suffix added to prompts for reasoning-capable models (e.g.&nbsp;<code>"Reasoning: low"</code> for GPT-OSS 20B, <code>"/nothink"</code> for Qwen 3 4B to disable chain-of-thought). Model-specific; see config for defaults.</li>
+<li><strong>Default Value:</strong> Model-dependent (e.g.&nbsp;<code>"Reasoning: low"</code> or <code>"/nothink"</code> or <code>''</code>).</li>
+</ul></li>
+<li><p><strong><code>PRINT_TRANSFORMERS_USER_PROMPT</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, prints the system and user prompts to the console when calling the local transformers LLM (<code>tools/llm_funcs.py</code>). Useful for debugging; avoid in production if logs are sensitive.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><p><strong>LLM generation parameters:</strong> <strong><code>LLM_TEMPERATURE</code></strong> (default <code>0.1</code>), <strong><code>LLM_TOP_K</code></strong> (<code>64</code>), <strong><code>LLM_MIN_P</code></strong> (<code>0</code>), <strong><code>LLM_TOP_P</code></strong> (<code>0.95</code>), <strong><code>LLM_REPETITION_PENALTY</code></strong> (<code>1.0</code>), <strong><code>LLM_MAX_NEW_TOKENS</code></strong> (<code>4096</code>), <strong><code>LLM_CONTEXT_LENGTH</code></strong> (<code>32768</code>), <strong><code>LLM_SEED</code></strong> (<code>42</code>), <strong><code>LLM_RESET</code></strong> (<code>False</code>), <strong><code>LLM_STREAM</code></strong> (<code>True</code>), <strong><code>LLM_STOP_STRINGS</code></strong>, <strong><code>LLM_THREADS</code></strong> (<code>-1</code>), <strong><code>SPECULATIVE_DECODING</code></strong> (<code>False</code>), <strong><code>ASSISTANT_MODEL</code></strong>, <strong><code>LLM_MODEL_DTYPE</code></strong> (<code>bfloat16</code>), and other <strong><code>LLM_*</code></strong> / related variables in <code>tools/config.py</code> control local/transformers LLM generation in <code>tools/llm_funcs.py</code>. <strong><code>LLM_TEMPERATURE</code></strong> and <strong><code>LLM_MAX_NEW_TOKENS</code></strong> also control PII detection LLM calls and retries.</p></li>
+<li><p><strong><code>SHOW_INFERENCE_SERVER_VLM_OPTIONS</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, allows the user to select inference-server-related options from the UI.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><p><strong><code>SHOW_HYBRID_MODELS</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, enables hybrid model options (e.g., hybrid-paddle-vlm, hybrid-paddle-inference-server) in the UI.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><p><strong><code>INFERENCE_SERVER_API_URL</code></strong></p>
+<ul>
+<li><strong>Description:</strong> Base URL of the inference-server API for remote OCR processing and PII detection.</li>
+<li><strong>Default Value:</strong> <code>"http://localhost:8080"</code></li>
+</ul></li>
+<li><p><strong><code>INFERENCE_SERVER_MODEL_NAME</code></strong></p>
+<ul>
+<li><strong>Description:</strong> Optional model name to use for inference-server API. If empty, uses the default model on the server.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><p><strong><code>INFERENCE_SERVER_TIMEOUT</code></strong></p>
+<ul>
+<li><strong>Description:</strong> Timeout in seconds for inference-server API requests.</li>
+<li><strong>Default Value:</strong> <code>300</code></li>
+</ul></li>
+<li><p><strong><code>DEFAULT_INFERENCE_SERVER_VLM_MODEL</code></strong></p>
+<ul>
+<li><strong>Description:</strong> Default model name for inference-server VLM API calls. If empty, uses <code>INFERENCE_SERVER_MODEL_NAME</code> or the server default.</li>
+<li><strong>Default Value:</strong> <code>"qwen_3_vl_30b_a3b_it"</code></li>
+</ul></li>
+<li><p><strong><code>DEFAULT_INFERENCE_SERVER_PII_MODEL</code></strong></p>
+<ul>
+<li><strong>Description:</strong> Default model name for inference-server PII detection API calls. If empty, uses <code>INFERENCE_SERVER_MODEL_NAME</code>, <code>CHOSEN_INFERENCE_SERVER_PII_MODEL</code>, or the server default.</li>
+<li><strong>Default Value:</strong> <code>"gemma_3_12b"</code></li>
+</ul></li>
+<li><p><strong><code>CHOSEN_INFERENCE_SERVER_PII_MODEL</code></strong></p>
+<ul>
+<li><strong>Description:</strong> Default inference-server PII model selected when <code>SHOW_INFERENCE_SERVER_LLM_MODELS</code> is enabled. Must be one of the registered inference-server models.</li>
+<li><strong>Default Value:</strong> First model in the inference-server models list (e.g.&nbsp;<code>"unnamed-inference-server-model"</code>).</li>
+</ul></li>
+<li><p><strong><code>INFERENCE_SERVER_LLM_PII_MODEL_CHOICE</code></strong></p>
+<ul>
+<li><strong>Description:</strong> Primary config variable for the inference-server PII model used at runtime. Defaults to <code>DEFAULT_INFERENCE_SERVER_PII_MODEL</code>, then <code>CHOSEN_INFERENCE_SERVER_PII_MODEL</code>, if not set.</li>
+<li><strong>Default Value:</strong> Inherits from <code>DEFAULT_INFERENCE_SERVER_PII_MODEL</code> or <code>CHOSEN_INFERENCE_SERVER_PII_MODEL</code>.</li>
+</ul></li>
+<li><p><strong><code>SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS</code></strong></p>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, allows the user to select from inference-server VLM model options in the UI.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+</ul>
+</section>
+<section id="vision-language-model-vlm-options" class="level3">
+<h3 class="anchored" data-anchor-id="vision-language-model-vlm-options">Vision Language Model (VLM) Options</h3>
+<ul>
+<li><strong><code>SHOW_VLM_MODEL_OPTIONS</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, VLM (Vision Language Model) options will be shown in the UI.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>LOAD_TRANSFORMERS_VLM_MODEL_AT_START</code></strong>
+<ul>
+<li><strong>Description:</strong> When <code>SHOW_VLM_MODEL_OPTIONS</code> is <code>"True"</code>, if set to <code>"True"</code>, loads local transformers VLM weights at application startup (same as historical behavior). If <code>"False"</code>, weights load on the first VLM OCR call (<code>tools/run_vlm.py</code>), reducing startup memory at the cost of a slower first run. Compare with <strong><code>LOAD_TRANSFORMERS_LLM_PII_MODEL_AT_START</code></strong> for the PII LLM (which defaults to <code>"False"</code>).</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><strong><code>SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL</code></strong>
+<ul>
+<li><strong>Description:</strong> Selected vision model for OCR. Choose from: <code>"Nanonets-OCR2-3B"</code>, <code>"Dots.OCR"</code>, <code>"Qwen3-VL-2B-Instruct"</code>, <code>"Qwen3-VL-4B-Instruct"</code>, <code>"Qwen3-VL-8B-Instruct"</code>, <code>"Qwen3-VL-30B-A3B-Instruct"</code>, <code>"Qwen3-VL-235B-A22B-Instruct"</code>, <code>"PaddleOCR-VL"</code>.</li>
+<li><strong>Default Value:</strong> <code>"Qwen3-VL-8B-Instruct"</code></li>
+</ul></li>
+<li><strong><code>QUANTISE_VLM_MODELS</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, the VLM models will be quantized using 4-bit quantisation (bitsandbytes).</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>OVERRIDE_VLM_REPO_ID</code></strong>
+<ul>
+<li><strong>Description:</strong> If non-empty, overrides the Hugging Face repo ID or local path used for the selected local transformers VLM (<code>SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL</code>). Use to point at a different checkpoint or a local folder. Leave empty for no override.</li>
+<li><strong>Default Value:</strong> <code>''</code> (empty)</li>
+</ul></li>
+<li><strong><code>USE_FLASH_ATTENTION</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, uses flash attention for the VLM, which can improve performance (not possible on Windows).</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>VLM_MAX_IMAGE_SIZE</code></strong>
+<ul>
+<li><strong>Description:</strong> Upper bound on total pixels (width × height) for images sent to the VLM after preparation (<code>_prepare_image_for_vlm</code>). Larger images are downscaled (aspect ratio preserved). For AWS Bedrock VLM paths, the effective cap is raised automatically (much larger budget) so this variable mainly limits local/inference-server/Gemini/Azure full-page and hybrid crops unless Bedrock is used. Multiples of 32×32 align with Qwen3-VL-style tiling.</li>
+<li><strong>Default Value:</strong> <code>819200</code></li>
+</ul></li>
+<li><strong><code>VLM_MIN_IMAGE_SIZE</code></strong>
+<ul>
+<li><strong>Description:</strong> Minimum total pixels for <strong>full-page</strong> VLM OCR (local transformers, inference-server, Gemini, Azure/OpenAI, Bedrock page). Smaller pages are upscaled (aspect preserved). Does <strong>not</strong> apply to hybrid line/crop VLM passes—those use <code>VLM_HYBRID_MIN_IMAGE_SIZE</code>. Preparation combines this with <code>VLM_MIN_DPI</code> / <code>VLM_MAX_DPI</code>; if constraints conflict, max pixel/DPI caps win (see console warning).</li>
+<li><strong>Default Value:</strong> <code>614400</code></li>
+</ul></li>
+<li><strong><code>VLM_HYBRID_MIN_IMAGE_SIZE</code></strong>
+<ul>
+<li><strong>Description:</strong> Minimum total pixels for <strong>hybrid</strong> VLM crops (second pass on line regions: local VLM, inference-server, Bedrock, Gemini, Azure in hybrid modes). Smaller crops are upscaled. Full-page VLM uses <code>VLM_MIN_IMAGE_SIZE</code> instead. Subject to the same DPI and max-pixel logic as other VLM images.</li>
+<li><strong>Default Value:</strong> <code>153600</code></li>
+</ul></li>
+<li><strong><code>VLM_MIN_DPI</code></strong>
+<ul>
+<li><strong>Description:</strong> Minimum effective DPI after preparation. Uses the image’s reported DPI from metadata (<code>image.info["dpi"]</code>), defaulting to <strong>72</strong> if absent. If reported DPI is below this value, the image is upscaled so that <strong>reported_dpi × scale</strong> falls within <code>[VLM_MIN_DPI, VLM_MAX_DPI]</code> (together with min/max pixel limits).</li>
+<li><strong>Default Value:</strong> <code>200.0</code></li>
+</ul></li>
+<li><strong><code>VLM_MAX_DPI</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum effective DPI after preparation. High-DPI scans are downscaled so effective DPI (see <code>VLM_MIN_DPI</code>) does not exceed this value, subject to <code>VLM_MAX_IMAGE_SIZE</code> (and hybrid/full-page min pixel settings).</li>
+<li><strong>Default Value:</strong> <code>300.0</code></li>
+</ul></li>
+<li><strong><code>VLM_MAX_ASPECT_RATIO</code></strong>
+<ul>
+<li><strong>Description:</strong> Upper bound on image aspect ratio <strong>after</strong> white-padding for every VLM path in <code>custom_image_analyser_engine</code>: local transformers (<code>extract_text_from_image_vlm</code>), inference-server (<code>_call_inference_server_vlm_api</code>), AWS Bedrock (<code>_call_bedrock_vlm_api</code>), Gemini, and Azure/OpenAI. The code pads very long/thin crops (typical hybrid line regions) so <code>max(width/height, height/width)</code> does not exceed this value. Lower values are stricter (more padding, smaller embedded text relative to canvas); higher values send nearer-native crops but may hit provider limits. Values below <code>1.0</code> are clamped to <code>1.0</code>. For Bedrock, if the image is still above the AWS Converse vision limit (20:1) after this step, a second stricter pad is applied automatically.</li>
+<li><strong>Default Value:</strong> <code>10.0</code></li>
+</ul></li>
+<li><strong><code>VLM_DISABLE_QWEN3_5_THINKING</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, disables Qwen3.5 “thinking” mode for <strong>local transformers</strong> VLM calls. Implemented by appending <code>&lt;think&gt;&lt;/think&gt;</code> to the generation prompt after <code>apply_chat_template</code>, so the model skips its reasoning chain and outputs the answer directly.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>INFERENCE_SERVER_DISABLE_THINKING</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, disables thinking for <strong>inference-server</strong> VLM calls (the server-side equivalent of <code>VLM_DISABLE_QWEN3_5_THINKING</code>). Adds <code>chat_template_kwargs: {"enable_thinking": false}</code> to every request payload; vLLM applies the Qwen3/Qwen3.5 chat template server-side and honours this flag to suppress <code>&lt;think&gt;...&lt;/think&gt;</code> generation entirely. Useful when the inference server is running a Qwen3.5 reasoning model and thinking tokens are unnecessary (e.g.&nbsp;for simple line-crop OCR in <code>hybrid-paddle-inference-server</code> mode). Eliminates thinking overhead and removes the need to raise <code>HYBRID_OCR_MAX_NEW_TOKENS</code> to accommodate the reasoning budget.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>MAX_NEW_TOKENS</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of tokens to generate for VLM responses.</li>
+<li><strong>Default Value:</strong> <code>4096</code></li>
+</ul></li>
+<li><strong><code>DEFAULT_MAX_NEW_TOKENS</code></strong>
+<ul>
+<li><strong>Description:</strong> Default maximum number of tokens to generate for VLM responses.</li>
+<li><strong>Default Value:</strong> <code>4096</code></li>
+</ul></li>
+<li><strong><code>MAX_INPUT_TOKEN_LENGTH</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of tokens that can be input to the VLM.</li>
+<li><strong>Default Value:</strong> <code>8192</code></li>
+</ul></li>
+<li><strong><code>OVERWRITE_EXISTING_OCR_RESULTS</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, always creates new OCR results instead of loading from existing JSON files.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>SAVE_VLM_INPUT_IMAGES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, saves input images sent to VLM OCR for debugging purposes.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>ADD_VLM_BOUNDING_BOX_RULES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, adds bounding box rules to the VLM prompt (e.g.&nbsp;coordinate format or output constraints for OCR).</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>HYBRID_OCR_MAX_NEW_TOKENS</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of tokens the inference server (or local VLM) may generate per hybrid line-crop OCR call. This is the generation budget passed directly to the model via <code>max_tokens</code>. For reasoning models such as Qwen3.5, thinking tokens (<code>&lt;think&gt;...&lt;/think&gt;</code>) count against this budget before any answer is produced, so the value must be large enough to cover both the reasoning chain and the short JSON answer. Setting this too low (e.g.&nbsp;<code>50</code>) causes the model to exhaust the budget during thinking and return empty results for every line. Increase to <code>2048</code> or higher if you observe “Inference server returned no results” log lines when using <code>hybrid-paddle-inference-server</code> with a reasoning model.</li>
+<li><strong>Default Value:</strong> <code>1024</code></li>
+</ul></li>
+<li><strong><code>HYBRID_OCR_MAX_WORDS</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of words allowed in a hybrid OCR result for a single text line. Results whose word count exceeds this threshold are discarded as likely hallucinations or runaway model output, and the original OCR result (e.g.&nbsp;from Paddle) is kept instead. This is a separate sanity check from <code>HYBRID_OCR_MAX_NEW_TOKENS</code> — it operates on the parsed response text, not on the token budget. A single line of text rarely contains more than ~50 words, so the default is conservative.</li>
+<li><strong>Default Value:</strong> <code>50</code></li>
+</ul></li>
+<li><strong><code>VLM_OCR_INTRO_TEXT</code></strong>
+<ul>
+<li><strong>Description:</strong> UI intro text when the local OCR option <strong>vlm</strong> (full-page vision-language OCR) is shown. Customise for your deployment.</li>
+<li><strong>Default Value:</strong> <code>"vlm" will call the chosen vision model (VLM) to return a structured json output that is then parsed into word-level bounding boxes.</code></li>
+</ul></li>
+<li><strong><code>VLM_OCR_HYBRID_INTRO_TEXT</code></strong>
+<ul>
+<li><strong>Description:</strong> UI intro text for <strong>hybrid-vlm</strong> (Tesseract first pass + VLM on selected lines/regions).</li>
+<li><strong>Default Value:</strong> <code>"hybrid-vlm" is a combination of Tesseract for OCR, and a second pass with the chosen vision model (VLM).</code></li>
+</ul></li>
+<li><strong><code>REPORT_VLM_OUTPUTS_TO_GUI</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, reports VLM outputs to the GUI with info boxes as they are processed.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>REPORT_LLM_OUTPUTS_TO_GUI</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, reports streamed LLM outputs (local transformers or local inference-server PII detection) to the GUI with <code>gr.Info</code> as they are processed.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>CLOUD_VLM_MODEL_CHOICE</code></strong>
+<ul>
+<li><strong>Description:</strong> Default model choice for cloud VLM OCR (AWS Bedrock, Gemini, or Azure/OpenAI). Used when cloud VLM options are enabled.</li>
+<li><strong>Default Value:</strong> <code>"qwen.qwen3-vl-235b-a22b"</code> (or first available cloud model if empty)</li>
+</ul></li>
+<li><strong><code>SHOW_CUSTOM_VLM_ENTITIES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, appends <strong><code>CUSTOM_VLM_FACES</code></strong> and <strong><code>CUSTOM_VLM_SIGNATURE</code></strong> to the redaction entity lists when at least one of <code>SHOW_VLM_MODEL_OPTIONS</code>, <code>SHOW_INFERENCE_SERVER_VLM_OPTIONS</code>, or <code>SHOW_BEDROCK_VLM_MODELS</code> is enabled—so users can redact detected faces and signatures from VLM-capable pipelines.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>CUSTOM_VLM_BACKEND</code></strong>
+<ul>
+<li><strong>Description:</strong> Backend used for CUSTOM_VLM_FACES and CUSTOM_VLM_SIGNATURE (face and signature detection) when those entities are selected for redaction. One of: <code>"transformers_vlm"</code> (local transformers VLM), <code>"inference_vlm"</code> (inference-server VLM), or <code>"bedrock_vlm"</code> (AWS Bedrock VLM). Applies regardless of the PII identification method (Local, AWS Comprehend, or LLM). Value is case-insensitive; invalid values fall back to <code>"bedrock_vlm"</code>.</li>
+<li><strong>Default Value:</strong> <code>"bedrock_vlm"</code></li>
+</ul></li>
+<li><strong><code>CUSTOM_VLM_MIN_CONFIDENCE</code></strong>
+<ul>
+<li><strong>Description:</strong> Minimum confidence required for VLM face/signature detections (<strong><code>CUSTOM_VLM_FACES</code></strong> / <strong><code>CUSTOM_VLM_SIGNATURE</code></strong>) to be kept for downstream outputs (annotations, decision tables, and PDF redaction). Values can be provided as <code>0..1</code> (e.g.&nbsp;<code>0.5</code>) or <code>0..100</code> (e.g.&nbsp;<code>50</code>).</li>
+<li><strong>Default Value:</strong> <code>0.5</code></li>
+</ul></li>
+<li><strong><code>CLOUD_LLM_PII_MODEL_CHOICE</code></strong>
+<ul>
+<li><strong>Description:</strong> Default AWS Bedrock (or cloud) model for LLM-based PII detection when <code>SHOW_AWS_BEDROCK_LLM_MODELS</code> (or other cloud LLM options) is enabled. Used by <code>tools/llm_entity_detection.py</code>.</li>
+<li><strong>Default Value:</strong> <code>"amazon.nova-pro-v1:0"</code></li>
+</ul></li>
+<li><strong><code>CLOUD_LLM_PII_CUSTOM_INSTRUCTIONS_MODEL_CHOICE</code></strong>
+<ul>
+<li><strong>Description:</strong> Optional “upgraded” cloud model used for LLM-based PII detection when custom instructions are provided (e.g.&nbsp;allow-list or user-specific rules). If set and non-empty, it overrides <code>CLOUD_LLM_PII_MODEL_CHOICE</code> whenever <code>custom_instructions</code> are passed to the entity-detection LLM. Leave empty to always use <code>CLOUD_LLM_PII_MODEL_CHOICE</code>.</li>
+<li><strong>Default Value:</strong> <code>''</code> (empty; no override)</li>
+</ul></li>
+<li><strong><code>CLOUD_SUMMARISATION_MODEL_CHOICE</code></strong>
+<ul>
+<li><strong>Description:</strong> Default AWS Bedrock (or cloud) model for LLM-based summarisation when using cloud inference (e.g.&nbsp;AWS Bedrock). Used by <code>tools/summaries.py</code>. Separate from <code>CLOUD_LLM_PII_MODEL_CHOICE</code> so you can assign a different model for summarisation than for entity detection.</li>
+<li><strong>Default Value:</strong> <code>"amazon.nova-pro-v1:0"</code></li>
+</ul></li>
+<li><strong><code>VLM_SEED</code></strong>
+<ul>
+<li><strong>Description:</strong> Random seed for VLM generation. If empty, no seed is set (non-deterministic). If set to an integer, generation will be deterministic.</li>
+<li><strong>Default Value:</strong> <code>''</code> (empty; no seed set)</li>
+</ul></li>
+<li><strong><code>VLM_DEFAULT_TEMPERATURE</code></strong>
+<ul>
+<li><strong>Description:</strong> Default temperature for VLM generation. If empty, model-specific defaults are used.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>VLM_DEFAULT_TOP_P</code></strong>
+<ul>
+<li><strong>Description:</strong> Default top_p (nucleus sampling) for VLM generation. If empty, model-specific defaults are used.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>VLM_DEFAULT_MIN_P</code></strong>
+<ul>
+<li><strong>Description:</strong> Default min_p (minimum probability threshold) for VLM generation. If empty, model-specific defaults are used.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>VLM_DEFAULT_TOP_K</code></strong>
+<ul>
+<li><strong>Description:</strong> Default top_k for VLM generation. If empty, model-specific defaults are used.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>VLM_DEFAULT_REPETITION_PENALTY</code></strong>
+<ul>
+<li><strong>Description:</strong> Default repetition penalty for VLM generation. If empty, model-specific defaults are used.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>VLM_DEFAULT_DO_SAMPLE</code></strong>
+<ul>
+<li><strong>Description:</strong> Default do_sample setting for VLM generation. <code>"True"</code> means use sampling (do_sample=True), <code>"False"</code> means use greedy decoding (do_sample=False). If empty, model-specific defaults are used.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>VLM_DEFAULT_PRESENCE_PENALTY</code></strong>
+<ul>
+<li><strong>Description:</strong> Default presence penalty for VLM generation. If empty, model-specific defaults are used.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+</ul>
+</section>
+<section id="entity-and-search-options" class="level3">
+<h3 class="anchored" data-anchor-id="entity-and-search-options">Entity and Search Options</h3>
+<ul>
+<li><strong><code>CHOSEN_COMPREHEND_ENTITIES</code></strong> / <strong><code>FULL_COMPREHEND_ENTITY_LIST</code></strong>
+<ul>
+<li><strong>Description:</strong> The selected and available PII entity types for AWS Comprehend.</li>
+<li><strong>Default Value:</strong> Predefined lists of entities (see script).</li>
+</ul></li>
+<li><strong><code>CHOSEN_LLM_ENTITIES</code></strong> / <strong><code>FULL_LLM_ENTITY_LIST</code></strong>
+<ul>
+<li><strong>Description:</strong> The selected and available PII entity types for LLM-based PII detection (e.g.&nbsp;AWS Bedrock, local transformers, inference server).</li>
+<li><strong>Default Value:</strong> Predefined lists (e.g.&nbsp;<code>['EMAIL_ADDRESS','ADDRESS','NAME','PHONE_NUMBER', 'CUSTOM']</code> for chosen; see script for full list).</li>
+</ul></li>
+<li><strong><code>CHOSEN_REDACT_ENTITIES</code></strong> / <strong><code>FULL_ENTITY_LIST</code></strong>
+<ul>
+<li><strong>Description:</strong> The selected and available PII entity types for the local model.</li>
+<li><strong>Default Value:</strong> Predefined lists of entities (see script).</li>
+</ul></li>
+<li><strong><code>CUSTOM_ENTITIES</code></strong>
+<ul>
+<li><strong>Description:</strong> A list of entities that are considered “custom” and may have special handling.</li>
+<li><strong>Default Value:</strong> <code>['TITLES', 'UKPOSTCODE', 'STREETNAME', 'CUSTOM']</code></li>
+</ul></li>
+<li><strong><code>DEFAULT_SEARCH_QUERY</code></strong>
+<ul>
+<li><strong>Description:</strong> The default text for the custom search/redact input box.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>DEFAULT_FUZZY_SPELLING_MISTAKES_NUM</code></strong>
+<ul>
+<li><strong>Description:</strong> Default number of allowed spelling mistakes for fuzzy searches.</li>
+<li><strong>Default Value:</strong> <code>0</code></li>
+</ul></li>
+<li><strong><code>DEFAULT_PAGE_MIN</code></strong> / <strong><code>DEFAULT_PAGE_MAX</code></strong>
+<ul>
+<li><strong>Description:</strong> Default start and end pages for processing. <code>0</code> for max means process all pages.</li>
+<li><strong>Default Value:</strong> <code>0</code> for both.</li>
+</ul></li>
+</ul>
+</section>
+<section id="textract-feature-selection" class="level3">
+<h3 class="anchored" data-anchor-id="textract-feature-selection">Textract Feature Selection</h3>
+<ul>
+<li><strong><code>DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX</code></strong>
+<ul>
+<li><strong>Description:</strong> The default options selected for Textract’s handwriting and signature detection. Provide as a list string, e.g.&nbsp;<code>"['Extract handwriting', 'Extract signatures']"</code>.</li>
+<li><strong>Default Value:</strong> <code>[]</code></li>
+</ul></li>
+<li><strong><code>HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS</code></strong>
+<ul>
+<li><strong>Description:</strong> Full list of available options for Textract’s handwriting and signature detection. Can include <code>'Extract handwriting'</code>, <code>'Extract signatures'</code>, and optionally <code>'Extract forms'</code>, <code>'Extract layout'</code>, <code>'Extract tables'</code>, and <code>'Face detection'</code> if the corresponding include options are enabled.</li>
+<li><strong>Default Value:</strong> <code>['Extract handwriting', 'Extract signatures']</code></li>
+</ul></li>
+<li><strong><code>INCLUDE_FORM_EXTRACTION_TEXTRACT_OPTION</code></strong></li>
+<li><strong><code>INCLUDE_LAYOUT_EXTRACTION_TEXTRACT_OPTION</code></strong></li>
+<li><strong><code>INCLUDE_TABLE_EXTRACTION_TEXTRACT_OPTION</code></strong>
+<ul>
+<li><strong>Description:</strong> Booleans (<code>"True"</code>/<code>"False"</code>) to include Forms, Layout, and Tables as selectable options for Textract analysis.</li>
+<li><strong>Default Value:</strong> <code>"False"</code> for all.</li>
+</ul></li>
+<li><strong><code>INCLUDE_FACE_IDENTIFICATION_TEXTRACT_OPTION</code></strong>
+<ul>
+<li><strong>Description:</strong> When set to <code>"True"</code>, adds “Face detection” as a selectable option in the handwriting/signature checkbox group. When enabled with AWS Bedrock VLM OCR, a second VLM pass per page is run to identify faces (cost and time estimates account for this).</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+</ul>
+</section>
+<section id="tabular-data-options" class="level3">
+<h3 class="anchored" data-anchor-id="tabular-data-options">Tabular Data Options</h3>
+<ul>
+<li><strong><code>DO_INITIAL_TABULAR_DATA_CLEAN</code></strong>
+<ul>
+<li><strong>Description:</strong> If <code>"True"</code>, performs an initial cleaning step on tabular data.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><strong><code>DEFAULT_TEXT_COLUMNS</code></strong> / <strong><code>DEFAULT_EXCEL_SHEETS</code></strong>
+<ul>
+<li><strong>Description:</strong> Default values for specifying which columns or sheets to process in tabular files.</li>
+<li><strong>Default Value:</strong> <code>[]</code> (empty list)</li>
+</ul></li>
+<li><strong><code>DEFAULT_TABULAR_ANONYMISATION_STRATEGY</code></strong>
+<ul>
+<li><strong>Description:</strong> The default method for anonymizing tabular data (e.g., “redact completely”).</li>
+<li><strong>Default Value:</strong> <code>"redact completely"</code></li>
+</ul></li>
+</ul>
+</section>
+</section>
+<section id="language-options" class="level2">
+<h2 class="anchored" data-anchor-id="language-options">Language Options</h2>
+<p>Settings for multi-language support.</p>
+<ul>
+<li><strong><code>SHOW_LANGUAGE_SELECTION</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, a language selection dropdown will be visible in the UI.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>DEFAULT_LANGUAGE_FULL_NAME</code></strong> / <strong><code>DEFAULT_LANGUAGE</code></strong>
+<ul>
+<li><strong>Description:</strong> The default language’s full name (e.g., “english”) and its short code (e.g., “en”).</li>
+<li><strong>Default Values:</strong> <code>"english"</code>, <code>"en"</code></li>
+<li><strong>Language Support Notes:</strong>
+<ul>
+<li><strong>Tesseract:</strong> Ensure the Tesseract language data (e.g., <code>fra.traineddata</code>) is installed. Find language packs at <a href="https://github.com/tesseract-ocr/tessdata">tesseract-ocr/tessdata</a>.</li>
+<li><strong>PaddleOCR:</strong> Ensure the PaddleOCR language data is installed. See supported languages at <a href="https://www.paddleocr.ai/main/en/version3.x/algorithm/PP-OCRv5/PP-OCRv5_multi_languages.html">PaddleOCR documentation</a>.</li>
+<li><strong>AWS Comprehend:</strong> Only English (<code>en</code>) and Spanish (<code>es</code>) are supported. See <a href="https://docs.aws.amazon.com/comprehend/latest/dg/how-pii.html">AWS Comprehend PII documentation</a>.</li>
+<li><strong>AWS Textract:</strong> Automatically detects language and supports English, Spanish, Italian, Portuguese, French, and German. Note that handwriting, invoices, receipts, identity documents, and queries processing are in English only. See <a href="https://aws.amazon.com/textract/faqs/#topic-0">AWS Textract FAQs</a>.</li>
+</ul></li>
+</ul></li>
+<li><strong><code>textract_language_choices</code></strong> / <strong><code>aws_comprehend_language_choices</code></strong>
+<ul>
+<li><strong>Description:</strong> Lists of supported language codes for Textract and Comprehend.</li>
+<li><strong>Default Value:</strong> <code>['en', 'es', 'fr', 'de', 'it', 'pt']</code> and <code>['en', 'es']</code></li>
+</ul></li>
+<li><strong><code>SPLIT_PUNCTUATION_FROM_WORDS</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, splits punctuation from words in Textract output.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>MAPPED_LANGUAGE_CHOICES</code></strong> / <strong><code>LANGUAGE_CHOICES</code></strong>
+<ul>
+<li><strong>Description:</strong> Paired lists of full language names and their corresponding short codes for the UI dropdown.</li>
+<li><strong>Default Value:</strong> Predefined lists (see script).</li>
+</ul></li>
+</ul>
+</section>
+<section id="duplicate-detection-settings" class="level2">
+<h2 class="anchored" data-anchor-id="duplicate-detection-settings">Duplicate Detection Settings</h2>
+<ul>
+<li><strong><code>DEFAULT_DUPLICATE_DETECTION_THRESHOLD</code></strong>
+<ul>
+<li><strong>Description:</strong> The similarity score (0.0 to 1.0) above which documents/pages are considered duplicates.</li>
+<li><strong>Default Value:</strong> <code>0.95</code></li>
+</ul></li>
+<li><strong><code>DEFAULT_MIN_CONSECUTIVE_PAGES</code></strong>
+<ul>
+<li><strong>Description:</strong> Minimum number of consecutive pages that must be duplicates to be flagged.</li>
+<li><strong>Default Value:</strong> <code>1</code></li>
+</ul></li>
+<li><strong><code>USE_GREEDY_DUPLICATE_DETECTION</code></strong>
+<ul>
+<li><strong>Description:</strong> If <code>"True"</code>, uses a greedy algorithm that may find more duplicates but can be less precise.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><strong><code>DEFAULT_COMBINE_PAGES</code></strong>
+<ul>
+<li><strong>Description:</strong> If <code>"True"</code>, text from the same page number across different files is combined before checking for duplicates. If <code>"False"</code>, line-level duplicate detection will be enabled instead.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><strong><code>DEFAULT_MIN_WORD_COUNT</code></strong>
+<ul>
+<li><strong>Description:</strong> Pages with fewer words than this value will be ignored by the duplicate detector.</li>
+<li><strong>Default Value:</strong> <code>10</code></li>
+</ul></li>
+<li><strong><code>REMOVE_DUPLICATE_ROWS</code></strong>
+<ul>
+<li><strong>Description:</strong> If <code>"True"</code>, enables duplicate row detection in tabular data.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+</ul>
+</section>
+<section id="file-output-options" class="level2">
+<h2 class="anchored" data-anchor-id="file-output-options">File Output Options</h2>
+<section id="review-redaction-overlay-export" class="level3">
+<h3 class="anchored" data-anchor-id="review-redaction-overlay-export">Review redaction overlay export</h3>
+<p>These variables apply when exporting the <strong>Review redactions</strong> tab overlay image (JPEG with hollow boxes, optional label abbreviations, and a legend). Output path: <code>{OUTPUT_FOLDER}/redaction_overlay/{basename}_page{n}_redaction_overlay.jpg</code>. The FastAPI agent route <code>POST /agent/export_review_redaction_overlay</code> uses the same rendering when given <code>page_image_path</code> and <code>boxes</code>.</p>
+<ul>
+<li><strong><code>REVIEW_OVERLAY_LABEL_ABBREV_CHARS</code></strong>
+<ul>
+<li><strong>Description:</strong> Number of leading characters of each redaction <strong>label</strong> to draw above each box (centred, with a small gap above the box top edge). Set to <code>0</code> to disable label text on the image. Values are clamped to <strong>0–24</strong> after parsing.</li>
+<li><strong>Default Value:</strong> <code>0</code></li>
+</ul></li>
+<li><strong><code>REVIEW_OVERLAY_LABEL_FONT_PX</code></strong>
+<ul>
+<li><strong>Description:</strong> Font size in pixels for those abbreviation labels. <strong><code>0</code></strong> means automatic sizing from image width: roughly <code>max(9, min(16, width // 90))</code>. Any <strong>positive</strong> value selects a fixed TrueType size, clamped to <strong>6–96</strong> pixels.</li>
+<li><strong>Default Value:</strong> <code>0</code></li>
+</ul></li>
+<li><strong><code>REVIEW_OVERLAY_MAX_PIXELS</code></strong>
+<ul>
+<li><strong>Description:</strong> If the overlay image’s <strong>width × height</strong> exceeds this value, it is <strong>downscaled</strong> (aspect ratio preserved) before JPEG encoding. Set to <strong><code>0</code></strong> to disable this cap (no resize for size reasons alone).</li>
+<li><strong>Default Value:</strong> <code>4000000</code> (4 megapixels)</li>
+</ul></li>
+<li><strong><code>REVIEW_OVERLAY_MAX_FILE_BYTES</code></strong>
+<ul>
+<li><strong>Description:</strong> Target <strong>maximum JPEG file size</strong> in bytes. The writer lowers JPEG quality in steps (similar to <code>SAVE_PAGE_OCR_VISUALISATIONS</code> page images) until the file is at or under this limit, down to a minimum quality. Values are clamped to a safe range after parsing.</li>
+<li><strong>Default Value:</strong> <code>512000</code> (500 × 1024 bytes, i.e.&nbsp;500 KiB)</li>
+</ul></li>
+<li><strong><code>USE_GUI_BOX_COLOURS_FOR_OUTPUTS</code></strong>
+<ul>
+<li><strong>Description:</strong> If <code>"True"</code>, the final redacted PDF will use the same redaction box colors as shown in the review UI.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>CUSTOM_BOX_COLOUR</code></strong>
+<ul>
+<li><strong>Description:</strong> Specifies the color for redaction boxes as an RGB tuple string, e.g., <code>"(0, 0, 0)"</code> for black. Alternatively, you can use the named color <code>"grey"</code> (which maps to RGB <code>(128, 128, 128)</code>).</li>
+<li><strong>Default Value:</strong> <code>"(0, 0, 0)"</code></li>
+</ul></li>
+<li><strong><code>APPLY_REDACTIONS_IMAGES</code></strong>, <strong><code>APPLY_REDACTIONS_GRAPHICS</code></strong>, <strong><code>APPLY_REDACTIONS_TEXT</code></strong>
+<ul>
+<li><strong>Description:</strong> Advanced control over how redactions are applied to underlying images, vector graphics, and text in the PDF, based on PyMuPDF options. <code>0</code> is the default for a standard redaction workflow.</li>
+<li><strong>Default Value:</strong> <code>0</code> for all.</li>
+<li><strong>Detailed Options:</strong>
+<ul>
+<li><strong><code>APPLY_REDACTIONS_IMAGES</code>:</strong> <code>0</code> = ignore (default), <code>1</code> = completely remove images overlapping redaction annotations, <code>2</code> = blank out overlapping pixels, <code>3</code> = only remove images that are actually visible. Note: Text in images is effectively removed by the overlapping rectangle shape.</li>
+<li><strong><code>APPLY_REDACTIONS_GRAPHICS</code>:</strong> <code>0</code> = ignore (default), <code>1</code> = remove graphics fully contained in redaction annotation, <code>2</code> = remove any overlapping vector graphics.</li>
+<li><strong><code>APPLY_REDACTIONS_TEXT</code>:</strong> <code>0</code> = remove all characters whose boundary box overlaps any redaction rectangle (default, complies with legal/data protection intentions), <code>1</code> = keep text while redacting graphics/images (does NOT comply with data protection intentions - use at your own risk).</li>
+</ul></li>
+</ul></li>
+<li><strong><code>RETURN_PDF_FOR_REVIEW</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, a PDF with redaction boxes drawn on it (but text not removed) is generated for the “Review” tab.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><strong><code>RETURN_REDACTED_PDF</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>'True'</code>, the application will return a fully redacted PDF at the end of the main task.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><strong><code>COMPRESS_REDACTED_PDF</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>'True'</code>, the redacted PDF output will be compressed.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+<li><strong>Warning:</strong> On low memory systems, the compression options in PyMuPDF can cause the app to crash if the PDF is longer than 500 pages or so. Setting this to <code>"False"</code> will save the PDF only with a basic cleaning option enabled, which is more memory-efficient.</li>
+</ul></li>
+<li><strong><code>SAVE_OUTPUTS_TO_S3</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>'True'</code>, the application will automatically upload redaction outputs (PDFs, text/tabular outputs, duplicate-analysis files, and Adobe XFDF review files) to Amazon S3 when <code>RUN_AWS_FUNCTIONS</code> is also enabled. Uploads use the <code>S3_OUTPUTS_FOLDER</code> prefix within the <code>DOCUMENT_REDACTION_BUCKET</code>, optionally with a per-session subfolder when <code>SESSION_OUTPUT_FOLDER</code> is enabled.</li>
+<li><strong>Default Value:</strong> <code>'False'</code></li>
+</ul></li>
+<li><strong><code>S3_OUTPUTS_FOLDER</code></strong>
+<ul>
+<li><strong>Description:</strong> Base S3 key prefix (folder path) within <code>DOCUMENT_REDACTION_BUCKET</code> where redaction outputs are stored, for example <code>'outputs/'</code> or <code>'redaction/outputs/'</code>. When <code>SESSION_OUTPUT_FOLDER</code> is <code>'True'</code>, a session-specific subfolder (based on <code>session_hash</code>) is appended to this path so each user/session writes to its own S3 subdirectory. If left blank, outputs will not be uploaded to S3 even if <code>SAVE_OUTPUTS_TO_S3</code> is <code>'True'</code>.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>S3_OUTPUTS_BUCKET</code></strong>
+<ul>
+<li><strong>Description:</strong> Name of the S3 bucket where redaction outputs are stored.</li>
+<li><strong>Default Value:</strong> <code>'DOCUMENT_REDACTION_BUCKET'</code></li>
+</ul></li>
+</ul>
+</section>
+</section>
+<section id="direct-mode-lambda-configuration" class="level2">
+<h2 class="anchored" data-anchor-id="direct-mode-lambda-configuration">Direct Mode &amp; Lambda Configuration</h2>
+<p>Settings for running the application from the command line (Direct Mode) or as an AWS Lambda function.</p>
+<p><strong>Note:</strong> Many <code>DIRECT_MODE_*</code> variables inherit their default values from their corresponding non-direct-mode variables if not explicitly set. For example, <code>DIRECT_MODE_LANGUAGE</code> defaults to <code>DEFAULT_LANGUAGE</code>, <code>DIRECT_MODE_IMAGES_DPI</code> defaults to <code>IMAGES_DPI</code>, etc.</p>
+<section id="direct-mode" class="level3">
+<h3 class="anchored" data-anchor-id="direct-mode">Direct Mode</h3>
+<ul>
+<li><strong><code>RUN_DIRECT_MODE</code></strong>
+<ul>
+<li><strong>Description:</strong> Set to <code>'True'</code> to enable direct command-line mode.</li>
+<li><strong>Default Value:</strong> <code>'False'</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_DEFAULT_USER</code></strong>
+<ul>
+<li><strong>Description:</strong> Default username for CLI requests.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_TASK</code></strong>
+<ul>
+<li><strong>Description:</strong> The task to perform: <code>'redact'</code> or <code>'deduplicate'</code>.</li>
+<li><strong>Default Value:</strong> <code>'redact'</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_INPUT_FILE</code></strong> / <strong><code>DIRECT_MODE_OUTPUT_DIR</code></strong>
+<ul>
+<li><strong>Description:</strong> Path to the input file and output directory for the task.</li>
+<li><strong>Default Values:</strong> <code>''</code>, <code>output/</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_DUPLICATE_TYPE</code></strong>
+<ul>
+<li><strong>Description:</strong> Type of duplicate detection for direct mode: <code>'pages'</code> or <code>'tabular'</code>.</li>
+<li><strong>Default Value:</strong> <code>'pages'</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_LANGUAGE</code></strong>
+<ul>
+<li><strong>Description:</strong> Language for document processing in direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>DEFAULT_LANGUAGE</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_PII_DETECTOR</code></strong>
+<ul>
+<li><strong>Description:</strong> PII detection method for direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>LOCAL_PII_OPTION</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_OCR_METHOD</code></strong>
+<ul>
+<li><strong>Description:</strong> OCR method for PDF/image processing in direct mode.</li>
+<li><strong>Default Value:</strong> <code>"Local OCR"</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_OCR_FIRST_PASS_MAX_WORKERS</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of threads for the OCR first pass in direct mode. Inherits from <code>OCR_FIRST_PASS_MAX_WORKERS</code> if not set.</li>
+<li><strong>Default Value:</strong> Same as <code>OCR_FIRST_PASS_MAX_WORKERS</code> (e.g.&nbsp;<code>3</code>)</li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_SUMMARY_PAGE_GROUP_MAX_WORKERS</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of threads for page-group summarisation in direct mode (when task is summarise). Inherits from <code>SUMMARY_PAGE_GROUP_MAX_WORKERS</code> if not set.</li>
+<li><strong>Default Value:</strong> Same as <code>SUMMARY_PAGE_GROUP_MAX_WORKERS</code> (e.g.&nbsp;<code>1</code>)</li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_PAGE_MIN</code></strong> / <strong><code>DIRECT_MODE_PAGE_MAX</code></strong>
+<ul>
+<li><strong>Description:</strong> First and last page to process in direct mode. <code>0</code> for max means process all pages.</li>
+<li><strong>Default Values:</strong> Inherit from <code>DEFAULT_PAGE_MIN</code> / <code>DEFAULT_PAGE_MAX</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_IMAGES_DPI</code></strong>
+<ul>
+<li><strong>Description:</strong> DPI for image processing in direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>IMAGES_DPI</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_CHOSEN_LOCAL_OCR_MODEL</code></strong>
+<ul>
+<li><strong>Description:</strong> Local OCR model choice for direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>DEFAULT_LOCAL_OCR_MODEL</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_PREPROCESS_LOCAL_OCR_IMAGES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, preprocesses images before OCR in direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>PREPROCESS_LOCAL_OCR_IMAGES</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_COMPRESS_REDACTED_PDF</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, compresses the redacted PDF output in direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>COMPRESS_REDACTED_PDF</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_RETURN_PDF_END_OF_REDACTION</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, returns a PDF at the end of redaction in direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>RETURN_REDACTED_PDF</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_EXTRACT_FORMS</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, extracts forms during Textract analysis in direct mode.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_EXTRACT_TABLES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, extracts tables during Textract analysis in direct mode.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_EXTRACT_LAYOUT</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, extracts layout during Textract analysis in direct mode.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_EXTRACT_SIGNATURES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, extracts signatures during Textract analysis in direct mode.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_MATCH_FUZZY_WHOLE_PHRASE_BOOL</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, matches fuzzy whole phrases in direct mode.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_ANON_STRATEGY</code></strong>
+<ul>
+<li><strong>Description:</strong> Anonymisation strategy for tabular data in direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>DEFAULT_TABULAR_ANONYMISATION_STRATEGY</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_FUZZY_MISTAKES</code></strong>
+<ul>
+<li><strong>Description:</strong> Number of fuzzy spelling mistakes allowed in direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>DEFAULT_FUZZY_SPELLING_MISTAKES_NUM</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_SIMILARITY_THRESHOLD</code></strong>
+<ul>
+<li><strong>Description:</strong> Similarity threshold for duplicate detection in direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>DEFAULT_DUPLICATE_DETECTION_THRESHOLD</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_MIN_WORD_COUNT</code></strong>
+<ul>
+<li><strong>Description:</strong> Minimum word count for duplicate detection in direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>DEFAULT_MIN_WORD_COUNT</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_MIN_CONSECUTIVE_PAGES</code></strong>
+<ul>
+<li><strong>Description:</strong> Minimum consecutive pages for duplicate detection in direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>DEFAULT_MIN_CONSECUTIVE_PAGES</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_GREEDY_MATCH</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, uses greedy matching for duplicate detection in direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>USE_GREEDY_DUPLICATE_DETECTION</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_COMBINE_PAGES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, combines pages for duplicate detection in direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>DEFAULT_COMBINE_PAGES</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_REMOVE_DUPLICATE_ROWS</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>"True"</code>, removes duplicate rows in tabular data in direct mode.</li>
+<li><strong>Default Value:</strong> Inherits from <code>REMOVE_DUPLICATE_ROWS</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_TEXTRACT_ACTION</code></strong>
+<ul>
+<li><strong>Description:</strong> Textract action for batch operations in direct mode.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_JOB_ID</code></strong>
+<ul>
+<li><strong>Description:</strong> Job ID for Textract operations in direct mode.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>DIRECT_MODE_INFERENCE_SERVER_MODEL</code></strong>
+<ul>
+<li><strong>Description:</strong> Inference server model to use for PII detection in direct mode. If empty, uses <code>CHOSEN_INFERENCE_SERVER_PII_MODEL</code>.</li>
+<li><strong>Default Value:</strong> <code>''</code> (inherits from <code>CHOSEN_INFERENCE_SERVER_PII_MODEL</code> when set)</li>
+</ul></li>
+</ul>
+</section>
+<section id="lambda-configuration" class="level3">
+<h3 class="anchored" data-anchor-id="lambda-configuration">Lambda Configuration</h3>
+<ul>
+<li><strong><code>LAMBDA_POLL_INTERVAL</code></strong>
+<ul>
+<li><strong>Description:</strong> Polling interval in seconds for checking Textract job status.</li>
+<li><strong>Default Value:</strong> <code>30</code></li>
+</ul></li>
+<li><strong><code>LAMBDA_MAX_POLL_ATTEMPTS</code></strong>
+<ul>
+<li><strong>Description:</strong> Maximum number of polling attempts before timeout.</li>
+<li><strong>Default Value:</strong> <code>120</code></li>
+</ul></li>
+<li><strong><code>LAMBDA_PREPARE_IMAGES</code></strong>
+<ul>
+<li><strong>Description:</strong> If <code>"True"</code>, prepares images for OCR processing within the Lambda environment.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><strong><code>LAMBDA_EXTRACT_SIGNATURES</code></strong>
+<ul>
+<li><strong>Description:</strong> Enables signature extraction during Textract analysis in Lambda.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>LAMBDA_DEFAULT_USERNAME</code></strong>
+<ul>
+<li><strong>Description:</strong> Default username for operations initiated by Lambda.</li>
+<li><strong>Default Value:</strong> <code>"lambda_user"</code></li>
+</ul></li>
+</ul>
+</section>
+</section>
+<section id="allow-deny-whole-page-redaction-lists" class="level2">
+<h2 class="anchored" data-anchor-id="allow-deny-whole-page-redaction-lists">Allow, Deny, &amp; Whole Page Redaction Lists</h2>
+<ul>
+<li><strong><code>GET_DEFAULT_ALLOW_LIST</code></strong>, <strong><code>GET_DEFAULT_DENY_LIST</code></strong>, <strong><code>GET_DEFAULT_WHOLE_PAGE_REDACTION_LIST</code></strong>
+<ul>
+<li><strong>Description:</strong> Booleans (<code>"True"</code>/<code>"False"</code>) to enable the use of allow, deny, or whole-page redaction lists.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+<li><strong>Note:</strong> <code>GET_DEFAULT_WHOLE_PAGE_REDACTION_LIST</code> is stored as a string value, not converted to boolean (unlike the other two variables).</li>
+</ul></li>
+<li><strong><code>ALLOW_LIST_PATH</code></strong>, <strong><code>DENY_LIST_PATH</code></strong>, <strong><code>WHOLE_PAGE_REDACTION_LIST_PATH</code></strong>
+<ul>
+<li><strong>Description:</strong> Local paths to the respective CSV list files.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>S3_ALLOW_LIST_PATH</code></strong>, <strong><code>S3_DENY_LIST_PATH</code></strong>, <strong><code>S3_WHOLE_PAGE_REDACTION_LIST_PATH</code></strong>
+<ul>
+<li><strong>Description:</strong> Paths to the respective list files within the <code>DOCUMENT_REDACTION_BUCKET</code>.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+</ul>
+</section>
+<section id="cost-code-options" class="level2">
+<h2 class="anchored" data-anchor-id="cost-code-options">Cost Code Options</h2>
+<ul>
+<li><strong><code>SHOW_COSTS</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>'True'</code>, cost-related information will be displayed in the UI.</li>
+<li><strong>Default Value:</strong> <code>'False'</code></li>
+</ul></li>
+<li><strong><code>GET_COST_CODES</code></strong>
+<ul>
+<li><strong>Description:</strong> Enables fetching and using cost codes. Set to <code>'True'</code> to enable.</li>
+<li><strong>Default Value:</strong> <code>'False'</code></li>
+</ul></li>
+<li><strong><code>DEFAULT_COST_CODE</code></strong>
+<ul>
+<li><strong>Description:</strong> Specifies a default cost code.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>COST_CODES_PATH</code></strong> / <strong><code>S3_COST_CODES_PATH</code></strong>
+<ul>
+<li><strong>Description:</strong> Local or S3 path to a CSV file containing available cost codes.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+<li><strong>File Format:</strong> The CSV file should contain a single table with two columns and a header row. The first column should contain cost codes, and the second column should contain a name or description for each cost code.</li>
+</ul></li>
+<li><strong><code>ENFORCE_COST_CODES</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>'True'</code>, makes the selection of a cost code mandatory.</li>
+<li><strong>Default Value:</strong> <code>'False'</code></li>
+</ul></li>
+</ul>
+<section id="session-default-cost-code-no-extra-environment-variables" class="level3">
+<h3 class="anchored" data-anchor-id="session-default-cost-code-no-extra-environment-variables">Session default cost code (no extra environment variables)</h3>
+<p>When cost codes are enabled (<code>GET_COST_CODES</code> or <code>ENFORCE_COST_CODES</code>), users can save a <strong>default cost code</strong> for their session via the “Set default cost code” button. This uses the <strong>existing</strong> cost code and AWS settings; no additional environment variables are required.</p>
+<ul>
+<li><strong>Behaviour:</strong>
+<ul>
+<li>The chosen cost code is stored in a CSV file (<code>session_default_cost_codes.csv</code>) with columns <code>session_hash</code>, <code>default_cost_code</code>, and <code>saved_at</code> (ISO timestamp). Duplicate <code>session_hash</code> rows are deduplicated on save, keeping only the latest.</li>
+<li><strong>Local save location:</strong> The CSV is written under the app’s <strong>input folder</strong> (the value of the input folder at save time, e.g.&nbsp;from <code>INPUT_FOLDER</code> or the session’s <code>input_folder_textbox</code>).</li>
+<li><strong>S3 (optional):</strong> If <code>S3_COST_CODES_PATH</code> is set and <code>RUN_AWS_FUNCTIONS</code> and <code>DOCUMENT_REDACTION_BUCKET</code> are set, the same file is also uploaded to <code>DOCUMENT_REDACTION_BUCKET</code> in the same key “folder” as the cost codes file (e.g.&nbsp;<code>config/session_default_cost_codes.csv</code>).</li>
+<li><strong>Email-only:</strong> Saves and S3 upload only run when the session identifier is a valid <strong>email address</strong> (e.g.&nbsp;when users are signed in via Cognito). If the session identifier is not an email (e.g.&nbsp;when running locally with a Gradio session hash), the default is not written to the CSV and not uploaded to S3. On load, the app does not download the session default cost codes file from S3 when the session identifier is not an email.</li>
+</ul></li>
+<li><strong>Relevant existing variables:</strong> <code>GET_COST_CODES</code>, <code>ENFORCE_COST_CODES</code>, <code>COST_CODES_PATH</code>, <code>S3_COST_CODES_PATH</code>, <code>DOCUMENT_REDACTION_BUCKET</code>, <code>RUN_AWS_FUNCTIONS</code>, and the app input folder (e.g.&nbsp;<code>INPUT_FOLDER</code> / <code>GRADIO_INPUT_FOLDER</code>).</li>
+</ul>
+</section>
+</section>
+<section id="whole-document-api-options-textract-async" class="level2">
+<h2 class="anchored" data-anchor-id="whole-document-api-options-textract-async">Whole Document API Options (Textract Async)</h2>
+<ul>
+<li><strong><code>SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS</code></strong>
+<ul>
+<li><strong>Description:</strong> Controls whether UI options for asynchronous whole document Textract calls are displayed.</li>
+<li><strong>Default Value:</strong> <code>'False'</code></li>
+<li><strong>Note:</strong> This feature is not currently fully implemented in the application.</li>
+</ul></li>
+<li><strong><code>TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET</code></strong>
+<ul>
+<li><strong>Description:</strong> The S3 bucket used for asynchronous Textract analysis.</li>
+<li><strong>Default Value:</strong> <code>''</code></li>
+</ul></li>
+<li><strong><code>TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER</code></strong> / <strong><code>..._OUTPUT_SUBFOLDER</code></strong>
+<ul>
+<li><strong>Description:</strong> Input and output subfolders within the analysis bucket.</li>
+<li><strong>Default Values:</strong> <code>'input'</code>, <code>'output'</code></li>
+</ul></li>
+<li><strong><code>LOAD_PREVIOUS_TEXTRACT_JOBS_S3</code></strong>
+<ul>
+<li><strong>Description:</strong> If set to <code>'True'</code>, the application will load data from previous Textract jobs stored in S3.</li>
+<li><strong>Default Value:</strong> <code>'False'</code></li>
+</ul></li>
+<li><strong><code>TEXTRACT_JOBS_S3_LOC</code></strong> / <strong><code>TEXTRACT_JOBS_S3_INPUT_LOC</code></strong>
+<ul>
+<li><strong>Description:</strong> S3 subfolders where Textract job output and input are stored.</li>
+<li><strong>Default Value:</strong> <code>'output'</code>, <code>'input'</code></li>
+</ul></li>
+<li><strong><code>TEXTRACT_JOBS_LOCAL_LOC</code></strong>
+<ul>
+<li><strong>Description:</strong> The local subfolder for storing Textract job data.</li>
+<li><strong>Default Value:</strong> <code>'output'</code></li>
+</ul></li>
+<li><strong><code>DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS</code></strong>
+<ul>
+<li><strong>Description:</strong> Specifies the number of past days for which to display whole document Textract jobs.</li>
+<li><strong>Default Value:</strong> <code>7</code></li>
+</ul></li>
+</ul>
+
+
+</section>
+
+<a onclick="window.scrollTo(0, 0); return false;" role="button" id="quarto-back-to-top"><i class="bi bi-arrow-up"></i> Back to top</a></main> <!-- /main -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp("https:\/\/seanpedrick-case\.github\.io\/doc_redaction\/");
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+
+
+
+
+</body></html>

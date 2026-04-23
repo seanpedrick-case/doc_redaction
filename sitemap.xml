@@ -1,19 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://seanpedrick-case.github.io/doc_redaction/quarto_site/user_guide.html</loc>
+    <loc>https://seanpedrick-case.github.io/doc_redaction/src/user_guide.html</loc>
     <lastmod>2026-04-20T11:52:52.135Z</lastmod>
   </url>
   <url>
-    <loc>https://seanpedrick-case.github.io/doc_redaction/quarto_site/python_package_usage.html</loc>
+    <loc>https://seanpedrick-case.github.io/doc_redaction/src/python_package_usage.html</loc>
     <lastmod>2026-04-23T21:31:33.419Z</lastmod>
   </url>
   <url>
-    <loc>https://seanpedrick-case.github.io/doc_redaction/quarto_site/management_guide.html</loc>
+    <loc>https://seanpedrick-case.github.io/doc_redaction/src/management_guide.html</loc>
     <lastmod>2025-06-18T20:04:04.000Z</lastmod>
   </url>
   <url>
-    <loc>https://seanpedrick-case.github.io/doc_redaction/quarto_site/faq.html</loc>
+    <loc>https://seanpedrick-case.github.io/doc_redaction/src/faq.html</loc>
     <lastmod>2026-03-23T15:25:45.759Z</lastmod>
   </url>
   <url>
@@ -21,19 +21,19 @@
     <lastmod>2026-04-22T13:21:24.161Z</lastmod>
   </url>
   <url>
-    <loc>https://seanpedrick-case.github.io/doc_redaction/quarto_site/app_settings.html</loc>
+    <loc>https://seanpedrick-case.github.io/doc_redaction/src/app_settings.html</loc>
     <lastmod>2026-04-19T21:42:32.208Z</lastmod>
   </url>
   <url>
-    <loc>https://seanpedrick-case.github.io/doc_redaction/quarto_site/installation_guide.html</loc>
+    <loc>https://seanpedrick-case.github.io/doc_redaction/src/installation_guide.html</loc>
     <lastmod>2026-01-30T15:41:11.000Z</lastmod>
   </url>
   <url>
-    <loc>https://seanpedrick-case.github.io/doc_redaction/quarto_site/ocr_and_redaction_with_qwen35.html</loc>
+    <loc>https://seanpedrick-case.github.io/doc_redaction/src/ocr_and_redaction_with_qwen35.html</loc>
     <lastmod>2026-03-27T23:22:20.000Z</lastmod>
   </url>
   <url>
-    <loc>https://seanpedrick-case.github.io/doc_redaction/quarto_site/redaction_with_vlm_and_llms.html</loc>
+    <loc>https://seanpedrick-case.github.io/doc_redaction/src/redaction_with_vlm_and_llms.html</loc>
     <lastmod>2026-03-26T14:00:47.000Z</lastmod>
   </url>
 </urlset>
