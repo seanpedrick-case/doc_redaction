@@ -18,7 +18,6 @@ tabulate<=0.10.0
 scikit-learn<=1.8.0
 spacy<=3.8.14
 spaczz<=0.6.1
-# en_core_web_lg is not on PyPI; downloaded on first NLP use or: python -m spacy download en_core_web_lg
 
 # --- PDF / OCR / Redaction tools ---
 pdfminer.six<=20260107
@@ -32,7 +31,7 @@ presidio-image-redactor<=0.0.57
 
 # --- Gradio and apps ---
 gradio<=6.10.0
-gradio_image_annotation_redaction==0.5.4 # Custom annotator version with rotation, zoom, labels, and box IDs
+gradio_image_annotation_redaction==0.5.5 # Custom annotator version with rotation, zoom, labels, and box IDs
 spaces<=0.48.3
 
 # --- AWS Lambda runtime ---

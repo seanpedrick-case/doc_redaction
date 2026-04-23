@@ -26,10 +26,13 @@ website:
         text: App settings management guide
       - text: Blog
         menu:
-          - href: src/redaction_with_vlm_and_llms.qmd
-            text: Redaction with local VLM and LLMs (Qwen 3)
+          - href: src/agentic_redactionqmd
+            text: Agentic redaction case study (Apr 2026)          
           - href: src/ocr_and_redaction_with_qwen35.qmd
             text: OCR and redaction with Qwen 3.5 (Mar 2026)
+          - href: src/redaction_with_vlm_and_llms.qmd
+            text: Redaction with local VLM and LLMs (Qwen 3)
+          
 
 format:
   html:

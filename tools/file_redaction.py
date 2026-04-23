@@ -5847,7 +5847,7 @@ def redact_image_pdf(
     - textract_request_metadata (list, optional): Metadata related to the redaction request. Defaults to an empty string.
     - current_loop_page (int, optional): The current page being processed. Defaults to 0.
     - page_break_return (bool, optional): Indicates if the function should return after a page break. Defaults to False.
-    - annotations_all_pages (List, optional): List of annotations on all pages that is used by the gradio_image_annotation object.
+    - annotations_all_pages (List, optional): List of annotations on all pages that is used by the gradio_image_annotation_redaction object.
     - all_page_line_level_ocr_results_df (pd.DataFrame, optional): All line level OCR results for the document as a Pandas dataframe,
     - all_pages_decision_process_table (pd.DataFrame, optional): All redaction decisions for document as a Pandas dataframe.
     - pymupdf_doc (Document, optional): The document as a PyMupdf object.

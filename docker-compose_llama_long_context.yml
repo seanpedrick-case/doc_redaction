@@ -25,13 +25,13 @@ services:
       - -hf
       - unsloth/Qwen3.6-27B-GGUF
       - --hf-file
-      - Qwen3.6-27B-UD-Q4_K_XL.gguf
+      - Qwen3.6-27B-IQ4_NL.gguf
       - --mmproj-url
       - https://huggingface.co/unsloth/Qwen3.6-27B-GGUF/resolve/main/mmproj-F16.gguf
       - --n-gpu-layers
       - "999"
       - --ctx-size
-      - "65536"
+      - "98304"
       - --fit
       - "off"
       - --temp

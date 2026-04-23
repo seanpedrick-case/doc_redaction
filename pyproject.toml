@@ -57,7 +57,7 @@ dependencies = [
     "Faker<=40.8.0",
     "python-levenshtein<=0.27.3",
     "spaczz<=0.6.1",
-    "gradio_image_annotation_redaction==0.5.4",
+    "gradio_image_annotation_redaction==0.5.5",
     "rapidfuzz<=3.14.5",
     "python-dotenv<=1.2.2",
     "awslambdaric<=3.1.1",

@@ -73,7 +73,7 @@ run_gui_test.bat
 - **Conda environment 'redaction' must be activated** before running tests
 - Python environment with all dependencies installed
 - Access to the `tools.config` module
-- Gradio and related GUI dependencies (including `gradio_image_annotation`)
+- Gradio and related GUI dependencies (including `gradio_image_annotation_redaction`)
 - The `app.py` file in the parent directory
 
 ### Prerequisites
@@ -84,7 +84,7 @@ Before running the GUI tests, ensure you have activated the conda environment:
 conda activate redaction
 ```
 
-The `gradio_image_annotation` package is already installed in the 'redaction' environment.
+The `gradio_image_annotation_redaction` package is already installed in the 'redaction' environment.
 
 ## Expected Behavior
 
