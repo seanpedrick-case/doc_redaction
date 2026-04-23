@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "doc_redaction"
 version = "2.2.0"
 description = "Redact PDF/image-based documents, Word, or CSV/XLSX files using a Gradio-based GUI interface"
-readme = "README.md"
+readme = "README_PYPI.md"
 authors = [
     { name = "Sean Pedrick-Case", email = "spedrickcase@lambeth.gov.uk" },
 ]

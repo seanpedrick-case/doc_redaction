@@ -1,14 +1,3 @@
----
-title: Document redaction
-emoji: 📝
-colorFrom: blue
-colorTo: yellow
-sdk: docker
-app_file: app.py
-pinned: true
-license: agpl-3.0
-short_description: OCR / redact PDF documents and tabular data
----
 # Document redaction (doc_redaction)
 
 <a href="https://pypi.org/project/doc-redaction/" target="_blank"><img alt="PyPI - Version" src="https://img.shields.io/pypi/v/doc-redaction"></a> 
