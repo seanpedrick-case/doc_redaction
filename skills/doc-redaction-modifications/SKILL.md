@@ -330,11 +330,14 @@ Review data from `result[6]` of `/choose_and_run_redactor` is a dict: `{headers,
 - Modified dataframe must maintain same structure with headers intact
 
 ### Affected Endpoints (endpoint inference bug)
+
+For `gradio_client` and `/gradio_api/call/...`, the Review-tab visual exports are registered as **`page_ocr_review_image`** and **`page_redaction_review_image`** in `app.py`. The FastAPI **`/agent/export_review_page_ocr_visualisation`** and **`/agent/export_review_redaction_overlay`** routes are separate (JSON bodies); do not use those strings as Gradio `api_name` values.
+
 | Endpoint | Purpose | Status |
 |----------|---------|--------|
 | `/apply_review_redactions` | Apply modified review data → PDF + log + updated df | ⚠️ Works with positional args only |
-| `/export_review_page_ocr_visualisation` | Export OCR overlay image via AnnotatedImageData input | ✅ Confirmed working pattern from initial redaction |
-| `/export_review_redaction_overlay` | Export redaction overlay with review_df → PNG + log paths | ⚠️ Same endpoint inference issue expected |
+| `/page_ocr_review_image` | Export OCR overlay image via AnnotatedImageData + OCR state | ✅ Confirmed working pattern from initial redaction |
+| `/page_redaction_review_image` | Export redaction overlay with review_df → image + log paths | ⚠️ Same endpoint inference issue expected |
 | `/combine_review_csvs`, `/combine_review_pdfs` | Combine results across multiple review sessions | Not tested — likely same positional-args requirement |
 
 ## When the default flow breaks

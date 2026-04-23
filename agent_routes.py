@@ -613,7 +613,7 @@ def post_combine_review_csvs(
 
 
 class AgentExportReviewRedactionOverlayRequest(BaseModel):
-    """Parity with Gradio ``api_name='export_review_redaction_overlay'``."""
+    """Agent JSON body for the same overlay render as Gradio ``api_name='page_redaction_review_image'``."""
 
     page_image_path: str = Field(
         ...,
@@ -644,7 +644,7 @@ class AgentExportReviewRedactionOverlayRequest(BaseModel):
 
 
 class AgentExportReviewPageOcrVisualisationRequest(BaseModel):
-    """Parity with Gradio ``api_name='export_review_page_ocr_visualisation'``."""
+    """Agent JSON body for the same OCR visualisation as Gradio ``api_name='page_ocr_review_image'``."""
 
     page_image_path: str = Field(
         ...,
@@ -666,7 +666,7 @@ class AgentExportReviewPageOcrVisualisationRequest(BaseModel):
 @router.post(
     "/export_review_redaction_overlay",
     response_model=AgentTaskResponse,
-    summary="export_review_redaction_overlay (Gradio api_name)",
+    summary="export_review_redaction_overlay (Agent API; Gradio api_name: page_redaction_review_image)",
     description=(
         "Renders hollow redaction outlines and a top-right legend on the page image; "
         "writes ``redaction_overlay/{doc_base_name}_page{n}_redaction_overlay.jpg`` under OUTPUT_FOLDER "
@@ -731,7 +731,7 @@ def post_export_review_redaction_overlay(
 @router.post(
     "/export_review_page_ocr_visualisation",
     response_model=AgentTaskResponse,
-    summary="export_review_page_ocr_visualisation (Gradio api_name)",
+    summary="export_review_page_ocr_visualisation (Agent API; Gradio api_name: page_ocr_review_image)",
     description=(
         "Renders a per-page OCR visualisation using tools.file_redaction.visualise_ocr_words_bounding_boxes; "
         "writes under OUTPUT_FOLDER/review_ocr_visualisations/."

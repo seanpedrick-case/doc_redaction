@@ -235,14 +235,7 @@ def combine_review_csvs(
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     sep = "/" if not out_dir.endswith(("/", "\\")) else ""
 
-    # merge_csv_files expects objects with a `.name` attribute (like Gradio files)
-    class _Named:
-        def __init__(self, path: str) -> None:
-            self.name = path
-
-    return merge_csv_files(
-        [_Named(str(p)) for p in input_files], output_folder=out_dir + sep
-    )
+    return merge_csv_files([str(p) for p in input_files], output_folder=out_dir + sep)
 
 
 def export_review_redaction_overlay(
@@ -254,7 +247,7 @@ def export_review_redaction_overlay(
     review_df_records: list[dict[str, Any]] | None = None,
     label_abbrev_chars: int | None = None,
 ) -> list[str]:
-    """Parity with Gradio `api_name='export_review_redaction_overlay'`."""
+    """Same behaviour as Gradio ``api_name='page_redaction_review_image'``; Agent API route ``export_review_redaction_overlay``."""
     import pandas as pd
 
     from tools.config import OUTPUT_FOLDER
@@ -283,7 +276,7 @@ def export_review_page_ocr_visualisation(
     page_number: int = 1,
     doc_base_name: str = "review",
 ) -> list[str]:
-    """Parity with Gradio `api_name='export_review_page_ocr_visualisation'`."""
+    """Same behaviour as Gradio ``api_name='page_ocr_review_image'``; Agent API route ``export_review_page_ocr_visualisation``."""
     from PIL import Image
 
     from tools.config import OUTPUT_FOLDER

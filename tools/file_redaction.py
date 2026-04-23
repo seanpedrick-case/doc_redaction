@@ -12050,6 +12050,7 @@ def visualise_ocr_words_bounding_boxes(
         - our OCR results: "bounding_box"
         - some serialized/review flows: "boundingBox"
         - occasionally: "bbox"
+        - dict with left/top/width/height (normalized or pixel), or xmin/ymin/xmax/ymax
         """
         if not isinstance(word_data, dict):
             return (0, 0, 0, 0)
@@ -12057,9 +12058,31 @@ def visualise_ocr_words_bounding_boxes(
             word_data.get("bounding_box")
             or word_data.get("boundingBox")
             or word_data.get("bbox")
-            or (0, 0, 0, 0)
         )
-        return bb
+        if bb is None:
+            return (0, 0, 0, 0)
+        if isinstance(bb, dict):
+            lk = {str(k).lower(): v for k, v in bb.items()}
+            if all(k in lk for k in ("left", "top", "width", "height")):
+                left = float(lk["left"])
+                top = float(lk["top"])
+                w = float(lk["width"])
+                h = float(lk["height"])
+                return (left, top, left + w, top + h)
+            if all(k in lk for k in ("xmin", "ymin", "xmax", "ymax")):
+                return (
+                    float(lk["xmin"]),
+                    float(lk["ymin"]),
+                    float(lk["xmax"]),
+                    float(lk["ymax"]),
+                )
+            return (0, 0, 0, 0)
+        if isinstance(bb, (list, tuple)) and len(bb) == 4:
+            try:
+                return tuple(float(x) for x in bb)
+            except (TypeError, ValueError):
+                return (0, 0, 0, 0)
+        return (0, 0, 0, 0)
 
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
         # Collect all bounding box coordinates to detect coordinate system
@@ -12193,8 +12216,16 @@ def visualise_ocr_words_bounding_boxes(
                 continue
 
             text = word_data.get("text", "")
-            # Handle both 'conf' and 'confidence' field names for compatibility
-            conf = int(word_data.get("conf", word_data.get("confidence", 0)))
+            # Handle 'conf' / 'confidence'; values may be 0–100 or fractional 0–1.
+            _raw = word_data.get("conf", word_data.get("confidence", 0))
+            try:
+                _cf = float(_raw)
+            except (TypeError, ValueError):
+                _cf = 0.0
+            if 0.0 <= _cf <= 1.0:
+                conf = int(round(_cf * 100))
+            else:
+                conf = int(_cf)
 
             # Skip empty text or invalid confidence
             if not text.strip() or conf == -1:
@@ -12295,11 +12326,15 @@ def visualise_ocr_words_bounding_boxes(
                 continue
             if not _wd.get("text", "").strip():
                 continue
-            if int(_wd.get("conf", _wd.get("confidence", 0))) == -1:
+            _rawc = _wd.get("conf", _wd.get("confidence", 0))
+            try:
+                _cf = float(_rawc)
+            except (TypeError, ValueError):
+                _cf = 0.0
+            _c = int(round(_cf * 100)) if 0.0 <= _cf <= 1.0 else int(_cf)
+            if _c == -1:
                 continue
-            _bb = _wd.get("bounding_box", (0, 0, 0, 0))
-            if (not _bb or len(_bb) != 4) and isinstance(_wd, dict):
-                _bb = _wd.get("boundingBox") or _wd.get("bbox") or (0, 0, 0, 0)
+            _bb = _get_word_bbox(_wd)
             if len(_bb) != 4:
                 continue
             _bx1, _by1, _bx2, _by2 = _bb
@@ -12356,8 +12391,16 @@ def visualise_ocr_words_bounding_boxes(
                 continue
 
             text = word_data.get("text", "")
-            # Handle both 'conf' and 'confidence' field names for compatibility
-            conf = int(word_data.get("conf", word_data.get("confidence", 0)))
+            # Handle 'conf' / 'confidence'; values may be 0–100 or fractional 0–1.
+            _raw = word_data.get("conf", word_data.get("confidence", 0))
+            try:
+                _cf = float(_raw)
+            except (TypeError, ValueError):
+                _cf = 0.0
+            if 0.0 <= _cf <= 1.0:
+                conf = int(round(_cf * 100))
+            else:
+                conf = int(_cf)
 
             # Skip empty text or invalid confidence
             if not text.strip() or conf == -1:
@@ -12421,7 +12464,12 @@ def visualise_ocr_words_bounding_boxes(
             if len(word_group) == 1:
                 word_data = word_group[0]["word_data"]
                 text = word_data.get("text", "")
-                conf = int(word_data.get("conf", word_data.get("confidence", 0)))
+                _raw = word_data.get("conf", word_data.get("confidence", 0))
+                try:
+                    _cf = float(_raw)
+                except (TypeError, ValueError):
+                    _cf = 0.0
+                conf = int(round(_cf * 100)) if 0.0 <= _cf <= 1.0 else int(_cf)
 
                 # Check if word was replaced by a different model
                 model = word_data.get("model", None)
@@ -12494,7 +12542,12 @@ def visualise_ocr_words_bounding_boxes(
                 for item in word_group:
                     word_data = item["word_data"]
                     text = word_data.get("text", "")
-                    conf = int(word_data.get("conf", word_data.get("confidence", 0)))
+                    _raw = word_data.get("conf", word_data.get("confidence", 0))
+                    try:
+                        _cf = float(_raw)
+                    except (TypeError, ValueError):
+                        _cf = 0.0
+                    conf = int(round(_cf * 100)) if 0.0 <= _cf <= 1.0 else int(_cf)
                     model = word_data.get("model", None)
                     is_replaced = model and model.lower() != base_model_name.lower()
 
