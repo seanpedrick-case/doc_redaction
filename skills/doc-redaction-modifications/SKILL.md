@@ -1,7 +1,7 @@
 ---
 name: doc-redaction-modifications
 description: "Modify existing PDF redactions using a single default path: Gradio `review_apply` with `gradio_client`. Use this when editing `*_review_file.csv`, adding scanned-page boxes, applying one page at a time, and verifying outputs."
-version: 2.0.1
+version: 2.0.2
 author: repo-maintained
 license: AGPL-3.0-only
 ---
@@ -26,12 +26,14 @@ Do not start with `/agent` or long UI-chain endpoints unless the fallback sectio
 ## Critical constraints
 
 - `review_apply` is the stable default for headless review modifications.
+- Prefer calling `/review_apply` with **positional arguments** (`client.predict(pdf, csv, None, api_name="/review_apply")`) when automating across deployments; named keyword arguments may be brittle in some Gradio 6.x multi-endpoint apps.
 - `/agent/apply_review_redactions` can return 404 or be unusable depending on deployment; treat it as fallback.
 - Local client file path: use `handle_file("/local/path/file.pdf")`. Server path returned from upload (for example `/tmp/gradio_tmp/...`): pass as plain string. Do not wrap server paths in `handle_file(...)`.
 - CSV files may have UTF-8 BOM; read/write with `encoding="utf-8-sig"` when editing.
 - Container output paths (for example `/home/user/app/output/...`) are inside the container. Retrieve outputs via `GET /gradio_api/file=...`, a bind mount, or `docker cp`.
 - Input review CSV basename must contain `_review_file`.
 - When using `/review_apply`, do not submit review rows whose `image` values are fake placeholders (for example `placeholder_image_2.png`) unless they are valid for the active run context. In field failures this stripped redaction rows during apply. Keep `image` values aligned with current run artifacts.
+  - Practical rule: when adding new rows, set `image` to an **existing row’s** `image` value **for the same page** whenever possible; only fall back to `placeholder_image_{page-1}.png` if you know the run uses that convention.
 
 These constraints are intentionally aligned with `doc-redaction-app/SKILL.md` so both skills use the same operational rules.
 
@@ -204,13 +206,39 @@ print("Wrote:", OUT_CSV)
 
 After writing `OUT_CSV`, apply it with the minimal end-to-end script above.
 
-## Practical visual verification (headless-safe)
+## Practical verification (headless-safe)
 
-Prefer this method over fragile in-session review export endpoints:
+### Step 1: Programmatic text extraction (primary — fast, reliable)
 
-1. Render each PDF page to PNG with PyMuPDF.
-2. Draw review CSV boxes on top of those images.
-3. Send the page review export images to a vision model (or human reviewer) for pass/fail checks.
+Extract visible text from the redacted PDF and confirm sensitive terms are NOT extractable. Black redaction boxes suppress text extraction, so if a term still appears in extracted text, its box is misaligned or missing. This is the primary verification method — faster than visual checks and catches missed PII definitively.
+
+```python
+import fitz  # PyMuPDF
+
+REDACTED = "output/document_redacted.pdf"
+ORIGINAL = "input/document.pdf"
+SENSITIVE_TERMS = ["London", "Sister City", "rudy.giuliani@email.com"]  # adjust per rules
+
+def extract_text(path):
+    doc = fitz.open(path)
+    return "".join(page.get_text() for page in doc)
+
+redacted_text = extract_text(REDACTED).lower()
+original_text = extract_text(ORIGINAL).lower()
+
+for term in SENSITIVE_TERMS:
+    t = term.lower()
+    orig_count = original_text.count(t)
+    redact_count = redacted_text.count(t)
+    status = "PASS" if redact_count == 0 else "FAIL"
+    print(f"[{status}] '{term}': {orig_count} in original, {redact_count} in redacted")
+```
+
+For scanned/image pages (no text layer), cross-reference box coordinates with OCR output CSVs (`*_ocr_results_with_words_*.csv`) to verify boxes overlap actual word positions.
+
+### Step 2: Review images (optional supplement)
+
+Prefer this method over fragile in-session review export endpoints for visual spot-checking. **CAUTION:** `vision_analyze` times out on large PDF page images (~4096x5760 pixels). If using vision models, downscale to 1280px max width first. For most cases, Step 1 alone is sufficient.
 
 ```python
 import csv
@@ -219,8 +247,8 @@ from pathlib import Path
 import fitz  # PyMuPDF
 from PIL import Image, ImageDraw
 
-PDF_PATH = Path("tmp/review_cycle/downloads/example_of_emails_sent_to_a_professor_before_applying_redacted.pdf")
-REVIEW_CSV = Path("tmp/review_cycle/downloads/example_of_emails_sent_to_a_professor_before_applying.pdf_review_file.csv")
+PDF_PATH = Path("tmp/review_cycle/downloads/example_redacted.pdf")
+REVIEW_CSV = Path("tmp/review_cycle/downloads/example_review_file.csv")
 OUT_DIR = Path("tmp/review_cycle/page_review_exports")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -234,15 +262,26 @@ for r in review_rows:
 
 doc = fitz.open(PDF_PATH)
 for p in range(1, doc.page_count + 1):
-    page = doc[p - 1]
-    pix = page.get_pixmap(dpi=180)
+    page_obj = doc[p - 1]
+    pix = page_obj.get_pixmap(dpi=180)
     img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+
+    # Downscale for vision compatibility if needed
+    max_w = 1280
+    if img.width > max_w:
+        scale = max_w / img.width
+        new_size = (max_w, int(img.height * scale))
+        img = img.resize(new_size, Image.LANCZOS)
+
     draw = ImageDraw.Draw(img)
     for r in rows_by_page.get(p, []):
         x0 = float(r["xmin"]) * pix.width
         y0 = float(r["ymin"]) * pix.height
         x1 = float(r["xmax"]) * pix.width
         y1 = float(r["ymax"]) * pix.height
+        if img.width != pix.width:
+            scale_x, scale_y = img.width / pix.width, img.height / pix.height
+            x0 *= scale_x; y0 *= scale_y; x1 *= scale_x; y1 *= scale_y
         draw.rectangle([x0, y0, x1, y1], outline="red", width=3)
     img.save(OUT_DIR / f"page_{p:03d}_review.png")
 
@@ -267,6 +306,36 @@ print("Review images in:", OUT_DIR)
 - [ ] Used `/review_apply` as primary path.
 - [ ] Recovered container outputs via `file=` download, bind mount, or `docker cp`.
 - [ ] Produced visual review images for verification before sign-off.
+
+## Known Issues & Workarounds
+
+### gradio_client Endpoint Inference Bug (Gradio 6.x)
+When calling endpoints via `gradio_client.Client().predict()`, the client fails to dispatch if **named keyword arguments** are used with multi-endpoint apps:
+```python
+# FAILS - endpoint inference can't match named kwargs:
+client.predict(annotated_image=..., current_page=1, review_file_state=modified_df)
+
+# WORKAROUND 1 - positional args only (no names):
+client.predict(image_dict, 1, modified_df, "/home/user/app/output/", True)
+
+# WORKAROUND 2 - raw HTTP POST + SSE polling:
+POST /gradio_api/call/apply_review_redactions with JSON payload
+GET /gradio_api/call/apply_review_redactions/{event_id} for results (requires async queue handling)
+```
+
+### Review Dataframe Modification Pattern
+Review data from `result[6]` of `/choose_and_run_redactor` is a dict: `{headers, data, metadata}`. To modify:
+- **Remove rows**: Filter out unwanted entries by text/label match before passing to apply endpoint
+- **Reclassify labels**: Change label strings in data rows (e.g., "STREETNAME" → "ADDRESS")
+- Modified dataframe must maintain same structure with headers intact
+
+### Affected Endpoints (endpoint inference bug)
+| Endpoint | Purpose | Status |
+|----------|---------|--------|
+| `/apply_review_redactions` | Apply modified review data → PDF + log + updated df | ⚠️ Works with positional args only |
+| `/export_review_page_ocr_visualisation` | Export OCR overlay image via AnnotatedImageData input | ✅ Confirmed working pattern from initial redaction |
+| `/export_review_redaction_overlay` | Export redaction overlay with review_df → PNG + log paths | ⚠️ Same endpoint inference issue expected |
+| `/combine_review_csvs`, `/combine_review_pdfs` | Combine results across multiple review sessions | Not tested — likely same positional-args requirement |
 
 ## When the default flow breaks
 

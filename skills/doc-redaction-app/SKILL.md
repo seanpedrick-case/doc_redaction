@@ -1,7 +1,7 @@
 ---
 name: doc-redaction-app
 description: "Operate the Document Redaction app with a practical default workflow: short Gradio endpoints via gradio_client, explicit handle_file rules, known failure traps, and output verification before sign-off."
-version: 2.0.2
+version: 2.0.3
 author: repo-maintained
 license: AGPL-3.0-only
 ---
@@ -25,6 +25,13 @@ Use these first:
 - `/tabular_redact` for tabular files
 
 Use `/redact_document` only when you need the full control surface.
+
+### 2b) Important: `/doc_redact` can “succeed” but return no artifacts
+
+Some deployments may return a success message (e.g. `"doc_redact completed"`) but **an empty output paths list** (`[]`).
+
+- Treat **empty paths** as a failure for automation (there is nothing to download).
+- Recommended fallback: immediately call `/redact_document` (or use raw `/gradio_api/*` HTTP) and continue from there.
 
 ### 2a) `/doc_redact` parameter values (important for agents)
 
@@ -76,6 +83,7 @@ Apply these constraints before writing scripts:
 - Quote CSV color tuples as strings (for example `"(0, 0, 0)"`) to avoid comma-splitting issues.
 - Use Python 3 explicitly.
 - CSV files may have UTF-8 BOM; read/write with `encoding="utf-8-sig"` when editing.
+- PowerShell note (Windows): `&&` is not a statement separator; use `;` or separate commands.
 
 ## Verification workflow (required before sign-off)
 
@@ -89,6 +97,13 @@ After every redaction/apply run:
    - false positives (non-sensitive text boxed)
    - box drift (misaligned geometry)
 5. Fix CSV page-by-page and re-apply using `/review_apply`.
+
+### Scanned-page warning (don’t rely on PDF text search)
+
+Many PDFs contain scanned/image-like pages with **no reliable selectable text**.
+
+- Do not rely on PDF text-search (e.g. PyMuPDF `search_for`) to find terms on those pages; it can silently miss.
+- Prefer **OCR word outputs** (e.g. `*_ocr_results_with_words_*.csv`) to locate terms and build boxes.
 
 Minimal review image generation script:
 
