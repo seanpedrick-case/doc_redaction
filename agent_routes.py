@@ -17,7 +17,16 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
-from tools.config import INPUT_FOLDER, OUTPUT_FOLDER
+from tools.config import (
+    AWS_LLM_PII_OPTION,
+    AWS_PII_OPTION,
+    INFERENCE_SERVER_PII_OPTION,
+    INPUT_FOLDER,
+    LOCAL_OCR_MODEL_OPTIONS,
+    LOCAL_PII_OPTION,
+    LOCAL_TRANSFORMERS_LLM_PII_OPTION,
+    OUTPUT_FOLDER,
+)
 from tools.secure_path_utils import validate_path_safety
 
 router = APIRouter(tags=["Agent"])
@@ -34,6 +43,9 @@ GRADIO_API_NAMES: tuple[str, ...] = (
     "redact_document",
     "load_and_prepare_documents_or_data",
     "apply_review_redactions",
+    "review_apply",
+    "pdf_summarise",
+    "tabular_redact",
     "word_level_ocr_text_search",
     "redact_data",
     "find_duplicate_pages",
@@ -47,12 +59,13 @@ GRADIO_API_NAMES: tuple[str, ...] = (
 
 
 def _allowed_path_roots() -> list[Path]:
-    roots = [REPO_ROOT.resolve()]
+    # Return roots without resolving. These are trusted config values, but avoiding
+    # Path.resolve() keeps CodeQL happy and matches our "no resolve on untrusted"
+    # approach elsewhere.
+    roots = [REPO_ROOT]
     for folder in (INPUT_FOLDER, OUTPUT_FOLDER):
-        try:
-            roots.append(Path(folder).resolve())
-        except (OSError, TypeError, ValueError):
-            continue
+        if folder:
+            roots.append(Path(str(folder)))
     return roots
 
 
@@ -83,12 +96,13 @@ def _normalize_untrusted_path_to_abs(path_str: str) -> str:
 
 def _must_be_under_allowed_roots(candidate_abs: str, original: str) -> None:
     """Enforce candidate is contained under repo, INPUT_FOLDER, or OUTPUT_FOLDER."""
+    candidate_real = os.path.realpath(str(candidate_abs))
     allowed_roots = [
-        os.path.normpath(os.path.abspath(str(p))) for p in _allowed_path_roots()
+        os.path.realpath(os.path.abspath(str(p))) for p in _allowed_path_roots()
     ]
     for root in allowed_roots:
         try:
-            common = os.path.commonpath([candidate_abs, root])
+            common = os.path.commonpath([candidate_real, root])
         except ValueError:
             # Different drive on Windows or invalid path mix
             continue
@@ -103,19 +117,27 @@ def _must_be_under_allowed_roots(candidate_abs: str, original: str) -> None:
 def _path_must_be_allowed_file(path_str: str) -> str:
     """Resolve path, ensure it is under an allowed root and exists as a file."""
     candidate_abs = _normalize_untrusted_path_to_abs(path_str)
+    candidate_real = os.path.realpath(candidate_abs)
+
     # Validate both "safe path" patterns and containment under trusted roots.
-    ok = False
-    for root in _allowed_path_roots():
-        if validate_path_safety(candidate_abs, base_path=str(root)):
-            ok = True
-            break
+    _must_be_under_allowed_roots(candidate_real, path_str)
+    ok = any(
+        validate_path_safety(candidate_real, base_path=str(root))
+        for root in _allowed_path_roots()
+    )
     if not ok:
         raise HTTPException(status_code=400, detail=f"Unsafe path rejected: {path_str}")
-    if not os.path.isfile(candidate_abs):
+    try:
+        candidate_path = Path(candidate_real)
+        if not candidate_path.is_file():
+            raise HTTPException(
+                status_code=400, detail=f"Not a file or missing: {candidate_real}"
+            )
+    except OSError:
         raise HTTPException(
-            status_code=400, detail=f"Not a file or missing: {candidate_abs}"
+            status_code=400, detail=f"Not a file or missing: {candidate_real}"
         )
-    return candidate_abs
+    return candidate_real
 
 
 def _path_must_be_allowed_directory(path_str: str, *, must_exist: bool = True) -> str:
@@ -126,16 +148,26 @@ def _path_must_be_allowed_directory(path_str: str, *, must_exist: bool = True) -
     that will be created later by the CLI).
     """
     candidate_abs = _normalize_untrusted_path_to_abs(path_str)
-    ok = False
-    for root in _allowed_path_roots():
-        if validate_path_safety(candidate_abs, base_path=str(root)):
-            ok = True
-            break
+    candidate_real = os.path.realpath(candidate_abs)
+
+    _must_be_under_allowed_roots(candidate_real, path_str)
+    ok = any(
+        validate_path_safety(candidate_real, base_path=str(root))
+        for root in _allowed_path_roots()
+    )
     if not ok:
         raise HTTPException(status_code=400, detail=f"Unsafe path rejected: {path_str}")
-    if must_exist and not os.path.isdir(candidate_abs):
-        raise HTTPException(status_code=400, detail=f"Not a directory: {candidate_abs}")
-    return candidate_abs
+    if must_exist:
+        try:
+            if not Path(candidate_real).is_dir():
+                raise HTTPException(
+                    status_code=400, detail=f"Not a directory: {candidate_real}"
+                )
+        except OSError:
+            raise HTTPException(
+                status_code=400, detail=f"Not a directory: {candidate_real}"
+            )
+    return candidate_real
 
 
 def _optional_agent_api_key(x_agent_api_key: Optional[str] = Header(None)) -> None:
@@ -163,11 +195,31 @@ class AgentRedactDocumentRequest(BaseModel):
     )
     output_dir: Optional[str] = None
     input_dir: Optional[str] = None
-    ocr_method: Optional[str] = None
-    pii_detector: Optional[str] = None
+    ocr_method: Optional[str] = Field(
+        None,
+        description=(
+            "High-level OCR/text mode. Accepted values: 'Local OCR', "
+            "'AWS Textract', 'Local text'. To choose a specific local OCR engine "
+            "(e.g. paddle/tesseract/vlm), set "
+            "overrides.chosen_local_ocr_model."
+        ),
+    )
+    pii_detector: Optional[str] = Field(
+        None,
+        description=(
+            "PII detection method. Recommended configured labels: "
+            f"'{LOCAL_PII_OPTION}', '{AWS_PII_OPTION}', '{AWS_LLM_PII_OPTION}', "
+            f"'{INFERENCE_SERVER_PII_OPTION}', '{LOCAL_TRANSFORMERS_LLM_PII_OPTION}', "
+            "'None'."
+        ),
+    )
     overrides: Optional[dict[str, Any]] = Field(
         None,
-        description="Optional CLI flag overrides; keys must match argparse destination names",
+        description=(
+            "Optional CLI flag overrides; keys must match argparse destination names. "
+            "For local OCR model selection, set 'chosen_local_ocr_model' "
+            f"(allowed models depend on deployment; configured options: {LOCAL_OCR_MODEL_OPTIONS})."
+        ),
     )
 
     model_config = {
@@ -178,6 +230,9 @@ class AgentRedactDocumentRequest(BaseModel):
                         "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf"
                     ],
                     "instruction": "Do not redact the university name.",
+                    "ocr_method": "Local OCR",
+                    "pii_detector": LOCAL_PII_OPTION,
+                    "overrides": {"chosen_local_ocr_model": "paddle"},
                 }
             ]
         }
@@ -280,7 +335,11 @@ def _run_cli_main(direct: dict[str, Any], gradio_api_name: str) -> AgentTaskResp
     description=(
         "Matches Gradio ``api_name='redact_document'``. "
         "``python cli_redact.py --task redact --input_file ...``. "
-        "Optional ``instruction`` maps to ``custom_llm_instructions``."
+        "Optional ``instruction`` maps to ``custom_llm_instructions``. "
+        "OCR modes: 'Local OCR' | 'AWS Textract' | 'Local text'. "
+        "Specific local OCR engines are set via ``overrides.chosen_local_ocr_model`` "
+        f"(for example: {LOCAL_OCR_MODEL_OPTIONS}). "
+        "PII methods should use configured labels shown on the request schema."
     ),
 )
 def post_redact_document(
@@ -297,7 +356,11 @@ def post_redact_document(
     summary="redact_data (Gradio api_name)",
     description=(
         "Matches Gradio ``api_name='redact_data'``. Same CLI ``redact`` task as "
-        "/redact_document; use CSV/XLSX/DOCX paths for tabular/Word flows."
+        "/redact_document; use CSV/XLSX/DOCX paths for tabular/Word flows. "
+        "OCR modes: 'Local OCR' | 'AWS Textract' | 'Local text'. "
+        "Specific local OCR engines are set via ``overrides.chosen_local_ocr_model`` "
+        f"(for example: {LOCAL_OCR_MODEL_OPTIONS}). "
+        "PII methods should use configured labels shown on the request schema."
     ),
 )
 def post_redact_data(
@@ -489,6 +552,38 @@ class AgentCombineReviewCsvsRequest(BaseModel):
     )
 
 
+class AgentApplyReviewRedactionsRequest(BaseModel):
+    """Headless parity with Gradio ``api_name='apply_review_redactions'`` (prepare + apply)."""
+
+    pdf_path: str = Field(
+        ...,
+        description="Path to the source PDF under allowed roots.",
+    )
+    review_csv_path: str = Field(
+        ...,
+        description=(
+            "Path to the review plan CSV; basename must contain '_review_file' "
+            "(e.g. mydoc_review_file.csv)."
+        ),
+    )
+    output_dir: Optional[str] = Field(
+        None,
+        description="Output directory (created if missing); defaults to OUTPUT_FOLDER.",
+    )
+    input_dir: Optional[str] = Field(
+        None,
+        description="Input/working directory for page images; defaults to INPUT_FOLDER.",
+    )
+    text_extract_method: Optional[str] = Field(
+        None,
+        description="OCR/text mode passed to prepare (defaults to CLI ocr_method).",
+    )
+    efficient_ocr: Optional[bool] = Field(
+        None,
+        description="If set, overrides EFFICIENT_OCR for the prepare step.",
+    )
+
+
 @router.post(
     "/combine_review_csvs",
     response_model=AgentTaskResponse,
@@ -518,7 +613,7 @@ def post_combine_review_csvs(
 
 
 class AgentExportReviewRedactionOverlayRequest(BaseModel):
-    """Parity with Gradio ``api_name='export_review_redaction_overlay'``."""
+    """Agent JSON body for the same overlay render as Gradio ``api_name='page_redaction_review_image'``."""
 
     page_image_path: str = Field(
         ...,
@@ -549,7 +644,7 @@ class AgentExportReviewRedactionOverlayRequest(BaseModel):
 
 
 class AgentExportReviewPageOcrVisualisationRequest(BaseModel):
-    """Parity with Gradio ``api_name='export_review_page_ocr_visualisation'``."""
+    """Agent JSON body for the same OCR visualisation as Gradio ``api_name='page_ocr_review_image'``."""
 
     page_image_path: str = Field(
         ...,
@@ -571,7 +666,7 @@ class AgentExportReviewPageOcrVisualisationRequest(BaseModel):
 @router.post(
     "/export_review_redaction_overlay",
     response_model=AgentTaskResponse,
-    summary="export_review_redaction_overlay (Gradio api_name)",
+    summary="export_review_redaction_overlay (Agent API; Gradio api_name: page_redaction_review_image)",
     description=(
         "Renders hollow redaction outlines and a top-right legend on the page image; "
         "writes ``redaction_overlay/{doc_base_name}_page{n}_redaction_overlay.jpg`` under OUTPUT_FOLDER "
@@ -594,25 +689,17 @@ def post_export_review_redaction_overlay(
         if body.review_df_records
         else pd.DataFrame()
     )
-    out_folder_path = Path(OUTPUT_FOLDER).expanduser().resolve()
-    if not validate_path_safety(str(out_folder_path)):
+    out_folder_abs = os.path.realpath(
+        os.path.abspath(os.path.expanduser(str(OUTPUT_FOLDER)))
+    )
+    if not validate_path_safety(out_folder_abs):
         raise HTTPException(status_code=400, detail="Unsafe OUTPUT_FOLDER path")
-    allowed_roots = _allowed_path_roots()
-    under_root = False
-    for root in allowed_roots:
-        try:
-            out_folder_path.relative_to(root)
-            under_root = True
-            break
-        except ValueError:
-            continue
-    if not under_root:
-        raise HTTPException(
-            status_code=403,
-            detail="OUTPUT_FOLDER must resolve under repo, INPUT_FOLDER, or OUTPUT_FOLDER",
-        )
-    out_folder_path.mkdir(parents=True, exist_ok=True)
-    out_folder = str(out_folder_path)
+    _must_be_under_allowed_roots(out_folder_abs, str(out_folder_abs))
+    try:
+        Path(out_folder_abs).mkdir(parents=True, exist_ok=True)
+    except OSError:
+        raise HTTPException(status_code=500, detail="Could not create OUTPUT_FOLDER")
+    out_folder = out_folder_abs
 
     path = visualise_review_redaction_boxes(
         annotator,
@@ -644,7 +731,7 @@ def post_export_review_redaction_overlay(
 @router.post(
     "/export_review_page_ocr_visualisation",
     response_model=AgentTaskResponse,
-    summary="export_review_page_ocr_visualisation (Gradio api_name)",
+    summary="export_review_page_ocr_visualisation (Agent API; Gradio api_name: page_ocr_review_image)",
     description=(
         "Renders a per-page OCR visualisation using tools.file_redaction.visualise_ocr_words_bounding_boxes; "
         "writes under OUTPUT_FOLDER/review_ocr_visualisations/."
@@ -660,25 +747,17 @@ def post_export_review_page_ocr_visualisation(
 
     img_path = _path_must_be_allowed_file(body.page_image_path)
 
-    out_folder_path = Path(OUTPUT_FOLDER).expanduser().resolve()
-    if not validate_path_safety(str(out_folder_path)):
+    out_folder_abs = os.path.realpath(
+        os.path.abspath(os.path.expanduser(str(OUTPUT_FOLDER)))
+    )
+    if not validate_path_safety(out_folder_abs):
         raise HTTPException(status_code=400, detail="Unsafe OUTPUT_FOLDER path")
-    allowed_roots = _allowed_path_roots()
-    under_root = False
-    for root in allowed_roots:
-        try:
-            out_folder_path.relative_to(root)
-            under_root = True
-            break
-        except ValueError:
-            continue
-    if not under_root:
-        raise HTTPException(
-            status_code=403,
-            detail="OUTPUT_FOLDER must resolve under repo, INPUT_FOLDER, or OUTPUT_FOLDER",
-        )
-    out_folder_path.mkdir(parents=True, exist_ok=True)
-    out_folder = str(out_folder_path)
+    _must_be_under_allowed_roots(out_folder_abs, str(out_folder_abs))
+    try:
+        Path(out_folder_abs).mkdir(parents=True, exist_ok=True)
+    except OSError:
+        raise HTTPException(status_code=500, detail="Could not create OUTPUT_FOLDER")
+    out_folder = out_folder_abs
 
     safe_base = str(body.doc_base_name or "review")
     image_name = f"{safe_base}_page{int(body.page_number)}.png"
@@ -719,7 +798,25 @@ def _gradio_only(api_name: str, detail: str) -> JSONResponse:
         content={
             "gradio_api_name": api_name,
             "detail": detail,
-            "hint": "Use the Gradio UI or gradio_client with this api_name.",
+            "hint": (
+                "This flow is Gradio-session stateful. Call the named route on the "
+                "Gradio HTTP API, not /agent."
+            ),
+            "gradio_http": {
+                "discover_schema": "GET /gradio_api/info",
+                "start_call": f"POST /gradio_api/call/{api_name}",
+                "request_body_shape": '{"data": [<args in schema order>]}',
+                "poll": f"GET /gradio_api/call/{api_name}/{{event_id}}",
+            },
+            "gradio_client_notes": [
+                "Pass api_name explicitly; do not rely on inferring the endpoint from "
+                "Python function names (large Blocks apps will look ambiguous).",
+                "If predict() still cannot resolve the route, open GET /gradio_api/info "
+                "and use the numeric fn_index with gradio_client, or call the HTTP "
+                "endpoints directly.",
+                "The length of data must match the parameter list for this deployment; "
+                "copy order and types from /gradio_api/info.",
+            ],
         },
     )
 
@@ -732,11 +829,56 @@ def post_load_and_prepare_documents_or_data() -> JSONResponse:
     )
 
 
-@router.post("/apply_review_redactions")
-def post_apply_review_redactions() -> JSONResponse:
-    return _gradio_only(
-        "apply_review_redactions",
-        "Review PDF/annotation state is managed in the Gradio UI.",
+@router.post(
+    "/apply_review_redactions",
+    response_model=AgentTaskResponse,
+    summary="apply_review_redactions (Gradio api_name)",
+    description=(
+        "Runs prepare_image_or_pdf_with_efficient_ocr([pdf, review_csv]) then "
+        "apply_redactions_to_review_df_and_files — same core pipeline as the Review tab, "
+        "without Gradio session state. Requires paths under allowed roots."
+    ),
+)
+def post_apply_review_redactions(
+    body: AgentApplyReviewRedactionsRequest,
+    _: None = Depends(_optional_agent_api_key),
+) -> AgentTaskResponse:
+    from tools.simplified_api import run_apply_review_redactions
+
+    pdf = _path_must_be_allowed_file(body.pdf_path)
+    csv = _path_must_be_allowed_file(body.review_csv_path)
+    out_dir: str | None = None
+    if body.output_dir is not None:
+        out_dir = _path_must_be_allowed_directory(body.output_dir, must_exist=False)
+    in_dir: str | None = None
+    if body.input_dir is not None:
+        in_dir = _path_must_be_allowed_directory(body.input_dir, must_exist=False)
+
+    try:
+        result = run_apply_review_redactions(
+            pdf_path=pdf,
+            review_csv_path=csv,
+            output_dir=out_dir,
+            input_dir=in_dir,
+            text_extract_method=body.text_extract_method,
+            efficient_ocr=body.efficient_ocr,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"apply_review_redactions failed: {e}",
+        ) from e
+
+    return AgentTaskResponse(
+        status="completed",
+        gradio_api_name="apply_review_redactions",
+        task="apply_review_redactions",
+        output_dir=result["output_dir"],
+        input_dir=result["input_dir"],
+        message=result["message"],
+        output_paths=result.get("output_paths"),
     )
 
 
@@ -752,18 +894,62 @@ def post_word_level_ocr_text_search() -> JSONResponse:
 def list_operations() -> dict[str, Any]:
     return {
         "gradio_api_names": list(GRADIO_API_NAMES),
+        "gradio_session_state_endpoints": {
+            "description": (
+                "These api_name values are exposed on the Gradio HTTP API but return "
+                "501 on /agent because they depend on in-memory Gradio state."
+            ),
+            "discover_schema": "GET /gradio_api/info",
+            "call_pattern": 'POST /gradio_api/call/<api_name> with JSON body {"data": [...]}',
+            "names": [
+                "load_and_prepare_documents_or_data",
+                "word_level_ocr_text_search",
+            ],
+        },
         "routes": [
             {
                 "gradio_api_name": "redact_document",
                 "method": "POST",
                 "path": "/agent/redact_document",
                 "implementation": "cli_redact task redact",
+                "notes": {
+                    "ocr_method": [
+                        "Local OCR",
+                        "AWS Textract",
+                        "Local text",
+                    ],
+                    "chosen_local_ocr_model_override": LOCAL_OCR_MODEL_OPTIONS,
+                    "pii_detector_recommended": [
+                        LOCAL_PII_OPTION,
+                        AWS_PII_OPTION,
+                        AWS_LLM_PII_OPTION,
+                        INFERENCE_SERVER_PII_OPTION,
+                        LOCAL_TRANSFORMERS_LLM_PII_OPTION,
+                        "None",
+                    ],
+                },
             },
             {
                 "gradio_api_name": "redact_data",
                 "method": "POST",
                 "path": "/agent/redact_data",
                 "implementation": "cli_redact task redact",
+                "notes": {
+                    "ocr_method": [
+                        "Local OCR",
+                        "AWS Textract",
+                        "Local text",
+                    ],
+                    "chosen_local_ocr_model_override": LOCAL_OCR_MODEL_OPTIONS,
+                    "pii_detector_recommended": [
+                        LOCAL_PII_OPTION,
+                        AWS_PII_OPTION,
+                        AWS_LLM_PII_OPTION,
+                        INFERENCE_SERVER_PII_OPTION,
+                        LOCAL_TRANSFORMERS_LLM_PII_OPTION,
+                        "None",
+                    ],
+                },
             },
             {
                 "gradio_api_name": "find_duplicate_pages",
@@ -817,7 +1003,7 @@ def list_operations() -> dict[str, Any]:
                 "gradio_api_name": "apply_review_redactions",
                 "method": "POST",
                 "path": "/agent/apply_review_redactions",
-                "implementation": "not_implemented_http",
+                "implementation": "tools.simplified_api.run_apply_review_redactions",
             },
             {
                 "gradio_api_name": "word_level_ocr_text_search",

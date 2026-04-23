@@ -1084,6 +1084,9 @@ def tabular_anonymise_wrapper_func(
     # Check for chosen col, skip file if not found
     all_cols_original_order = list(anon_df.columns)
 
+    if not chosen_cols:
+        chosen_cols = list(all_cols_original_order)
+
     any_cols_found = check_lists(chosen_cols, all_cols_original_order)
 
     if any_cols_found is False:
@@ -1096,6 +1099,9 @@ def tabular_anonymise_wrapper_func(
             key_string,
             log_files_output_paths,
             comprehend_query_number,
+            0,
+            0,
+            "",
         )
     else:
         chosen_cols_in_anon_df = get_common_strings(

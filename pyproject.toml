@@ -4,16 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc_redaction"
-version = "2.1.0"
+version = "2.2.0"
 description = "Redact PDF/image-based documents, Word, or CSV/XLSX files using a Gradio-based GUI interface"
-readme = "README.md"
+readme = "README_PYPI.md"
 authors = [
     { name = "Sean Pedrick-Case", email = "spedrickcase@lambeth.gov.uk" },
 ]
 maintainers = [
     { name = "Sean Pedrick-Case", email = "spedrickcase@lambeth.gov.uk" },
 ]
-license = { text = "AGPL-3.0-only" } # This licence type required to use PyMuPDF
+license = "AGPL-3.0-only" # This licence type required to use PyMuPDF
 keywords = [
     "redaction",
     "pdf",
@@ -50,7 +50,6 @@ dependencies = [
     "pandas<=2.3.3",
     "scikit-learn<=1.8.0",
     "spacy<=3.8.14",
-    "en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0.tar.gz",
     "gradio<=6.10.0",
     "boto3<=1.42.91",
     "pyarrow<=23.0.1",
@@ -58,7 +57,7 @@ dependencies = [
     "Faker<=40.8.0",
     "python-levenshtein<=0.27.3",
     "spaczz<=0.6.1",
-    "gradio_image_annotation @ https://github.com/seanpedrick-case/gradio_image_annotator/releases/download/v0.5.3/gradio_image_annotation-0.5.3-py3-none-any.whl",
+    "gradio_image_annotation_redaction==0.5.5",
     "rapidfuzz<=3.14.5",
     "python-dotenv<=1.2.2",
     "awslambdaric<=3.1.1",
@@ -114,7 +113,31 @@ Homepage = "https://seanpedrick-case.github.io/doc_redaction/"
 Repository = "https://github.com/seanpedrick-case/doc_redaction"
 
 [project.scripts]
-cli_redact = "cli_redact:main"
+cli_redact = "doc_redaction.cli_redact:main"
+mcp_doc_redaction = "mcp_doc_redaction.server:main"
+doc_redaction_install_deps = "doc_redaction.install_deps:main"
+
+[tool.setuptools]
+include-package-data = true
+py-modules = [
+    "app",
+    "agent_routes",
+    "cli_redact",
+    "lambda_entrypoint",
+    "load_dynamo_logs",
+    "load_s3_logs",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["doc_redaction*", "tools*", "mcp_doc_redaction*"]
+exclude = [
+    "test*",
+    "skills*",
+    "cdk*",
+    "src*",
+    "example_data*",
+]
 
 # Configuration for Ruff linter:
 [tool.ruff]

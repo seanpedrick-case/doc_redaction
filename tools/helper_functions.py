@@ -991,6 +991,8 @@ def check_for_existing_textract_file(
     except (ValueError, PermissionError, OSError):
         return False
 
+    if not validate_path_safety(str(textract_output_path), base_path=out_dir):
+        return False
     if textract_output_path.exists():
         # print("Existing Textract analysis output file found.")
         return True
@@ -1024,6 +1026,8 @@ def check_for_relevant_ocr_output_with_words(
     except (ValueError, PermissionError, OSError):
         return False
 
+    if not validate_path_safety(str(local_ocr_output_path), base_path=out_dir):
+        return False
     if local_ocr_output_path.exists():
         print("Existing OCR with words analysis output file found.")
         return True
@@ -1081,7 +1085,20 @@ def wipe_logs(feedback_logs_loc: str, usage_logs_loc: str):
         print("Could not remove usage logs file", e)
 
 
-def merge_csv_files(file_list: List[str], output_folder: str = OUTPUT_FOLDER):
+def _merge_csv_input_path(file) -> str:
+    """Resolve CSV path from str, PathLike, or Gradio-style object with ``.name``."""
+    if isinstance(file, (str, os.PathLike)):
+        return os.fspath(file)
+    name = getattr(file, "name", None)
+    if isinstance(name, (str, os.PathLike)):
+        return os.fspath(name)
+    raise TypeError(
+        "merge_csv_files expected str/PathLike or object with str .name (Gradio file-like), "
+        f"got {type(file).__name__}"
+    )
+
+
+def merge_csv_files(file_list: List, output_folder: str = OUTPUT_FOLDER):
 
     # Initialise an empty list to hold DataFrames
     dataframes = []
@@ -1089,8 +1106,8 @@ def merge_csv_files(file_list: List[str], output_folder: str = OUTPUT_FOLDER):
 
     # Loop through each file in the file list
     for file in file_list:
-        # Read the CSV file into a DataFrame
-        df = pd.read_csv(file.name)
+        csv_path = _merge_csv_input_path(file)
+        df = pd.read_csv(csv_path)
         dataframes.append(df)
 
     # Concatenate all DataFrames into a single DataFrame
@@ -1105,7 +1122,7 @@ def merge_csv_files(file_list: List[str], output_folder: str = OUTPUT_FOLDER):
 
     merged_df = merged_df.sort_values(["page", "ymin", "xmin", "label"])
 
-    file_out_name = os.path.basename(file_list[0])
+    file_out_name = os.path.basename(_merge_csv_input_path(file_list[0]))
 
     merged_csv_path = output_folder + file_out_name + "_merged.csv"
 

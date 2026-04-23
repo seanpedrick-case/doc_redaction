@@ -128,6 +128,10 @@ COPY --from=builder /install/bin /usr/local/bin/
 # passes; that can break the `google` namespace so `google.protobuf` is missing and Paddle fails at import.
 RUN pip install --no-cache-dir "protobuf<=7.34.0"
 
+# English pipeline is not a normal PyPI dependency; bundle it in the image so runtime works offline.
+# Placed before COPY app code so application changes do not invalidate this layer.
+RUN python -m spacy download en_core_web_lg
+
 # Copy your application code and entrypoint
 COPY . ${APP_HOME}/app
 COPY entrypoint.sh ${APP_HOME}/app/entrypoint.sh

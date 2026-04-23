@@ -9,19 +9,11 @@ pinned: true
 license: agpl-3.0
 short_description: OCR / redact PDF documents and tabular data
 ---
-# Document redaction
+# Document redaction (doc_redaction)
 
-version: 2.1.0
+<a href="https://pypi.org/project/doc-redaction/" target="_blank"><img alt="PyPI - Version" src="https://img.shields.io/pypi/v/doc-redaction"></a> 
 
 Redact personally identifiable information (PII) from documents (PDF, PNG, JPG), Word files (DOCX), or tabular data (XLSX/CSV/Parquet). Please see the [User Guide](https://seanpedrick-case.github.io/doc_redaction/src/user_guide.html) for a full walkthrough of all the features in the app.
-    
-To extract text from documents, the 'Local' options are PikePDF for PDFs with selectable text, and OCR with Tesseract. Use AWS Textract to extract more complex elements e.g. handwriting, signatures, or unclear text. PaddleOCR and VLM support is also provided (see the installation instructions below). 
-
-For PII identification, 'Local' (based on spaCy) gives good results if you are looking for common names or terms, or a custom list of terms to redact (see Redaction settings).  AWS Comprehend gives better results at a small cost.
-
-Additional options on the 'Redaction settings' include, the type of information to redact (e.g. people, places), custom terms to include/ exclude from redaction, fuzzy matching, language settings, and whole page redaction. After redaction is complete, you can view and modify suggested redactions on the 'Review redactions' tab to quickly create a final redacted document.
-
-NOTE: The app is not 100% accurate, and it will miss some personal information. It is essential that all outputs are reviewed **by a human** before using the final outputs.
 
 ---
 
@@ -35,10 +27,33 @@ This application relies on two external tools for OCR (Tesseract) and PDF proces
 
 ---
 
+#### Automated dependency setup (recommended)
+
+If you **don’t have admin rights** (or you just want the simplest setup), you can have the project download and configure **Tesseract** and **Poppler** into a local `third_party/` folder inside your checkout.
+
+You need the installer script available first, which means either:
+
+- **Repository checkout**: `git clone ...` and run the command from the repo root (recommended for the web UI), or
+- **PyPI install**: `pip install doc_redaction` and run from a writable folder where you want `third_party/` and `config/app_config.env` to be created/updated.
+
+From the repository root (or your chosen working folder) after creating/activating your venv and installing Python requirements:
+
+```bash
+python -m doc_redaction.install_deps
+```
+
+This writes `TESSERACT_FOLDER` / `POPPLER_FOLDER` into `config/app_config.env` so the app can find the binaries without you editing your system PATH.
+
+To just check whether your machine can already see the tools:
+
+```bash
+python -m doc_redaction.install_deps --verify-only
+```
+
 
 #### **On Windows**
 
-Installation on Windows requires downloading installers and adding the programs to your system's PATH.
+If you don’t use the automated setup above, you can install the dependencies manually by downloading installers and adding the programs to your system's PATH.
 
 1.  **Install Tesseract OCR:**
     *   Download the installer from the official Tesseract at [UB Mannheim page](https://github.com/UB-Mannheim/tesseract/wiki) (e.g., `tesseract-ocr-w64-setup-v5.X.X...exe`).
@@ -78,58 +93,66 @@ sudo dnf install -y tesseract poppler-utils
 ---
 
 
-### 2. Installation: Code and Python Packages
+### 2. Installation: Python packages
 
-Once the system prerequisites are installed, you can set up the Python environment.
-
-#### Step 1: Clone the Repository
-
-Open your terminal or Git Bash and clone this repository:
-```bash
-git clone https://github.com/seanpedrick-case/doc_redaction.git
-cd doc_redaction
-```
-
-#### Step 2: Create and Activate a Virtual Environment (Recommended)
-
-It is highly recommended to use a virtual environment to isolate project dependencies and avoid conflicts with other Python projects.
+Once the system prerequisites are installed, create a virtual environment (recommended) and install **doc_redaction**.
 
 ```bash
-# Create the virtual environment
 python -m venv venv
-
-# Activate it
-# On Windows:
+# Windows:
 .\venv\Scripts\activate
-
-# On macOS/Linux:
+# macOS/Linux:
 source venv/bin/activate
 ```
 
-#### Step 3: Install Python Dependencies
+#### Install from PyPI (recommended for users and library use)
 
-##### Lightweight version (without PaddleOCR and VLM support)
-
-This project uses `pyproject.toml` to manage dependencies. You can install everything with a single pip command. This process will also download the required Spacy models and other packages directly from their URLs.
+The package is published on PyPI as **`doc-redaction`** (import name **`doc_redaction`**):
 
 ```bash
-pip install .
+pip install doc_redaction
 ```
 
-Alternatively, you can install from the `requirements_lightweight.txt` file:
+Optional extras (same as in `pyproject.toml`):
+
+```bash
+pip install "doc_redaction[paddle,vlm]"
+```
+
+For programmatic use (CLI-first API matching Gradio `api_name` routes), see **[Package API usage (Python)](https://seanpedrick-case.github.io/doc_redaction/src/package_api_usage.html)**. The console script **`cli_redact`** is available after install.
+
+**Web UI from a PyPI install:** You *can* start the Gradio UI after `pip install doc_redaction` by running:
+
+```bash
+python -m app
+```
+
+In practice, the **smoothest UI experience** (examples, bundled assets, docs links, etc.) is still usually via a **repository checkout** or **Docker**, but PyPI install is sufficient to launch the UI as long as you run it from a suitable working folder and have the system dependencies available (or run `python -m doc_redaction.install_deps` first).
+
+#### Install from source (repository checkout / development)
+
+Clone the repository and install in editable mode:
+
+```bash
+git clone https://github.com/seanpedrick-case/doc_redaction.git
+cd doc_redaction
+pip install -e .
+```
+
+From the same checkout you can use `requirements_lightweight.txt` instead of editable install if you prefer:
+
 ```bash
 pip install -r requirements_lightweight.txt
 ```
 
-##### Full version (with Paddle and VLM support)
-
-Run the following command to install the additional dependencies:
+##### Full install from source (Paddle and VLM)
 
 ```bash
-pip install .[paddle,vlm]
+pip install -e ".[paddle,vlm]"
 ```
 
-Alternatively, you can use the full `requirements.txt` file, that contains references to the PaddleOCR and related Torch/transformers dependencies (for cuda 12.9):
+Alternatively, use the full `requirements.txt` (includes PaddleOCR and Torch/transformers references for CUDA 12.9):
+
 ```bash
 pip install -r requirements.txt
 ```
@@ -176,11 +199,19 @@ Open this URL in your web browser to use the document redaction tool
 
 #### Command line interface
 
-If instead you want to run redactions or other app functions in CLI mode, run the following for instructions:
+If you installed from **PyPI**, use the installed console script:
+
+```bash
+cli_redact --help
+```
+
+From a **repository checkout**, you can also run:
 
 ```bash
 python cli_redact.py --help
 ```
+
+For Python examples that mirror each Gradio `api_name`, see [Package API usage (Python)](https://seanpedrick-case.github.io/doc_redaction/src/package_api_usage.html) (source: [src/package_api_usage.qmd](src/package_api_usage.qmd)).
 
 ---
 
@@ -257,3 +288,44 @@ These settings are only relevant if you intend to use AWS services like Textract
     *   `ENFORCE_COST_CODES=True`: Makes selecting a cost code mandatory before starting a redaction.
 
 Now you have the app installed, please refer to the [User Guide](https://seanpedrick-case.github.io/doc_redaction/src/user_guide.html) for more information on how to use it for basic and advanced redaction.
+
+## For agents (API quickstart)
+
+If you are an LLM/agent interacting with this app over HTTP (e.g. Hugging Face Spaces), **do not guess inputs** from the UI. Use the Gradio schema as the source of truth:
+
+- **Discover schema**: `GET /gradio_api/info`
+- **Upload files**: `POST /gradio_api/upload` (multipart field `files`) → returns server-internal paths like `/tmp/gradio_tmp/...`
+- **Call**: `POST /gradio_api/call/{api_name}` with body `{"data":[...]}` (argument order must match `/gradio_api/info`)
+- **Poll**: `GET /gradio_api/call/{api_name}/{event_id}` until complete
+- **Download outputs**: `GET /gradio_api/file={path}` (note: some deployments return 403 without session cookies)
+
+### Choose the correct route (prefer short `gr.api` endpoints)
+
+Fetch `/gradio_api/info` and then prefer the simplest route that exists:
+
+- **Apply edited review CSV to a PDF**: `/review_apply`
+- **Redact a PDF/image document**: `/doc_redact`
+- **Summarise a PDF**: `/pdf_summarise`
+- **Redact tabular files (CSV/XLSX/Parquet/DOCX)**: `/tabular_redact`
+
+If those endpoints are not present in your deployment, fall back to the long UI-chained routes (`/apply_review_redactions`, `/redact_data`, etc.) and build `data[]` strictly from `/gradio_api/info`.
+
+### Common gotchas
+
+- **Arity errors** (`needed: N, got: M`) mean you called a session-heavy UI handler with the wrong `data[]`. Prefer the short endpoints above.
+- **`handle_file()` gotcha** (for `gradio_client` users): do **not** wrap server-internal upload paths (e.g. `/tmp/gradio_tmp/...`) with `handle_file()`. Pass them as plain strings.
+- **Container-only outputs**: outputs may be written to container paths (e.g. `/home/user/app/output/`). Plan to download via `file=...` or use a mounted output directory in Docker.
+
+### Optional: MCP server
+
+If you want external agents to call this app reliably without re-implementing Gradio upload/call/poll/download details, consider an **MCP server** that wraps the main tasks (`redact_document`, `apply_review_redactions`, `redact_tabular`, `summarise_document`) behind a small tool interface. See [src/agent_mcp.md](src/agent_mcp.md).
+
+**Use as a library:** After installing from [PyPI](https://pypi.org/project/doc-redaction/) (`pip install doc_redaction`), you can call the same workflows as the Gradio `api_name` routes from Python. See the documentation: [Package API usage (Python)](https://seanpedrick-case.github.io/doc_redaction/src/package_api_usage.html) (source: [src/package_api_usage.qmd](src/package_api_usage.qmd)).
+    
+To extract text from documents, the 'Local' options are PikePDF for PDFs with selectable text, and OCR with Tesseract. Use AWS Textract to extract more complex elements e.g. handwriting, signatures, or unclear text. PaddleOCR and VLM support is also provided (see the installation instructions below). 
+
+For PII identification, 'Local' (based on spaCy) gives good results if you are looking for common names or terms, or a custom list of terms to redact (see Redaction settings).  AWS Comprehend gives better results at a small cost.
+
+Additional options on the 'Redaction settings' include, the type of information to redact (e.g. people, places), custom terms to include/ exclude from redaction, fuzzy matching, language settings, and whole page redaction. After redaction is complete, you can view and modify suggested redactions on the 'Review redactions' tab to quickly create a final redacted document.
+
+NOTE: The app is not 100% accurate, and it will miss some personal information. It is essential that all outputs are reviewed **by a human** before using the final outputs.

@@ -49,7 +49,10 @@ def test_export_review_page_ocr_visualisation_writes_file(tmp_path):
         str(tmp_path),
     )
     assert out is not None
-    assert os.path.isfile(out)
+    resolved_out = os.path.realpath(out)
+    safe_root = os.path.realpath(str(tmp_path))
+    assert os.path.commonpath([safe_root, resolved_out]) == safe_root
+    assert os.path.isfile(resolved_out)
     assert "review_ocr_visualisations" in out.replace("\\", "/")
 
 
@@ -95,12 +98,15 @@ def test_export_review_page_ocr_visualisation_draws_text_for_normalized_boxes(tm
         str(tmp_path),
     )
     assert out is not None
-    assert os.path.isfile(out)
+    resolved_out = os.path.realpath(out)
+    safe_root = os.path.realpath(str(tmp_path))
+    assert os.path.commonpath([safe_root, resolved_out]) == safe_root
+    assert os.path.isfile(resolved_out)
 
     # Ensure there is non-white ink on the right-hand half (the text page).
     from PIL import Image
 
-    img = Image.open(out).convert("RGB")
+    img = Image.open(resolved_out).convert("RGB")
     w, h = img.size
     # Right half; skip a small top-left patch where only legend might appear.
     crop = img.crop((w // 2 + 5, 5, w - 5, h - 5))

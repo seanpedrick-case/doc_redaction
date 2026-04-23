@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 import polars as pl
 import pymupdf
-from gradio_image_annotation.image_annotator import AnnotatedImageData
+from gradio_image_annotation_redaction.image_annotator import AnnotatedImageData
 from PIL import Image, ImageDraw, ImageFont
 from pymupdf import Document, Rect
 
@@ -109,6 +109,24 @@ def _is_under_allowed_roots(candidate_abs: str) -> bool:
     return False
 
 
+def _validated_allowed_file_path(path_str: str) -> Optional[str]:
+    """Return canonical file path if safe and under allowed roots, else None."""
+    if not path_str or not validate_path_safety(path_str):
+        return None
+    candidate_abs = _normalize_untrusted_path_to_abs(path_str)
+    candidate_real = os.path.realpath(candidate_abs)
+    if not validate_path_safety(candidate_real):
+        return None
+    if not _is_under_allowed_roots(candidate_real):
+        return None
+    try:
+        if not Path(candidate_real).is_file():
+            return None
+    except OSError:
+        return None
+    return candidate_real
+
+
 if not MAX_IMAGE_PIXELS:
     Image.MAX_IMAGE_PIXELS = None
 
@@ -148,7 +166,7 @@ def _concat_frames_without_all_na_warning(
 
 
 def _ensure_box_colour_string(colour):
-    """Ensure colour is a string for gradio_image_annotation (JS expects .startsWith)."""
+    """Ensure colour is a string for gradio_image_annotation_redaction (JS expects .startsWith)."""
     if colour is None:
         return "(0, 0, 0)"
     if isinstance(colour, str):
@@ -713,7 +731,7 @@ def update_annotator_page_from_review_df(
             for key in expected_annotation_keys:
                 if key not in current_page_review_df.columns:
                     # Add missing column with default value. Use 0.0 for coords so
-                    # gradio_image_annotation never receives None/NaN (causes TypeError in preprocess_boxes).
+                    # gradio_image_annotation_redaction never receives None/NaN (causes TypeError in preprocess_boxes).
                     default_value = (
                         0.0 if key in ["xmin", "ymin", "xmax", "ymax"] else ""
                     )
@@ -1868,7 +1886,7 @@ def update_annotator_object_and_filter_df(
     List[AnnotatedImageData],
 ]:
     """
-    Update a gradio_image_annotation object with new annotation data for the current page
+    Update a gradio_image_annotation_redaction object with new annotation data for the current page
     and update filter dataframes, optimizing by processing only the current page's data for display.
 
     Args:
@@ -2124,7 +2142,7 @@ def update_annotator_object_and_filter_df(
                     current_page_annotations_df["color"] = CUSTOM_BOX_COLOUR
             else:
                 current_page_annotations_df["color"] = CUSTOM_BOX_COLOUR
-        # gradio_image_annotation JS expects colour as string (e.g. .startsWith("rgba"))
+        # gradio_image_annotation_redaction JS expects colour as string (e.g. .startsWith("rgba"))
         current_page_annotations_df["color"] = current_page_annotations_df[
             "color"
         ].apply(_ensure_box_colour_string)
@@ -4494,7 +4512,7 @@ def _box_coords_to_pixel_rect(
     """
     Map box corners to pixel integers on a ``w`` x ``h`` underlay.
 
-    ``gradio_image_annotation`` returns **absolute pixel** coordinates in the
+    ``gradio_image_annotation_redaction`` returns **absolute pixel** coordinates in the
     backend; review CSV / OCR data use **normalized 0–1** coordinates. If the
     largest corner value is <= 1, treat as normalized; otherwise as pixels.
     """
@@ -4537,16 +4555,10 @@ def _load_underlay_rgb_from_annotator(
         return None
     if isinstance(img_val, str) and img_val:
         try:
-            if not validate_path_safety(img_val):
+            safe_path = _validated_allowed_file_path(img_val)
+            if not safe_path:
                 return None
-            candidate_abs = _normalize_untrusted_path_to_abs(img_val)
-            if not validate_path_safety(candidate_abs):
-                return None
-            if not _is_under_allowed_roots(candidate_abs):
-                return None
-            if not os.path.isfile(candidate_abs):
-                return None
-            im = Image.open(candidate_abs)
+            im = Image.open(safe_path)
             return np.asarray(im.convert("RGB"))
         except Exception:
             return None
@@ -4632,10 +4644,21 @@ def _resize_bgr_to_max_pixels(image_bgr: np.ndarray, max_pixels: int) -> np.ndar
 
 
 def _write_review_overlay_jpeg(
-    image_bgr: np.ndarray, path: str, max_file_bytes: int
+    image_bgr: np.ndarray, path: str, max_file_bytes: int, *, base_dir: str
 ) -> None:
     """Write JPEG, lowering quality until file size is at or below ``max_file_bytes`` (cf. OCR page visualisations)."""
-    out_path = Path(path)
+    try:
+        base_path = Path(base_dir).expanduser().resolve(strict=False)
+        out_path = Path(path).expanduser().resolve(strict=False)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ValueError(f"Invalid output path: {path}") from exc
+    # Defense-in-depth: ensure we only touch paths within the configured output root.
+    try:
+        out_path.relative_to(base_path)
+    except ValueError as exc:
+        raise ValueError(f"Unsafe output path rejected: {out_path}") from exc
+    if not validate_path_safety(str(out_path), base_path=str(base_path)):
+        raise ValueError(f"Unsafe output path rejected: {out_path}")
     quality = 95
     while quality >= 10:
         cv2.imwrite(
@@ -4765,10 +4788,16 @@ def visualise_review_redaction_boxes(
     safe_base = sanitize_filename(str(base))
     out_fn = f"{safe_base}_page{int(page_number)}_redaction_overlay.jpg"
     try:
-        out_path = secure_path_join(output_folder, "redaction_overlay", out_fn)
+        out_dir = os.path.normpath(str(output_folder))
+        if not validate_folder_containment(out_dir, OUTPUT_FOLDER):
+            out_dir = OUTPUT_FOLDER
+        out_path = secure_path_join(out_dir, "redaction_overlay", out_fn)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         _write_review_overlay_jpeg(
-            image_bgr, str(out_path), REVIEW_OVERLAY_MAX_FILE_BYTES
+            image_bgr,
+            str(out_path),
+            REVIEW_OVERLAY_MAX_FILE_BYTES,
+            base_dir=str(out_dir),
         )
         return str(out_path)
     except Exception:
@@ -4993,6 +5022,42 @@ def export_review_page_ocr_visualisation_for_gradio(
 
     gr.Info("Could not save the OCR visualisation image.", duration=6)
     return None
+
+
+def page_redaction_review_image(
+    page_annotator: Optional[AnnotatedImageData],
+    annotate_current_page: float,
+    review_df: pd.DataFrame,
+    doc_full_file_name_textbox: str,
+    output_folder_textbox: str,
+) -> Optional[str]:
+    """Short-name Gradio handler; wraps `export_review_redaction_overlay_for_gradio`."""
+    return export_review_redaction_overlay_for_gradio(
+        page_annotator=page_annotator,
+        annotate_current_page=annotate_current_page,
+        review_df=review_df,
+        doc_full_file_name_textbox=doc_full_file_name_textbox,
+        output_folder_textbox=output_folder_textbox,
+    )
+
+
+def page_ocr_review_image(
+    page_annotator: Optional[AnnotatedImageData],
+    annotate_current_page: float,
+    all_page_line_level_ocr_results_with_words: list,
+    all_page_line_level_ocr_results_with_words_df_base: Optional[pd.DataFrame],
+    doc_full_file_name_textbox: str,
+    output_folder_textbox: str,
+) -> Optional[str]:
+    """Short-name Gradio handler; wraps `export_review_page_ocr_visualisation_for_gradio`."""
+    return export_review_page_ocr_visualisation_for_gradio(
+        page_annotator=page_annotator,
+        annotate_current_page=annotate_current_page,
+        all_page_line_level_ocr_results_with_words=all_page_line_level_ocr_results_with_words,
+        all_page_line_level_ocr_results_with_words_df_base=all_page_line_level_ocr_results_with_words_df_base,
+        doc_full_file_name_textbox=doc_full_file_name_textbox,
+        output_folder_textbox=output_folder_textbox,
+    )
 
 
 def _warn_and_halt_review_df_validation(msg: str) -> None:

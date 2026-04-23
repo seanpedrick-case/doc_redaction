@@ -1,0 +1,15 @@
+Using the doc-redaction-app skill, redact this pdf document: https://github.com/seanpedrick-case/doc_redaction/blob/main/example_data/Partnership-Agreement-Toolkit_0_0.pdf using the redaction tool hosted at https://seanpedrickcase-document-redaction.hf.space. Use the paddle OCR method if that is available, or tesseract if it is not. Use the the Local PII identification method. Save the results to a folder in your workspace named 'output'.
+
+Next, I would like you to check through the redactions with the doc-redaction-modifications skill. I would like you to use the output files from the redaction task to check through redaction results on each page, and remove / add / modify redactions according to these rules:
+
+- Any redaction box related to general country names should be removed
+- All redactions for Rudy Giuliani should be removed
+- Redaction box sizings and positions should be checked visually to ensure they fully cover the relevant words
+- Redactions should be added for any signatures
+- All mentions of London, and 'Sister City' should be redacted
+- Ensure that all remaining redaction boxes cover genuine PII and are not false positives
+- Ensure that other genuine PII is not missed, and is covered by a redaction box.
+
+As you go, ensure that you check the redaction box positions for accuracy on the page with image exports.
+
+After you have completed your review, upload the updated files into the Redaction app to create new finalised outputs. Put these in the 'output_final' subfolder in your workspace.

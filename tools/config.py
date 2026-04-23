@@ -107,7 +107,7 @@ def ensure_folder_within_app_directory(
         ]
         if any(normalized_path.startswith(prefix) for prefix in system_path_prefixes):
             # System paths are allowed but we log a warning
-            print(f"Warning: Using system path outside app directory: {folder_path}")
+            # print(f"Warning: Using system path outside app directory: {folder_path}")
             return folder_path
         else:
             raise ValueError(
@@ -134,7 +134,7 @@ def ensure_folder_within_app_directory(
             if has_trailing_sep and not result.endswith(os.sep):
                 result = result + os.sep
             print(
-                f"Warning: Sanitized folder path '{folder_path}' to '{result}' for security"
+                f"Warning: Sanitised folder path '{folder_path}' to '{result}' for security"
             )
             return result
         else:
@@ -2231,27 +2231,11 @@ USER_GUIDE_URL = validate_safe_url(
 
 DEFAULT_INTRO_TEXT = f"""# Document redaction
 
-    Redact personally identifiable information (PII) from:\n
-    - **Documents**: PDF / PNG / JPG\n
-    - **Word**: DOCX\n
-    - **Tabular data**: XLSX / CSV / Parquet\n
-    See the [User Guide]({USER_GUIDE_URL}) for full guidance.\n
-\n
-    ## Quick start\n
-    1. Go to **Redact PDF/image**.\n
-    2. Upload a file.\n
-    3. Choose **Text extraction**:\n
-       - **Local text**: best for PDFs with selectable text.\n
-       - **Local OCR**: for scans/images.\n
-       - **AWS Textract**: best for difficult scans, handwriting, signatures, or forms (paid).\n
-    4. Choose **PII detection**:\n
-       - **Local** (spaCy): good general PII + custom lists.\n
-       - **AWS Comprehend**: often higher recall (paid).\n
-    5. Click **Extract text and redact document**.\n
-    6. Review and edit results in **Review redactions**, then export the final redacted PDF.\n
-\n
-    ## Important\n
-    The app is not 100% accurate and may miss PII. **A human must review** all outputs before use."""
+Redact personally identifiable information (PII) from documents (PDF, PNG, JPG), Word files (DOCX), or tabular data (XLSX/CSV/Parquet). Please see the [User Guide]({USER_GUIDE_URL}) for a full walkthrough of all the features and settings.
+    
+To start, upload a document below (or click on an example), then click 'Extract text and redact document' to redact the document. Then, view and modify suggested redactions on the 'Review redactions' tab.
+
+NOTE: The app is not 100% accurate, and it will miss some personal information. It is essential that all outputs are reviewed **by a human** before using the final outputs."""
 
 INTRO_TEXT = get_or_create_env_var("INTRO_TEXT", DEFAULT_INTRO_TEXT)
 
@@ -2280,7 +2264,7 @@ INTRO_TEXT = sanitize_markdown_text(INTRO_TEXT.strip('"').strip("'"))
 
 # Ensure we have valid content after sanitization
 if not INTRO_TEXT or not INTRO_TEXT.strip():
-    print("Warning: Intro text is empty after sanitization, using default intro text")
+    print("Warning: Intro text is empty after sanitisation, using default intro text")
     INTRO_TEXT = sanitize_markdown_text(DEFAULT_INTRO_TEXT)
 
 # App fills screen width or not

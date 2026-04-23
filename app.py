@@ -7,7 +7,7 @@ import spaces
 from fastapi import FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from gradio_image_annotation import image_annotator
+from gradio_image_annotation_redaction import image_annotator
 
 from tools.auth import authenticate_user
 from tools.aws_functions import (
@@ -294,13 +294,13 @@ from tools.redaction_review import (
     df_select_callback_ocr,
     df_select_callback_textract_api,
     exclude_selected_items_from_redaction,
-    export_review_page_ocr_visualisation_for_gradio,
-    export_review_redaction_overlay_for_gradio,
     get_all_rows_with_same_text,
     get_all_rows_with_same_text_redact,
     get_and_merge_current_page_annotations,
     increase_bottom_page_count_based_on_top,
     increase_page,
+    page_ocr_review_image,
+    page_redaction_review_image,
     reset_dropdowns,
     undo_last_removal,
     update_all_entity_df_dropdowns,
@@ -1386,6 +1386,26 @@ with blocks:
     ###
 
     gr.Markdown(INTRO_TEXT)
+
+    with gr.Accordion("API for agents (quickstart)", open=False, visible=False):
+        gr.Markdown("""
+If you are an LLM/agent calling this app programmatically, prefer the **short `gr.api` endpoints** and always use the schema from **`GET /gradio_api/info`**.\n
+\n
+**Universal protocol** (any endpoint):\n
+- `GET /gradio_api/info`\n
+- `POST /gradio_api/upload` (multipart field `files`) → internal paths like `/tmp/gradio_tmp/...`\n
+- `POST /gradio_api/call/{api_name}` with `{"data":[...]}`\n
+- poll `GET /gradio_api/call/{api_name}/{event_id}`\n
+- download `GET /gradio_api/file={path}` (may 403 under some auth/proxies)\n
+\n
+**Prefer these short endpoints when present**:\n
+- `/doc_redact` (PDF/JPG/PNG)\n
+- `/review_apply` (PDF + `*_review_file.csv`)\n
+- `/pdf_summarise` (PDF)\n
+- `/tabular_redact` (CSV/XLSX/Parquet/DOCX)\n
+\n
+**Gotcha**: do not wrap server-internal upload paths (e.g. `/tmp/gradio_tmp/...`) in `gradio_client.handle_file()`; pass them as plain strings.\n
+            """)
 
     # Examples for PDF/image redaction
     if SHOW_EXAMPLES:
@@ -4918,7 +4938,8 @@ with blocks:
         outputs=None,
         api_visibility="undocumented",
     ).failure(  # Failure case enables branching for when duplicate analysis textbox is enabled
-        fn=lambda: None
+        fn=lambda: None,
+        api_visibility="undocumented",
     ).then(
         fn=reset_aws_call_vars,
         outputs=[
@@ -5259,6 +5280,7 @@ with blocks:
             total_pdf_page_count,
         ],
         show_progress_on=[redaction_output_summary_textbox],
+        api_visibility="undocumented",
     ).success(
         fn=lambda *args: usage_callback.flag(
             list(args),
@@ -5317,6 +5339,7 @@ with blocks:
         ),
         outputs=[flag_value_placeholder],
         preprocess=False,
+        api_visibility="undocumented",
     ).success(
         fn=upload_log_file_to_s3,
         inputs=[usage_logs_state, usage_s3_logs_loc_state],
@@ -5397,7 +5420,8 @@ with blocks:
         outputs=None,
         api_visibility="undocumented",
     ).failure(  # Failure case enables branching for when duplicate analysis textbox is enabled
-        fn=lambda: None
+        fn=lambda: None,
+        api_visibility="undocumented",
     ).then(
         fn=reset_aws_call_vars,
         outputs=[
@@ -6046,6 +6070,7 @@ with blocks:
             all_page_line_level_ocr_results_with_words_df_base,
         ],
         show_progress_on=[redaction_output_summary_textbox, input_pdf_for_review],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -6145,6 +6170,7 @@ with blocks:
             all_page_line_level_ocr_results_with_words_df_base,
         ],
         show_progress_on=[redaction_output_summary_textbox],
+        api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
         inputs=[
@@ -6881,7 +6907,7 @@ with blocks:
     )
 
     export_review_ocr_visualisation_btn.click(
-        export_review_page_ocr_visualisation_for_gradio,
+        page_ocr_review_image,
         inputs=[
             annotator,
             annotate_current_page,
@@ -6891,11 +6917,11 @@ with blocks:
             output_folder_textbox,
         ],
         outputs=[redaction_overlay_output_file],
-        api_name="export_review_page_ocr_visualisation",
+        api_name="page_ocr_review_image",
     )
 
     export_redaction_overlay_btn.click(
-        export_review_redaction_overlay_for_gradio,
+        page_redaction_review_image,
         inputs=[
             annotator,
             annotate_current_page,
@@ -6904,7 +6930,7 @@ with blocks:
             output_folder_textbox,
         ],
         outputs=[redaction_overlay_output_file],
-        api_name="export_review_redaction_overlay",
+        api_name="page_redaction_review_image",
     )
 
     ###
@@ -8270,6 +8296,7 @@ with blocks:
             all_page_line_level_ocr_results_with_words_df_base,
         ],
         show_progress_on=[adobe_review_files_out],
+        api_visibility="undocumented",
     ).success(
         fn=convert_xfdf_to_dataframe,
         inputs=[
@@ -9405,7 +9432,7 @@ with blocks:
         ],
         show_progress=True,
         show_progress_on=[summarisation_status],
-        api_name="summarise_document",
+        api_name="undocumented",
     ).success(
         fn=lambda: "summarisation",
         outputs=[task_textbox],
@@ -10073,6 +10100,52 @@ with blocks:
         )
 
     ###
+    # Simple Gradio HTTP API (short routes for agents/MCP).
+    ###
+    from tools.simplified_api import (
+        doc_redact_api,
+        pdf_summarise_api,
+        review_apply_api,
+        tabular_redact_api,
+    )
+
+    gr.api(
+        doc_redact_api,
+        api_name="doc_redact",
+        api_description=(
+            "Redact a single PDF/image in one call (CLI-aligned). "
+            "Returns (output_paths, message). Does not update the main UI session."
+        ),
+    )
+
+    gr.api(
+        review_apply_api,
+        api_name="review_apply",
+        api_description=(
+            "Apply redactions in one call from the original PDF and a *_review_file.csv. "
+            "Returns (output_paths, message). Does not update the Review tab UI session."
+        ),
+    )
+
+    gr.api(
+        pdf_summarise_api,
+        api_name="pdf_summarise",
+        api_description=(
+            "Summarise a PDF in one call (CLI-aligned: OCR/text extract then LLM summary). "
+            "Returns (output_paths, status_message, summary_text)."
+        ),
+    )
+
+    gr.api(
+        tabular_redact_api,
+        api_name="tabular_redact",
+        api_description=(
+            "Redact a single tabular file (CSV/XLSX/Parquet/DOCX) in one call. "
+            "Returns (output_paths, message). Does not update the Tabular UI session."
+        ),
+    )
+
+    ###
     # APP RUN SETTINGS
     ###
 
@@ -10082,6 +10155,13 @@ with blocks:
     )
 
     if not RUN_DIRECT_MODE:
+        # Expose I/O dirs for GET /gradio_api/file=<path> (MCP, curl, API clients).
+        # Without this, Gradio returns 403 "File not allowed" for outputs under OUTPUT_FOLDER.
+        _gradio_file_allowed_paths: list[str] = [
+            str(Path(OUTPUT_FOLDER).resolve()),
+            str(Path(INPUT_FOLDER).resolve()),
+        ]
+
         # If running through command line with uvicorn
         if RUN_FASTAPI:
             if ALLOWED_ORIGINS:
@@ -10118,6 +10198,7 @@ with blocks:
                 path="",
                 favicon_path=Path(FAVICON_PATH),
                 mcp_server=RUN_MCP_SERVER,
+                allowed_paths=_gradio_file_allowed_paths,
             )
 
             # Example command to run in uvicorn (in python): uvicorn.run("app:app", host=GRADIO_SERVER_NAME, port=GRADIO_SERVER_PORT)
@@ -10139,6 +10220,7 @@ with blocks:
                         root_path=ROOT_PATH,
                         favicon_path=Path(FAVICON_PATH),
                         mcp_server=RUN_MCP_SERVER,
+                        allowed_paths=_gradio_file_allowed_paths,
                     )
                 else:
                     blocks.launch(
@@ -10153,6 +10235,7 @@ with blocks:
                         root_path=ROOT_PATH,
                         favicon_path=Path(FAVICON_PATH),
                         mcp_server=RUN_MCP_SERVER,
+                        allowed_paths=_gradio_file_allowed_paths,
                     )
 
     else:

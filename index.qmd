@@ -2,11 +2,11 @@
 title: "Home"
 ---
 
-version: 2.1.0
+version: 2.2.0
 
 Welcome to the Document Redaction App documentation. This site provides comprehensive documentation for the Document Redaction App.
 
-Navigate through the sections to learn how to install, use, and manage the application. Below is a brief introduction to the app.
+Navigate through the sections to learn how to install, use, and manage the application. Below is a brief introduction to the app, followed by **complete installation instructions** (PyPI, source, and Docker overview).
 
 ## Document redaction
 
@@ -20,4 +20,155 @@ Additional options include, choosing the type of information to redact (e.g. peo
 
 NOTE: The app is not 100% accurate, and it will miss some personal information. It is essential that all outputs are reviewed **by a human** before using the final outputs.
 
+---
 
+## Installation
+
+### Prerequisites: Tesseract and Poppler
+
+The application needs **Tesseract** (OCR) and **Poppler** (PDF utilities) on your system before Python packages will work fully.
+
+#### Automated dependency setup (recommended)
+
+If you **don't have admin rights** (or you just want the simplest setup), you can have the project download and configure **Tesseract** and **Poppler** into a local `third_party/` folder inside your checkout.
+
+You need the installer script available first, which means either:
+
+- **Repository checkout**: `git clone ...` and run the command from the repo root (recommended for the web UI), or
+- **PyPI install**: `pip install doc_redaction` and run from a writable folder where you want `third_party/` and `config/app_config.env` to be created/updated.
+
+From the repository root (or your chosen working folder) after creating/activating your venv and installing Python requirements:
+
+```bash
+python -m doc_redaction.install_deps
+```
+
+This writes `TESSERACT_FOLDER` / `POPPLER_FOLDER` into `config/app_config.env` so the app can find the binaries without you editing your system PATH.
+
+To just check whether your machine can already see the tools:
+
+```bash
+python -m doc_redaction.install_deps --verify-only
+```
+
+#### Windows
+
+If you don’t use the automated setup above, install manually:
+
+1. **Tesseract:** Install from the [UB Mannheim Tesseract wiki](https://github.com/UB-Mannheim/tesseract/wiki). During setup, add Tesseract to the system PATH.
+2. **Poppler:** Download from [Poppler for Windows](https://github.com/oschwartz10612/poppler-windows), extract to a permanent folder, and add the `bin` directory to your system PATH.
+
+Verify in a new terminal: `tesseract --version` and `pdftoppm -v`.
+
+#### Linux (Debian/Ubuntu)
+
+```bash
+sudo apt-get update && sudo apt-get install -y tesseract-ocr poppler-utils
+```
+
+#### Linux (Fedora/CentOS/RHEL)
+
+```bash
+sudo dnf install -y tesseract poppler-utils
+```
+
+### Python environment
+
+Use a virtual environment (recommended):
+
+```bash
+python -m venv venv
+# Windows:
+.\venv\Scripts\activate
+# macOS/Linux:
+source venv/bin/activate
+```
+
+### Install from PyPI
+
+The package is published on [PyPI](https://pypi.org/project/doc-redaction/) as **doc-redaction**; the import name is **`doc_redaction`**.
+
+```bash
+pip install doc_redaction
+```
+
+#### Web UI from a PyPI install
+
+You can start the Gradio web UI after a PyPI install with:
+
+```bash
+python -m app
+```
+
+For the smoothest UI experience (examples/assets/config in expected locations), a **repository checkout** or **Docker** is still usually simpler, but PyPI install is sufficient to launch the UI as long as the system dependencies are available (or you run `python -m doc_redaction.install_deps` first).
+
+Optional extras (PaddleOCR, VLM stack — see `pyproject.toml` on the repository for exact extras):
+
+```bash
+pip install "doc_redaction[paddle,vlm]"
+```
+
+After a PyPI install you get:
+
+- The **`cli_redact`** console script (same behaviour as `cli_redact.py` in the repo).
+- The **programmatic API** documented in [Package API usage (Python)](src/package_api_usage.qmd).
+
+**Gradio web UI:** The full `app.py` UI is easiest to run from a **repository clone** (see below) or via **Docker**; a PyPI install is optimised for library and CLI use.
+
+### Install from source (clone / development)
+
+```bash
+git clone https://github.com/seanpedrick-case/doc_redaction.git
+cd doc_redaction
+pip install -e .
+```
+
+Lightweight (no Paddle/VLM extras):
+
+```bash
+pip install -e .
+```
+
+Full extras from the repo:
+
+```bash
+pip install -e ".[paddle,vlm]"
+```
+
+Alternatively, `requirements_lightweight.txt` or `requirements.txt` from the repository root (see [README on GitHub](https://github.com/seanpedrick-case/doc_redaction) for GPU notes for Paddle and Torch).
+
+### Run the Gradio application (source checkout)
+
+From the repository root, with dependencies installed:
+
+```bash
+python app.py
+```
+
+Open the local URL shown in the terminal (typically `http://127.0.0.1:7860`).
+
+### Command-line interface
+
+- **PyPI install:** `cli_redact --help`
+- **Source checkout:** `python cli_redact.py --help`
+
+### Using as a Python package (no Gradio UI)
+
+For examples that mirror each Gradio `api_name` using the CLI-first Python API, see **[Package API usage (Python)](src/package_api_usage.qmd)**.
+
+### Docker and cloud deployment
+
+For container-based installs, AWS CDK, and advanced deployment, see the [App installation guide (with CDK)](src/installation_guide.qmd) and the [Dockerfile](https://github.com/seanpedrick-case/doc_redaction/blob/main/Dockerfile) in the repository.
+
+### Configuration
+
+Application settings are typically loaded from `config/app_config.env`. A full variable reference is on the site under [App settings management guide](src/app_settings.qmd) and in the GitHub repository documentation.
+
+---
+
+## More documentation
+
+- [User guide](src/user_guide.qmd)
+- [Package API usage (Python)](src/package_api_usage.qmd)
+- [App installation guide (with CDK)](src/installation_guide.qmd)
+- [App settings management guide](src/app_settings.qmd)

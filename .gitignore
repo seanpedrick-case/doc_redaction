@@ -1,6 +1,9 @@
 *.url
 *.ipynb
 *.pyc
+*.qmd
+_quarto.yml
+quarto_site/*
 .venv/*
 examples/*
 processing/*
@@ -18,7 +21,8 @@ usage/*
 feedback/*
 config/*
 user_guide/*
-skills/*
+doc_redaction.egg-info/*
+.venv_pypi_test/*
 cdk/config/*
 cdk/cdk.out/*
 cdk/archive/*

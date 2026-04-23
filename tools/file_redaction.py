@@ -153,8 +153,10 @@ from tools.redaction_types import (
 )
 from tools.secure_path_utils import (
     secure_file_write,
+    secure_path_join,
     validate_folder_containment,
     validate_path_containment,
+    validate_path_safety,
 )
 
 # Extract numbers before 'seconds' using secure regex
@@ -1184,6 +1186,7 @@ def _choose_and_run_redactor_impl(
         )
 
     # CLI mode may provide options to enter method names in a different format
+    print("Text extraction method requested:", text_extraction_method)
     if text_extraction_method == "AWS Textract":
         text_extraction_method = TEXTRACT_TEXT_EXTRACT_OPTION
     if text_extraction_method == "Local OCR":
@@ -1220,6 +1223,8 @@ def _choose_and_run_redactor_impl(
 
     if pii_identification_method == "None":
         pii_identification_method = NO_REDACTION_PII_OPTION
+
+    print("PII identification method requested:", pii_identification_method)
 
     # Normalise the output folder path separator (handles Windows backslash paths)
     if not output_folder.endswith(("/", os.sep)):
@@ -5842,7 +5847,7 @@ def redact_image_pdf(
     - textract_request_metadata (list, optional): Metadata related to the redaction request. Defaults to an empty string.
     - current_loop_page (int, optional): The current page being processed. Defaults to 0.
     - page_break_return (bool, optional): Indicates if the function should return after a page break. Defaults to False.
-    - annotations_all_pages (List, optional): List of annotations on all pages that is used by the gradio_image_annotation object.
+    - annotations_all_pages (List, optional): List of annotations on all pages that is used by the gradio_image_annotation_redaction object.
     - all_page_line_level_ocr_results_df (pd.DataFrame, optional): All line level OCR results for the document as a Pandas dataframe,
     - all_pages_decision_process_table (pd.DataFrame, optional): All redaction decisions for document as a Pandas dataframe.
     - pymupdf_doc (Document, optional): The document as a PyMupdf object.
@@ -12045,6 +12050,7 @@ def visualise_ocr_words_bounding_boxes(
         - our OCR results: "bounding_box"
         - some serialized/review flows: "boundingBox"
         - occasionally: "bbox"
+        - dict with left/top/width/height (normalized or pixel), or xmin/ymin/xmax/ymax
         """
         if not isinstance(word_data, dict):
             return (0, 0, 0, 0)
@@ -12052,9 +12058,31 @@ def visualise_ocr_words_bounding_boxes(
             word_data.get("bounding_box")
             or word_data.get("boundingBox")
             or word_data.get("bbox")
-            or (0, 0, 0, 0)
         )
-        return bb
+        if bb is None:
+            return (0, 0, 0, 0)
+        if isinstance(bb, dict):
+            lk = {str(k).lower(): v for k, v in bb.items()}
+            if all(k in lk for k in ("left", "top", "width", "height")):
+                left = float(lk["left"])
+                top = float(lk["top"])
+                w = float(lk["width"])
+                h = float(lk["height"])
+                return (left, top, left + w, top + h)
+            if all(k in lk for k in ("xmin", "ymin", "xmax", "ymax")):
+                return (
+                    float(lk["xmin"]),
+                    float(lk["ymin"]),
+                    float(lk["xmax"]),
+                    float(lk["ymax"]),
+                )
+            return (0, 0, 0, 0)
+        if isinstance(bb, (list, tuple)) and len(bb) == 4:
+            try:
+                return tuple(float(x) for x in bb)
+            except (TypeError, ValueError):
+                return (0, 0, 0, 0)
+        return (0, 0, 0, 0)
 
     if text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
         # Collect all bounding box coordinates to detect coordinate system
@@ -12188,8 +12216,16 @@ def visualise_ocr_words_bounding_boxes(
                 continue
 
             text = word_data.get("text", "")
-            # Handle both 'conf' and 'confidence' field names for compatibility
-            conf = int(word_data.get("conf", word_data.get("confidence", 0)))
+            # Handle 'conf' / 'confidence'; values may be 0–100 or fractional 0–1.
+            _raw = word_data.get("conf", word_data.get("confidence", 0))
+            try:
+                _cf = float(_raw)
+            except (TypeError, ValueError):
+                _cf = 0.0
+            if 0.0 <= _cf <= 1.0:
+                conf = int(round(_cf * 100))
+            else:
+                conf = int(_cf)
 
             # Skip empty text or invalid confidence
             if not text.strip() or conf == -1:
@@ -12290,11 +12326,15 @@ def visualise_ocr_words_bounding_boxes(
                 continue
             if not _wd.get("text", "").strip():
                 continue
-            if int(_wd.get("conf", _wd.get("confidence", 0))) == -1:
+            _rawc = _wd.get("conf", _wd.get("confidence", 0))
+            try:
+                _cf = float(_rawc)
+            except (TypeError, ValueError):
+                _cf = 0.0
+            _c = int(round(_cf * 100)) if 0.0 <= _cf <= 1.0 else int(_cf)
+            if _c == -1:
                 continue
-            _bb = _wd.get("bounding_box", (0, 0, 0, 0))
-            if (not _bb or len(_bb) != 4) and isinstance(_wd, dict):
-                _bb = _wd.get("boundingBox") or _wd.get("bbox") or (0, 0, 0, 0)
+            _bb = _get_word_bbox(_wd)
             if len(_bb) != 4:
                 continue
             _bx1, _by1, _bx2, _by2 = _bb
@@ -12351,8 +12391,16 @@ def visualise_ocr_words_bounding_boxes(
                 continue
 
             text = word_data.get("text", "")
-            # Handle both 'conf' and 'confidence' field names for compatibility
-            conf = int(word_data.get("conf", word_data.get("confidence", 0)))
+            # Handle 'conf' / 'confidence'; values may be 0–100 or fractional 0–1.
+            _raw = word_data.get("conf", word_data.get("confidence", 0))
+            try:
+                _cf = float(_raw)
+            except (TypeError, ValueError):
+                _cf = 0.0
+            if 0.0 <= _cf <= 1.0:
+                conf = int(round(_cf * 100))
+            else:
+                conf = int(_cf)
 
             # Skip empty text or invalid confidence
             if not text.strip() or conf == -1:
@@ -12416,7 +12464,12 @@ def visualise_ocr_words_bounding_boxes(
             if len(word_group) == 1:
                 word_data = word_group[0]["word_data"]
                 text = word_data.get("text", "")
-                conf = int(word_data.get("conf", word_data.get("confidence", 0)))
+                _raw = word_data.get("conf", word_data.get("confidence", 0))
+                try:
+                    _cf = float(_raw)
+                except (TypeError, ValueError):
+                    _cf = 0.0
+                conf = int(round(_cf * 100)) if 0.0 <= _cf <= 1.0 else int(_cf)
 
                 # Check if word was replaced by a different model
                 model = word_data.get("model", None)
@@ -12489,7 +12542,12 @@ def visualise_ocr_words_bounding_boxes(
                 for item in word_group:
                     word_data = item["word_data"]
                     text = word_data.get("text", "")
-                    conf = int(word_data.get("conf", word_data.get("confidence", 0)))
+                    _raw = word_data.get("conf", word_data.get("confidence", 0))
+                    try:
+                        _cf = float(_raw)
+                    except (TypeError, ValueError):
+                        _cf = 0.0
+                    conf = int(round(_cf * 100)) if 0.0 <= _cf <= 1.0 else int(_cf)
                     model = word_data.get("model", None)
                     is_replaced = model and model.lower() != base_model_name.lower()
 
@@ -12590,10 +12648,26 @@ def visualise_ocr_words_bounding_boxes(
 
     # Save the visualization
     if output_folder:
-        textract_viz_folder = os.path.join(output_folder, visualisation_folder)
+        trusted_base = os.path.realpath(str(OUTPUT_FOLDER))
+        requested_out_dir = os.path.realpath(os.path.normpath(str(output_folder)))
+        out_dir = trusted_base
+        if validate_folder_containment(requested_out_dir, trusted_base):
+            out_dir = requested_out_dir
+        else:
+            # Defense-in-depth: attempt to map a requested directory to a safe relative
+            # path under the trusted base. If that relative contains traversal, the
+            # secure join will reject it and we stay on trusted_base.
+            try:
+                rel_out_dir = os.path.relpath(requested_out_dir, trusted_base)
+                if rel_out_dir not in (".", ""):
+                    out_dir = str(secure_path_join(trusted_base, rel_out_dir))
+            except Exception:
+                out_dir = trusted_base
+
+        textract_viz_folder = str(secure_path_join(out_dir, visualisation_folder))
 
         # Double-check the constructed path is safe
-        if not validate_folder_containment(textract_viz_folder, OUTPUT_FOLDER):
+        if not validate_path_safety(textract_viz_folder, base_path=out_dir):
             raise ValueError(
                 f"Unsafe textract visualisations folder path: {textract_viz_folder}"
             )
@@ -12629,7 +12703,12 @@ def visualise_ocr_words_bounding_boxes(
             timestamp = int(time.time())
             filename = f"{visualisation_folder}_{timestamp}.jpg"
 
-        output_path = os.path.join(textract_viz_folder, filename)
+        output_path = str(secure_path_join(textract_viz_folder, filename))
+        resolved_output_path = os.path.realpath(output_path)
+        if not validate_path_safety(
+            resolved_output_path, base_path=textract_viz_folder
+        ):
+            raise ValueError(f"Unsafe output path rejected: {output_path}")
 
         # Save the combined image. Ensure that image file size is 500kb or less
 
@@ -12640,11 +12719,13 @@ def visualise_ocr_words_bounding_boxes(
         is_saved = False
         while quality >= 10:
             cv2.imwrite(
-                output_path, combined_image, [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+                resolved_output_path,
+                combined_image,
+                [int(cv2.IMWRITE_JPEG_QUALITY), quality],
             )
             if (
-                os.path.exists(output_path)
-                and os.path.getsize(output_path) <= max_filesize
+                os.path.exists(resolved_output_path)
+                and os.path.getsize(resolved_output_path) <= max_filesize
             ):
                 is_saved = True
                 break
@@ -12653,11 +12734,13 @@ def visualise_ocr_words_bounding_boxes(
         if not is_saved:
             # Save as lowest acceptable quality if cannot get under 500kb, or raise warning
             cv2.imwrite(
-                output_path, combined_image, [int(cv2.IMWRITE_JPEG_QUALITY), 10]
+                resolved_output_path,
+                combined_image,
+                [int(cv2.IMWRITE_JPEG_QUALITY), 10],
             )
             # Optionally log warning here that file could not be compressed below 500kb
 
-        log_files_output_paths.append(output_path)
+        log_files_output_paths.append(resolved_output_path)
 
         return log_files_output_paths
 
