@@ -1,6 +1,9 @@
 *.url
 *.ipynb
 *.pyc
+*.qmd
+_quarto.yml
+quarto_site/*
 .venv/*
 examples/*
 processing/*
