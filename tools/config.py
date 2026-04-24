@@ -1166,7 +1166,7 @@ SHOW_OCR_GUI_OPTIONS = convert_string_to_boolean(
 )
 
 SHOW_LOCAL_OCR_MODEL_OPTIONS = convert_string_to_boolean(
-    get_or_create_env_var("SHOW_LOCAL_OCR_MODEL_OPTIONS", "False")
+    get_or_create_env_var("SHOW_LOCAL_OCR_MODEL_OPTIONS", "True")
 )
 
 SHOW_PADDLE_MODEL_OPTIONS = convert_string_to_boolean(
