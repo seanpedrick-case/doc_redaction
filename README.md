@@ -127,7 +127,13 @@ For programmatic use (CLI-first API matching Gradio `api_name` routes), see **[P
 python -m app
 ```
 
-In practice, the **smoothest UI experience** (examples, bundled assets, docs links, etc.) is still usually via a **repository checkout** or **Docker**, but PyPI install is sufficient to launch the UI as long as you run it from a suitable working folder and have the system dependencies available (or run `python -m doc_redaction.install_deps` first).
+**Important: your working directory matters.** When you run `python -m app`, the app treats your *current folder* as the “app folder”:
+
+- It will look for configuration at `config/app_config.env` *relative to the folder you run it from* (and `python -m doc_redaction.install_deps` will also write `config/app_config.env` there).
+- It may create new folders in that location (for example `config/`, `output/`, `input/`, `logs/`, `usage/`, `feedback/`, and temporary/cache folders depending on your settings).
+- The full set of bundled UI example files (`example_data/`) is part of the **Git repository checkout** rather than the PyPI wheel. If you run from a “random” directory after a PyPI install, you should expect the Examples section to be missing unless you provide your own `example_data/` folder.
+
+In practice, the **smoothest UI experience** (examples, bundled assets, docs links, predictable relative paths) is still usually via a **repository checkout** or **Docker**, but PyPI install is sufficient to launch the UI as long as you run it from a suitable working folder and have the system dependencies available (or run `python -m doc_redaction.install_deps` first).
 
 #### Install from source (repository checkout / development)
 
@@ -242,6 +248,11 @@ These settings are useful for all users, regardless of whether you are using AWS
     *   Use these if you installed Tesseract or Poppler to a custom location on **Windows** and did not add them to the system PATH.
     *   Provide the path to the respective installation folders (for Poppler, point to the `bin` sub-directory).
     *   **Examples:** `POPPLER_FOLDER=C:/Program Files/poppler-24.02.0/bin/` `TESSERACT_FOLDER=tesseract/`
+
+*   `TESSERACT_DATA_FOLDER`
+    *   If Tesseract runs but you see an error like `Error opening data file ./eng.traineddata` or `Tesseract couldn't load any languages`, this is usually because it can't find the `tessdata/` language files.
+    *   Set this to the folder that contains `eng.traineddata` (typically a `tessdata` directory).
+    *   **Examples (Windows):** `TESSERACT_DATA_FOLDER=C:/Program Files/Tesseract-OCR/tessdata`
 
 *   `SHOW_LANGUAGE_SELECTION=True`
     *   Set to `True` to display a language selection dropdown in the UI for OCR processing.
