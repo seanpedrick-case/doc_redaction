@@ -209,7 +209,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 </header>
 
 
-<p>version: 2.2.0</p>
+<p>version: 2.2.1</p>
 <p>Welcome to the Document Redaction App documentation. This site provides comprehensive documentation for the Document Redaction App.</p>
 <p>Navigate through the sections to learn how to install, use, and manage the application. Below is a brief introduction to the app, followed by <strong>complete installation instructions</strong> (PyPI, source, and Docker overview).</p>
 <section id="document-redaction" class="level2">
@@ -233,11 +233,11 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <p>The application needs <strong>Tesseract</strong> (OCR) and <strong>Poppler</strong> (PDF utilities) on your system before Python packages will work fully.</p>
 <section id="automated-dependency-setup-recommended" class="level4">
 <h4 class="anchored" data-anchor-id="automated-dependency-setup-recommended">Automated dependency setup (recommended)</h4>
-<p>If you <strong>don’t have admin rights</strong> (or you just want the simplest setup), you can have the project download and configure <strong>Tesseract</strong> and <strong>Poppler</strong> into a local <code>third_party/</code> folder inside your checkout.</p>
+<p>If you <strong>don’t have admin rights</strong> (or you just want the simplest setup), you can have the project download and configure <strong>Tesseract</strong> and <strong>Poppler</strong> into a local <code>redaction_deps/</code> folder inside the doc_redaction folder.</p>
 <p>You need the installer script available first, which means either:</p>
 <ul>
 <li><strong>Repository checkout</strong>: <code>git clone ...</code> and run the command from the repo root (recommended for the web UI), or</li>
-<li><strong>PyPI install</strong>: <code>pip install doc_redaction</code> and run from a writable folder where you want <code>third_party/</code> and <code>config/app_config.env</code> to be created/updated.</li>
+<li><strong>PyPI install</strong>: <code>pip install doc_redaction</code> and run from a writable folder where you want <code>redaction_deps/</code> and <code>config/app_config.env</code> to be created/updated.</li>
 </ul>
 <p>From the repository root (or your chosen working folder) after creating/activating your venv and installing Python requirements:</p>
 <div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> doc_redaction.install_deps</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
