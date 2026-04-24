@@ -18,12 +18,12 @@ This application relies on two external tools for OCR (Tesseract) and PDF proces
 
 #### Automated dependency setup (recommended)
 
-If you **don’t have admin rights** (or you just want the simplest setup), you can have the project download and configure **Tesseract** and **Poppler** into a local `third_party/` folder inside your checkout.
+If you **don’t have admin rights** (or you just want the simplest setup), you can have the project download and configure **Tesseract** and **Poppler** into a local `redaction_deps/` folder inside the doc_redaction folder.
 
 You need the installer script available first, which means either:
 
 - **Repository checkout**: `git clone ...` and run the command from the repo root (recommended for the web UI), or
-- **PyPI install**: `pip install doc_redaction` and run from a writable folder where you want `third_party/` and `config/app_config.env` to be created/updated.
+- **PyPI install**: `pip install doc_redaction` and run from a writable folder where you want `redaction_deps/` and `config/app_config.env` to be created/updated.
 
 From the repository root (or your chosen working folder) after creating/activating your venv and installing Python requirements:
 

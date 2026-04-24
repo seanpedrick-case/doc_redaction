@@ -4,6 +4,8 @@
 *.qmd
 _quarto.yml
 quarto_site/*
+src/*
+redaction_deps/*
 .venv/*
 examples/*
 processing/*
