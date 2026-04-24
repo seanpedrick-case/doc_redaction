@@ -1,7 +1,7 @@
 ---
 name: doc-redaction-modifications
 description: "Modify existing PDF redactions using a single default path: Gradio `review_apply` with `gradio_client`. Use this when editing `*_review_file.csv`, adding scanned-page boxes, applying one page at a time, and verifying outputs."
-version: 2.0.2
+version: 2.0.3
 author: repo-maintained
 license: AGPL-3.0-only
 ---
@@ -37,14 +37,100 @@ Do not start with `/agent` or long UI-chain endpoints unless the fallback sectio
 
 These constraints are intentionally aligned with `doc-redaction-app/SKILL.md` so both skills use the same operational rules.
 
-## One-page execution loop
+## Execution loop
 
-Run this loop for each page:
-1. Edit only one target page in `*_review_file.csv`.
-2. Apply with `/review_apply`.
-3. Download outputs.
-4. Verify page review export image visually.
-5. Move to next page.
+For a full document review, edit all pages in a single modified CSV and apply once. Use page-by-page apply only if you need to compare individual pages mid-session.
+
+Recommended order:
+1. Load the `*_review_file.csv` into a script (not manually).
+2. Apply all removals, additions, and coordinate corrections programmatically.
+3. **Generate a local pre-apply preview to check box positions** (see section below) — no server round-trip needed.
+4. Apply the edited CSV via `/review_apply` only when the preview looks correct.
+5. Download and verify outputs — always sort by `st_mtime` to pick the newest file (see below).
+6. If corrections are needed, update the script and repeat from step 2.
+
+## Pre-apply coordinate preview (use this tool)
+
+The Document Redaction app includes `tools/preview_redaction_boxes.py`, a local rendering tool that draws proposed CSV boxes onto the original PDF pages and saves PNGs. **Use this before every `/review_apply` call** to verify box positions without server round-trips.
+
+### Option A — Local (preferred, instantaneous)
+
+Works when you have a local copy of the original PDF and the edited CSV (the normal case after downloading outputs from a prior run):
+
+```python
+from tools.preview_redaction_boxes import preview_redaction_boxes
+
+paths = preview_redaction_boxes(
+    "input/document.pdf",           # original un-redacted PDF
+    "output/document_review_file_edited.csv",
+    out_dir="output/preview",       # where to save PNGs
+    dpi=150,                        # 150 is fast; use 200+ for fine detail
+    draw_grid=True,                 # overlays horizontal % lines for reading y-coords
+    pages=[5, 6],                   # optional: only render specific pages
+)
+# Inspect paths — each PNG shows color-coded boxes with label text and a legend
+```
+
+Or from the command line:
+
+```bash
+python tools/preview_redaction_boxes.py original.pdf review_file.csv --pages 5,6 --grid
+```
+
+**What you get:** each PNG shows the original PDF page with:
+- Color-coded semi-transparent box fills by label type (PERSON=red, SIGNATURE=purple, LOCATION=blue, CUSTOM=amber …)
+- Label and text snippet printed at the top of each box
+- Horizontal percentage-grid lines with `%` markers so you can read off normalized y-coordinates by eye
+- A legend in the top-right corner
+
+### Option B — Server API (fallback, for headless agents without local files)
+
+If you do not have a local copy of the original PDF, call the `/preview_boxes` endpoint on the hosted app. It returns a ZIP of preview PNGs without applying any redactions:
+
+```python
+from gradio_client import Client, handle_file
+
+client = Client("https://seanpedrickcase-document-redaction.hf.space")
+zip_path, message = client.predict(
+    api_name="/preview_boxes",
+    pdf_file=handle_file("path/to/original.pdf"),
+    review_csv_file=handle_file("path/to/review_file_edited.csv"),
+    dpi=150,
+    max_width=1280,
+    draw_grid=True,
+    pages="5,6",    # optional, comma-separated 1-indexed page numbers
+)
+# Download zip_path from the server and extract to inspect PNGs
+```
+
+### Iteration pattern
+
+```
+edit CSV
+  → preview locally (< 5 seconds)
+  → spot the miss / misaligned box
+  → adjust CSV
+  → preview again
+  → (repeat until correct)
+  → apply via /review_apply   ← only now does the server get involved
+  → verify final output
+```
+
+### Always sort outputs by modification time
+
+Each `/review_apply` call generates a **new hash-prefixed filename**. After several iterations you will have multiple versions in the output folder. Always sort by `st_mtime` to pick the most recent:
+
+```python
+from pathlib import Path
+latest_pdf = sorted(
+    Path("output_final").glob("*_redacted.pdf"),
+    key=lambda f: f.stat().st_mtime, reverse=True
+)[0]
+latest_csv = sorted(
+    Path("output_final").glob("*_review_file.csv"),
+    key=lambda f: f.stat().st_mtime, reverse=True
+)[0]
+```
 
 ## Minimal end-to-end example (copy/paste)
 
@@ -120,6 +206,55 @@ with httpx.Client(timeout=120.0) as http:
 
 (WORK_DIR / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 print("Downloaded files to:", download_dir)
+```
+
+## Signatures — always manual (never auto-detected)
+
+The app's PII detection never finds handwritten signatures. Treat signature redaction as a **mandatory manual step** for any document that will be signed.
+
+### Workflow
+1. Render each page at high DPI and visually locate all signature zones.
+2. Use nearby OCR words (printed name below the line, "Mayor", "Signed", etc.) as coordinate anchors.
+3. Estimate `ymin`/`ymax` from a percentage-grid preview image.
+4. Add a `SIGNATURE` row per signature and a separate `PERSON` row for the printed name beneath it if that name is also sensitive.
+5. Verify with a local preview before applying.
+
+Typical coordinate starting estimates (refine per document):
+- Signature line area: `ymin = y_of_printed_name - 0.06`, `ymax = y_of_printed_name - 0.005`
+- Printed name: `ymin = y_of_printed_name`, `ymax = y_of_printed_name + 0.02`
+
+Expect 1-3 iterations before each signature is correctly covered.
+
+## OCR-invisible content (calligraphic text, stamps, decorative headings)
+
+OCR returns nothing for decorative or hand-lettered headings. Treat any visually prominent heading or stamp as a potential miss.
+
+### Detection
+- Render each page and look for text that is not reflected in `*_ocr_results_with_words_*.csv`.
+- Common culprits: calligraphic section titles, official seals, watermarks, rubber stamps.
+
+### Coordinate estimation
+1. Render the page with a percentage grid overlay (5% intervals).
+2. Read the approximate `ymin`/`ymax` from the grid for the undetected text block.
+3. Add a `CUSTOM` row with those coordinates and a descriptive `text` value.
+4. Preview locally, apply, verify. Expect 3-5 iterations for decorative text because local render ≠ server render exactly.
+
+## Cross-line phrases ("Sister City", "Sister Cities")
+
+When a two-word phrase spans two OCR lines (different `y` values), merging them into one box produces an oversized rectangle that covers unrelated text. Use a split-box approach instead:
+
+```python
+# r1 = OCR row for word 1 ("Sister"), r2 = OCR row for word 2 ("City")
+if abs(float(r1["ymin"]) - float(r2["ymin"])) > 0.01:
+    # words on different lines — two separate boxes
+    new_rows.append(make_row(page, "CUSTOM", r1["xmin"], r1["ymin"], r1["xmax"], r1["ymax"], "Sister"))
+    new_rows.append(make_row(page, "CUSTOM", r2["xmin"], r2["ymin"], r2["xmax"], r2["ymax"], "City"))
+else:
+    # same line — single merged box
+    new_rows.append(make_row(page, "CUSTOM",
+        min(r1["xmin"], r2["xmin"]), min(r1["ymin"], r2["ymin"]),
+        max(r1["xmax"], r2["xmax"]), max(r1["ymax"], r2["ymax"]),
+        "Sister City"))
 ```
 
 ## Adding redactions on scanned/image pages (no OCR boxes)
@@ -298,6 +433,18 @@ print("Review images in:", OUT_DIR)
    - Use only when both file paths are server-local and accepted by route validation.
 3. Browser UI:
    - Last resort when API access is unavailable.
+
+## Per-page review checklist
+
+Run through this for every page before signing off:
+
+- [ ] All named individuals redacted (check `*_ocr_results_with_words_*.csv` for full names).
+- [ ] All signatures redacted (handwritten lines, initials, flourishes).
+- [ ] All printed names below signatures redacted.
+- [ ] Target phrases redacted on this page (e.g. "London", "Sister City", email addresses).
+- [ ] No false positives: country names, city names, organisation names not flagged as PII left unredacted.
+- [ ] All boxes correctly sized — no box clips adjacent text or floats into wrong area.
+- [ ] OCR-invisible content checked visually (decorative headings, stamps, seals).
 
 ## Completion checklist
 

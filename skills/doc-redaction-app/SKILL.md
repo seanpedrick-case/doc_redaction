@@ -1,7 +1,7 @@
 ---
 name: doc-redaction-app
 description: "Operate the Document Redaction app with a practical default workflow: short Gradio endpoints via gradio_client, explicit handle_file rules, known failure traps, and output verification before sign-off."
-version: 2.0.3
+version: 2.0.4
 author: repo-maintained
 license: AGPL-3.0-only
 ---
@@ -21,6 +21,7 @@ license: AGPL-3.0-only
 Use these first:
 - `/doc_redact` for PDF/image redaction
 - `/review_apply` for applying edited review CSV
+- `/preview_boxes` for rendering proposed CSV boxes onto the original PDF **without** applying redactions — use before `/review_apply` to verify coordinates (returns a ZIP of PNGs)
 - `/pdf_summarise` for PDF summarization
 - `/tabular_redact` for tabular files
 
@@ -97,6 +98,65 @@ After every redaction/apply run:
    - false positives (non-sensitive text boxed)
    - box drift (misaligned geometry)
 5. Fix CSV page-by-page and re-apply using `/review_apply`.
+
+### Multiple apply runs — always sort outputs by modification time
+
+Each `/review_apply` call generates a **new hash-prefixed filename** (e.g. `a3f9..._ redacted.pdf`). After several iterations you will have multiple versions in the output folder. Scripts that glob for output files **must** sort by `st_mtime` descending and take the first result, or they will silently verify an older file:
+
+```python
+from pathlib import Path
+
+candidates = sorted(
+    Path("output_final").glob("*_redacted.pdf"),
+    key=lambda f: f.stat().st_mtime,
+    reverse=True,
+)
+latest = candidates[0]  # always the most recently applied version
+```
+
+Apply the same pattern to `*_review_file.csv` and `*_redactions_for_review.pdf`.
+
+### Pre-apply coordinate preview (saves round-trips)
+
+Before sending a modified CSV to `/review_apply`, render the proposed boxes on the **original PDF locally**. This lets you confirm geometry without a server round-trip and is especially valuable for manually placed boxes (signatures, decorative text, stamps).
+
+Add a percentage grid to measure where boxes land relative to page content:
+
+```python
+import csv, fitz
+from pathlib import Path
+from PIL import Image, ImageDraw
+
+PDF = Path("input/document.pdf")
+CSV = Path("output/document_review_file_edited.csv")
+OUT = Path("output/preview"); OUT.mkdir(exist_ok=True)
+
+with CSV.open(encoding="utf-8-sig") as f:
+    rows = {}
+    for r in csv.DictReader(f):
+        rows.setdefault(int(float(r.get("page", 0) or 0)), []).append(r)
+
+doc = fitz.open(str(PDF))
+for p in range(1, doc.page_count + 1):
+    pix = doc[p - 1].get_pixmap(dpi=150)
+    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+    draw = ImageDraw.Draw(img)
+    for pct in range(0, 100, 5):           # percentage grid
+        y = int(pct / 100 * pix.height)
+        draw.line([(0, y), (60, y)], fill="red", width=1)
+        draw.text((2, y), f"{pct}%", fill="red")
+    for r in rows.get(p, []):
+        draw.rectangle(
+            [float(r["xmin"]) * pix.width, float(r["ymin"]) * pix.height,
+             float(r["xmax"]) * pix.width, float(r["ymax"]) * pix.height],
+            outline="orange", width=3,
+        )
+    img.save(OUT / f"page_{p:03d}.png")
+```
+
+Even a perfect local preview does not guarantee pixel-perfect alignment in the final redacted PDF — the server applies boxes in the original PDF coordinate space, which can render slightly differently to a local PyMuPDF render. Always verify the actual applied output after each apply run.
+
+
 
 ### Scanned-page warning (don’t rely on PDF text search)
 

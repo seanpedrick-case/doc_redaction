@@ -10105,6 +10105,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
     from tools.simplified_api import (
         doc_redact_api,
         pdf_summarise_api,
+        preview_boxes_api,
         review_apply_api,
         tabular_redact_api,
     )
@@ -10142,6 +10143,18 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         api_description=(
             "Redact a single tabular file (CSV/XLSX/Parquet/DOCX) in one call. "
             "Returns (output_paths, message). Does not update the Tabular UI session."
+        ),
+    )
+
+    gr.api(
+        preview_boxes_api,
+        api_name="preview_boxes",
+        api_description=(
+            "Render proposed redaction boxes from a *_review_file.csv onto the original PDF "
+            "and return a ZIP of preview PNGs. Use this to verify box positions before calling "
+            "/review_apply — no redaction is applied. "
+            "Returns (zip_path, message). For agents with local files, calling "
+            "tools.preview_redaction_boxes.preview_redaction_boxes() directly is faster."
         ),
     )
 
