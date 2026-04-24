@@ -31,7 +31,7 @@ services:
       - --n-gpu-layers
       - "-1"
       - --ctx-size
-      - "98304"
+      - "131072"
       - --fit
       - "off"
       - --temp
@@ -59,6 +59,10 @@ services:
       - "300"
       - --parallel
       - "1"
+      - --cache-type-k
+      - "q8_0"
+      - --cache-type-v
+      - "q8_0"
     ports:
       - "8000:8080"
     volumes:
@@ -128,6 +132,12 @@ services:
       - "0" # Increase this value to fit within your available VRAM
       - --image_min_tokens
       - "300"
+      - --parallel
+      - "1"
+      - --cache-type-k
+      - "q8_0"
+      - --cache-type-v
+      - "q8_0"
     ports:
       - "8005:8080"
     volumes:
@@ -193,6 +203,12 @@ services:
       - "0" # Increase this value to fit within your availableVRAM
       - --image_min_tokens
       - "300"
+      - --parallel
+      - "1"
+      - --cache-type-k
+      - "q8_0"
+      - --cache-type-v
+      - "q8_0"
     ports:
       - "8001:8080"
     volumes:
@@ -256,6 +272,12 @@ services:
       - "42"
       - --image_min_tokens
       - "300"
+      - --parallel
+      - "1"
+      - --cache-type-k
+      - "q8_0"
+      - --cache-type-v
+      - "q8_0"
     ports:
       - "8000:8080"
     volumes:
@@ -292,7 +314,7 @@ services:
       - --mmproj-url
       - https://huggingface.co/unsloth/Qwen3.5-9B-A3B-GGUF/resolve/main/mmproj-F16.gguf
       - --n-gpu-layers
-      - "999"
+      - "-1"
       - --ctx-size
       - "131072"
       - --fit
@@ -318,12 +340,14 @@ services:
       - "42"
       - --n-cpu-moe
       - "0" # Increase this value to fit within your availableVRAM
+      - --image_min_tokens
+      - "300"
+      - --parallel
+      - "1"
       - --cache-type-k
       - "q8_0"
       - --cache-type-v
       - "q8_0"
-      - --image_min_tokens
-      - "300"
     ports:
       - "8003:8080"
     volumes:
@@ -371,7 +395,7 @@ services:
       - --no-warmup
       - --seed
       - "42"
-      - -np
+      - --parallel
       - "1"
       - --cache-type-k
       - "q8_0"
@@ -434,7 +458,7 @@ services:
       - --no-warmup
       - --seed
       - "42"
-      - -np
+      - --parallel
       - "1"
       - --cache-type-k
       - "q8_0"
