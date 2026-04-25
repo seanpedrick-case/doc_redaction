@@ -587,8 +587,8 @@ LOAD_REDACTION_ANNOTATIONS_FROM_PDF = convert_string_to_boolean(
 TESSERACT_FOLDER = get_or_create_env_var(
     "TESSERACT_FOLDER", ""
 )  #  # If installing for Windows, install Tesseract 5.5.0 from here: https://github.com/UB-Mannheim/tesseract/wiki. Then this environment variable should point to the Tesseract folder e.g. tesseract/
-if TESSERACT_FOLDER:
-    TESSERACT_FOLDER = ensure_folder_within_app_directory(TESSERACT_FOLDER)
+if TESSERACT_FOLDER and not os.path.isabs(TESSERACT_FOLDER):
+    # TESSERACT_FOLDER = ensure_folder_within_app_directory(TESSERACT_FOLDER)
     add_folder_to_path(TESSERACT_FOLDER)
 
 TESSERACT_DATA_FOLDER = get_or_create_env_var(
@@ -601,7 +601,7 @@ if TESSERACT_DATA_FOLDER and not os.path.isabs(TESSERACT_DATA_FOLDER):
 POPPLER_FOLDER = get_or_create_env_var(
     "POPPLER_FOLDER", ""
 )  # If installing on Windows,install Poppler from here https://github.com/oschwartz10612/poppler-windows. This variable needs to point to the poppler bin folder e.g. poppler/poppler-24.02.0/Library/bin/
-if POPPLER_FOLDER:
+if POPPLER_FOLDER and not os.path.isabs(POPPLER_FOLDER):
     POPPLER_FOLDER = ensure_folder_within_app_directory(POPPLER_FOLDER)
     add_folder_to_path(POPPLER_FOLDER)
 
@@ -2155,6 +2155,30 @@ PROFILE_REDACTION_APPLY = convert_string_to_boolean(
 # When True, merge overlapping or very close redaction boxes into fewer larger rectangles before applying (reduces redact_single_box calls on dense pages). Off by default. Warning - may turn a page into one single large redaction box if there are many redactions on the page.
 MERGE_SMALL_REDACTIONS = convert_string_to_boolean(
     get_or_create_env_var("MERGE_SMALL_REDACTIONS", "False")
+)
+
+# When True (and MERGE_SMALL_REDACTIONS), only merge boxes that are on the same visual text line.
+# Implemented as a required minimum vertical overlap ratio between the two boxes.
+#
+# This prevents pathological merges where two separate redactions on different lines get unioned into
+# one huge rectangle (e.g., if the merge threshold is large relative to the coordinate scale).
+MERGE_SMALL_REDACTIONS_SAME_LINE_ONLY = convert_string_to_boolean(
+    get_or_create_env_var("MERGE_SMALL_REDACTIONS_SAME_LINE_ONLY", "True")
+)
+
+# Minimum vertical overlap ratio (0–1) required for two boxes to be considered "same line" for merging.
+# Ratio is computed as overlap_height / min(height1, height2).
+try:
+    _merge_small_redactions_min_y_overlap_ratio = float(
+        get_or_create_env_var(
+            "MERGE_SMALL_REDACTIONS_MIN_Y_OVERLAP_RATIO", "0.6"
+        ).strip()
+        or "0.6"
+    )
+except ValueError:
+    _merge_small_redactions_min_y_overlap_ratio = 0.6
+MERGE_SMALL_REDACTIONS_MIN_Y_OVERLAP_RATIO = max(
+    0.0, min(1.0, _merge_small_redactions_min_y_overlap_ratio)
 )
 
 # When True, use Polars for review DataFrame coordinate scaling and CSV write in apply_redactions_to_review_df_and_files (faster for large annotation sets).

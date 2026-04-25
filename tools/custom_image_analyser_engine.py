@@ -7,6 +7,7 @@ import math
 import os
 import re
 import shutil
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -158,6 +159,22 @@ def _guess_tessdata_dir_from_tesseract_exe(tesseract_exe: str | None) -> str | N
     return None
 
 
+def _strip_wrapping_quotes(path: str | None) -> str:
+    """
+    Some .env setups accidentally include quotes in values, e.g.:
+      TESSDATA_PREFIX="tesseract/tessdata"
+    If those quotes end up in the environment variable value (including a stray trailing quote),
+    Tesseract will literally try to open paths like '"..."/eng.traineddata' and fail.
+    """
+    if not path:
+        return ""
+    s = str(path).strip()
+    if len(s) >= 2 and ((s[0] == s[-1] == '"') or (s[0] == s[-1] == "'")):
+        return s[1:-1].strip()
+    # Also handle common "one-sided" cases, e.g. a stray trailing quote.
+    return s.strip('"').strip("'").strip()
+
+
 def _resolve_tessdata_dir() -> str | None:
     """
     Return an absolute tessdata directory if we can find one.
@@ -166,15 +183,16 @@ def _resolve_tessdata_dir() -> str | None:
     2) tools.config.TESSERACT_DATA_FOLDER if it points to a valid tessdata dir
     3) Guess based on tesseract executable location (PATH / pytesseract config)
     """
-    env_prefix = os.environ.get("TESSDATA_PREFIX", "")
+    env_prefix = _strip_wrapping_quotes(os.environ.get("TESSDATA_PREFIX", ""))
     if _is_probable_tessdata_dir(env_prefix):
         return os.path.abspath(env_prefix)
 
     try:
         from tools.config import TESSERACT_DATA_FOLDER
 
-        if _is_probable_tessdata_dir(TESSERACT_DATA_FOLDER):
-            return os.path.abspath(TESSERACT_DATA_FOLDER)
+        cfg_dir = _strip_wrapping_quotes(TESSERACT_DATA_FOLDER)
+        if _is_probable_tessdata_dir(cfg_dir):
+            return os.path.abspath(cfg_dir)
     except Exception:
         # config import is optional for library use
         pass
@@ -195,11 +213,20 @@ def _ensure_tessdata_available_in_env(existing_config: str | None) -> str | None
     if not tessdata_dir:
         return existing_config
 
-    os.environ.setdefault("TESSDATA_PREFIX", tessdata_dir)
+    # Overwrite (not setdefault) so we can repair misquoted values already present in env.
+    os.environ["TESSDATA_PREFIX"] = tessdata_dir
 
     cfg = (existing_config or "").strip()
     if "--tessdata-dir" in cfg:
         return cfg
+
+    # On Windows, pytesseract parses config with shlex(posix=False), which can
+    # preserve quote characters in values and make Tesseract treat them as part
+    # of the path (e.g. '"C:\\...\\tessdata"/eng.traineddata'). Rely on
+    # TESSDATA_PREFIX there instead of injecting --tessdata-dir.
+    if sys.platform == "win32":
+        return cfg
+
     return (cfg + f' --tessdata-dir "{tessdata_dir}"').strip()
 
 
