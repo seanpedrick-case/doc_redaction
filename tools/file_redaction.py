@@ -82,6 +82,8 @@ from tools.config import (
     MAX_WORKERS,
     MERGE_BOUNDING_BOXES,
     MERGE_SMALL_REDACTIONS,
+    MERGE_SMALL_REDACTIONS_MIN_Y_OVERLAP_RATIO,
+    MERGE_SMALL_REDACTIONS_SAME_LINE_ONLY,
     NO_REDACTION_PII_OPTION,
     OCR_FIRST_PASS_MAX_WORKERS,
     OUTPUT_FOLDER,
@@ -4987,7 +4989,27 @@ def _merge_adjacent_redaction_boxes(
         out["ymax"] = max(b1["ymax"], b2["ymax"])
         return out
 
+    def _y_overlap_ratio(b1: dict, b2: dict) -> float:
+        h1 = max(0.0, float(b1["ymax"]) - float(b1["ymin"]))
+        h2 = max(0.0, float(b2["ymax"]) - float(b2["ymin"]))
+        denom = min(h1, h2)
+        if denom <= 0:
+            return 0.0
+        overlap = max(
+            0.0,
+            min(float(b1["ymax"]), float(b2["ymax"]))
+            - max(float(b1["ymin"]), float(b2["ymin"])),
+        )
+        return overlap / denom
+
     def _overlap_or_close(b1: dict, b2: dict) -> bool:
+        # Guard rail: do not merge across separate visual lines unless explicitly allowed.
+        # This prevents a single giant union box when two redactions happen to be consecutive
+        # in reading order but are located on very different y positions.
+        if MERGE_SMALL_REDACTIONS_SAME_LINE_ONLY:
+            if _y_overlap_ratio(b1, b2) < MERGE_SMALL_REDACTIONS_MIN_Y_OVERLAP_RATIO:
+                return False
+
         if b1["xmax"] + threshold < b2["xmin"] or b2["xmax"] + threshold < b1["xmin"]:
             return False
         if b1["ymax"] + threshold < b2["ymin"] or b2["ymax"] + threshold < b1["ymin"]:

@@ -9432,7 +9432,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         show_progress=True,
         show_progress_on=[summarisation_status],
-        api_name="undocumented",
+        api_visibility="undocumented",
     ).success(
         fn=lambda: "summarisation",
         outputs=[task_textbox],
