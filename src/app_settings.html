@@ -180,6 +180,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
   <li><a href="#file-output-options" id="toc-file-output-options" class="nav-link" data-scroll-target="#file-output-options">File Output Options</a>
   <ul class="collapse">
   <li><a href="#review-redaction-overlay-export" id="toc-review-redaction-overlay-export" class="nav-link" data-scroll-target="#review-redaction-overlay-export">Review redaction overlay export</a></li>
+  <li><a href="#redaction-box-post-processing-merging-small-boxes" id="toc-redaction-box-post-processing-merging-small-boxes" class="nav-link" data-scroll-target="#redaction-box-post-processing-merging-small-boxes">Redaction box post-processing (merging small boxes)</a></li>
   </ul></li>
   <li><a href="#direct-mode-lambda-configuration" id="toc-direct-mode-lambda-configuration" class="nav-link" data-scroll-target="#direct-mode-lambda-configuration">Direct Mode &amp; Lambda Configuration</a>
   <ul class="collapse">
@@ -1467,6 +1468,27 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <li><strong><code>APPLY_REDACTIONS_GRAPHICS</code>:</strong> <code>0</code> = ignore (default), <code>1</code> = remove graphics fully contained in redaction annotation, <code>2</code> = remove any overlapping vector graphics.</li>
 <li><strong><code>APPLY_REDACTIONS_TEXT</code>:</strong> <code>0</code> = remove all characters whose boundary box overlaps any redaction rectangle (default, complies with legal/data protection intentions), <code>1</code> = keep text while redacting graphics/images (does NOT comply with data protection intentions - use at your own risk).</li>
 </ul></li>
+</ul></li>
+</ul>
+</section>
+<section id="redaction-box-post-processing-merging-small-boxes" class="level3">
+<h3 class="anchored" data-anchor-id="redaction-box-post-processing-merging-small-boxes">Redaction box post-processing (merging small boxes)</h3>
+<p>These variables control an <strong>optional</strong> post-processing step that merges overlapping or very-close redaction rectangles into fewer larger rectangles before applying them to the PDF. This can reduce the number of <code>redact_single_box</code> calls on pages with many dense redactions.</p>
+<ul>
+<li><strong><code>MERGE_SMALL_REDACTIONS</code></strong>
+<ul>
+<li><strong>Description:</strong> If <code>"True"</code>, merge overlapping/nearby redaction rectangles into fewer rectangles before applying redactions. This can speed up pages with many small redactions, but can also create overly-large merged boxes if misconfigured.</li>
+<li><strong>Default Value:</strong> <code>"False"</code></li>
+</ul></li>
+<li><strong><code>MERGE_SMALL_REDACTIONS_SAME_LINE_ONLY</code></strong>
+<ul>
+<li><strong>Description:</strong> If <code>"True"</code> (and <code>MERGE_SMALL_REDACTIONS</code> is enabled), only merge boxes that are on the <strong>same visual text line</strong>, based on vertical overlap. This prevents pathological merges where two redactions that are adjacent in OCR text sequence but lie on different y positions (e.g.&nbsp;top-left text followed by bottom-right text) get merged into one giant rectangle.</li>
+<li><strong>Default Value:</strong> <code>"True"</code></li>
+</ul></li>
+<li><strong><code>MERGE_SMALL_REDACTIONS_MIN_Y_OVERLAP_RATIO</code></strong>
+<ul>
+<li><strong>Description:</strong> Minimum vertical overlap ratio (0–1) required for two boxes to be considered “same line” when <code>MERGE_SMALL_REDACTIONS_SAME_LINE_ONLY</code> is enabled. Computed as <code>overlap_height / min(height1, height2)</code>. Increase to be stricter (merge less across slightly misaligned boxes); decrease to be more permissive.</li>
+<li><strong>Default Value:</strong> <code>0.6</code></li>
 </ul></li>
 <li><strong><code>RETURN_PDF_FOR_REVIEW</code></strong>
 <ul>

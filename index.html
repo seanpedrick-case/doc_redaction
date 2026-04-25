@@ -209,7 +209,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 </header>
 
 
-<p>version: 2.2.1</p>
+<p>version: 2.2.3</p>
 <p>Welcome to the Document Redaction App documentation. This site provides comprehensive documentation for the Document Redaction App.</p>
 <p>Navigate through the sections to learn how to install, use, and manage the application. Below is a brief introduction to the app, followed by <strong>complete installation instructions</strong> (PyPI, source, and Docker overview).</p>
 <section id="document-redaction" class="level2">
@@ -280,7 +280,13 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <h4 class="anchored" data-anchor-id="web-ui-from-a-pypi-install">Web UI from a PyPI install</h4>
 <p>You can start the Gradio web UI after a PyPI install with:</p>
 <div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb7"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> app</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<p>For the smoothest UI experience (examples/assets/config in expected locations), a <strong>repository checkout</strong> or <strong>Docker</strong> is still usually simpler, but PyPI install is sufficient to launch the UI as long as the system dependencies are available (or you run <code>python -m doc_redaction.install_deps</code> first).</p>
+<p><strong>Important: your working directory matters.</strong> When you run <code>python -m app</code>, the app treats your <em>current folder</em> as the “app folder”:</p>
+<ul>
+<li>It loads configuration from <code>config/app_config.env</code> <em>relative to the folder you run it from</em> (and <code>python -m doc_redaction.install_deps</code> will also create/update that file there).</li>
+<li>It may create new folders in that location (for example <code>config/</code>, <code>output/</code>, <code>input/</code>, <code>logs/</code>, <code>usage/</code>, <code>feedback/</code>, and temporary/cache folders depending on your settings).</li>
+<li>The full set of bundled UI example files (<code>example_data/</code>) is part of the <strong>Git repository checkout</strong> rather than the PyPI wheel. If you run from a “random” directory after a PyPI install, you should expect the Examples section to be missing unless you provide your own <code>example_data/</code> folder.</li>
+</ul>
+<p>For the smoothest Gradio UI experience (examples/assets/config in expected locations, predictable relative paths), the recommended approach is a <strong>repository checkout</strong> (or <strong>Docker</strong>). PyPI install is still sufficient to launch the UI as long as the system dependencies are available (or you run <code>python -m doc_redaction.install_deps</code> first).</p>
 <p>Optional extras (PaddleOCR, VLM stack — see <code>pyproject.toml</code> on the repository for exact extras):</p>
 <div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb8"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install <span class="st">"doc_redaction[paddle,vlm]"</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>After a PyPI install you get:</p>
