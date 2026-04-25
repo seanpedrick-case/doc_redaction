@@ -384,6 +384,16 @@ services:
       - "q8_0"
       - --image_min_tokens
       - "300"
+      # - -hfd # This and the following parameters are for enabling speculative decoding. This should only be enabled when not using the mmproj parameter (i.e. no vision model available)
+      # - unsloth/gemma-4-E2B-it-GGUF
+      # - --hfd-file
+      # - gemma-4-E2B-it-IQ4_NL.gguf
+      # - -parallel
+      # - "1"
+      # - --draft-min
+      # - "1"
+      # - "draft-max"
+      # - "8"
     ports:
       - "8002:8080"
     volumes:

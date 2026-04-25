@@ -1077,6 +1077,104 @@ def tabular_redact_api(
     )
 
 
+def preview_boxes_api(
+    pdf_file: Any,
+    review_csv_file: Any,
+    dpi: int | None = 150,
+    max_width: int | None = 1280,
+    draw_grid: bool | None = True,
+    pages: str | None = None,
+) -> tuple[str, str]:
+    """
+    Render proposed redaction boxes from *review_csv_file* onto the
+    original *pdf_file* and return a ZIP archive of preview PNGs.
+
+    Use this endpoint when you do **not** have a local copy of the
+    original PDF and want to verify box positions without calling
+    ``/review_apply``.  For agents that already hold local files,
+    calling ``tools.preview_redaction_boxes.preview_redaction_boxes``
+    directly is faster (no upload/download round-trip).
+
+    Parameters
+    ----------
+    pdf_file:
+        The original (un-redacted) PDF uploaded by the caller.
+    review_csv_file:
+        The ``*_review_file.csv`` (original or edited) uploaded by the
+        caller.
+    dpi:
+        Render resolution (default 150).
+    max_width:
+        Maximum output image width in pixels (default 1280).
+    draw_grid:
+        If True (default), overlay percentage-grid lines so normalized
+        y-coordinates can be read by eye.
+    pages:
+        Optional comma-separated 1-indexed page numbers, e.g. ``"1,3,5"``.
+        If omitted, all pages are rendered.
+
+    Returns
+    -------
+    tuple[str, str]
+        ``(zip_path, message)`` where *zip_path* is a server-side path to
+        a ZIP file of preview PNGs retrievable via
+        ``GET /gradio_api/file=<zip_path>``.
+    """
+    import tempfile
+
+    from tools.preview_redaction_boxes import preview_redaction_boxes
+
+    pdf_path = normalize_gradio_file_to_path(pdf_file)
+    csv_path = normalize_gradio_file_to_path(review_csv_file)
+
+    if not pdf_path or not csv_path:
+        return "", "Error: both pdf_file and review_csv_file are required."
+
+    pdf_path = stage_gradio_upload_if_ephemeral(pdf_path, INPUT_FOLDER)
+    csv_path = stage_gradio_upload_if_ephemeral(csv_path, INPUT_FOLDER)
+
+    page_list: list[int] | None = None
+    if pages:
+        try:
+            page_list = [int(p.strip()) for p in pages.split(",") if p.strip()]
+        except ValueError:
+            return (
+                "",
+                f"Error: 'pages' must be comma-separated integers, got: {pages!r}",
+            )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out_paths = preview_redaction_boxes(
+            pdf_path,
+            csv_path,
+            out_dir=tmp,
+            dpi=int(dpi or 150),
+            max_width=int(max_width or 1280),
+            draw_grid=bool(draw_grid),
+            pages=page_list,
+        )
+
+        if not out_paths:
+            return (
+                "",
+                "No pages rendered — check that the CSV contains rows with valid page numbers.",
+            )
+
+        out_base = Path(OUTPUT_FOLDER) / f"preview_{Path(pdf_path).stem}"
+        out_base.mkdir(parents=True, exist_ok=True)
+        zip_path = str(out_base / "preview_boxes.zip")
+
+        import zipfile
+
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for p in out_paths:
+                zf.write(p, arcname=Path(p).name)
+
+    n = len(out_paths)
+    msg = f"Preview complete: {n} page(s) rendered. Download the ZIP to inspect box positions."
+    return zip_path, msg
+
+
 def doc_redact_api(
     document_file: Any,
     redact_entities: list[str] | None = None,
@@ -1117,4 +1215,5 @@ __all__ = [
     "run_apply_review_redactions",
     "summarise_document_from_upload_for_gradio_api",
     "pdf_summarise_api",
+    "preview_boxes_api",
 ]
