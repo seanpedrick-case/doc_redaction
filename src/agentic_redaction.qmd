@@ -1,0 +1,265 @@
+---
+title: "Agentic redaction - tests and outputs"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-title: "On this page"
+---
+
+```{=html}
+<style>
+.agent-prompt-box {
+  white-space: pre-line;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  border: 1px solid #e0e0e0;
+  background: #fafafa;
+  padding: 16px;
+  border-radius: 4px;
+  line-height: 1.35;
+}
+.agent-prompt-box p { margin: 0.35em 0; }
+.agent-prompt-box ul { margin: 0.35em 0; padding-left: 1.25em; }
+.agent-prompt-box li { margin: 0.08em 0; }
+</style>
+```
+
+27 April 2026
+
+# Summary
+
+Document redaction tasks are tasks that involve text and vision capabilities, and long context understanding to review and redact each page of a long document. Privacy is also key, which gives a strong incentive to use local, open source models if possible.
+
+In this post, I investigate the possibility of using agent workflows to conduct end-to-end redaction and review tasks. 
+
+I had three main questions that I wanted to answer for this experiment:
+
+**1. Can any model perform a full end-to-end redaction and review task?**
+
+To prove if this is at all possible, I first tried Sonnet 4.6 within Cursor.
+
+**2. Can small, local models perform agentic redaction and review tasks?**
+
+I wanted to see if small, local models could perform this task at all. If possible, this would give rise to the possibility of a fully local, private redaction and review workflow. For this, I tried Qwen 3.6 27B, and 35B A3B on a local system (quantised to 4 bit, and run on llama.cppon a 24GB VRAM GPU) in Hermes Agent (v0.11.0 with commit 9d1b277e). The docker compose file used to deploy this model can be found [here](https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_llama_long_context.yml){target="_blank"}.
+
+**3. Can the biggest open source models stand up to closed models for redaction and review tasks?**
+To see if a performant model based on a large open source model could be used to perform the task. For this, I tried Kimi 2.5, and Cursor Composer 2.0,  [a fine tuned version of Kimi 2.5](https://cursor.com/blog/composer-2-technical-report).
+
+To do this task, a skill file was developed for [document redaction](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/vlm_blog/agentic_redaction/skills/doc-redaction-app/SKILL.md){target="_blank"} and [modifying redaction results](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/vlm_blog/agentic_redaction/skills/doc-redaction-modifications/SKILL.md){target="_blank"} based on the open source [Document Redactions app / package](https://github.com/seanpedrick-case/doc_redaction){target="_blank"}. The agents were instructed to redact an [example document](https://github.com/seanpedrick-case/doc_redaction/blob/main/example_data/Partnership-Agreement-Toolkit_0_0.pdf) according to a set of [custom instructions](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/vlm_blog/agentic_redaction/skills/Example%20agent%20skills%20use%20prompt.txt){target="_blank"} by using a publicly-available [Hugging Face space](https://huggingface.co/spaces/seanpedrickcase/document_redaction){target="_blank"} serving the redaction app as a tool (this could be served locally).
+
+## Findings
+
+| Model | Rating | Positives | Negatives |
+|-|-|-|-|
+| Sonnet 4.6 (in Cursor) | 8.0 | Generally good quality, accurate redactions on each page | Very high cost (~$1.62 for 7 pages) |
+| Composer 2.0 (Kimi 2.5 fine tune in Cursor) | 7.5 | Much less lazy, and better quality redactions than Kimi 2.5. Faster and cheaper than Sonnet 4.6 | Unreliable - lazy on some pages, while very good on others. |
+| Qwen 3.6 27B (4 bit, in Hermes Agent) | 4.0 | Completed the workflow and correctly used tools. Potential for fully private deployment, 0 API token cost | Generally lazy on following instructions. Misplaced redaction boxes, particularly signatures. Long time taken. |
+| Kimi 2.5 (in Cursor) | 3.5 | Completed the workflow and correctly used tools. Cheaper than Sonnet. | Very lazy, did not reliably follow instructions. Badly placed redaction boxes, particularly signatures |
+
+I found that Sonnet 4.6 within Cursor was able to follow the instructions given, and was mostly successful (but at high cost). Qwen 3.6 27B and 35B A3B on a local system (quantised to 4 bit) completed the redaction and review task, but the quality of the output was not good. Kimi 2.5, surprisingly, performed little better than Qwen. Cursor Composer 2.0, performed much better than Kimi, but not as well as Sonnet, showing that finetuning a large model can significantly improve performance. However, redaction quality by page varied significantly.
+
+I was impressed that a local model (Qwen 3.6 27B 4 bit) running on consumer hardware (24GB VRAM) could perform the full redaction-review workflow. Obviously the quality of the output could not compare to the largest models, but the fact it could do it at all gives rise to the possibility that in a relatively short time, a fully local and private redaction workflow could be within reach.
+
+In conclusion, a full end to end redaction workflow with agents at a quality level to replace a human redactor is not currently possible, even with the best models. Local models are still far from being able to perform the task to a satisfactory level. However, all the models tested were able to follow the steps in the workflow and call appropriate tools. So the skillset is there, it's more of a question of model quality. As AI models continue to improve in general peformance, I am sure that within a year or two, all local and cloud models will peform this task much better - I will continue to benchmark new models on this task as they become available.
+
+# Introduction
+
+Redaction tasks are highly complex, and differ from many other types of work with documents in that it is a highly manual vision & text understanding task. To successfully redact a document, currently a person needs to complete a number of tasks (for each page):
+
+1. Locate the physical location of text and images on the page.
+2. Read and fully understand the text.
+3. Assess what is 'personal information' in the specific context discussed in the text or images (e.g. faces, signatures).
+4. Accurately place boxes on top of the content to be redacted so that they cover precisely the information to be excluded, without overlapping adjacent content.
+
+As well as the above, 5. a final check is always required to review all redaction boxes to ensure that they are accurate and complete before sending on.
+
+On top of the above requirements, redaction tasks often also have additional constraints due to the fact that the data is by its nature highly sensitive. There is a clear incentive to reduce reliance on solutions that send data elsewhere and potentially expose this sensitive information.
+
+In recent years, OCR and PII identification tools have improved greatly, including local models. And so there is an increasing incentive to use these tools to speed up the redaction process.
+
+## Redaction using OCR and PII identification tools
+
+There are many performant local OCR tools now available (e.g. PaddleOCR, Tesseract), and PII identification models (e.g. spaCy) that can be used for redaction tasks. AI models, as VLMs or LLMs, have recently been incorporated as additional tools that can improve results by e.g. greater understanding of handwritten text than 'traditional' OCR models (see the blog posts [here](https://seanpedrick-case.github.io/doc_redaction/src/ocr_and_redaction_with_qwen35.html){target="_blank"} and [here](https://seanpedrick-case.github.io/doc_redaction/src/redaction_with_vlm_and_llms.html){target="_blank"}).
+
+There are a number of apps that have tried to bring these models together as a useful tool for redaction tasks by humans. For example, the [open source Document Redaction app](https://github.com/seanpedrick-case/doc_redaction) was designed as a tool that would be used by humans to speed up steps 1-4 above, after which the user would manually conduct step 5 with the app to manually check the results page by page. 
+
+However, despite improvements in OCR and PII identification models, there are two issues that remain with using automated redaction tools like this:
+
+1. Redaction tools generally work best for 'blanket' redaction tasks, i.e. all names, email addresses etc., regardless of context. 
+2. The OCR / PII identification tools are not perfectly accurate, and will miss out personal information/wrongly redact even with blanket redaction.
+
+The above issues mean that the time saving from using the Document Redaction app is limited. Some form of human review is needed to correct the ~20% of redaction instances that have issues. This percentage can be much higher in situations where blanked redaction is not appropriate, and e.g. only some names should be redacted, based on the context of the text around them.
+
+## The advent of agentic AI models
+
+Until recently, AI models have not been capable of end to end redaction tasks (initial redaction + comprehensive review of redaction results). With the advent of agentic AI tools, this may have changed. Powerful models and agent harnesses are becoming available that are capable of long-running, complex tasks.
+
+Redaction and review is exactly this type of task. In theory, using an agent harness, it should be feasible for an AI model to conduct steps 1-5 described above. If the agent can understand relatively complex instructions, while understanding the context of the text and images on the page, then redaction tasks could potentially be performed in the background on a system. In this case, qualified human redactors would need only to do a quick scan and verification of results before further use.
+
+To test this theory, I tried out a number of agentic models. First, to prove if this is at all possible, I tried Sonnet 4.6 within Cursor. Then I tried out several open source models that are considered best in their class. First, Qwen 3.6 27B, and 35B A3B on a local system (on a 24GB VRAM GPU) in Hermes Agent. I also compared them against a performant model based on a large open source model (Kimi 2.5, and Cursor Composer 2.0, a finetuned version of the Kimi 2.5 model), to see what could be possible with one of the better models currently available for a relatively low cost. 
+
+# Method
+
+Our agents were given a task to redact a document using the Document Redaction app hosted on Hugging Face Spaces: [seanpedrickcase-document-redaction](https://seanpedrickcase-document-redaction.hf.space){target="_blank"}, running on version 2.2.2. The app has been adapted to have a number of API endpoints available to facilitate the use of app tools by agents. You can see these by viewing the 'Use via API' page accessible at the bottom of the app page, or directly [here](https://seanpedrickcase-document-redaction.hf.space/gradio_api/info).
+
+The agents were given the [following instructions](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/vlm_blog/agentic_redaction/skills/Example%20agent%20skills%20use%20prompt.txt){target="_blank"}, which were designed to give a range of tasks to add, remove, and review redaction boxes:
+
+<div class="agent-prompt-box">
+Using the doc-redaction-app skill, redact this pdf document: https://github.com/seanpedrick-case/doc_redaction/blob/main/example_data/Partnership-Agreement-Toolkit_0_0.pdf using the redaction tool hosted at https://seanpedrickcase-document-redaction.hf.space. Use the paddle OCR method if that is available, or tesseract if it is not. Use the the Local PII identification method. Save the results to a folder in your workspace named 'output'.
+
+Next, I would like you to check through the redactions with the doc-redaction-modifications skill. I would like you to use the output files from the redaction task to check through redaction results on each page, and remove / add / modify redactions according to these rules:
+
+- Any redaction box related to general country names should be removed
+- All redactions for Rudy Giuliani should be removed
+- Redaction box sizings and positions should be checked visually to ensure they fully cover the relevant words
+- Redactions should be added for any signatures
+- All mentions of London, and 'Sister City' should be redacted
+- Ensure that all remaining redaction boxes cover genuine PII and are not false positives
+- Ensure that other genuine PII is not missed, and is covered by a redaction box.
+
+As you go, ensure that you check the redaction box positions for accuracy on the page with image exports.
+
+After you have completed your review, upload the updated files into the Redaction app to create new finalised outputs. Put these in the 'output_final' subfolder in your workspace.
+</div>
+
+The source document to be redacted was the Partnership Agreement Toolkit PDF from the project examples: [Partnership-Agreement-Toolkit_0_0.pdf](https://github.com/seanpedrick-case/doc_redaction/blob/main/example_data/Partnership-Agreement-Toolkit_0_0.pdf){target="_blank"}. As you can see, this is a document that has a range of information including typed text, scanned 'noisy' document pages, and additional visual features such as signatures that would not be picked up by simple OCR models.
+
+Skill files were given to the agents for [document redaction](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/vlm_blog/agentic_redaction/skills/doc-redaction-app/SKILL.md){target="_blank"} and [modifying redaction results](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/vlm_blog/agentic_redaction/skills/doc-redaction-modifications/SKILL.md){target="_blank"}, based on the API endpoints available in the [Document redaction Gradio app](https://seanpedrickcase-document-redaction.hf.space){target="_blank"}. The skill files were created iteratively in discussion with agentic AI models as they attempted to access the app space. Over several days, both the app and skill files were updated until I achieved a 'usable' workflow.
+
+I had three main questions that I wanted to answer for this experiment:
+
+**1. Can any model perform a full end-to-end redaction and review task?**
+
+To prove if this is at all possible, I first tried Sonnet 4.6 within Cursor.
+
+**2. Can small, local models perform agentic redaction and review tasks?**
+
+I wanted to see if small, local models could perform this task at all. If possible, this would give rise to the possibility of a fully local, private redaction and review workflow. For this, I tried Qwen 3.6 27B, and 35B A3B on a local system (quantised to 4 bit, and run on llama.cppon a 24GB VRAM GPU) in Hermes Agent (v0.11.0 with commit 9d1b277e). The docker compose file used to deploy this model can be found [here](https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_llama_long_context.yml){target="_blank"}.
+
+**3. Can the biggest open source models stand up to closed models for redaction and review tasks?**
+To see if a performant model based on a large open source model could be used to perform the task. For this, I tried Kimi 2.5, and Cursor Composer 2.0,  [a fine tuned version of Kimi 2.5](https://cursor.com/blog/composer-2-technical-report).
+
+# Results
+
+There are seven pages in the test document, but for brevity I will give an overall score, and then focus on the result for a couple of the difficult pages, page, 5 and 6 which were referred to in custom instructions (always redact 'London', remove redactions for Rudy Giuliani, add redactions for Sister City) and contain a signature and some handwritten text (see below).
+
+[![Partnership Agreement page 5](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/agentic_redaction/Partnership-Agreement-Toolkit_page_5.png)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/agentic_redaction/Partnership-Agreement-Toolkit_page_5.png){target="_blank"}
+
+[![Partnership Agreement page 6](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/agentic_redaction/Partnership-Agreement-Toolkit_page_6.png)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/agentic_redaction/Partnership-Agreement-Toolkit_page_6.png){target="_blank"}
+
+## Is this taks even possible? Trying Sonnet 4.6 within Cursor
+
+** Rating: 8 / 10 **
+
+Final output files can be found [here](https://github.com/seanpedrick-case/document_redaction_examples/tree/main/vlm_blog/agentic_redaction/sonnet_46/output_final/){target="_blank"}. [This file](https://github.com/seanpedrick-case/document_redaction_examples/blob/main/vlm_blog/agentic_redaction/sonnet_46/output_final/0be425c626e34501b6c334350996d6ee_Partnership-Agreement-Toolkit_0_0_redacted.pdf){target="_blank"} is the final redacted output.
+
+Sonnet tried to follow all the instructions given, and was mostly successful. There are however some instances where it got things wrong.
+
+Page 5 is below. Here, Sonnet did pretty well. It redacted all 'London' and 'Sister City'entries, it correctly unredacted Rudy Giuliani's name, and it added redactions for signatures. Signature boxes are mostly well placed, apart from missing a little text to the right of each signature.
+
+[![Partnership Agreement page 5](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/agentic_redaction/sonnet_46/output_final/final_Partnership-Agreement-Toolkit_0_0_redacted_5.png)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/agentic_redaction/sonnet_46/output_final/final_Partnership-Agreement-Toolkit_0_0_redacted_5.png){target="_blank"}
+
+Let's now take a look at page 6. This page looks worse. Sonnet successfully redacted instances of 'Sister City', however it went totally overboard in redacting the instance of 'Sister City' near the top of the page in the title, creating a huge redaction box and covering other text. The signatures to the bottom are completely covered, but the boxes are oversized towards the left.
+
+[![Example of a handwritten note](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/agentic_redaction/sonnet_46/output_final/final_Partnership-Agreement-Toolkit_0_0_redacted_6.png)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/agentic_redaction/sonnet_46/output_final/final_Partnership-Agreement-Toolkit_0_0_redacted_6.png){target="_blank"}
+
+Overall, I was quite impressed with Sonnet here. It followed the instructions generally well. With the exception of badly sized and aligned redaction boxes here and there, it did a pretty good job. Having this running on the background on a large document (assuming it could perform as well on 300 pages as it did on 7 pages), this could be a time saver for redaction review for a human performing redaction.
+
+This of course has to be balanced against the cost - Sonnet used about 25 minutes of processing time, and about 110,000 non-cached input tokens, and about 87,000 non-cached output tokens. According to Anthropic API pricing, this would put the cost of redacting and reviewing this 7 page document at about $1.62, which is pretty steep, and took about 25 minutes of processing time. That would put a 300 page document (assuming linear scaling) at around $70, and could take up to 18 hours, which I imagine is not feasible in almost any situation.
+
+Practical points aside, we can show at least that agentic AI **can** perform the redaction and review task, and can do so with a reasonable degree of accuracy. Now let's see how local models can do in comparison.
+
+## Qwen 3.6 27B deployed locally within Hermes Agent
+
+** Rating: 4 / 10 **
+
+I deployed Qwen 3.6 27B on a local system (quantised to 4 bit, and run on llama.cppon a 24GB VRAM GPU) in Hermes Agent (v0.11.0 with commit 9d1b277e). The docker compose file used to deploy this model can be found [here](https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_llama_long_context.yml){target="_blank"}. Qwen was running with 128k context at about 30 tokens per second. It took a long time on the task, around 45 minutes. As opposed to Sonnet, the token cost is effectively 0, apart from electricity cost. So, how did it do?
+
+On the plus side, it did run the full workflow, used tools and skills correctly, and completed the task. Apart from this, all the results were pretty bad. You can see all the output files from this run [here](https://github.com/seanpedrick-case/document_redaction_examples/tree/main/vlm_blog/agentic_redaction/qwen_36_27b/output_final/){target="_blank"}. As before I will focus on page 5 and 6.
+
+First, page 5. The pluses - London is successfully redacted on the page. Rudy Giuliani is correctly unredacted. The model did make an attempt the covering the signatures. Now the negatives - the signature boxes are completely misplaced and too small. The 'Sister City' redactions are also missed.
+
+[![Partnership Agreement page 5](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/agentic_redaction/qwen_36_27b_3/output_final/final_Partnership-Agreement-Toolkit_0_0_redacted_5.png)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/agentic_redaction/qwen_36_27b_3/output_final/final_Partnership-Agreement-Toolkit_0_0_redacted_5.png){target="_blank"}
+
+Let's now take a look at page 6. Here we have the same issues. The 'Sister City' redactions are missed, the signature boxes are completely misplaced and too small. A large redaction box has been placed towards the top, which covers irrelevant text. 
+[![Example of a handwritten note](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/agentic_redaction/qwen_36_27b_3/output_final/final_Partnership-Agreement-Toolkit_0_0_redacted_6.png)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/agentic_redaction/qwen_36_27b_3/output_final/final_Partnership-Agreement-Toolkit_0_0_redacted_6.png){target="_blank"}
+
+Elsewhere, it seems the model didn't attempt to redact anything on pages 1-3.
+
+Qwen 3.6 27B did not perform well at this task, and it would not save a user time in redacting by turning out results like this. But to put this in perspective, this was a model run completely locally, with a token cost of 0 (excluding electricity), and if calling a version of the Redaction app run locally, could be run on a completely isolated, private system. The fact that this local model could follow the workflow steps at all is impressive. As small local models improve, I expect that they will perform this task much better in the future, and eventually a fully local redaction workflow will be viable.
+
+## Kimi 2.5 within Cursor
+
+** Rating: 3.5 / 10 **
+
+I wanted to see if any open source model could successfully complete this task. I tried Kimi 2.5, a ~1 Trillion parameter model that is widely regarded as one of the best open source models available in this size range. This is a large model, and so is not practical to run locally, but gives an indication of what is possible with the current frontier of open source models. I tried it in Cursor, to see if it could compare to Sonnet 4.6 using the same agent harness. All the results for Kimi 2.5 can be found [here](https://github.com/seanpedrick-case/document_redaction_examples/tree/main/vlm_blog/agentic_redaction/kimi_25_2){target="_blank"}.
+
+Honestly, I was surprised and disappointed at how badly Kimi 2.5 performed. Let's take a look at page 5. The results are quite similar to Qwen 3.6 27B. Sister City redactions are missed. The signature boxes are completely off. It did redact 'London', and avoided redacting Rudy Giuliani's name. But that's about all that is positive here.
+
+[![Partnership Agreement page 5](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/agentic_redaction/kimi_25_2/output_final/final_Partnership-Agreement-Toolkit_0_0_redacted_5.png)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/agentic_redaction/kimi_25_2/output_final/final_Partnership-Agreement-Toolkit_0_0_redacted_5.png){target="_blank"}
+
+Now, page 6. This is even worse. It didn't even attempt to redact 'Sister City', and I could barely call that an attempt at redacting the signatures.
+
+[![Example of a handwritten note](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/agentic_redaction/kimi_25_2/output_final/final_Partnership-Agreement-Toolkit_0_0_redacted_6.png)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/agentic_redaction/kimi_25_2/output_final/final_Partnership-Agreement-Toolkit_0_0_redacted_6.png){target="_blank"}
+
+On page 1-3, Kimi also put in minimal effort.
+
+In general, Kimi 2.5 seemed to be lazy at this task. Partially attempting some of the instructions, quality varying greatly by page. It was relatively quick, at about 12 minutes, but I would put this down mostly to not trying some of the required steps on at least some pages, rather than efficiency. It also cost 95,000 input tokens, and 20,000 output tokens (non-cached), about a quarter of the output tokens that Sonnet used, highlighting its relative laziness.
+
+Outputs like this would not save a human performing redaction any time, and I have scored it lower than Qwen due to the fact that you would be paying for tokens on top of this.
+
+## Composer 2.0 (Kimi 2.5-finetuned model) agent within Cursor
+
+** Rating: 7 / 10 **
+
+I was highly disappointed by Kimi. But then I thought, what if the issue is that Kimi has not been effectively finetuned towards agentic tool calling and coding? To test this, I tried the Composer 2.0 model. This model is [based on a finetuned Kimi 2.5 model](https://cursor.com/blog/composer-2-technical-report){target="_blank"}. 
+
+All the outputs produced by the model for the task can be found here. The model took about 20 minutes to conduct the redact / review task of the 7 page document, read in about 180,000 of non-cached tokens during the process, and produced about 35,000 output tokens.
+
+All the outputs produced by the Composer model can be found [here](https://github.com/seanpedrick-case/document_redaction_examples/tree/main/vlm_blog/agentic_redaction/composer_2_fast_2){target="_blank"}. 
+
+Looking at page 5 first, and the results are... not bad at all:
+
+[![Partnership Agreement page 5](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/agentic_redaction/composer_2_fast_2/output_final/final_Partnership-Agreement-Toolkit_0_0_redacted_5.png)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/agentic_redaction/composer_2_fast_2/output_final/final_Partnership-Agreement-Toolkit_0_0_redacted_5.png){target="_blank"}
+
+Composer has attempted all the London and Sister City redactions (boxes are a tad large, but usable). It has ignored the Rudy Giuliani name towards the bottom. And it had a decent attempt at the signatures, although not quite covering everything.
+
+Page 6 is worse:
+
+[![Partnership Agreement page 6](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/agentic_redaction/composer_2_fast_2/output_final/final_Partnership-Agreement-Toolkit_0_0_redacted_6.png)](https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/agentic_redaction/composer_2_fast_2/output_final/final_Partnership-Agreement-Toolkit_0_0_redacted_6.png){target="_blank"}
+
+Composer missed a Sister City redaction (the handwriting type), and the signature box is completely off. It doesn't seem to have attempted the second redaction.
+
+In general, pages 1-3 are good, and followed the instructions. 
+
+This finetuned Composer 2.0 was much better than the original Kimi 2.5 model. It was much better at attempting all tasks, and was in general less lazy on all pages.
+
+The input in terms of input / output tokens (180,000 non-cached inputs, 35,000 output), which would mean about $0.18 to redaction and review this 7 page document, or $7.50 for a 300 page document. This is much more within the range of what would be acceptable in terms of cost to replace a human redaction task. Cursor spent 20 minutes on the task. If I ran this agent over the document as a 'first pass', using the Document Redaction app as a tool to redact and review the document, would it save time doing redactions? I think maybe yes, a little. Although with the variation in redaction quality by page, I'm not sure I would trust the results to be consistent throughout a document, especially a much larger one.
+
+
+# Conclusions
+
+| Model | Rating | Positives | Negatives |
+|-|-|-|-|
+| Sonnet 4.6 (in Cursor) | 8.0 | Generally good quality, accurate redactions on each page | Very high cost (~$1.62 for 7 pages) |
+| Composer 2.0 (Kimi 2.5 fine tune in Cursor) | 7.5 | Much less lazy, and better quality redactions than Kimi 2.5. Faster and cheaper than Sonnet 4.6 | Unreliable - lazy on some pages, while very good on others. |
+| Qwen 3.6 27B (4 bit, in Hermes Agent) | 4.0 | Completed the workflow and correctly used tools. Potential for fully private deployment, 0 API token cost | Generally lazy on following instructions. Misplaced redaction boxes, particularly signatures. Long time taken. |
+| Kimi 2.5 (in Cursor) | 3.5 | Completed the workflow and correctly used tools. Cheaper than Sonnet. | Very lazy, did not reliably follow instructions. Badly placed redaction boxes, particularly signatures |
+
+## **1. Can any model perform a full end-to-end redaction and review task?**
+
+Closed source models - such as Sonnet 4.6, or Composer 2.0 in Cursor - are technically capable of end to end redaction and review tasks in an agent harness. However, the quality of the results, even for Sonnet 4.6 are not quite good enough. Additionally, the cost of Sonnet 4.6 would be prohibitive for regular redaction of large documents. Composer 2.0 would seem to be a more realistic option in terms of the cost/quality balance. However, I suspect that for long documents, the page to page unreliability in redaction quality would make its use impractical.
+
+## **2. Can small, local models perform agentic redaction and review tasks?**
+
+Local models (Qwen 3.6 27B) on consumer hardware (24 GB VRAM) can follow the redaction and review workflow, use the correct tools identified by the skills, and produce output redacted documents. However, the quality of these redacted documents is much lower than that for the closed models tested.
+
+My expectations of these smaller models was probably too high for this experiment. The fact that they can do this highly complex task at all is a testament to the progress made in open source AI in the space of just a few years. From one perspective, the important frontier has been reached - small, local models can successfully run complex agentic workflows. Now all that is needed is increased model quality. We know that through e.g. the Opus and Sonnet range of models that this is possible. The question is more - how long will it take to get to that level of quality?
+
+## **3. Can the biggest open source models stand up to closed models for redaction and review tasks?**
+
+I was disappointed by the performance of Kimi 2.5 for the redaction task (performance was similar to the local Qwen 3.6 model), and I'm wondering why it performed so badly, especially compared to the finetuned version of the same model (Composer 2.0). I can only think that this model hasn't been trained enough on agent tool calling or coding tasks to perform well at this type of task.
+
+## General conclusions
+
+It seems that for real life redaction tasks, significant human review would still be required following the use of even the best closed source models. AI is not ready to conduct end-to-end document redaction tasks just yet. But I suspect in a year or two, they may be. I will continue to benchmark new models against this task as they become available to keep track of improvements.
