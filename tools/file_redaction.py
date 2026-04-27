@@ -5486,7 +5486,7 @@ def merge_img_bboxes(
     max_word_gap_height_multiplier: float = 3.0,
 ):
     """
-    Merges bounding boxes for image annotations based on the provided results from signature and handwriting recognizers.
+    Merges bounding boxes for image annotations based on the provided results.
 
     Args:
         bboxes (list): A list of bounding boxes to be merged.

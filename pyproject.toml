@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc_redaction"
-version = "2.2.3"
+version = "2.2.4"
 description = "Redact PDF/image-based documents, Word, or CSV/XLSX files using a Gradio-based GUI interface"
 readme = "README_PYPI.md"
 authors = [
@@ -50,7 +50,7 @@ dependencies = [
     "pandas<=2.3.3",
     "scikit-learn<=1.8.0",
     "spacy<=3.8.14",
-    "gradio<=6.10.0",
+    "gradio>=6.9.0,<=6.10.0",
     "boto3<=1.42.91",
     "pyarrow<=23.0.1",
     "openpyxl<=3.1.5",
@@ -105,7 +105,7 @@ vlm = [
 
 # Run Gradio as an mcp server
 mcp = [
-    "gradio[mcp]<=6.10.0"
+    "gradio[mcp]>=6.9.0,<=6.10.0"
 ]
 
 [project.urls]
@@ -128,15 +128,20 @@ py-modules = [
     "load_s3_logs",
 ]
 
+[tool.setuptools.package-data]
+# Ensure non-code assets are included in wheels (PyPI installs).
+doc_redaction = [
+    "assets/*.png",
+    "example_data/**/*",
+]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["doc_redaction*", "tools*", "mcp_doc_redaction*"]
 exclude = [
     "test*",
-    "skills*",
     "cdk*",
     "src*",
-    "example_data*",
 ]
 
 # Configuration for Ruff linter:

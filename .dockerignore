@@ -18,6 +18,7 @@ dist/*
 docs/*
 build_deps/*
 user_guide/*
+_extensions/*
 doc_redaction.egg-info/*
 .venv_pypi_test/*
 cdk/config/*

@@ -21,7 +21,93 @@ Redact personally identifiable information (PII) from documents (PDF, PNG, JPG),
 
 Follow these instructions to get the document redaction application running on your local machine.
 
-### 1. Prerequisites: System Dependencies
+### 1. Package installation
+
+#### Install from source repo (recommended for full features)
+
+Clone the repository and install in editable mode:
+
+```bash
+git clone https://github.com/seanpedrick-case/doc_redaction.git
+cd doc_redaction
+pip install -e .
+```
+
+##### Full install from source (Paddle and VLM)
+
+```bash
+pip install -e ".[paddle,vlm]"
+```
+
+Note that the versions of both PaddleOCR and Torch installed by default are the CPU-only versions. If you want to install the equivalent GPU versions, you will need to run the following commands:
+```bash
+pip install paddlepaddle-gpu==3.2.1 --index-url https://www.paddlepaddle.org.cn/packages/stable/cu129/
+```
+
+**Note:** It is difficult to get paddlepaddle gpu working in an environment alongside torch. You may well need to reinstall the cpu version to ensure compatibility, and run paddlepaddle-gpu in a separate environment without torch installed. If you get errors related to .dll files following paddle gpu install, you may need to install the latest c++ redistributables. For Windows, you can find them [here](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170)
+
+```bash
+pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu129
+pip install torchvision --index-url https://download.pytorch.org/whl/cu129
+```
+
+#### Install from PyPI (recommended for users and library use)
+
+Create a virtual environment (recommended) and install **doc_redaction**.
+
+```bash
+python -m venv venv
+# Windows:
+.\venv\Scripts\activate
+# macOS/Linux:
+source venv/bin/activate
+```
+
+The package is published on PyPI as **`doc-redaction`** (import name **`doc_redaction`**):
+
+```bash
+pip install doc_redaction
+```
+
+Optional extras (same as in `pyproject.toml`):
+
+```bash
+pip install "doc_redaction[paddle,vlm]"
+```
+
+For programmatic use (CLI-first API matching Gradio `api_name` routes), see **[Python Package usage (Python)](https://seanpedrick-case.github.io/doc_redaction/src/python_package_usage.html)**. The console script **`cli_redact`** is available after install.
+
+**Web UI from a PyPI install:** You *can* start the Gradio UI after `pip install doc_redaction` by running:
+
+```bash
+python -m app
+```
+
+**Important: your working directory matters.** When you run `python -m app`, the app treats your *current folder* as the “app folder”:
+
+- It will look for configuration at `config/app_config.env` *relative to the folder you run it from* (and `python -m doc_redaction.install_deps` will also write `config/app_config.env` there).
+- It may create new folders in that location (for example `config/`, `output/`, `input/`, `logs/`, `usage/`, `feedback/`, and temporary/cache folders depending on your settings).
+- The UI example files and bundled assets are packaged with the PyPI install (they live inside the installed `doc_redaction` package). If you run from a “random” directory after a PyPI install, the app can still locate its packaged examples; your working directory mainly affects where `config/`, `input/`, `output/`, logs, and temp folders are created.
+
+In practice, the **smoothest UI experience** (examples, bundled assets, docs links, predictable relative paths) is still usually via a **repository checkout** or **Docker**, but PyPI install is sufficient to launch the UI as long as you run it from a suitable working folder and have the system dependencies available (or run `python -m doc_redaction.install_deps` first).
+
+#### Docker installation
+
+The doc_redaction Redaction app can be installed by using the [Dockerfile](https://github.com/seanpedrick-case/doc_redaction/blob/main/Dockerfile) or Docker compose files ([llama.cpp](https://github.com/ggml-org/llama.cpp), [vLLM](https://docs.vllm.ai/en/stable/)) provided in the repo.
+
+##### Without Llama.cpp / vLLM inference server
+
+If you want a working Docker installation without GPU support, you can install from the [Dockerfile](https://github.com/seanpedrick-case/doc_redaction/blob/main/Dockerfile) in the repo. A working example of this, with the CPU version of PaddleOCR, can be found on [Hugging Face](https://huggingface.co/spaces/seanpedrickcase/document_redaction). You can adjust the INSTALL_PADDLEOCR, PADDLE_GPU_ENABLED, INSTALL_VLM, and TORCH_GPU_ENABLED config variables to adjust for PaddleOCR and Transformers packages for local VLM support. Note that GPU-enabled PaddleOCR, and GPU-enabled Transformers/Torch often don't work well together, which is one reason why a Llama.cpp/vLLM inference server Docker installation option is provided below.
+
+##### With Llama.cpp / vLLM inference server
+
+The project now has Docker and Docker compose files available to pair running the Redaction app with local inference servers powered by [llama.cpp](https://github.com/ggml-org/llama.cpp), or [vLLM](https://docs.vllm.ai/en/stable/). Llama.cpp is more flexible than vLLM for low VRAM systems, as Llama.cpp will offload to cpu/system RAM automatically rather than failing as vLLM tends to do.
+
+For Llama.cpp, you can use the [docker-compose_llama.yml](https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_llama.yml) file, and for vLLM, you can use the [docker-compose_vllm.yml](https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_vllm.yml) file. To run, Docker / Docker Desktop should be installed, and then you can run the commands suggested in the top of the files to run the servers.
+
+You will need ~40-50GB of disk space to run everything depending on the model chosen from the compose file. For the vLLM server, you will need 24 GB VRAM. For the Llama.cpp server, 24 GB VRAM is needed to run at full speed, but the n-gpu-layers and n-cpu-moe parameters in the Docker compose file can be adjusted to fit into your system. I would suggest that 8 GB VRAM is needed as a bare minimum for decent inference speed. See the [Unsloth guide](https://unsloth.ai/docs/models/qwen3.5) for more details on working with GGUF files for Qwen 3.5.
+
+### 2. Install prerequisites: Tesseract and Poppler
 
 This application relies on two external tools for OCR (Tesseract) and PDF processing (Poppler). Please install them on your system before proceeding.
 
@@ -50,7 +136,6 @@ To just check whether your machine can already see the tools:
 python -m doc_redaction.install_deps --verify-only
 ```
 
-
 #### **On Windows**
 
 If you don’t use the automated setup above, you can install the dependencies manually by downloading installers and adding the programs to your system's PATH.
@@ -72,7 +157,6 @@ If you don’t use the automated setup above, you can install the dependencies m
         *   Click OK on all windows to save the changes.
 
     To verify, open a new Command Prompt and run `tesseract --version` and `pdftoppm -v`. If they both return version information, you have successfully installed the prerequisites.
-
 ---
 
 #### **On Linux (Debian/Ubuntu)**
@@ -92,108 +176,9 @@ sudo dnf install -y tesseract poppler-utils
 ```
 ---
 
-
-### 2. Installation: Python packages
-
-Once the system prerequisites are installed, create a virtual environment (recommended) and install **doc_redaction**.
-
-```bash
-python -m venv venv
-# Windows:
-.\venv\Scripts\activate
-# macOS/Linux:
-source venv/bin/activate
-```
-
-#### Install from PyPI (recommended for users and library use)
-
-The package is published on PyPI as **`doc-redaction`** (import name **`doc_redaction`**):
-
-```bash
-pip install doc_redaction
-```
-
-Optional extras (same as in `pyproject.toml`):
-
-```bash
-pip install "doc_redaction[paddle,vlm]"
-```
-
-For programmatic use (CLI-first API matching Gradio `api_name` routes), see **[Package API usage (Python)](https://seanpedrick-case.github.io/doc_redaction/src/package_api_usage.html)**. The console script **`cli_redact`** is available after install.
-
-**Web UI from a PyPI install:** You *can* start the Gradio UI after `pip install doc_redaction` by running:
-
-```bash
-python -m app
-```
-
-**Important: your working directory matters.** When you run `python -m app`, the app treats your *current folder* as the “app folder”:
-
-- It will look for configuration at `config/app_config.env` *relative to the folder you run it from* (and `python -m doc_redaction.install_deps` will also write `config/app_config.env` there).
-- It may create new folders in that location (for example `config/`, `output/`, `input/`, `logs/`, `usage/`, `feedback/`, and temporary/cache folders depending on your settings).
-- The full set of bundled UI example files (`example_data/`) is part of the **Git repository checkout** rather than the PyPI wheel. If you run from a “random” directory after a PyPI install, you should expect the Examples section to be missing unless you provide your own `example_data/` folder.
-
-In practice, the **smoothest UI experience** (examples, bundled assets, docs links, predictable relative paths) is still usually via a **repository checkout** or **Docker**, but PyPI install is sufficient to launch the UI as long as you run it from a suitable working folder and have the system dependencies available (or run `python -m doc_redaction.install_deps` first).
-
-#### Install from source (repository checkout / development)
-
-Clone the repository and install in editable mode:
-
-```bash
-git clone https://github.com/seanpedrick-case/doc_redaction.git
-cd doc_redaction
-pip install -e .
-```
-
-From the same checkout you can use `requirements_lightweight.txt` instead of editable install if you prefer:
-
-```bash
-pip install -r requirements_lightweight.txt
-```
-
-##### Full install from source (Paddle and VLM)
-
-```bash
-pip install -e ".[paddle,vlm]"
-```
-
-Alternatively, use the full `requirements.txt` (includes PaddleOCR and Torch/transformers references for CUDA 12.9):
-
-```bash
-pip install -r requirements.txt
-```
-
-Note that the versions of both PaddleOCR and Torch installed by default are the CPU-only versions. If you want to install the equivalent GPU versions, you will need to run the following commands:
-```bash
-pip install paddlepaddle-gpu==3.2.1 --index-url https://www.paddlepaddle.org.cn/packages/stable/cu129/
-```
-
-**Note:** It is difficult to get paddlepaddle gpu working in an environment alongside torch. You may well need to reinstall the cpu version to ensure compatibility, and run paddlepaddle-gpu in a separate environment without torch installed. If you get errors related to .dll files following paddle gpu install, you may need to install the latest c++ redistributables. For Windows, you can find them [here](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170)
-
-```bash
-pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu129
-pip install torchvision --index-url https://download.pytorch.org/whl/cu129
-```
-
-#### Docker installation
-
-The doc_redaction Redaction app can be installed by using the [Dockerfile](https://github.com/seanpedrick-case/doc_redaction/blob/main/Dockerfile) or Docker compose files ([llama.cpp](https://github.com/ggml-org/llama.cpp), [vLLM](https://docs.vllm.ai/en/stable/)) provided in the repo.
-
-##### Without Llama.cpp / vLLM inference server
-
-If you want a working Docker installation without GPU support, you can install from the [Dockerfile](https://github.com/seanpedrick-case/doc_redaction/blob/main/Dockerfile) in the repo. A working example of this, with the CPU version of PaddleOCR, can be found on [Hugging Face](https://huggingface.co/spaces/seanpedrickcase/document_redaction). You can adjust the INSTALL_PADDLEOCR, PADDLE_GPU_ENABLED, INSTALL_VLM, and TORCH_GPU_ENABLED config variables to adjust for PaddleOCR and Transformers packages for local VLM support. Note that GPU-enabled PaddleOCR, and GPU-enabled Transformers/Torch often don't work well together, which is one reason why a Llama.cpp/vLLM inference server Docker installation option is provided below.
-
-##### With Llama.cpp / vLLM inference server
-
-The project now has Docker and Docker compose files available to pair running the Redaction app with local inference servers powered by [llama.cpp](https://github.com/ggml-org/llama.cpp), or [vLLM](https://docs.vllm.ai/en/stable/). Llama.cpp is more flexible than vLLM for low VRAM systems, as Llama.cpp will offload to cpu/system RAM automatically rather than failing as vLLM tends to do.
-
-For Llama.cpp, you can use the [docker-compose_llama.yml](https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_llama.yml) file, and for vLLM, you can use the [docker-compose_vllm.yml](https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_vllm.yml) file. To run, Docker / Docker Desktop should be installed, and then you can run the commands suggested in the top of the files to run the servers.
-
-You will need ~40-50GB of disk space to run everything depending on the model chosen from the compose file. For the vLLM server, you will need 24 GB VRAM. For the Llama.cpp server, 24 GB VRAM is needed to run at full speed, but the n-gpu-layers and n-cpu-moe parameters in the Docker compose file can be adjusted to fit into your system. I would suggest that 8 GB VRAM is needed as a bare minimum for decent inference speed. See the [Unsloth guide](https://unsloth.ai/docs/models/qwen3.5) for more details on working with GGUF files for Qwen 3.5.
-
 ### 3. Run the Application
 
-With all dependencies installed, you can now start the Gradio application.
+With all dependencies installed, you can now start the Gradio application GUI. For a guide on how to use this, please go [here](https://seanpedrick-case.github.io/doc_redaction/src/user_guide.html).
 
 ```bash
 python app.py
@@ -204,6 +189,8 @@ After running the command, the application will start, and you will see a local 
 Open this URL in your web browser to use the document redaction tool
 
 #### Command line interface
+
+For example CLI commands, please refer to [this guide](https://seanpedrick-case.github.io/doc_redaction/src/user_guide.html#command-line-interface-cli) or the examples in [cli_redact.py](https://github.com/seanpedrick-case/doc_redaction/blob/main/cli_redact.py#L321)
 
 If you installed from **PyPI**, use the installed console script:
 
@@ -217,7 +204,9 @@ From a **repository checkout**, you can also run:
 python cli_redact.py --help
 ```
 
-For Python examples that mirror each Gradio `api_name`, see [Package API usage (Python)](https://seanpedrick-case.github.io/doc_redaction/src/package_api_usage.html) (source: [src/package_api_usage.qmd](src/package_api_usage.qmd)).
+#### Python package commands
+
+For Python examples in using the Python package, please see [Python Package usage (Python)](https://seanpedrick-case.github.io/doc_redaction/src/python_package_usage.html).
 
 ---
 
@@ -329,9 +318,9 @@ If those endpoints are not present in your deployment, fall back to the long UI-
 
 ### Optional: MCP server
 
-If you want external agents to call this app reliably without re-implementing Gradio upload/call/poll/download details, consider an **MCP server** that wraps the main tasks (`redact_document`, `apply_review_redactions`, `redact_tabular`, `summarise_document`) behind a small tool interface. See [src/agent_mcp.md](src/agent_mcp.md).
+If you want external agents to call this app reliably without re-implementing Gradio upload/call/poll/download details, consider an **MCP server** that wraps the main tasks (`redact_document`, `apply_review_redactions`, `redact_tabular`, `summarise_document`) behind a small tool interface. See the [relevant documentation](https://github.com/seanpedrick-case/doc_redaction/blob/main/mcp_doc_redaction/README.md).
 
-**Use as a library:** After installing from [PyPI](https://pypi.org/project/doc-redaction/) (`pip install doc_redaction`), you can call the same workflows as the Gradio `api_name` routes from Python. See the documentation: [Package API usage (Python)](https://seanpedrick-case.github.io/doc_redaction/src/package_api_usage.html) (source: [src/package_api_usage.qmd](src/package_api_usage.qmd)).
+**Use as a library:** After installing from [PyPI](https://pypi.org/project/doc-redaction/) (`pip install doc_redaction`), you can call the same workflows as the Gradio `api_name` routes from Python. See the documentation: [Python Package usage (Python)](https://seanpedrick-case.github.io/doc_redaction/src/python_package_usage.html).
     
 To extract text from documents, the 'Local' options are PikePDF for PDFs with selectable text, and OCR with Tesseract. Use AWS Textract to extract more complex elements e.g. handwriting, signatures, or unclear text. PaddleOCR and VLM support is also provided (see the installation instructions below). 
 
