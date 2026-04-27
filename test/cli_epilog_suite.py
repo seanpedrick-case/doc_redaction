@@ -495,7 +495,7 @@ class TestCLIRedactExamples(unittest.TestCase):
             os.path.dirname(os.path.dirname(__file__)), "cli_redact.py"
         )
         cls.example_data_dir = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)), "example_data"
+            os.path.dirname(os.path.dirname(__file__)), "doc_redaction", "example_data"
         )
         cls.temp_output_dir = tempfile.mkdtemp(prefix="test_output_")
 
