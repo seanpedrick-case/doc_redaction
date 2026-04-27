@@ -1557,8 +1557,6 @@ with blocks:
 
     gr.Markdown(INTRO_TEXT)
 
-    print("_DEPS_WARNING_MD:", _DEPS_WARNING_MD)
-
     if _DEPS_WARNING_MD:
         gr.Markdown(_DEPS_WARNING_MD)
 

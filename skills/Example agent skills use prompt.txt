@@ -1,4 +1,4 @@
-Using the doc-redaction-app skill, redact this pdf document: https://github.com/seanpedrick-case/doc_redaction/blob/main/example_data/Partnership-Agreement-Toolkit_0_0.pdf using the redaction tool hosted at https://seanpedrickcase-document-redaction.hf.space. Use the paddle OCR method if that is available, or tesseract if it is not. Use the the Local PII identification method. Save the results to a folder in your workspace named 'output'.
+Using the doc-redaction-app skill, redact this pdf document: https://github.com/seanpedrick-case/doc_redaction/blob/main/doc_redaction/example_data/Partnership-Agreement-Toolkit_0_0.pdf using the redaction tool hosted at https://seanpedrickcase-document-redaction.hf.space. Use the paddle OCR method if that is available, or tesseract if it is not. Use the the Local PII identification method. Save the results to a folder in your workspace named 'output'.
 
 Next, I would like you to check through the redactions with the doc-redaction-modifications skill. I would like you to use the output files from the redaction task to check through redaction results on each page, and remove / add / modify redactions according to these rules:
 
