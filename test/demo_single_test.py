@@ -27,6 +27,7 @@ def demo_pdf_redaction():
     )
     input_file = os.path.join(
         os.path.dirname(os.path.dirname(__file__)),
+        "doc_redaction",
         "example_data",
         "example_of_emails_sent_to_a_professor_before_applying.pdf",
     )
@@ -44,7 +45,7 @@ def demo_pdf_redaction():
     if not os.path.isfile(input_file):
         print(f"❌ Input file not found: {input_file}")
         print(
-            "Make sure you have the example data files in the example_data/ directory"
+            "Make sure you have the example data files in doc_redaction/example_data/"
         )
         return False
 
@@ -80,6 +81,7 @@ def demo_csv_anonymisation():
     )
     input_file = os.path.join(
         os.path.dirname(os.path.dirname(__file__)),
+        "doc_redaction",
         "example_data",
         "combined_case_notes.csv",
     )
@@ -97,7 +99,7 @@ def demo_csv_anonymisation():
     if not os.path.isfile(input_file):
         print(f"❌ Input file not found: {input_file}")
         print(
-            "Make sure you have the example data files in the example_data/ directory"
+            "Make sure you have the example data files in doc_redaction/example_data/"
         )
         return False
 

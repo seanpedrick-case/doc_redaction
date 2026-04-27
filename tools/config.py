@@ -306,8 +306,6 @@ if APP_CONFIG_PATH:
     if os.path.exists(APP_CONFIG_PATH):
         print(f"Loading app variables from config file {APP_CONFIG_PATH}")
         load_dotenv(APP_CONFIG_PATH)
-    else:
-        print("App config file not found at location:", APP_CONFIG_PATH)
 
 ###
 # AWS OPTIONS
@@ -322,8 +320,6 @@ if AWS_CONFIG_PATH:
     if os.path.exists(AWS_CONFIG_PATH):
         print(f"Loading AWS variables from config file {AWS_CONFIG_PATH}")
         load_dotenv(AWS_CONFIG_PATH)
-    else:
-        print("AWS config file not found at location:", AWS_CONFIG_PATH)
 
 RUN_AWS_FUNCTIONS = convert_string_to_boolean(
     get_or_create_env_var("RUN_AWS_FUNCTIONS", "False")

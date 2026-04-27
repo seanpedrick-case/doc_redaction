@@ -1,3 +1,4 @@
-include favicon.png
+recursive-include doc_redaction/assets *.png
+recursive-include doc_redaction/example_data *
 recursive-include intros *.txt
 

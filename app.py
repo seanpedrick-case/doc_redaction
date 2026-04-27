@@ -1,4 +1,6 @@
 import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import gradio as gr
@@ -8,6 +10,134 @@ from fastapi import FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from gradio_image_annotation_redaction import image_annotator
+
+
+# Gradio will raise if favicon_path points at a missing file. In PyPI installs the
+# repo-root `favicon.png` is typically not present, so treat the favicon as optional.
+def _resolve_optional_file_path(path_value: str | None) -> Path | None:
+    if not path_value:
+        return None
+
+    p = Path(path_value)
+    if p.is_file():
+        return p
+
+    # If a relative path was provided, also try resolving relative to this file.
+    if not p.is_absolute():
+        alt = Path(__file__).resolve().parent / p
+        if alt.is_file():
+            return alt
+
+        # Also try resolving relative to the installed `doc_redaction` package.
+        try:
+            import doc_redaction as _doc_redaction_pkg
+
+            pkg_dir = Path(_doc_redaction_pkg.__file__).resolve().parent
+            pkg_rel = pkg_dir / p
+            if pkg_rel.is_file():
+                return pkg_rel
+
+            # Backwards-compatible: old configs often used "favicon.png" at repo root.
+            if p.name.lower() == "favicon.png":
+                pkg_favicon = pkg_dir / "assets" / "favicon.png"
+                if pkg_favicon.is_file():
+                    return pkg_favicon
+        except Exception:
+            pass
+
+    return None
+
+
+def _run_and_capture(cmd: list[str]) -> tuple[int, str]:
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        return (127, "")
+    out = (p.stdout or "") + "\n" + (p.stderr or "")
+    return (int(p.returncode), out.strip())
+
+
+def _external_dep_warning_markdown() -> str | None:
+    """
+    Best-effort check that Tesseract + Poppler are discoverable.
+
+    We warn (but do not fail) when binaries aren't found, because many workflows
+    (e.g. tabular-only redaction) can still work without them.
+    """
+
+    def _find_exe(name: str, folder_hint: str | None) -> str:
+        """
+        Find an executable, respecting PATH and optional folder hints from config.
+
+        `folder_hint` may point at either the executable itself, the bin folder,
+        or a parent folder containing bin/ or Library/bin/.
+        """
+        found = shutil.which(name)
+        if found:
+            return found
+
+        if not folder_hint:
+            return name
+
+        p = Path(folder_hint)
+        exe_name = f"{name}.exe" if os.name == "nt" else name
+
+        candidates: list[Path] = []
+        if p.is_file():
+            candidates.append(p)
+        else:
+            candidates.extend(
+                [
+                    p / exe_name,
+                    p / "bin" / exe_name,
+                    p / "Library" / "bin" / exe_name,
+                ]
+            )
+
+        for c in candidates:
+            if c.is_file():
+                return str(c)
+
+        return name
+
+    # Late import to avoid ordering constraints at module load.
+    try:
+        from tools.config import POPPLER_FOLDER, TESSERACT_FOLDER
+    except Exception:
+        POPPLER_FOLDER = ""
+        TESSERACT_FOLDER = ""
+
+    tesseract_exe = _find_exe("tesseract", TESSERACT_FOLDER)
+    pdftoppm_exe = _find_exe("pdftoppm", POPPLER_FOLDER)
+
+    t_code, t_out = _run_and_capture([tesseract_exe, "--version"])
+    p_code, p_out = _run_and_capture([pdftoppm_exe, "-v"])
+
+    t_ok = t_code == 0 and bool(t_out.strip())
+    p_ok = p_code == 0 and bool(p_out.strip())
+
+    if t_ok and p_ok:
+        return None
+
+    missing = []
+    if not t_ok:
+        missing.append("Tesseract (`tesseract --version` failed)")
+    if not p_ok:
+        missing.append("Poppler (`pdftoppm -v` failed)")
+
+    missing_text = ", ".join(missing)
+    return (
+        "### ⚠️ Missing external dependencies\n\n"
+        f"This app could not find: **{missing_text}**.\n\n"
+        "- If you already installed them, ensure they are on your **PATH**, or set "
+        "`TESSERACT_FOLDER` / `POPPLER_FOLDER` in `config/app_config.env`.\n"
+        "- To install automatically (recommended), run:\n\n"
+        "```bash\n"
+        "python -m doc_redaction.install_deps\n"
+        "```\n\n"
+        "See `README.md` for the full setup instructions."
+    )
+
 
 from tools.auth import authenticate_user
 from tools.aws_functions import (
@@ -370,23 +500,60 @@ if 0 == 1:
 # Load in Gradio app components
 ###
 
+
+def _resolve_example_data_dir() -> Path | None:
+    """
+    Resolve the example data directory both for repo checkouts and PyPI installs.
+
+    - Repo checkout (legacy): ./example_data
+    - PyPI install (packaged): doc_redaction/example_data (inside site-packages)
+    """
+    # Prefer packaged example data (works in PyPI installs)
+    try:
+        import doc_redaction as _doc_redaction_pkg
+
+        pkg_dir = Path(_doc_redaction_pkg.__file__).resolve().parent
+        packaged = pkg_dir / "example_data"
+        if packaged.is_dir():
+            return packaged
+    except Exception:
+        pass
+
+    # Fallback to legacy repo-root path for older checkouts / custom layouts
+    legacy = Path("example_data").resolve()
+    if legacy.is_dir():
+        return legacy
+
+    return None
+
+
+_EXAMPLE_DATA_DIR = _resolve_example_data_dir()
+
+
+def _example_data_path(rel: str) -> str:
+    if _EXAMPLE_DATA_DIR is None:
+        return rel
+    return str((_EXAMPLE_DATA_DIR / rel).resolve())
+
+
 # Check which example files exist and create examples only for available files
 example_files = [
-    "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf",
-    "example_data/example_complaint_letter.jpg",
-    "example_data/graduate-job-example-cover-letter.pdf",
-    "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
-    "example_data/partnership_toolkit_redact_custom_deny_list.csv",
-    "example_data/partnership_toolkit_redact_some_pages.csv",
+    _example_data_path("example_of_emails_sent_to_a_professor_before_applying.pdf"),
+    _example_data_path("example_complaint_letter.jpg"),
+    _example_data_path("graduate-job-example-cover-letter.pdf"),
+    _example_data_path("Partnership-Agreement-Toolkit_0_0.pdf"),
+    _example_data_path("partnership_toolkit_redact_custom_deny_list.csv"),
+    _example_data_path("partnership_toolkit_redact_some_pages.csv"),
 ]
 
 ocr_example_files = [
-    "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
-    "example_data/Difficult handwritten note.jpg",
-    "example_data/Example-cv-university-graduaty-hr-role-with-photo-2.pdf",
+    _example_data_path("Partnership-Agreement-Toolkit_0_0.pdf"),
+    _example_data_path("Difficult handwritten note.jpg"),
+    _example_data_path("Example-cv-university-graduaty-hr-role-with-photo-2.pdf"),
 ]
 
 # Load some components outside of blocks context that are used for examples
+
 
 # Components for "Redact all PII" option (conditionally visible)
 # Set initial visibility based on default redaction method ("Redact all PII")
@@ -962,6 +1129,9 @@ else:
         fill_width=FILL_SCREEN_WIDTH,
     )
 
+# Warn early if OCR/PDF system dependencies aren't available.
+_DEPS_WARNING_MD = _external_dep_warning_markdown()
+
 with blocks:
 
     ###
@@ -1386,6 +1556,11 @@ with blocks:
     ###
 
     gr.Markdown(INTRO_TEXT)
+
+    print("_DEPS_WARNING_MD:", _DEPS_WARNING_MD)
+
+    if _DEPS_WARNING_MD:
+        gr.Markdown(_DEPS_WARNING_MD)
 
     with gr.Accordion("API for agents (quickstart)", open=False, visible=False):
         gr.Markdown("""
@@ -3168,7 +3343,9 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                 )
 
                 # Check if duplicate example file exists
-                duplicate_example_file = "example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv"
+                duplicate_example_file = _example_data_path(
+                    "example_outputs/doubled_output_joined.pdf_ocr_output.csv"
+                )
 
                 if os.path.exists(duplicate_example_file):
 
@@ -3315,9 +3492,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
                 # Check which tabular example files exist
                 tabular_example_files = [
-                    "example_data/combined_case_notes.csv",
-                    "example_data/Bold minimalist professional cover letter.docx",
-                    "example_data/Lambeth_2030-Our_Future_Our_Lambeth.pdf.csv",
+                    _example_data_path("combined_case_notes.csv"),
+                    _example_data_path(
+                        "Bold minimalist professional cover letter.docx"
+                    ),
+                    _example_data_path("Lambeth_2030-Our_Future_Our_Lambeth.pdf.csv"),
                 ]
 
                 available_tabular_examples = list()
@@ -10209,7 +10388,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                 auth=authenticate_user if COGNITO_AUTH else None,
                 max_file_size=MAX_FILE_SIZE,
                 path="",
-                favicon_path=Path(FAVICON_PATH),
+                favicon_path=_resolve_optional_file_path(FAVICON_PATH),
                 mcp_server=RUN_MCP_SERVER,
                 allowed_paths=_gradio_file_allowed_paths,
             )
@@ -10231,7 +10410,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                         server_name=GRADIO_SERVER_NAME,
                         server_port=GRADIO_SERVER_PORT,
                         root_path=ROOT_PATH,
-                        favicon_path=Path(FAVICON_PATH),
+                        favicon_path=_resolve_optional_file_path(FAVICON_PATH),
                         mcp_server=RUN_MCP_SERVER,
                         allowed_paths=_gradio_file_allowed_paths,
                     )
@@ -10246,7 +10425,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                         server_name=GRADIO_SERVER_NAME,
                         server_port=GRADIO_SERVER_PORT,
                         root_path=ROOT_PATH,
-                        favicon_path=Path(FAVICON_PATH),
+                        favicon_path=_resolve_optional_file_path(FAVICON_PATH),
                         mcp_server=RUN_MCP_SERVER,
                         allowed_paths=_gradio_file_allowed_paths,
                     )

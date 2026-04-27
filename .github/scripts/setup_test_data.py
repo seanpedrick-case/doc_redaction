@@ -12,7 +12,7 @@ import pandas as pd
 
 def create_directories():
     """Create necessary directories."""
-    dirs = ["example_data", "example_data/example_outputs"]
+    dirs = ["doc_redaction/example_data", "doc_redaction/example_data/example_outputs"]
 
     for dir_path in dirs:
         os.makedirs(dir_path, exist_ok=True)
@@ -35,11 +35,9 @@ def create_dummy_pdf():
 
     try:
         # Create the main test PDF
-        pdf_path = (
-            "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf"
-        )
+        pdf_path = "doc_redaction/example_data/example_of_emails_sent_to_a_professor_before_applying.pdf"
         print(f"Creating PDF: {pdf_path}")
-        print(f"Directory exists: {os.path.exists('example_data')}")
+        print(f"Directory exists: {os.path.exists('doc_redaction/example_data')}")
 
         c = canvas.Canvas(pdf_path, pagesize=letter)
         c.drawString(100, 750, "This is a test document for redaction testing.")
@@ -58,7 +56,9 @@ def create_dummy_pdf():
         print(f"Created dummy PDF: {pdf_path}")
 
         # Create Partnership Agreement Toolkit PDF
-        partnership_pdf_path = "example_data/Partnership-Agreement-Toolkit_0_0.pdf"
+        partnership_pdf_path = (
+            "doc_redaction/example_data/Partnership-Agreement-Toolkit_0_0.pdf"
+        )
         print(f"Creating PDF: {partnership_pdf_path}")
         c = canvas.Canvas(partnership_pdf_path, pagesize=letter)
         c.drawString(100, 750, "Partnership Agreement Toolkit")
@@ -83,7 +83,9 @@ def create_dummy_pdf():
         print(f"Created dummy PDF: {partnership_pdf_path}")
 
         # Create Graduate Job Cover Letter PDF
-        cover_letter_pdf_path = "example_data/graduate-job-example-cover-letter.pdf"
+        cover_letter_pdf_path = (
+            "doc_redaction/example_data/graduate-job-example-cover-letter.pdf"
+        )
         print(f"Creating PDF: {cover_letter_pdf_path}")
         c = canvas.Canvas(cover_letter_pdf_path, pagesize=letter)
         c.drawString(100, 750, "Cover Letter Example")
@@ -102,19 +104,19 @@ def create_dummy_pdf():
         print("ReportLab not available, skipping PDF creation")
         # Create simple text files instead
         with open(
-            "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf",
+            "doc_redaction/example_data/example_of_emails_sent_to_a_professor_before_applying.pdf",
             "w",
         ) as f:
             f.write("This is a dummy PDF file for testing")
 
         with open(
-            "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
+            "doc_redaction/example_data/Partnership-Agreement-Toolkit_0_0.pdf",
             "w",
         ) as f:
             f.write("This is a dummy Partnership Agreement PDF file for testing")
 
         with open(
-            "example_data/graduate-job-example-cover-letter.pdf",
+            "doc_redaction/example_data/graduate-job-example-cover-letter.pdf",
             "w",
         ) as f:
             f.write("This is a dummy cover letter PDF file for testing")
@@ -135,8 +137,8 @@ def create_dummy_csv():
         "Date": ["2024-01-15", "2024-01-16", "2024-01-17"],
     }
     df = pd.DataFrame(csv_data)
-    df.to_csv("example_data/combined_case_notes.csv", index=False)
-    print("Created dummy CSV: example_data/combined_case_notes.csv")
+    df.to_csv("doc_redaction/example_data/combined_case_notes.csv", index=False)
+    print("Created dummy CSV: doc_redaction/example_data/combined_case_notes.csv")
 
     # Lambeth CSV
     lambeth_data = {
@@ -149,9 +151,12 @@ def create_dummy_csv():
     }
     df_lambeth = pd.DataFrame(lambeth_data)
     df_lambeth.to_csv(
-        "example_data/Lambeth_2030-Our_Future_Our_Lambeth.pdf.csv", index=False
+        "doc_redaction/example_data/Lambeth_2030-Our_Future_Our_Lambeth.pdf.csv",
+        index=False,
     )
-    print("Created dummy CSV: example_data/Lambeth_2030-Our_Future_Our_Lambeth.pdf.csv")
+    print(
+        "Created dummy CSV: doc_redaction/example_data/Lambeth_2030-Our_Future_Our_Lambeth.pdf.csv"
+    )
 
 
 def create_dummy_word_doc():
@@ -168,7 +173,9 @@ def create_dummy_word_doc():
         doc.add_paragraph("Name: John Doe")
         doc.add_paragraph("Address: 123 Test Street, Test City, TC 12345")
 
-        doc.save("example_data/Bold minimalist professional cover letter.docx")
+        doc.save(
+            "doc_redaction/example_data/Bold minimalist professional cover letter.docx"
+        )
         print("Created dummy Word document")
 
     except ImportError:
@@ -180,20 +187,21 @@ def create_allow_deny_lists():
     # Allow lists
     allow_data = {"word": ["test", "example", "document"]}
     pd.DataFrame(allow_data).to_csv(
-        "example_data/test_allow_list_graduate.csv", index=False
+        "doc_redaction/example_data/test_allow_list_graduate.csv", index=False
     )
     pd.DataFrame(allow_data).to_csv(
-        "example_data/test_allow_list_partnership.csv", index=False
+        "doc_redaction/example_data/test_allow_list_partnership.csv", index=False
     )
     print("Created allow lists")
 
     # Deny lists
     deny_data = {"word": ["sensitive", "confidential", "private"]}
     pd.DataFrame(deny_data).to_csv(
-        "example_data/partnership_toolkit_redact_custom_deny_list.csv", index=False
+        "doc_redaction/example_data/partnership_toolkit_redact_custom_deny_list.csv",
+        index=False,
     )
     pd.DataFrame(deny_data).to_csv(
-        "example_data/Partnership-Agreement-Toolkit_test_deny_list_para_single_spell.csv",
+        "doc_redaction/example_data/Partnership-Agreement-Toolkit_test_deny_list_para_single_spell.csv",
         index=False,
     )
     print("Created deny lists")
@@ -201,7 +209,8 @@ def create_allow_deny_lists():
     # Whole page redaction list
     page_data = {"page": [1, 2]}
     pd.DataFrame(page_data).to_csv(
-        "example_data/partnership_toolkit_redact_some_pages.csv", index=False
+        "doc_redaction/example_data/partnership_toolkit_redact_some_pages.csv",
+        index=False,
     )
     print("Created whole page redaction list")
 
@@ -223,7 +232,7 @@ def create_ocr_output():
     }
     df = pd.DataFrame(ocr_data)
     df.to_csv(
-        "example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv",
+        "doc_redaction/example_data/example_outputs/doubled_output_joined.pdf_ocr_output.csv",
         index=False,
     )
     print("Created dummy OCR output CSV")
@@ -257,7 +266,7 @@ def create_dummy_image():
         draw.text((50, 200), "Name: John Doe", fill="black", font=font)
         draw.text((50, 250), "Address: 123 Test Street", fill="black", font=font)
 
-        img.save("example_data/example_complaint_letter.jpg")
+        img.save("doc_redaction/example_data/example_complaint_letter.jpg")
         print("Created dummy image")
 
     except ImportError:
@@ -280,7 +289,7 @@ def main():
 
     print("\nTest data setup complete!")
     print("Created files:")
-    for root, dirs, files in os.walk("example_data"):
+    for root, dirs, files in os.walk("doc_redaction/example_data"):
         for file in files:
             file_path = os.path.join(root, file)
             print(f"  {file_path}")
@@ -293,9 +302,9 @@ def main():
 
     # Verify critical files exist
     critical_files = [
-        "example_data/Partnership-Agreement-Toolkit_0_0.pdf",
-        "example_data/graduate-job-example-cover-letter.pdf",
-        "example_data/example_of_emails_sent_to_a_professor_before_applying.pdf",
+        "doc_redaction/example_data/Partnership-Agreement-Toolkit_0_0.pdf",
+        "doc_redaction/example_data/graduate-job-example-cover-letter.pdf",
+        "doc_redaction/example_data/example_of_emails_sent_to_a_professor_before_applying.pdf",
     ]
 
     print("\nVerifying critical test files:")
