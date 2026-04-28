@@ -495,7 +495,7 @@ class TestCLIRedactExamples(unittest.TestCase):
             os.path.dirname(os.path.dirname(__file__)), "cli_redact.py"
         )
         cls.example_data_dir = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)), "example_data"
+            os.path.dirname(os.path.dirname(__file__)), "doc_redaction", "example_data"
         )
         cls.temp_output_dir = tempfile.mkdtemp(prefix="test_output_")
 
@@ -811,13 +811,14 @@ class TestCLIRedactExamples(unittest.TestCase):
         if not os.path.isfile(input_file):
             self.skipTest(f"Example file not found: {input_file}")
 
-        # Skip this test if AWS credentials are not available
+        # Page range must exist on all test PDFs: CI's setup_test_data.py builds a 3-page
+        # Partnership stub; the repo's full example PDF has more pages. Pages 1–2 are valid in both.
         run_cli_redact(
             script_path=self.script_path,
             input_file=input_file,
             output_dir=self.temp_output_dir,
-            page_min=6,
-            page_max=7,
+            page_min=1,
+            page_max=2,
             ocr_method="AWS Textract",
             handwrite_signature_extraction=[
                 "Extract handwriting",
@@ -1041,7 +1042,7 @@ class TestGUIApp(unittest.TestCase):
 
         except ImportError as e:
             error_msg = f"Failed to import app module: {e}"
-            if "gradio_image_annotation" in str(e):
+            if "gradio_image_annotation_redaction" in str(e):
                 error_msg += "\n\nNOTE: This test requires the 'redaction' conda environment to be activated."
                 error_msg += "\nPlease run: conda activate redaction"
                 error_msg += "\nThen run this test again."
@@ -1097,7 +1098,7 @@ class TestGUIApp(unittest.TestCase):
 
         except Exception as e:
             error_msg = f"Unexpected error during app launch test: {e}"
-            if "gradio_image_annotation" in str(e):
+            if "gradio_image_annotation_redaction" in str(e):
                 error_msg += "\n\nNOTE: This test requires the 'redaction' conda environment to be activated."
                 error_msg += "\nPlease run: conda activate redaction"
                 error_msg += "\nThen run this test again."
@@ -1141,14 +1142,14 @@ class TestGUIApp(unittest.TestCase):
 
         except ImportError as e:
             error_msg = f"Failed to import configuration: {e}"
-            if "gradio_image_annotation" in str(e):
+            if "gradio_image_annotation_redaction" in str(e):
                 error_msg += "\n\nNOTE: This test requires the 'redaction' conda environment to be activated."
                 error_msg += "\nPlease run: conda activate redaction"
                 error_msg += "\nThen run this test again."
             self.fail(error_msg)
         except Exception as e:
             error_msg = f"Unexpected error during configuration test: {e}"
-            if "gradio_image_annotation" in str(e):
+            if "gradio_image_annotation_redaction" in str(e):
                 error_msg += "\n\nNOTE: This test requires the 'redaction' conda environment to be activated."
                 error_msg += "\nPlease run: conda activate redaction"
                 error_msg += "\nThen run this test again."

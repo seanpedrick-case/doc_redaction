@@ -35,6 +35,7 @@ from tools.config import (
     CUSTOM_ENTITIES,
     DEFAULT_LANGUAGE,
     DO_INITIAL_TABULAR_DATA_CLEAN,
+    FULL_COMPREHEND_ENTITY_LIST,
     INFERENCE_SERVER_PII_OPTION,
     LLM_MAX_NEW_TOKENS,
     LLM_TEMPERATURE,
@@ -85,6 +86,14 @@ def _comprehend_one_cell(
     retry_delay: int = 3,
 ) -> Tuple[List[RecognizerResult], int]:
     """Call AWS Comprehend for one text cell. Returns (recognizer_results, query_units)."""
+    aws_entity_types = [
+        t
+        for t in (chosen_redact_comprehend_entities or [])
+        if t in (FULL_COMPREHEND_ENTITY_LIST or [])
+        and t not in ("CUSTOM", "CUSTOM_FUZZY")
+    ]
+    if not text_str.strip() or not aws_entity_types:
+        return ([], 0)
     query_units = (
         len(text_str.strip()) + COMPREHEND_CHARACTERS_PER_UNIT - 1
     ) // COMPREHEND_CHARACTERS_PER_UNIT
@@ -95,7 +104,7 @@ def _comprehend_one_cell(
             )
             results = []
             for entity in response["Entities"]:
-                if entity.get("Type") not in chosen_redact_comprehend_entities:
+                if entity.get("Type") not in aws_entity_types:
                     continue
                 entity_text = text_str[entity["BeginOffset"] : entity["EndOffset"]]
                 if in_allow_list_flat:
@@ -776,6 +785,7 @@ def anonymise_files_with_open_text(
                 in_deny_list,
                 max_fuzzy_spelling_mistakes_num,
                 pii_identification_method,
+                language,
                 chosen_redact_comprehend_entities,
                 comprehend_query_number,
                 comprehend_client,
@@ -1074,6 +1084,9 @@ def tabular_anonymise_wrapper_func(
     # Check for chosen col, skip file if not found
     all_cols_original_order = list(anon_df.columns)
 
+    if not chosen_cols:
+        chosen_cols = list(all_cols_original_order)
+
     any_cols_found = check_lists(chosen_cols, all_cols_original_order)
 
     if any_cols_found is False:
@@ -1086,6 +1099,9 @@ def tabular_anonymise_wrapper_func(
             key_string,
             log_files_output_paths,
             comprehend_query_number,
+            0,
+            0,
+            "",
         )
     else:
         chosen_cols_in_anon_df = get_common_strings(
@@ -1450,28 +1466,47 @@ def anonymise_script(
     # AWS Comprehend calls
     elif pii_identification_method == "AWS Comprehend" and comprehend_client:
 
-        # Only run Local anonymisation for entities that are not covered by AWS Comprehend
-        if custom_entities:
-            custom_redact_entities = [
-                entity
-                for entity in chosen_redact_comprehend_entities
-                if entity in custom_entities
-            ]
-            if custom_redact_entities:
-                # Get results from analyze_dict
-                custom_results = analyze_dict(
-                    batch_analyzer,
-                    df_dict,
-                    language=language,
-                    entities=custom_redact_entities,
-                    score_threshold=score_threshold,
-                    return_decision_process=True,
-                    allow_list=in_allow_list_flat,
-                )
+        # Match CustomImageAnalyzerEngine.analyze_text (AWS path): run Presidio first for
+        # CUSTOM / CUSTOM_FUZZY and other custom-entity types, then merge Comprehend hits
+        # per cell (deny list is enforced via CUSTOM / CUSTOM_FUZZY recognizers).
+        from tools.custom_image_analyser_engine import filter_entities_for_language
 
-                # Initialize results_by_column with custom entity results
-                for result in custom_results:
-                    results_by_column[result.key] = result
+        valid_language_entities = nlp_analyser.registry.get_supported_entities(
+            languages=[language]
+        )
+        if "CUSTOM" not in valid_language_entities:
+            valid_language_entities.append("CUSTOM")
+        if "CUSTOM_FUZZY" not in valid_language_entities:
+            valid_language_entities.append("CUSTOM_FUZZY")
+
+        local_custom_entities = [
+            entity
+            for entity in (chosen_redact_comprehend_entities or [])
+            if entity in (custom_entities or []) or entity in ("CUSTOM", "CUSTOM_FUZZY")
+        ]
+        if in_deny_list:
+            for ent in ("CUSTOM", "CUSTOM_FUZZY"):
+                if ent not in local_custom_entities:
+                    local_custom_entities.append(ent)
+
+        language_supported_entities = []
+        if local_custom_entities:
+            language_supported_entities = filter_entities_for_language(
+                local_custom_entities, valid_language_entities, language
+            )
+
+        if language_supported_entities:
+            custom_results = analyze_dict(
+                batch_analyzer,
+                df_dict,
+                language=language,
+                entities=language_supported_entities,
+                score_threshold=score_threshold,
+                return_decision_process=True,
+                allow_list=in_allow_list_flat,
+            )
+            for result in custom_results:
+                results_by_column[result.key] = result
 
         max_retries = 3
         retry_delay = 3
@@ -1525,9 +1560,10 @@ def anonymise_script(
                 )
                 raise err
             comprehend_query_number += units
-            results_by_column[column_name].recognizer_results[
-                text_idx
-            ] = recognizer_list
+            prior = results_by_column[column_name].recognizer_results[text_idx]
+            results_by_column[column_name].recognizer_results[text_idx] = list(
+                prior
+            ) + list(recognizer_list)
 
         # Convert the dictionary of results back to a list
         analyzer_results = list(results_by_column.values())

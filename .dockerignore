@@ -1,6 +1,11 @@
 *.url
 *.ipynb
 *.pyc
+*.qmd
+_quarto.yml
+quarto_site/*
+src/*
+redaction_deps/*
 .venv/*
 examples/*
 processing/*
@@ -13,6 +18,9 @@ dist/*
 docs/*
 build_deps/*
 user_guide/*
+_extensions/*
+doc_redaction.egg-info/*
+.venv_pypi_test/*
 cdk/config/*
 tld/*
 cdk/config/*
@@ -38,3 +46,4 @@ test/usage/*
 model_cache/*
 sanitized_file/*
 src/doc_redaction.egg-info/*
+docker-compose_llama_long_context_dual_gpu.yml

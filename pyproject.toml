@@ -4,16 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc_redaction"
-version = "2.0.3"
+version = "2.2.5"
 description = "Redact PDF/image-based documents, Word, or CSV/XLSX files using a Gradio-based GUI interface"
-readme = "README.md"
+readme = "README_PYPI.md"
 authors = [
     { name = "Sean Pedrick-Case", email = "spedrickcase@lambeth.gov.uk" },
 ]
 maintainers = [
     { name = "Sean Pedrick-Case", email = "spedrickcase@lambeth.gov.uk" },
 ]
-license = { text = "AGPL-3.0-only" } # This licence type required to use PyMuPDF
+license = "AGPL-3.0-only" # This licence type required to use PyMuPDF
 keywords = [
     "redaction",
     "pdf",
@@ -49,16 +49,15 @@ dependencies = [
     "pikepdf<=10.3.0",
     "pandas<=2.3.3",
     "scikit-learn<=1.8.0",
-    "spacy<=3.8.11",
-    "en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0.tar.gz",
-    "gradio<=6.10.0",
-    "boto3<=1.42.80",
+    "spacy<=3.8.14",
+    "gradio>=6.9.0,<=6.10.0",
+    "boto3<=1.42.91",
     "pyarrow<=23.0.1",
     "openpyxl<=3.1.5",
     "Faker<=40.8.0",
     "python-levenshtein<=0.27.3",
     "spaczz<=0.6.1",
-    "gradio_image_annotation @ https://github.com/seanpedrick-case/gradio_image_annotator/releases/download/v0.5.3/gradio_image_annotation-0.5.3-py3-none-any.whl",
+    "gradio_image_annotation_redaction==0.5.5",
     "rapidfuzz<=3.14.5",
     "python-dotenv<=1.2.2",
     "awslambdaric<=3.1.1",
@@ -66,7 +65,7 @@ dependencies = [
     "polars<=1.38.1",
     "defusedxml<=0.7.1",
     "numpy<=2.4.4",
-    "spaces<=0.48.1",
+    "spaces<=0.48.3",
     "google-genai<=1.73.0",
     "openai<=2.31.0",
     "markdown<=3.10.2",
@@ -106,7 +105,7 @@ vlm = [
 
 # Run Gradio as an mcp server
 mcp = [
-    "gradio[mcp]<=6.9.0"
+    "gradio[mcp]>=6.9.0,<=6.10.0"
 ]
 
 [project.urls]
@@ -114,7 +113,36 @@ Homepage = "https://seanpedrick-case.github.io/doc_redaction/"
 Repository = "https://github.com/seanpedrick-case/doc_redaction"
 
 [project.scripts]
-cli_redact = "cli_redact:main"
+cli_redact = "doc_redaction.cli_redact:main"
+mcp_doc_redaction = "mcp_doc_redaction.server:main"
+doc_redaction_install_deps = "doc_redaction.install_deps:main"
+
+[tool.setuptools]
+include-package-data = true
+py-modules = [
+    "app",
+    "agent_routes",
+    "cli_redact",
+    "lambda_entrypoint",
+    "load_dynamo_logs",
+    "load_s3_logs",
+]
+
+[tool.setuptools.package-data]
+# Ensure non-code assets are included in wheels (PyPI installs).
+doc_redaction = [
+    "assets/*.png",
+    "example_data/**/*",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["doc_redaction*", "tools*", "mcp_doc_redaction*"]
+exclude = [
+    "test*",
+    "cdk*",
+    "src*",
+]
 
 # Configuration for Ruff linter:
 [tool.ruff]
@@ -137,6 +165,9 @@ target-version = ['py310']
 
 # Configuration for pytest:
 [tool.pytest.ini_options]
+markers = [
+    "integration: optional slow tests (CLI PDF smoke; set PYTEST_CLI_INTEGRATION=1 where needed)",
+]
 filterwarnings = [
     "ignore::DeprecationWarning:click.parser",
     "ignore::DeprecationWarning:weasel.util.config",
@@ -156,4 +187,6 @@ addopts = [
     "--tb=short",
     "--strict-markers",
     "--disable-warnings",
+    "-m",
+    "not integration",
 ]

@@ -1,7 +1,7 @@
 name: Sync to Hugging Face hub Zero GPU
 on:
   push:
-    branches: [dev]
+    branches: [main]
 
 permissions:
   contents: read

@@ -21,6 +21,13 @@ COPY requirements_lightweight.txt .
 
 RUN pip install --verbose --no-cache-dir --target=/install -r requirements_lightweight.txt && rm requirements_lightweight.txt
 
+ARG INSTALL_GRADIO_MCP=False
+ENV INSTALL_GRADIO_MCP=${INSTALL_GRADIO_MCP}
+
+RUN if [ "$INSTALL_GRADIO_MCP" = "True" ]; then \
+    pip install --verbose --no-cache-dir --force-reinstall --target=/install "gradio[mcp]<=6.10.0"; \
+fi
+
 # Optionally install PaddleOCR if the INSTALL_PADDLEOCR environment variable is set to True. Note that GPU-enabled PaddleOCR is unlikely to work in the same environment as a GPU-enabled version of PyTorch, so it is recommended to install PaddleOCR as a CPU-only version if you want to use GPU-enabled PyTorch.
 
 ARG INSTALL_PADDLEOCR=False
@@ -94,7 +101,6 @@ ENV APP_HOME=/home/user
 
 # Set env variables for Gradio & other apps
 ENV GRADIO_TEMP_DIR=/tmp/gradio_tmp/ \
-    TLDEXTRACT_CACHE=/tmp/tld/ \
     MPLCONFIGDIR=/tmp/matplotlib_cache/ \
     GRADIO_OUTPUT_FOLDER=$APP_HOME/app/output/ \
     GRADIO_INPUT_FOLDER=$APP_HOME/app/input/ \
@@ -121,6 +127,10 @@ COPY --from=builder /install/bin /usr/local/bin/
 # Reinstall protobuf into the final site-packages. Builder uses multiple `pip install --target=/install`
 # passes; that can break the `google` namespace so `google.protobuf` is missing and Paddle fails at import.
 RUN pip install --no-cache-dir "protobuf<=7.34.0"
+
+# English pipeline is not a normal PyPI dependency; bundle it in the image so runtime works offline.
+# Placed before COPY app code so application changes do not invalidate this layer.
+RUN python -m spacy download en_core_web_lg
 
 # Copy your application code and entrypoint
 COPY . ${APP_HOME}/app

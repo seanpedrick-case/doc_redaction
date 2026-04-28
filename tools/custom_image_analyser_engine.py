@@ -6,6 +6,8 @@ import json
 import math
 import os
 import re
+import shutil
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -110,6 +112,123 @@ from tools.run_vlm import (
 from tools.secure_path_utils import validate_folder_containment
 from tools.secure_regex_utils import safe_sanitize_text
 from tools.word_segmenter import AdaptiveSegmenter
+
+# ---- Tesseract discovery helpers -------------------------------------------------
+
+
+def _is_probable_tessdata_dir(path: str) -> bool:
+    try:
+        if not path:
+            return False
+        p = os.path.abspath(os.path.expandvars(os.path.expanduser(path)))
+        if not os.path.isdir(p):
+            return False
+        # If eng.traineddata exists, it's definitely a tessdata dir. Otherwise allow
+        # the folder if it contains *any* traineddata (language packs vary).
+        if os.path.isfile(os.path.join(p, "eng.traineddata")):
+            return True
+        for name in os.listdir(p):
+            if name.lower().endswith(".traineddata"):
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def _guess_tessdata_dir_from_tesseract_exe(tesseract_exe: str | None) -> str | None:
+    if not tesseract_exe:
+        return None
+    exe_dir = os.path.dirname(os.path.abspath(tesseract_exe))
+
+    # Common Windows installer layout:
+    #   C:\Program Files\Tesseract-OCR\tesseract.exe
+    #   C:\Program Files\Tesseract-OCR\tessdata\eng.traineddata
+    candidate = os.path.join(exe_dir, "tessdata")
+    if _is_probable_tessdata_dir(candidate):
+        return candidate
+
+    # Common conda-forge layout on Windows:
+    #   <prefix>\Library\bin\tesseract.exe
+    #   <prefix>\Library\share\tessdata\eng.traineddata
+    up1 = os.path.dirname(exe_dir)
+    up2 = os.path.dirname(up1)
+    conda_candidate = os.path.join(up2, "share", "tessdata")
+    if _is_probable_tessdata_dir(conda_candidate):
+        return conda_candidate
+
+    return None
+
+
+def _strip_wrapping_quotes(path: str | None) -> str:
+    """
+    Some .env setups accidentally include quotes in values, e.g.:
+      TESSDATA_PREFIX="tesseract/tessdata"
+    If those quotes end up in the environment variable value (including a stray trailing quote),
+    Tesseract will literally try to open paths like '"..."/eng.traineddata' and fail.
+    """
+    if not path:
+        return ""
+    s = str(path).strip()
+    if len(s) >= 2 and ((s[0] == s[-1] == '"') or (s[0] == s[-1] == "'")):
+        return s[1:-1].strip()
+    # Also handle common "one-sided" cases, e.g. a stray trailing quote.
+    return s.strip('"').strip("'").strip()
+
+
+def _resolve_tessdata_dir() -> str | None:
+    """
+    Return an absolute tessdata directory if we can find one.
+    Priority:
+    1) Existing TESSDATA_PREFIX if it points to a valid tessdata dir
+    2) tools.config.TESSERACT_DATA_FOLDER if it points to a valid tessdata dir
+    3) Guess based on tesseract executable location (PATH / pytesseract config)
+    """
+    env_prefix = _strip_wrapping_quotes(os.environ.get("TESSDATA_PREFIX", ""))
+    if _is_probable_tessdata_dir(env_prefix):
+        return os.path.abspath(env_prefix)
+
+    try:
+        from tools.config import TESSERACT_DATA_FOLDER
+
+        cfg_dir = _strip_wrapping_quotes(TESSERACT_DATA_FOLDER)
+        if _is_probable_tessdata_dir(cfg_dir):
+            return os.path.abspath(cfg_dir)
+    except Exception:
+        # config import is optional for library use
+        pass
+
+    tesseract_exe = getattr(
+        pytesseract.pytesseract, "tesseract_cmd", None
+    ) or shutil.which("tesseract")
+    return _guess_tessdata_dir_from_tesseract_exe(tesseract_exe)
+
+
+def _ensure_tessdata_available_in_env(existing_config: str | None) -> str | None:
+    """
+    Ensure Tesseract can find language traineddata files by:
+    - setting TESSDATA_PREFIX if we can resolve tessdata dir
+    - adding --tessdata-dir to the tesseract config string when not already present
+    """
+    tessdata_dir = _resolve_tessdata_dir()
+    if not tessdata_dir:
+        return existing_config
+
+    # Overwrite (not setdefault) so we can repair misquoted values already present in env.
+    os.environ["TESSDATA_PREFIX"] = tessdata_dir
+
+    cfg = (existing_config or "").strip()
+    if "--tessdata-dir" in cfg:
+        return cfg
+
+    # On Windows, pytesseract parses config with shlex(posix=False), which can
+    # preserve quote characters in values and make Tesseract treat them as part
+    # of the path (e.g. '"C:\\...\\tessdata"/eng.traineddata'). Rely on
+    # TESSDATA_PREFIX there instead of injecting --tessdata-dir.
+    if sys.platform == "win32":
+        return cfg
+
+    return (cfg + f' --tessdata-dir "{tessdata_dir}"').strip()
+
 
 # AWS Comprehend billing: 1 unit = 100 characters (entity recognition, PII, etc.)
 COMPREHEND_CHARACTERS_PER_UNIT = 100
@@ -8516,10 +8635,11 @@ class CustomImageAnalyzerEngine:
 
         elif self.ocr_engine == "tesseract":
 
+            tesseract_cfg = _ensure_tessdata_available_in_env(self.tesseract_config)
             ocr_data = pytesseract.image_to_data(
                 image,
                 output_type=pytesseract.Output.DICT,
-                config=self.tesseract_config,
+                config=tesseract_cfg,
                 lang=self.tesseract_lang,  # Ensure the Tesseract language data (e.g., fra.traineddata) is installed on your system.
             )
 
@@ -12536,7 +12656,10 @@ def merge_text_bounding_boxes(
                 original_bounding_boxes.append(
                     {
                         "text": "".join(char_text),
+                        # Keep both keys for compatibility across UI/table/render paths.
+                        # OCR word/line results use "bounding_box"; decision/review tables often use "boundingBox".
                         "boundingBox": bbox,
+                        "bounding_box": bbox,
                         "result": copy.deepcopy(result),
                     }
                 )
@@ -12598,6 +12721,7 @@ def merge_text_bounding_boxes(
                             {
                                 "text": "".join(merged_text),
                                 "boundingBox": merged_box,
+                                "bounding_box": merged_box,
                                 "result": merged_result,
                             }
                         )
@@ -12632,7 +12756,9 @@ def recreate_page_line_level_ocr_results_with_page(
     page = page_line_level_ocr_results_with_words["page"]
 
     for line_data in page_line_level_ocr_results_with_words["results"].values():
-        bbox = line_data["bounding_box"]
+        bbox = line_data.get("bounding_box") or line_data.get("boundingBox")
+        if not bbox:
+            continue
         text = line_data["text"]
         if line_data["line"]:
             line_number = line_data["line"]
