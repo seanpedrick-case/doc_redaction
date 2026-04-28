@@ -2,7 +2,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
 
 <meta charset="utf-8">
-<meta name="generator" content="quarto-1.9.36">
+<meta name="generator" content="quarto-1.9.37">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
@@ -74,7 +74,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <script src="site_libs/quarto-html/tippy.umd.min.js"></script>
 <script src="site_libs/quarto-html/anchor.min.js"></script>
 <link href="site_libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="site_libs/quarto-html/quarto-syntax-highlighting-845c23b38eaddc0f92fda52bfe77a8c8.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<link href="site_libs/quarto-html/quarto-syntax-highlighting-7f8f88aac4f3542376d5c11b86a4c14d.css" rel="stylesheet" id="quarto-text-highlighting-styles">
 <script src="site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
 <link href="site_libs/bootstrap/bootstrap-a0f9fd0d421825b736dc1bbcbcba2219.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
@@ -217,7 +217,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 </header>
 
 
-<p>version: 2.2.4</p>
+<p>version: 2.2.5</p>
 <p>Welcome to the Document Redaction App documentation. This site provides comprehensive documentation for the Document Redaction App.</p>
 <p>Navigate through the sections to learn how to install, use, and manage the application. Below is a brief introduction to the app, followed by <strong>complete installation instructions</strong> (PyPI, source, and Docker overview).</p>
 <section id="document-redaction" class="level2">
@@ -239,57 +239,62 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <p>Follow these instructions to get the document redaction application running on your local machine.</p>
 <section id="package-installation" class="level3">
 <h3 class="anchored" data-anchor-id="package-installation">1. Package installation</h3>
-<section id="install-from-source-repo-recommended-for-full-features" class="level4">
-<h4 class="anchored" data-anchor-id="install-from-source-repo-recommended-for-full-features">Install from source repo (recommended for full features)</h4>
+<section id="option-1---recommended-install-from-source-repo" class="level4">
+<h4 class="anchored" data-anchor-id="option-1---recommended-install-from-source-repo">Option 1 - Recommended: Install from source repo</h4>
 <p>Clone the repository and install in editable mode:</p>
 <div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> clone https://github.com/seanpedrick-case/doc_redaction.git</span>
 <span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> doc_redaction</span>
 <span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install <span class="at">-e</span> .</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<section id="full-install-from-source-paddle-and-vlm" class="level5">
-<h5 class="anchored" data-anchor-id="full-install-from-source-paddle-and-vlm">Full install from source (Paddle and VLM)</h5>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install <span class="at">-e</span> <span class="st">".[paddle,vlm]"</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<section id="install-extras-paddle-or-transformerstorch-vlm" class="level5">
+<h5 class="anchored" data-anchor-id="install-extras-paddle-or-transformerstorch-vlm">Install extras (Paddle or Transformers/Torch VLM)</h5>
+<p>To install with PaddleOCR:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install <span class="at">-e</span> <span class="st">".[paddle]"</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>Note that the versions of both PaddleOCR and Torch installed by default are the CPU-only versions. If you want to install the equivalent GPU versions, you will need to run the following commands:</p>
 <div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb3"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install paddlepaddle-gpu==3.2.1 <span class="at">--index-url</span> https://www.paddlepaddle.org.cn/packages/stable/cu129/</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>If you want to run VLMs / LLMs with the transformers package:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb4"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install <span class="at">-e</span> <span class="st">".[vlm]"</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>Note:</strong> It is difficult to get paddlepaddle gpu working in an environment alongside torch. You may well need to reinstall the cpu version to ensure compatibility, and run paddlepaddle-gpu in a separate environment without torch installed. If you get errors related to .dll files following paddle gpu install, you may need to install the latest c++ redistributables. For Windows, you can find them <a href="https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170">here</a></p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb4"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install torch==2.8.0 <span class="at">--index-url</span> https://download.pytorch.org/whl/cu129</span>
-<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install torchvision <span class="at">--index-url</span> https://download.pytorch.org/whl/cu129</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb5"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install torch==2.8.0 <span class="at">--index-url</span> https://download.pytorch.org/whl/cu129</span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install torchvision <span class="at">--index-url</span> https://download.pytorch.org/whl/cu129</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </section>
 </section>
-<section id="install-from-pypi-recommended-for-users-and-library-use" class="level4">
-<h4 class="anchored" data-anchor-id="install-from-pypi-recommended-for-users-and-library-use">Install from PyPI (recommended for users and library use)</h4>
+<section id="option-2---install-from-pypi" class="level4">
+<h4 class="anchored" data-anchor-id="option-2---install-from-pypi">Option 2 - Install from PyPI</h4>
 <p>Create a virtual environment (recommended) and install <strong>doc_redaction</strong>.</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb5"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> venv venv</span>
-<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="co"># Windows:</span></span>
-<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a><span class="bu">.</span><span class="dt">\v</span>env<span class="dt">\S</span>cripts<span class="dt">\a</span>ctivate</span>
-<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a><span class="co"># macOS/Linux:</span></span>
-<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a><span class="bu">source</span> venv/bin/activate</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb6"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> venv venv</span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="co"># Windows:</span></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="bu">.</span><span class="dt">\v</span>env<span class="dt">\S</span>cripts<span class="dt">\a</span>ctivate</span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="co"># macOS/Linux:</span></span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a><span class="bu">source</span> venv/bin/activate</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>The package is published on PyPI as <strong><code>doc-redaction</code></strong> (import name <strong><code>doc_redaction</code></strong>):</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb6"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install doc_redaction</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<p>Optional extras (same as in <code>pyproject.toml</code>):</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb7"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install <span class="st">"doc_redaction[paddle,vlm]"</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb7"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install doc_redaction</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Optional extras (same as in <code>pyproject.toml</code>). For installing paddleOCR:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb8"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install <span class="st">"doc_redaction[paddle]"</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>For running VLMs / LLMs with the transformers package:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb9"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install <span class="st">"doc_redaction[vlm]"</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>For programmatic use (CLI-first API matching Gradio <code>api_name</code> routes), see <strong><a href="https://seanpedrick-case.github.io/doc_redaction/src/python_package_usage.html">Python Package usage (Python)</a></strong>. The console script <strong><code>cli_redact</code></strong> is available after install.</p>
-<p><strong>Web UI from a PyPI install:</strong> You <em>can</em> start the Gradio UI after <code>pip install doc_redaction</code> by running:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb8"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> app</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>Web UI from a PyPI install:</strong> You <em>can</em> start the Gradio UI after <code>pip install doc_redaction</code> by running (note that the prerequisites tesseract and poppler will need to be correctly installed following step 2 below):</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb10"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> app</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>Important: your working directory matters.</strong> When you run <code>python -m app</code>, the app treats your <em>current folder</em> as the “app folder”:</p>
 <ul>
 <li>It will look for configuration at <code>config/app_config.env</code> <em>relative to the folder you run it from</em> (and <code>python -m doc_redaction.install_deps</code> will also write <code>config/app_config.env</code> there).</li>
 <li>It may create new folders in that location (for example <code>config/</code>, <code>output/</code>, <code>input/</code>, <code>logs/</code>, <code>usage/</code>, <code>feedback/</code>, and temporary/cache folders depending on your settings).</li>
-<li>The full set of bundled UI example files (<code>example_data/</code>) is part of the <strong>Git repository checkout</strong> rather than the PyPI wheel. If you run from a “random” directory after a PyPI install, you should expect the Examples section to be missing unless you provide your own <code>example_data/</code> folder.</li>
+<li>The UI example files and bundled assets are packaged with the PyPI install (they live inside the installed <code>doc_redaction</code> package). If you run from a “random” directory after a PyPI install, the app can still locate its packaged examples; your working directory mainly affects where <code>config/</code>, <code>input/</code>, <code>output/</code>, logs, and temp folders are created.</li>
 </ul>
 <p>In practice, the <strong>smoothest UI experience</strong> (examples, bundled assets, docs links, predictable relative paths) is still usually via a <strong>repository checkout</strong> or <strong>Docker</strong>, but PyPI install is sufficient to launch the UI as long as you run it from a suitable working folder and have the system dependencies available (or run <code>python -m doc_redaction.install_deps</code> first).</p>
 </section>
-<section id="docker-installation" class="level4">
-<h4 class="anchored" data-anchor-id="docker-installation">Docker installation</h4>
+<section id="option-3---docker-installation" class="level4">
+<h4 class="anchored" data-anchor-id="option-3---docker-installation">Option 3 - Docker installation</h4>
 <p>The doc_redaction Redaction app can be installed by using the <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/Dockerfile">Dockerfile</a> or Docker compose files (<a href="https://github.com/ggml-org/llama.cpp">llama.cpp</a>, <a href="https://docs.vllm.ai/en/stable/">vLLM</a>) provided in the repo.</p>
-<section id="without-llama.cpp-vllm-inference-server" class="level5">
-<h5 class="anchored" data-anchor-id="without-llama.cpp-vllm-inference-server">Without Llama.cpp / vLLM inference server</h5>
-<p>If you want a working Docker installation without GPU support, you can install from the <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/Dockerfile">Dockerfile</a> in the repo. A working example of this, with the CPU version of PaddleOCR, can be found on <a href="https://huggingface.co/spaces/seanpedrickcase/document_redaction">Hugging Face</a>. You can adjust the INSTALL_PADDLEOCR, PADDLE_GPU_ENABLED, INSTALL_VLM, and TORCH_GPU_ENABLED config variables to adjust for PaddleOCR and Transformers packages for local VLM support. Note that GPU-enabled PaddleOCR, and GPU-enabled Transformers/Torch often don’t work well together, which is one reason why a Llama.cpp/vLLM inference server Docker installation option is provided below.</p>
-</section>
 <section id="with-llama.cpp-vllm-inference-server" class="level5">
 <h5 class="anchored" data-anchor-id="with-llama.cpp-vllm-inference-server">With Llama.cpp / vLLM inference server</h5>
 <p>The project now has Docker and Docker compose files available to pair running the Redaction app with local inference servers powered by <a href="https://github.com/ggml-org/llama.cpp">llama.cpp</a>, or <a href="https://docs.vllm.ai/en/stable/">vLLM</a>. Llama.cpp is more flexible than vLLM for low VRAM systems, as Llama.cpp will offload to cpu/system RAM automatically rather than failing as vLLM tends to do.</p>
 <p>For Llama.cpp, you can use the <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_llama.yml">docker-compose_llama.yml</a> file, and for vLLM, you can use the <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_vllm.yml">docker-compose_vllm.yml</a> file. To run, Docker / Docker Desktop should be installed, and then you can run the commands suggested in the top of the files to run the servers.</p>
-<p>You will need ~40-50GB of disk space to run everything depending on the model chosen from the compose file. For the vLLM server, you will need 24 GB VRAM. For the Llama.cpp server, 24 GB VRAM is needed to run at full speed, but the n-gpu-layers and n-cpu-moe parameters in the Docker compose file can be adjusted to fit into your system. I would suggest that 8 GB VRAM is needed as a bare minimum for decent inference speed. See the <a href="https://unsloth.ai/docs/models/qwen3.5">Unsloth guide</a> for more details on working with GGUF files for Qwen 3.5.</p>
+<p>You will need ~40 GB of disk space to run everything depending on the model chosen from the compose file. For the vLLM server, you will need 24 GB VRAM. For the Llama.cpp server, 24 GB VRAM is needed to run at full speed, but the n-gpu-layers and n-cpu-moe parameters in the Docker compose file can be adjusted to fit into your system. I would suggest that 8 GB VRAM is needed as a bare minimum for decent inference speed. See the <a href="https://unsloth.ai/docs/models/qwen3.5">Unsloth guide</a> for more details on working with GGUF files for Qwen 3.5.</p>
+</section>
+<section id="without-llama.cpp-vllm-inference-server" class="level5">
+<h5 class="anchored" data-anchor-id="without-llama.cpp-vllm-inference-server">Without Llama.cpp / vLLM inference server</h5>
+<p>If you want a working Docker installation without GPU support, you can install from the <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/Dockerfile">Dockerfile</a> in the repo. A working example of this, with the CPU version of PaddleOCR, can be found on <a href="https://huggingface.co/spaces/seanpedrickcase/document_redaction">Hugging Face</a>. You can adjust the INSTALL_PADDLEOCR, PADDLE_GPU_ENABLED, INSTALL_VLM, and TORCH_GPU_ENABLED config variables to adjust for PaddleOCR and Transformers packages for local VLM support. Note that GPU-enabled PaddleOCR, and GPU-enabled Transformers/Torch often don’t work well together, which is one reason why a Llama.cpp/vLLM inference server Docker installation option is provided below.</p>
 </section>
 </section>
 </section>
@@ -306,10 +311,10 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <li><strong>PyPI install</strong>: <code>pip install doc_redaction</code> and run from a writable folder where you want <code>redaction_deps/</code> and <code>config/app_config.env</code> to be created/updated.</li>
 </ul>
 <p>From the repository root (or your chosen working folder) after creating/activating your venv and installing Python requirements:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb9"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> doc_redaction.install_deps</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb11"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> doc_redaction.install_deps</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>This writes <code>TESSERACT_FOLDER</code> / <code>POPPLER_FOLDER</code> into <code>config/app_config.env</code> so the app can find the binaries without you editing your system PATH.</p>
 <p>To just check whether your machine can already see the tools:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb10"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> doc_redaction.install_deps <span class="at">--verify-only</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb12"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> doc_redaction.install_deps <span class="at">--verify-only</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </section>
 <section id="on-windows" class="level4">
 <h4 class="anchored"><strong>On Windows</strong></h4>
@@ -340,27 +345,27 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <section id="on-linux-debianubuntu" class="level4">
 <h4 class="anchored" data-anchor-id="on-linux-debianubuntu"><strong>On Linux (Debian/Ubuntu)</strong></h4>
 <p>Open your terminal and run the following command to install Tesseract and Poppler:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb11"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> apt-get update <span class="kw">&amp;&amp;</span> <span class="fu">sudo</span> apt-get install <span class="at">-y</span> tesseract-ocr poppler-utils</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb13"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> apt-get update <span class="kw">&amp;&amp;</span> <span class="fu">sudo</span> apt-get install <span class="at">-y</span> tesseract-ocr poppler-utils</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </section>
 <section id="on-linux-fedoracentosrhel" class="level4">
 <h4 class="anchored" data-anchor-id="on-linux-fedoracentosrhel"><strong>On Linux (Fedora/CentOS/RHEL)</strong></h4>
 <p>Open your terminal and use the <code>dnf</code> or <code>yum</code> package manager:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb12"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> dnf install <span class="at">-y</span> tesseract poppler-utils</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb14"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> dnf install <span class="at">-y</span> tesseract poppler-utils</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <hr>
 </section>
 </section>
 <section id="run-the-application" class="level3">
 <h3 class="anchored" data-anchor-id="run-the-application">3. Run the Application</h3>
 <p>With all dependencies installed, you can now start the Gradio application.</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb13"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> app.py</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb15"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> app.py</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>After running the command, the application will start, and you will see a local URL in your terminal (usually <code>http://127.0.0.1:7860</code>).</p>
 <p>Open this URL in your web browser to use the document redaction tool</p>
 <section id="command-line-interface" class="level4">
 <h4 class="anchored" data-anchor-id="command-line-interface">Command line interface</h4>
 <p>If you installed from <strong>PyPI</strong>, use the installed console script:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb14"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="ex">cli_redact</span> <span class="at">--help</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb16"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="ex">cli_redact</span> <span class="at">--help</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>From a <strong>repository checkout</strong>, you can also run:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb15"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--help</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb17"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--help</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>For Python examples that mirror each Gradio <code>api_name</code>, see <a href="https://seanpedrick-case.github.io/doc_redaction/src/python_package_usage.html">Python Package usage (Python)</a>.</p>
 <hr>
 </section>
@@ -368,16 +373,16 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <section id="run-the-application-1" class="level3">
 <h3 class="anchored" data-anchor-id="run-the-application-1">3. Run the Application</h3>
 <p>With all dependencies installed, you can now start the Gradio application GUI. For a guide on how to use this, please go <a href="https://seanpedrick-case.github.io/doc_redaction/src/user_guide.html">here</a>.</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb16"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> app.py</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb18"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> app.py</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>After running the command, the application will start, and you will see a local URL in your terminal (usually <code>http://127.0.0.1:7860</code>).</p>
 <p>Open this URL in your web browser to use the document redaction tool</p>
 <section id="command-line-interface-1" class="level4">
 <h4 class="anchored" data-anchor-id="command-line-interface-1">Command line interface</h4>
 <p>For example CLI commands, please refer to <a href="https://seanpedrick-case.github.io/doc_redaction/src/user_guide.html#command-line-interface-cli">this guide</a> or the examples in <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/cli_redact.py#L321">cli_redact.py</a></p>
 <p>If you installed from <strong>PyPI</strong>, use the installed console script:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb17"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="ex">cli_redact</span> <span class="at">--help</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb19"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="ex">cli_redact</span> <span class="at">--help</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>From a <strong>repository checkout</strong>, you can also run:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb18"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--help</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb20"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--help</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </section>
 <section id="python-package-commands" class="level4">
 <h4 class="anchored" data-anchor-id="python-package-commands">Python package commands</h4>
