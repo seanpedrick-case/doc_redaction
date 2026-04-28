@@ -23,7 +23,7 @@ Follow these instructions to get the document redaction application running on y
 
 ### 1. Package installation
 
-#### Install from source repo (recommended for full features)
+#### Option 1 - Recommended: Install from source repo
 
 Clone the repository and install in editable mode:
 
@@ -33,16 +33,25 @@ cd doc_redaction
 pip install -e .
 ```
 
-##### Full install from source (Paddle and VLM)
+##### Install extras (Paddle or Transformers/Torch VLM)
+
+To install with PaddleOCR:
 
 ```bash
-pip install -e ".[paddle,vlm]"
+pip install -e ".[paddle]"
 ```
 
 Note that the versions of both PaddleOCR and Torch installed by default are the CPU-only versions. If you want to install the equivalent GPU versions, you will need to run the following commands:
 ```bash
 pip install paddlepaddle-gpu==3.2.1 --index-url https://www.paddlepaddle.org.cn/packages/stable/cu129/
 ```
+
+If you want to run VLMs / LLMs with the transformers package:
+
+```bash
+pip install -e ".[vlm]"
+```
+
 
 **Note:** It is difficult to get paddlepaddle gpu working in an environment alongside torch. You may well need to reinstall the cpu version to ensure compatibility, and run paddlepaddle-gpu in a separate environment without torch installed. If you get errors related to .dll files following paddle gpu install, you may need to install the latest c++ redistributables. For Windows, you can find them [here](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170)
 
@@ -51,7 +60,7 @@ pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu129
 pip install torchvision --index-url https://download.pytorch.org/whl/cu129
 ```
 
-#### Install from PyPI (recommended for users and library use)
+#### Option 2 - Install from PyPI
 
 Create a virtual environment (recommended) and install **doc_redaction**.
 
@@ -69,15 +78,21 @@ The package is published on PyPI as **`doc-redaction`** (import name **`doc_reda
 pip install doc_redaction
 ```
 
-Optional extras (same as in `pyproject.toml`):
+Optional extras (same as in `pyproject.toml`). For installing paddleOCR:
 
 ```bash
-pip install "doc_redaction[paddle,vlm]"
+pip install "doc_redaction[paddle]"
+```
+
+For running VLMs / LLMs with the transformers package:
+
+```bash
+pip install "doc_redaction[vlm]"
 ```
 
 For programmatic use (CLI-first API matching Gradio `api_name` routes), see **[Python Package usage (Python)](https://seanpedrick-case.github.io/doc_redaction/src/python_package_usage.html)**. The console script **`cli_redact`** is available after install.
 
-**Web UI from a PyPI install:** You *can* start the Gradio UI after `pip install doc_redaction` by running:
+**Web UI from a PyPI install:** You *can* start the Gradio UI after `pip install doc_redaction` by running (note that the prerequisites tesseract and poppler will need to be correctly installed following step 2 below):
 
 ```bash
 python -m app
@@ -91,13 +106,9 @@ python -m app
 
 In practice, the **smoothest UI experience** (examples, bundled assets, docs links, predictable relative paths) is still usually via a **repository checkout** or **Docker**, but PyPI install is sufficient to launch the UI as long as you run it from a suitable working folder and have the system dependencies available (or run `python -m doc_redaction.install_deps` first).
 
-#### Docker installation
+#### Option 3 - Docker installation
 
 The doc_redaction Redaction app can be installed by using the [Dockerfile](https://github.com/seanpedrick-case/doc_redaction/blob/main/Dockerfile) or Docker compose files ([llama.cpp](https://github.com/ggml-org/llama.cpp), [vLLM](https://docs.vllm.ai/en/stable/)) provided in the repo.
-
-##### Without Llama.cpp / vLLM inference server
-
-If you want a working Docker installation without GPU support, you can install from the [Dockerfile](https://github.com/seanpedrick-case/doc_redaction/blob/main/Dockerfile) in the repo. A working example of this, with the CPU version of PaddleOCR, can be found on [Hugging Face](https://huggingface.co/spaces/seanpedrickcase/document_redaction). You can adjust the INSTALL_PADDLEOCR, PADDLE_GPU_ENABLED, INSTALL_VLM, and TORCH_GPU_ENABLED config variables to adjust for PaddleOCR and Transformers packages for local VLM support. Note that GPU-enabled PaddleOCR, and GPU-enabled Transformers/Torch often don't work well together, which is one reason why a Llama.cpp/vLLM inference server Docker installation option is provided below.
 
 ##### With Llama.cpp / vLLM inference server
 
@@ -105,11 +116,15 @@ The project now has Docker and Docker compose files available to pair running th
 
 For Llama.cpp, you can use the [docker-compose_llama.yml](https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_llama.yml) file, and for vLLM, you can use the [docker-compose_vllm.yml](https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_vllm.yml) file. To run, Docker / Docker Desktop should be installed, and then you can run the commands suggested in the top of the files to run the servers.
 
-You will need ~40-50GB of disk space to run everything depending on the model chosen from the compose file. For the vLLM server, you will need 24 GB VRAM. For the Llama.cpp server, 24 GB VRAM is needed to run at full speed, but the n-gpu-layers and n-cpu-moe parameters in the Docker compose file can be adjusted to fit into your system. I would suggest that 8 GB VRAM is needed as a bare minimum for decent inference speed. See the [Unsloth guide](https://unsloth.ai/docs/models/qwen3.5) for more details on working with GGUF files for Qwen 3.5.
+You will need ~40 GB of disk space to run everything depending on the model chosen from the compose file. For the vLLM server, you will need 24 GB VRAM. For the Llama.cpp server, 24 GB VRAM is needed to run at full speed, but the n-gpu-layers and n-cpu-moe parameters in the Docker compose file can be adjusted to fit into your system. I would suggest that 8 GB VRAM is needed as a bare minimum for decent inference speed. See the [Unsloth guide](https://unsloth.ai/docs/models/qwen3.5) for more details on working with GGUF files for Qwen 3.5.
+
+##### Without Llama.cpp / vLLM inference server
+
+If you want a working Docker installation without GPU support, you can install from the [Dockerfile](https://github.com/seanpedrick-case/doc_redaction/blob/main/Dockerfile) in the repo. A working example of this, with the CPU version of PaddleOCR, can be found on [Hugging Face](https://huggingface.co/spaces/seanpedrickcase/document_redaction). You can adjust the INSTALL_PADDLEOCR, PADDLE_GPU_ENABLED, INSTALL_VLM, and TORCH_GPU_ENABLED config variables to adjust for PaddleOCR and Transformers packages for local VLM support. Note that GPU-enabled PaddleOCR, and GPU-enabled Transformers/Torch often don't work well together, which is one reason why a Llama.cpp/vLLM inference server Docker installation option is provided below.
 
 ### 2. Install prerequisites: Tesseract and Poppler
 
-This application relies on two external tools for OCR (Tesseract) and PDF processing (Poppler). Please install them on your system before proceeding.
+This application relies on two external tools for OCR (Tesseract) and PDF processing (Poppler). Please install them on your system before proceeding. To run the Document Redaction app successfully, these tools need to be installed and either 1. added to PATH, or 2. be in a folder that is directly referenced in the config/app_config.env file with the variables TESSERACT_FOLDER and POPPLER_FOLDER (defined [here](https://github.com/seanpedrick-case/doc_redaction/blob/main/tools/config.py) if you want to see the code). The instructions below will guide you through diffferent ways to install these dependencies.
 
 ---
 

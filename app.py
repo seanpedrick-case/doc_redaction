@@ -168,6 +168,7 @@ from tools.config import (
     CLOUD_VLM_MODEL_CHOICE,
     COGNITO_AUTH,
     CONFIG_FOLDER,
+    COST_CODE_ACCORDION_OPEN,
     COST_CODES_PATH,
     CSV_ACCESS_LOG_HEADERS,
     CSV_FEEDBACK_LOG_HEADERS,
@@ -923,7 +924,7 @@ cost_code_choice_drop = gr.Dropdown(
     value=DEFAULT_COST_CODE,
     label="Choose cost code for analysis",
     choices=[DEFAULT_COST_CODE],
-    allow_custom_value=False,
+    allow_custom_value=True,
     visible=GET_COST_CODES or ENFORCE_COST_CODES,
 )
 set_default_cost_code_button = gr.Button(
@@ -1254,6 +1255,9 @@ with blocks:
         value=0
     )  # Keeps track of the last page that the annotator was on
     s3_logs_output_textbox = gr.State(value="")
+
+    # Session default cost codes dataframe
+    session_default_cost_codes_df = gr.State(pd.DataFrame())
 
     ## Annotator zoom value
     annotator_zoom_number = gr.Number(
@@ -2786,7 +2790,9 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
                 if GET_COST_CODES or ENFORCE_COST_CODES:
                     with gr.Accordion(
-                        "Assign task to cost code", open=True, visible=True
+                        "Assign task to cost code",
+                        open=COST_CODE_ACCORDION_OPEN,
+                        visible=True,
                     ):
                         gr.Markdown(
                             "Please ensure that you have approval from your budget holder before using this app for redaction tasks that incur a cost."
