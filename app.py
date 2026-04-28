@@ -1256,6 +1256,9 @@ with blocks:
     )  # Keeps track of the last page that the annotator was on
     s3_logs_output_textbox = gr.State(value="")
 
+    # Session default cost codes dataframe
+    session_default_cost_codes_df = gr.State(pd.DataFrame())
+
     ## Annotator zoom value
     annotator_zoom_number = gr.Number(
         label="Current annotator zoom level", value=100, precision=0, visible=False

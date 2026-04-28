@@ -61,6 +61,7 @@ from tools.config import (
     S3_OUTPUTS_FOLDER,
     SAVE_OUTPUTS_TO_S3,
     SELECTABLE_TEXT_EXTRACT_OPTION,
+    SESSION_DEFAULT_COST_CODES_FILENAME,
     SESSION_OUTPUT_FOLDER,
     SHOW_FEEDBACK_BUTTONS,
     TEXTRACT_JOBS_LOCAL_LOC,
@@ -218,8 +219,6 @@ def get_file_name_no_ext(file_path: str):
     # Then, split the basename and its extension and return only the basename without the extension
     filename_without_extension, _ = os.path.splitext(basename)
 
-    # print(filename_without_extension)
-
     return filename_without_extension
 
 
@@ -310,8 +309,6 @@ def update_cost_code_dataframe_from_dropdown_select(
     ]
     return cost_code_df
 
-
-SESSION_DEFAULT_COST_CODES_FILENAME = "session_default_cost_codes.csv"
 
 # Reasonable email pattern for validating session_hash (saves/upload require email format)
 _EMAIL_PATTERN = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
@@ -516,6 +513,7 @@ def save_default_cost_code_for_session(
     valid_codes = list(cost_code_df.iloc[:, 0].astype(str).unique())
     if cost_code_choice not in valid_codes:
         return "Selected cost code not in the list. Choose a cost code from the table."
+
     try:
         csv_path_obj = _validate_session_default_cost_codes_csv_path(
             get_session_default_cost_codes_csv_path(output_folder)
@@ -543,7 +541,28 @@ def save_default_cost_code_for_session(
     # 1. Prepare your new data
     new_row_df = pd.DataFrame([row])
 
-    if os.path.exists(csv_path) and os.path.getsize(csv_path) > 0:
+    result, df = load_session_default_cost_code_with_df(session_hash, output_folder)
+
+    if not df.empty:
+        existing = df
+
+        # Check if the file is structured correctly
+        if {"session_hash", "default_cost_code"}.issubset(existing.columns):
+
+            # Ensure column exists for consistency
+            if "saved_at" not in existing.columns:
+                existing["saved_at"] = ""
+
+            # Logic: Keep everything EXCEPT the current session_hash
+            # We cast both to string to ensure "123" matches 123
+            existing = existing[
+                existing["session_hash"].astype(str) != str(session_hash)
+            ]
+
+            # Combine the old (minus the current hash) with the new row
+            updated = pd.concat([existing, new_row_df], ignore_index=True)
+
+    elif os.path.exists(csv_path) and os.path.getsize(csv_path) > 0:
         existing = pd.read_csv(csv_path)
 
         # Check if the file is structured correctly
@@ -588,6 +607,7 @@ def save_default_cost_code_for_session(
             updated.to_csv(csv_path, index=False)
         s3_prefix = _get_session_default_cost_codes_s3_key_prefix()
         s3_full_key = s3_prefix + SESSION_DEFAULT_COST_CODES_FILENAME
+
         upload_result = upload_file_to_s3(
             local_file_paths=[csv_path],
             s3_key=s3_prefix,
@@ -595,10 +615,7 @@ def save_default_cost_code_for_session(
             RUN_AWS_FUNCTIONS=RUN_AWS_FUNCTIONS,
         )
         if upload_result and "successfully" in upload_result.lower():
-            print(
-                f"Session default cost codes CSV uploaded to "
-                f"s3://{DOCUMENT_REDACTION_BUCKET}/{s3_full_key}"
-            )
+            print("Updated session default cost codes CSV successfully uploaded")
         else:
             print(
                 f"Session default cost codes S3 upload issue "
@@ -653,6 +670,51 @@ def _read_session_default_from_csv_path(
         return ""
 
 
+def _read_session_default_from_csv_path_with_df(
+    csv_path: str,
+    session_hash: str,
+    *,
+    allow_download_temp: bool = False,
+) -> tuple[str, pd.DataFrame]:
+    """Read CSV at csv_path and return default_cost_code for session_hash, or "", plus the dataframe.
+    If saved_at exists, uses the latest row by saved_at for that session_hash.
+    """
+    try:
+        csv_path_obj = _validate_session_default_cost_codes_csv_path(
+            csv_path, allow_download_temp=allow_download_temp
+        )
+        csv_path = str(csv_path_obj)
+        # Help CodeQL see a containment check against trusted roots.
+        if allow_download_temp:
+            ok = validate_path_safety(csv_path, base_path=tempfile.gettempdir())
+        else:
+            ok = False
+            for root in _session_default_cost_codes_parent_dirs():
+                if validate_path_safety(csv_path, base_path=str(root)):
+                    ok = True
+                    break
+        if not ok:
+            raise PermissionError(
+                "Session default cost codes CSV path outside allowed roots"
+            )
+    except (ValueError, PermissionError, OSError):
+        return "", pd.DataFrame()
+    if not os.path.exists(csv_path):
+        return "", pd.DataFrame()
+    try:
+        df = pd.read_csv(csv_path)
+        if "session_hash" not in df.columns or "default_cost_code" not in df.columns:
+            return "", df
+        match = df[df["session_hash"].astype(str) == str(session_hash)]
+        if match.empty:
+            return "", df
+        if "saved_at" in match.columns:
+            match = match.sort_values("saved_at", ascending=True, na_position="last")
+        return str(match.iloc[-1]["default_cost_code"]).strip(), df
+    except Exception:
+        return "", pd.DataFrame()
+
+
 def load_session_default_cost_code(
     session_hash: str, input_folder: str | None = None
 ) -> str:
@@ -674,6 +736,7 @@ def load_session_default_cost_code(
     ):
         s3_prefix = _get_session_default_cost_codes_s3_key_prefix()
         tmp_path = None
+        print("Downloading session default cost codes CSV from s3")
         try:
             with tempfile.NamedTemporaryFile(
                 mode="w", suffix=".csv", delete=False
@@ -689,6 +752,7 @@ def load_session_default_cost_code(
                 result = _read_session_default_from_csv_path(
                     tmp_path, session_hash, allow_download_temp=True
                 )
+                print("Successfully read session default cost code from CSV:", result)
                 if result:
                     try:
                         os.unlink(tmp_path)
@@ -713,6 +777,69 @@ def load_session_default_cost_code(
     return _read_session_default_from_csv_path(csv_path, session_hash)
 
 
+def load_session_default_cost_code_with_df(
+    session_hash: str, input_folder: str | None = None
+) -> tuple[str, pd.DataFrame]:
+    """
+    Load the default cost code for the given session_hash from the session defaults CSV.
+    If S3_COST_CODES_PATH is set, tries the same bucket and folder in S3 first, then local.
+    If input_folder is provided, tries that path first for local file, then fallback.
+    Returns the default cost code string if found, along with the dataframe if found, else "".
+    """
+    if not session_hash or not str(session_hash).strip():
+        return "", pd.DataFrame()
+
+    # Only download from S3 when session_hash is an email (same rule as for saves)
+    if _is_valid_session_hash_email(session_hash) and (
+        S3_COST_CODES_PATH
+        and str(S3_COST_CODES_PATH).strip()
+        and RUN_AWS_FUNCTIONS
+        and DOCUMENT_REDACTION_BUCKET
+    ):
+        s3_prefix = _get_session_default_cost_codes_s3_key_prefix()
+        tmp_path = None
+
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".csv", delete=False
+            ) as tmp:
+                tmp_path = tmp.name
+            download_file_from_s3(
+                bucket_name=DOCUMENT_REDACTION_BUCKET,
+                key=s3_prefix + SESSION_DEFAULT_COST_CODES_FILENAME,
+                local_file_path_and_name=tmp_path,
+                RUN_AWS_FUNCTIONS=RUN_AWS_FUNCTIONS,
+            )
+            if tmp_path and os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
+                result, df = _read_session_default_from_csv_path_with_df(
+                    tmp_path, session_hash, allow_download_temp=True
+                )
+                print("Successfully read session default cost code from CSV")
+                if result:
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
+                    return result, df
+        except Exception:
+            pass
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    # Local: try input_folder first if provided, then default cost codes folder
+    if input_folder is not None and str(input_folder).strip():
+        csv_path = get_session_default_cost_codes_csv_path(input_folder)
+        result, df = _read_session_default_from_csv_path_with_df(csv_path, session_hash)
+        if result:
+            return result, df
+    csv_path = get_session_default_cost_codes_csv_path()
+    result, df = _read_session_default_from_csv_path_with_df(csv_path, session_hash)
+    return result, df
+
+
 def apply_session_default_cost_code(
     session_hash: str,
     cost_code_dataframe: pd.DataFrame,
@@ -727,6 +854,7 @@ def apply_session_default_cost_code(
     applies, return (current_default_cost_code, current_dropdown_value) so the
     dropdown keeps showing e.g. DEFAULT_COST_CODE instead of being cleared.
     """
+
     default_code = load_session_default_cost_code(session_hash, input_folder)
     if not default_code:
         # Preserve current values so we don't overwrite with "" on app load
@@ -792,8 +920,6 @@ def get_file_name_without_type(file_path):
 
     # Then, split the basename and its extension and return only the basename without the extension
     filename_without_extension, _ = os.path.splitext(basename)
-
-    # print(filename_without_extension)
 
     return filename_without_extension
 
@@ -893,7 +1019,7 @@ def custom_regex_load(in_file: List[str], file_type: str = "allow_list"):
             print(output_text)
     else:
         output_text = "No file provided."
-        # print(output_text)
+
         return output_text, custom_regex_list
 
     return output_text, custom_regex_list
@@ -908,7 +1034,6 @@ def put_columns_in_df(in_file: List[str]):
     for file in in_file:
         file_name = file.name
         file_type = detect_file_type(file_name)
-        # print("File type is:", file_type)
 
         if (file_type == "xlsx") | (file_type == "xls"):
             number_of_excel_files += 1
@@ -1005,7 +1130,6 @@ def check_for_existing_textract_file(
     if not validate_path_safety(str(textract_output_path), base_path=out_dir):
         return False
     if textract_output_path.exists():
-        # print("Existing Textract analysis output file found.")
         return True
 
     else:
@@ -1024,7 +1148,6 @@ def check_for_relevant_ocr_output_with_words(
     elif text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION:
         file_ending = "_ocr_results_with_words_textract.json"
     else:
-        # print("No valid text extraction method found. Returning False")
         return False
 
     try:

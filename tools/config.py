@@ -2573,6 +2573,10 @@ COST_CODE_ACCORDION_OPEN = convert_string_to_boolean(
     get_or_create_env_var("COST_CODE_ACCORDION_OPEN", "True")
 )
 
+SESSION_DEFAULT_COST_CODES_FILENAME = get_or_create_env_var(
+    "SESSION_DEFAULT_COST_CODES_FILENAME", "session_default_cost_codes.csv"
+)
+
 
 ###
 # WHOLE DOCUMENT API OPTIONS
