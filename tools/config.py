@@ -2569,6 +2569,10 @@ ENFORCE_COST_CODES = convert_string_to_boolean(
 if ENFORCE_COST_CODES:
     GET_COST_CODES = True
 
+COST_CODE_ACCORDION_OPEN = convert_string_to_boolean(
+    get_or_create_env_var("COST_CODE_ACCORDION_OPEN", "True")
+)
+
 
 ###
 # WHOLE DOCUMENT API OPTIONS

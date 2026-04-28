@@ -268,14 +268,11 @@ def load_in_default_cost_codes(cost_codes_path: str, default_cost_code: str = ""
     else:
         value = ""
 
-    out_dropdown = gr.Dropdown(
-        value=value,
-        label="Choose cost code for analysis",
-        choices=dropdown_choices,
-        allow_custom_value=False,
+    return (
+        cost_codes_df,
+        cost_codes_df,
+        gr.update(value=value, choices=dropdown_choices),
     )
-
-    return cost_codes_df, cost_codes_df, out_dropdown
 
 
 def enforce_cost_codes(
