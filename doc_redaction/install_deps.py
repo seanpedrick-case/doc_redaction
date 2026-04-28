@@ -405,26 +405,26 @@ def _install_windows_poppler(base_dir: Path, force: bool) -> Path:
 
 def _tesseract_latest_installer_url() -> str:
     """
-    Best-effort: scrape the UB Mannheim directory listing and pick the newest
-    64-bit installer filename.
+    Use the GitHub API to get the latest (5.50) tesseract installer URL for Windows.
     """
-    index_url = "https://digi.bib.uni-mannheim.de/tesseract/"
-    req = urllib.request.Request(
-        index_url,
-        headers={"User-Agent": "doc_redaction-install-deps/1.0"},
-    )
-    with urllib.request.urlopen(req) as resp:
-        html = resp.read().decode("utf-8", errors="replace")
+    # Use the GitHub API to get release data
+    api_url = "https://api.github.com/repos/tesseract-ocr/tesseract/releases/tags/5.5.0"
+    req = urllib.request.Request(api_url, headers={"User-Agent": "python-script"})
 
-    # Example: tesseract-ocr-w64-setup-5.5.0.20241111.exe
-    names = re.findall(r"(tesseract-ocr-w64-setup-[0-9][^\"'>\s]*?\.exe)", html)
-    if not names:
-        raise RuntimeError(
-            "Could not find a tesseract-ocr-w64-setup-*.exe in the listing"
-        )
-    # Sort by string: version/date suffix makes this generally safe for these filenames.
-    newest = sorted(set(names))[-1]
-    return index_url.rstrip("/") + "/" + newest
+    with urllib.request.urlopen(req) as resp:
+        data = json.loads(resp.read().decode())
+
+    # Search through the 'assets' list for the .exe
+    for asset in data.get("assets", []):
+        name = asset.get("name", "")
+        print("name: ", name)
+        if re.match(r"tesseract-ocr-w64-setup-.*\.exe", name):
+            print("found tesseract download url: ", asset.get("browser_download_url"))
+            return asset.get("browser_download_url")
+        else:
+            print("Not a tesseract installer: ", name)
+
+    raise RuntimeError("Could not find Windows installer in GitHub assets.")
 
 
 def _find_tesseract_bin_from_prefix(prefix: Path) -> Path | None:

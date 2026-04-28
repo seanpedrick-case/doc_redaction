@@ -49,5 +49,6 @@ test/usage/*
 model_cache/*
 sanitized_file/*
 src/doc_redaction.egg-info/*
+docker-compose_llama_long_context_dual_gpu.yml
 
 **/*.quarto_ipynb

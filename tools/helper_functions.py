@@ -543,23 +543,37 @@ def save_default_cost_code_for_session(
         "default_cost_code": cost_code_choice,
         "saved_at": saved_at,
     }
-    if os.path.exists(csv_path):
+    # 1. Prepare your new data
+    new_row_df = pd.DataFrame([row])
+
+    if os.path.exists(csv_path) and os.path.getsize(csv_path) > 0:
         existing = pd.read_csv(csv_path)
-        if (
-            "session_hash" in existing.columns
-            and "default_cost_code" in existing.columns
-        ):
+
+        # Check if the file is structured correctly
+        if {"session_hash", "default_cost_code"}.issubset(existing.columns):
+
+            # Ensure column exists for consistency
             if "saved_at" not in existing.columns:
                 existing["saved_at"] = ""
-            # Replace any existing row for this session (one row per session_hash)
+
+            # Logic: Keep everything EXCEPT the current session_hash
+            # We cast both to string to ensure "123" matches 123
             existing = existing[
                 existing["session_hash"].astype(str) != str(session_hash)
             ]
-            updated = pd.concat([existing, pd.DataFrame([row])], ignore_index=True)
+
+            # Combine the old (minus the current hash) with the new row
+            updated = pd.concat([existing, new_row_df], ignore_index=True)
         else:
-            updated = pd.DataFrame([row])
+            # If the CSV exists but has wrong columns, treat it as a fresh start
+            print(
+                f"Warning: {csv_path} has an invalid structure. Resetting file."
+            )  # Add this for debugging
+            updated = new_row_df
     else:
-        updated = pd.DataFrame([row])
+        # File doesn't exist or is empty
+        updated = new_row_df
+
     # Remove duplicate session_hashes, keeping only the latest by saved_at
     updated = _dedupe_session_default_cost_codes(updated)
     updated.to_csv(csv_path, index=False)
