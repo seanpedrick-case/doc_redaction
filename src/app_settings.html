@@ -2,7 +2,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
 
 <meta charset="utf-8">
-<meta name="generator" content="quarto-1.9.37">
+<meta name="generator" content="quarto-1.9.36">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
@@ -39,7 +39,7 @@ ul.task-list li input[type="checkbox"] {
 <script src="../site_libs/quarto-html/tippy.umd.min.js"></script>
 <script src="../site_libs/quarto-html/anchor.min.js"></script>
 <link href="../site_libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-7f8f88aac4f3542376d5c11b86a4c14d.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-845c23b38eaddc0f92fda52bfe77a8c8.css" rel="stylesheet" id="quarto-text-highlighting-styles">
 <script src="../site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
 <link href="../site_libs/bootstrap/bootstrap-a0f9fd0d421825b736dc1bbcbcba2219.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
@@ -198,7 +198,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
   <li><a href="#allow-deny-whole-page-redaction-lists" id="toc-allow-deny-whole-page-redaction-lists" class="nav-link" data-scroll-target="#allow-deny-whole-page-redaction-lists">Allow, Deny, &amp; Whole Page Redaction Lists</a></li>
   <li><a href="#cost-code-options" id="toc-cost-code-options" class="nav-link" data-scroll-target="#cost-code-options">Cost Code Options</a>
   <ul class="collapse">
-  <li><a href="#session-default-cost-code-no-extra-environment-variables" id="toc-session-default-cost-code-no-extra-environment-variables" class="nav-link" data-scroll-target="#session-default-cost-code-no-extra-environment-variables">Session default cost code (no extra environment variables)</a></li>
+  <li><a href="#session-default-cost-code" id="toc-session-default-cost-code" class="nav-link" data-scroll-target="#session-default-cost-code">Session default cost code</a></li>
   </ul></li>
   <li><a href="#whole-document-api-options-textract-async" id="toc-whole-document-api-options-textract-async" class="nav-link" data-scroll-target="#whole-document-api-options-textract-async">Whole Document API Options (Textract Async)</a></li>
   </ul>
@@ -1787,14 +1787,9 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <li><strong>Description:</strong> If set to <code>'True'</code>, the cost code accordion will be open by default.</li>
 <li><strong>Default Value:</strong> <code>'False'</code></li>
 </ul></li>
-<li><strong><code>SESSION_DEFAULT_COST_CODES_FILENAME</code></strong>
-<ul>
-<li><strong>Description:</strong> The filename for the session default cost codes CSV file.</li>
-<li><strong>Default Value:</strong> <code>'session_default_cost_codes.csv'</code></li>
-</ul></li>
 </ul>
-<section id="session-default-cost-code-no-extra-environment-variables" class="level3">
-<h3 class="anchored" data-anchor-id="session-default-cost-code-no-extra-environment-variables">Session default cost code (no extra environment variables)</h3>
+<section id="session-default-cost-code" class="level3">
+<h3 class="anchored" data-anchor-id="session-default-cost-code">Session default cost code</h3>
 <p>When cost codes are enabled (<code>GET_COST_CODES</code> or <code>ENFORCE_COST_CODES</code>), users can save a <strong>default cost code</strong> for their session via the “Set default cost code” button. This uses the <strong>existing</strong> cost code and AWS settings; no additional environment variables are required.</p>
 <ul>
 <li><strong>Behaviour:</strong>
@@ -1803,6 +1798,16 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <li><strong>Local save location:</strong> The CSV is written under the app’s <strong>input folder</strong> (the value of the input folder at save time, e.g.&nbsp;from <code>INPUT_FOLDER</code> or the session’s <code>input_folder_textbox</code>).</li>
 <li><strong>S3 (optional):</strong> If <code>S3_COST_CODES_PATH</code> is set and <code>RUN_AWS_FUNCTIONS</code> and <code>DOCUMENT_REDACTION_BUCKET</code> are set, the same file is also uploaded to <code>DOCUMENT_REDACTION_BUCKET</code> in the same key “folder” as the cost codes file (e.g.&nbsp;<code>config/session_default_cost_codes.csv</code>).</li>
 <li><strong>Email-only:</strong> Saves and S3 upload only run when the session identifier is a valid <strong>email address</strong> (e.g.&nbsp;when users are signed in via Cognito). If the session identifier is not an email (e.g.&nbsp;when running locally with a Gradio session hash), the default is not written to the CSV and not uploaded to S3. On load, the app does not download the session default cost codes file from S3 when the session identifier is not an email.</li>
+</ul></li>
+<li><strong><code>SESSION_DEFAULT_COST_CODES_FILENAME</code></strong>
+<ul>
+<li><strong>Description:</strong> The filename for the session default cost codes CSV file.</li>
+<li><strong>Default Value:</strong> <code>'session_default_cost_codes.csv'</code></li>
+</ul></li>
+<li><strong><code>SHOW_SET_DEFAULT_COST_CODE_BUTTON</code></strong>
+<ul>
+<li><strong>Description:</strong> Show the set default cost code button or not.</li>
+<li><strong>Default Value:</strong> <code>'True'</code></li>
 </ul></li>
 <li><strong>Relevant existing variables:</strong> <code>GET_COST_CODES</code>, <code>ENFORCE_COST_CODES</code>, <code>COST_CODES_PATH</code>, <code>S3_COST_CODES_PATH</code>, <code>DOCUMENT_REDACTION_BUCKET</code>, <code>RUN_AWS_FUNCTIONS</code>, and the app input folder (e.g.&nbsp;<code>INPUT_FOLDER</code> / <code>GRADIO_INPUT_FOLDER</code>).</li>
 </ul>
