@@ -1567,8 +1567,7 @@ with blocks:
         gr.Markdown(_DEPS_WARNING_MD)
 
     with gr.Accordion("API for agents (quickstart)", open=False, visible=False):
-        gr.Markdown(
-            """
+        gr.Markdown("""
 If you are an LLM/agent calling this app programmatically, prefer the **short `gr.api` endpoints** and always use the schema from **`GET /gradio_api/info`**.\n
 \n
 **Universal protocol** (any endpoint):\n
@@ -1585,8 +1584,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 - `/tabular_redact` (CSV/XLSX/Parquet/DOCX)\n
 \n
 **Gotcha**: do not wrap server-internal upload paths (e.g. `/tmp/gradio_tmp/...`) in `gradio_client.handle_file()`; pass them as plain strings.\n
-            """
-        )
+            """)
 
     # Examples for PDF/image redaction
     if SHOW_EXAMPLES:
