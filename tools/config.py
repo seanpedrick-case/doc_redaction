@@ -2577,6 +2577,9 @@ SESSION_DEFAULT_COST_CODES_FILENAME = get_or_create_env_var(
     "SESSION_DEFAULT_COST_CODES_FILENAME", "session_default_cost_codes.csv"
 )
 
+SHOW_SET_DEFAULT_COST_CODE_BUTTON = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_SET_DEFAULT_COST_CODE_BUTTON", "True")
+)
 
 ###
 # WHOLE DOCUMENT API OPTIONS

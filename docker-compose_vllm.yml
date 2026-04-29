@@ -3,8 +3,12 @@
 #   COMPOSE_PROFILES=vllm-9b   -> QuantTrio/Qwen3.5-9B-AWQ (default VLLM_OPENAI_MODEL)
 #   COMPOSE_PROFILES=vllm-27b  -> set VLLM_OPENAI_MODEL=QuantTrio/Qwen3.5-27B-AWQ
 # App uses http://vllm-inference:8000 (shared network alias on both vLLM services).
-# Example CLI commands:
+# Example CLI commands (add --build to the below commands if you want to rebuild the app images)
+
+# Recommended for 16gb VRAM systems:
 # docker compose -f docker-compose_vllm.yml --profile vllm-9b up -d
+
+# Recommended for 24gb VRAM systems:
 # docker compose -f docker-compose_vllm.yml --profile vllm-27b up -d
 services:
   vllm-server-qwen35-9b:
@@ -13,13 +17,14 @@ services:
     shm_size: '8gb'
     command: |
       --model QuantTrio/Qwen3.5-9B-AWQ
-      --gpu-memory-utilization 0.7
+      --gpu-memory-utilization 0.925
       --tensor-parallel-size 1
       --max-num-seqs 1
       --reasoning-parser qwen3
-      --max-model-len 32768
-      --speculative-config '{"method":"mtp","num_speculative_tokens":3}'
+      --max-model-len 16384
       --max-num-batched-tokens 2048
+
+    # --speculative-config '{"method":"mtp","num_speculative_tokens":3}'
     
     deploy:
       resources:
@@ -134,7 +139,7 @@ services:
       - INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES=True
       - PREPROCESS_LOCAL_OCR_IMAGES=False
       - INFERENCE_SERVER_DISABLE_THINKING=True
-      - MAX_NEW_TOKENS=16384
+      - MAX_NEW_TOKENS=8192
       - SAVE_EXAMPLE_HYBRID_IMAGES=False
       - SAVE_VLM_INPUT_IMAGES=False
       - VLM_MAX_DPI=200.0
@@ -142,6 +147,7 @@ services:
       - REPORT_VLM_OUTPUTS_TO_GUI=True
       - REPORT_LLM_OUTPUTS_TO_GUI=True
       - ADD_VLM_BOUNDING_BOX_RULES=False
+      - VLM_DEFAULT_STREAM=False
 
     deploy:
       resources:

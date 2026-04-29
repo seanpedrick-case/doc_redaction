@@ -45,6 +45,7 @@ from tools.config import (
     DEFAULT_LANGUAGE,
     DEFAULT_LOCAL_OCR_MODEL,
     DOCUMENT_REDACTION_BUCKET,
+    ENFORCE_COST_CODES,
     INFERENCE_SERVER_PII_OPTION,
     INPUT_FOLDER,
     LANGUAGE_CHOICES,
@@ -833,10 +834,15 @@ def load_session_default_cost_code_with_df(
     if input_folder is not None and str(input_folder).strip():
         csv_path = get_session_default_cost_codes_csv_path(input_folder)
         result, df = _read_session_default_from_csv_path_with_df(csv_path, session_hash)
+
+        print("Successfully loaded default session cost codes from:", csv_path)
         if result:
             return result, df
+
     csv_path = get_session_default_cost_codes_csv_path()
     result, df = _read_session_default_from_csv_path_with_df(csv_path, session_hash)
+
+    print("Successfully loaded default session cost codes from:", csv_path)
     return result, df
 
 
@@ -855,11 +861,16 @@ def apply_session_default_cost_code(
     dropdown keeps showing e.g. DEFAULT_COST_CODE instead of being cleared.
     """
 
+    gradio_message = "Default cost code not found. You will need to enter a cost code in the dropdown area above 'Extract text and redact document' to do a redaction task"
+
     default_code = load_session_default_cost_code(session_hash, input_folder)
     if not default_code:
         # Preserve current values so we don't overwrite with "" on app load
         cur = current_default_cost_code if current_default_cost_code is not None else ""
         drop = current_dropdown_value if current_dropdown_value is not None else ""
+        if ENFORCE_COST_CODES and not DEFAULT_COST_CODE:
+            print(gradio_message)
+            gr.Info(gradio_message)
         return cur, drop
     if cost_code_dataframe is None or cost_code_dataframe.empty:
         return default_code, default_code
@@ -867,6 +878,9 @@ def apply_session_default_cost_code(
     if default_code not in choices:
         cur = current_default_cost_code if current_default_cost_code is not None else ""
         drop = current_dropdown_value if current_dropdown_value is not None else ""
+        if ENFORCE_COST_CODES and not DEFAULT_COST_CODE:
+            print(gradio_message)
+            gr.Info(gradio_message)
         return cur, drop
     return default_code, default_code
 

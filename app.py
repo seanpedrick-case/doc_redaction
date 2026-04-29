@@ -316,6 +316,7 @@ from tools.config import (
     SHOW_OCR_GUI_OPTIONS,
     SHOW_PII_IDENTIFICATION_OPTIONS,
     SHOW_QUICKSTART,
+    SHOW_SET_DEFAULT_COST_CODE_BUTTON,
     SHOW_SUMMARISATION,
     SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS,
     SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS,
@@ -929,7 +930,8 @@ cost_code_choice_drop = gr.Dropdown(
 )
 set_default_cost_code_button = gr.Button(
     value="Set default cost code",
-    visible=GET_COST_CODES or ENFORCE_COST_CODES,
+    visible=(GET_COST_CODES or ENFORCE_COST_CODES)
+    and SHOW_SET_DEFAULT_COST_CODE_BUTTON,
 )
 
 reset_cost_code_dataframe_button = gr.Button(
@@ -2338,7 +2340,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                                     walkthrough_set_default_cost_code_button = (
                                         gr.Button(
                                             value="Set default cost code",
-                                            visible=show_cost_codes,
+                                            visible=show_cost_codes
+                                            and SHOW_SET_DEFAULT_COST_CODE_BUTTON,
                                         )
                                     )
 
