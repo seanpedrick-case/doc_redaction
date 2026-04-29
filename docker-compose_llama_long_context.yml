@@ -4,17 +4,16 @@
 # The app always talks to http://llama-inference:8080 (shared network alias on both model services).
 # Each model service uses its own llama.cpp and Hugging Face hub cache volumes so mmproj-F16.gguf
 # (same filename per repo) and -hf downloads are not shared across profiles.
-# Example CLI commands:
+# Example CLI commands (all are recommended for 24gb VRAM systems minimum, add --build to the below commands if you want to rebuild the app images):
+
 # docker compose -f docker-compose_llama_long_context.yml --profile 35b_36 up -d
 # docker compose -f docker-compose_llama_long_context.yml --profile 27b_36 up -d
 # docker compose -f docker-compose_llama_long_context.yml --profile 35b up -d
 # docker compose -f docker-compose_llama_long_context.yml --profile 27b up -d
 # docker compose -f docker-compose_llama_long_context.yml --profile 9b up -d
-
 # docker compose -f docker-compose_llama_long_context.yml --profile gemma4-31b up -d
 # docker compose -f docker-compose_llama_long_context.yml --profile gemma4-26b up -d
 
-# Add --build to the above if you want to rebuild the app image.
 services:
 
   # Qwen 3.6 27B model setup below requires 24GB of VRAM to run.
@@ -27,7 +26,7 @@ services:
       - --hf-file
       - Qwen3.6-27B-UD-Q4_K_XL.gguf
       - --mmproj-url
-      - https://huggingface.co/unsloth/Qwen3.6-27B-GGUF/resolve/main/mmproj-F16.gguf
+      - https://huggingface.co/unsloth/Qwen3.6-27B-GGUF/resolve/main/mmproj-BF16.gguf
       - --n-gpu-layers
       - "-1"
       - --ctx-size
@@ -35,17 +34,17 @@ services:
       - --fit
       - "off"
       - --temp
-      - "0.7"
+      - "1.0"
       - --top-k
       - "20"
       - --top-p
-      - "0.8"
+      - "0.95"
       - --min-p
       - "0.0"
       - --frequency-penalty
       - "1"
       - --presence-penalty
-      - "1"
+      - "1.5"
       - --chat-template-kwargs
       - "{\"preserve_thinking\": true}"
       - --host
@@ -98,7 +97,7 @@ services:
       - --hf-file
       - Qwen3.6-35B-A3B-UD-IQ4_NL.gguf
       - --mmproj-url
-      - https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/main/mmproj-F16.gguf
+      - https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/main/mmproj-BF16.gguf
       - --n-gpu-layers
       - "-1"
       - --ctx-size
@@ -106,17 +105,17 @@ services:
       - --fit
       - "off"
       - --temp
-      - "0.7"
+      - "1.0"
       - --top-k
       - "20"
       - --top-p
-      - "0.8"
+      - "0.95"
       - --min-p
       - "0.0"
       - --frequency-penalty
       - "1"
       - --presence-penalty
-      - "1"
+      - "1.5"
       - --repeat-penalty
       - "1"
       - --chat-template-kwargs
@@ -312,7 +311,7 @@ services:
       - --hf-file
       - Qwen3.5-9B-UD-Q4_K_XL.gguf
       - --mmproj-url
-      - https://huggingface.co/unsloth/Qwen3.5-9B-A3B-GGUF/resolve/main/mmproj-F16.gguf
+      - https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/mmproj-BF16.gguf
       - --n-gpu-layers
       - "-1"
       - --ctx-size
@@ -340,14 +339,12 @@ services:
       - "42"
       - --n-cpu-moe
       - "0" # Increase this value to fit within your availableVRAM
-      - --image_min_tokens
-      - "300"
-      - --parallel
-      - "1"
       - --cache-type-k
       - "q8_0"
       - --cache-type-v
       - "q8_0"
+      - --image_min_tokens
+      - "300"
     ports:
       - "8003:8080"
     volumes:
@@ -364,6 +361,15 @@ services:
               capabilities: [gpu]
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/v1/models >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 8
+      start_period: 1200s
+    networks:
+      redaction-net-llama:
+        aliases:
+          - llama-inference
+
 
    # Gemma 4 31B model setup below requires 24GB+ of VRAM to run.
   gemma4-31b_q4_gguf:

@@ -50,5 +50,5 @@ model_cache/*
 sanitized_file/*
 src/doc_redaction.egg-info/*
 docker-compose_llama_long_context_dual_gpu.yml
-
 **/*.quarto_ipynb
+skills/Example agent skills use prompt local.txt
