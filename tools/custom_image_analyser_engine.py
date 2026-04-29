@@ -1384,6 +1384,10 @@ def _call_inference_server_vlm_api(
                 # generated so far on each chunk). Printing every chunk reprints completed lines.
                 # Others stream incremental tokens only. Support both.
                 accumulated_response = ""
+                # Qwen3 / vLLM --reasoning-parser: assistant text may stream only in
+                # delta.reasoning_content (or reasoning) while content stays empty. Non-streaming
+                # responses are handled by _extract_choice_message_text; mirror that here.
+                accumulated_reasoning = ""
                 # Track only the current in-progress line (since the last newline) so GUI line
                 # reporting doesn't repeatedly emit the entire response.
                 line_buffer = ""
@@ -1407,7 +1411,30 @@ def _call_inference_server_vlm_api(
 
                             if "choices" in chunk and len(chunk["choices"]) > 0:
                                 delta = chunk["choices"][0].get("delta", {})
-                                token = delta.get("content", "")
+                                token = delta.get("content") or ""
+                                reason_piece = delta.get("reasoning_content")
+                                if not isinstance(reason_piece, str):
+                                    reason_piece = ""
+                                if not reason_piece:
+                                    r_alt = delta.get("reasoning")
+                                    reason_piece = (
+                                        r_alt if isinstance(r_alt, str) else ""
+                                    )
+
+                                if reason_piece:
+                                    if reason_piece == accumulated_reasoning:
+                                        pass
+                                    elif (
+                                        accumulated_reasoning
+                                        and reason_piece.startswith(
+                                            accumulated_reasoning
+                                        )
+                                    ):
+                                        accumulated_reasoning = reason_piece
+                                    else:
+                                        accumulated_reasoning += reason_piece
+                                    output_tokens += 1
+
                                 if not token:
                                     continue
                                 if token == accumulated_response:
@@ -1460,7 +1487,12 @@ def _call_inference_server_vlm_api(
 
                 print()  # newline after stream finishes
 
-                text = accumulated_response
+                _content_stripped = accumulated_response.strip()
+                text = (
+                    accumulated_response
+                    if _content_stripped
+                    else accumulated_reasoning.strip()
+                )
                 stream_elapsed_s = time.perf_counter() - stream_start
 
                 # Try to extract token usage from final chunk if available
