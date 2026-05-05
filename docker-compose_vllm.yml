@@ -17,14 +17,13 @@ services:
     shm_size: '8gb'
     command: |
       --model QuantTrio/Qwen3.5-9B-AWQ
-      --gpu-memory-utilization 0.925
+      --gpu-memory-utilization 0.926
       --tensor-parallel-size 1
       --max-num-seqs 1
       --reasoning-parser qwen3
       --max-model-len 16384
       --max-num-batched-tokens 2048
-
-    # --speculative-config '{"method":"mtp","num_speculative_tokens":3}'
+      --speculative-config '{"method":"mtp","num_speculative_tokens":3}'
     
     deploy:
       resources:

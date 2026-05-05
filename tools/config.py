@@ -2177,6 +2177,20 @@ MERGE_SMALL_REDACTIONS_MIN_Y_OVERLAP_RATIO = max(
     0.0, min(1.0, _merge_small_redactions_min_y_overlap_ratio)
 )
 
+# Height of the PyMuPDF text-removal strip (add_redact_annot) as a fraction of the redaction
+# bbox height, centered vertically. Lower values reduce adjacent-line text removal in tight
+# layouts; too low may leave selectable text. Ignored for whole-page / very tall boxes.
+try:
+    _redact_text_strip_height_fraction = float(
+        get_or_create_env_var("REDACT_TEXT_STRIP_HEIGHT_FRACTION", "0.6").strip()
+        or "0.6"
+    )
+except ValueError:
+    _redact_text_strip_height_fraction = 0.6
+REDACT_TEXT_STRIP_HEIGHT_FRACTION = max(
+    1e-6, min(1.0, _redact_text_strip_height_fraction)
+)
+
 # When True, use Polars for review DataFrame coordinate scaling and CSV write in apply_redactions_to_review_df_and_files (faster for large annotation sets).
 USE_POLARS_FOR_REVIEW = convert_string_to_boolean(
     get_or_create_env_var("USE_POLARS_FOR_REVIEW", "True")
