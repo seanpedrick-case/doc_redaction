@@ -34,7 +34,7 @@ services:
       - --fit
       - "off"
       - --temp
-      - "1.0"
+      - "0.7"
       - --top-k
       - "20"
       - --top-p
@@ -44,7 +44,7 @@ services:
       - --frequency-penalty
       - "1"
       - --presence-penalty
-      - "1.5"
+      - "0.0"
       - --chat-template-kwargs
       - "{\"preserve_thinking\": true}"
       - --host

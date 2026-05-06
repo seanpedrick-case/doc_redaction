@@ -91,6 +91,7 @@ from tools.config import (
     PADDLE_MAX_WORKERS,
     PAGE_BREAK_VALUE,
     PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS,
+    REDACT_TEXT_STRIP_HEIGHT_FRACTION,
     RETURN_PDF_FOR_REVIEW,
     RETURN_REDACTED_PDF,
     RUN_AWS_FUNCTIONS,
@@ -4768,6 +4769,65 @@ def define_box_colour(
     return out_colour
 
 
+# Bbox height ≥ this fraction of page height uses a near-full-height text strip (whole blocks / tables).
+_TEXT_REDACT_STRIP_LARGE_BOX_PAGE_FRACTION = 0.23
+
+
+def _text_overlap_redact_rect(
+    pymupdf_page: Page,
+    pymupdf_rect: Rect,
+    img_annotation_box: dict,
+) -> Rect:
+    """
+    Rectangle for add_redact_annot text removal: centered strip scaled by bbox height,
+    with guards for whole-page and other tall boxes.
+    """
+    x1, y1, x2, y2 = (
+        float(pymupdf_rect[0]),
+        float(pymupdf_rect[1]),
+        float(pymupdf_rect[2]),
+        float(pymupdf_rect[3]),
+    )
+    box_h = max(0.0, y2 - y1)
+    page_h = float(pymupdf_page.rect.height)
+    label = (img_annotation_box.get("label") or "").strip()
+
+    hx1, hx2 = x1 + 2, x2 - 2
+    if hx1 >= hx2:
+        hx1, hx2 = x1, x2
+
+    use_near_full_height = label == "Whole page" or (
+        page_h > 0 and box_h >= _TEXT_REDACT_STRIP_LARGE_BOX_PAGE_FRACTION * page_h
+    )
+
+    if use_near_full_height or box_h <= 0:
+        redact_bottom_y = y1 + 2
+        redact_top_y = y2 - 2
+        if (redact_top_y - redact_bottom_y) < 1:
+            middle_y = (y1 + y2) / 2
+            redact_bottom_y = middle_y - 1
+            redact_top_y = middle_y + 1
+        return Rect(hx1, redact_bottom_y, hx2, redact_top_y)
+
+    y_mid = (y1 + y2) / 2
+    strip_h = box_h * REDACT_TEXT_STRIP_HEIGHT_FRACTION
+    strip_h = max(strip_h, 0.5)
+    strip_h = min(strip_h, box_h)
+
+    if strip_h < 1.0:
+        redact_bottom_y = y_mid - 1
+        redact_top_y = y_mid + 1
+    else:
+        redact_bottom_y = max(y1, y_mid - strip_h / 2)
+        redact_top_y = min(y2, y_mid + strip_h / 2)
+
+    if redact_top_y <= redact_bottom_y:
+        redact_bottom_y = y_mid - 1
+        redact_top_y = y_mid + 1
+
+    return Rect(hx1, redact_bottom_y, hx2, redact_top_y)
+
+
 def redact_single_box(
     pymupdf_page: Page,
     pymupdf_rect: Rect,
@@ -4802,24 +4862,17 @@ def redact_single_box(
     pymupdf_x2 = pymupdf_rect[2]
     pymupdf_y2 = pymupdf_rect[3]
 
+    img_annotation_box["text"] = img_annotation_box.get("text") or ""
+    img_annotation_box["label"] = img_annotation_box.get("label") or "Redaction"
+
     # Full size redaction box for covering all the text of a word
     full_size_redaction_box = Rect(
         pymupdf_x1 - 1, pymupdf_y1 - 1, pymupdf_x2 + 1, pymupdf_y2 + 1
     )
 
-    # Calculate tiny height redaction box so that it doesn't delete text from adjacent lines
-    redact_bottom_y = pymupdf_y1 + 2
-    redact_top_y = pymupdf_y2 - 2
-
-    # Calculate the middle y value and set a small height if default values are too close together
-    if (redact_top_y - redact_bottom_y) < 1:
-        middle_y = (pymupdf_y1 + pymupdf_y2) / 2
-        redact_bottom_y = middle_y - 1
-        redact_top_y = middle_y + 1
-
-    rect_small_pixel_height = Rect(
-        pymupdf_x1 + 2, redact_bottom_y, pymupdf_x2 - 2, redact_top_y
-    )  # Slightly smaller than outside box
+    rect_small_pixel_height = _text_overlap_redact_rect(
+        pymupdf_page, pymupdf_rect, img_annotation_box
+    )
 
     # Review PDF (..._redactions_for_review.pdf): always use custom colours
     review_colour = define_box_colour(True, img_annotation_box, CUSTOM_BOX_COLOUR)
@@ -4827,9 +4880,6 @@ def redact_single_box(
     output_colour = define_box_colour(
         custom_colours, img_annotation_box, CUSTOM_BOX_COLOUR
     )
-
-    img_annotation_box["text"] = img_annotation_box.get("text") or ""
-    img_annotation_box["label"] = img_annotation_box.get("label") or "Redaction"
 
     # Create a copy of the page for final redaction if needed
     applied_redaction_page = None
