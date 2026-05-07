@@ -2,16 +2,13 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
 
 <meta charset="utf-8">
-<meta name="generator" content="quarto-1.9.36">
+<meta name="generator" content="quarto-1.8.27">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 
 <title>App settings management guide – Document Redaction App</title>
 <style>
-/* Default styles provided by pandoc.
-** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
-*/
 code{white-space: pre-wrap;}
 span.smallcaps{font-variant: small-caps;}
 div.columns{display: flex; gap: min(4vw, 1.5em);}
@@ -35,14 +32,15 @@ ul.task-list li input[type="checkbox"] {
 <meta name="quarto:offset" content="../">
 <script src="../site_libs/quarto-html/quarto.js" type="module"></script>
 <script src="../site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="../site_libs/quarto-html/axe/axe-check.js" type="module"></script>
 <script src="../site_libs/quarto-html/popper.min.js"></script>
 <script src="../site_libs/quarto-html/tippy.umd.min.js"></script>
 <script src="../site_libs/quarto-html/anchor.min.js"></script>
 <link href="../site_libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-845c23b38eaddc0f92fda52bfe77a8c8.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-ed96de9b727972fe78a7b5d16c58bf87.css" rel="stylesheet" id="quarto-text-highlighting-styles">
 <script src="../site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="../site_libs/bootstrap/bootstrap-a0f9fd0d421825b736dc1bbcbcba2219.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-e31584831b205ffbb2d98406f31c2a5b.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -110,8 +108,16 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <span class="menu-text">User guide</span></a>
   </li>  
   <li class="nav-item">
+    <a class="nav-link" href="../src/faq.html"> 
+<span class="menu-text">User FAQ</span></a>
+  </li>  
+  <li class="nav-item">
     <a class="nav-link" href="../src/python_package_usage.html"> 
 <span class="menu-text">Python package usage</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../src/installation_guide.html"> 
+<span class="menu-text">App installation guide (with CDK)</span></a>
   </li>  
   <li class="nav-item">
     <a class="nav-link active" href="../src/app_settings.html" aria-current="page"> 
@@ -124,7 +130,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
     <ul class="dropdown-menu" aria-labelledby="nav-menu-blog">    
         <li>
     <a class="dropdown-item" href="../src/agentic_redaction.html">
- <span class="dropdown-text">Agents for document redaction and review tasks (open vs closed-source) (Apr 2026)</span></a>
+ <span class="dropdown-text">End-to-end redaction and review with agents (Apr 2026)</span></a>
   </li>  
         <li>
     <a class="dropdown-item" href="../src/ocr_and_redaction_with_qwen35.html">
@@ -136,18 +142,6 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
   </li>  
     </ul>
   </li>
-</ul>
-            <ul class="navbar-nav navbar-nav-scroll ms-auto">
-  <li class="nav-item compact">
-    <a class="nav-link" href="https://github.com/seanpedrick-case/doc_redaction"> <i class="bi bi-github" role="img">
-</i> 
-<span class="menu-text"></span></a>
-  </li>  
-  <li class="nav-item compact">
-    <a class="nav-link" href="https://bsky.app/profile/seanpedrickcase.bsky.social"> <i class="bi bi-bluesky" role="img">
-</i> 
-<span class="menu-text"></span></a>
-  </li>  
 </ul>
           </div> <!-- /navcollapse -->
             <div class="quarto-navbar-tools">
@@ -198,7 +192,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
   <li><a href="#allow-deny-whole-page-redaction-lists" id="toc-allow-deny-whole-page-redaction-lists" class="nav-link" data-scroll-target="#allow-deny-whole-page-redaction-lists">Allow, Deny, &amp; Whole Page Redaction Lists</a></li>
   <li><a href="#cost-code-options" id="toc-cost-code-options" class="nav-link" data-scroll-target="#cost-code-options">Cost Code Options</a>
   <ul class="collapse">
-  <li><a href="#session-default-cost-code" id="toc-session-default-cost-code" class="nav-link" data-scroll-target="#session-default-cost-code">Session default cost code</a></li>
+  <li><a href="#session-default-cost-code-no-extra-environment-variables" id="toc-session-default-cost-code-no-extra-environment-variables" class="nav-link" data-scroll-target="#session-default-cost-code-no-extra-environment-variables">Session default cost code (no extra environment variables)</a></li>
   </ul></li>
   <li><a href="#whole-document-api-options-textract-async" id="toc-whole-document-api-options-textract-async" class="nav-link" data-scroll-target="#whole-document-api-options-textract-async">Whole Document API Options (Textract Async)</a></li>
   </ul>
@@ -1477,12 +1471,6 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <li><strong><code>APPLY_REDACTIONS_TEXT</code>:</strong> <code>0</code> = remove all characters whose boundary box overlaps any redaction rectangle (default, complies with legal/data protection intentions), <code>1</code> = keep text while redacting graphics/images (does NOT comply with data protection intentions - use at your own risk).</li>
 </ul></li>
 </ul></li>
-<li><strong><code>REDACT_TEXT_STRIP_HEIGHT_FRACTION</code></strong>
-<ul>
-<li><strong>Description:</strong> For <strong>word-sized</strong> redaction boxes, PyMuPDF removes text where glyph bounding boxes overlap the redaction annotation (<code>add_redact_annot</code> in <code>redact_single_box</code>). To avoid stripping text on <strong>adjacent lines</strong> when line spacing is tight or boxes are tall (e.g.&nbsp;selectable text in table cells), the app uses a <strong>narrower vertical strip</strong> for that annotation: height = (redaction box height) × this fraction, <strong>centered</strong> inside the box. <strong>Whole-page</strong> redactions and boxes whose height is at least ~23% of the page height still use a near <strong>full-height</strong> strip (same idea as the legacy <code>y ± 2</code> pt behaviour) so large regions are not left partially unredacted. Values are parsed as a float and clamped to a small positive number up to <code>1.0</code> in <code>tools/config.py</code>.</li>
-<li><strong>Default Value:</strong> <code>0.6</code></li>
-<li><strong>Tuning:</strong> Lower (e.g.&nbsp;<code>0.4</code>–<code>0.5</code>) if neighbouring lines still lose characters; raise (toward <code>1.0</code>) if traces of the target text remain selectable in the final <code>_redacted.pdf</code>.</li>
-</ul></li>
 </ul>
 </section>
 <section id="redaction-box-post-processing-merging-small-boxes" class="level3">
@@ -1788,14 +1776,9 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <li><strong>Description:</strong> If set to <code>'True'</code>, makes the selection of a cost code mandatory.</li>
 <li><strong>Default Value:</strong> <code>'False'</code></li>
 </ul></li>
-<li><strong><code>COST_CODE_ACCORDION_OPEN</code></strong>
-<ul>
-<li><strong>Description:</strong> If set to <code>'True'</code>, the cost code accordion will be open by default.</li>
-<li><strong>Default Value:</strong> <code>'False'</code></li>
-</ul></li>
 </ul>
-<section id="session-default-cost-code" class="level3">
-<h3 class="anchored" data-anchor-id="session-default-cost-code">Session default cost code</h3>
+<section id="session-default-cost-code-no-extra-environment-variables" class="level3">
+<h3 class="anchored" data-anchor-id="session-default-cost-code-no-extra-environment-variables">Session default cost code (no extra environment variables)</h3>
 <p>When cost codes are enabled (<code>GET_COST_CODES</code> or <code>ENFORCE_COST_CODES</code>), users can save a <strong>default cost code</strong> for their session via the “Set default cost code” button. This uses the <strong>existing</strong> cost code and AWS settings; no additional environment variables are required.</p>
 <ul>
 <li><strong>Behaviour:</strong>
@@ -1804,16 +1787,6 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <li><strong>Local save location:</strong> The CSV is written under the app’s <strong>input folder</strong> (the value of the input folder at save time, e.g.&nbsp;from <code>INPUT_FOLDER</code> or the session’s <code>input_folder_textbox</code>).</li>
 <li><strong>S3 (optional):</strong> If <code>S3_COST_CODES_PATH</code> is set and <code>RUN_AWS_FUNCTIONS</code> and <code>DOCUMENT_REDACTION_BUCKET</code> are set, the same file is also uploaded to <code>DOCUMENT_REDACTION_BUCKET</code> in the same key “folder” as the cost codes file (e.g.&nbsp;<code>config/session_default_cost_codes.csv</code>).</li>
 <li><strong>Email-only:</strong> Saves and S3 upload only run when the session identifier is a valid <strong>email address</strong> (e.g.&nbsp;when users are signed in via Cognito). If the session identifier is not an email (e.g.&nbsp;when running locally with a Gradio session hash), the default is not written to the CSV and not uploaded to S3. On load, the app does not download the session default cost codes file from S3 when the session identifier is not an email.</li>
-</ul></li>
-<li><strong><code>SESSION_DEFAULT_COST_CODES_FILENAME</code></strong>
-<ul>
-<li><strong>Description:</strong> The filename for the session default cost codes CSV file.</li>
-<li><strong>Default Value:</strong> <code>'session_default_cost_codes.csv'</code></li>
-</ul></li>
-<li><strong><code>SHOW_SET_DEFAULT_COST_CODE_BUTTON</code></strong>
-<ul>
-<li><strong>Description:</strong> Show the set default cost code button or not.</li>
-<li><strong>Default Value:</strong> <code>'True'</code></li>
 </ul></li>
 <li><strong>Relevant existing variables:</strong> <code>GET_COST_CODES</code>, <code>ENFORCE_COST_CODES</code>, <code>COST_CODES_PATH</code>, <code>S3_COST_CODES_PATH</code>, <code>DOCUMENT_REDACTION_BUCKET</code>, <code>RUN_AWS_FUNCTIONS</code>, and the app input folder (e.g.&nbsp;<code>INPUT_FOLDER</code> / <code>GRADIO_INPUT_FOLDER</code>).</li>
 </ul>
