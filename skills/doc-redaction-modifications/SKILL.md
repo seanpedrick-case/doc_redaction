@@ -1,143 +1,92 @@
 ---
 name: doc-redaction-modifications
-description: "Modify existing PDF redactions using a single default path: Gradio `review_apply` with `gradio_client`. Use this when editing `*_review_file.csv`, adding scanned-page boxes, applying one page at a time, and verifying outputs."
-version: 2.0.3
+description: "Review and reapply: edit *_review_file.csv, preview boxes, call Gradio /review_apply, download newest outputs, and verify. Parallel multi-page orchestration (subagents) → doc-redact-page-review. Initial redaction → doc-redaction-app."
+version: 2.1.2
 author: repo-maintained
 license: AGPL-3.0-only
 ---
 
 ## Goal
 
-Apply targeted fixes to an existing redaction run with a repeatable, page-by-page workflow.
+Repeatable **review → edit CSV → preview → `/review_apply` → download → verify** loop when you already have the **original PDF** and a matching `*_review_file.csv`.
 
-Use this skill when you already have:
-- The original PDF.
-- A corresponding `*_review_file.csv`.
+Initial redaction only: [`../doc-redaction-app/SKILL.md`](../doc-redaction-app/SKILL.md).
 
-## Primary path (default)
+**Parallel page-range review (subagents):** after a first-pass run, if the user wants **many pages reviewed in parallel** with a **single** merged `/review_apply`, use the orchestration playbook [`../doc-redact-page-review/SKILL.md`](../doc-redact-page-review/SKILL.md) (one child per page, parent merges full CSV, parent calls `/review_apply` once). This skill stays the reference for CSV/OCR/preview/API details.
 
-Use `gradio_client` with `api_name="/review_apply"` and these 3 inputs:
-1. `pdf_file`
-2. `review_csv_file`
-3. `output_dir` (`None` to use server default)
+## Primary path
 
-Do not start with `/agent` or long UI-chain endpoints unless the fallback section says to.
+`gradio_client` with **`api_name="/review_apply"`** and three arguments: `pdf_file`, `review_csv_file`, `output_dir` (use `None` for server default).
+
+Prefer **positional** arguments when automating (`client.predict(handle_file(pdf), handle_file(csv), None, api_name="/review_apply")`)—named kwargs can break endpoint inference on some Gradio multi-route apps.
+
+Do not default to `/agent/apply_review_redactions` unless paths are valid **on the server** (see Fallbacks).
 
 ## Critical constraints
 
-- `review_apply` is the stable default for headless review modifications.
-- Prefer calling `/review_apply` with **positional arguments** (`client.predict(pdf, csv, None, api_name="/review_apply")`) when automating across deployments; named keyword arguments may be brittle in some Gradio 6.x multi-endpoint apps.
-- `/agent/apply_review_redactions` can return 404 or be unusable depending on deployment; treat it as fallback.
-- Local client file path: use `handle_file("/local/path/file.pdf")`. Server path returned from upload (for example `/tmp/gradio_tmp/...`): pass as plain string. Do not wrap server paths in `handle_file(...)`.
-- CSV files may have UTF-8 BOM; read/write with `encoding="utf-8-sig"` when editing.
-- Container output paths (for example `/home/user/app/output/...`) are inside the container. Retrieve outputs via `GET /gradio_api/file=...`, a bind mount, or `docker cp`.
-- Input review CSV basename must contain `_review_file`.
-- When using `/review_apply`, do not submit review rows whose `image` values are fake placeholders (for example `placeholder_image_2.png`) unless they are valid for the active run context. In field failures this stripped redaction rows during apply. Keep `image` values aligned with current run artifacts.
-  - Practical rule: when adding new rows, set `image` to an **existing row’s** `image` value **for the same page** whenever possible; only fall back to `placeholder_image_{page-1}.png` if you know the run uses that convention.
-
-These constraints are intentionally aligned with `doc-redaction-app/SKILL.md` so both skills use the same operational rules.
+- Review CSV **basename** must contain `_review_file`.
+- **`image` column**: reuse an **existing row’s `image` value for the same page** when adding rows; arbitrary placeholders can cause rows to be dropped on apply.
+- **`handle_file`**: local paths → `handle_file(...)`; server paths from a prior upload → plain string, not wrapped.
+- CSV: read/write with **`encoding="utf-8-sig"`** (BOM).
+- Returned paths live **inside the server/container**; fetch with **`GET {BASE}/gradio_api/file={urllib.parse.quote(path, safe="")}`** (encode the full path), bind mount, or `docker cp`. Use the same **`Authorization: Bearer`** as the client on gated HF Spaces.
+- **`httpx.Timeout`**: long **read** timeout for large PDFs (e.g. 1800s+).
+- From a **Docker client** to Gradio on the host, use `http://host.docker.internal:<port>` instead of `localhost`.
+- If **`/review_apply` HTTP responses** look like HTML (even with status 200), treat as server error—inspect body; do not assume JSON.
+- Smoke-check the Space/app is up (e.g. `GET` base URL) before long runs.
 
 ## Execution loop
 
-For a full document review, edit all pages in a single modified CSV and apply once. Use page-by-page apply only if you need to compare individual pages mid-session.
+For a full pass, edit **one** consolidated CSV and apply **once**. Page-by-page apply only when you need intermediate diffs.
 
-Recommended order:
-1. Load the `*_review_file.csv` into a script (not manually).
-2. Apply all removals, additions, and coordinate corrections programmatically.
-3. **Generate a local pre-apply preview to check box positions** (see section below) — no server round-trip needed.
-4. Apply the edited CSV via `/review_apply` only when the preview looks correct.
-5. Download and verify outputs — always sort by `st_mtime` to pick the newest file (see below).
-6. If corrections are needed, update the script and repeat from step 2.
+1. Load `*_review_file.csv` in a script (not by hand in Excel only).
+2. Add/remove/relabel rows; fix coordinates programmatically.
+3. **Preview** box geometry (local tool or `/preview_boxes`) before calling the server.
+4. **`/review_apply`** when the preview is acceptable.
+5. **Download** artifacts; **sort by `st_mtime`** and take the newest `*_redacted.pdf` / `*_review_file.csv` (each apply adds hash-prefixed names).
+6. **Verify** (text extraction and/or review PNGs); repeat from 2 if needed.
 
-## Pre-apply coordinate preview (use this tool)
+## Word-level OCR (for precise boxes)
 
-The Document Redaction app includes `tools/preview_redaction_boxes.py`, a local rendering tool that draws proposed CSV boxes onto the original PDF pages and saves PNGs. **Use this before every `/review_apply` call** to verify box positions without server round-trips.
+Use `*_ocr_results_with_words_*.csv` from the same run. Typical word columns include **`word_x0`, `word_y0`, `word_x1`, `word_y1`** (normalized 0–1, same convention as the review CSV). Match **`page`** and **`word_text`**, then:
 
-### Option A — Local (preferred, instantaneous)
+- **Same line** (small vertical gap between word rows, e.g. `|Δy0| < 0.01`): merge to one box with `min`/`max` of coordinates.
+- **Different lines**: **separate boxes**—one merged box spanning lines wipes unrelated text.
 
-Works when you have a local copy of the original PDF and the edited CSV (the normal case after downloading outputs from a prior run):
+Optional: overlap check—confirm each target word’s rectangle intersects some review row on that page before applying.
 
-```python
-from tools.preview_redaction_boxes import preview_redaction_boxes
+## Pre-apply preview
 
-paths = preview_redaction_boxes(
-    "input/document.pdf",           # original un-redacted PDF
-    "output/document_review_file_edited.csv",
-    out_dir="output/preview",       # where to save PNGs
-    dpi=150,                        # 150 is fast; use 200+ for fine detail
-    draw_grid=True,                 # overlays horizontal % lines for reading y-coords
-    pages=[5, 6],                   # optional: only render specific pages
-)
-# Inspect paths — each PNG shows color-coded boxes with label text and a legend
-```
-
-Or from the command line:
+### A — Local (preferred)
 
 ```bash
-python tools/preview_redaction_boxes.py original.pdf review_file.csv --pages 5,6 --grid
+python tools/preview_redaction_boxes.py original.pdf edited_review_file.csv --pages 5,6 --grid
 ```
 
-**What you get:** each PNG shows the original PDF page with:
-- Color-coded semi-transparent box fills by label type (PERSON=red, SIGNATURE=purple, LOCATION=blue, CUSTOM=amber …)
-- Label and text snippet printed at the top of each box
-- Horizontal percentage-grid lines with `%` markers so you can read off normalized y-coordinates by eye
-- A legend in the top-right corner
+Or `from tools.preview_redaction_boxes import preview_redaction_boxes` (see tool docstring for `dpi`, `draw_grid`, `pages`).
 
-### Option B — Server API (fallback, for headless agents without local files)
+### B — Server `/preview_boxes`
 
-If you do not have a local copy of the original PDF, call the `/preview_boxes` endpoint on the hosted app. It returns a ZIP of preview PNGs without applying any redactions:
+When you lack local repo tools but can upload: returns a **ZIP** of PNGs; no redaction applied. Download the returned path like any other `gradio_api/file=` artifact.
 
-```python
-from gradio_client import Client, handle_file
+### C — No `preview_redaction_boxes` available
 
-client = Client("https://seanpedrickcase-document-redaction.hf.space")
-zip_path, message = client.predict(
-    api_name="/preview_boxes",
-    pdf_file=handle_file("path/to/original.pdf"),
-    review_csv_file=handle_file("path/to/review_file_edited.csv"),
-    dpi=150,
-    max_width=1280,
-    draw_grid=True,
-    pages="5,6",    # optional, comma-separated 1-indexed page numbers
-)
-# Download zip_path from the server and extract to inspect PNGs
-```
+Render the original PDF with PyMuPDF/Pillow at chosen DPI and draw rectangles using normalized `xmin`…`ymax` × pixel width/height—same math as inside `preview_redaction_boxes`.
 
-### Iteration pattern
-
-```
-edit CSV
-  → preview locally (< 5 seconds)
-  → spot the miss / misaligned box
-  → adjust CSV
-  → preview again
-  → (repeat until correct)
-  → apply via /review_apply   ← only now does the server get involved
-  → verify final output
-```
-
-### Always sort outputs by modification time
-
-Each `/review_apply` call generates a **new hash-prefixed filename**. After several iterations you will have multiple versions in the output folder. Always sort by `st_mtime` to pick the most recent:
+## Picking the latest outputs
 
 ```python
 from pathlib import Path
-latest_pdf = sorted(
-    Path("output_final").glob("*_redacted.pdf"),
-    key=lambda f: f.stat().st_mtime, reverse=True
-)[0]
-latest_csv = sorted(
-    Path("output_final").glob("*_review_file.csv"),
-    key=lambda f: f.stat().st_mtime, reverse=True
-)[0]
+
+def latest_match(folder: Path, pattern: str) -> Path:
+    hits = sorted(folder.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not hits:
+        raise FileNotFoundError(pattern)
+    return hits[0]
 ```
 
-## Minimal end-to-end example (copy/paste)
-
-This script performs one full cycle: edit page rows -> apply -> download artifacts.
+## Minimal apply + download
 
 ```python
-import csv
 import hashlib
 import json
 from pathlib import Path
@@ -146,148 +95,71 @@ from urllib.parse import quote
 import httpx
 from gradio_client import Client, handle_file
 
-BASE_URL = "https://seanpedrickcase-document-redaction.hf.space"
-PDF_PATH = Path("example_data/example_of_emails_sent_to_a_professor_before_applying.pdf").resolve()
-REVIEW_CSV = Path("example_data/example_outputs/example_of_emails_sent_to_a_professor_before_applying_review_file.csv").resolve()
-WORK_DIR = Path("tmp/review_cycle").resolve()
-WORK_DIR.mkdir(parents=True, exist_ok=True)
+BASE_URL = "https://example.hf.space".rstrip("/")
+HF_TOKEN = None  # set if Space is gated
 
-TARGET_PAGE = 1
+httpx_kwargs = {"timeout": httpx.Timeout(connect=120.0, read=1800.0, write=120.0, pool=120.0)}
+client = Client(BASE_URL, hf_token=HF_TOKEN, httpx_kwargs=httpx_kwargs) if HF_TOKEN else Client(BASE_URL, httpx_kwargs=httpx_kwargs)
 
-edited_csv = WORK_DIR / REVIEW_CSV.name
+pdf = Path("original.pdf")
+csv_in = Path("document_review_file.csv")  # basename must contain _review_file
 
-# 1) Edit CSV for one page (example: remove one row on TARGET_PAGE)
-with REVIEW_CSV.open("r", newline="", encoding="utf-8-sig") as f:
-    rows = list(csv.DictReader(f))
-fieldnames = list(rows[0].keys())
-page_rows = [r for r in rows if int(float(r.get("page", "0") or 0)) == TARGET_PAGE]
-other_rows = [r for r in rows if int(float(r.get("page", "0") or 0)) != TARGET_PAGE]
-if page_rows:
-    page_rows = page_rows[1:]  # delete one redaction on this page
-updated_rows = other_rows + page_rows
-
-with edited_csv.open("w", newline="", encoding="utf-8-sig") as f:
-    w = csv.DictWriter(f, fieldnames=fieldnames)
-    w.writeheader()
-    w.writerows(updated_rows)
-
-# 2) Apply edited review CSV via /review_apply
-client = Client(BASE_URL)
-paths, message = client.predict(
+raw = client.predict(
+    handle_file(str(pdf)),
+    handle_file(str(csv_in)),
+    None,
     api_name="/review_apply",
-    pdf_file=handle_file(str(PDF_PATH)),
-    review_csv_file=handle_file(str(edited_csv)),
-    output_dir=None,
 )
-print("Apply message:", message)
-print("Returned paths:", paths)
+paths, message = (raw[0], raw[1]) if isinstance(raw, (list, tuple)) and len(raw) >= 2 and isinstance(raw[-1], str) else (raw if isinstance(raw, list) else [raw], "")
+print(message, paths)
 
-# 3) Download returned server files
-download_dir = WORK_DIR / "downloads"
-download_dir.mkdir(exist_ok=True)
-
+headers = {}
+if HF_TOKEN:
+    headers["Authorization"] = f"Bearer {HF_TOKEN.strip()}"
+out_dir = Path("downloads")
+out_dir.mkdir(parents=True, exist_ok=True)
 manifest = []
-with httpx.Client(timeout=120.0) as http:
+with httpx.Client(timeout=httpx_kwargs["timeout"], headers=headers) as http:
     for p in paths:
-        name = Path(p).name or "artifact.bin"
-        url = f"{BASE_URL}/gradio_api/file={quote(p, safe='/')}"
-        r = http.get(url)
-        r.raise_for_status()
-        out = download_dir / name
-        out.write_bytes(r.content)
-        manifest.append(
-            {
-                "server_path": p,
-                "local_file": str(out),
-                "size": out.stat().st_size,
-                "sha256": hashlib.sha256(out.read_bytes()).hexdigest(),
-            }
-        )
-
-(WORK_DIR / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-print("Downloaded files to:", download_dir)
+        if not isinstance(p, str) or not p.startswith("/"):
+            continue
+        url = f"{BASE_URL}/gradio_api/file={quote(p, safe='')}"
+        data = http.get(url).raise_for_status().content
+        dest = out_dir / Path(p).name
+        dest.write_bytes(data)
+        manifest.append({"server_path": p, "local": str(dest), "sha256": hashlib.sha256(data).hexdigest()})
+(out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 ```
 
-## Signatures — always manual (never auto-detected)
+## CSV edits that come up often
 
-The app's PII detection never finds handwritten signatures. Treat signature redaction as a **mandatory manual step** for any document that will be signed.
+### Signatures (always treat as manual)
 
-### Workflow
-1. Render each page at high DPI and visually locate all signature zones.
-2. Use nearby OCR words (printed name below the line, "Mayor", "Signed", etc.) as coordinate anchors.
-3. Estimate `ymin`/`ymax` from a percentage-grid preview image.
-4. Add a `SIGNATURE` row per signature and a separate `PERSON` row for the printed name beneath it if that name is also sensitive.
-5. Verify with a local preview before applying.
+PII pipelines rarely catch ink. Locate ink vs printed name in a grid preview; anchor **`SIGNATURE`** boxes using nearby OCR words (“Signed”, titles). Rough anchors: signature band often **just above** the printed name line; use separate **`PERSON`** (or rule-appropriate label) rows for typed names if they are sensitive. With **word-level OCR only**, a **vertical gap** between last body line and first footer/name line can indicate a signature band—still confirm in a preview before apply.
 
-Typical coordinate starting estimates (refine per document):
-- Signature line area: `ymin = y_of_printed_name - 0.06`, `ymax = y_of_printed_name - 0.005`
-- Printed name: `ymin = y_of_printed_name`, `ymax = y_of_printed_name + 0.02`
+### OCR-invisible content (stamps, calligraphy)
 
-Expect 1-3 iterations before each signature is correctly covered.
+If it is visible on the page but absent from word OCR, add **`CUSTOM`** (or rule label) rows from a **percentage-grid** estimate; expect a few preview/apply iterations—local rasterization can differ slightly from server PDF space.
 
-## OCR-invisible content (calligraphic text, stamps, decorative headings)
+### Scanned pages without word boxes
 
-OCR returns nothing for decorative or hand-lettered headings. Treat any visually prominent heading or stamp as a potential miss.
+Use deterministic **zone presets** as starting guesses, then refine (example normalized rectangles):
 
-### Detection
-- Render each page and look for text that is not reflected in `*_ocr_results_with_words_*.csv`.
-- Common culprits: calligraphic section titles, official seals, watermarks, rubber stamps.
+| Zone         | xmin | ymin | xmax | ymax |
+|-------------|------|------|------|------|
+| top_left    | 0.05 | 0.08 | 0.45 | 0.18 |
+| top_right   | 0.55 | 0.08 | 0.95 | 0.18 |
+| mid_left    | 0.05 | 0.40 | 0.45 | 0.52 |
+| mid_right   | 0.55 | 0.40 | 0.95 | 0.52 |
+| bottom_left | 0.05 | 0.78 | 0.45 | 0.90 |
+| bottom_right | 0.55 | 0.78 | 0.95 | 0.90 |
 
-### Coordinate estimation
-1. Render the page with a percentage grid overlay (5% intervals).
-2. Read the approximate `ymin`/`ymax` from the grid for the undetected text block.
-3. Add a `CUSTOM` row with those coordinates and a descriptive `text` value.
-4. Preview locally, apply, verify. Expect 3-5 iterations for decorative text because local render ≠ server render exactly.
-
-## Cross-line phrases ("Sister City", "Sister Cities")
-
-When a two-word phrase spans two OCR lines (different `y` values), merging them into one box produces an oversized rectangle that covers unrelated text. Use a split-box approach instead:
-
-```python
-# r1 = OCR row for word 1 ("Sister"), r2 = OCR row for word 2 ("City")
-if abs(float(r1["ymin"]) - float(r2["ymin"])) > 0.01:
-    # words on different lines — two separate boxes
-    new_rows.append(make_row(page, "CUSTOM", r1["xmin"], r1["ymin"], r1["xmax"], r1["ymax"], "Sister"))
-    new_rows.append(make_row(page, "CUSTOM", r2["xmin"], r2["ymin"], r2["xmax"], r2["ymax"], "City"))
-else:
-    # same line — single merged box
-    new_rows.append(make_row(page, "CUSTOM",
-        min(r1["xmin"], r2["xmin"]), min(r1["ymin"], r2["ymin"]),
-        max(r1["xmax"], r2["xmax"]), max(r1["ymax"], r2["ymax"]),
-        "Sister City"))
-```
-
-## Adding redactions on scanned/image pages (no OCR boxes)
-
-Use deterministic zone-based coordinates, not random values.
-Use zone presets as a starting estimate, not a final geometry guarantee.
-For variable signatures/stamps, refine coordinates with vision review from page review export images before final apply.
-
-### Zone presets
-
-Use these normalized boxes:
-- `top_left`: `xmin=0.05, ymin=0.08, xmax=0.45, ymax=0.18`
-- `top_right`: `xmin=0.55, ymin=0.08, xmax=0.95, ymax=0.18`
-- `mid_left`: `xmin=0.05, ymin=0.40, xmax=0.45, ymax=0.52`
-- `mid_right`: `xmin=0.55, ymin=0.40, xmax=0.95, ymax=0.52`
-- `bottom_left`: `xmin=0.05, ymin=0.78, xmax=0.45, ymax=0.90`
-- `bottom_right`: `xmin=0.55, ymin=0.78, xmax=0.95, ymax=0.90`
-
-### Script: page-image spec -> review CSV rows
-
-Inputs:
-- Existing `*_review_file.csv`
-- A JSON spec listing page and zone for each missing redaction
+When appending rows, set **`image`** from an existing same-page row; **`color`** as a quoted string, e.g. `"(0, 0, 0)"`; unique **`id`**.
 
 ```python
 import csv
-import json
 import secrets
 from pathlib import Path
-
-REVIEW_CSV = Path("example_data/example_outputs/example_of_emails_sent_to_a_professor_before_applying_review_file.csv")
-SPEC_JSON = Path("tmp/scan_zone_spec.json")
-OUT_CSV = Path("tmp/scan_zone_review_file.csv")
 
 ZONE = {
     "top_left": (0.05, 0.08, 0.45, 0.18),
@@ -297,196 +169,116 @@ ZONE = {
     "bottom_left": (0.05, 0.78, 0.45, 0.90),
     "bottom_right": (0.55, 0.78, 0.95, 0.90),
 }
+# spec = [{"page": 1, "zone": "bottom_right", "label": "SIGNATURE", "text": "signature"}, ...]
 
-# SPEC format:
-# [
-#   {"page": 1, "zone": "bottom_right", "label": "SIGNATURE", "text": "signature"},
-#   {"page": 2, "zone": "top_left", "label": "CUSTOM", "text": "address"}
-# ]
-spec = json.loads(SPEC_JSON.read_text(encoding="utf-8"))
 
-with REVIEW_CSV.open("r", newline="", encoding="utf-8-sig") as f:
-    rows = list(csv.DictReader(f))
-fieldnames = list(rows[0].keys())
-image_col = fieldnames[0]
-
-for item in spec:
-    page = int(item["page"])
-    xmin, ymin, xmax, ymax = ZONE[item["zone"]]
-    # Keep image values aligned with this run: prefer an existing row's image for the same page.
-    same_page = [r for r in rows if int(float(r.get("page", "0") or 0)) == page]
-    image_value = same_page[0].get(image_col) if same_page and same_page[0].get(image_col) else f"placeholder_image_{max(page - 1, 0)}.png"
-    rows.append(
-        {
-            image_col: image_value,
-            "page": str(page),
-            "label": item.get("label", "CUSTOM"),
-            "color": "(0, 0, 0)",
-            "xmin": f"{xmin:.4f}",
-            "ymin": f"{ymin:.4f}",
-            "xmax": f"{xmax:.4f}",
-            "ymax": f"{ymax:.4f}",
-            "id": secrets.token_hex(6),
-            "text": item.get("text", ""),
-        }
-    )
-
-with OUT_CSV.open("w", newline="", encoding="utf-8-sig") as f:
-    w = csv.DictWriter(f, fieldnames=fieldnames)
-    w.writeheader()
-    w.writerows(rows)
-
-print("Wrote:", OUT_CSV)
+def append_zones(review_csv: Path, spec: list, out_csv: Path) -> None:
+    rows = list(csv.DictReader(review_csv.open(encoding="utf-8-sig")))
+    fieldnames = list(rows[0].keys())
+    img_col = fieldnames[0]
+    for item in spec:
+        page = int(item["page"])
+        xmin, ymin, xmax, ymax = ZONE[item["zone"]]
+        same_page = [r for r in rows if int(float(r.get("page", 0) or 0)) == page]
+        image_val = (
+            same_page[0].get(img_col)
+            if same_page and same_page[0].get(img_col)
+            else f"placeholder_image_{max(page - 1, 0)}.png"
+        )
+        new_row = {k: "" for k in fieldnames}
+        new_row.update(
+            {
+                img_col: image_val,
+                "page": str(page),
+                "label": item.get("label", "CUSTOM"),
+                "color": "(0, 0, 0)",
+                "xmin": f"{xmin:.4f}",
+                "ymin": f"{ymin:.4f}",
+                "xmax": f"{xmax:.4f}",
+                "ymax": f"{ymax:.4f}",
+                "id": secrets.token_hex(6),
+                "text": item.get("text", ""),
+            }
+        )
+        rows.append(new_row)
+    with out_csv.open("w", newline="", encoding="utf-8-sig") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames)
+        w.writeheader()
+        w.writerows(rows)
 ```
 
-After writing `OUT_CSV`, apply it with the minimal end-to-end script above.
+## Verification (after reapply)
 
-## Practical verification (headless-safe)
+1. **Text layer**: `PyMuPDF` `page.get_text()` on the **`*_redacted.pdf`**—sensitive strings present in the original should be **gone** under successful blackouts. Useless for purely scanned pages with no text.
+2. **Scanned / hybrid**: check overlap between review boxes and **`*_ocr_results_with_words_*.csv`** positions for the terms you care about.
+3. **Optional — VLM spot-check**: export a **moderate-DPI** page PNG (downscale very large rasterizations—huge tiles time out). Many OpenAI-compatible servers are **text-only**; confirm vision with a **real page crop**, not a tiny placeholder image (1×1 probes mislead).
 
-### Step 1: Programmatic text extraction (primary — fast, reliable)
+### OpenAI-compatible VLM (when the endpoint supports vision)
 
-Extract visible text from the redacted PDF and confirm sensitive terms are NOT extractable. Black redaction boxes suppress text extraction, so if a term still appears in extracted text, its box is misaligned or missing. This is the primary verification method — faster than visual checks and catches missed PII definitively.
+Use the usual **`/v1/chat/completions`** multimodal body: one `image_url` with a **`data:image/png;base64,...`** URL plus a short text prompt.
 
-```python
-import fitz  # PyMuPDF
-
-REDACTED = "output/document_redacted.pdf"
-ORIGINAL = "input/document.pdf"
-SENSITIVE_TERMS = ["London", "Sister City", "rudy.giuliani@email.com"]  # adjust per rules
-
-def extract_text(path):
-    doc = fitz.open(path)
-    return "".join(page.get_text() for page in doc)
-
-redacted_text = extract_text(REDACTED).lower()
-original_text = extract_text(ORIGINAL).lower()
-
-for term in SENSITIVE_TERMS:
-    t = term.lower()
-    orig_count = original_text.count(t)
-    redact_count = redacted_text.count(t)
-    status = "PASS" if redact_count == 0 else "FAIL"
-    print(f"[{status}] '{term}': {orig_count} in original, {redact_count} in redacted")
-```
-
-For scanned/image pages (no text layer), cross-reference box coordinates with OCR output CSVs (`*_ocr_results_with_words_*.csv`) to verify boxes overlap actual word positions.
-
-### Step 2: Review images (optional supplement)
-
-Prefer this method over fragile in-session review export endpoints for visual spot-checking. **CAUTION:** `vision_analyze` times out on large PDF page images (~4096x5760 pixels). If using vision models, downscale to 1280px max width first. For most cases, Step 1 alone is sufficient.
+- **`max_tokens`**: set **high (≈1000–2500+)**. Image tokens count toward the limit; values like 50–200 often return **empty `content` with HTTP 200** and `finish_reason: length`. Budget for both encoding and the answer.
+- **`temperature`**: keep **low** (e.g. **0.1**) for repeatable yes/no checks.
+- **Reasoning-style models** (e.g. some Qwen variants): read **`content` and `reasoning_content`** and concatenate—analysis may live only in **`reasoning_content`** while `content` stays empty on success.
+- **Prompts**: one focused question per call (“Is the name X still readable?”); long multi-part prompts often come back empty—**split** into separate requests. Say what should be **visible** vs **covered by black boxes**.
+- **Client**: `httpx.post(..., content=json.dumps(payload).encode(), headers={"Content-Type": "application/json"}, timeout=180)` (raise timeout for slow hosts / large images).
 
 ```python
-import csv
+import base64
+import json
 from pathlib import Path
 
-import fitz  # PyMuPDF
-from PIL import Image, ImageDraw
+import httpx
 
-PDF_PATH = Path("tmp/review_cycle/downloads/example_redacted.pdf")
-REVIEW_CSV = Path("tmp/review_cycle/downloads/example_review_file.csv")
-OUT_DIR = Path("tmp/review_cycle/page_review_exports")
-OUT_DIR.mkdir(parents=True, exist_ok=True)
-
-with REVIEW_CSV.open("r", newline="", encoding="utf-8-sig") as f:
-    review_rows = list(csv.DictReader(f))
-
-rows_by_page = {}
-for r in review_rows:
-    page = int(float(r.get("page", "0") or 0))
-    rows_by_page.setdefault(page, []).append(r)
-
-doc = fitz.open(PDF_PATH)
-for p in range(1, doc.page_count + 1):
-    page_obj = doc[p - 1]
-    pix = page_obj.get_pixmap(dpi=180)
-    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-
-    # Downscale for vision compatibility if needed
-    max_w = 1280
-    if img.width > max_w:
-        scale = max_w / img.width
-        new_size = (max_w, int(img.height * scale))
-        img = img.resize(new_size, Image.LANCZOS)
-
-    draw = ImageDraw.Draw(img)
-    for r in rows_by_page.get(p, []):
-        x0 = float(r["xmin"]) * pix.width
-        y0 = float(r["ymin"]) * pix.height
-        x1 = float(r["xmax"]) * pix.width
-        y1 = float(r["ymax"]) * pix.height
-        if img.width != pix.width:
-            scale_x, scale_y = img.width / pix.width, img.height / pix.height
-            x0 *= scale_x; y0 *= scale_y; x1 *= scale_x; y1 *= scale_y
-        draw.rectangle([x0, y0, x1, y1], outline="red", width=3)
-    img.save(OUT_DIR / f"page_{p:03d}_review.png")
-
-print("Review images in:", OUT_DIR)
+def vlm_review(image_path: str, prompt: str, base_url: str, model: str, max_tokens: int = 2000) -> str:
+    b64 = base64.b64encode(Path(image_path).read_bytes()).decode()
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ],
+        "max_tokens": max_tokens,
+        "temperature": 0.1,
+    }
+    r = httpx.post(
+        f"{base_url.rstrip('/')}/v1/chat/completions",
+        content=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+        timeout=180.0,
+    )
+    if r.status_code != 200:
+        return f"ERROR {r.status_code}: {r.text[:500]}"
+    msg = r.json()["choices"][0]["message"]
+    return (msg.get("content") or "") + (msg.get("reasoning_content") or "")
 ```
 
-## Fallbacks (use only if default path is blocked)
+Watch **false positives** when trimming boxes: geography/org phrases mis-tagged as **PERSON**, bare job titles, OCR gibberish next to signatures mistaken for names—remove or relabel per policy.
 
-1. Raw Gradio HTTP:
-   - `POST /gradio_api/upload` (PDF + review CSV)
-   - `POST /gradio_api/call/review_apply` with `{"data":[pdf_path, csv_path, null]}`
-   - Poll `GET /gradio_api/call/review_apply/{event_id}`
-2. `/agent/apply_review_redactions`:
-   - Use only when both file paths are server-local and accepted by route validation.
-3. Browser UI:
-   - Last resort when API access is unavailable.
+## Fallbacks
 
-## Per-page review checklist
+1. Raw **`/gradio_api/*`**: upload (if enabled) → `call/review_apply` → poll → `file=` download with encoding + auth.
+2. **`/agent/apply_review_redactions`**: only if both paths resolve under the server’s allowed roots.
+3. **Browser UI** if APIs are blocked.
+4. **Container / path isolation** (client cannot upload, agent paths rejected): apply the same CSV boxes **locally** with PyMuPDF (`add_redact_annot` + `apply_redactions`, or equivalent)—see [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md).
 
-Run through this for every page before signing off:
+## Gradio vs Agent names
 
-- [ ] All named individuals redacted (check `*_ocr_results_with_words_*.csv` for full names).
-- [ ] All signatures redacted (handwritten lines, initials, flourishes).
-- [ ] All printed names below signatures redacted.
-- [ ] Target phrases redacted on this page (e.g. "London", "Sister City", email addresses).
-- [ ] No false positives: country names, city names, organisation names not flagged as PII left unredacted.
-- [ ] All boxes correctly sized — no box clips adjacent text or floats into wrong area.
-- [ ] OCR-invisible content checked visually (decorative headings, stamps, seals).
+Review-tab Gradio exports use names like **`page_redaction_review_image`** / **`page_ocr_review_image`**. FastAPI **`/agent/export_review_*`** routes are different; do not use agent path strings as Gradio `api_name`. The short apply route for agents is **`/review_apply`**, not the full Review-tab **`apply_review_redactions`** event (many positional inputs).
 
-## Completion checklist
+## Checklists
 
-- [ ] Worked page-by-page, not full-document edits first.
-- [ ] Read and wrote CSV with `utf-8-sig`.
-- [ ] Used `/review_apply` as primary path.
-- [ ] Recovered container outputs via `file=` download, bind mount, or `docker cp`.
-- [ ] Produced visual review images for verification before sign-off.
+**Per page (policy-dependent):** names, signatures + printed names, target phrases, OCR-invisible stamps/headings, box size/alignment, false positives removed.
 
-## Known Issues & Workarounds
+**Run:** `utf-8-sig` CSV; preview before apply; **`/review_apply`** as default; newest outputs by mtime; verify with extraction and/or images.
 
-### gradio_client Endpoint Inference Bug (Gradio 6.x)
-When calling endpoints via `gradio_client.Client().predict()`, the client fails to dispatch if **named keyword arguments** are used with multi-endpoint apps:
-```python
-# FAILS - endpoint inference can't match named kwargs:
-client.predict(annotated_image=..., current_page=1, review_file_state=modified_df)
+## When stuck
 
-# WORKAROUND 1 - positional args only (no names):
-client.predict(image_dict, 1, modified_df, "/home/user/app/output/", True)
+[`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) — path validation, 403 downloads, and PyMuPDF fallback steps.
 
-# WORKAROUND 2 - raw HTTP POST + SSE polling:
-POST /gradio_api/call/apply_review_redactions with JSON payload
-GET /gradio_api/call/apply_review_redactions/{event_id} for results (requires async queue handling)
-```
-
-### Review Dataframe Modification Pattern
-Review data from `result[6]` of `/choose_and_run_redactor` is a dict: `{headers, data, metadata}`. To modify:
-- **Remove rows**: Filter out unwanted entries by text/label match before passing to apply endpoint
-- **Reclassify labels**: Change label strings in data rows (e.g., "STREETNAME" → "ADDRESS")
-- Modified dataframe must maintain same structure with headers intact
-
-### Affected Endpoints (endpoint inference bug)
-
-For `gradio_client` and `/gradio_api/call/...`, the Review-tab visual exports are registered as **`page_ocr_review_image`** and **`page_redaction_review_image`** in `app.py`. The FastAPI **`/agent/export_review_page_ocr_visualisation`** and **`/agent/export_review_redaction_overlay`** routes are separate (JSON bodies); do not use those strings as Gradio `api_name` values.
-
-| Endpoint | Purpose | Status |
-|----------|---------|--------|
-| `/apply_review_redactions` | Apply modified review data → PDF + log + updated df | ⚠️ Works with positional args only |
-| `/page_ocr_review_image` | Export OCR overlay image via AnnotatedImageData + OCR state | ✅ Confirmed working pattern from initial redaction |
-| `/page_redaction_review_image` | Export redaction overlay with review_df → image + log paths | ⚠️ Same endpoint inference issue expected |
-| `/combine_review_csvs`, `/combine_review_pdfs` | Combine results across multiple review sessions | Not tested — likely same positional-args requirement |
-
-## When the default flow breaks
-
-Use [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) for deeper failure-mode diagnosis and recovery steps.
+Repo API overview: [AGENTS.md](../../AGENTS.md).
