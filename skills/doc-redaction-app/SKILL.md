@@ -1,219 +1,83 @@
 ---
 name: doc-redaction-app
-description: "Operate the Document Redaction app with a practical default workflow: short Gradio endpoints via gradio_client, explicit handle_file rules, known failure traps, and output verification before sign-off."
-version: 2.0.4
+description: "Initial document redaction and downloading server outputs: gradio_client, `/doc_redact` first, path/download traps, and `/redact_document` when needed. Not for CSV review or reapply (see doc-redaction-modifications); parallel multi-page review orchestration → doc-redact-page-review."
+version: 2.1.1
 author: repo-maintained
 license: AGPL-3.0-only
 ---
 
+## Scope
 
-## Quick start (read this first)
+This skill covers **running an initial redaction** and **getting artifacts onto the client**. For edited review CSVs, `/review_apply`, coordinate fixes, and visual QA, use [`../doc-redaction-modifications/SKILL.md`](../doc-redaction-modifications/SKILL.md). For **parallel per-page review** (spawn subagents, merge CSV, one `/review_apply`), use [`../doc-redact-page-review/SKILL.md`](../doc-redact-page-review/SKILL.md).
 
-### 1) Pick the right access path
+## Quick start
+
+### 1) Access path
 
 - Primary: `gradio_client`
 - Fallback: raw `/gradio_api/*` HTTP
-- Use `/agent/*` only when you have server-local paths (shared filesystem)
-- Browser UI only if APIs are blocked
+- `/agent/*` only when inputs resolve on the **server** (repo root, `INPUT_FOLDER`, or `OUTPUT_FOLDER`). If you see path validation errors, the client and app do not share a filesystem—use Gradio upload paths or MCP, not bare agent paths.
 
-### 2) Prefer short endpoints over `/redact_document`
+### 2) Prefer `/doc_redact` over `/redact_document`
 
-Use these first:
-- `/doc_redact` for PDF/image redaction
-- `/review_apply` for applying edited review CSV
-- `/preview_boxes` for rendering proposed CSV boxes onto the original PDF **without** applying redactions — use before `/review_apply` to verify coordinates (returns a ZIP of PNGs)
-- `/pdf_summarise` for PDF summarization
-- `/tabular_redact` for tabular files
+Use `/doc_redact` for a normal PDF/image first pass. Use `/redact_document` only when you need the full Gradio control surface.
 
-Use `/redact_document` only when you need the full control surface.
+### 2b) `/doc_redact` can succeed with no artifacts
 
-### 2b) Important: `/doc_redact` can “succeed” but return no artifacts
+Some deployments return a success message but **`[]`** for output paths. Treat that as **no deliverable** for automation.
 
-Some deployments may return a success message (e.g. `"doc_redact completed"`) but **an empty output paths list** (`[]`).
+- **Custom VLM entity types** (e.g. `CUSTOM_VLM_SIGNATURE`, `CUSTOM_VLM_FACES`) are a common trigger: processing may complete but paths stay empty. Fall back to `/redact_document` (or deployment-specific docs) if you need those entities.
 
-- Treat **empty paths** as a failure for automation (there is nothing to download).
-- Recommended fallback: immediately call `/redact_document` (or use raw `/gradio_api/*` HTTP) and continue from there.
+### 2c) `/doc_redact` vs `/redact_document` parameter names
 
-### 2a) `/doc_redact` parameter values (important for agents)
+They are **not** interchangeable. Wrong kwargs raise errors such as `Parameter is not a valid keyword argument`.
 
-`/doc_redact` accepts a simplified `ocr_method` input that maps to two CLI knobs:
-- High-level OCR/text modes: `Local OCR`, `AWS Textract`, `Local text`
-- Local OCR engine shortcuts (auto-mapped to `Local OCR` + `chosen_local_ocr_model`):
-  - `tesseract`, `paddle`, `hybrid-paddle`, `hybrid-vlm`, `hybrid-paddle-vlm`, `hybrid-paddle-inference-server`
-  - `vlm`, `inference-server`, `bedrock-vlm`, `gemini-vlm`, `azure-openai-vlm`
-- Common aliases are accepted (for example `textract`, `local`, `simple text`, `hybrid paddle vlm`).
+- `/doc_redact`: e.g. `document_file`, `ocr_method`, `pii_method`, `redact_entities` (not `file_paths`, `chosen_local_ocr_model`, `chosen_redact_entities`).
+- `/redact_document`: long-form names (`file_paths`, `chosen_redact_entities`, `chosen_local_ocr_model`, `pii_identification_method`, etc.). Use `client.view_api()` when in doubt.
 
-`/doc_redact` `pii_method` accepts configured labels and common aliases:
-- `Local`
-- `AWS Comprehend`
-- `LLM (AWS Bedrock)`
-- `Local inference server`
-- `Local transformers LLM`
-- `None` (plus aliases like `no redaction`)
+### 2d) OCR / PII labels on `/doc_redact`
 
-Use exact configured labels where possible for maximum portability across deployments.
+- `ocr_method`: high-level modes (`Local OCR`, `AWS Textract`, `Local text`) plus engine shortcuts (`tesseract`, `paddle`, `hybrid-paddle-vlm`, `vlm`, `inference-server`, …). Aliases like `textract`, `local` often work.
+- `pii_method`: e.g. `Local`, `AWS Comprehend`, `LLM (AWS Bedrock)`, `Local inference server`, `Local transformers LLM`, `None`. Prefer exact labels from the deployment.
 
-### 3) `handle_file` rule (critical)
+Optional **page window** (when exposed): `page_min` / `page_max` (1-based; `0` often means first/last page—confirm in `view_api()`).
 
-- Local client file path: use `handle_file("/local/path/file.pdf")`
-- Server path returned from upload (for example `/tmp/gradio_tmp/...`): pass as plain string
-- Do not wrap server paths in `handle_file(...)`
+### 3) `handle_file` (critical)
 
-### 3b) Local downloads after `predict` (critical)
+- **Local** file on the machine running the client: `handle_file("/local/path/file.pdf")`
+- **Server** path (e.g. after Gradio upload): plain string—**do not** wrap in `handle_file(...)`
 
-- `client.predict` returns **server-side paths** (and status strings). It does **not** write files to your machine; fetch bytes yourself with HTTP unless you use MCP (bundled zip) or a shared filesystem.
-- Endpoint: `{BASE_URL}/gradio_api/file={encoded_path}` where **`encoded_path` = `urllib.parse.quote(path, safe="")`**. Omitting encoding breaks when paths contain spaces or reserved characters.
-- For gated/private HF Spaces, use the same **`Authorization: Bearer <HF_TOKEN>`** header on download requests as for the client.
-- Paths may appear as plain strings or nested dicts with a `"path"` key; use recursive extraction (see full reference example or `extract_file_like_paths` in `mcp_doc_redaction/gradio_transport.py`).
+### 4) Downloads after `predict` (critical)
 
-### 4) Two high-impact gotchas
+- Return values are **server paths** (and strings); nothing is written locally unless you fetch bytes.
+- URL: `{BASE_URL}/gradio_api/file={urllib.parse.quote(path, safe="")}`. Always encode the path; spaces and special characters break naive URLs.
+- Gated HF Spaces: send **`Authorization: Bearer <HF_TOKEN>`** on download requests as well as on the client.
+- Paths may be strings or nested dicts with a `"path"` key; walk recursively if needed (see `extract_file_like_paths` in `mcp_doc_redaction/gradio_transport.py`).
 
-- For full `/redact_document`: `output_folder` must be non-empty.
-- For full `/redact_document`: `chosen_llm_entities` must contain at least one value even when using Local PII mode.
+### 5) `/redact_document` gotchas (initial run)
 
-### 5) `review_apply` image-name trap (critical)
+- `output_folder` must be **non-empty**. On many HF-style deployments, use the app’s real output directory (often something like `/home/user/app/output`) so returned paths are downloadable; paths under `/tmp/gradio/...` may still appear and can return **403** on `gradio_api/file=`—if downloads fail, check returned path prefixes and deployment README.
+- `chosen_llm_entities` must contain **at least one** value even in Local PII mode (e.g. `["PERSON"]` or `["PERSON_NAME"]`).
+- **`combined_out_message=""`** and **`ocr_review_files=[]`** are required in typical apps; omitting them raises `TypeError: No value provided for required argument`.
+- Heavy **VLM / signature** jobs can run many minutes per page; use generous **`httpx.Timeout`** (e.g. `read=1800` or higher) to avoid false timeouts.
+- When picking files by name, **`…_redacted.pdf`** is the redacted artifact; **`…_redactions_for_review.pdf`** is an overlay preview, not the final black-box PDF.
 
-When using `/review_apply`, do not submit review rows whose `image` values are fake placeholders (for example `placeholder_image_2.png`) unless they are valid for the active run context. In field failures this stripped redaction rows during apply. Keep `image` values aligned with current run artifacts.
+### 6) Client and network
 
-## Known tool limitations (prominent)
+- **`Client(BASE_URL)`** can hang on cold API info fetch; always pass **`httpx_kwargs`** with a **connect** timeout (e.g. 120s) and a long **read** timeout for big jobs.
+- From **Docker** to a Gradio app on the host, use `http://host.docker.internal:<port>` instead of `localhost` on the client container.
 
-Apply these constraints before writing scripts:
+## Known scripting limitations
 
-- Use full Python scripts instead of fragile one-liners for CSV editing and bbox generation.
-- Avoid patch patterns that collapse line breaks in generated Python; verify written scripts before execution.
-- Quote CSV color tuples as strings (for example `"(0, 0, 0)"`) to avoid comma-splitting issues.
-- Use Python 3 explicitly.
-- CSV files may have UTF-8 BOM; read/write with `encoding="utf-8-sig"` when editing.
-- PowerShell note (Windows): `&&` is not a statement separator; use `;` or separate commands.
-
-## Verification workflow (required before sign-off)
-
-After every redaction/apply run:
-
-1. Generate output artifacts (`*_redacted.pdf`, `*_review_file.csv`).
-2. Render each PDF page to image with PyMuPDF.
-3. Draw review CSV boxes on page images.
-4. Review review images with a human or vision model for:
-   - misses (sensitive text visible)
-   - false positives (non-sensitive text boxed)
-   - box drift (misaligned geometry)
-5. Fix CSV page-by-page and re-apply using `/review_apply`.
-
-### Multiple apply runs — always sort outputs by modification time
-
-Each `/review_apply` call generates a **new hash-prefixed filename** (e.g. `a3f9..._ redacted.pdf`). After several iterations you will have multiple versions in the output folder. Scripts that glob for output files **must** sort by `st_mtime` descending and take the first result, or they will silently verify an older file:
-
-```python
-from pathlib import Path
-
-candidates = sorted(
-    Path("output_final").glob("*_redacted.pdf"),
-    key=lambda f: f.stat().st_mtime,
-    reverse=True,
-)
-latest = candidates[0]  # always the most recently applied version
-```
-
-Apply the same pattern to `*_review_file.csv` and `*_redactions_for_review.pdf`.
-
-### Pre-apply coordinate preview (saves round-trips)
-
-Before sending a modified CSV to `/review_apply`, render the proposed boxes on the **original PDF locally**. This lets you confirm geometry without a server round-trip and is especially valuable for manually placed boxes (signatures, decorative text, stamps).
-
-Add a percentage grid to measure where boxes land relative to page content:
-
-```python
-import csv, fitz
-from pathlib import Path
-from PIL import Image, ImageDraw
-
-PDF = Path("input/document.pdf")
-CSV = Path("output/document_review_file_edited.csv")
-OUT = Path("output/preview"); OUT.mkdir(exist_ok=True)
-
-with CSV.open(encoding="utf-8-sig") as f:
-    rows = {}
-    for r in csv.DictReader(f):
-        rows.setdefault(int(float(r.get("page", 0) or 0)), []).append(r)
-
-doc = fitz.open(str(PDF))
-for p in range(1, doc.page_count + 1):
-    pix = doc[p - 1].get_pixmap(dpi=150)
-    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-    draw = ImageDraw.Draw(img)
-    for pct in range(0, 100, 5):           # percentage grid
-        y = int(pct / 100 * pix.height)
-        draw.line([(0, y), (60, y)], fill="red", width=1)
-        draw.text((2, y), f"{pct}%", fill="red")
-    for r in rows.get(p, []):
-        draw.rectangle(
-            [float(r["xmin"]) * pix.width, float(r["ymin"]) * pix.height,
-             float(r["xmax"]) * pix.width, float(r["ymax"]) * pix.height],
-            outline="orange", width=3,
-        )
-    img.save(OUT / f"page_{p:03d}.png")
-```
-
-Even a perfect local preview does not guarantee pixel-perfect alignment in the final redacted PDF — the server applies boxes in the original PDF coordinate space, which can render slightly differently to a local PyMuPDF render. Always verify the actual applied output after each apply run.
-
-
-
-### Scanned-page warning (don’t rely on PDF text search)
-
-Many PDFs contain scanned/image-like pages with **no reliable selectable text**.
-
-- Do not rely on PDF text-search (e.g. PyMuPDF `search_for`) to find terms on those pages; it can silently miss.
-- Prefer **OCR word outputs** (e.g. `*_ocr_results_with_words_*.csv`) to locate terms and build boxes.
-
-Minimal review image generation script:
-
-```python
-import csv
-from pathlib import Path
-
-import fitz  # PyMuPDF
-from PIL import Image, ImageDraw
-
-PDF_PATH = Path("output/document_redacted.pdf")
-REVIEW_CSV = Path("output/document.pdf_review_file.csv")
-OUT_DIR = Path("output/review_images")
-OUT_DIR.mkdir(parents=True, exist_ok=True)
-
-with REVIEW_CSV.open("r", newline="", encoding="utf-8-sig") as f:
-    rows = list(csv.DictReader(f))
-
-rows_by_page = {}
-for r in rows:
-    p = int(float(r.get("page", "0") or 0))
-    rows_by_page.setdefault(p, []).append(r)
-
-doc = fitz.open(PDF_PATH)
-for p in range(1, doc.page_count + 1):
-    pix = doc[p - 1].get_pixmap(dpi=180)
-    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-    draw = ImageDraw.Draw(img)
-    for r in rows_by_page.get(p, []):
-        x0 = float(r["xmin"]) * pix.width
-        y0 = float(r["ymin"]) * pix.height
-        x1 = float(r["xmax"]) * pix.width
-        y1 = float(r["ymax"]) * pix.height
-        draw.rectangle([x0, y0, x1, y1], outline="red", width=3)
-    img.save(OUT_DIR / f"page_{p:03d}.png")
-```
-
-For detailed review-editing procedures and scanned-page coordinate patterns, use [`../doc-redaction-modifications/SKILL.md`](../doc-redaction-modifications/SKILL.md) and [`../doc-redaction-modifications/TROUBLESHOOTING.md`](../doc-redaction-modifications/TROUBLESHOOTING.md).
+- Prefer small Python scripts over fragile one-liners for anything touching CSVs or paths.
+- CSV: quote colour tuples as strings (e.g. `"(0, 0, 0)"`); use `encoding="utf-8-sig"` when editing (BOM).
+- PowerShell: `&&` is not a line separator; use `;` or separate commands.
 
 ## Full reference
 
-### Recommended runtime order
+### `gradio_client` pattern for `/doc_redact`
 
-1. `gradio_client` (default)
-2. raw `/gradio_api/*` HTTP (fallback)
-3. `/agent/*` only with server-local paths
-
-### `gradio_client` default call pattern
-
-Use **`document_file`** (not `pdf_file`) for `/doc_redact`. Hugging Face Spaces and slow TLS benefit from **long `httpx` timeouts**; defaults often raise `ConnectTimeout` on cold start or long jobs.
+Use **`document_file`** (not `pdf_file`). Example download loop after `predict`:
 
 ```python
 import os
@@ -233,22 +97,19 @@ client = (
     if HF_TOKEN
     else Client(BASE_URL, httpx_kwargs=httpx_kwargs)
 )
-# client.view_api()  # prints endpoint signatures
 
 result = client.predict(
     api_name="/doc_redact",
     document_file=handle_file("/local/path/document.pdf"),
 )
 
-# Then download each server path (see §3b). Example:
 headers = {}
 if HF_TOKEN:
     headers["Authorization"] = f"Bearer {HF_TOKEN.strip()}"
 out_dir = Path("output/run_001")
 out_dir.mkdir(parents=True, exist_ok=True)
 with httpx.Client(timeout=httpx_kwargs["timeout"], headers=headers) as http:
-    for p in result[0]:  # /doc_redact returns (output_paths, message)
-        # If entries are dicts with "path", walk recursively (§3b / extract_file_like_paths).
+    for p in result[0]:
         if not isinstance(p, str) or not p.startswith("/"):
             continue
         url = f"{BASE_URL}/gradio_api/file={quote(p, safe='')}"
@@ -256,74 +117,52 @@ with httpx.Client(timeout=httpx_kwargs["timeout"], headers=headers) as http:
         dest.write_bytes(http.get(url).raise_for_status().content)
 ```
 
-### Full `/redact_document` cold-start template
+### Minimal `/redact_document` cold start
 
-Use this only when short routes are insufficient. Keep these defaults unless deployment docs require changes:
+Expand with **`client.view_api()`** for your deployment; typical extra fields include `text_extraction_method`, `pii_identification_method`, `review_file_state`, etc.
 
 ```python
 kwargs = {
     "file_paths": [handle_file("/local/path/document.pdf")],
     "chosen_redact_entities": ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"],
     "chosen_redact_comprehend_entities": [],
-    "chosen_llm_entities": ["PERSON"],  # must be non-empty
+    "chosen_llm_entities": ["PERSON"],
     "ocr_review_files": [],
     "combined_out_message": "",
-    "output_folder": "/tmp/gradio",  # must be non-empty
+    "output_folder": "/home/user/app/output",  # non-empty; adjust to deployment
 }
 result = client.predict(api_name="/redact_document", **kwargs)
 ```
 
-### Pragmatic return-value handling for `/redact_document`
+### Pragmatic handling of `/redact_document` return shape
 
-Current tested deployments often return around twelve values. Practical strategy:
+Returns are often a long tuple; indices can shift between versions. Prefer:
 
-1. Treat `result` as tuple/list.
-2. Extract all file-like values by suffix match (`.pdf`, `.csv`, `.json`).
-3. Keep status strings for logging.
-4. If deployment upgrades break shape, re-check `client.view_api()` and adjust mapping once.
+1. Collect strings ending in `.pdf`, `.csv`, `.json` (including nested lists).
+2. Log human-readable status strings.
+3. Re-run `view_api()` after upgrades if mapping breaks.
 
-Example:
-
-```python
-def extract_paths(result):
-    out = []
-    for item in result:
-        if isinstance(item, str) and item.lower().endswith((".pdf", ".csv", ".json")):
-            out.append(item)
-        elif isinstance(item, list):
-            out.extend(
-                s for s in item
-                if isinstance(s, str) and s.lower().endswith((".pdf", ".csv", ".json"))
-            )
-    return out
-```
-
-### Raw HTTP fallback checklist
+### Raw HTTP fallback
 
 1. `GET /gradio_api/info`
-2. `POST /gradio_api/upload` with multipart `files`
-3. `POST /gradio_api/call/{api_name}` with `{"data":[...]}`
-4. Poll `GET /gradio_api/call/{api_name}/{event_id}`
-5. Download outputs with `GET {BASE}/gradio_api/file={urllib.parse.quote(path, safe="")}` (always URL-encode `path`; use `Bearer` if the Space is gated). Or read shared disk.
+2. Upload (if supported) → `POST /gradio_api/call/{api_name}` with `{"data":[...]}`
+3. Poll `GET /gradio_api/call/{api_name}/{event_id}`
+4. Download with encoded `gradio_api/file=` (and Bearer token if gated)
 
-### MCP usage guidance (when vs not when)
+### MCP vs scripts
 
-Use MCP (`mcp_doc_redaction`) when tools are already wired into an IDE agent runtime (for example Cursor) and you want structured tool calls plus bundled zip/manifest outputs.
+Use **`mcp_doc_redaction`** when the agent already has MCP tools and bundled zips help. For standalone automation, `gradio_client` is usually simpler.
 
-Do not choose MCP as first step for standalone scripts or generic automation; `gradio_client` is simpler there.
+### Auth
 
-### Authentication
+- HF gated/private: `HF_TOKEN` / `Authorization: Bearer …`
+- Agent API: `X-Agent-API-Key` when configured
 
-- HF Spaces private/gated: `HF_TOKEN` bearer auth
-- `/agent/*` when configured: `X-Agent-API-Key`
-- Enterprise reverse proxy: deployment-specific cookies/headers
+### Typical first-run artifacts
 
-### Expected outputs
+- `*_redacted.pdf`, `*_redactions_for_review.pdf`, `*_review_file.csv`
+- OCR exports: `*_ocr_output_*.csv`, `*_ocr_results_with_words_*.{csv,json}`
 
-- `*_redacted.pdf`
-- `*_redactions_for_review.pdf`
-- `*_review_file.csv`
-- `*_ocr_output_*.csv`
-- `*_ocr_results_with_words_*.csv` and/or `.json`
+Package downloads with a small manifest (name, size, hash, time) when automating.
 
-Package artifacts with a manifest (`name`, `size`, `sha256`, timestamp, run metadata).
+Repo-wide API summary: [AGENTS.md](../../AGENTS.md).

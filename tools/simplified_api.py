@@ -1130,8 +1130,8 @@ def preview_boxes_api(
     if not pdf_path or not csv_path:
         return "", "Error: both pdf_file and review_csv_file are required."
 
-    pdf_path = stage_gradio_upload_if_ephemeral(pdf_path, INPUT_FOLDER)
-    csv_path = stage_gradio_upload_if_ephemeral(csv_path, INPUT_FOLDER)
+    pdf_path = stage_gradio_upload_if_ephemeral(pdf_path)
+    csv_path = stage_gradio_upload_if_ephemeral(csv_path)
 
     page_list: list[int] | None = None
     if pages:
