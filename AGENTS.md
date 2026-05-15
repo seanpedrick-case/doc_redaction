@@ -8,6 +8,14 @@ Context for AI coding agents working on **doc_redaction** (PII redaction for PDF
 - **License**: AGPL-3.0-only (see [pyproject.toml](pyproject.toml)). Respect license terms when adding dependencies.
 - **Accuracy**: Outputs are not guaranteed complete; downstream use should assume **human review** of redacted material.
 
+## Cursor skills: redaction workflow (optional)
+
+For agents operating the deployed app (Gradio Client, review CSV, `/review_apply`), these repo-local playbooks are a suggested ladder:
+
+1. **[`skills/doc-redaction-app/SKILL.md`](skills/doc-redaction-app/SKILL.md)** — first-pass redaction (`/doc_redact` / `/redact_document`) and downloading artifacts.
+2. **[`skills/doc-redact-page-review/SKILL.md`](skills/doc-redact-page-review/SKILL.md)** — after outputs exist: **parallel per-page** child agents, merge into one full-document `*_review_file.csv`, **single** `/review_apply` from the parent.
+3. **[`skills/doc-redaction-modifications/SKILL.md`](skills/doc-redaction-modifications/SKILL.md)** — CSV mechanics, `preview_redaction_boxes`, `/review_apply` patterns, verification, VLM and PyMuPDF fallbacks (single-thread edits and the **technical** reference for page-review children).
+
 ## Setup
 
 1. **System**: Install **Tesseract** and **Poppler** (required for OCR/PDF). See [README.md](README.md) (Windows/Linux sections).
