@@ -1329,6 +1329,33 @@ CONVERT_LINE_TO_WORD_LEVEL = convert_string_to_boolean(
     get_or_create_env_var("CONVERT_LINE_TO_WORD_LEVEL", "True")
 )  # Whether to convert paddle line-level OCR results to word-level for better precision
 
+# Local OCR reading order: "column" (multi-column aware) or "legacy" (global top-left sort).
+LOCAL_OCR_READING_ORDER = (
+    get_or_create_env_var("LOCAL_OCR_READING_ORDER", "column").strip().lower()
+)
+if LOCAL_OCR_READING_ORDER not in ("column", "legacy"):
+    LOCAL_OCR_READING_ORDER = "column"
+
+OCR_FULL_SPAN_WIDTH_RATIO = float(
+    get_or_create_env_var("OCR_FULL_SPAN_WIDTH_RATIO", "0.6")
+)  # Box width / page width above this is treated as a full-width line (header/footer).
+
+OCR_COLUMN_GAP_MIN_FRACTION = float(
+    get_or_create_env_var("OCR_COLUMN_GAP_MIN_FRACTION", "0.04")
+)  # Minimum horizontal gap (fraction of page width) between text columns.
+
+OCR_LINE_Y_THRESHOLD_FRACTION = float(
+    get_or_create_env_var("OCR_LINE_Y_THRESHOLD_FRACTION", "0.015")
+)  # Vertical alignment tolerance as a fraction of page height.
+
+OCR_LINE_Y_THRESHOLD_MIN_PX = float(
+    get_or_create_env_var("OCR_LINE_Y_THRESHOLD_MIN_PX", "12")
+)  # Minimum vertical alignment tolerance in pixels.
+
+PADDLE_PRESERVE_LINE_BOXES = convert_string_to_boolean(
+    get_or_create_env_var("PADDLE_PRESERVE_LINE_BOXES", "False")
+)  # Keep Paddle line boxes (skip word split + regrouping) when using Paddle OCR.
+
 LOAD_PADDLE_AT_STARTUP = convert_string_to_boolean(
     get_or_create_env_var("LOAD_PADDLE_AT_STARTUP", "False")
 )  # Whether to load the PaddleOCR model at startup.

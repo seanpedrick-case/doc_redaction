@@ -20,7 +20,7 @@ This skill covers **running an initial redaction** and **getting artifacts onto 
 
 ### 2) Prefer `/doc_redact` over `/redact_document`
 
-Use `/doc_redact` for a normal PDF/image first pass. Use `/redact_document` only when you need the full Gradio control surface.
+Use `/doc_redact` for a normal PDF/image first pass. Use `/redact_document` only when you need the full Gradio control surface. Note that the `/doc_redact` endpoint may not be visible when calling `client.view_api()`.
 
 ### 2b) `/doc_redact` can succeed with no artifacts
 

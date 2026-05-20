@@ -148,6 +148,10 @@ from tools.load_spacy_model_custom_recognisers import (
     nlp_analyser,
     score_threshold,
 )
+from tools.ocr_reading_order import (
+    reorder_structured_text_lines,
+    should_preserve_paddle_line_boxes,
+)
 from tools.redaction_types import (
     RedactionContext,
     RedactionOptions,
@@ -6494,7 +6498,13 @@ def redact_image_pdf(
                 (
                     page_line_level_ocr_results,
                     page_line_level_ocr_results_with_words,
-                ) = combine_ocr_results(page_word_level_ocr_results, page=str(pno + 1))
+                ) = combine_ocr_results(
+                    page_word_level_ocr_results,
+                    page=str(pno + 1),
+                    preserve_line_boxes=should_preserve_paddle_line_boxes(
+                        chosen_local_ocr_model
+                    ),
+                )
 
                 return (
                     pno,
@@ -7000,7 +7010,11 @@ def redact_image_pdf(
                             page_line_level_ocr_results,
                             page_line_level_ocr_results_with_words,
                         ) = combine_ocr_results(
-                            page_word_level_ocr_results, page=reported_page_number
+                            page_word_level_ocr_results,
+                            page=reported_page_number,
+                            preserve_line_boxes=should_preserve_paddle_line_boxes(
+                                chosen_local_ocr_model
+                            ),
                         )
                     # else: line/word structures already set from parallel local OCR worker
 
@@ -10665,6 +10679,17 @@ def process_page_to_structured_ocr_pymupdf(
             line_results.append(line_obj)
             lines_char_groups.append(line_chars)
             valid_line_count += 1
+
+    if line_results:
+        mediabox = page.mediabox
+        line_results, lines_char_groups, page_data = reorder_structured_text_lines(
+            line_results,
+            lines_char_groups,
+            page_data,
+            page_width=float(mediabox.width),
+            page_height=float(mediabox.height),
+            start_line_number=start_line_number,
+        )
 
     return page_data, line_results, lines_char_groups
 

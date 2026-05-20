@@ -22,11 +22,11 @@ services:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda12
     command:
       - -hf
-      - unsloth/Qwen3.6-27B-GGUF
+      - unsloth/Qwen3.6-27B-MTP-GGUF
       - --hf-file
       - Qwen3.6-27B-UD-Q6_K_XL.gguf
       - --mmproj-url
-      - https://huggingface.co/unsloth/Qwen3.6-27B-GGUF/resolve/main/mmproj-BF16.gguf
+      - https://huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF/resolve/main/mmproj-BF16.gguf
       - --n-gpu-layers
       - "-1"
       # - -mg
@@ -35,8 +35,8 @@ services:
       # - "cuda0,cuda1"
       # - -sm
       # - "row"
-      # - --tensor-split
-      # - "24,14"
+      - --tensor-split
+      - "24,15"
       - --ctx-size
       - "131072"
       - --fit
@@ -70,6 +70,10 @@ services:
       - "q8_0"
       - --cache-type-v
       - "q8_0"
+      - --spec-type
+      - "draft-mtp"
+      - --spec-draft-n-max
+      - "2"
     ports:
       - "8000:8080"
     volumes:

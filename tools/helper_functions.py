@@ -3,6 +3,7 @@ import os
 import platform
 import random
 import re
+import shutil
 import string
 import sys
 import tempfile
@@ -1181,6 +1182,67 @@ def check_for_relevant_ocr_output_with_words(
         return True
     else:
         return False
+
+
+def _is_bundled_example_textract_json(filename: str) -> bool:
+    return filename.endswith("_textract.json") or filename.endswith(
+        "_ocr_results_with_words_textract.json"
+    )
+
+
+def seed_bundled_example_textract_json(
+    output_folder: str,
+    bundled_example_outputs_dir: str,
+) -> None:
+    """
+    Copy bundled example Textract JSON into the session output folder when missing.
+
+    Used when RUN_ALL_EXAMPLES_THROUGH_AWS is enabled so demo documents can reuse
+    shipped OCR results instead of calling AWS Textract on every run.
+    """
+    if not bundled_example_outputs_dir or not os.path.isdir(
+        bundled_example_outputs_dir
+    ):
+        return
+    if not output_folder:
+        return
+
+    try:
+        out_dir = os.path.normpath(str(output_folder))
+        if not validate_folder_containment(out_dir, OUTPUT_FOLDER):
+            out_dir = OUTPUT_FOLDER
+        ensure_folder_exists(out_dir)
+    except (ValueError, PermissionError, OSError) as exc:
+        print(
+            "Could not seed bundled example Textract JSON (output folder invalid):",
+            exc,
+        )
+        return
+
+    copied = 0
+    for name in os.listdir(bundled_example_outputs_dir):
+        if not _is_bundled_example_textract_json(name):
+            continue
+        src = os.path.join(bundled_example_outputs_dir, name)
+        if not os.path.isfile(src):
+            continue
+        try:
+            dest = secure_path_join(out_dir, name)
+        except (ValueError, PermissionError, OSError):
+            continue
+        if not validate_path_safety(str(dest), base_path=out_dir):
+            continue
+        if dest.exists():
+            continue
+        try:
+            shutil.copy2(src, dest)
+            copied += 1
+            print(f"Seeded bundled example Textract JSON: {name} -> {dest}")
+        except OSError as exc:
+            print(f"Could not copy bundled example Textract JSON {name}: {exc}")
+
+    if copied:
+        print(f"Seeded {copied} bundled example Textract JSON file(s) into {out_dir}")
 
 
 def add_folder_to_path(folder_path: str):

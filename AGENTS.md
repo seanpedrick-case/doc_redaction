@@ -32,6 +32,27 @@ For agents operating the deployed app (Gradio Client, review CSV, `/review_apply
 - Run from repo root: `pytest` (optional: `pytest test/`).
 - Fix failures related to your changes before opening a PR.
 
+## Line order (local OCR and simple text extraction)
+
+Multi-column layouts use shared logic in [`tools/ocr_reading_order.py`](tools/ocr_reading_order.py). Controlled by **`LOCAL_OCR_READING_ORDER`** (`column` default, `legacy` for previous top-left behaviour).
+
+### Local OCR (Paddle/Tesseract)
+
+Word boxes are merged into line-level CSV rows in [`combine_ocr_results`](tools/custom_image_analyser_engine.py).
+
+- **`column`**: detect text columns, assign line numbers down each column left-to-right; full-width lines (headers) first. Stops cross-column merging that produced wide erroneous lines on multi-column PDFs.
+- **`PADDLE_PRESERVE_LINE_BOXES=True`** or **`CONVERT_LINE_TO_WORD_LEVEL=False`** with Paddle: keep Paddle line boxes (skip word split + regrouping); line numbers still use column reading order.
+
+### Simple text extraction (PyMuPDF)
+
+[`redact_text_pdf`](tools/file_redaction.py) → [`process_page_to_structured_ocr_pymupdf`](tools/file_redaction.py) calls [`reorder_structured_text_lines`](tools/ocr_reading_order.py) after collecting lines, using **`page.mediabox`** width/height for full-span header detection. Each PDF line keeps its bbox; only order and `line` indices change.
+
+### Tunables (both routes)
+
+`OCR_FULL_SPAN_WIDTH_RATIO`, `OCR_COLUMN_GAP_MIN_FRACTION`, `OCR_LINE_Y_THRESHOLD_FRACTION`, `OCR_LINE_Y_THRESHOLD_MIN_PX`.
+
+Changing line order affects PII page text, duplicate-page detection, and review CSV line indices on multi-column documents; re-review after upgrading.
+
 ## Agentic / programmatic access (two surfaces)
 
 ### 1. FastAPI Agent API (recommended for LLM agents: small JSON bodies)

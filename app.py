@@ -391,6 +391,7 @@ from tools.helper_functions import (
     reset_state_vars,
     reveal_feedback_buttons,
     save_default_cost_code_for_session,
+    seed_bundled_example_textract_json,
     show_duplicate_info_box_on_click,
     show_info_box_on_click,
     show_info_box_on_click_ocr_examples,
@@ -536,6 +537,13 @@ def _example_data_path(rel: str) -> str:
     if _EXAMPLE_DATA_DIR is None:
         return rel
     return str((_EXAMPLE_DATA_DIR / rel).resolve())
+
+
+def seed_example_textract_json_on_app_load(output_folder: str) -> None:
+    """On app load, copy shipped example Textract JSON into the active output folder."""
+    seed_bundled_example_textract_json(
+        output_folder, _example_data_path("example_outputs")
+    )
 
 
 # Check which example files exist and create examples only for available files
@@ -1696,7 +1704,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                     [example_files[3]],
                     "Local OCR model - PDFs without selectable text",
                     "Local",
-                    [],
+                    ["Extract handwriting", "Extract signatures"],
                     ["CUSTOM"],  # Use CUSTOM entity to enable deny list functionality
                     ["CUSTOM"],
                     [example_files[3]],
@@ -4007,6 +4015,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                                 precision=0,
                                 minimum=0,
                                 step=1,
+                                visible=False,
                             )
                     with gr.Column(scale=1):
                         overwrite_existing_ocr_checkbox = gr.Checkbox(
@@ -9857,7 +9866,52 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
     # Get connection details on app load
 
     if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS:
-        blocks.load(
+        app_load_event = (
+            blocks.load(
+                get_connection_params,
+                inputs=[
+                    output_folder_textbox,
+                    input_folder_textbox,
+                    session_output_folder_textbox,
+                    s3_output_folder_state,
+                    s3_whole_document_textract_input_subfolder,
+                    s3_whole_document_textract_output_subfolder,
+                    s3_whole_document_textract_logs_subfolder,
+                    local_whole_document_textract_logs_subfolder,
+                ],
+                outputs=[
+                    session_hash_state,
+                    output_folder_textbox,
+                    session_hash_textbox,
+                    input_folder_textbox,
+                    s3_whole_document_textract_input_subfolder,
+                    s3_whole_document_textract_output_subfolder,
+                    s3_whole_document_textract_logs_subfolder,
+                    local_whole_document_textract_logs_subfolder,
+                    s3_output_folder_state,
+                ],
+                api_visibility="undocumented",
+            )
+            .success(
+                load_in_textract_job_details,
+                inputs=[
+                    load_s3_whole_document_textract_logs_bool,
+                    s3_whole_document_textract_logs_subfolder,
+                    local_whole_document_textract_logs_subfolder,
+                ],
+                outputs=[textract_job_detail_df],
+                api_visibility="undocumented",
+            )
+            .success(
+                fn=load_all_output_files,
+                inputs=output_folder_textbox,
+                outputs=all_output_files,
+                api_visibility="undocumented",
+            )
+        )
+
+    else:
+        app_load_event = blocks.load(
             get_connection_params,
             inputs=[
                 output_folder_textbox,
@@ -9880,15 +9934,6 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                 local_whole_document_textract_logs_subfolder,
                 s3_output_folder_state,
             ],
-            api_visibility="undocumented",
-        ).success(
-            load_in_textract_job_details,
-            inputs=[
-                load_s3_whole_document_textract_logs_bool,
-                s3_whole_document_textract_logs_subfolder,
-                local_whole_document_textract_logs_subfolder,
-            ],
-            outputs=[textract_job_detail_df],
             api_visibility="undocumented",
         ).success(
             fn=load_all_output_files,
@@ -9897,30 +9942,12 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             api_visibility="undocumented",
         )
 
-    else:
-        blocks.load(
-            get_connection_params,
-            inputs=[
-                output_folder_textbox,
-                input_folder_textbox,
-                session_output_folder_textbox,
-                s3_output_folder_state,
-                s3_whole_document_textract_input_subfolder,
-                s3_whole_document_textract_output_subfolder,
-                s3_whole_document_textract_logs_subfolder,
-                local_whole_document_textract_logs_subfolder,
-            ],
-            outputs=[
-                session_hash_state,
-                output_folder_textbox,
-                session_hash_textbox,
-                input_folder_textbox,
-                s3_whole_document_textract_input_subfolder,
-                s3_whole_document_textract_output_subfolder,
-                s3_whole_document_textract_logs_subfolder,
-                local_whole_document_textract_logs_subfolder,
-                s3_output_folder_state,
-            ],
+    # Copy bundled example Textract JSON into the session output folder so AWS demo
+    # examples reuse local results instead of calling Textract on every run.
+    if RUN_ALL_EXAMPLES_THROUGH_AWS and SHOW_EXAMPLES:
+        app_load_event = app_load_event.success(
+            seed_example_textract_json_on_app_load,
+            inputs=[output_folder_textbox],
             api_visibility="undocumented",
         ).success(
             fn=load_all_output_files,
