@@ -1,13 +1,26 @@
 """Tests for multi-column local OCR reading order."""
 
 from dataclasses import dataclass
+from pathlib import Path
+
+import pandas as pd
 
 from tools.ocr_reading_order import (
     assign_layout_boxes,
     build_line_groups,
     group_into_lines_legacy,
+    has_side_by_side_columns,
     reorder_structured_text_lines,
+    should_use_column_reading_order,
     sort_reading_order,
+)
+
+COMPLAINT_CSV = (
+    Path(__file__).resolve().parent.parent
+    / "doc_redaction"
+    / "example_data"
+    / "example_outputs"
+    / "example_complaint_letter_ocr_output_local_ocr.csv"
 )
 
 
@@ -283,3 +296,39 @@ def test_reorder_structured_text_lines_words_aligned():
     )
     assert new_lr[0].text == "left second"
     assert new_pd["results"]["text_line_1"]["words"][0]["text"] == "left second"
+
+
+def _boxes_from_csv(path: Path):
+    df = pd.read_csv(path)
+    boxes = []
+    for _, r in df.iterrows():
+        boxes.append(_ocr(r.text, r.left, r.top, r.width, r.height))
+    return boxes
+
+
+def test_complaint_letter_not_multi_column():
+    """Single-column business letter must not use false column clustering."""
+    boxes = _boxes_from_csv(COMPLAINT_CSV)
+    assert should_use_column_reading_order(boxes, 1.0, 1.0) is False
+    assert has_side_by_side_columns(boxes, 1.0, 1.0) is False
+    layout = assign_layout_boxes(boxes, 1.0, 1.0)
+    column_indices = {lb.column_index for lb in layout if lb.zone == "column"}
+    assert column_indices == {0}
+
+
+def test_complaint_letter_reading_order_puts_street_on_first_row():
+    boxes = _boxes_from_csv(COMPLAINT_CSV)
+    ordered = sort_reading_order(boxes, page_width=1.0, page_height=1.0)
+    top_row = [b.text for b in ordered if abs(b.top - 0.109501) < 0.002]
+    assert "123 Main" in top_row
+    assert "Street" in top_row
+    assert top_row.index("123 Main") < top_row.index("Street")
+    assert ordered.index(next(b for b in ordered if b.text == "Street")) < 20
+
+
+def test_build_line_groups_complaint_merges_address_line():
+    boxes = _boxes_from_csv(COMPLAINT_CSV)
+    groups, _, _ = build_line_groups(boxes, reading_order_mode="column")
+    first = groups[0]
+    texts = {w.text for w in first}
+    assert "123 Main" in texts and "Street" in texts

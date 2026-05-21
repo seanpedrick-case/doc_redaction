@@ -40,7 +40,7 @@ Multi-column layouts use shared logic in [`tools/ocr_reading_order.py`](tools/oc
 
 Word boxes are merged into line-level CSV rows in [`combine_ocr_results`](tools/custom_image_analyser_engine.py).
 
-- **`column`**: detect text columns, assign line numbers down each column left-to-right; full-width lines (headers) first. Stops cross-column merging that produced wide erroneous lines on multi-column PDFs.
+- **`column`**: detect text columns, assign line numbers down each column left-to-right; full-width lines (headers) first. Stops cross-column merging that produced wide erroneous lines on multi-column PDFs. **Auto-fallback**: if no consecutive horizontal gutter is found on a text row (`OCR_COLUMN_GUTTER_MIN_FRACTION`, default `0.04`), the page is treated as single-column and ordered by `(top, left)` (e.g. business letters).
 - **`PADDLE_PRESERVE_LINE_BOXES=True`** or **`CONVERT_LINE_TO_WORD_LEVEL=False`** with Paddle: keep Paddle line boxes (skip word split + regrouping); line numbers still use column reading order.
 
 ### Simple text extraction (PyMuPDF)
@@ -49,7 +49,7 @@ Word boxes are merged into line-level CSV rows in [`combine_ocr_results`](tools/
 
 ### Tunables (both routes)
 
-`OCR_FULL_SPAN_WIDTH_RATIO`, `OCR_COLUMN_GAP_MIN_FRACTION`, `OCR_LINE_Y_THRESHOLD_FRACTION`, `OCR_LINE_Y_THRESHOLD_MIN_PX`.
+`OCR_FULL_SPAN_WIDTH_RATIO`, `OCR_COLUMN_GAP_MIN_FRACTION`, `OCR_COLUMN_GUTTER_MIN_FRACTION`, `OCR_LINE_Y_THRESHOLD_FRACTION`, `OCR_LINE_Y_THRESHOLD_MIN_PX`.
 
 Changing line order affects PII page text, duplicate-page detection, and review CSV line indices on multi-column documents; re-review after upgrading.
 

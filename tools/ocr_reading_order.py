@@ -12,6 +12,7 @@ from tools.config import (
     CONVERT_LINE_TO_WORD_LEVEL,
     LOCAL_OCR_READING_ORDER,
     OCR_COLUMN_GAP_MIN_FRACTION,
+    OCR_COLUMN_GUTTER_MIN_FRACTION,
     OCR_FULL_SPAN_WIDTH_RATIO,
     OCR_LINE_Y_THRESHOLD_FRACTION,
     OCR_LINE_Y_THRESHOLD_MIN_PX,
@@ -99,8 +100,111 @@ def compute_column_gap_threshold(
     column_gap_min_fraction: float = OCR_COLUMN_GAP_MIN_FRACTION,
 ) -> float:
     median_w = _median_box_width(boxes)
-    # Use 0.9× median width so typical 3-column gutters (≈1.2–2× line width) still split.
-    return max(column_gap_min_fraction * page_width, 0.9 * median_w)
+    # Use 1.2× median width so typical 3-column gutters still split; avoids tiny
+    # x-center gaps from indentation on single-column pages when gutter check passes.
+    return max(column_gap_min_fraction * page_width, 1.2 * median_w)
+
+
+def _group_boxes_into_rows(boxes: Sequence[Any], y_threshold: float) -> List[List[Any]]:
+    """Group boxes into text rows by similar top (sorted top-to-left)."""
+    sorted_boxes = sorted(boxes, key=lambda b: (float(b.top), float(b.left)))
+    rows: List[List[Any]] = []
+    i = 0
+    while i < len(sorted_boxes):
+        row = [sorted_boxes[i]]
+        row_top = float(sorted_boxes[i].top)
+        i += 1
+        while (
+            i < len(sorted_boxes)
+            and float(sorted_boxes[i].top) - row_top <= y_threshold
+        ):
+            row.append(sorted_boxes[i])
+            i += 1
+        rows.append(row)
+    return rows
+
+
+def has_side_by_side_columns(
+    boxes: Sequence[Any],
+    page_width: float,
+    page_height: float,
+    full_span_width_ratio: float = OCR_FULL_SPAN_WIDTH_RATIO,
+    gutter_min_fraction: float = OCR_COLUMN_GUTTER_MIN_FRACTION,
+) -> bool:
+    """
+    True when at least one text row has a clear gutter between consecutive boxes.
+
+    Only adjacent left-to-right gaps count (not distant fragments on the same band).
+    Single-column prose can place many boxes on one row with small word spacing; true
+    columns have a wide empty gap between consecutive regions on the same row.
+    """
+    column_boxes = [
+        b for b in boxes if not is_full_span_box(b, page_width, full_span_width_ratio)
+    ]
+    if len(column_boxes) < 2:
+        return False
+
+    y_thresh = compute_y_threshold(page_height, column_boxes, page_width=page_width)
+    gutter_min = max(
+        gutter_min_fraction * page_width,
+        0.2 * _median_box_width(column_boxes),
+    )
+
+    for row in _group_boxes_into_rows(column_boxes, y_thresh):
+        if len(row) < 2:
+            continue
+        row_sorted = sorted(row, key=lambda b: float(b.left))
+        for j in range(len(row_sorted) - 1):
+            right = float(row_sorted[j].left) + float(row_sorted[j].width)
+            next_left = float(row_sorted[j + 1].left)
+            gap = next_left - right
+            if next_left >= right and gap + 1e-6 >= gutter_min:
+                return True
+    return False
+
+
+def should_use_column_reading_order(
+    boxes: Sequence[Any],
+    page_width: float,
+    page_height: float,
+    reading_order_mode: str | None = None,
+    full_span_width_ratio: float = OCR_FULL_SPAN_WIDTH_RATIO,
+    gutter_min_fraction: float = OCR_COLUMN_GUTTER_MIN_FRACTION,
+) -> bool:
+    """Whether to apply column-major reading order (vs legacy top-left)."""
+    mode = (reading_order_mode or LOCAL_OCR_READING_ORDER).strip().lower()
+    if mode == "legacy":
+        return False
+    if mode != "column":
+        return False
+    return has_side_by_side_columns(
+        boxes,
+        page_width,
+        page_height,
+        full_span_width_ratio=full_span_width_ratio,
+        gutter_min_fraction=gutter_min_fraction,
+    )
+
+
+def _sort_single_column_reading_order(
+    boxes: Sequence[Any],
+    page_width: float,
+    full_span_width_ratio: float = OCR_FULL_SPAN_WIDTH_RATIO,
+) -> List[Any]:
+    """Full-span lines first, then remaining lines by (top, left)."""
+    full_span = sorted(
+        [b for b in boxes if is_full_span_box(b, page_width, full_span_width_ratio)],
+        key=lambda b: (float(b.top), float(b.left)),
+    )
+    rest = sorted(
+        [
+            b
+            for b in boxes
+            if not is_full_span_box(b, page_width, full_span_width_ratio)
+        ],
+        key=lambda b: (float(b.top), float(b.left)),
+    )
+    return full_span + rest
 
 
 def assign_layout_boxes(
@@ -114,9 +218,6 @@ def assign_layout_boxes(
     if not boxes:
         return []
 
-    column_gap = compute_column_gap_threshold(
-        page_width, boxes, column_gap_min_fraction
-    )
     column_candidates = []
     layout: List[_LayoutBox] = []
 
@@ -129,7 +230,29 @@ def assign_layout_boxes(
     if not column_candidates:
         return layout
 
-    centers = [(float(b.left) + float(b.width) / 2.0, b) for b in column_candidates]
+    use_columns = should_use_column_reading_order(
+        boxes, page_width, page_height, full_span_width_ratio=full_span_width_ratio
+    )
+    if not use_columns:
+        for box in column_candidates:
+            layout.append(_LayoutBox(result=box, zone="column", column_index=0))
+        return layout
+
+    median_w = _median_box_width(column_candidates)
+    # Wide lines (partial headers) bridge x-clusters; treat as full-span for ordering.
+    bridge_width = max(0.2 * page_width, 1.25 * median_w)
+    narrow_candidates = [b for b in column_candidates if float(b.width) <= bridge_width]
+    for box in column_candidates:
+        if float(box.width) > bridge_width:
+            layout.append(_LayoutBox(result=box, zone="full_span", column_index=-1))
+
+    if not narrow_candidates:
+        return layout
+
+    column_gap = compute_column_gap_threshold(
+        page_width, narrow_candidates, column_gap_min_fraction
+    )
+    centers = [(float(b.left) + float(b.width) / 2.0, b) for b in narrow_candidates]
     centers.sort(key=lambda item: item[0])
     clusters: List[List[Any]] = [[centers[0][1]]]
     cluster_centers = [centers[0][0]]
@@ -175,6 +298,11 @@ def sort_reading_order(
 
     if page_width is None or page_height is None:
         page_width, page_height = infer_page_dimensions(boxes)
+
+    if not should_use_column_reading_order(boxes, page_width, page_height):
+        return _sort_single_column_reading_order(
+            boxes, page_width, full_span_width_ratio=full_span_width_ratio
+        )
 
     layout_boxes = assign_layout_boxes(
         boxes,
@@ -299,7 +427,11 @@ def build_line_groups(
     page_width, page_height = infer_page_dimensions(ocr_results)
     mode = reading_order_mode or LOCAL_OCR_READING_ORDER
 
-    if mode == "legacy":
+    use_columns = should_use_column_reading_order(
+        ocr_results, page_width, page_height, reading_order_mode=mode
+    )
+
+    if not use_columns:
         if y_threshold is not None:
             yt = y_threshold
         elif _coordinates_likely_normalized(page_width, page_height):
@@ -334,14 +466,15 @@ def _order_line_boxes_for_reading(
     reading_order_mode: str | None = None,
 ) -> List[Any]:
     """Return line boxes in reading order (column-aware or legacy top-left)."""
-    mode = reading_order_mode or LOCAL_OCR_READING_ORDER
     if not line_results:
         return []
-    if mode == "legacy":
-        return sorted(
-            line_results,
-            key=lambda b: (float(b.top), float(b.left)),
-        )
+    if not should_use_column_reading_order(
+        line_results,
+        page_width,
+        page_height,
+        reading_order_mode=reading_order_mode,
+    ):
+        return _sort_single_column_reading_order(line_results, page_width)
     return sort_reading_order(
         line_results,
         page_width=page_width,

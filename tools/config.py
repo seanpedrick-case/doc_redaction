@@ -1342,7 +1342,11 @@ OCR_FULL_SPAN_WIDTH_RATIO = float(
 
 OCR_COLUMN_GAP_MIN_FRACTION = float(
     get_or_create_env_var("OCR_COLUMN_GAP_MIN_FRACTION", "0.04")
-)  # Minimum horizontal gap (fraction of page width) between text columns.
+)  # Minimum horizontal gap (fraction of page width) between x-center clusters.
+
+OCR_COLUMN_GUTTER_MIN_FRACTION = float(
+    get_or_create_env_var("OCR_COLUMN_GUTTER_MIN_FRACTION", "0.04")
+)  # Min horizontal gap between boxes on the same text row to treat as multi-column.
 
 OCR_LINE_Y_THRESHOLD_FRACTION = float(
     get_or_create_env_var("OCR_LINE_Y_THRESHOLD_FRACTION", "0.015")
