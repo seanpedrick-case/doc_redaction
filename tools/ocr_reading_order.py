@@ -879,8 +879,20 @@ def reorder_structured_text_lines(
     """
     Reorder PyMuPDF/pdfminer structured page lines for multi-column reading order.
 
-    Keeps line_results, lines_char_groups, and page_data["results"] aligned while
-    reassigning line numbers from start_line_number.
+    Mirrors the local OCR pipeline (build_line_groups) as closely as possible:
+
+    1. Column-aware sort via sort_reading_order / assign_layout_boxes /
+       detect_column_split_xpoints (or legacy top-left for single-column pages).
+    2. Y-band grouping via group_into_lines — merges any same-row split boxes
+       (e.g. mixed-font spans that PyMuPDF emitted as separate lines) and splits
+       horizontally-disparate boxes via _finalize_line.
+    3. Secondary sub-column pass via _reorder_lines_column_major — ensures proper
+       column-major order when sub-columns sit within a single macro-column.
+    4. Each resulting line group is merged into a single box (OCRResult), with
+       char_groups and page_data["results"] kept in sync.
+
+    When a group contains only one box (the common case for clean PDF text), no
+    merge is performed — the original box is just renumbered in-place.
     """
     if not line_results:
         return list(line_results), list(lines_char_groups), page_data
@@ -891,47 +903,114 @@ def reorder_structured_text_lines(
             f"({len(line_results)} != {len(lines_char_groups)})"
         )
 
+    # Build lookups keyed by object identity (survives sort/group passes).
     id_to_char_group = {
         id(line): lines_char_groups[i] for i, line in enumerate(line_results)
     }
     results_by_old_line = dict(page_data.get("results") or {})
 
-    ordered = _order_line_boxes_for_reading(
+    # ── Step 1: column-aware sort ──────────────────────────────────────────────
+    # Determine column mode once so we can share it with steps 2 & 3.
+    use_column = should_use_column_reading_order(
         line_results,
         page_width,
         page_height,
         reading_order_mode=reading_order_mode,
     )
+    if use_column:
+        ordered = sort_reading_order(
+            line_results, page_width=page_width, page_height=page_height
+        )
+    else:
+        ordered = _sort_single_column_reading_order(line_results, page_width)
 
+    # ── Steps 2 & 3: y-band grouping + secondary sub-column pass ──────────────
+    # These match build_line_groups (local OCR route) and are applied in column
+    # mode only.  For single-column / legacy pages PyMuPDF lines are already
+    # formed, so a simple per-line group is sufficient.
+    if use_column:
+        yt = compute_y_threshold(page_height, list(line_results), page_width=page_width)
+        groups = group_into_lines(ordered, page_width, page_height, y_threshold=yt)
+        if groups:
+            word_mw = _median_box_width(list(line_results))
+            groups = _reorder_lines_column_major(groups, page_width, word_mw)
+    else:
+        groups = [[box] for box in ordered]
+
+    # ── Step 4: reconstruct output, merging boxes within each group ───────────
     new_line_results: List[Any] = []
     new_char_groups: List[Any] = []
     new_results: dict = {}
 
-    for i, line in enumerate(ordered):
-        old_line_no = line.line
+    for i, group in enumerate(groups):
+        if not group:
+            continue
         new_line_no = start_line_number + i
-        line.line = new_line_no
-        new_line_results.append(line)
-        new_char_groups.append(id_to_char_group[id(line)])
 
-        old_entry = results_by_old_line.get(f"text_line_{old_line_no}")
-        if old_entry is not None:
-            new_entry = dict(old_entry)
-            new_entry["line"] = new_line_no
-            new_results[f"text_line_{new_line_no}"] = new_entry
+        if len(group) == 1:
+            # Fast path: single-box group — renumber in-place, no merge needed.
+            box = group[0]
+            old_line_no = box.line
+            box.line = new_line_no
+            merged_chars = id_to_char_group.get(id(box), [])
+            old_entry = results_by_old_line.get(f"text_line_{old_line_no}")
+            if old_entry is not None:
+                new_entry = dict(old_entry)
+                new_entry["line"] = new_line_no
+                new_results[f"text_line_{new_line_no}"] = new_entry
+            else:
+                new_results[f"text_line_{new_line_no}"] = {
+                    "line": new_line_no,
+                    "text": box.text,
+                    "bounding_box": [
+                        box.left,
+                        box.top,
+                        box.left + box.width,
+                        box.top + box.height,
+                    ],
+                    "words": [],
+                    "conf": getattr(box, "conf", 100.0),
+                }
         else:
+            # Merge group: combine text, union bounding-box, concatenate chars/words.
+            # Capture old line numbers BEFORE mutating any box.
+            old_line_nos_group = [b.line for b in group]
+            group_text = " ".join(b.text for b in group)
+            group_left = min(float(b.left) for b in group)
+            group_top = min(float(b.top) for b in group)
+            group_right = max(float(b.left) + float(b.width) for b in group)
+            group_bottom = max(float(b.top) + float(b.height) for b in group)
+            group_conf = sum(getattr(b, "conf", 100.0) for b in group) / len(group)
+
+            # Mutate the first box as the merged representative (OCRResult is a
+            # mutable dataclass, so field assignment is safe).
+            box = group[0]
+            box.text = group_text
+            box.left = group_left
+            box.top = group_top
+            box.width = group_right - group_left
+            box.height = group_bottom - group_top
+            box.conf = group_conf
+            box.line = new_line_no
+
+            merged_chars: List[Any] = []
+            merged_words: List[Any] = []
+            for b, old_ln in zip(group, old_line_nos_group):
+                merged_chars.extend(id_to_char_group.get(id(b), []))
+                old_entry = results_by_old_line.get(f"text_line_{old_ln}")
+                if old_entry:
+                    merged_words.extend(old_entry.get("words", []))
+
             new_results[f"text_line_{new_line_no}"] = {
                 "line": new_line_no,
-                "text": line.text,
-                "bounding_box": [
-                    line.left,
-                    line.top,
-                    line.left + line.width,
-                    line.top + line.height,
-                ],
-                "words": [],
-                "conf": getattr(line, "conf", 100.0),
+                "text": group_text,
+                "bounding_box": [group_left, group_top, group_right, group_bottom],
+                "words": merged_words,
+                "conf": group_conf,
             }
+
+        new_line_results.append(box)
+        new_char_groups.append(merged_chars)
 
     new_page_data = dict(page_data)
     new_page_data["results"] = new_results

@@ -211,7 +211,7 @@ def reverse_y_coords(df: pd.DataFrame, column: str):
     df[column] = df[column]
     df[column] = 1 - df[column].astype(float)
 
-    df[column] = df[column].round(6)
+    df[column] = df[column].round(5)
 
     return df[column]
 

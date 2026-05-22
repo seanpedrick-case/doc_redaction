@@ -45,7 +45,16 @@ Word boxes are merged into line-level CSV rows in [`combine_ocr_results`](tools/
 
 ### Simple text extraction (PyMuPDF)
 
-[`redact_text_pdf`](tools/file_redaction.py) → [`process_page_to_structured_ocr_pymupdf`](tools/file_redaction.py) calls [`reorder_structured_text_lines`](tools/ocr_reading_order.py) after collecting lines, using **`page.mediabox`** width/height for full-span header detection. Each PDF line keeps its bbox; only order and `line` indices change.
+[`redact_text_pdf`](tools/file_redaction.py) → [`process_page_to_structured_ocr_pymupdf`](tools/file_redaction.py) calls [`reorder_structured_text_lines`](tools/ocr_reading_order.py) after collecting lines, using **`page.mediabox`** width/height for full-span header detection.
+
+`reorder_structured_text_lines` now mirrors `build_line_groups` (local OCR route):
+
+1. **Column-aware sort** (`sort_reading_order` / `assign_layout_boxes` / `detect_column_split_xpoints`) — or legacy top-left for single-column pages.
+2. **Y-band grouping** (`group_into_lines`) — merges any same-row PyMuPDF lines that were emitted as separate objects (e.g. mixed-font spans) and splits horizontally-disparate boxes via `_finalize_line`.  *Column mode only.*
+3. **Secondary sub-column pass** (`_reorder_lines_column_major`) — ensures correct column-major order when sub-columns sit within a single macro-column.  *Column mode only.*
+4. When a group contains more than one box, constituent boxes are **merged** into a single `OCRResult` (union bbox, joined text, concatenated chars/words).
+
+In single-column / legacy mode only step 1 is applied; PyMuPDF lines are pre-formed so no merging is needed.
 
 ### Tunables (both routes)
 

@@ -24,7 +24,7 @@ services:
       - -hf
       - unsloth/Qwen3.6-27B-MTP-GGUF
       - --hf-file
-      - Qwen3.6-27B-UD-Q5_K_XL.gguf
+      - Qwen3.6-27B-UD-Q6_K_XL.gguf
       - --mmproj-url
       - https://huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF/resolve/main/mmproj-BF16.gguf
       - --n-gpu-layers
@@ -36,7 +36,7 @@ services:
       # - -sm
       # - "row"
       - --tensor-split
-      - "24,17"
+      - "24,15"
       - --ctx-size
       - "131072"
       - -ub

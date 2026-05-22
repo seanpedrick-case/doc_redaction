@@ -2181,7 +2181,7 @@ def divide_coordinates_by_page_sizes_pl(
     # Clip to 0 and round
     df = df.with_columns(
         [
-            pl.col(c).clip(0, float("inf")).round(6)
+            pl.col(c).clip(0, float("inf")).round(5)
             for c in coord_cols
             if c in df.columns
         ]
@@ -2278,10 +2278,10 @@ def divide_coordinates_by_page_sizes_pl(
 
         if "image_width" in df_abs.columns and "image_height" in df_abs.columns:
             df_abs = df_abs.with_columns(
-                (pl.col(xmin) / pl.col("image_width")).round(6).alias(xmin),
-                (pl.col(xmax) / pl.col("image_width")).round(6).alias(xmax),
-                (pl.col(ymin) / pl.col("image_height")).round(6).alias(ymin),
-                (pl.col(ymax) / pl.col("image_height")).round(6).alias(ymax),
+                (pl.col(xmin) / pl.col("image_width")).round(5).alias(xmin),
+                (pl.col(xmax) / pl.col("image_width")).round(5).alias(xmax),
+                (pl.col(ymin) / pl.col("image_height")).round(5).alias(ymin),
+                (pl.col(ymax) / pl.col("image_height")).round(5).alias(ymax),
             )
             df_abs = df_abs.with_columns(
                 [
@@ -2365,7 +2365,7 @@ def divide_coordinates_by_page_sizes_pl(
         )
         out = out.drop(["_ymin_orig", "_ymax_orig", "_xmin_orig", "_xmax_orig"])
         out = out.with_columns(
-            [pl.col(c).round(6) for c in coord_cols if c in out.columns]
+            [pl.col(c).round(5) for c in coord_cols if c in out.columns]
         )
 
     return out
@@ -2534,19 +2534,19 @@ def multiply_coordinates_by_page_sizes(
     df_rel = df_rel.with_columns(
         [
             pl.when(has_size)
-            .then((pl.col(xmin) * pl.col("image_width")).round(6))
+            .then((pl.col(xmin) * pl.col("image_width")).round(5))
             .otherwise(pl.col(xmin))
             .alias(xmin),
             pl.when(has_size)
-            .then((pl.col(xmax) * pl.col("image_width")).round(6))
+            .then((pl.col(xmax) * pl.col("image_width")).round(5))
             .otherwise(pl.col(xmax))
             .alias(xmax),
             pl.when(has_size)
-            .then((pl.col(ymin) * pl.col("image_height")).round(6))
+            .then((pl.col(ymin) * pl.col("image_height")).round(5))
             .otherwise(pl.col(ymin))
             .alias(ymin),
             pl.when(has_size)
-            .then((pl.col(ymax) * pl.col("image_height")).round(6))
+            .then((pl.col(ymax) * pl.col("image_height")).round(5))
             .otherwise(pl.col(ymax))
             .alias(ymax),
         ]
@@ -2559,7 +2559,7 @@ def multiply_coordinates_by_page_sizes(
     out = out.sort(["page", xmin, ymin], nulls_last=True)
     out = out.with_columns(
         [
-            pl.col(c).clip(0, float("inf")).round(6)
+            pl.col(c).clip(0, float("inf")).round(5)
             for c in coord_cols
             if c in out.columns
         ]
