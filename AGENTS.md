@@ -40,7 +40,7 @@ Multi-column layouts use shared logic in [`tools/ocr_reading_order.py`](tools/oc
 
 Word boxes are merged into line-level CSV rows in [`combine_ocr_results`](tools/custom_image_analyser_engine.py).
 
-- **`column`**: detect text columns, assign line numbers down each column left-to-right; full-width lines (headers) first. Stops cross-column merging that produced wide erroneous lines on multi-column PDFs. **Auto-fallback**: if no consecutive horizontal gutter is found on a text row (`OCR_COLUMN_GUTTER_MIN_FRACTION`, default `0.04`), the page is treated as single-column and ordered by `(top, left)` (e.g. business letters).
+- **`column`**: detect text columns, assign line numbers down each column left-to-right; full-width lines (headers) first. Stops cross-column merging that produced wide erroneous lines on multi-column PDFs. **Auto-fallback**: the page is treated as single-column unless a *consecutive cluster* of gutter rows (y-gap between adjacent rows ≤ `OCR_COLUMN_MAX_CONSECUTIVE_GUTTER_GAP`, default `0.06` of page height) has ≥ `OCR_COLUMN_MIN_GUTTER_ROWS` (default `3`) rows **and** the cluster's topmost row is above the footer zone (`OCR_COLUMN_FOOTER_ZONE_FRACTION`, default `0.75`). This prevents isolated header bands (logo | title, 1 gutter row), signature-only blocks at the page bottom (cluster starts at y ≥ 0.75), or the combination of both, from forcing column mode on the single-column body text between them.
 - **`PADDLE_PRESERVE_LINE_BOXES=True`** or **`CONVERT_LINE_TO_WORD_LEVEL=False`** with Paddle: keep Paddle line boxes (skip word split + regrouping); line numbers still use column reading order.
 
 ### Simple text extraction (PyMuPDF)
@@ -49,7 +49,11 @@ Word boxes are merged into line-level CSV rows in [`combine_ocr_results`](tools/
 
 ### Tunables (both routes)
 
-`OCR_FULL_SPAN_WIDTH_RATIO`, `OCR_COLUMN_GAP_MIN_FRACTION`, `OCR_COLUMN_GUTTER_MIN_FRACTION`, `OCR_LINE_Y_THRESHOLD_FRACTION`, `OCR_LINE_Y_THRESHOLD_MIN_PX`.
+`OCR_FULL_SPAN_WIDTH_RATIO`, `OCR_COLUMN_GAP_MIN_FRACTION`, `OCR_COLUMN_GUTTER_MIN_FRACTION`, `OCR_COLUMN_SUBGUTTER_MIN_FRACTION` (default `0.015` — fine-grained gutter scan in `assign_layout_boxes`; lower = detects narrower sub-column boundaries), `OCR_COLUMN_MIN_GUTTER_ROWS`, `OCR_COLUMN_MAX_BOX_HEIGHT_RATIO`, `OCR_COLUMN_MAX_CONSECUTIVE_GUTTER_GAP`, `OCR_COLUMN_FOOTER_ZONE_FRACTION`, `OCR_LINE_SPLIT_GAP_FRACTION` (default 0.025 — horizontal gap fraction that forces a line split; must be below the narrowest column gutter, ~0.030 for two-page spreads; also used as the gap threshold for the secondary sub-column sort in `build_line_groups`), `OCR_LINE_Y_THRESHOLD_FRACTION` (default 0.013 — row-alignment tolerance as a fraction of page height; reduced from 0.015 to correctly separate tightly-set 10 pt body text whose row spacing is ~0.014), `OCR_LINE_Y_THRESHOLD_MIN_PX`.
+
+**Sub-column ordering** (`build_line_groups`): after the primary word-level column sort, a second pass (`_reorder_lines_column_major`) clusters the produced line groups by their leftmost x-position using `OCR_LINE_SPLIT_GAP_FRACTION` as the gap threshold. This ensures that adjacent narrow sub-columns whose word-level centre gap is below `column_gap_threshold` (e.g. two columns on a spread where each page is already one macro-column) are still output in left-to-right column-major order rather than interleaved by y-position.
+
+**Fine-grained gutter-based column assignment** (`assign_layout_boxes`): before falling back to centre-gap clustering, `detect_column_split_xpoints` scans the page for structural gutters at the finer `OCR_COLUMN_SUBGUTTER_MIN_FRACTION` threshold (default 0.015). Each qualifying gutter cluster produces a `(split_x, y_min)` pair — the split point is only applied to boxes whose `top ≥ y_min`, preventing a narrow sub-column gutter (visible only in the lower two-column section) from mis-splitting a full-width introductory paragraph that sits above it. This correctly separates narrow adjacent columns (e.g. 1.9 % gutter on a two-page spread) without fragmenting full-width headings or paragraphs.
 
 Changing line order affects PII page text, duplicate-page detection, and review CSV line indices on multi-column documents; re-review after upgrading.
 

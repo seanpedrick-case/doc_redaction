@@ -1348,9 +1348,62 @@ OCR_COLUMN_GUTTER_MIN_FRACTION = float(
     get_or_create_env_var("OCR_COLUMN_GUTTER_MIN_FRACTION", "0.04")
 )  # Min horizontal gap between boxes on the same text row to treat as multi-column.
 
+OCR_COLUMN_MIN_GUTTER_ROWS = int(
+    get_or_create_env_var("OCR_COLUMN_MIN_GUTTER_ROWS", "3")
+)  # Min number of text rows that must each show a side-by-side gutter before the page
+# is classified as multi-column.  A single header band (logo left, title right) has
+# only 1 gutter row and must not trigger column mode for the whole page body.
+
+OCR_COLUMN_MAX_BOX_HEIGHT_RATIO = float(
+    get_or_create_env_var("OCR_COLUMN_MAX_BOX_HEIGHT_RATIO", "4.0")
+)  # A box is excluded from gutter detection if its height exceeds this multiple of the
+# median box height on the page.  Image regions / city-seal placeholders misdetected
+# as text typically have heights 10-20× the median and would otherwise create false
+# gutter rows that trigger column mode on single-column pages.
+
+OCR_COLUMN_MAX_CONSECUTIVE_GUTTER_GAP = float(
+    get_or_create_env_var("OCR_COLUMN_MAX_CONSECUTIVE_GUTTER_GAP", "0.06")
+)  # Maximum y-gap (as fraction of page height) between adjacent gutter rows that are
+# still considered part of the same consecutive cluster.  Gutter rows separated by more
+# than this gap (e.g. a header at y=0.07 and signatures at y=0.81) belong to distinct
+# layout regions and must not be counted together against min_gutter_rows.
+
+OCR_COLUMN_FOOTER_ZONE_FRACTION = float(
+    get_or_create_env_var("OCR_COLUMN_FOOTER_ZONE_FRACTION", "0.75")
+)  # A cluster of gutter rows whose topmost row starts at or beyond this fraction of page
+# height is treated as a footer/signature block and must not trigger column mode on its
+# own.  Prevents two side-by-side signature blocks from forcing column-major reading
+# order on the single-column body text above them.
+
+OCR_COLUMN_SUBGUTTER_MIN_FRACTION = float(
+    get_or_create_env_var("OCR_COLUMN_SUBGUTTER_MIN_FRACTION", "0.015")
+)  # Fine-grained gutter threshold used inside assign_layout_boxes (after the page is already
+# confirmed multi-column) to detect narrow sub-column boundaries that the standard
+# OCR_COLUMN_GUTTER_MIN_FRACTION (0.04) would miss (e.g. a 1.9 % gutter on a two-page spread).
+
+OCR_LINE_SPLIT_GAP_FRACTION = float(
+    get_or_create_env_var("OCR_LINE_SPLIT_GAP_FRACTION", "0.025")
+)  # When merging word-level boxes into lines, a horizontal gap between adjacent boxes
+# that exceeds this fraction of page width forces a new line (build-time rightward gap)
+# or triggers a post-processing split (_finalize_line) even when both boxes share the
+# same y-band.  Prevents words from different columns or side-by-side elements from
+# being concatenated into one line.
+# Typical inter-word spacing is 0.005–0.015 (well below this threshold).
+# The threshold must be smaller than the narrowest real column gutter (~0.030 for the
+# Lambeth foreword two-page spread) yet large enough to avoid splitting normal text.
+# Typical inter-word spacing for OCR word-level boxes is 0.003–0.010; the next
+# threshold tier is the narrowest column gutter observed (~0.020–0.030).
+# 0.025 (2.5 %) provides safe headroom above word spacing and catches the ~0.030+
+# gutters in multi-column documents.
+
 OCR_LINE_Y_THRESHOLD_FRACTION = float(
-    get_or_create_env_var("OCR_LINE_Y_THRESHOLD_FRACTION", "0.015")
-)  # Vertical alignment tolerance as a fraction of page height.
+    get_or_create_env_var("OCR_LINE_Y_THRESHOLD_FRACTION", "0.013")
+)  # Vertical alignment tolerance as a fraction of page height.  Two word-level boxes
+# whose tops differ by less than this fraction are treated as belonging to the same
+# logical text row.  0.013 (1.3 %) is chosen to stay below the ~0.014 row spacing of
+# tightly-set 10 pt body text (e.g. the Lambeth foreword two-page spread) while still
+# being well above typical within-row top jitter (< 0.005).  For normalised 0-1
+# coordinates page_height=1.0, so the fraction doubles as the absolute threshold.
 
 OCR_LINE_Y_THRESHOLD_MIN_PX = float(
     get_or_create_env_var("OCR_LINE_Y_THRESHOLD_MIN_PX", "12")
