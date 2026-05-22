@@ -268,20 +268,16 @@ def _sort_single_column_reading_order(
     page_width: float,
     full_span_width_ratio: float = OCR_FULL_SPAN_WIDTH_RATIO,
 ) -> List[Any]:
-    """Full-span lines first, then remaining lines by (top, left)."""
-    full_span = sorted(
-        [b for b in boxes if is_full_span_box(b, page_width, full_span_width_ratio)],
-        key=lambda b: (float(b.top), float(b.left)),
-    )
-    rest = sorted(
-        [
-            b
-            for b in boxes
-            if not is_full_span_box(b, page_width, full_span_width_ratio)
-        ],
-        key=lambda b: (float(b.top), float(b.left)),
-    )
-    return full_span + rest
+    """Sort boxes by (top, left) for single-column pages.
+
+    Full-span hoisting is intentionally omitted here.  For multi-column pages
+    that concept is handled by assign_layout_boxes / sort_reading_order, which
+    correctly separates column-spanning headers from column text.  On a
+    single-column page (emails, letters, memos) full-width body sentences would
+    otherwise be incorrectly hoisted above shorter but topographically higher
+    lines (salutations, From/To/Subject fields, etc.).
+    """
+    return sorted(boxes, key=lambda b: (float(b.top), float(b.left)))
 
 
 def detect_column_split_xpoints(
