@@ -1,8 +1,8 @@
 # Document redaction task prompt (template)
 
-Copy everything below the line into a new agent chat. Replace `{placeholders}` in the **Setup** section, then fill in **User redaction requirements** at the end with your case-specific policy.
+Copy everything below **“---”** into a new agent chat (include the **Required skills** section). Replace `{placeholders}` in **Setup**, then fill in **User redaction requirements** at the end.
 
-Skills for the agent: [`doc-redaction-app`](../doc-redaction-app/SKILL.md) → [`doc-redaction-modifications`](../doc-redaction-modifications/SKILL.md) (Pass 1) → optional Pass 2; parallel Pass 1 pages → [`doc-redact-page-review`](../doc-redact-page-review/SKILL.md).
+For Cursor: attach or enable the skills listed in **Required skills** on the agent, *or* rely on the paths in that section — the agent must **read each skill file before** the corresponding phase.
 
 ---
 
@@ -21,6 +21,26 @@ Skills for the agent: [`doc-redaction-app`](../doc-redaction-app/SKILL.md) → [
 ## Agent task (fixed workflow — do not skip)
 
 Redact and review **`{FILE_NAME}`** from **`{INPUT_PATH}`**.
+
+### Required skills (read before starting — do not improvise)
+
+**Before any API calls**, read the repo skills below in order. They contain endpoint details, download traps, CSV rules, and coverage/prune steps that this prompt does not repeat.
+
+| Phase | Skill | Path | When |
+|-------|--------|------|------|
+| **1 — Initial redaction** | `doc-redaction-app` | `skills/doc-redaction-app/SKILL.md` | First: `/doc_redact`, download artifacts to `{OUTPUT_BASE}output_redact/` |
+| **2 — Pass 1 review** | `doc-redaction-modifications` | `skills/doc-redaction-modifications/SKILL.md` | CSV edits, `verify_redaction_coverage`, suspicious-row prune, `/review_apply`, post-apply checks |
+| **3 — Parallel Pass 1 (optional)** | `doc-redact-page-review` | `skills/doc-redact-page-review/SKILL.md` | **Only if** `{PAGE_RANGE}` is large and you split Pass 1 across subagents; parent still merges and applies **once** |
+| **Pass 2 VLM (optional)** | `doc-redaction-modifications` § Pass 2 | same file | **Only if** Pass 2 criteria below are met — not for initial review |
+
+**Rules:**
+
+- Follow skill procedures for Gradio client usage, `handle_file`, path validation, and picking newest outputs by `st_mtime`.
+- This prompt’s **User redaction requirements** (at the end) override generic examples in the skills for *what* to redact; skills define *how*.
+- Do **not** skip reading `doc-redaction-modifications` — it defines Pass 1 completion (`pass_strict`, prune, single apply).
+- Repo overview for agents: `AGENTS.md`.
+
+**Cursor users:** attach skills `doc-redaction-app`, `doc-redaction-modifications`, and (if using page subagents) `doc-redact-page-review` to the agent, **and** keep the **Required skills** table in the prompt so the agent knows read order and phase boundaries.
 
 ### Two-pass model (Pass 1 is the deliverable)
 
@@ -141,6 +161,21 @@ _List professionals, organisations, and generic terms that must remain visible u
 - _(e.g. “Pass 1 only — do not run VLM unless I ask”)_
 - _(e.g. “Run Pass 2 only on pages_flagged_for_vlm after Pass 1”)_
 
+### Pass 2 VLM endpoint (optional — fill in only if Pass 2 may run)
+
+Pass 1 does **not** use this block. It is for **visual page review** (`POST …/v1/chat/completions` with page PNGs), not for `/doc_redact` OCR (e.g. `hybrid-paddle-inference-server` — that is configured on the Gradio app / inference server, not here).
+
+Leave blank or write **“N/A — Pass 1 only”** if Pass 2 will not run.
+
+| Setting | Value |
+|---------|--------|
+| **Base URL** | _(e.g. `http://host.docker.internal:8000` — agent appends `/v1/chat/completions`)_ |
+| **Model** | _(e.g. `Qwen/Qwen2.5-VL-7B-Instruct`)_ |
+| **API key** | _(e.g. `none` for local vLLM, or env var name like `VLM_API_KEY` — **do not paste secrets in chat**)_ |
+| **Timeout (s)** | _(e.g. `240`)_ |
+| **max_tokens** | _(e.g. `2000`)_ |
+| **Notes** | _(e.g. reasoning model — check `reasoning_content`; sequential one page at a time)_ |
+
 ### Additional instructions
 
 _(Any other constraints: duplicate pages, specific pages to spot-check, files not to commit, delivery format, etc.)_
@@ -164,4 +199,7 @@ _(Any other constraints: duplicate pages, specific pages to spot-check, files no
 
 ### Pass 2 preference
 - Pass 1 only unless pages_flagged_for_vlm remain after prune and post-apply coverage
+
+### Pass 2 VLM endpoint
+- N/A — Pass 1 only (omit Pass 2 unless I follow up)
 ```
