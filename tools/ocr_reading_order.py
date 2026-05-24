@@ -862,6 +862,22 @@ def _order_line_boxes_for_reading(
     )
 
 
+def _model_from_ocr_boxes(boxes) -> str | None:
+    """Return a single model name, or join distinct models with '/'."""
+    models: list[str] = []
+    for box in boxes:
+        model = (
+            getattr(box, "model", None)
+            if not isinstance(box, dict)
+            else box.get("model")
+        )
+        if model and model not in models:
+            models.append(str(model))
+    if not models:
+        return None
+    return models[0] if len(models) == 1 else "/".join(models)
+
+
 def reorder_structured_text_lines(
     line_results: Sequence[Any],
     lines_char_groups: Sequence[Any],
@@ -988,6 +1004,7 @@ def reorder_structured_text_lines(
             box.height = group_bottom - group_top
             box.conf = group_conf
             box.line = new_line_no
+            box.model = _model_from_ocr_boxes(group)
 
             merged_chars: List[Any] = []
             merged_words: List[Any] = []

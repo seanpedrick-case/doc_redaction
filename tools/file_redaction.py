@@ -36,6 +36,7 @@ from tools.aws_textract import (
     convert_question_answer_to_dataframe,
     json_to_ocrresult,
     load_and_convert_textract_json,
+    textract_prioritizes_signature_extraction,
 )
 from tools.config import (
     APPLY_REDACTIONS_GRAPHICS,
@@ -134,10 +135,13 @@ from tools.file_conversion import (
     word_level_ocr_output_to_dataframe,
 )
 from tools.helper_functions import (
+    LINE_LEVEL_OCR_DF_COLUMNS,
     clean_unicode_text,
     get_file_name_without_type,
     get_ocr_visualisation_font_path,
     get_textract_file_suffix,
+    line_level_ocr_row,
+    normalize_line_level_ocr_df,
 )
 from tools.load_spacy_model_custom_recognisers import (
     CustomWordFuzzyRecognizer,
@@ -211,7 +215,7 @@ def reverse_y_coords(df: pd.DataFrame, column: str):
     df[column] = df[column]
     df[column] = 1 - df[column].astype(float)
 
-    df[column] = df[column].round(5)
+    df[column] = df[column].round(4)
 
     return df[column]
 
@@ -2154,9 +2158,7 @@ def _choose_and_run_redactor_impl(
             "id",
         ]
     )
-    all_page_line_level_ocr_results_df = pd.DataFrame(
-        columns=["page", "text", "left", "top", "width", "height", "line", "conf"]
-    )
+    all_page_line_level_ocr_results_df = pd.DataFrame(columns=LINE_LEVEL_OCR_DF_COLUMNS)
 
     # Run through file loop, redact each file at a time
     for file in file_paths_loop:
@@ -2754,7 +2756,22 @@ def _choose_and_run_redactor_impl(
                         entities_for_vlm.append("CUSTOM_VLM_FACES")
 
                     _vlm_wants_person = "CUSTOM_VLM_FACES" in entities_for_vlm
-                    _vlm_wants_signature = "CUSTOM_VLM_SIGNATURE" in entities_for_vlm
+                    _vlm_wants_signature = (
+                        "CUSTOM_VLM_SIGNATURE" in entities_for_vlm
+                        and not textract_prioritizes_signature_extraction(
+                            text_extraction_method, handwrite_signature_checkbox
+                        )
+                    )
+                    if (
+                        "CUSTOM_VLM_SIGNATURE" in entities_for_vlm
+                        and textract_prioritizes_signature_extraction(
+                            text_extraction_method, handwrite_signature_checkbox
+                        )
+                    ):
+                        print(
+                            "Textract Extract signatures enabled — skipping "
+                            "CUSTOM_VLM_SIGNATURE VLM pass (Textract signatures take priority)."
+                        )
 
                     _vlm_rounds = []
                     if _vlm_wants_signature:
@@ -3441,21 +3458,12 @@ def _choose_and_run_redactor_impl(
                     #     pymupdf_doc = None
 
         if not all_page_line_level_ocr_results_df.empty:
-            all_page_line_level_ocr_results_df = all_page_line_level_ocr_results_df[
-                ["page", "text", "left", "top", "width", "height", "line", "conf"]
-            ]
+            all_page_line_level_ocr_results_df = normalize_line_level_ocr_df(
+                all_page_line_level_ocr_results_df
+            )
         else:
             all_page_line_level_ocr_results_df = pd.DataFrame(
-                columns=[
-                    "page",
-                    "text",
-                    "left",
-                    "top",
-                    "width",
-                    "height",
-                    "line",
-                    "conf",
-                ]
+                columns=LINE_LEVEL_OCR_DF_COLUMNS
             )
 
         ocr_file_path = (
@@ -3577,6 +3585,7 @@ def _choose_and_run_redactor_impl(
                 "line_x1",
                 "line_y1",
                 "line_conf",
+                "line_model",
             ]
             # Identify duplicated rows (excluding the first occurrence)
             dupes_mask = all_page_line_level_ocr_results_with_words_df.duplicated(
@@ -5840,7 +5849,7 @@ def redact_image_pdf(
     page_break_return: bool = False,
     annotations_all_pages: List = list(),
     all_page_line_level_ocr_results_df: pd.DataFrame = pd.DataFrame(
-        columns=["page", "text", "left", "top", "width", "height", "line", "conf"]
+        columns=LINE_LEVEL_OCR_DF_COLUMNS
     ),
     all_pages_decision_process_table: pd.DataFrame = pd.DataFrame(
         columns=[
@@ -5977,6 +5986,14 @@ def redact_image_pdf(
     # When True, skip per-page VLM face/signature detection; run_custom_vlm_only_pass
     # (after OCR in efficient-OCR flow) handles each once per page on full images.
     _skip_inline_custom_vlm_detection = defer_inline_custom_vlm_detection_pass
+    _skip_custom_vlm_signature_textract = textract_prioritizes_signature_extraction(
+        text_extraction_method, handwrite_signature_checkbox
+    )
+    if _skip_custom_vlm_signature_textract:
+        print(
+            "Textract Extract signatures enabled — skipping inline "
+            "CUSTOM_VLM_SIGNATURE VLM detection (Textract signatures take priority)."
+        )
 
     tic = time.perf_counter()
 
@@ -7180,6 +7197,10 @@ def redact_image_pdf(
                 )
                 if (
                     not _skip_inline_custom_vlm_detection
+                    and not (
+                        _skip_custom_vlm_signature_textract
+                        and text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+                    )
                     and (
                         text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
                         or text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
@@ -7460,6 +7481,7 @@ def redact_image_pdf(
                 # Supports pure and hybrid VLM/inference-server local OCR models.
                 if (
                     not _skip_inline_custom_vlm_detection
+                    and not _skip_custom_vlm_signature_textract
                     and chosen_local_ocr_model
                     in [
                         "vlm",
@@ -7644,16 +7666,7 @@ def redact_image_pdf(
                             )
                             page_text_ocr_outputs = pd.DataFrame(
                                 [
-                                    {
-                                        "page": page_1based,
-                                        "text": getattr(r, "text", ""),
-                                        "left": getattr(r, "left", None),
-                                        "top": getattr(r, "top", None),
-                                        "width": getattr(r, "width", None),
-                                        "height": getattr(r, "height", None),
-                                        "line": getattr(r, "line", None),
-                                        "conf": getattr(r, "conf", None),
-                                    }
+                                    line_level_ocr_row(page_1based, r)
                                     for r in _line_results
                                 ]
                             )
@@ -8105,6 +8118,7 @@ def redact_image_pdf(
                 # and inject [SIGNATURE] entries into the word-level OCR structure for AWS Textract.
                 if (
                     not _skip_inline_custom_vlm_detection
+                    and not _skip_custom_vlm_signature_textract
                     and text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
                     and "CUSTOM_VLM_SIGNATURE" in chosen_redact_entities
                     and isinstance(page_line_level_ocr_results_with_words, dict)
@@ -8247,16 +8261,9 @@ def redact_image_pdf(
                 ):
                     line_level_ocr_results_df = pd.DataFrame(
                         [
-                            {
-                                "page": page_line_level_ocr_results["page"],
-                                "text": result.text,
-                                "left": result.left,
-                                "top": result.top,
-                                "width": result.width,
-                                "height": result.height,
-                                "line": result.line,
-                                "conf": result.conf,
-                            }
+                            line_level_ocr_row(
+                                page_line_level_ocr_results["page"], result
+                            )
                             for result in page_line_level_ocr_results["results"]
                         ]
                     )
@@ -8711,6 +8718,7 @@ def redact_image_pdf(
 
             if (
                 not _skip_inline_custom_vlm_detection
+                and not _skip_custom_vlm_signature_textract
                 and text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
                 and "CUSTOM_VLM_SIGNATURE" in chosen_redact_entities
                 and isinstance(page_line_level_ocr_results_with_words, dict)
@@ -8826,16 +8834,9 @@ def redact_image_pdf(
                 ):
                     line_level_ocr_results_df = pd.DataFrame(
                         [
-                            {
-                                "page": page_line_level_ocr_results["page"],
-                                "text": result.text,
-                                "left": result.left,
-                                "top": result.top,
-                                "width": result.width,
-                                "height": result.height,
-                                "line": result.line,
-                                "conf": result.conf,
-                            }
+                            line_level_ocr_row(
+                                page_line_level_ocr_results["page"], result
+                            )
                             for result in page_line_level_ocr_results["results"]
                         ]
                     )
@@ -9308,6 +9309,7 @@ def redact_image_pdf(
                     # Skipped when defer_inline_custom_vlm_detection_pass: post-pass covers PDF/decision table.
                     if (
                         not _skip_inline_custom_vlm_detection
+                        and not _skip_custom_vlm_signature_textract
                         and pii_identification_method == AWS_PII_OPTION
                         and "CUSTOM_VLM_SIGNATURE" in chosen_redact_comprehend_entities
                         and isinstance(page_line_level_ocr_results_with_words, dict)
@@ -9815,8 +9817,8 @@ def redact_image_pdf(
                     all_pages_decision_process_list
                 )
 
-                all_line_level_ocr_results_df = pd.DataFrame(
-                    all_line_level_ocr_results_list
+                all_line_level_ocr_results_df = normalize_line_level_ocr_df(
+                    pd.DataFrame(all_line_level_ocr_results_list)
                 )
                 if selection_element_results_list:
                     selection_element_results_list_df = pd.DataFrame(
@@ -9951,8 +9953,8 @@ def redact_image_pdf(
                 all_pages_decision_process_list
             )
 
-            all_line_level_ocr_results_df = pd.DataFrame(
-                all_line_level_ocr_results_list
+            all_line_level_ocr_results_df = normalize_line_level_ocr_df(
+                pd.DataFrame(all_line_level_ocr_results_list)
             )
 
             if selection_element_results_list:
@@ -10046,17 +10048,19 @@ def redact_image_pdf(
         ]
         _ocr_rows = [x for x in all_line_level_ocr_results_list if isinstance(x, dict)]
         if _ocr_dfs and _ocr_rows:
-            all_line_level_ocr_results_df = pd.concat(
-                _ocr_dfs + [pd.DataFrame(_ocr_rows)], ignore_index=True
+            all_line_level_ocr_results_df = normalize_line_level_ocr_df(
+                pd.concat(_ocr_dfs + [pd.DataFrame(_ocr_rows)], ignore_index=True)
             )
         elif _ocr_dfs:
-            all_line_level_ocr_results_df = pd.concat(_ocr_dfs, ignore_index=True)
+            all_line_level_ocr_results_df = normalize_line_level_ocr_df(
+                pd.concat(_ocr_dfs, ignore_index=True)
+            )
         else:
-            all_line_level_ocr_results_df = pd.DataFrame(_ocr_rows)
+            all_line_level_ocr_results_df = normalize_line_level_ocr_df(
+                pd.DataFrame(_ocr_rows)
+            )
     else:
-        all_line_level_ocr_results_df = pd.DataFrame(
-            columns=["page", "text", "left", "top", "width", "height", "line", "conf"]
-        )
+        all_line_level_ocr_results_df = pd.DataFrame(columns=LINE_LEVEL_OCR_DF_COLUMNS)
 
     # Convert decision table and ocr results to relative coordinates
     _pages_pdf_pts = set(pages_in_pdf_points) if pages_in_pdf_points else None
@@ -10163,6 +10167,7 @@ def create_line_level_ocr_results_from_characters(
                             width=round(overall_bbox[2] - overall_bbox[0], 2),
                             height=round(overall_bbox[3] - overall_bbox[1], 2),
                             line=line_number,
+                            model="pdfminer",
                         )
                     )
                     line_level_characters_out.append(character_objects_out)
@@ -10201,6 +10206,7 @@ def create_line_level_ocr_results_from_characters(
             width=round(overall_bbox[2] - overall_bbox[0], 2),
             height=round(overall_bbox[3] - overall_bbox[1], 2),
             line=line_number,
+            model="pdfminer",
         )
         line_level_results_out.append(line_ocr_result)
         line_level_characters_out.append(character_objects_out)
@@ -10409,18 +10415,7 @@ def _extract_text_from_single_page(file_path: str, page_no: int) -> Tuple[
     page_ocr_results_with_words = list()
     page_text_ocr_outputs_list = list()
 
-    empty_ocr_df = pd.DataFrame(
-        columns=[
-            "page",
-            "text",
-            "left",
-            "top",
-            "width",
-            "height",
-            "line",
-            "conf",
-        ]
-    )
+    empty_ocr_df = pd.DataFrame(columns=LINE_LEVEL_OCR_DF_COLUMNS)
 
     text_line_no = 1
     for page_layout in extract_pages(file_path, page_numbers=[page_no], maxpages=1):
@@ -10447,14 +10442,9 @@ def _extract_text_from_single_page(file_path: str, page_no: int) -> Tuple[
                 line_level_text_results_df = pd.DataFrame(
                     [
                         {
-                            "page": page_no + 1,
+                            **line_level_ocr_row(page_no + 1, result),
                             "text": (result.text).strip(),
-                            "left": result.left,
-                            "top": result.top,
-                            "width": result.width,
-                            "height": result.height,
-                            "line": result.line,
-                            "conf": 100.0,
+                            "conf": getattr(result, "conf", 100.0),
                         }
                         for result in line_level_text_results_list
                     ]
@@ -10735,22 +10725,15 @@ def _extract_text_from_single_page_pymupdf(pdf_bytes: bytes, page_no: int) -> Tu
         page_text_ocr_outputs = pd.DataFrame(
             [
                 {
-                    "page": reported_page_number,
+                    **line_level_ocr_row(reported_page_number, result),
                     "text": result.text.strip(),
-                    "left": result.left,
-                    "top": result.top,
-                    "width": result.width,
-                    "height": result.height,
-                    "line": result.line,
-                    "conf": 100.0,
+                    "conf": getattr(result, "conf", 100.0),
                 }
                 for result in line_results
             ]
         )
     else:
-        page_text_ocr_outputs = pd.DataFrame(
-            columns=["page", "text", "left", "top", "width", "height", "line", "conf"]
-        )
+        page_text_ocr_outputs = pd.DataFrame(columns=LINE_LEVEL_OCR_DF_COLUMNS)
 
     doc.close()  # Always close for memory efficiency
 
@@ -11123,7 +11106,7 @@ def redact_text_pdf(
     page_break_return: bool = False,  # Flag to indicate if a page break should be returned
     annotations_all_pages: List[dict] = list(),  # List of annotations across all pages
     all_line_level_ocr_results_df: pd.DataFrame = pd.DataFrame(
-        columns=["page", "text", "left", "top", "width", "height", "line", "conf"]
+        columns=LINE_LEVEL_OCR_DF_COLUMNS
     ),  # DataFrame for OCR results
     all_pages_decision_process_table: pd.DataFrame = pd.DataFrame(
         columns=[
@@ -11633,22 +11616,9 @@ def redact_text_pdf(
 
         # Join extracted text outputs for all lines together
         if not page_text_ocr_outputs.empty:
-            page_text_ocr_outputs = page_text_ocr_outputs.sort_values(
-                ["line"]
-            ).reset_index(drop=True)
-            page_text_ocr_outputs = page_text_ocr_outputs.loc[
-                :,
-                [
-                    "page",
-                    "text",
-                    "left",
-                    "top",
-                    "width",
-                    "height",
-                    "line",
-                    "conf",
-                ],
-            ]
+            page_text_ocr_outputs = normalize_line_level_ocr_df(
+                page_text_ocr_outputs.sort_values(["line"]).reset_index(drop=True)
+            )
             all_line_level_ocr_results_list.append(page_text_ocr_outputs)
 
         toc = time.perf_counter()
@@ -11708,21 +11678,12 @@ def redact_text_pdf(
                 df for df in all_line_level_ocr_results_list if not df.empty
             ]
             if non_empty_ocr_results:
-                all_line_level_ocr_results_df = pd.concat(
-                    non_empty_ocr_results, ignore_index=True
+                all_line_level_ocr_results_df = normalize_line_level_ocr_df(
+                    pd.concat(non_empty_ocr_results, ignore_index=True)
                 )
             else:
                 all_line_level_ocr_results_df = pd.DataFrame(
-                    columns=[
-                        "page",
-                        "text",
-                        "left",
-                        "top",
-                        "width",
-                        "height",
-                        "line",
-                        "conf",
-                    ]
+                    columns=LINE_LEVEL_OCR_DF_COLUMNS
                 )
 
             current_loop_page += 1
@@ -11844,13 +11805,11 @@ def redact_text_pdf(
         df for df in all_line_level_ocr_results_list if not df.empty
     ]
     if non_empty_ocr_results:
-        all_line_level_ocr_results_df = pd.concat(
-            non_empty_ocr_results, ignore_index=True
+        all_line_level_ocr_results_df = normalize_line_level_ocr_df(
+            pd.concat(non_empty_ocr_results, ignore_index=True)
         )
     else:
-        all_line_level_ocr_results_df = pd.DataFrame(
-            columns=["page", "text", "left", "top", "width", "height", "line", "conf"]
-        )
+        all_line_level_ocr_results_df = pd.DataFrame(columns=LINE_LEVEL_OCR_DF_COLUMNS)
 
     if not all_pages_decision_process_table.empty:
 

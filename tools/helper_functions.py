@@ -1812,6 +1812,61 @@ def reset_base_dataframe(df: pd.DataFrame):
     return df
 
 
+LINE_LEVEL_OCR_DF_COLUMNS = [
+    "page",
+    "text",
+    "left",
+    "top",
+    "width",
+    "height",
+    "line",
+    "conf",
+    "model",
+]
+
+
+def model_from_ocr_boxes(boxes) -> str | None:
+    """Return a single model name, or join distinct models with '/'."""
+    models: list[str] = []
+    for box in boxes:
+        model = (
+            getattr(box, "model", None)
+            if not isinstance(box, dict)
+            else box.get("model")
+        )
+        if model and model not in models:
+            models.append(str(model))
+    if not models:
+        return None
+    return models[0] if len(models) == 1 else "/".join(models)
+
+
+def line_level_ocr_row(page, result) -> dict:
+    """Build one line-level OCR CSV row from an OCRResult-like object."""
+    return {
+        "page": page,
+        "text": getattr(result, "text", ""),
+        "left": getattr(result, "left", None),
+        "top": getattr(result, "top", None),
+        "width": getattr(result, "width", None),
+        "height": getattr(result, "height", None),
+        "line": getattr(result, "line", None),
+        "conf": getattr(result, "conf", None),
+        "model": getattr(result, "model", None),
+    }
+
+
+def normalize_line_level_ocr_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Ensure line-level OCR output has the standard columns, including model."""
+    if df is None or df.empty:
+        return pd.DataFrame(columns=LINE_LEVEL_OCR_DF_COLUMNS)
+    out = df.copy()
+    for col in LINE_LEVEL_OCR_DF_COLUMNS:
+        if col not in out.columns:
+            out[col] = None
+    return out.loc[:, LINE_LEVEL_OCR_DF_COLUMNS]
+
+
 def reset_ocr_base_dataframe(df: pd.DataFrame):
     if df.empty:
         print("OCR base dataframe is empty, returning empty dataframe")

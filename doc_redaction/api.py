@@ -22,6 +22,7 @@ from doc_redaction.cli_api import (
     redact_data,
     redact_document,
     summarise_document,
+    verify_redaction_coverage,
     word_level_ocr_text_search,
 )
 
@@ -31,6 +32,7 @@ __all__ = [
     "apply_review_redactions",
     "export_review_page_ocr_visualisation",
     "export_review_redaction_overlay",
+    "verify_redaction_coverage",
     "word_level_ocr_text_search",
     "redact_data",
     "find_duplicate_pages",

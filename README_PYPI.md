@@ -303,7 +303,7 @@ If you are an LLM/agent interacting with this app over HTTP (e.g. Hugging Face S
 Fetch `/gradio_api/info` and then prefer the simplest route that exists:
 
 - **Apply edited review CSV to a PDF**: `/review_apply`
-- **Redact a PDF/image document**: `/doc_redact`
+- **Redact a PDF/image document**: `/doc_redact` — optional `handwrite_signature_checkbox` for AWS Textract (e.g. `Extract handwriting`, `Extract signatures`)
 - **Summarise a PDF**: `/pdf_summarise`
 - **Redact tabular files (CSV/XLSX/Parquet/DOCX)**: `/tabular_redact`
 

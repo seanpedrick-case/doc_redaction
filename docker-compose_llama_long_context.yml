@@ -35,10 +35,10 @@ services:
       # - "cuda0,cuda1"
       # - -sm
       # - "row"
-      - --tensor-split
-      - "24,15"
+      #- --tensor-split
+      #- "24,15"
       - --ctx-size
-      - "131072"
+      - "98304"
       - -ub
       - "512"
       - --fit
@@ -65,7 +65,7 @@ services:
       - --seed
       - "42"
       - --image_min_tokens
-      - "1024"
+      - "300"
       - --parallel
       - "1"
       - --cache-type-k

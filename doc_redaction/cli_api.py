@@ -337,10 +337,50 @@ def apply_review_redactions(
     return list(r.get("output_paths") or [])
 
 
-def word_level_ocr_text_search(*args: Any, **kwargs: Any) -> list[str]:
-    raise NotImplementedError(
-        "word_level_ocr_text_search is Gradio-session-state driven; no CLI-first equivalent is currently provided."
+def word_level_ocr_text_search(
+    ocr_words_csv_path: str,
+    search_text: str,
+    *,
+    similarity_threshold: float = 1.0,
+    use_regex: bool = False,
+    review_csv_path: str | None = None,
+) -> dict:
+    """Headless word-level OCR search against ``*_ocr_results_with_words_*.csv``."""
+    from tools.verify_redaction_coverage import run_word_level_ocr_text_search
+
+    return run_word_level_ocr_text_search(
+        ocr_words_csv_path,
+        search_text,
+        similarity_threshold=similarity_threshold,
+        use_regex=use_regex,
+        review_csv_path=review_csv_path,
     )
+
+
+def verify_redaction_coverage(
+    review_csv_path: str,
+    ocr_words_csv_path: str,
+    *,
+    must_redact: list[str] | None = None,
+    must_not_redact: list[str] | None = None,
+    redacted_pdf_path: str | None = None,
+    total_pages: int | None = None,
+    min_word_length: int = 3,
+    sample_pixels: bool = False,
+) -> dict:
+    """Pass 1 programmatic coverage report (no VLM)."""
+    from tools.verify_redaction_coverage import verify_redaction_coverage as _verify
+
+    return _verify(
+        review_csv_path,
+        ocr_words_csv_path,
+        must_redact=must_redact,
+        must_not_redact=must_not_redact,
+        redacted_pdf_path=redacted_pdf_path,
+        total_pages=total_pages,
+        min_word_length=min_word_length,
+        sample_pixels=sample_pixels,
+    ).to_dict()
 
 
 __all__ = [
@@ -350,6 +390,7 @@ __all__ = [
     "export_review_page_ocr_visualisation",
     "export_review_redaction_overlay",
     "word_level_ocr_text_search",
+    "verify_redaction_coverage",
     "redact_data",
     "find_duplicate_pages",
     "find_duplicate_tabular",

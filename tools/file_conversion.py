@@ -38,7 +38,10 @@ from tools.config import (
     TEXTRACT_TEXT_EXTRACT_OPTION,
     ensure_folder_within_app_directory,
 )
-from tools.helper_functions import get_file_name_without_type, read_file
+from tools.helper_functions import (
+    get_file_name_without_type,
+    read_file,
+)
 from tools.secure_path_utils import secure_file_read, secure_join
 from tools.secure_regex_utils import safe_extract_page_number_from_path
 
@@ -908,6 +911,7 @@ def word_level_ocr_output_to_dataframe(ocr_results: dict) -> pd.DataFrame:
                         "line_x1": line_bbox[2],
                         "line_y1": line_bbox[3],
                         "line_conf": line_conf,
+                        "line_model": line_data.get("model"),
                     }
                 )
 
@@ -949,6 +953,9 @@ def word_level_ocr_df_to_line_level_ocr_df(
             conf = group["line_conf"].dropna().iloc[0]
         else:
             conf = group["word_conf"].mean() if "word_conf" in group.columns else 100.0
+        model = None
+        if "line_model" in group.columns and group["line_model"].notna().any():
+            model = group["line_model"].dropna().iloc[0]
         return pd.Series(
             {
                 "text": text,
@@ -957,6 +964,7 @@ def word_level_ocr_df_to_line_level_ocr_df(
                 "width": x1 - x0,
                 "height": y1 - y0,
                 "conf": conf,
+                "model": model,
             }
         )
 
@@ -965,9 +973,9 @@ def word_level_ocr_df_to_line_level_ocr_df(
         .apply(agg_line)
         .reset_index()
     )
-    # Match expected column order: page, text, left, top, width, height, line, conf
+    # Match expected column order: page, text, left, top, width, height, line, conf, model
     return line_level[
-        ["page", "text", "left", "top", "width", "height", "line", "conf"]
+        ["page", "text", "left", "top", "width", "height", "line", "conf", "model"]
     ]
 
 
@@ -2181,7 +2189,7 @@ def divide_coordinates_by_page_sizes_pl(
     # Clip to 0 and round
     df = df.with_columns(
         [
-            pl.col(c).clip(0, float("inf")).round(5)
+            pl.col(c).clip(0, float("inf")).round(4)
             for c in coord_cols
             if c in df.columns
         ]
@@ -2278,10 +2286,10 @@ def divide_coordinates_by_page_sizes_pl(
 
         if "image_width" in df_abs.columns and "image_height" in df_abs.columns:
             df_abs = df_abs.with_columns(
-                (pl.col(xmin) / pl.col("image_width")).round(5).alias(xmin),
-                (pl.col(xmax) / pl.col("image_width")).round(5).alias(xmax),
-                (pl.col(ymin) / pl.col("image_height")).round(5).alias(ymin),
-                (pl.col(ymax) / pl.col("image_height")).round(5).alias(ymax),
+                (pl.col(xmin) / pl.col("image_width")).round(4).alias(xmin),
+                (pl.col(xmax) / pl.col("image_width")).round(4).alias(xmax),
+                (pl.col(ymin) / pl.col("image_height")).round(4).alias(ymin),
+                (pl.col(ymax) / pl.col("image_height")).round(4).alias(ymax),
             )
             df_abs = df_abs.with_columns(
                 [
@@ -2365,7 +2373,7 @@ def divide_coordinates_by_page_sizes_pl(
         )
         out = out.drop(["_ymin_orig", "_ymax_orig", "_xmin_orig", "_xmax_orig"])
         out = out.with_columns(
-            [pl.col(c).round(5) for c in coord_cols if c in out.columns]
+            [pl.col(c).round(4) for c in coord_cols if c in out.columns]
         )
 
     return out
@@ -2534,19 +2542,19 @@ def multiply_coordinates_by_page_sizes(
     df_rel = df_rel.with_columns(
         [
             pl.when(has_size)
-            .then((pl.col(xmin) * pl.col("image_width")).round(5))
+            .then((pl.col(xmin) * pl.col("image_width")).round(4))
             .otherwise(pl.col(xmin))
             .alias(xmin),
             pl.when(has_size)
-            .then((pl.col(xmax) * pl.col("image_width")).round(5))
+            .then((pl.col(xmax) * pl.col("image_width")).round(4))
             .otherwise(pl.col(xmax))
             .alias(xmax),
             pl.when(has_size)
-            .then((pl.col(ymin) * pl.col("image_height")).round(5))
+            .then((pl.col(ymin) * pl.col("image_height")).round(4))
             .otherwise(pl.col(ymin))
             .alias(ymin),
             pl.when(has_size)
-            .then((pl.col(ymax) * pl.col("image_height")).round(5))
+            .then((pl.col(ymax) * pl.col("image_height")).round(4))
             .otherwise(pl.col(ymax))
             .alias(ymax),
         ]
@@ -2559,7 +2567,7 @@ def multiply_coordinates_by_page_sizes(
     out = out.sort(["page", xmin, ymin], nulls_last=True)
     out = out.with_columns(
         [
-            pl.col(c).clip(0, float("inf")).round(5)
+            pl.col(c).clip(0, float("inf")).round(4)
             for c in coord_cols
             if c in out.columns
         ]

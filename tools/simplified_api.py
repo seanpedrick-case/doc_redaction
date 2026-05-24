@@ -688,7 +688,7 @@ def redact_document_from_upload_for_gradio_api(
     deny_list: list[str] | None = None,
     page_min: int | None = None,
     page_max: int | None = None,
-    llm_instruction: str | None = "",
+    handwrite_signature_checkbox: list[str] | None = None,
 ) -> tuple[list[str], str]:
     """
     Short, stateless ``gr.api`` wrapper for PDF/image document redaction.
@@ -705,8 +705,14 @@ def redact_document_from_upload_for_gradio_api(
             (`Local`, `AWS Comprehend`, `LLM (AWS Bedrock)`, `Local inference server`,
             `Local transformers LLM`, `None`) plus common aliases.
         allow_list / deny_list: Optional explicit token lists for matching behaviour.
+            ``deny_list`` terms are matched via the ``CUSTOM`` entity (appended to
+            ``redact_entities`` automatically when ``deny_list`` is non-empty).
         page_min / page_max: Optional page bounds (0 means all, CLI semantics).
-        llm_instruction: Optional custom instruction for LLM-backed detection.
+        handwrite_signature_checkbox: AWS Textract extraction options when using
+            `AWS Textract` (or hybrid Textract routes). Typical values include
+            `Extract handwriting`, `Extract signatures`; deployment config may
+            also expose `Extract forms`, `Extract layout`, `Extract tables`, or
+            `Face detection`. When omitted, CLI/deployment defaults apply.
 
     Returns:
         (output_paths, message)
@@ -737,10 +743,17 @@ def redact_document_from_upload_for_gradio_api(
         overrides["allow_list"] = list(allow_list)
     if deny_list is not None:
         overrides["deny_list"] = list(deny_list)
+        if deny_list:
+            if redact_entities is not None:
+                ents = list(overrides.get("local_redact_entities") or [])
+                if "CUSTOM" not in ents:
+                    overrides["local_redact_entities"] = [*ents, "CUSTOM"]
     if page_min is not None:
         overrides["page_min"] = int(page_min)
     if page_max is not None:
         overrides["page_max"] = int(page_max)
+    if handwrite_signature_checkbox is not None:
+        overrides["handwrite_signature_extraction"] = list(handwrite_signature_checkbox)
 
     cli_ocr_method, ocr_overrides = _resolve_cli_ocr_inputs(ocr_method)
     cli_pii_method = _resolve_cli_pii_method(pii_method)
@@ -752,7 +765,6 @@ def redact_document_from_upload_for_gradio_api(
         output_dir=safe_out_dir,
         ocr_method=cli_ocr_method,
         pii_detector=cli_pii_method,
-        instruction=llm_instruction,
         overrides=merged_overrides or None,
     )
 
@@ -1175,6 +1187,53 @@ def preview_boxes_api(
     return zip_path, msg
 
 
+def run_verify_redaction_coverage(
+    review_csv_path: str,
+    ocr_words_csv_path: str,
+    *,
+    must_redact: list[str] | None = None,
+    must_not_redact: list[str] | None = None,
+    redacted_pdf_path: str | None = None,
+    total_pages: int | None = None,
+    min_word_length: int = 3,
+    sample_pixels: bool = False,
+) -> dict:
+    """Headless Pass 1 coverage report (see ``tools.verify_redaction_coverage``)."""
+    from tools.verify_redaction_coverage import verify_redaction_coverage
+
+    report = verify_redaction_coverage(
+        review_csv_path,
+        ocr_words_csv_path,
+        must_redact=must_redact,
+        must_not_redact=must_not_redact,
+        redacted_pdf_path=redacted_pdf_path,
+        total_pages=total_pages,
+        min_word_length=min_word_length,
+        sample_pixels=sample_pixels,
+    )
+    return report.to_dict()
+
+
+def run_word_level_ocr_text_search_api(
+    ocr_words_csv_path: str,
+    search_text: str,
+    *,
+    similarity_threshold: float = 1.0,
+    use_regex: bool = False,
+    review_csv_path: str | None = None,
+) -> dict:
+    """Headless word-level OCR search with optional review-box coverage flags."""
+    from tools.verify_redaction_coverage import run_word_level_ocr_text_search
+
+    return run_word_level_ocr_text_search(
+        ocr_words_csv_path,
+        search_text,
+        similarity_threshold=similarity_threshold,
+        use_regex=use_regex,
+        review_csv_path=review_csv_path,
+    )
+
+
 def doc_redact_api(
     document_file: Any,
     redact_entities: list[str] | None = None,
@@ -1185,7 +1244,7 @@ def doc_redact_api(
     deny_list: list[str] | None = None,
     page_min: int | None = None,
     page_max: int | None = None,
-    llm_instruction: str | None = "",
+    handwrite_signature_checkbox: list[str] | None = None,
 ) -> tuple[list[str], str]:
     """Short-name wrapper; prefer calling this via `api_name='/doc_redact'`."""
     return redact_document_from_upload_for_gradio_api(
@@ -1198,7 +1257,7 @@ def doc_redact_api(
         deny_list=deny_list,
         page_min=page_min,
         page_max=page_max,
-        llm_instruction=llm_instruction,
+        handwrite_signature_checkbox=handwrite_signature_checkbox,
     )
 
 
@@ -1216,4 +1275,6 @@ __all__ = [
     "summarise_document_from_upload_for_gradio_api",
     "pdf_summarise_api",
     "preview_boxes_api",
+    "run_verify_redaction_coverage",
+    "run_word_level_ocr_text_search_api",
 ]

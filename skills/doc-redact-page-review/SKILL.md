@@ -1,48 +1,57 @@
 ---
 name: doc-redact-page-review
-description: "After initial redaction (doc-redaction-app): orchestrate parallel per-page child agents, merge CSV changes, preview once, single /review_apply. Use when the user asks to review a page range and spawn subagents."
-version: 1.1.0
+description: "After initial redaction (doc-redaction-app): Pass 1 parallel per-page OCR/CSV review (subagents), merge, single /review_apply; optional Pass 2 VLM visual check after Pass 1 outputs."
+version: 1.3.0
 author: repo-maintained
 license: AGPL-3.0-only
 ---
 
 ## Where this fits
 
-1. **Initial redaction** — [`../doc-redaction-app/SKILL.md`](../doc-redaction-app/SKILL.md) (`/doc_redact` or `/redact_document`) and download outputs.
-2. **This skill** — parallel **per-page** review with **one** merged `/review_apply` from the **parent** agent.
-3. **Mechanics** (CSV columns, OCR word merge rules, `preview_redaction_boxes`, `/review_apply` snippets, VLM, PyMuPDF fallback) — [`../doc-redaction-modifications/SKILL.md`](../doc-redaction-modifications/SKILL.md).
+1. **Initial redaction** — [`../doc-redaction-app/SKILL.md`](../doc-redaction-app/SKILL.md).
+2. **This skill** — orchestrate **Pass 1** (parallel per-page OCR/CSV review) → merge → **one** `/review_apply`.
+3. **Pass 2 (optional)** — visual VLM page checks **after** Pass 1 outputs; see [`../doc-redaction-modifications/SKILL.md`](../doc-redaction-modifications/SKILL.md) § Pass 2.
+4. **Mechanics** (CSV, word/line OCR, preview, apply, VLM details) — modifications skill.
+
+## Two-pass model (orchestration view)
+
+| Phase | Who | Method |
+|-------|-----|--------|
+| **Pass 1** | Parallel child agents (one page each) + parent merge/apply | OCR line CSV, word OCR CSV, review CSV, rules, local preview — **no VLM** |
+| **Pass 2** | Parent (or sequential subagents, max 1 at a time on local VLM) | Visual check of Pass 1 preview/redacted PNGs — **only if user requests** |
+
+**Default:** complete Pass 1 and deliver. Do **not** spawn VLM subagents for every page unless explicitly asked.
 
 ## Goal
 
-User gives a **folder** of a completed run, a **page range**, and **review rules**. The **parent** agent spawns **parallel child agents (one page each)**. Children return structured deltas (e.g. JSON); the parent **merges** into a **full-document** `*_review_file.csv`, runs **one** local or server **preview** if needed, then **one** `/review_apply`. Children **must not** call `/review_apply`.
+User gives a **folder** of a completed run, a **page range**, and **review rules**. Parent spawns **Pass 1 children (one page each)**. Children return JSON deltas; parent **merges** full `*_review_file.csv`, **one** `/review_apply`, text verify. Optional **Pass 2** VLM after that.
 
 ## Trigger
 
-- Phrases like “review pages X–Y”, “check pages X through Y in [folder]”, “parallel page review”.
-- User supplies: output **folder**, **page range**, **rules**; optionally **app base URL** and output dir names.
+- “Review pages X–Y”, “check pages X through Y in [folder]”, “parallel page review”.
+- Pass 2 trigger: “VLM check”, “visual review”, “verify redactions visually” — run **after** Pass 1 apply.
 
 ## Inputs
 
 | Input | Notes |
 |--------|--------|
-| **Folder** | Contains `*_review_file.csv`, `*_ocr_results_with_words*.csv` (word columns for that run), and the **original** unredacted `.pdf`. |
-| **Page range** | e.g. `4-7` or `[4,5,6,7]` (1-based page indices as in the review CSV). |
-| **Rules** | Bullet list: removals, additions, phrases to redact, false-positive policy, signatures, etc. |
-| **App URL** | Optional; e.g. `http://host.docker.internal:7861` for local Docker. |
-| **Output layout** | Optional; e.g. per-page artifacts under `output_review_p{N}/`, merged under `output_review_final/`. |
+| **Folder** | `*_review_file.csv`, `*_ocr_results_with_words*.csv`, `*_ocr_output_*.csv` (line), original PDF |
+| **Page range** | e.g. `4-7` (1-based) |
+| **Rules** | Removals, additions, phrases, false-positive policy, signatures |
+| **App URL** | Optional; e.g. `http://host.docker.internal:7861` |
+| **Output layout** | e.g. `output_review_p{N}/`, `output_review_final/` |
+| **Pass 2** | Optional VLM base URL; flag pages or full doc |
 
-## Step 1 — Discover files
+## Pass 1 — Discover files
 
-Resolve paths under the folder: one `*_review_file.csv`, one `*_ocr_results_with_words*.csv`, one **original** PDF (same document the review CSV belongs to).
+Resolve: one `*_review_file.csv`, one `*_ocr_results_with_words*.csv`, one `*_ocr_output_*.csv`, one **original** PDF.
 
-## Step 1b — Keep a full baseline (CRITICAL)
+## Pass 1 — Keep a full baseline (CRITICAL)
 
-- Load the **master** review CSV once (`encoding="utf-8-sig"`). Treat it as the **source of truth** for pages **outside** the review range.
-- **Never** let a child overwrite the whole master with a partial CSV.
+- Load **master** review CSV once (`utf-8-sig`). Source of truth for pages **outside** the review range.
+- **Never** let a child overwrite the master with a partial CSV.
 
-**Per-child input:** give each child **only rows for its assigned page** (a slice or small temp CSV), plus paths to the PDF and OCR CSV and the full rules list. That limits cross-page mistakes and keeps prompts small.
-
-Normalize page numbers when filtering:
+**Per-child input:** page slice only + paths to PDF, word OCR CSV, **line OCR CSV**, rules. No VLM in Pass 1 children.
 
 ```python
 import csv
@@ -53,87 +62,96 @@ def page_int(row: dict) -> int:
 
 def rows_for_page(csv_path: Path, page: int) -> list[dict]:
     with csv_path.open(newline="", encoding="utf-8-sig") as f:
-        rows = list(csv.DictReader(f))
-    return [r for r in rows if page_int(r) == page]
+        return [r for r in csv.DictReader(f) if page_int(r) == page]
 ```
 
-## Step 2 — Parallel children (one page each)
+## Pass 1 — Parallel children (one page each)
 
-Use your **agent platform’s parallel child tasks** (subagents, delegated tasks, etc.):
+- **One child per page**; batch concurrency (e.g. 3–5) for Gradio — **not** for VLM.
+- Each child: review slice + word OCR + **line OCR** → apply rules → return **JSON only** (no `/review_apply`, **no VLM**).
+- Absolute paths for all inputs.
 
-- **One child per page** in the range; run up to **N** at a time (e.g. **3–5**) so Gradio is not overloaded; queue the rest.
-- Each child: **read** slice + OCR for that page → apply rules → return **JSON only** (no `/review_apply`).
-- Pass **absolute paths**; children do not share cwd unless your platform guarantees it.
+Suggested JSON: `page`, `removals`, `additions`, `modifications`, or **`final_rows`** for that page only.
 
-Suggested JSON shape (adapt if needed): `page`, `removals` (ids), `additions` (full row dicts), `modifications` (id + field patches), or **`final_rows`** for that page only—parent must still merge with **unreviewed** pages from master.
+### Pass 1 child checklist
 
-## Step 3 — Child checklist (delegate to modifications rules)
+Follow modifications skill **Pass 1**: word OCR merge rules, line OCR for context, `image` column reuse, `utf-8-sig`, false positives, signatures, optional local preview PNG for parent spot-check (not VLM).
 
-Children should follow [`../doc-redaction-modifications/SKILL.md`](../doc-redaction-modifications/SKILL.md): word-level OCR (`word_x0`…), same-line merge vs split lines, `image` column reuse, `utf-8-sig`, false positives, signatures.
+**Hard rule:** children **do not** call `/review_apply`, `/preview_boxes`, or VLM.
 
-**Hard rule:** children **do not** call `/review_apply` or `/preview_boxes` unless you intentionally centralize preview on the parent (recommended: **parent** runs `preview_redaction_boxes` on the **merged** CSV once).
+## Pass 1 — Merge (parent only)
 
-## Step 4 — Merge (parent only)
+1. Master rows for pages **not** in reviewed set → unchanged.
+2. Replace each reviewed page with child **verified** row set.
+3. Sort by `page`, `ymin`, `xmin`.
+4. Write **`{document}_review_file_merged.csv`** (`_review_file` in basename).
+5. Validate: no duplicate `id`s; boxes in [0, 1].
 
-1. Start from **master** rows where `page` **not in** the reviewed set → copy unchanged.
-2. For each reviewed page, replace with that page’s **verified** row set from the child (after applying removals/additions/patches in order).
-3. Sort rows if the app expects stable ordering (e.g. by `page`, then `ymin`, then `xmin`).
-4. Write **`{document}_review_file_merged.csv`** (basename must still contain **`_review_file`** for `/review_apply`).
-5. Optionally validate: no duplicate `id` collisions across pages; every row has valid `xmin`…`ymax` in [0, 1].
+## Pass 1 — Preview and single `/review_apply`
 
-**Invariant:** merged file = **all pages** present → one `/review_apply` updates the **entire** PDF consistently.
+1. Optional parent preview on merged CSV (`preview_redaction_boxes` or `/preview_boxes`).
+2. **One** `/review_apply` — original PDF + merged CSV.
+3. Download; newest by `mtime`.
 
-## Step 5 — Preview and single `/review_apply`
+## Pass 1 — Verify (parent)
 
-1. Parent runs local preview (see modifications) on **original PDF + merged CSV** for spot-check pages if needed.
-2. **One** `gradio_client` `predict(..., api_name="/review_apply")` with **original PDF** + merged CSV.
-3. Download outputs; **sort by `mtime`** for `*_redacted.pdf` / `*_review_file.csv` (see modifications).
+- Run **`verify_redaction_coverage`** (CLI or `POST /agent/verify_redaction_coverage`) on merged CSV **before** `/review_apply`.
+- After apply, re-run with `redacted_pdf_path` for text-layer checks.
+- Deliver when `coverage_pass` is true, or only `pages_flagged_for_vlm` remain → optional Pass 2 on those pages only.
 
-## Step 6 — Verify (parent)
+**Pass 1 deliverables:** per-page JSON/CSVs under `output_review_p{N}/`; coverage JSON; merged PDF/CSV under `output_review_final/`.
 
-Minimum: **text extraction** on redacted PDF for rules-driven strings; **page count** vs original; optional **pixel sample** at box centers (expect near-black). Optional VLM: see modifications. On failure: PyMuPDF fallback per modifications / TROUBLESHOOTING.
+## Pass 2 — Optional visual VLM (flagged pages only)
 
-## Step 7 — Deliverables (convention)
+Run only when user requests visual QA **or** Pass 1 coverage report lists `pages_flagged_for_vlm`.
 
-Adjust to user request; typical layout:
-
-- Optional per-page notes or PNGs: `output_review_p{N}/`
-- Merged artifacts: `output_review_final/` (redacted PDF, updated review CSV, overlay PDF if produced)
+1. Use Pass 1 merged CSV + original PDF (or Pass 1 `*_redacted.pdf`).
+2. Render preview/redacted PNGs **only for flagged pages**.
+3. **Sequential** VLM calls if using a local model (max **1 concurrent** VLM subagent).
+4. Parse findings → **conservative** CSV edits (see modifications § Pass 2).
+5. **One** more `/review_apply` if CSV changed → re-run coverage report.
 
 ## Error handling
 
 | Scenario | Action |
 |----------|--------|
-| Child fails | Retry that page once; if still failing, log and either skip page (leave master rows) or escalate. |
-| `/review_apply` fails / host down | PyMuPDF local apply from merged CSV (modifications / TROUBLESHOOTING). |
-| Missing OCR for a page | Child flags in JSON; parent may use grid/zone heuristics from modifications. |
+| Pass 1 child fails | Retry once; else leave master rows for that page |
+| `/review_apply` fails | PyMuPDF local apply (TROUBLESHOOTING) |
+| Missing OCR | Flag in JSON; zone heuristics (modifications) |
+| VLM timeout / empty response | Skip page or retry once; do not block Pass 1 delivery |
 
 ## Pitfalls
 
-- **Multiple `/review_apply` calls** (e.g. one per child) → races, inconsistent hashes, wasted GPU; **parent only, once.**
-- **Partial CSV uploaded** as if it were the full document → unreviewed pages lose boxes. Always merge to full CSV first.
-- **Concurrency**: batch pages if the queue or GPU thrashes.
-- **Trust but verify** child JSON against OCR before merge.
+- **VLM in Pass 1 children** — expensive; defer to Pass 2.
+- **Multiple `/review_apply`** within one pass — races; parent only, once per pass.
+- **Partial CSV as full document** — always merge first.
+- **VLM heuristic over-addition** — prefer explicit name matches; see modifications Pass 2.
 
-## Example user prompt
+## Example user prompts
 
+**Pass 1 only (default):**
 ```
-Review pages 4–7 of outputs in /workspace/output_redact_sig/ for Partnership-Agreement-Toolkit_0_0.pdf. Spawn one subagent per page in parallel. Rules:
-1. Remove boxes for general country names
-2. Remove redactions for [name] per policy
-3. Tune box sizes vs OCR word boxes
-4. Add SIGNATURE rows where missing
-5. Redact London and Sister City / Sister Cities per word-OCR rules
-6. No false positives; no missed PII
+Review pages 4–7 in /workspace/output_redact/. One subagent per page. OCR/CSV only — no VLM.
+Rules: [policy bullets]. Save merged outputs under output_review_final/
+```
 
-Save merged outputs under output_review_final/
+**Pass 1 + Pass 2:**
+```
+Review pages 1–56 (Pass 1: OCR/CSV subagents, merge, apply). Then Pass 2: VLM visual check
+each page sequentially against output_review_final/ previews. Re-apply once if VLM finds fixes.
 ```
 
 ## Completion checklist
 
-- [ ] Master CSV backed up or reproducible from folder
-- [ ] One child per reviewed page (or explicit batching)
-- [ ] Merged full-document `*_review_file.csv` with `_review_file` in name
-- [ ] Preview (if used) on merged file before apply
-- [ ] Single `/review_apply` (or documented PyMuPDF fallback)
-- [ ] Verification + newest artifacts by mtime
+**Pass 1**
+- [ ] Master CSV backed up
+- [ ] One OCR/CSV child per page (no VLM)
+- [ ] Merged full-document `*_review_file.csv`
+- [ ] Single `/review_apply`
+- [ ] Text/OCR verification
+
+**Pass 2 (if requested)**
+- [ ] VLM on Pass 1 outputs only
+- [ ] Conservative CSV patches
+- [ ] Single re-apply if needed
+- [ ] Re-verify

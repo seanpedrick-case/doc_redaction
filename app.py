@@ -10328,6 +10328,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         api_name="doc_redact",
         api_description=(
             "Redact a single PDF/image in one call (CLI-aligned). "
+            "Optional handwrite_signature_checkbox for AWS Textract extraction "
+            "(e.g. Extract handwriting, Extract signatures). "
             "Returns (output_paths, message). Does not update the main UI session."
         ),
     )

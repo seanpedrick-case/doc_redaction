@@ -262,7 +262,7 @@ def redact_document(
             list(opt.deny_list or []),
             opt.page_min,
             opt.page_max,
-            "",
+            list(opt.handwrite_signature_checkbox or []),
         ]
         event_id = c.call(api_name, data)
         completed = c.poll(api_name, event_id, timeout_s=3600.0)

@@ -1063,6 +1063,31 @@ def get_cli_default_args_dict() -> dict:
     return vars(build_cli_argument_parser().parse_args([]))
 
 
+def resolve_deny_list_for_redaction(args) -> list[str] | str:
+    """
+    Inline ``deny_list`` (API/direct mode) takes precedence over ``deny_list_file``.
+    """
+    inline = getattr(args, "deny_list", None)
+    if isinstance(inline, list):
+        return [str(x) for x in inline if str(x).strip()]
+    file_path = getattr(args, "deny_list_file", None) or ""
+    return file_path
+
+
+def resolve_allow_list_for_redaction(args) -> list[str] | str:
+    """
+    Inline ``allow_list`` (API/direct mode) takes precedence over file paths.
+    """
+    inline = getattr(args, "allow_list", None)
+    if isinstance(inline, list):
+        return [str(x) for x in inline if str(x).strip()]
+    file_path = getattr(args, "allow_list_file", None) or ""
+    if file_path:
+        return file_path
+    path_only = getattr(args, "allow_list", None)
+    return path_only if isinstance(path_only, str) else ""
+
+
 def main(direct_mode_args={}):
     """
     A unified command-line interface to prepare, redact, and anonymise various document types.
@@ -1373,8 +1398,8 @@ def main(direct_mode_args={}):
                         chosen_redact_comprehend_entities=args.aws_redact_entities,
                         chosen_llm_entities=args.llm_redact_entities,
                         text_extraction_method=args.ocr_method,
-                        in_allow_list=args.allow_list_file,
-                        in_deny_list=args.deny_list_file,
+                        in_allow_list=resolve_allow_list_for_redaction(args),
+                        in_deny_list=resolve_deny_list_for_redaction(args),
                         redact_whole_page_list=args.redact_whole_page_file,
                         page_min=args.page_min,
                         page_max=args.page_max,
@@ -1591,11 +1616,11 @@ def main(direct_mode_args={}):
                     anon_strategy=args.anon_strategy,
                     chosen_cols=args.text_columns,
                     chosen_redact_entities=args.local_redact_entities,
-                    in_allow_list=args.allow_list_file,
+                    in_allow_list=resolve_allow_list_for_redaction(args),
                     in_excel_sheets=args.excel_sheets,
                     first_loop_state=True,
                     output_folder=args.output_dir,
-                    in_deny_list=args.deny_list_file,
+                    in_deny_list=resolve_deny_list_for_redaction(args),
                     max_fuzzy_spelling_mistakes_num=args.fuzzy_mistakes,
                     pii_identification_method=args.pii_detector,
                     chosen_redact_comprehend_entities=args.aws_redact_entities,
@@ -2312,8 +2337,8 @@ def main(direct_mode_args={}):
                         or [],
                         chosen_llm_entities=args.llm_redact_entities or [],
                         text_extraction_method=args.ocr_method,
-                        in_allow_list=args.allow_list_file,
-                        in_deny_list=args.deny_list_file,
+                        in_allow_list=resolve_allow_list_for_redaction(args),
+                        in_deny_list=resolve_deny_list_for_redaction(args),
                         redact_whole_page_list=args.redact_whole_page_file,
                         page_min=args.page_min,
                         page_max=args.page_max,

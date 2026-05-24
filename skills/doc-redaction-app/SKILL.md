@@ -1,14 +1,14 @@
 ---
 name: doc-redaction-app
 description: "Initial document redaction and downloading server outputs: gradio_client, `/doc_redact` first, path/download traps, and `/redact_document` when needed. Not for CSV review or reapply (see doc-redaction-modifications); parallel multi-page review orchestration → doc-redact-page-review."
-version: 2.1.1
+version: 2.3.1
 author: repo-maintained
 license: AGPL-3.0-only
 ---
 
 ## Scope
 
-This skill covers **running an initial redaction** and **getting artifacts onto the client**. For edited review CSVs, `/review_apply`, coordinate fixes, and visual QA, use [`../doc-redaction-modifications/SKILL.md`](../doc-redaction-modifications/SKILL.md). For **parallel per-page review** (spawn subagents, merge CSV, one `/review_apply`), use [`../doc-redact-page-review/SKILL.md`](../doc-redact-page-review/SKILL.md).
+This skill covers **running an initial redaction** and **getting artifacts onto the client**. For review after a run: **Pass 1** (OCR/CSV edits, `/review_apply`) and optional **Pass 2** (visual VLM) — [`../doc-redaction-modifications/SKILL.md`](../doc-redaction-modifications/SKILL.md). For **parallel Pass 1 page review** (subagents, merge, one apply), use [`../doc-redact-page-review/SKILL.md`](../doc-redact-page-review/SKILL.md).
 
 ## Quick start
 
@@ -32,7 +32,7 @@ Some deployments return a success message but **`[]`** for output paths. Treat t
 
 They are **not** interchangeable. Wrong kwargs raise errors such as `Parameter is not a valid keyword argument`.
 
-- `/doc_redact`: e.g. `document_file`, `ocr_method`, `pii_method`, `redact_entities` (not `file_paths`, `chosen_local_ocr_model`, `chosen_redact_entities`).
+- `/doc_redact`: e.g. `document_file`, `ocr_method`, `pii_method`, `redact_entities`, `handwrite_signature_checkbox` (not `file_paths`, `chosen_local_ocr_model`, `chosen_redact_entities`, `custom_llm_instructions`).
 - `/redact_document`: long-form names (`file_paths`, `chosen_redact_entities`, `chosen_local_ocr_model`, `pii_identification_method`, etc.). Use `client.view_api()` when in doubt.
 
 ### 2d) OCR / PII labels on `/doc_redact`
@@ -41,6 +41,152 @@ They are **not** interchangeable. Wrong kwargs raise errors such as `Parameter i
 - `pii_method`: e.g. `Local`, `AWS Comprehend`, `LLM (AWS Bedrock)`, `Local inference server`, `Local transformers LLM`, `None`. Prefer exact labels from the deployment.
 
 Optional **page window** (when exposed): `page_min` / `page_max` (1-based; `0` often means first/last page—confirm in `view_api()`).
+
+**AWS Textract extraction** (`handwrite_signature_checkbox`): multiselect list passed when using `AWS Textract` (or hybrid Textract routes). Values must match the deployment UI labels exactly.
+
+| Value | Always available? | Purpose |
+|-------|-------------------|---------|
+| `Extract handwriting` | Yes (base default) | Handwritten text via Textract |
+| `Extract signatures` | Yes (base default) | Signature blocks via Textract |
+| `Extract forms` | Only if deployment enables it | Key-value / form fields |
+| `Extract layout` | Only if deployment enables it | Document layout structure |
+| `Extract tables` | Only if deployment enables it | Table detection |
+| `Face detection` | Only if deployment enables it | Face regions (often used with VLM routes) |
+
+Base deployments expose only the first two (`HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS` default). Extra rows appear when the server config sets `INCLUDE_FORM_EXTRACTION_TEXTRACT_OPTION`, `INCLUDE_LAYOUT_EXTRACTION_TEXTRACT_OPTION`, `INCLUDE_TABLE_EXTRACTION_TEXTRACT_OPTION`, or `INCLUDE_FACE_IDENTIFICATION_TEXTRACT_OPTION` to `True`. Confirm with the UI “AWS Textract extraction settings” checkbox group or `GET /gradio_api/info`.
+
+Example:
+
+```python
+client.predict(
+    api_name="/doc_redact",
+    document_file=handle_file("/local/path/document.pdf"),
+    ocr_method="AWS Textract",
+    handwrite_signature_checkbox=["Extract handwriting", "Extract signatures"],
+)
+```
+
+When omitted, server/CLI defaults apply (`DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX`, often `[]`).
+
+### 2e) PII entity lists — Local vs AWS Comprehend
+
+**Which parameter to use depends on `pii_method`:**
+
+| `pii_method` | `/doc_redact` | `/redact_document` |
+|--------------|---------------|-------------------|
+| `Local` (spaCy/Presidio) | `redact_entities` | `chosen_redact_entities` |
+| `AWS Comprehend` | **Not exposed** — use `/redact_document` or CLI | `chosen_redact_comprehend_entities` |
+
+`/doc_redact` maps `redact_entities` → CLI `local_redact_entities` only. For Comprehend entity selection, call `/redact_document` (or `cli_redact.py --aws_redact_entities …`).
+
+**Local PII entities** (`FULL_ENTITY_LIST` in `tools/config.py`; deployment may extend via env):
+
+`TITLES`, `PERSON`, `PHONE_NUMBER`, `EMAIL_ADDRESS`, `STREETNAME`, `UKPOSTCODE`, `CREDIT_CARD`, `CRYPTO`, `DATE_TIME`, `IBAN_CODE`, `IP_ADDRESS`, `NRP`, `LOCATION`, `MEDICAL_LICENSE`, `URL`, `UK_NHS`, `CUSTOM`, `CUSTOM_FUZZY`
+
+When VLM face/signature detection is enabled on the deployment, the list may also include: `CUSTOM_VLM_FACES`, `CUSTOM_VLM_SIGNATURE`.
+
+**Textract + `CUSTOM_VLM_SIGNATURE`:** when `ocr_method` is `AWS Textract` and `handwrite_signature_checkbox` includes `Extract signatures`, Textract signature analysis runs and **inline/post-pass `CUSTOM_VLM_SIGNATURE` VLM detection is skipped** (no duplicate signature finding). Keep `CUSTOM_VLM_SIGNATURE` in the entity list if you want those regions redacted; Textract supplies the boxes. Without `Extract signatures`, `CUSTOM_VLM_SIGNATURE` still uses VLM as before.
+
+Default selection (`CHOSEN_REDACT_ENTITIES`): `TITLES`, `PERSON`, `PHONE_NUMBER`, `EMAIL_ADDRESS`, `STREETNAME`, `UKPOSTCODE`, `CUSTOM`.
+
+**AWS Comprehend entities** (`FULL_COMPREHEND_ENTITY_LIST`):
+
+`BANK_ACCOUNT_NUMBER`, `BANK_ROUTING`, `CREDIT_DEBIT_NUMBER`, `CREDIT_DEBIT_CVV`, `CREDIT_DEBIT_EXPIRY`, `PIN`, `EMAIL`, `ADDRESS`, `NAME`, `PHONE`, `SSN`, `DATE_TIME`, `PASSPORT_NUMBER`, `DRIVER_ID`, `URL`, `AGE`, `USERNAME`, `PASSWORD`, `AWS_ACCESS_KEY`, `AWS_SECRET_KEY`, `IP_ADDRESS`, `MAC_ADDRESS`, `LICENSE_PLATE`, `VEHICLE_IDENTIFICATION_NUMBER`, `UK_NATIONAL_INSURANCE_NUMBER`, `INTERNATIONAL_BANK_ACCOUNT_NUMBER`, `SWIFT_CODE`, `UK_NATIONAL_HEALTH_SERVICE_NUMBER`, `ALL`, `CUSTOM`, `CUSTOM_FUZZY`
+
+Default selection (`CHOSEN_COMPREHEND_ENTITIES`): `EMAIL`, `ADDRESS`, `NAME`, `PHONE`, `PASSPORT_NUMBER`, `UK_NATIONAL_INSURANCE_NUMBER`, `UK_NATIONAL_HEALTH_SERVICE_NUMBER`, `CUSTOM`.
+
+**Do not mix label namespaces:** Local uses `PERSON` / `EMAIL_ADDRESS`; Comprehend uses `NAME` / `EMAIL`. Pick the list that matches your `pii_method`.
+
+#### Custom Presidio recognizers (Local **and** Comprehend)
+
+These are **not** generic spaCy NER labels — they are app-specific Presidio recognizers (`tools/load_spacy_model_custom_recognisers.py`). They appear in **both** Local and Comprehend entity dropdowns because `CUSTOM_ENTITIES` is merged into the Comprehend lists (Comprehend can miss titles, UK postcodes, and street fragments).
+
+| Entity | What it detects |
+|--------|-----------------|
+| `TITLES` | Honorifics/titles: Mr, Mrs, Ms, Miss, Dr, Professor, Sir, … |
+| `UKPOSTCODE` | UK postcode patterns (e.g. `SW1A 1AA`, `GIR 0AA`) |
+| `STREETNAME` | Street/road address fragments (number + street-type suffix, e.g. `… Road`, `… Lane`) |
+
+Default deployment config (`CUSTOM_ENTITIES`): `TITLES`, `UKPOSTCODE`, `STREETNAME`. Admins may extend via the `CUSTOM_ENTITIES` env var.
+
+On **`/doc_redact`**: include in `redact_entities`. On **`/redact_document`**: include in `chosen_redact_entities` (Local) **or** `chosen_redact_comprehend_entities` (Comprehend — these three labels are valid there too).
+
+#### `CUSTOM` and `CUSTOM_FUZZY` (deny-list driven)
+
+Both routes support explicit term lists via **`deny_list`** / **`allow_list`** on `/doc_redact`, or deny/allow list files on `/redact_document` / CLI.
+
+| Entity | Matching | Typical use |
+|--------|----------|-------------|
+| `CUSTOM` | Exact (literal or regex in deny list) | Always redact specific names, orgs, or regex patterns |
+| `CUSTOM_FUZZY` | Fuzzy deny-list match (spelling variants) | Same, tolerating typos; auto-included when CLI `fuzzy_mistakes > 0` |
+
+**`/doc_redact` inline lists:** pass terms directly as `deny_list=["term1", "term2"]` (not a file path). When `deny_list` is non-empty, the API **auto-appends `CUSTOM`** to `redact_entities` if missing (deny-list matching requires that entity type). If you omit `redact_entities` entirely, CLI defaults already include `CUSTOM`.
+
+For fuzzy deny-list matching via API, include `CUSTOM_FUZZY` in `redact_entities` explicitly (or use CLI/`/redact_document` with `fuzzy_mistakes > 0`, which auto-adds `CUSTOM_FUZZY`).
+
+`allow_list` excludes terms from redaction even when another entity type would match.
+
+Example — Local `/doc_redact` with UK-specific recognizers + custom deny terms:
+
+```python
+client.predict(
+    api_name="/doc_redact",
+    document_file=handle_file("/local/path/document.pdf"),
+    pii_method="Local",
+    redact_entities=[
+        "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER",
+        "TITLES", "STREETNAME", "UKPOSTCODE",
+        "CUSTOM", "CUSTOM_FUZZY",
+    ],
+    deny_list=["Acme Corp", "Cora Fyller"],
+)
+```
+
+Example — Comprehend `/redact_document` with Comprehend labels **plus** custom recognizers:
+
+```python
+client.predict(
+    api_name="/redact_document",
+    file_paths=[handle_file("/local/path/document.pdf")],
+    pii_identification_method="AWS Comprehend",
+    chosen_redact_entities=[],
+    chosen_redact_comprehend_entities=[
+        "NAME", "EMAIL", "PHONE", "ADDRESS",
+        "TITLES", "UKPOSTCODE", "STREETNAME", "CUSTOM",
+    ],
+    chosen_llm_entities=["PERSON_NAME"],
+    ocr_review_files=[],
+    combined_out_message="",
+    output_folder="/home/user/app/output",
+)
+```
+
+Example — Local on `/doc_redact`:
+
+```python
+client.predict(
+    api_name="/doc_redact",
+    document_file=handle_file("/local/path/document.pdf"),
+    pii_method="Local",
+    redact_entities=["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "STREETNAME", "UKPOSTCODE", "TITLES"],
+)
+```
+
+Example — Comprehend on `/redact_document`:
+
+```python
+client.predict(
+    api_name="/redact_document",
+    file_paths=[handle_file("/local/path/document.pdf")],
+    pii_identification_method="AWS Comprehend",
+    chosen_redact_entities=[],  # unused when Comprehend is selected
+    chosen_redact_comprehend_entities=["NAME", "EMAIL", "PHONE", "ADDRESS"],
+    chosen_llm_entities=["PERSON_NAME"],
+    ocr_review_files=[],
+    combined_out_message="",
+    output_folder="/home/user/app/output",
+)
+```
 
 ### 3) `handle_file` (critical)
 
@@ -124,9 +270,10 @@ Expand with **`client.view_api()`** for your deployment; typical extra fields in
 ```python
 kwargs = {
     "file_paths": [handle_file("/local/path/document.pdf")],
-    "chosen_redact_entities": ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"],
+    "pii_identification_method": "Local",
+    "chosen_redact_entities": ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "STREETNAME", "UKPOSTCODE", "TITLES", "CUSTOM"],
     "chosen_redact_comprehend_entities": [],
-    "chosen_llm_entities": ["PERSON"],
+    "chosen_llm_entities": ["PERSON_NAME"],
     "ocr_review_files": [],
     "combined_out_message": "",
     "output_folder": "/home/user/app/output",  # non-empty; adjust to deployment
