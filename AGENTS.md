@@ -12,6 +12,7 @@ Context for AI coding agents working on **doc_redaction** (PII redaction for PDF
 
 For agents operating the deployed app (Gradio Client, review CSV, `/review_apply`), these repo-local playbooks are a suggested ladder:
 
+0. **[`skills/doc-redaction-task-prompt/TASK_PROMPT_TEMPLATE.md`](skills/doc-redaction-task-prompt/TASK_PROMPT_TEMPLATE.md)** — copy-paste user task prompt (Pass 1 default, Pass 2 gated); **user redaction requirements go at the end of the prompt**.
 1. **[`skills/doc-redaction-app/SKILL.md`](skills/doc-redaction-app/SKILL.md)** — first-pass redaction (`/doc_redact` / `/redact_document`) and downloading artifacts.
 2. **[`skills/doc-redact-page-review/SKILL.md`](skills/doc-redact-page-review/SKILL.md)** — after outputs exist: **parallel per-page** child agents, merge into one full-document `*_review_file.csv`, **single** `/review_apply` from the parent.
 3. **[`skills/doc-redaction-modifications/SKILL.md`](skills/doc-redaction-modifications/SKILL.md)** — CSV mechanics, `preview_redaction_boxes`, `/review_apply` patterns, verification, VLM and PyMuPDF fallbacks (single-thread edits and the **technical** reference for page-review children).
@@ -74,7 +75,7 @@ When `RUN_FASTAPI` is true, routes are mounted under **`/agent`** ([agent_routes
 
 - **Catalog**: `GET /agent/operations` — maps each Gradio `api_name` to an HTTP path and notes whether the route is implemented via CLI or returns HTTP 501 for Gradio-only flows.
 - **Implemented POST routes** (CLI- or [tools/simplified_api.py](tools/simplified_api.py)-backed where noted):  
-  `redact_document`, `redact_data`, `find_duplicate_pages`, `find_duplicate_tabular`, `summarise_document`, `combine_review_pdfs`, `combine_review_csvs`, `export_review_redaction_overlay`, `export_review_page_ocr_visualisation`, `apply_review_redactions`, **`verify_redaction_coverage`** (Pass 1 programmatic QA: `review_csv_path`, `ocr_words_csv_path`, optional `must_redact` / `must_not_redact` regex lists, optional `redacted_pdf_path`), **`word_level_ocr_text_search`** (headless search in `*_ocr_results_with_words_*.csv` with optional review-box coverage flags).  
+  `redact_document`, `redact_data`, `find_duplicate_pages`, `find_duplicate_tabular`, `summarise_document`, `combine_review_pdfs`, `combine_review_csvs`, `export_review_redaction_overlay`, `export_review_page_ocr_visualisation`, `apply_review_redactions`, **`verify_redaction_coverage`** (Pass 1 QA: `must_redact` / `must_not_redact` regex lists, optional `redacted_pdf_path`, optional `auto_prune_suspicious` + `pruned_output_path`; returns `pass_strict`, `pass_with_cleanup`, `pages_flagged_for_vlm`, `pages_needing_csv_cleanup`), **`word_level_ocr_text_search`** (headless word OCR search with optional review-box overlap flags).  
   Note: on Gradio ([app.py](app.py)), the Review-tab visual exports use `api_name` **`page_redaction_review_image`** and **`page_ocr_review_image`**; the **`/agent`** routes above keep the explicit `export_review_*` names for the same operations.
 - **Gradio-only stubs** (501 + JSON hint): `load_and_prepare_documents_or_data`.
 - **Auth**: If `AGENT_API_KEY` is set in the environment, send header `X-Agent-API-Key` with that value.

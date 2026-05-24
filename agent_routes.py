@@ -286,12 +286,24 @@ class AgentVerifyRedactionRequest(BaseModel):
         False,
         description="Sample pixel darkness at box centres on redacted PDF (requires redacted_pdf_path).",
     )
+    auto_prune_suspicious: bool = Field(
+        False,
+        description="Remove prunable suspicious short/OCR-fragment rows and write pruned CSV.",
+    )
+    pruned_output_path: Optional[str] = Field(
+        None,
+        description="Output path for pruned CSV when auto_prune_suspicious is true.",
+    )
 
 
 class AgentVerifyRedactionResponse(BaseModel):
     status: str
     gradio_api_name: str = "verify_redaction_coverage"
     coverage_pass: bool
+    coverage_pass_strict: bool
+    coverage_pass_with_cleanup: bool
+    pruned_csv_path: Optional[str] = None
+    prune_log: Optional[Dict[str, Any]] = None
     report: Dict[str, Any]
 
 
@@ -950,7 +962,7 @@ def post_verify_redaction_coverage(
     if body.redacted_pdf_path:
         redacted = _path_must_be_allowed_file(body.redacted_pdf_path)
     try:
-        report = run_verify_redaction_coverage(
+        report, pruned_csv_path, prune_log = run_verify_redaction_coverage(
             review_csv_path=review,
             ocr_words_csv_path=ocr_words,
             must_redact=body.must_redact,
@@ -959,6 +971,8 @@ def post_verify_redaction_coverage(
             total_pages=body.total_pages,
             min_word_length=body.min_word_length,
             sample_pixels=body.sample_pixels,
+            auto_prune_suspicious=body.auto_prune_suspicious,
+            pruned_output_path=body.pruned_output_path,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -968,7 +982,11 @@ def post_verify_redaction_coverage(
         ) from e
     return AgentVerifyRedactionResponse(
         status="completed",
-        coverage_pass=bool(report.get("pass")),
+        coverage_pass=bool(report.get("pass_strict", report.get("pass"))),
+        coverage_pass_strict=bool(report.get("pass_strict", report.get("pass"))),
+        coverage_pass_with_cleanup=bool(report.get("pass_with_cleanup")),
+        pruned_csv_path=pruned_csv_path,
+        prune_log=prune_log,
         report=report,
     )
 
@@ -1125,9 +1143,12 @@ def list_operations() -> dict[str, Any]:
                 "path": "/agent/verify_redaction_coverage",
                 "implementation": "tools.verify_redaction_coverage.verify_redaction_coverage",
                 "notes": {
-                    "purpose": "Pass 1 programmatic QA — uncovered/over-redacted terms, suspicious rows, optional text/pixel checks.",
+                    "purpose": "Pass 1 programmatic QA — pass_strict (policy), pass_with_cleanup (+ suspicious rows), optional prune and text/pixel checks.",
                     "must_redact": "list of regex strings",
                     "must_not_redact": "list of regex strings",
+                    "auto_prune_suspicious": "remove short OCR-fragment rows before reporting",
+                    "pages_flagged_for_vlm": "policy/visual failures only",
+                    "pages_needing_csv_cleanup": "suspicious rows — prune, not VLM",
                 },
             },
             {

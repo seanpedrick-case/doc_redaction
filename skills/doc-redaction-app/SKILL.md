@@ -10,6 +10,8 @@ license: AGPL-3.0-only
 
 This skill covers **running an initial redaction** and **getting artifacts onto the client**. For review after a run: **Pass 1** (OCR/CSV edits, `/review_apply`) and optional **Pass 2** (visual VLM) — [`../doc-redaction-modifications/SKILL.md`](../doc-redaction-modifications/SKILL.md). For **parallel Pass 1 page review** (subagents, merge, one apply), use [`../doc-redact-page-review/SKILL.md`](../doc-redact-page-review/SKILL.md).
 
+**Starting a new task from chat:** copy [`../doc-redaction-task-prompt/TASK_PROMPT_TEMPLATE.md`](../doc-redaction-task-prompt/TASK_PROMPT_TEMPLATE.md), fill setup placeholders, and put case-specific **must redact / must not redact** rules in the **User redaction requirements** section at the end.
+
 ## Quick start
 
 ### 1) Access path

@@ -1,7 +1,7 @@
 ---
 name: doc-redact-page-review
 description: "After initial redaction (doc-redaction-app): Pass 1 parallel per-page OCR/CSV review (subagents), merge, single /review_apply; optional Pass 2 VLM visual check after Pass 1 outputs."
-version: 1.3.0
+version: 1.4.0
 author: repo-maintained
 license: AGPL-3.0-only
 ---
@@ -89,15 +89,16 @@ Follow modifications skill **Pass 1**: word OCR merge rules, line OCR for contex
 
 ## Pass 1 — Preview and single `/review_apply`
 
-1. Optional parent preview on merged CSV (`preview_redaction_boxes` or `/preview_boxes`).
-2. **One** `/review_apply` — original PDF + merged CSV.
-3. Download; newest by `mtime`.
+1. Run **`verify_redaction_coverage`** on merged CSV; fix policy issues until `pass_strict`.
+2. **Prune suspicious rows** (`--prune-suspicious` or `auto_prune_suspicious: true`); re-run until `pass_with_cleanup` (or accept cleanup debt).
+3. Optional parent preview on merged/pruned CSV (`preview_redaction_boxes` or `/preview_boxes`).
+4. **One** `/review_apply` — original PDF + pruned merged CSV.
+5. Download; newest by `mtime`.
 
 ## Pass 1 — Verify (parent)
 
-- Run **`verify_redaction_coverage`** (CLI or `POST /agent/verify_redaction_coverage`) on merged CSV **before** `/review_apply`.
-- After apply, re-run with `redacted_pdf_path` for text-layer checks.
-- Deliver when `coverage_pass` is true, or only `pages_flagged_for_vlm` remain → optional Pass 2 on those pages only.
+- Re-run **`verify_redaction_coverage`** after apply with `redacted_pdf_path` for text-layer checks.
+- Deliver when `pass_strict` is true. **`pages_flagged_for_vlm`** = policy/visual risk → optional Pass 2. **`pages_needing_csv_cleanup`** = run prune, not VLM.
 
 **Pass 1 deliverables:** per-page JSON/CSVs under `output_review_p{N}/`; coverage JSON; merged PDF/CSV under `output_review_final/`.
 

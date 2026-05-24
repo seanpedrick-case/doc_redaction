@@ -57,7 +57,8 @@ class ReviewRowHit:
 @dataclass
 class PageReport:
     page: int
-    pass_: bool = True
+    pass_strict: bool = True
+    pass_with_cleanup: bool = True
     review_row_count: int = 0
     uncovered_terms: list[TermHit] = field(default_factory=list)
     over_redacted: list[ReviewRowHit] = field(default_factory=list)
@@ -67,25 +68,40 @@ class PageReport:
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
-        d["pass"] = d.pop("pass_")
+        # ``pass`` mirrors ``pass_strict`` (policy/visual gate for Pass 1 completion).
+        d["pass"] = d["pass_strict"]
         return d
 
 
 @dataclass
 class CoverageReport:
     pages_total: int = 0
-    pages_with_issues: int = 0
+    pages_with_policy_issues: int = 0
+    pages_with_cleanup_issues: int = 0
     pages_flagged_for_vlm: list[int] = field(default_factory=list)
-    pass_: bool = True
+    pages_needing_csv_cleanup: list[int] = field(default_factory=list)
+    pass_strict: bool = True
+    pass_with_cleanup: bool = True
     pages: dict[str, PageReport] = field(default_factory=dict)
+
+    @property
+    def pass_(self) -> bool:
+        """Backward-compatible alias: policy-only pass (not blocked by suspicious rows)."""
+        return self.pass_strict
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "pass": self.pass_,
+            "pass": self.pass_strict,
+            "pass_strict": self.pass_strict,
+            "pass_with_cleanup": self.pass_with_cleanup,
             "summary": {
                 "pages_total": self.pages_total,
-                "pages_with_issues": self.pages_with_issues,
+                "pages_with_policy_issues": self.pages_with_policy_issues,
+                "pages_with_cleanup_issues": self.pages_with_cleanup_issues,
                 "pages_flagged_for_vlm": self.pages_flagged_for_vlm,
+                "pages_needing_csv_cleanup": self.pages_needing_csv_cleanup,
+                # Deprecated alias kept for older clients.
+                "pages_with_issues": self.pages_with_policy_issues,
             },
             "pages": {k: v.to_dict() for k, v in self.pages.items()},
         }
@@ -174,6 +190,94 @@ def is_suspicious_row(row: dict, min_word_length: int = 3) -> str | None:
     if text and len(text) < min_word_length and not re.search(r"\d", text):
         return "single_char_or_short_box"
     return None
+
+
+def is_prunable_suspicious_row(
+    row: dict,
+    must_redact: list[str] | list[re.Pattern] | None = None,
+    *,
+    min_word_length: int = 3,
+) -> bool:
+    """
+    Return True when a suspicious short/OCR-fragment row can be removed safely.
+
+    Rows matching ``must_redact`` are kept even when short (e.g. initials in policy).
+    """
+    reason = is_suspicious_row(row, min_word_length=min_word_length)
+    if not reason:
+        return False
+    text = (row.get("text") or "").strip()
+    if not text:
+        return reason == "empty_titles_row"
+    patterns: list[re.Pattern]
+    if not must_redact:
+        patterns = []
+    elif isinstance(must_redact[0], re.Pattern):
+        patterns = list(must_redact)  # type: ignore[arg-type]
+    else:
+        patterns = compile_patterns(list(must_redact))
+    if patterns and matches_any(text, patterns):
+        return False
+    return True
+
+
+def prune_suspicious_review_rows(
+    review_rows: list[dict],
+    *,
+    must_redact: list[str] | None = None,
+    min_word_length: int = 3,
+) -> tuple[list[dict], dict[str, Any]]:
+    """Drop prunable suspicious rows; return kept rows and a removal log."""
+    must_redact_re = compile_patterns(must_redact or [])
+    kept: list[dict] = []
+    removed: list[dict[str, Any]] = []
+    for row in review_rows:
+        if is_prunable_suspicious_row(
+            row, must_redact_re, min_word_length=min_word_length
+        ):
+            removed.append(
+                {
+                    "page": page_int(row),
+                    "row_id": str(row.get("id", "")),
+                    "text": (row.get("text") or "").strip(),
+                    "label": row.get("label") or "",
+                }
+            )
+        else:
+            kept.append(row)
+    log = {
+        "removed_count": len(removed),
+        "removed_rows": removed,
+        "kept_count": len(kept),
+    }
+    return kept, log
+
+
+def prune_suspicious_review_csv(
+    review_csv_path: str | Path,
+    output_csv_path: str | Path,
+    *,
+    must_redact: list[str] | None = None,
+    min_word_length: int = 3,
+) -> dict[str, Any]:
+    """Load review CSV, prune suspicious rows, write ``output_csv_path``."""
+    path = Path(review_csv_path)
+    out = Path(output_csv_path)
+    with path.open(newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        fieldnames = list(reader.fieldnames or [])
+        rows = list(reader)
+    pruned, log = prune_suspicious_review_rows(
+        rows, must_redact=must_redact, min_word_length=min_word_length
+    )
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(pruned)
+    log["input_csv"] = str(path)
+    log["output_csv"] = str(out)
+    return log
 
 
 def sample_pixels_dark(
@@ -271,7 +375,7 @@ def verify_redaction_coverage(
                 for wr in page_ocr
             )
             if has_must_redact_on_page:
-                page_report.pass_ = False
+                page_report.pass_strict = False
 
         for r in page_review:
             text = (r.get("text") or "").strip()
@@ -287,7 +391,7 @@ def verify_redaction_coverage(
                             reason="must_not_redact",
                         )
                     )
-                    page_report.pass_ = False
+                    page_report.pass_strict = False
             reason = is_suspicious_row(r, min_word_length=min_word_length)
             if reason:
                 page_report.suspicious_rows.append(
@@ -299,37 +403,38 @@ def verify_redaction_coverage(
                         reason=reason,
                     )
                 )
-                page_report.pass_ = False
+                page_report.pass_with_cleanup = False
 
         seen_terms: set[tuple[int, str]] = set()
-        for wr in page_ocr:
-            wt = (wr.get("word_text") or wr.get("text") or "").strip()
-            if not wt or len(wt) < min_word_length:
-                continue
-            if must_redact_re and not matches_any(wt, must_redact_re):
-                continue
-            wb = word_box(wr)
-            if wb is None:
-                continue
-            key = (page, wt.lower())
-            if key in seen_terms:
-                continue
-            seen_terms.add(key)
-            covered = is_covered_by_review(*wb, page_review)
-            if not covered:
-                page_report.uncovered_terms.append(
-                    TermHit(
-                        page=page,
-                        text=wt,
-                        word_x0=wb[0],
-                        word_y0=wb[1],
-                        word_x1=wb[2],
-                        word_y1=wb[3],
-                        line=str(wr.get("line", "")),
-                        covered=False,
+        if must_redact_re:
+            for wr in page_ocr:
+                wt = (wr.get("word_text") or wr.get("text") or "").strip()
+                if not wt or len(wt) < min_word_length:
+                    continue
+                if not matches_any(wt, must_redact_re):
+                    continue
+                wb = word_box(wr)
+                if wb is None:
+                    continue
+                key = (page, wt.lower())
+                if key in seen_terms:
+                    continue
+                seen_terms.add(key)
+                covered = is_covered_by_review(*wb, page_review)
+                if not covered:
+                    page_report.uncovered_terms.append(
+                        TermHit(
+                            page=page,
+                            text=wt,
+                            word_x0=wb[0],
+                            word_y0=wb[1],
+                            word_x1=wb[2],
+                            word_y1=wb[3],
+                            line=str(wr.get("line", "")),
+                            covered=False,
+                        )
                     )
-                )
-                page_report.pass_ = False
+                    page_report.pass_strict = False
 
         if redacted_text_by_page and must_redact_re:
             page_text = redacted_text_by_page.get(page, "")
@@ -338,7 +443,7 @@ def verify_redaction_coverage(
                     leak = m.group()
                     if leak and leak not in page_report.text_layer_leaks:
                         page_report.text_layer_leaks.append(leak)
-                        page_report.pass_ = False
+                        page_report.pass_strict = False
 
         if sample_pixels and redacted_pdf_path and page_review:
             boxes: list[tuple[float, float, float, float]] = []
@@ -350,13 +455,17 @@ def verify_redaction_coverage(
                 Path(redacted_pdf_path), page, boxes
             )
             if page_report.pixel_failures:
-                page_report.pass_ = False
+                page_report.pass_strict = False
 
         report.pages[str(page)] = page_report
-        if not page_report.pass_:
-            report.pages_with_issues += 1
+        if not page_report.pass_strict:
+            report.pages_with_policy_issues += 1
             report.pages_flagged_for_vlm.append(page)
-            report.pass_ = False
+            report.pass_strict = False
+        if page_report.suspicious_rows:
+            report.pages_with_cleanup_issues += 1
+            report.pages_needing_csv_cleanup.append(page)
+            report.pass_with_cleanup = False
 
     return report
 
@@ -460,8 +569,32 @@ def main() -> None:
     )
     parser.add_argument("--min-word-length", type=int, default=3)
     parser.add_argument("--sample-pixels", action="store_true")
+    parser.add_argument(
+        "--prune-suspicious",
+        action="store_true",
+        help="Write a pruned review CSV with suspicious short rows removed.",
+    )
+    parser.add_argument(
+        "--pruned-output",
+        type=Path,
+        default=None,
+        help="Output path for --prune-suspicious (default: <review_csv>_pruned.csv).",
+    )
     parser.add_argument("--output-json", type=Path, default=None)
     args = parser.parse_args()
+
+    if args.prune_suspicious:
+        out = args.pruned_output or args.review_csv.with_name(
+            f"{args.review_csv.stem}_pruned.csv"
+        )
+        prune_log = prune_suspicious_review_csv(
+            args.review_csv,
+            out,
+            must_redact=args.must_redact,
+            min_word_length=args.min_word_length,
+        )
+        print(json.dumps(prune_log, indent=2))
+        args.review_csv = out
 
     report = verify_redaction_coverage(
         args.review_csv,
@@ -480,7 +613,7 @@ def main() -> None:
         print(f"Wrote {args.output_json}")
     else:
         print(text)
-    raise SystemExit(0 if report.pass_ else 1)
+    raise SystemExit(0 if report.pass_strict else 1)
 
 
 if __name__ == "__main__":

@@ -35,8 +35,8 @@ services:
       # - "cuda0,cuda1"
       # - -sm
       # - "row"
-      #- --tensor-split
-      #- "24,15"
+      - --tensor-split
+      - "24,17"
       - --ctx-size
       - "98304"
       - -ub
@@ -75,7 +75,7 @@ services:
       - --spec-type
       - "draft-mtp"
       - --spec-draft-n-max
-      - "2"
+      - "3"
     ports:
       - "8000:8080"
     volumes:

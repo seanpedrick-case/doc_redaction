@@ -94,8 +94,57 @@ def test_run_verify_redaction_coverage_wrapper() -> None:
         total_pages=8,
     ).to_dict()
     assert "pass" in out
+    assert "pass_strict" in out
+    assert "pass_with_cleanup" in out
     assert "pages" in out
     assert "summary" in out
+    assert "pages_needing_csv_cleanup" in out["summary"]
+
+
+def test_pass_strict_not_blocked_by_suspicious_rows(tmp_path: Path) -> None:
+    review = tmp_path / "review.csv"
+    words = tmp_path / "words.csv"
+    review.write_text(
+        "image,page,label,color,xmin,ymin,xmax,ymax,id,text\n"
+        'img.png,1,PERSON,"(0,0,0)",0.1,0.1,0.2,0.2,abc,-\n',
+        encoding="utf-8-sig",
+    )
+    words.write_text(
+        "page,word_text,word_x0,word_y0,word_x1,word_y1\n" "1,Hello,0.5,0.5,0.6,0.6\n",
+        encoding="utf-8-sig",
+    )
+
+    from tools.verify_redaction_coverage import verify_redaction_coverage
+
+    report = verify_redaction_coverage(
+        review, words, must_redact=[], must_not_redact=[], total_pages=1
+    )
+    assert report.pass_strict is True
+    assert report.pass_with_cleanup is False
+    assert report.pages_needing_csv_cleanup == [1]
+    assert report.pages_flagged_for_vlm == []
+
+
+def test_prune_suspicious_review_csv(tmp_path: Path) -> None:
+    src = tmp_path / "review.csv"
+    out = tmp_path / "review_pruned.csv"
+    src.write_text(
+        "image,page,label,color,xmin,ymin,xmax,ymax,id,text\n"
+        'img.png,1,PERSON,"(0,0,0)",0.1,0.1,0.2,0.2,a1,-\n'
+        'img.png,1,PERSON,"(0,0,0)",0.3,0.1,0.4,0.2,a2,Cora\n',
+        encoding="utf-8-sig",
+    )
+
+    from tools.verify_redaction_coverage import prune_suspicious_review_csv
+
+    log = prune_suspicious_review_csv(
+        src, out, must_redact=[r"cora"], min_word_length=3
+    )
+    assert log["removed_count"] == 1
+    assert log["kept_count"] == 1
+    pruned_text = out.read_text(encoding="utf-8-sig")
+    assert "Cora" in pruned_text
+    assert ",a1,-" not in pruned_text
 
 
 def test_cli_api_verify_redaction_coverage() -> None:

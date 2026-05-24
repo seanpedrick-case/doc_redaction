@@ -1197,12 +1197,37 @@ def run_verify_redaction_coverage(
     total_pages: int | None = None,
     min_word_length: int = 3,
     sample_pixels: bool = False,
-) -> dict:
+    auto_prune_suspicious: bool = False,
+    pruned_output_path: str | None = None,
+) -> tuple[dict, str | None, dict | None]:
     """Headless Pass 1 coverage report (see ``tools.verify_redaction_coverage``)."""
-    from tools.verify_redaction_coverage import verify_redaction_coverage
+    from pathlib import Path
+
+    from tools.verify_redaction_coverage import (
+        prune_suspicious_review_csv,
+        verify_redaction_coverage,
+    )
+
+    review_path = Path(review_csv_path)
+    pruned_csv_path: str | None = None
+    prune_log: dict | None = None
+    if auto_prune_suspicious:
+        out = (
+            Path(pruned_output_path)
+            if pruned_output_path
+            else review_path.with_name(f"{review_path.stem}_pruned.csv")
+        )
+        prune_log = prune_suspicious_review_csv(
+            review_path,
+            out,
+            must_redact=must_redact,
+            min_word_length=min_word_length,
+        )
+        review_path = out
+        pruned_csv_path = str(out)
 
     report = verify_redaction_coverage(
-        review_csv_path,
+        review_path,
         ocr_words_csv_path,
         must_redact=must_redact,
         must_not_redact=must_not_redact,
@@ -1211,7 +1236,7 @@ def run_verify_redaction_coverage(
         min_word_length=min_word_length,
         sample_pixels=sample_pixels,
     )
-    return report.to_dict()
+    return report.to_dict(), pruned_csv_path, prune_log
 
 
 def run_word_level_ocr_text_search_api(

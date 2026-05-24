@@ -367,11 +367,13 @@ def verify_redaction_coverage(
     total_pages: int | None = None,
     min_word_length: int = 3,
     sample_pixels: bool = False,
+    auto_prune_suspicious: bool = False,
+    pruned_output_path: str | None = None,
 ) -> dict:
     """Pass 1 programmatic coverage report (no VLM)."""
-    from tools.verify_redaction_coverage import verify_redaction_coverage as _verify
+    from tools.simplified_api import run_verify_redaction_coverage
 
-    return _verify(
+    report, _, _ = run_verify_redaction_coverage(
         review_csv_path,
         ocr_words_csv_path,
         must_redact=must_redact,
@@ -380,7 +382,10 @@ def verify_redaction_coverage(
         total_pages=total_pages,
         min_word_length=min_word_length,
         sample_pixels=sample_pixels,
-    ).to_dict()
+        auto_prune_suspicious=auto_prune_suspicious,
+        pruned_output_path=pruned_output_path,
+    )
+    return report
 
 
 __all__ = [

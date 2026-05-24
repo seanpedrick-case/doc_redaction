@@ -1,7 +1,7 @@
 ---
 name: doc-redaction-modifications
 description: "Review and reapply: two-pass workflow — Pass 1 (OCR/CSV/text, default) then optional Pass 2 (VLM per page). Edit *_review_file.csv, preview, /review_apply, verify. Parallel page orchestration → doc-redact-page-review. Initial redaction → doc-redaction-app."
-version: 2.3.0
+version: 2.4.0
 author: repo-maintained
 license: AGPL-3.0-only
 ---
@@ -48,14 +48,15 @@ Use artefacts from the **same redaction run**. No VLM in this pass.
 2. **Policy edits** — remove false positives, add missing PII rows, relabel (programmatically, not Excel-only).
 3. **Word OCR** — match `page` + `word_text`; merge words on the same line (`|Δy0| < ~0.01`); separate boxes across lines.
 4. **Line OCR** — use line CSV for phrase context, line numbers, and confirming reading order when word boxes fragment a name or address.
-5. **Coverage report (mandatory before apply)** — run [`tools/verify_redaction_coverage.py`](../../tools/verify_redaction_coverage.py) or **`POST /agent/verify_redaction_coverage`** with `must_redact` / `must_not_redact` regex lists. Fix flagged pages; re-run until clean or only `pages_flagged_for_vlm` remain.
-6. **Preview** — `preview_redaction_boxes` or `/preview_boxes` on edited CSV (spot-check worst pages from the report).
-7. **Merge** full-document CSV (all pages) if reviewing a subset — see page-review skill.
-8. **One** `/review_apply` → download newest `*_redacted.pdf` / `*_review_file.csv` (sort by `st_mtime`).
-9. **Coverage report (after apply)** — re-run with `redacted_pdf_path` for text-layer leak checks; optional `sample_pixels=true`.
-10. **Term search (optional)** — `POST /agent/word_level_ocr_text_search` or `doc_redaction.verify_redaction_coverage` / `word_level_ocr_text_search` to find policy phrases in word OCR and whether each hit is boxed.
+5. **Coverage report (mandatory before apply)** — run [`tools/verify_redaction_coverage.py`](../../tools/verify_redaction_coverage.py) or **`POST /agent/verify_redaction_coverage`** with `must_redact` / `must_not_redact` regex lists. Fix **policy** flags (`uncovered_terms`, `over_redacted`, `text_layer_leaks`); re-run until `pass_strict` is true.
+6. **Suspicious-row prune (standard Pass 1 cleanup)** — remove short OCR-fragment boxes (`"-"`, `"."`, `"Ho"`, etc.) that do **not** match `must_redact`. CLI: `--prune-suspicious --pruned-output merged_pruned.csv` or API: `auto_prune_suspicious: true`. Re-run coverage; target `pass_with_cleanup: true`.
+7. **Preview** — `preview_redaction_boxes` or `/preview_boxes` on edited CSV (spot-check worst pages from the report).
+8. **Merge** full-document CSV (all pages) if reviewing a subset — see page-review skill.
+9. **One** `/review_apply` → download newest `*_redacted.pdf` / `*_review_file.csv` (sort by `st_mtime`).
+10. **Coverage report (after apply)** — re-run with `redacted_pdf_path` for text-layer leak checks; optional `sample_pixels=true`.
+11. **Term search (optional)** — `POST /agent/word_level_ocr_text_search` or `word_level_ocr_text_search` to find policy phrases in word OCR and whether each hit is boxed.
 
-Pass 1 is **complete** when coverage reports pass (or only VLM-flagged pages remain). Run **Pass 2 VLM only on `pages_flagged_for_vlm`**, not every page.
+Pass 1 is **complete** when `pass_strict` is true (policy satisfied). **`pass_with_cleanup`** also requires no suspicious short rows. Run **Pass 2 VLM only on `pages_flagged_for_vlm`** (policy/visual risk — not `pages_needing_csv_cleanup` alone).
 
 ### Coverage verification (Pass 1 — no VLM)
 
@@ -67,9 +68,19 @@ Programmatic QA replacing per-page visual review for most cases.
 python tools/verify_redaction_coverage.py merged_review_file.csv ocr_words.csv \
   --must-redact "cora|fuller|fyller" \
   --must-not-redact "dr\\.|macrae|gibson|social worker" \
+  --prune-suspicious --pruned-output merged_pruned.csv \
   --redacted-pdf output_redacted.pdf \
   --output-json coverage_report.json
 ```
+
+**Report fields:**
+
+| Field | Meaning |
+|-------|---------|
+| `pass` / `pass_strict` | Policy satisfied: no uncovered terms, over-redactions, text leaks, or pixel failures |
+| `pass_with_cleanup` | Also no suspicious short OCR-fragment rows |
+| `pages_flagged_for_vlm` | Policy/visual failures → optional Pass 2 |
+| `pages_needing_csv_cleanup` | Suspicious rows only → run prune step, not VLM |
 
 **Agent API:** `POST /agent/verify_redaction_coverage`
 
@@ -80,13 +91,17 @@ python tools/verify_redaction_coverage.py merged_review_file.csv ocr_words.csv \
   "must_redact": ["cora|fuller|fyller", "stephen|peter|rhett|yazmin"],
   "must_not_redact": ["dr\\.|doctor|social worker|macrae|gibson"],
   "redacted_pdf_path": "path/to/doc_redacted.pdf",
+  "auto_prune_suspicious": true,
+  "pruned_output_path": "path/to/doc_review_file_pruned.csv",
   "sample_pixels": false
 }
 ```
 
-Response includes `coverage_pass`, per-page `uncovered_terms`, `over_redacted`, `suspicious_rows`, and `pages_flagged_for_vlm` — use the latter for optional Pass 2 only.
+Response includes `coverage_pass_strict`, `coverage_pass_with_cleanup`, `pruned_csv_path`, `prune_log`, per-page issues, and `pages_flagged_for_vlm` vs `pages_needing_csv_cleanup`.
 
-**Word search:** `POST /agent/word_level_ocr_text_search` with `ocr_words_csv_path`, `search_text`, optional `review_csv_path` (adds `covered_by_review_box` per hit).
+**Word search:** `POST /agent/word_level_ocr_text_search` with `ocr_words_csv_path`, `search_text`, optional `review_csv_path`.
+
+`covered_by_review_box` uses **intersecting** review boxes (not strict containment). A hit marked `false` may still be visually redacted if a larger box overlaps — inspect coordinates before adding rows.
 
 **Python:**
 
@@ -106,6 +121,8 @@ hits = word_level_ocr_text_search(
     review_csv_path="doc_review_file.csv",
 )
 ```
+
+**Reference orchestrator:** [`workspace/run_pass1_cora_fyller.py`](../../workspace/run_pass1_cora_fyller.py) — policy edits → coverage fix → **prune suspicious rows** → single `/review_apply` → post coverage → term search.
 
 ### Word-level OCR (precise boxes)
 
@@ -131,7 +148,7 @@ Run **after Pass 1** has produced reviewed outputs. Checks whether black boxes m
 ### When to run Pass 2
 
 - User explicitly requests visual / VLM check of all pages or a page range.
-- **`pages_flagged_for_vlm`** from coverage report after Pass 1 (preferred — targeted, not full doc).
+- **`pages_flagged_for_vlm`** from coverage report after Pass 1 (preferred — targeted, not full doc). These are **policy/visual** failures only (`uncovered_terms`, text leaks, pixel failures) — **not** pages that only have suspicious short OCR rows (use prune instead).
 - Pass 1 text/coverage verification inconclusive on scanned pages (handwriting, stamps, OCR-blind ink).
 
 ### When to skip Pass 2
@@ -303,9 +320,10 @@ When appending rows: same-page **`image`**, **`color`** as `"(0, 0, 0)"`, unique
 
 ### Pass 1 (required)
 
-1. **Text layer** — PyMuPDF on `*_redacted.pdf`; policy strings should be absent where boxed.
-2. **Word OCR overlap** — target terms intersect review boxes on each page.
-3. **Preview PNGs** — spot-check worst pages locally.
+1. **Coverage report** — `pass_strict` (policy terms covered, no over-redactions, no text leaks).
+2. **Text layer** — PyMuPDF on `*_redacted.pdf`; policy strings should be absent where boxed.
+3. **Word OCR overlap** — target terms intersect review boxes on each page.
+4. **Preview PNGs** — spot-check worst pages locally.
 
 ### Pass 2 (when run)
 
@@ -324,7 +342,7 @@ Watch **false positives**: geography/org as **PERSON**, bare job titles, OCR fra
 
 ## Checklists
 
-**Pass 1 (each page):** policy removals/additions; word OCR box alignment; line OCR context; false positives; signatures; **coverage report clean or flagged-only**; preview spot-check; merge; single apply; post-apply coverage report.
+**Pass 1 (each page):** policy removals/additions; word OCR box alignment; line OCR context; false positives; signatures; **coverage report `pass_strict`**; **suspicious-row prune**; preview spot-check; merge; single apply; post-apply coverage report.
 
 **Pass 2 (optional, flagged pages only):** VLM on `pages_flagged_for_vlm`; conservative CSV patch; single re-apply; re-run coverage report.
 
