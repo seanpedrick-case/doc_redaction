@@ -2,6 +2,7 @@ name: Sync to Hugging Face hub
 on:
   push:
     branches: [dev]
+  workflow_dispatch:
 
 permissions:
   contents: read
