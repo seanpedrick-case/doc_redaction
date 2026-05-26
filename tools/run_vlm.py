@@ -820,7 +820,7 @@ if SHOW_VLM_MODEL_OPTIONS is True:
                 Qwen3_5ForConditionalGeneration,
             )
 
-            MODEL_ID = "lokeshe09/Qwen3.6-27B-bnb-4bit"
+            MODEL_ID = "samajlouis/Qwen3.6-27B-bnb-nf4"
             if OVERRIDE_VLM_REPO_ID:
                 MODEL_ID = OVERRIDE_VLM_REPO_ID
             processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)

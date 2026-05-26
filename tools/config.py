@@ -1587,7 +1587,7 @@ QWEN36_27B_REPO_ID = get_or_create_env_var(
     "QWEN36_27B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.6-27B"
 )
 QWEN36_27B_BNB_4BIT_REPO_ID = get_or_create_env_var(
-    "QWEN36_27B_BNB_4BIT_REPO_TRANSFORMERS_ID", "lokeshe09/Qwen3.6-27B-bnb-4bit"
+    "QWEN36_27B_BNB_4BIT_REPO_TRANSFORMERS_ID", "samajlouis/Qwen3.6-27B-bnb-nf4"
 )
 QWEN36_35B_A3B_REPO_ID = get_or_create_env_var(
     "QWEN36_35B_A3B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-35B-A3B"

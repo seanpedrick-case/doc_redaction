@@ -28,8 +28,6 @@ Use `/doc_redact` for a normal PDF/image first pass. Use `/redact_document` only
 
 Some deployments return a success message but **`[]`** for output paths. Treat that as **no deliverable** for automation.
 
-- **Custom VLM entity types** (e.g. `CUSTOM_VLM_SIGNATURE`, `CUSTOM_VLM_FACES`) are a common trigger: processing may complete but paths stay empty. Fall back to `/redact_document` (or deployment-specific docs) if you need those entities.
-
 ### 2c) `/doc_redact` vs `/redact_document` parameter names
 
 They are **not** interchangeable. Wrong kwargs raise errors such as `Parameter is not a valid keyword argument`.
