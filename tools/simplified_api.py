@@ -49,7 +49,10 @@ from tools.file_conversion import (
 )
 from tools.file_redaction import run_redaction
 from tools.helper_functions import get_file_name_without_type
-from tools.redaction_review import apply_redactions_to_review_df_and_files
+from tools.redaction_review import (
+    apply_redactions_to_review_df_and_files,
+    validate_review_file_df_headless,
+)
 from tools.redaction_types import RedactionContext, RedactionOptions
 from tools.secure_path_utils import validate_path_safety
 from tools.summaries import (
@@ -74,6 +77,26 @@ class HeadlessGradioProgress:
 
     def tqdm(self, iterable, desc: str | None = None, unit: str | None = None):
         return iterable
+
+
+def _format_review_apply_message(unique_paths: list[str], prep_msg: str | None) -> str:
+    """Build a status string that distinguishes deliverable vs review-copy PDFs."""
+    redacted = [p for p in unique_paths if p.endswith("_redacted.pdf")]
+    review_copy = [p for p in unique_paths if "_redactions_for_review" in p]
+    parts: list[str] = []
+    if prep_msg and str(prep_msg).strip():
+        parts.append(str(prep_msg).strip())
+    parts.append(
+        "Applied redactions via PyMuPDF redaction annotations (text removed in *_redacted.pdf)."
+    )
+    if redacted:
+        parts.append(f"Deliverable: {Path(redacted[0]).name}")
+    if review_copy:
+        parts.append(
+            f"Review copy (text retained): {Path(review_copy[0]).name} "
+            "— do not use for text-layer leak checks."
+        )
+    return " ".join(parts)
 
 
 def _folder_with_trailing_sep(folder: str) -> str:
@@ -360,6 +383,11 @@ def run_apply_review_redactions(
 
     if not isinstance(review_df, pd.DataFrame):
         review_df = pd.DataFrame()
+    if review_df.empty:
+        raise ValueError(
+            "Review CSV produced no rows after prepare; check review_csv_path."
+        )
+    validate_review_file_df_headless(review_df)
     if not page_sizes:
         raise ValueError(
             "prepare_image_or_pdf produced empty page_sizes; check pdf_path and logs."
@@ -450,7 +478,7 @@ def run_apply_review_redactions(
         "output_paths": unique_paths,
         "output_dir": out_folder.rstrip(os.sep),
         "input_dir": in_folder.rstrip(os.sep),
-        "message": (str(prep_msg) if prep_msg else "apply_review_redactions completed"),
+        "message": _format_review_apply_message(unique_paths, prep_msg),
         "gradio_api_name": "apply_review_redactions",
     }
 

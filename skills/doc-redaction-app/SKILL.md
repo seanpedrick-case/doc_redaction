@@ -1,7 +1,7 @@
 ---
 name: doc-redaction-app
 description: "Initial document redaction and downloading server outputs: gradio_client, `/doc_redact` first, path/download traps, and `/redact_document` when needed. Not for CSV review or reapply (see doc-redaction-modifications); parallel multi-page review orchestration → doc-redact-page-review."
-version: 2.3.1
+version: 2.3.2
 author: repo-maintained
 license: AGPL-3.0-only
 ---
@@ -208,7 +208,8 @@ client.predict(
 - `chosen_llm_entities` must contain **at least one** value even in Local PII mode (e.g. `["PERSON"]` or `["PERSON_NAME"]`).
 - **`combined_out_message=""`** and **`ocr_review_files=[]`** are required in typical apps; omitting them raises `TypeError: No value provided for required argument`.
 - Heavy **VLM / signature** jobs can run many minutes per page; use generous **`httpx.Timeout`** (e.g. `read=1800` or higher) to avoid false timeouts.
-- When picking files by name, **`…_redacted.pdf`** is the redacted artifact; **`…_redactions_for_review.pdf`** is an overlay preview, not the final black-box PDF.
+- When picking files by name, **`…_redacted.pdf`** is the redacted artifact (text stripped); **`…_redactions_for_review.pdf`** is a review copy that **retains the text layer** — not the deliverable and not for leak checks.
+- **`/review_apply`** returns both files. Download `*_redacted.pdf` for delivery and post-apply coverage; ignore `_redactions_for_review.pdf` for text-layer verification.
 
 ### 6) Client and network
 

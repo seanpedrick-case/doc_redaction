@@ -1,6 +1,6 @@
 # Document redaction task prompt (template)
 
-Copy everything below **“---”** into a new agent chat (include the **Required skills** section). Replace `{placeholders}` in **Setup**, then fill in **User redaction requirements** at the end.
+Copy everything below **“---”** into a new agent chat (include the **Required skills** section). **Replace every `{placeholder}` with real values** — do not send literal `{FILE_NAME}` / `{INPUT_PATH}` strings. Fill **Deployment — Pass 2 VLM** when your stack exposes a local VLM, then fill in **User redaction requirements** at the end.
 
 For Cursor: attach or enable the skills listed in **Required skills** on the agent, *or* rely on the paths in that section — the agent must **read each skill file before** the corresponding phase.
 
@@ -10,11 +10,13 @@ For Cursor: attach or enable the skills listed in **Required skills** on the age
 
 | Placeholder | Example |
 |-------------|---------|
-| `{FILE_NAME}` | `20211004 Cora Fyller UNREDACTED 0507.pdf` |
+| `{FILE_NAME}` | `example.pdf` |
 | `{INPUT_PATH}` | `workspace/{FILE_NAME}` |
 | `{OUTPUT_BASE}` | `workspace/redact/{FILE_NAME}/` |
 | `{GRADIO_URL}` | `http://host.docker.internal:7861` |
 | `{PAGE_RANGE}` | `all` or `1-56` |
+| `{VLM_BASE_URL}` | `http://host.docker.internal:8000` (Pass 2 only; append `/v1/chat/completions`) |
+| `{VLM_MODEL}` | _(e.g. `Qwen/Qwen3.6-27B-MTP-GGUF`)_ |
 
 ---
 
@@ -42,6 +44,34 @@ Redact and review **`{FILE_NAME}`** from **`{INPUT_PATH}`**.
 
 **Cursor users:** attach skills `doc-redaction-app`, `doc-redaction-modifications`, and (if using page subagents) `doc-redact-page-review` to the agent, **and** keep the **Required skills** table in the prompt so the agent knows read order and phase boundaries.
 
+### Agent anti-confusion rules (read before acting)
+
+These rules prevent common LLM mistakes on real runs. **Skills define mechanics; this section defines stop conditions.**
+
+| Confusion | Wrong instinct | Correct approach |
+|-----------|----------------|------------------|
+| **`/review_apply` purpose** | “Draw overlays only” or “PyMuPDF script = real redaction” | **Only** `/review_apply` (or `/agent/apply_review_redactions`) produces deliverable `*_redacted.pdf` with text stripped. `/preview_boxes` is QA only. |
+| **PyMuPDF in Pass 1** | Write a standalone script that redacts and saves the final PDF | **Allowed:** read word/span positions from the **original PDF**, normalize to **0–1**, append rows to `*_review_file.csv`, then **`/review_apply`**. **Forbidden:** saving a “final” PDF without going through `/review_apply`. |
+| **How many applies?** | Re-call `/review_apply` after every small CSV tweak | **Batch** CSV fixes from the coverage JSON, then apply. Pass 1: **one** `/review_apply`; **at most one** extra apply only if Pass 2 CSV edits or a single coordinated fix pass still leaves `pass_strict: false`. Do **not** loop apply five+ times chasing the same pages. |
+| **When is Pass 1 done?** | “Pixel-black = good enough” while `pass_strict: false` | **Default deliverable gate:** post-apply **`pass_strict: true`**. If you cannot reach it, **stop and report** — do not silently ship (see exception table below). |
+| **`text_layer_leaks` + `coord_mismatch_or_image_text`** | Add ever-wider/full-page boxes until `get_text()` is clean | Often **decorative/image overlay** text. Check **`pixel_failures`** and manual pixel samples. If **pixels are black** but text stream still contains the term, **do not** keep adding full-span boxes — document as a known limitation or run **Pass 2** on those pages only. |
+| **Coverage regex too narrow** | Only regex the org keyword (e.g. `Lambeth`) when user said “redact any names” | Derive **`must_redact`** from **all** user bullets (names, org terms, faces policy). For “any names”, include a name pattern (e.g. `\b[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})+\b`) **plus** explicit name tokens from the review CSV / word OCR — not org terms alone. |
+| **`verify_redaction_coverage` paths** | Upload CSV to a random endpoint or use client paths on Agent API | Prefer **`POST /agent/verify_redaction_coverage`** with **server paths** from the same `/doc_redact` run (under app `OUTPUT_FOLDER`). If client and server do not share a filesystem, use Gradio upload + `/review_apply`, or run the CLI locally on downloaded CSVs. |
+| **`CUSTOM_VLM_FACES` on `/doc_redact`** | Assume face boxes exist; skip face QA | Face detection may return **zero rows**. If user requires face-photo redaction and review CSV has **no face boxes**, treat as **Pass 2 / flagged-page** work — do not mark the task complete without noting face coverage. |
+| **Draft vs deliverable PDF** | Post-apply checks on `*_redactions_for_review.pdf` or early `*_redacted.pdf` from `/doc_redact` | Verify against **post-apply** `*_redacted.pdf` from **`/review_apply`**, basename ending in `_redacted.pdf`. |
+| **Initial `/doc_redact` output** | Treat first-run `*_redacted.pdf` as final | Treat as **draft**. Pass 1 review + **`/review_apply`** is required unless the user explicitly waives review. |
+
+**Delivery exception (only if `pass_strict` cannot be reached after one apply + one fix pass):**
+
+Fill this in the summary markdown — **do not deliver without it** when `pass_strict: false`:
+
+| Field | Value |
+|-------|--------|
+| **Pages still failing strict** | _(e.g. 3, 5, 7, 19, 21)_ |
+| **`leak_likely_causes`** | _(from coverage JSON per page)_ |
+| **`pixel_failures` count** | _(0 = visually covered; >0 = real visual leak)_ |
+| **User decision needed** | Accept text-stream artifact / run Pass 2 VLM on listed pages / manual review |
+
 ### Two-pass model (Pass 1 is the deliverable)
 
 **Default: Pass 1 only.** Pass 1 must be sufficient for delivery unless Pass 2 criteria below are met after Pass 1 completes.
@@ -57,22 +87,25 @@ Redact and review **`{FILE_NAME}`** from **`{INPUT_PATH}`**.
 2. **Review all pages in Pass 1** using **OCR / CSV / text only** (no VLM):
    - Load `*_review_file.csv`, `*_ocr_results_with_words_*.csv`, `*_ocr_output_*.csv`, original PDF from the same run.
    - Apply **User redaction requirements** (must redact / must not redact) programmatically to the review CSV.
-   - Align missing boxes from word OCR (merge same-line tokens; separate boxes across lines).
-   - Run **`verify_redaction_coverage`** (CLI or `POST /agent/verify_redaction_coverage`) with `must_redact` / `must_not_redact` regex lists derived from user requirements.
-   - Fix policy issues until **`pass_strict: true`** (`uncovered_terms`, `over_redacted`, `text_layer_leaks` cleared).
+   - Align missing boxes from word OCR (merge same-line tokens; separate boxes across lines). Use PyMuPDF positions only to **author CSV rows** (normalized 0–1), not to write the final PDF directly.
+   - Run **`verify_redaction_coverage`** (CLI or `POST /agent/verify_redaction_coverage`) with `must_redact` / `must_not_redact` regex lists derived from **every** user requirement bullet (not just org keywords).
+   - Fix policy issues until **`pass_strict: true`** (`uncovered_terms`, `over_redacted`, `text_layer_leaks` cleared) — **batch fixes**, then re-verify; avoid re-applying after each row.
    - **Prune suspicious rows** — short OCR fragments that do not match `must_redact` (`auto_prune_suspicious: true` or `--prune-suspicious`). Re-run coverage; target **`pass_with_cleanup: true`**.
    - Optional: `/preview_boxes` on highest-risk pages only (not every page).
 
-3. **Single apply** — **one** `/review_apply` from the parent agent (original PDF + merged/pruned CSV). Download newest outputs by `st_mtime` to **`{OUTPUT_BASE}review/output_review_final/`**.
+3. **Apply (minimal calls)** — **`/review_apply`** once from the parent agent (original PDF + merged/pruned CSV). Download newest outputs by `st_mtime` to **`{OUTPUT_BASE}review/output_review_final/`**. **At most one** additional `/review_apply` if Pass 2 edits the CSV or a single coordinated fix pass is still required; see **Agent anti-confusion rules**.
 
 4. **Post-apply verification**
    - Re-run `verify_redaction_coverage` with `redacted_pdf_path`.
    - Optional term search (`POST /agent/word_level_ocr_text_search`) for key names from user requirements.
 
 5. **Pass 1 completion criteria**
-   - Post-apply coverage: **`pass_strict: true`**
+   - Post-apply coverage: **`pass_strict: true`** (required unless **Delivery exception** table in summary is filled — see anti-confusion rules)
    - Practitioner / allow-list names not over-redacted (per user requirements)
-   - Write a brief summary markdown under **`{OUTPUT_BASE}review/`** (what was done, coverage results, any pages still needing optional Pass 2)
+   - Deliverable PDF is **post-apply** `*_redacted.pdf` under **`{OUTPUT_BASE}review/output_review_final/`**
+   - Write a brief summary markdown under **`{OUTPUT_BASE}review/`** (what was done, coverage results, any pages still needing optional Pass 2 or user sign-off)
+
+**Hard gates:** (1) deliverable = post-apply `*_redacted.pdf` only via `/review_apply`; (2) `pass_strict: true` required unless you fill the Delivery exception table; (3) at most two `/review_apply` calls total in Pass 1; (4) batch CSV fixes — no apply-per-row loops; (5) PyMuPDF may only help write CSV rows, not replace `/review_apply`.
 
 ---
 
@@ -85,7 +118,7 @@ Redact and review **`{FILE_NAME}`** from **`{INPUT_PATH}`**.
 | I explicitly ask for visual / VLM review | Run Pass 2 only on pages or range I specify, or on `pages_flagged_for_vlm` if I say “flagged pages only” |
 | Post-apply coverage lists **`pages_flagged_for_vlm`** | VLM **only those pages** (sequential, max 1 concurrent on local VLM) |
 | Page has **`uncovered_terms`** for must-redact regex after Pass 1 fixes | Targeted Pass 2 on that page |
-| Page has **`text_layer_leaks`** or **`pixel_failures`** | Targeted Pass 2 on that page |
+| Page has **`text_layer_leaks`** or **`pixel_failures`** | Targeted Pass 2 on that page. If **`leak_likely_causes`** is `coord_mismatch_or_image_text` and **`pixel_failures` is empty**, prefer Pass 2 visual check over repeated full-span CSV boxes. |
 | Handwriting, stamps, signatures, or ink **absent from word OCR** and suspected to contain policy PII | Targeted Pass 2 on that page after noting why in the summary |
 
 **Do not run Pass 2 for:**
@@ -108,98 +141,97 @@ If Pass 2 runs: render PNGs for flagged pages only → one VLM call per page →
 - Reuse same-page `image` column value when adding rows
 - Long `httpx` read timeout for large PDFs (e.g. 1800s+)
 - Human review of redacted material is still assumed downstream
+- **Do not** bypass `/review_apply` with custom PyMuPDF “true redaction” scripts when `text_layer_leaks` appear — fix CSV boxes/coordinates and re-apply (see `doc-redaction-modifications` § Endpoint semantics)
+- If resuming a partial run: record which `*_redacted.pdf` is post-apply, re-run `verify_redaction_coverage` with that path (do not trust stale JSON without checking the PDF it was run against)
+- If the deployment has `POST_REDACT_PASS1_QA=True`, initial redaction may already emit `*_coverage_report.json` (and optional `*_review_file_pruned.csv`) — that is **deployment sanity QA**, not a substitute for this task's Pass 1 review and `/review_apply`
+
+---
+
+### Deployment — Pass 2 VLM (use only if Pass 2 criteria above are met)
+
+**Agent / operator fills this block** — not the end-user’s redaction policy. Use when Pass 2 visual review may run (e.g. face photos in scans, flagged pages after coverage). **Pass 1 does not call this endpoint.**
+
+Omit this entire section or write **“N/A — no VLM deployed”** if Pass 2 will never run.
+
+| Setting | Value |
+|---------|--------|
+| **Base URL** | `{VLM_BASE_URL}` |
+| **Model** | `{VLM_MODEL}` |
+| **API key** | _(e.g. `none` for local vLLM, or env var name like `VLM_API_KEY` — **do not paste secrets in chat**)_ |
+| **Timeout (s)** | _(e.g. `240`)_ |
+| **max_tokens** | _(e.g. `2500`)_ |
+| **Notes** | _(e.g. reasoning model — check `reasoning_content`; sequential one page at a time)_ |
+
+For **simple user sections** (non-expert bullets only), keep VLM connection details here — not under **User redaction requirements**. For **detailed user sections**, you may duplicate or move settings to **Pass 2 VLM endpoint** below instead.
+
+---
+
+## Long documents (100+ pages — operator / agent rules)
+
+Use this appendix when **`{PAGE_RANGE}`** is **`all`** or spans **100+ pages** (e.g. 500-page bundles). Pass 1 remains the deliverable; Pass 2 stays **flagged-pages-only**.
+
+### When to activate
+
+- Page count **≥ 100**, or expected OCR CSV **> 50k word rows**, or a single `/doc_redact` call is likely to exceed **~30 minutes**.
+- Set **`{PAGE_RANGE}`** explicitly (e.g. `1-500`) so subagents and coverage know scope.
+
+### Programmatic review (mandatory at scale)
+
+**Never load the full `*_review_file.csv` or word OCR CSV into chat context.** At 500 pages these files can exceed model context limits.
+
+Instead:
+
+1. Edit CSVs with **Python/pandas scripts** on disk (regex policy, merge word boxes, add rows).
+2. Run **`verify_redaction_coverage`** via CLI or **`POST /agent/verify_redaction_coverage`**; read the **JSON report** only (`pages_with_policy_issues`, per-page flags).
+3. Fix **only flagged pages**; batch edits before re-running coverage (avoid verify-after-every-row).
+4. Use **`--prune-suspicious`** / `auto_prune_suspicious: true` once policy passes are stable.
+
+Parallel page subagents ([`doc-redact-page-review`](../doc-redact-page-review/SKILL.md)): spawn for **policy-flagged pages** or page-specific rules — not necessarily all 500 pages. Batch **3–5 concurrent** children; parent **merges once** and calls **`/review_apply` once**.
+
+### Initial redaction — prefer CLI or chunks
+
+| Approach | When |
+|----------|------|
+| **`python cli_redact.py`** (or **`POST /agent/redact_document`**) | Multi-hour jobs; avoids Gradio HTTP read timeouts |
+| **Chunked `/doc_redact`** (`page_min` / `page_max`, e.g. 100 pages per run) | Single call would exceed client timeout or server RAM |
+| **Single `/doc_redact`** | ≤ ~100 pages or mostly text with `EFFICIENT_OCR=True` and long `httpx` read timeout (1800s+) |
+
+After chunked redact: merge review CSVs with **`combine_review_csvs`** (Agent API / Gradio), then **one** `/review_apply` on the **full original PDF**.
+
+**Deployment toggles** (see `tools/config.py`, `config/app_config.env`):
+
+- **`EFFICIENT_OCR=True`** — text extraction first; OCR only on sparse/image pages.
+- **`OCR_FIRST_PASS_MAX_WORKERS`**, **`PADDLE_MAX_WORKERS`** — tune CPU/GPU parallelism.
+- **`POST_REDACT_PASS1_QA=True`** — optional post-redact coverage + prune (sanity QA only; not a substitute for this task's Pass 1 review).
+
+### Tiered Pass 1 workflow (500+ pages)
+
+1. Initial redact (CLI or chunked) → save under **`{OUTPUT_BASE}output_redact/`**.
+2. Programmatic regex pass on full review CSV.
+3. **`verify_redaction_coverage`** → fix pages in `pages_with_policy_issues`.
+4. Prune suspicious rows → re-verify until **`pass_with_cleanup: true`**.
+5. **One** `/review_apply` → post-apply verify with `redacted_pdf_path`.
+6. Optional: **`find_duplicate_pages`** — review one page per duplicate cluster, propagate CSV patterns.
+7. Pass 2 VLM **only** on `pages_flagged_for_vlm` or user-specified ranges — **never** full-document visual sweep.
+
+### Resume checkpoints
+
+If the agent session dies mid-task:
+
+- After step 1: resume from CSV edit + verify (artifacts in `{OUTPUT_BASE}output_redact/`).
+- After apply: record which `*_redacted.pdf` is post-apply; re-run verify against that path (do not trust stale JSON).
+
+### Pass 2 at scale
+
+Do **not** run VLM on every page. At ~1–2 min/page sequential on local VLMs, 500 pages ≈ **8–17 hours** plus large image-token cost. Use Deployment — Pass 2 VLM only for explicit flagged subsets.
 
 ---
 
 ## User redaction requirements (fill in — authoritative for this task)
 
-> **Instructions for the user:** Replace the placeholder bullets below with your case-specific policy. The agent must treat this section as the source of truth for what to redact, what to leave visible, and any run settings not covered above.
+**Instructions for the user:** Include placeholder bullets below with your case-specific policy. The agent must treat this section as the source of truth for what to redact, what to leave visible, and any run settings not covered above.
 
-### Document and scope
 
-- **File:** `{FILE_NAME}`
-- **Pages to process:** `{PAGE_RANGE}`
-- **Output folder:** `{OUTPUT_BASE}`
 
-### OCR and PII detection
 
-- **OCR method:** _(e.g. `hybrid-paddle-inference-server`, fallback `paddle`)_
-- **PII method:** _(e.g. `Local`)_
-- **Other run options:** _(e.g. efficient OCR off, no batching, custom entities — or “defaults”)_
 
-### Must redact (family / sensitive — add boxes if missing)
-
-_List every name, relationship, address pattern, phone/postcode pattern, or other PII that must be blacked out. Be explicit about spelling variants and OCR fragments._
-
-- _(e.g. Cora, Stephen, Peter, Rhett, Yazmin, Elliot)_
-- _(e.g. surname variants: Fuller, Fyller)_
-- _(e.g. Romola)_
-- _(e.g. family addresses, phone numbers, postcodes)_
-- _(add rows as needed)_
-
-### Must NOT redact (practitioners / allow list — remove false-positive boxes)
-
-_List professionals, organisations, and generic terms that must remain visible unless they are also in “must redact”._
-
-- _(e.g. Dr / Doctor / social worker / nurse titles when not family)_
-- _(e.g. named practitioners: Macrae Gibson, Syred, Allsop, Wright, …)_
-- _(e.g. Lambeth Council, borough, department names when not personal data)_
-- _(add rows as needed)_
-
-### Coverage regex hints (optional — agent may derive from lists above)
-
-- **`must_redact` patterns:** _(e.g. `\b(cora|stephen|fuller|fyller)\b`)_
-- **`must_not_redact` patterns:** _(e.g. `\bdr\.?\b|\bmacrae\b|\bgibson\b`)_
-
-### Signatures, handwriting, and non-OCR content
-
-- _(e.g. redact handwritten signatures near “Signed”; add CUSTOM boxes if OCR blind)_
-- _(e.g. skip Pass 2 unless flagged)_
-
-### Pass 2 preference
-
-- _(e.g. “Pass 1 only — do not run VLM unless I ask”)_
-- _(e.g. “Run Pass 2 only on pages_flagged_for_vlm after Pass 1”)_
-
-### Pass 2 VLM endpoint (optional — fill in only if Pass 2 may run)
-
-Pass 1 does **not** use this block. It is for **visual page review** (`POST …/v1/chat/completions` with page PNGs), not for `/doc_redact` OCR (e.g. `hybrid-paddle-inference-server` — that is configured on the Gradio app / inference server, not here).
-
-Leave blank or write **“N/A — Pass 1 only”** if Pass 2 will not run.
-
-| Setting | Value |
-|---------|--------|
-| **Base URL** | _(e.g. `http://host.docker.internal:8000` — agent appends `/v1/chat/completions`)_ |
-| **Model** | _(e.g. `Qwen/Qwen2.5-VL-7B-Instruct`)_ |
-| **API key** | _(e.g. `none` for local vLLM, or env var name like `VLM_API_KEY` — **do not paste secrets in chat**)_ |
-| **Timeout (s)** | _(e.g. `240`)_ |
-| **max_tokens** | _(e.g. `2000`)_ |
-| **Notes** | _(e.g. reasoning model — check `reasoning_content`; sequential one page at a time)_ |
-
-### Additional instructions
-
-_(Any other constraints: duplicate pages, specific pages to spot-check, files not to commit, delivery format, etc.)_
-
----
-
-## Example (minimal filled user section)
-
-```markdown
-### Must redact
-- Cora, Stephen, Peter, Rhett, Yazmin, Elliot; Fuller/Fyller; Romola
-- Phone numbers and UK postcodes associated with the family
-
-### Must NOT redact
-- Practitioners: Dr, doctors, social workers, Macrae, Gibson, Syred, Allsop, Wright
-- Generic org text: Lambeth Council, borough, department (unless containing family PII)
-
-### OCR and PII
-- OCR: hybrid-paddle-inference-server (fallback paddle)
-- PII: Local
-
-### Pass 2 preference
-- Pass 1 only unless pages_flagged_for_vlm remain after prune and post-apply coverage
-
-### Pass 2 VLM endpoint
-- N/A — Pass 1 only (omit Pass 2 unless I follow up)
-```

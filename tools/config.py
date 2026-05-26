@@ -1583,6 +1583,16 @@ QWEN35_27B_BNB_4BIT_REPO_ID = get_or_create_env_var(
 QWEN35_35B_A3B_REPO_ID = get_or_create_env_var(
     "QWEN35_35B_A3B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-35B-A3B"
 )
+QWEN36_27B_REPO_ID = get_or_create_env_var(
+    "QWEN36_27B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.6-27B"
+)
+QWEN36_27B_BNB_4BIT_REPO_ID = get_or_create_env_var(
+    "QWEN36_27B_BNB_4BIT_REPO_TRANSFORMERS_ID", "lokeshe09/Qwen3.6-27B-bnb-4bit"
+)
+QWEN36_35B_A3B_REPO_ID = get_or_create_env_var(
+    "QWEN36_35B_A3B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-35B-A3B"
+)
+
 QWEN35_122B_A10B_REPO_ID = get_or_create_env_var(
     "QWEN35_122B_A10B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-122B-A10B"
 )
@@ -1681,6 +1691,26 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_35B_A3B_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 35B-A3B"
     elif (
+        "qwen3.6-27b-bnb" in model_choice_lower
+        or QWEN36_27B_BNB_4BIT_REPO_ID in model_choice_lower
+        or "qwen3.6-27b-4bit" in model_choice_lower
+    ):
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN36_27B_BNB_4BIT_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.6 27B (4-bit)"
+    elif (
+        "qwen3.6-27b" in model_choice_lower
+        or "qwen-3.6-27b"
+        or QWEN36_27B_REPO_ID in model_choice_lower
+    ):
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN36_27B_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.6 27B"
+    elif (
+        "qwen3.6-35b-a3b" in model_choice_lower
+        or QWEN36_35B_A3B_REPO_ID in model_choice_lower
+    ):
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN36_35B_A3B_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.6 35B-A3B"
+    elif (
         "qwen3.5-122b" in model_choice_lower
         or "qwen-3.5-122b"
         or QWEN35_122B_A10B_REPO_ID in model_choice_lower
@@ -1724,6 +1754,9 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE in [
     "Qwen 3.5 27B (4-bit)",
     "Qwen 3.5 27B",
     "Qwen 3.5 35B-A3B",
+    "Qwen 3.6 27B (4-bit)",
+    "Qwen 3.6 27B",
+    "Qwen 3.6 35B-A3B",
     "Qwen 3.5 122B-A10B",
     "Gemma 4 31B bnb",
 ]:
@@ -2222,6 +2255,30 @@ TWO_PASS_REVIEW_PDF_LOW_MEMORY = convert_string_to_boolean(
 RETURN_REDACTED_PDF = convert_string_to_boolean(
     get_or_create_env_var("RETURN_REDACTED_PDF", "True")
 )  # Return a redacted PDF at the end of the redaction task. Could be useful to set this to "False" if you want to ensure that the user always goes to the 'Review Redactions' tab before getting the final redacted PDF product.
+
+# Optional Pass 1 sanity QA after initial redaction (coverage report + optional sibling pruned CSV).
+# Does not auto-apply review edits or run VLM — see tools/post_redaction_pass1_qa.py.
+POST_REDACT_PASS1_QA = convert_string_to_boolean(
+    get_or_create_env_var("POST_REDACT_PASS1_QA", "False")
+)
+POST_REDACT_PASS1_AUTO_PRUNE = convert_string_to_boolean(
+    get_or_create_env_var("POST_REDACT_PASS1_AUTO_PRUNE", "False")
+)
+POST_REDACT_PASS1_USE_DENY_ALLOW_LISTS = convert_string_to_boolean(
+    get_or_create_env_var("POST_REDACT_PASS1_USE_DENY_ALLOW_LISTS", "True")
+)
+POST_REDACT_PASS1_MUST_REDACT_PATH = get_or_create_env_var(
+    "POST_REDACT_PASS1_MUST_REDACT_PATH", ""
+)
+POST_REDACT_PASS1_MUST_NOT_REDACT_PATH = get_or_create_env_var(
+    "POST_REDACT_PASS1_MUST_NOT_REDACT_PATH", ""
+)
+POST_REDACT_PASS1_MIN_WORD_LENGTH = int(
+    get_or_create_env_var("POST_REDACT_PASS1_MIN_WORD_LENGTH", "3")
+)
+POST_REDACT_PASS1_INCLUDE_IN_OUTPUTS = convert_string_to_boolean(
+    get_or_create_env_var("POST_REDACT_PASS1_INCLUDE_IN_OUTPUTS", "True")
+)
 
 COMPRESS_REDACTED_PDF = convert_string_to_boolean(
     get_or_create_env_var("COMPRESS_REDACTED_PDF", "False")

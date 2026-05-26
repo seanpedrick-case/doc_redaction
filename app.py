@@ -10339,6 +10339,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         api_name="review_apply",
         api_description=(
             "Apply redactions in one call from the original PDF and a *_review_file.csv. "
+            "Uses PyMuPDF redaction annotations and strips underlying text in *_redacted.pdf. "
+            "Also returns *_redactions_for_review.pdf (text retained for review). "
             "Returns (output_paths, message). Does not update the Review tab UI session."
         ),
     )

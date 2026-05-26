@@ -5071,24 +5071,22 @@ def _warn_and_halt_review_df_validation(msg: str) -> None:
     raise gr.Error(msg)
 
 
-def validate_review_file_df(review_file_df: pd.DataFrame) -> None:
+def get_review_file_df_validation_errors(
+    review_file_df: pd.DataFrame,
+) -> str | None:
     """
-    Validate `review_file_df` shape/values before applying manual updates.
+    Return a human-readable validation error message, or ``None`` if valid.
 
-    If invalid, shows a GUI warning and halts chained Gradio events.
+    Shared by the Gradio UI validator and headless ``/review_apply`` / agent apply.
     """
 
     if review_file_df is None or not isinstance(review_file_df, pd.DataFrame):
-        _warn_and_halt_review_df_validation(
-            "Review file table is missing or not a DataFrame."
-        )
+        return "Review file table is missing or not a DataFrame."
 
     required_cols = ["label", "text", "color", "xmin", "ymin", "xmax", "ymax"]
     missing = [c for c in required_cols if c not in review_file_df.columns]
     if missing:
-        _warn_and_halt_review_df_validation(
-            f"Review file table is missing required columns: {missing}"
-        )
+        return f"Review file table is missing required columns: {missing}"
 
     # ---- label checks ----
     label_series = review_file_df["label"]
@@ -5138,7 +5136,7 @@ def validate_review_file_df(review_file_df: pd.DataFrame) -> None:
             "Labels must be < 50 chars and must not contain script-like content. "
             f"Examples: {sample}"
         )
-        _warn_and_halt_review_df_validation(msg)
+        return msg
 
     # ---- text checks ----
     text_series = review_file_df["text"]
@@ -5171,7 +5169,7 @@ def validate_review_file_df(review_file_df: pd.DataFrame) -> None:
             "Text must be <= 1000 chars and must not contain script-like content. "
             f"Examples: {sample}"
         )
-        _warn_and_halt_review_df_validation(msg)
+        return msg
 
     # ---- color checks ----
     color_series = review_file_df["color"]
@@ -5229,7 +5227,7 @@ def validate_review_file_df(review_file_df: pd.DataFrame) -> None:
             "Expected a tuple/list like (12, 34, 56) (or the string '(12, 34, 56)') with each value 0–255. "
             f"Examples: {sample}"
         )
-        _warn_and_halt_review_df_validation(msg)
+        return msg
 
     # ---- bounding box checks ----
     bbox_cols = ["xmin", "ymin", "xmax", "ymax"]
@@ -5271,4 +5269,24 @@ def validate_review_file_df(review_file_df: pd.DataFrame) -> None:
             "Values must be numeric, within 0–1, and satisfy xmin<=xmax and ymin<=ymax. "
             f"Examples: {sample}"
         )
+        return msg
+
+    return None
+
+
+def validate_review_file_df(review_file_df: pd.DataFrame) -> None:
+    """
+    Validate `review_file_df` shape/values before applying manual updates.
+
+    If invalid, shows a GUI warning and halts chained Gradio events.
+    """
+    msg = get_review_file_df_validation_errors(review_file_df)
+    if msg:
         _warn_and_halt_review_df_validation(msg)
+
+
+def validate_review_file_df_headless(review_file_df: pd.DataFrame) -> None:
+    """Validate review CSV data for headless apply; raises ``ValueError`` on failure."""
+    msg = get_review_file_df_validation_errors(review_file_df)
+    if msg:
+        raise ValueError(msg)

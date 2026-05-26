@@ -82,6 +82,8 @@ class RedactionOptions:
     prepare_images: bool = True
     RETURN_REDACTED_PDF: bool = RETURN_REDACTED_PDF
     RETURN_PDF_FOR_REVIEW: bool = RETURN_PDF_FOR_REVIEW
+    post_redact_pass1_qa: Optional[bool] = None
+    post_redact_pass1_auto_prune: Optional[bool] = None
 
 
 @dataclass

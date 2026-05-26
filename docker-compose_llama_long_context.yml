@@ -19,7 +19,7 @@ services:
   # Qwen 3.6 27B model setup below requires 24GB of VRAM to run.
   qwen36-27b_q4_gguf:
     profiles: ["27b_36"]
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda12-b9265
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda12
     command:
       - -hf
       - unsloth/Qwen3.6-27B-MTP-GGUF
@@ -36,9 +36,9 @@ services:
       # - -sm
       # - "row"
       - --tensor-split
-      - "24,17"
+      - "24,15"
       - --ctx-size
-      - "98304"
+      - "114688"
       - -ub
       - "512"
       - --fit
@@ -75,7 +75,7 @@ services:
       - --spec-type
       - "draft-mtp"
       - --spec-draft-n-max
-      - "3"
+      - "2"
     ports:
       - "8000:8080"
     volumes:

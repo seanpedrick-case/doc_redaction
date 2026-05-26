@@ -787,6 +787,87 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             model_default_prompt = text_read_default_prompt
             _apply_generation_family_defaults(_QWEN3_5_FAMILY_DEFAULTS)
 
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.6-27B":
+            from transformers import (
+                AutoProcessor,
+                Qwen3_5ForConditionalGeneration,
+            )
+
+            MODEL_ID = "Qwen/Qwen3.6-27B"
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "attn_implementation": attn_implementation,
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["dtype"] = "auto"
+            model = Qwen3_5ForConditionalGeneration.from_pretrained(
+                MODEL_ID, **load_kwargs
+            )
+
+            model_default_prompt = text_read_default_prompt
+            _apply_generation_family_defaults(_QWEN3_5_FAMILY_DEFAULTS)
+
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.6-27B-bnb-4bit":
+            from transformers import (
+                AutoProcessor,
+                Qwen3_5ForConditionalGeneration,
+            )
+
+            MODEL_ID = "lokeshe09/Qwen3.6-27B-bnb-4bit"
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "attn_implementation": attn_implementation,
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["dtype"] = "auto"
+            model = Qwen3_5ForConditionalGeneration.from_pretrained(
+                MODEL_ID, **load_kwargs
+            )
+
+            model_default_prompt = text_read_default_prompt
+            _apply_generation_family_defaults(_QWEN3_5_FAMILY_DEFAULTS)
+
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.6-35B-A3B":
+            from transformers import (
+                AutoProcessor,
+                Qwen3_5MoeForConditionalGeneration,
+            )
+
+            MODEL_ID = "Qwen/Qwen3.6-35B-A3B"
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "attn_implementation": attn_implementation,
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["dtype"] = "auto"
+            model = Qwen3_5MoeForConditionalGeneration.from_pretrained(
+                MODEL_ID, **load_kwargs
+            )
+
+            model_default_prompt = text_read_default_prompt
+            _apply_generation_family_defaults(_QWEN3_5_FAMILY_DEFAULTS)
+
         elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-122B-A10B":
             from transformers import (
                 AutoProcessor,

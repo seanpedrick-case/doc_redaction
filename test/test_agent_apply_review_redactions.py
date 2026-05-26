@@ -97,3 +97,44 @@ def test_review_csv_basename_must_contain_review_file(tmp_out_dir: str) -> None:
             review_csv_path=str(wrong_csv),
             output_dir=tmp_out_dir,
         )
+
+
+def test_run_apply_review_redactions_rejects_pixel_coordinates(
+    tmp_out_dir: str,
+) -> None:
+    pdf = _example_pdf()
+    csv = _example_review_csv()
+    if not pdf.is_file() or not csv.is_file():
+        pytest.skip("example_data fixtures not present")
+
+    import pandas as pd
+
+    bad_csv = Path(tmp_out_dir) / "pixel_coords_review_file.csv"
+    df = pd.read_csv(csv, encoding="utf-8-sig")
+    df.loc[0, ["xmin", "ymin", "xmax", "ymax"]] = [100.0, 200.0, 300.0, 400.0]
+    df.to_csv(bad_csv, index=False, encoding="utf-8-sig")
+
+    from tools.simplified_api import run_apply_review_redactions
+
+    with pytest.raises(ValueError, match="between 0 and 1"):
+        run_apply_review_redactions(
+            pdf_path=str(pdf),
+            review_csv_path=str(bad_csv),
+            output_dir=tmp_out_dir,
+        )
+
+
+def test_gradio_apply_message_labels_deliverable_pdf(tmp_out_dir: str) -> None:
+    pdf = _example_pdf()
+    csv = _example_review_csv()
+    if not pdf.is_file() or not csv.is_file():
+        pytest.skip("example_data fixtures not present")
+
+    from tools.simplified_api import apply_review_redactions_from_uploads_for_gradio_api
+
+    _, msg = apply_review_redactions_from_uploads_for_gradio_api(
+        str(pdf), str(csv), tmp_out_dir
+    )
+    assert "_redacted.pdf" in msg
+    assert "Deliverable" in msg
+    assert "text removed" in msg.lower()

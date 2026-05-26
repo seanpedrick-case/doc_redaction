@@ -1149,6 +1149,7 @@ def list_operations() -> dict[str, Any]:
                     "auto_prune_suspicious": "remove short OCR-fragment rows before reporting",
                     "pages_flagged_for_vlm": "policy/visual failures only",
                     "pages_needing_csv_cleanup": "suspicious rows — prune, not VLM",
+                    "leak_likely_causes": "per-page hints when text_layer_leaks (coord_not_normalized, missing_page_boxes, etc.) — not a broken /review_apply",
                 },
             },
             {

@@ -176,3 +176,27 @@ def test_cli_api_word_search() -> None:
 
     out = run_word_level_ocr_text_search(words, "Toolkit", review_csv_path=review)
     assert out["match_count"] >= 1
+
+
+def test_infer_leak_likely_causes_flags_non_normalized_coords() -> None:
+    from tools.verify_redaction_coverage import PageReport, infer_leak_likely_causes
+
+    page_report = PageReport(
+        page=3,
+        pass_strict=False,
+        review_row_count=2,
+        text_layer_leaks=["Lambeth"],
+    )
+    page_review = [
+        {
+            "page": 3,
+            "xmin": 491.43,
+            "ymin": 0.1,
+            "xmax": 500.0,
+            "ymax": 0.2,
+            "text": "Example",
+            "label": "PERSON",
+        }
+    ]
+    causes = infer_leak_likely_causes(page_report, page_review)
+    assert "coord_not_normalized" in causes

@@ -1078,6 +1078,8 @@ def _choose_and_run_redactor_impl(
     prepare_images: bool = True,
     RETURN_REDACTED_PDF: bool = RETURN_REDACTED_PDF,
     RETURN_PDF_FOR_REVIEW: bool = RETURN_PDF_FOR_REVIEW,
+    post_redact_pass1_qa: bool | None = None,
+    post_redact_pass1_auto_prune: bool | None = None,
     progress=gr.Progress(track_tqdm=True),
 ):
     """
@@ -1195,6 +1197,9 @@ def _choose_and_run_redactor_impl(
         efficient_ocr_min_embedded_image_px = max(
             0, int(efficient_ocr_min_embedded_image_px)
         )
+
+    if efficient_ocr is None:
+        efficient_ocr = EFFICIENT_OCR
 
     # CLI mode may provide options to enter method names in a different format
     print("Text extraction method requested:", text_extraction_method)
@@ -3864,6 +3869,42 @@ def _choose_and_run_redactor_impl(
             else:
                 out_file_paths.append(review_file_path[0])
 
+            _rev_csv = (
+                review_file_path
+                if isinstance(review_file_path, str)
+                else review_file_path[0]
+            )
+            _ocr_words = all_page_line_level_ocr_results_with_words_df_file_path
+            if isinstance(_ocr_words, list):
+                _ocr_words = _ocr_words[0] if _ocr_words else None
+            if _rev_csv and _ocr_words:
+                try:
+                    from tools.post_redaction_pass1_qa import (
+                        run_post_redaction_pass1_qa,
+                    )
+
+                    qa_result = run_post_redaction_pass1_qa(
+                        review_csv_path=_rev_csv,
+                        ocr_words_csv_path=_ocr_words,
+                        output_folder=output_folder,
+                        total_pages=number_of_pages,
+                        deny_list=custom_recogniser_word_list_flat,
+                        allow_list=in_allow_list_flat,
+                        enabled=post_redact_pass1_qa,
+                        auto_prune=post_redact_pass1_auto_prune,
+                    )
+                    if qa_result.get("summary"):
+                        if isinstance(combined_out_message, list):
+                            combined_out_message = "\n".join(combined_out_message)
+                        combined_out_message = (
+                            combined_out_message + " " + qa_result["summary"]
+                        )
+                    for qa_path in qa_result.get("paths_created") or []:
+                        if qa_path not in out_file_paths:
+                            out_file_paths.append(qa_path)
+                except Exception as qa_exc:
+                    print(f"Post-redaction Pass 1 QA failed: {qa_exc}")
+
         # Make a combined message for the file
         if isinstance(combined_out_message, list):
             combined_out_message = "\n".join(combined_out_message)
@@ -4151,6 +4192,8 @@ def choose_and_run_redactor(
     prepare_images: bool = True,
     RETURN_REDACTED_PDF: bool = RETURN_REDACTED_PDF,
     RETURN_PDF_FOR_REVIEW: bool = RETURN_PDF_FOR_REVIEW,
+    post_redact_pass1_qa: bool | None = None,
+    post_redact_pass1_auto_prune: bool | None = None,
     progress=gr.Progress(track_tqdm=True),
 ):
     """Compatibility wrapper: builds RedactionOptions/RedactionContext and calls run_redaction."""

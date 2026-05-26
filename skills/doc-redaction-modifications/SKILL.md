@@ -1,7 +1,7 @@
 ---
 name: doc-redaction-modifications
 description: "Review and reapply: two-pass workflow — Pass 1 (OCR/CSV/text, default) then optional Pass 2 (VLM per page). Edit *_review_file.csv, preview, /review_apply, verify. Parallel page orchestration → doc-redact-page-review. Initial redaction → doc-redaction-app."
-version: 2.4.0
+version: 2.5.1
 author: repo-maintained
 license: AGPL-3.0-only
 ---
@@ -27,6 +27,37 @@ Review is split into a **fast, text-based first pass** (default) and an **option
 | **Apply** | **One** `/review_apply` after Pass 1 merge | Edit CSV from VLM findings → **one** more `/review_apply` if changes made |
 
 **Default workflow:** Pass 1 only → deliver. Run Pass 2 only when needed.
+
+## Endpoint semantics (do not get this wrong)
+
+| Endpoint | Applies redaction? | Text layer stripped? | Output to use |
+|----------|-------------------|----------------------|---------------|
+| `/doc_redact` | Proposes boxes; may emit an early `*_redacted.pdf` | Run-dependent | Review CSV + OCR — treat as **draft** until Pass 1 review + apply |
+| `/preview_boxes` | **No** — draws boxes on rendered page images only | N/A | Coordinate QA only |
+| `/review_apply` | **Yes** — from **original PDF + `*_review_file.csv`** | **Yes** — PyMuPDF redaction + `apply_redactions()` | `*_redacted.pdf` |
+
+**Never** implement a custom “true redaction” PyMuPDF script because `text_layer_leaks` appeared. Fix CSV coverage and coordinates first, then call `/review_apply` again. **Exception:** reading PyMuPDF word positions to **add normalized CSV rows** is allowed — writing the final PDF without `/review_apply` is not (see task template § Agent anti-confusion rules).
+
+**Never** run post-apply text-layer checks on `*_redactions_for_review.pdf` — that file **retains text** for human review. `/review_apply` returns **both** files; only `*_redacted.pdf` is the deliverable.
+
+Use [`tools/verify_redaction_coverage.py`](../../tools/verify_redaction_coverage.py) or `POST /agent/verify_redaction_coverage` — **do not** reimplement coverage scripts locally.
+
+### Text-layer leak troubleshooting
+
+When `text_layer_leaks` appear on `*_redacted.pdf`:
+
+1. Confirm the PDF basename ends with `_redacted.pdf` (not `_redactions_for_review.pdf`).
+2. **Pre-apply:** all `xmin/ymin/xmax/ymax` must be **normalized 0–1** (`df[bbox_cols].max().max() <= 1`). Never paste PyMuPDF absolute points without dividing by page width/height.
+3. Read `leak_likely_causes` on each page in the coverage report:
+
+| Cause | Meaning | Fix |
+|-------|---------|-----|
+| `missing_page_boxes` | No review rows on that page | Add boxes from word/line OCR or PyMuPDF text positions (normalized) |
+| `missing_review_boxes` | Word OCR hits not intersecting any box | Add/extend review rows |
+| `coord_not_normalized` | CSV rows use pixel/point coords (>1) | Normalize to 0–1; re-apply (headless apply now rejects invalid coords) |
+| `coord_mismatch_or_image_text` | Word OCR covered but text still extractable | Widen boxes, split multi-line blocks, or redact image areas (`CUSTOM`); image-baked text cannot be stripped by text redaction alone. If **`pixel_failures` is empty** after apply, stop adding full-span boxes — document limitation or use Pass 2 visual check on those pages. |
+
+Word OCR can show **100% covered** while the text layer still leaks — that is usually **coordinates** or **image text**, not a broken apply endpoint.
 
 ## Pass 1 — OCR / CSV / text review
 
@@ -58,6 +89,17 @@ Use artefacts from the **same redaction run**. No VLM in this pass.
 
 Pass 1 is **complete** when `pass_strict` is true (policy satisfied). **`pass_with_cleanup`** also requires no suspicious short rows. Run **Pass 2 VLM only on `pages_flagged_for_vlm`** (policy/visual risk — not `pages_needing_csv_cleanup` alone).
 
+### Automatic post-redaction QA (optional — main app)
+
+When `POST_REDACT_PASS1_QA=True` ([`tools/config.py`](../../tools/config.py)), initial redaction (Gradio / CLI / `/doc_redact`) runs [`tools/post_redaction_pass1_qa.py`](../../tools/post_redaction_pass1_qa.py) after writing `*_review_file.csv`:
+
+- Emits `*_coverage_report.json` next to the review CSV
+- Optionally emits sibling `*_review_file_pruned.csv` when `POST_REDACT_PASS1_AUTO_PRUNE=True` (does **not** replace the original CSV)
+- Maps run **deny list → must_redact**, **allow list → must_not_redact** when `POST_REDACT_PASS1_USE_DENY_ALLOW_LISTS=True`
+- Appends a one-line QA summary to the redaction status message
+
+This is **pre-review-apply** deployment QA only. **Agent Pass 1** (policy edits, merge, `/review_apply`, post-apply coverage) is still required for case-specific review workflows.
+
 ### Coverage verification (Pass 1 — no VLM)
 
 Programmatic QA replacing per-page visual review for most cases.
@@ -81,6 +123,7 @@ python tools/verify_redaction_coverage.py merged_review_file.csv ocr_words.csv \
 | `pass_with_cleanup` | Also no suspicious short OCR-fragment rows |
 | `pages_flagged_for_vlm` | Policy/visual failures → optional Pass 2 |
 | `pages_needing_csv_cleanup` | Suspicious rows only → run prune step, not VLM |
+| `leak_likely_causes` (per page) | Why `text_layer_leaks` appeared — see troubleshooting table above |
 
 **Agent API:** `POST /agent/verify_redaction_coverage`
 
@@ -232,6 +275,7 @@ Do not default to `/agent/apply_review_redactions` unless paths resolve **on the
 ## Critical constraints
 
 - Review CSV **basename** must contain `_review_file`.
+- **Bounding boxes:** `xmin`, `ymin`, `xmax`, `ymax` must be **normalized 0–1** (not PDF points or pixels). Pre-apply sanity check: `df[["xmin","ymin","xmax","ymax"]].max().max() <= 1`.
 - **`image` column**: reuse an **existing row’s `image` value for the same page** when adding rows.
 - **`handle_file`**: local paths → `handle_file(...)`; server paths from prior upload → plain string.
 - CSV: **`encoding="utf-8-sig"`** (BOM).
@@ -338,7 +382,7 @@ Watch **false positives**: geography/org as **PERSON**, bare job titles, OCR fra
 1. Raw **`/gradio_api/*`**
 2. **`/agent/apply_review_redactions`** — server-local paths only
 3. Browser UI
-4. Local PyMuPDF apply — [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md)
+4. Local PyMuPDF apply — [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) — **only when `/review_apply` fails** (HTTP/Gradio error), **not** when coverage reports `text_layer_leaks`
 
 ## Checklists
 

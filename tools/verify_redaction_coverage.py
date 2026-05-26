@@ -65,6 +65,7 @@ class PageReport:
     suspicious_rows: list[ReviewRowHit] = field(default_factory=list)
     text_layer_leaks: list[str] = field(default_factory=list)
     pixel_failures: list[str] = field(default_factory=list)
+    leak_likely_causes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -176,6 +177,39 @@ def is_covered_by_review(
         if boxes_intersect(wx0, wy0, wx1, wy1, *rb):
             return True
     return False
+
+
+def _row_has_non_normalized_bbox(row: dict) -> bool:
+    rb = review_box(row)
+    if rb is None:
+        return False
+    return any(v > 1.0 or v < 0.0 for v in rb)
+
+
+def infer_leak_likely_causes(
+    page_report: PageReport, page_review: list[dict]
+) -> list[str]:
+    """
+    Suggest why ``text_layer_leaks`` appear despite review boxes.
+
+    Helps agents avoid misdiagnosing leaks as a broken ``/review_apply`` endpoint.
+    """
+    if not page_report.text_layer_leaks:
+        return []
+    causes: list[str] = []
+    if page_report.review_row_count == 0:
+        causes.append("missing_page_boxes")
+    if page_report.uncovered_terms:
+        causes.append("missing_review_boxes")
+    if page_review and any(_row_has_non_normalized_bbox(r) for r in page_review):
+        causes.append("coord_not_normalized")
+    if (
+        not page_report.uncovered_terms
+        and page_report.review_row_count > 0
+        and "coord_not_normalized" not in causes
+    ):
+        causes.append("coord_mismatch_or_image_text")
+    return causes
 
 
 def matches_any(text: str, patterns: list[re.Pattern]) -> bool:
@@ -444,6 +478,11 @@ def verify_redaction_coverage(
                     if leak and leak not in page_report.text_layer_leaks:
                         page_report.text_layer_leaks.append(leak)
                         page_report.pass_strict = False
+
+        if page_report.text_layer_leaks:
+            page_report.leak_likely_causes = infer_leak_likely_causes(
+                page_report, page_review
+            )
 
         if sample_pixels and redacted_pdf_path and page_review:
             boxes: list[tuple[float, float, float, float]] = []
