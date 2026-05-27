@@ -3,8 +3,8 @@ name: CI/CD Pipeline
 on:
   push:
     branches: [ main ]
-  #pull_request:
-  #  branches: [ main ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
   #schedule:
   # Run tests daily at 2 AM UTC
