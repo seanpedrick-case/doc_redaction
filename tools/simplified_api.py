@@ -1240,11 +1240,15 @@ def run_verify_redaction_coverage(
     pruned_csv_path: str | None = None
     prune_log: dict | None = None
     if auto_prune_suspicious:
-        out = (
-            Path(pruned_output_path)
-            if pruned_output_path
-            else review_path.with_name(f"{review_path.stem}_pruned.csv")
-        )
+        if pruned_output_path:
+            safe_pruned_output_path = validate_path_safety(
+                pruned_output_path,
+                [INPUT_FOLDER, OUTPUT_FOLDER],
+                is_input=False,
+            )
+            out = Path(safe_pruned_output_path)
+        else:
+            out = review_path.with_name(f"{review_path.stem}_pruned.csv")
         prune_log = prune_suspicious_review_csv(
             review_path,
             out,
