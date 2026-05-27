@@ -23,9 +23,19 @@ def _is_file_path(path: str) -> bool:
 
 
 def _resolve_under_workspace(path: str) -> Path | None:
+    if not path or not path.strip():
+        return None
+
     try:
-        resolved = Path(path).resolve()
-        resolved.relative_to(WORKSPACE_DIR.resolve())
+        user_path = Path(path)
+        if user_path.is_absolute():
+            return None
+        if ".." in user_path.parts:
+            return None
+
+        workspace_root = WORKSPACE_DIR.resolve()
+        resolved = (workspace_root / user_path).resolve()
+        resolved.relative_to(workspace_root)
     except (ValueError, OSError):
         return None
     return resolved if resolved.is_file() else None
