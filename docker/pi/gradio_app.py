@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import gradio as gr
 from output_files import (
+    gradio_allowed_paths,
     load_workspace_output_files,
     refresh_workspace_output_files_stub,
     workspace_files_download_fn,
@@ -464,7 +465,7 @@ def build_ui() -> gr.Blocks:
 
         session_info = gr.Markdown("_Ready._")
 
-        with gr.Row(equal_height=True):
+        with gr.Row(equal_height=False):
             with gr.Column(scale=2):
                 with gr.Accordion("Redaction task", open=True):
                     gr.Markdown(
@@ -645,4 +646,5 @@ if __name__ == "__main__":
         server_name=PI_UI_HOST,
         server_port=PI_UI_PORT,
         show_error=True,
+        allowed_paths=gradio_allowed_paths(),
     )

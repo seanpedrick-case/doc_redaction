@@ -40,6 +40,24 @@ def refresh_workspace_output_files_stub() -> gr.FileExplorer:
     return gr.FileExplorer(root_dir=str(REFRESH_STUB_DIR.resolve()))
 
 
+def gradio_allowed_paths() -> list[str]:
+    """Paths Gradio may serve via gr.File (must include the shared workspace)."""
+    paths: list[str] = []
+    for raw in (
+        WORKSPACE_DIR,
+        os.environ.get("PI_WORKDIR", "/workspace/doc_redaction"),
+        REFRESH_STUB_DIR,
+        "/tmp",
+    ):
+        try:
+            resolved = str(Path(raw).resolve())
+        except OSError:
+            continue
+        if resolved not in paths:
+            paths.append(resolved)
+    return paths
+
+
 def workspace_files_download_fn(selected: list[str] | None) -> list[str] | None:
     """Return only file paths under the workspace (for gr.File download)."""
     if not selected:
