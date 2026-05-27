@@ -5,9 +5,7 @@ version: 1.4.0
 author: repo-maintained
 license: AGPL-3.0-only
 changelog:
-  - "v1.4.0 (Apr 21, 2026): Added /find_duplicate_tabular docs with handle_file caveat. Clarified HF Space '0 entities' quirk.
-Added Excel multi-sheet handling. Output file naming convention section expanded strategy
-comparison. Added error handling patterns and edge case notes."
+  - "v1.4.0 (Apr 21, 2026): Added /find_duplicate_tabular docs with handle_file caveat. Clarified HF Space '0 entities' quirk. Added Excel multi-sheet handling. Output file naming convention section expanded strategy comparison. Added error handling patterns and edge case notes."
 ---
 
 ## Purpose

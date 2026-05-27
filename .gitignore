@@ -36,6 +36,7 @@ docs/*
 cdk.out/*
 cdk.json
 cdk.context.json
+precheck.context.json
 .quarto/*
 /.quarto/
 /_site/
@@ -53,3 +54,5 @@ src/doc_redaction.egg-info/*
 docker_compose/*
 **/*.quarto_ipynb
 skills/example_prompts/*
+.pi/sessions/
+docker/pi/agent/sessions/

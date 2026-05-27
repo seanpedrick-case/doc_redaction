@@ -1,0 +1,32 @@
+{
+  "defaultProvider": "llama-cpp",
+  "defaultModel": "unsloth/Qwen3.6-27B-MTP-GGUF",
+  "defaultThinkingLevel": "off",
+  "hideThinkingBlock": true,
+  "compaction": {
+    "enabled": false,
+    "reserveTokens": 16384,
+    "keepRecentTokens": 20000
+  },
+  "branchSummary": {
+    "skipPrompt": true,
+    "reserveTokens": 16384
+  },
+  "retry": {
+    "enabled": true,
+    "maxRetries": 3,
+    "baseDelayMs": 2000,
+    "provider": {
+      "timeoutMs": 3600000,
+      "maxRetries": 2,
+      "maxRetryDelayMs": 60000
+    }
+  },
+  "enableSkillCommands": true,
+  "sessionDir": "sessions",
+  "steeringMode": "one-at-a-time",
+  "followUpMode": "one-at-a-time",
+  "terminal": {
+    "showTerminalProgress": false
+  }
+}

@@ -62,6 +62,8 @@ from cdk_config import (
     ECS_TASK_ROLE_NAME,
     ECS_USE_FARGATE_SPOT,
     EXISTING_IGW_ID,
+    EXISTING_LOAD_BALANCER_ARN,
+    EXISTING_LOAD_BALANCER_DNS,
     FARGATE_TASK_DEFINITION_NAME,
     FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
     GITHUB_REPO_BRANCH,
@@ -136,7 +138,14 @@ class CdkStack(Stack):
 
         # --- Helper to get context values ---
         def get_context_bool(key: str, default: bool = False) -> bool:
-            return self.node.try_get_context(key) or default
+            value = self.node.try_get_context(key)
+            if value is None:
+                return default
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                return value.lower() in ("true", "1", "yes")
+            return bool(value)
 
         def get_context_str(key: str, default: str = None) -> str:
             return self.node.try_get_context(key) or default
@@ -159,14 +168,32 @@ class CdkStack(Stack):
         # --- VPC and Subnets (Assuming VPC is always lookup, Subnets are created/returned by create_subnets) ---
         new_vpc_created = False
         if VPC_NAME:
-            print("Looking for current VPC:", VPC_NAME)
-            try:
-                vpc = ec2.Vpc.from_lookup(self, "VPC", vpc_name=VPC_NAME)
-                print("Successfully looked up VPC:", vpc.vpc_id)
-            except Exception as e:
-                raise Exception(
-                    f"Could not look up VPC with name '{VPC_NAME}' due to: {e}"
+            vpc_id = get_context_str("vpc_id")
+            if not vpc_id:
+                raise ValueError(
+                    f"VPC '{VPC_NAME}' was not resolved during pre-check (missing "
+                    "'vpc_id' in context). Re-run from the cdk/ directory so "
+                    "precheck.context.json is generated."
                 )
+            availability_zones = list(
+                dict.fromkeys(
+                    (PUBLIC_SUBNET_AVAILABILITY_ZONES or [])
+                    + (PRIVATE_SUBNET_AVAILABILITY_ZONES or [])
+                )
+            )
+            if not availability_zones:
+                raise ValueError(
+                    "vpc_id is in context but no subnet availability zones are "
+                    "configured. Set PUBLIC_SUBNET_AVAILABILITY_ZONES and/or "
+                    "PRIVATE_SUBNET_AVAILABILITY_ZONES in cdk_config.env."
+                )
+            vpc = ec2.Vpc.from_vpc_attributes(
+                self,
+                "VPC",
+                vpc_id=vpc_id,
+                availability_zones=availability_zones,
+            )
+            print(f"Using VPC from pre-check context: {vpc_id}")
 
         elif NEW_VPC_DEFAULT_NAME:
             new_vpc_created = True
@@ -378,7 +405,7 @@ class CdkStack(Stack):
                 # The rest of the original code (which iterates *_SUBNETS_TO_USE) will be skipped.
 
         checked_public_subnets_ctx = get_context_dict("checked_public_subnets")
-        get_context_dict("checked_private_subnets")
+        checked_private_subnets_ctx = get_context_dict("checked_private_subnets")
 
         public_subnets_data_for_creation_ctx = get_context_list_of_dicts(
             "public_subnets_to_create"
@@ -399,13 +426,31 @@ class CdkStack(Stack):
                         raise RuntimeError(
                             f"Context for existing public subnet '{subnet_name}' is missing 'id'."
                         )
+                    subnet_az = subnet_info.get("az")
+                    if (
+                        not subnet_az
+                        and PUBLIC_SUBNET_AVAILABILITY_ZONES
+                        and i < len(PUBLIC_SUBNET_AVAILABILITY_ZONES)
+                    ):
+                        subnet_az = PUBLIC_SUBNET_AVAILABILITY_ZONES[i]
+                    if not subnet_az:
+                        raise RuntimeError(
+                            f"Context for existing public subnet '{subnet_name}' is missing 'az'."
+                        )
+                    subnet_attrs = {
+                        "subnet_id": subnet_id,
+                        "availability_zone": subnet_az,
+                    }
+                    route_table_id = subnet_info.get("route_table_id")
+                    if route_table_id:
+                        subnet_attrs["route_table_id"] = route_table_id
                     try:
-                        ec2.Subnet.from_subnet_id(
+                        imported_subnet = ec2.Subnet.from_subnet_attributes(
                             self,
                             f"ImportedPublicSubnet{subnet_name.replace('-', '')}{i}",
-                            subnet_id,
+                            **subnet_attrs,
                         )
-                        # self.public_subnets.append(imported_subnet)
+                        self.public_subnets.append(imported_subnet)
                         print(
                             f"Imported existing public subnet: {subnet_name} (ID: {subnet_id})"
                         )
@@ -456,7 +501,9 @@ class CdkStack(Stack):
         print("Creating NAT gateway/located existing")
         self.single_nat_gateway_id = None
 
-        nat_gw_id_from_context = SINGLE_NAT_GATEWAY_ID
+        nat_gw_id_from_context = SINGLE_NAT_GATEWAY_ID or get_context_str(
+            "id:NatGateway"
+        )
 
         if nat_gw_id_from_context:
             print(
@@ -501,8 +548,47 @@ class CdkStack(Stack):
 
         # --- 4. Process Private Subnets ---
         print("\n--- Processing Private Subnets ---")
-        # ... (rest of your existing subnet processing logic for checked_private_subnets_ctx) ...
-        # (This part for importing existing subnets remains the same)
+        if checked_private_subnets_ctx:
+            for i, subnet_name in enumerate(PRIVATE_SUBNETS_TO_USE):
+                subnet_info = checked_private_subnets_ctx.get(subnet_name)
+                if subnet_info and subnet_info.get("exists"):
+                    subnet_id = subnet_info.get("id")
+                    if not subnet_id:
+                        raise RuntimeError(
+                            f"Context for existing private subnet '{subnet_name}' is missing 'id'."
+                        )
+                    subnet_az = subnet_info.get("az")
+                    if (
+                        not subnet_az
+                        and PRIVATE_SUBNET_AVAILABILITY_ZONES
+                        and i < len(PRIVATE_SUBNET_AVAILABILITY_ZONES)
+                    ):
+                        subnet_az = PRIVATE_SUBNET_AVAILABILITY_ZONES[i]
+                    if not subnet_az:
+                        raise RuntimeError(
+                            f"Context for existing private subnet '{subnet_name}' is missing 'az'."
+                        )
+                    subnet_attrs = {
+                        "subnet_id": subnet_id,
+                        "availability_zone": subnet_az,
+                    }
+                    route_table_id = subnet_info.get("route_table_id")
+                    if route_table_id:
+                        subnet_attrs["route_table_id"] = route_table_id
+                    try:
+                        imported_subnet = ec2.Subnet.from_subnet_attributes(
+                            self,
+                            f"ImportedPrivateSubnet{subnet_name.replace('-', '')}{i}",
+                            **subnet_attrs,
+                        )
+                        self.private_subnets.append(imported_subnet)
+                        print(
+                            f"Imported existing private subnet: {subnet_name} (ID: {subnet_id})"
+                        )
+                    except Exception as e:
+                        raise RuntimeError(
+                            f"Failed to import private subnet '{subnet_name}' with ID '{subnet_id}'. Error: {e}"
+                        )
 
         # Create new private subnets
         if private_subnets_data_for_creation_ctx:
@@ -914,15 +1000,16 @@ class CdkStack(Stack):
                     raise ValueError(
                         f"Context value 'arn:{codebuild_project_name}' is required if project exists."
                     )
-                codebuild_project = codebuild.Project.from_project_arn(
+                codebuild.Project.from_project_arn(
                     self, "CodeBuildProject", project_arn=project_arn
                 )
                 print("Using existing CodeBuild project")
             else:
-                codebuild_project = codebuild.Project(
+                codebuild.Project(
                     self,
                     "CodeBuildProject",  # Logical ID
                     project_name=codebuild_project_name,  # Explicit resource name
+                    role=codebuild_role,
                     source=codebuild.Source.git_hub(
                         owner=GITHUB_REPO_USERNAME,
                         repo=GITHUB_REPO_NAME,
@@ -975,8 +1062,24 @@ class CdkStack(Stack):
                 )
                 print("Successfully created CodeBuild project", codebuild_project_name)
 
-            # Grant permissions - applies to both created and imported project role
-            ecr_repo.grant_pull_push(codebuild_project.role)
+            # Imported projects have role=undefined in CDK; use the actual service
+            # role from context (existing project) or the managed codebuild_role (new).
+            if get_context_bool(f"exists:{codebuild_project_name}"):
+                project_service_role_arn = get_context_str(
+                    f"service_role_arn:{codebuild_project_name}"
+                )
+                if project_service_role_arn:
+                    ecr_grantee = iam.Role.from_role_arn(
+                        self,
+                        "CodeBuildProjectServiceRole",
+                        role_arn=project_service_role_arn,
+                        mutable=True,
+                    )
+                else:
+                    ecr_grantee = codebuild_role
+            else:
+                ecr_grantee = codebuild_role
+            ecr_repo.grant_pull_push(ecr_grantee)
 
         except Exception as e:
             raise Exception("Could not handle Codebuild project due to:", e)
@@ -1075,15 +1178,34 @@ class CdkStack(Stack):
             load_balancer_name = ALB_NAME
             if len(load_balancer_name) > 32:
                 load_balancer_name = load_balancer_name[-32:]
-            if get_context_bool(f"exists:{load_balancer_name}"):
-                # Lookup ALB by ARN from context
-                alb_arn = get_context_str(f"arn:{load_balancer_name}")
-                if not alb_arn:
-                    raise ValueError(
-                        f"Context value 'arn:{load_balancer_name}' is required if ALB exists."
+            alb_arn = get_context_str(f"arn:{load_balancer_name}") or (
+                EXISTING_LOAD_BALANCER_ARN or None
+            )
+            alb_dns_name = get_context_str(f"dns:{load_balancer_name}") or (
+                EXISTING_LOAD_BALANCER_DNS or None
+            )
+            if alb_arn and alb_dns_name:
+                alb_security_group_id = (
+                    get_context_str(f"security_group_id:{load_balancer_name}")
+                    or alb_security_group.security_group_id
+                )
+                alb_attrs = {
+                    "load_balancer_arn": alb_arn,
+                    "load_balancer_dns_name": alb_dns_name,
+                    "security_group_id": alb_security_group_id,
+                    "vpc": vpc,
+                }
+                alb_canonical_zone_id = get_context_str(
+                    f"canonical_hosted_zone_id:{load_balancer_name}"
+                )
+                if alb_canonical_zone_id:
+                    alb_attrs["load_balancer_canonical_hosted_zone_id"] = (
+                        alb_canonical_zone_id
                     )
-                alb = elbv2.ApplicationLoadBalancer.from_lookup(
-                    self, "ALB", load_balancer_arn=alb_arn  # Logical ID
+                alb = elbv2.ApplicationLoadBalancer.from_application_load_balancer_attributes(
+                    self,
+                    "ALB",
+                    **alb_attrs,
                 )
                 print(f"Using existing Application Load Balancer {load_balancer_name}.")
             else:
@@ -1754,7 +1876,7 @@ class CdkStack(Stack):
             description="ID of the ALB's Security Group",
             export_name=f"{self.stack_name}-AlbSgId",
         )
-        CfnOutput(self, "ALBName", value=alb.load_balancer_name)
+        CfnOutput(self, "ALBName", value=load_balancer_name)
 
         CfnOutput(self, "RegionalAlbDnsName", value=alb.load_balancer_dns_name)
 

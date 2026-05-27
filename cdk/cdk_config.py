@@ -98,9 +98,18 @@ AWS_ACCOUNT_ID = get_or_create_env_var("AWS_ACCOUNT_ID", "")
 # CDK OPTIONS
 ###
 CDK_PREFIX = get_or_create_env_var("CDK_PREFIX", "")
-CONTEXT_FILE = get_or_create_env_var(
-    "CONTEXT_FILE", "cdk.context.json"
-)  # Define the CDK output context file name
+_precheck_context_file = get_or_create_env_var("CONTEXT_FILE", "precheck.context.json")
+# Never write boto3 pre-check output into CDK's lookup cache file (causes stale
+# vpc-provider / load-balancer entries and wrong-account lookup validation errors).
+if os.path.basename(_precheck_context_file.replace("\\", "/")) == "cdk.context.json":
+    print(
+        "WARNING: CONTEXT_FILE must not be 'cdk.context.json' (that file is CDK's "
+        "lookup cache). Using 'precheck.context.json' instead. Update "
+        "config/cdk_config.env and remove CONTEXT_FILE=cdk.context.json if set."
+    )
+    _precheck_context_file = "precheck.context.json"
+CONTEXT_FILE = _precheck_context_file
+CDK_CONTEXT_FILE = get_or_create_env_var("CDK_CONTEXT_FILE", "cdk.context.json")
 CDK_FOLDER = get_or_create_env_var(
     "CDK_FOLDER", ""
 )  # FULL_PATH_TO_CDK_FOLDER_HERE (with forward slash)
@@ -253,7 +262,7 @@ ALB_TARGET_GROUP_NAME = get_or_create_env_var(
 )  # Max 32 characters
 EXISTING_LOAD_BALANCER_ARN = get_or_create_env_var("EXISTING_LOAD_BALANCER_ARN", "")
 EXISTING_LOAD_BALANCER_DNS = get_or_create_env_var(
-    "EXISTING_LOAD_BALANCER_ARN", "placeholder_load_balancer_dns.net"
+    "EXISTING_LOAD_BALANCER_DNS", "placeholder_load_balancer_dns.net"
 )
 
 ## CLOUDFRONT

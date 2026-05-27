@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Any, Dict, List
+from typing import Dict, List
 
 from cdk_config import (  # Import necessary config
     ALB_NAME,
@@ -110,7 +110,6 @@ def check_and_set_context():
         context_data["vpc_id"] = vpc_id  # Store VPC ID in context
 
         # SUBNET CHECKS
-        context_data: Dict[str, Any] = {}
         all_proposed_subnets_data: List[Dict[str, str]] = []
 
         # Flag to indicate if full validation mode (with CIDR/AZs) is active
@@ -193,6 +192,18 @@ def check_and_set_context():
                 checked_public_subnets[subnet_name] = {
                     "exists": exists,
                     "id": subnet_id,
+                    "az": (
+                        existing_aws_subnets["by_name"].get(subnet_name, {}).get("az")
+                        if exists
+                        else None
+                    ),
+                    "route_table_id": (
+                        existing_aws_subnets["by_name"]
+                        .get(subnet_name, {})
+                        .get("route_table_id")
+                        if exists
+                        else None
+                    ),
                 }
 
                 # If the subnet exists, remove it from the proposed subnets list
@@ -215,6 +226,18 @@ def check_and_set_context():
                 checked_private_subnets[subnet_name] = {
                     "exists": exists,
                     "id": subnet_id,
+                    "az": (
+                        existing_aws_subnets["by_name"].get(subnet_name, {}).get("az")
+                        if exists
+                        else None
+                    ),
+                    "route_table_id": (
+                        existing_aws_subnets["by_name"]
+                        .get(subnet_name, {})
+                        .get("route_table_id")
+                        if exists
+                        else None
+                    ),
                 }
 
                 # If the subnet exists, remove it from the proposed subnets list
@@ -239,10 +262,13 @@ def check_and_set_context():
                 )
                 print("\nPre-synth validation successful. Proceeding with CDK synth.\n")
 
-                # Populate context_data for downstream CDK construct creation
+                # Populate context_data for downstream CDK construct creation.
+                # Skip subnets that already exist in AWS (imported in the stack).
                 context_data["public_subnets_to_create"] = []
                 if public_ready_for_full_validation:
                     for i, name in enumerate(PUBLIC_SUBNETS_TO_USE):
+                        if checked_public_subnets.get(name, {}).get("exists"):
+                            continue
                         context_data["public_subnets_to_create"].append(
                             {
                                 "name": name,
@@ -254,6 +280,8 @@ def check_and_set_context():
                 context_data["private_subnets_to_create"] = []
                 if private_ready_for_full_validation:
                     for i, name in enumerate(PRIVATE_SUBNETS_TO_USE):
+                        if checked_private_subnets.get(name, {}).get("exists"):
+                            continue
                         context_data["private_subnets_to_create"].append(
                             {
                                 "name": name,
@@ -270,24 +298,21 @@ def check_and_set_context():
     # Example checks and setting context values
     # IAM Roles
     role_name = CODEBUILD_ROLE_NAME
-    exists, _, _ = check_for_existing_role(role_name)
-    context_data[f"exists:{role_name}"] = exists  # Use boolean
+    exists, role_arn, _ = check_for_existing_role(role_name)
+    context_data[f"exists:{role_name}"] = exists
     if exists:
-        _, role_arn, _ = check_for_existing_role(role_name)  # Get ARN if needed
         context_data[f"arn:{role_name}"] = role_arn
 
     role_name = ECS_TASK_ROLE_NAME
-    exists, _, _ = check_for_existing_role(role_name)
+    exists, role_arn, _ = check_for_existing_role(role_name)
     context_data[f"exists:{role_name}"] = exists
     if exists:
-        _, role_arn, _ = check_for_existing_role(role_name)
         context_data[f"arn:{role_name}"] = role_arn
 
     role_name = ECS_TASK_EXECUTION_ROLE_NAME
-    exists, _, _ = check_for_existing_role(role_name)
+    exists, role_arn, _ = check_for_existing_role(role_name)
     context_data[f"exists:{role_name}"] = exists
     if exists:
-        _, role_arn, _ = check_for_existing_role(role_name)
         context_data[f"arn:{role_name}"] = role_arn
 
     # S3 Buckets
@@ -313,25 +338,28 @@ def check_and_set_context():
 
     # CodeBuild Project
     project_name = CODEBUILD_PROJECT_NAME
-    exists, _ = check_codebuild_project_exists(project_name)
+    exists, project_arn, service_role_arn = check_codebuild_project_exists(project_name)
     context_data[f"exists:{project_name}"] = exists
     if exists:
-        # Need a way to get the ARN from the check function
-        _, project_arn = check_codebuild_project_exists(
-            project_name
-        )  # Assuming it returns ARN
         context_data[f"arn:{project_name}"] = project_arn
+        if service_role_arn:
+            context_data[f"service_role_arn:{project_name}"] = service_role_arn
 
-    # ALB (by name lookup)
-    alb_name = ALB_NAME
-    exists, _ = check_alb_exists(alb_name, region_name=AWS_REGION)
+    # ALB (by name lookup) — context keys use the same 32-char name the stack uses
+    alb_name = ALB_NAME[-32:] if len(ALB_NAME) > 32 else ALB_NAME
+    exists, alb_object = check_alb_exists(alb_name, region_name=AWS_REGION)
     context_data[f"exists:{alb_name}"] = exists
     if exists:
-        _, alb_object = check_alb_exists(
-            alb_name, region_name=AWS_REGION
-        )  # Assuming check returns object
         print("alb_object:", alb_object)
         context_data[f"arn:{alb_name}"] = alb_object["LoadBalancerArn"]
+        context_data[f"dns:{alb_name}"] = alb_object["DNSName"]
+        context_data[f"canonical_hosted_zone_id:{alb_name}"] = alb_object[
+            "CanonicalHostedZoneId"
+        ]
+        if alb_object.get("SecurityGroups"):
+            context_data[f"security_group_id:{alb_name}"] = alb_object[
+                "SecurityGroups"
+            ][0]
 
     # Cognito User Pool (by name)
     user_pool_name = COGNITO_USER_POOL_NAME
@@ -360,13 +388,10 @@ def check_and_set_context():
 
     # WAF Web ACL (by name and scope)
     web_acl_name = WEB_ACL_NAME
-    exists, _ = check_web_acl_exists(
-        web_acl_name, scope="CLOUDFRONT"
-    )  # Assuming check returns object
+    exists, existing_web_acl = check_web_acl_exists(web_acl_name, scope="CLOUDFRONT")
     context_data[f"exists:{web_acl_name}"] = exists
     if exists:
-        _, existing_web_acl = check_web_acl_exists(web_acl_name, scope="CLOUDFRONT")
-        context_data[f"arn:{web_acl_name}"] = existing_web_acl.attr_arn
+        context_data[f"arn:{web_acl_name}"] = existing_web_acl["ARN"]
 
     # Write the context data to the file
     with open(CONTEXT_FILE, "w") as f:

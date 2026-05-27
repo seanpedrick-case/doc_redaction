@@ -8,21 +8,24 @@
 
 # docker compose -f docker-compose_llama_long_context.yml --profile 35b_36 up -d
 # docker compose -f docker-compose_llama_long_context.yml --profile 27b_36 up -d
-# docker compose -f docker-compose_llama_long_context.yml --profile 35b up -d
-# docker compose -f docker-compose_llama_long_context.yml --profile 27b up -d
-# docker compose -f docker-compose_llama_long_context.yml --profile 9b up -d
 # docker compose -f docker-compose_llama_long_context.yml --profile gemma4-31b up -d
 # docker compose -f docker-compose_llama_long_context.yml --profile gemma4-26b up -d
 
+# For agentic usage with pi
+# docker compose -f docker-compose_llama_agentic.yml --profile 27b_36 up -d --build
+# docker compose -f docker-compose_llama_agentic.yml exec -it pi-agent pi
+
+# docker compose -f docker-compose_llama_agentic.yml --profile 27b_36 up -d pi-agent
+
 services:
 
-  # Qwen 3.6 27B model setup below requires 24GB of VRAM to run.
+  # Qwen 3.6 27B model setup below requires 40GB of VRAM to run. For 24GB, Change to -hf-file parameter to Qwen3.6-27B-UD-Q4_K_XL.gguf, or Qwen3.6-27B-IQ4_NL.gguf
   qwen36-27b_q4_gguf:
     profiles: ["27b_36"]
     image: ghcr.io/ggml-org/llama.cpp:server-cuda12
     command:
       - -hf
-      - unsloth/Qwen3.6-27B-MTP-GGUF
+      - unsloth/Qwen3.6-27B-MTP-GGUF # For
       - --hf-file
       - Qwen3.6-27B-UD-Q6_K_XL.gguf
       - --mmproj-url
@@ -35,8 +38,8 @@ services:
       # - "cuda0,cuda1"
       # - -sm
       # - "row"
-      - --tensor-split
-      - "24,15"
+      # - --tensor-split
+      # - "24,15"
       - --ctx-size
       - "114688"
       - -ub
@@ -175,215 +178,6 @@ services:
       redaction-net-llama:
         aliases:
           - llama-inference
-
-  # Qwen 3.5 35B model setup below requires 24GB of VRAM with n-cpu-moe set to 0. For lower VRAM systems, n-cpu-moe ~ 40 could work for a 12GB VRAM system, and n-cpu-moe ~ 20 for a 16GB VRAM system.
-  qwen35-35b_q4_gguf:
-    profiles: ["35b"]
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda12
-    command:
-      - -hf
-      - unsloth/Qwen3.5-35B-A3B-GGUF
-      - --hf-file
-      - Qwen3.5-35B-A3B-UD-IQ4_NL.gguf
-      - --mmproj-url
-      - https://huggingface.co/unsloth/Qwen3.5-35B-A3B-GGUF/resolve/main/mmproj-F16.gguf
-      - --n-gpu-layers
-      - "-1"
-      - --ctx-size
-      - "196608"
-      - --fit
-      - "off"
-      - --temp
-      - "0.7"
-      - --top-k
-      - "20"
-      - --top-p
-      - "0.8"
-      - --min-p
-      - "0.0"
-      - --frequency-penalty
-      - "1"
-      - --presence-penalty
-      - "1"
-      - --host
-      - "0.0.0.0"
-      - --port
-      - "8080"
-      - --no-warmup
-      - --seed
-      - "42"
-      - --n-cpu-moe
-      - "0" # Increase this value to fit within your availableVRAM
-      - --image_min_tokens
-      - "300"
-      - --parallel
-      - "1"
-      - --cache-type-k
-      - "q8_0"
-      - --cache-type-v
-      - "q8_0"
-    ports:
-      - "8001:8080"
-    volumes:
-      - ./models:/models
-      - hf-llama-cache-qwen35-35b:/root/.cache/llama.cpp
-      - hf-hub-cache-qwen35-35b:/root/.cache/huggingface
-    pull_policy: always
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/v1/models >/dev/null || exit 1"]
-      interval: 30s
-      timeout: 15s
-      retries: 8
-      start_period: 1200s
-    networks:
-      redaction-net-llama:
-        aliases:
-          - llama-inference
-
-  # Qwen 3.5 27B model setup below requires 24GB of VRAM to run.
-  qwen35-27b_q4_gguf:
-    profiles: ["27b"]
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda12
-    command:
-      - -hf
-      - unsloth/Qwen3.5-27B-GGUF
-      - --hf-file
-      - Qwen3.5-27B-UD-Q4_K_XL.gguf
-      - --mmproj-url
-      - https://huggingface.co/unsloth/Qwen3.5-27B-GGUF/resolve/main/mmproj-F16.gguf
-      - --n-gpu-layers
-      - "-1"
-      - --ctx-size
-      - "196608"
-      - --fit
-      - "off"
-      - --temp
-      - "0.7"
-      - --top-k
-      - "20"
-      - --top-p
-      - "0.8"
-      - --min-p
-      - "0.0"
-      - --frequency-penalty
-      - "1"
-      - --presence-penalty
-      - "1"
-      - --host
-      - "0.0.0.0"
-      - --port
-      - "8080"
-      - --no-warmup
-      - --seed
-      - "42"
-      - --image_min_tokens
-      - "300"
-      - --parallel
-      - "1"
-      - --cache-type-k
-      - "q8_0"
-      - --cache-type-v
-      - "q8_0"
-    ports:
-      - "8000:8080"
-    volumes:
-      - ./models:/models
-      - hf-llama-cache-qwen35-27b:/root/.cache/llama.cpp
-      - hf-hub-cache-qwen35-27b:/root/.cache/huggingface
-    pull_policy: always
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/v1/models >/dev/null || exit 1"]
-      interval: 30s
-      timeout: 15s
-      retries: 8
-      start_period: 1200s
-    networks:
-      redaction-net-llama:
-        aliases:
-          - llama-inference
-
-  qwen9b_q4_gguf:
-    profiles: ["9b"]
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda12
-    command:
-      - -hf
-      - unsloth/Qwen3.5-9B-GGUF
-      - --hf-file
-      - Qwen3.5-9B-UD-Q4_K_XL.gguf
-      - --mmproj-url
-      - https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/mmproj-BF16.gguf
-      - --n-gpu-layers
-      - "-1"
-      - --ctx-size
-      - "131072"
-      - --fit
-      - "off"
-      - --temp
-      - "0.7"
-      - --top-k
-      - "20"
-      - --top-p
-      - "0.8"
-      - --min-p
-      - "0.0"
-      - --frequency-penalty
-      - "1"
-      - --presence-penalty
-      - "1"
-      - --host
-      - "0.0.0.0"
-      - --port
-      - "8080"
-      - --no-warmup
-      - --seed
-      - "42"
-      - --n-cpu-moe
-      - "0" # Increase this value to fit within your availableVRAM
-      - --cache-type-k
-      - "q8_0"
-      - --cache-type-v
-      - "q8_0"
-      - --image_min_tokens
-      - "300"
-    ports:
-      - "8003:8080"
-    volumes:
-      - ./models:/models
-      - hf-llama-cache-qwen9b:/root/.cache/llama.cpp
-      - hf-hub-cache-qwen9b:/root/.cache/huggingface
-    pull_policy: always
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/v1/models >/dev/null || exit 1"]
-      interval: 30s
-      timeout: 15s
-      retries: 8
-      start_period: 1200s
-    networks:
-      redaction-net-llama:
-        aliases:
-          - llama-inference
-
 
    # Gemma 4 31B model setup below requires 24GB+ of VRAM to run.
   gemma4-31b_q4_gguf:
@@ -525,7 +319,7 @@ services:
           - llama-inference
 
   redaction-app-llama:
-    profiles: ["35b_36", "27b_36", "35b", "27b", "9b", "gemma4-31b", "gemma4-26b"]
+    profiles: ["35b_36", "27b_36", "gemma4-31b", "gemma4-26b"]
     image: redaction-app-main
     build:
       context: .              # Look in the current folder
@@ -542,15 +336,6 @@ services:
         condition: service_healthy
         required: false
       qwen36-27b_q4_gguf:
-        condition: service_healthy
-        required: false
-      qwen35-35b_q4_gguf:
-        condition: service_healthy
-        required: false
-      qwen35-27b_q4_gguf:
-        condition: service_healthy
-        required: false
-      qwen9b_q4_gguf:
         condition: service_healthy
         required: false
       gemma4-31b_q4_gguf:
@@ -611,6 +396,43 @@ services:
               capabilities: [gpu]
     ports:
       - "7861:7860"
+    volumes:
+      - ./workspace:/home/user/app/workspace:rw
+    networks:
+      - redaction-net-llama
+
+  pi-agent:
+    profiles: ["27b_36"]
+    build:
+      context: .
+      dockerfile: Dockerfile.pi
+    image: pi-agent-doc-redaction
+    depends_on:
+      qwen36-27b_q4_gguf:
+        condition: service_healthy
+      redaction-app-llama:
+        condition: service_started
+    environment:
+      - HOME=/home/node
+      - PI_SKIP_VERSION_CHECK=1
+      - PI_OFFLINE=1
+      - DOC_REDACTION_GRADIO_URL=http://redaction-app-llama:7860
+      - GRADIO_SERVER_NAME=0.0.0.0
+      - GRADIO_SERVER_PORT=7862
+      - PYTHONPATH=/workspace/doc_redaction/docker/pi
+      - PI_WORKSPACE_DIR=/home/user/app/workspace
+    ports:
+      - "7862:7862"
+    volumes:
+      - ./docker/pi/agent/settings.json:/home/node/.pi/agent/settings.json:ro
+      - ./docker/pi/agent/models.json:/home/node/.pi/agent/models.json:ro
+      - .:/workspace/doc_redaction:rw
+      - ./workspace:/home/user/app/workspace:rw
+      - pi-agent-sessions:/home/node/.pi/agent/sessions
+    working_dir: /workspace/doc_redaction
+    stdin_open: true
+    tty: true
+    entrypoint: ["/bin/bash", "/workspace/doc_redaction/docker/pi/start.sh"]
     networks:
       - redaction-net-llama
 
@@ -621,15 +443,10 @@ networks:
 volumes:
   hf-llama-cache-qwen36-35b:
   hf-llama-cache-qwen36-27b:
-  hf-llama-cache-qwen35-35b:
-  hf-llama-cache-qwen35-27b:
-  hf-llama-cache-qwen9b:
   hf-llama-cache-gemma4-31b:
   hf-llama-cache-gemma4-26b:
   hf-hub-cache-qwen36-35b:
   hf-hub-cache-qwen36-27b:
-  hf-hub-cache-qwen35-35b:
-  hf-hub-cache-qwen35-27b:
-  hf-hub-cache-qwen9b:
   hf-hub-cache-gemma4-31b:
   hf-hub-cache-gemma4-26b:
+  pi-agent-sessions:
