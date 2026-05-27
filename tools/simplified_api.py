@@ -1236,7 +1236,27 @@ def run_verify_redaction_coverage(
         verify_redaction_coverage,
     )
 
-    review_path = Path(review_csv_path)
+    safe_review_csv_path = validate_path_safety(
+        review_csv_path,
+        [INPUT_FOLDER, OUTPUT_FOLDER],
+        is_input=True,
+    )
+    safe_ocr_words_csv_path = validate_path_safety(
+        ocr_words_csv_path,
+        [INPUT_FOLDER, OUTPUT_FOLDER],
+        is_input=True,
+    )
+    safe_redacted_pdf_path = (
+        validate_path_safety(
+            redacted_pdf_path,
+            [INPUT_FOLDER, OUTPUT_FOLDER],
+            is_input=True,
+        )
+        if redacted_pdf_path
+        else None
+    )
+
+    review_path = Path(safe_review_csv_path)
     pruned_csv_path: str | None = None
     prune_log: dict | None = None
     if auto_prune_suspicious:
@@ -1260,10 +1280,10 @@ def run_verify_redaction_coverage(
 
     report = verify_redaction_coverage(
         review_path,
-        ocr_words_csv_path,
+        safe_ocr_words_csv_path,
         must_redact=must_redact,
         must_not_redact=must_not_redact,
-        redacted_pdf_path=redacted_pdf_path,
+        redacted_pdf_path=safe_redacted_pdf_path,
         total_pages=total_pages,
         min_word_length=min_word_length,
         sample_pixels=sample_pixels,
