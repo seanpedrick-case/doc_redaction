@@ -1,10 +1,18 @@
 import os
 
 from aws_cdk import App, Environment
+from cdk_appregistry import register_doc_redaction_application
 from cdk_config import (
+    APPREGISTRY_APPLICATION_NAME,
+    APPREGISTRY_ATTRIBUTE_GROUP_NAME,
+    APPREGISTRY_DESCRIPTION,
+    APPREGISTRY_REPOSITORY_URL,
+    APPREGISTRY_STACK_NAME,
     AWS_ACCOUNT_ID,
     AWS_REGION,
     CDK_CONTEXT_FILE,
+    CDK_PREFIX,
+    ENABLE_APPREGISTRY,
     RUN_USEAST_STACK,
     USE_CLOUDFRONT,
 )
@@ -65,6 +73,21 @@ aws_env_regional = Environment(account=AWS_ACCOUNT_ID, region=AWS_REGION)
 regional_stack = CdkStack(
     app, "RedactionStack", env=aws_env_regional, cross_region_references=True
 )
+
+if ENABLE_APPREGISTRY == "True":
+    register_doc_redaction_application(
+        app,
+        aws_account_id=AWS_ACCOUNT_ID,
+        aws_region=AWS_REGION,
+        application_name=APPREGISTRY_APPLICATION_NAME,
+        application_description=APPREGISTRY_DESCRIPTION,
+        appregistry_stack_name=APPREGISTRY_STACK_NAME,
+        attribute_group_name=APPREGISTRY_ATTRIBUTE_GROUP_NAME,
+        repository_url=APPREGISTRY_REPOSITORY_URL,
+        cdk_prefix=CDK_PREFIX,
+        use_cloudfront=USE_CLOUDFRONT,
+        alb_dns_name=regional_stack.params.get("alb_dns_name"),
+    )
 
 if USE_CLOUDFRONT == "True" and RUN_USEAST_STACK == "True":
     aws_env_us_east_1 = Environment(account=AWS_ACCOUNT_ID, region="us-east-1")

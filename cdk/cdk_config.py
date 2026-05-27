@@ -98,6 +98,28 @@ AWS_ACCOUNT_ID = get_or_create_env_var("AWS_ACCOUNT_ID", "")
 # CDK OPTIONS
 ###
 CDK_PREFIX = get_or_create_env_var("CDK_PREFIX", "")
+
+# AWS Console myApplications (Service Catalog AppRegistry)
+ENABLE_APPREGISTRY = get_or_create_env_var("ENABLE_APPREGISTRY", "True")
+APPREGISTRY_APPLICATION_NAME = get_or_create_env_var(
+    "APPREGISTRY_APPLICATION_NAME", f"{CDK_PREFIX}doc-redaction"
+)
+APPREGISTRY_DESCRIPTION = get_or_create_env_var(
+    "APPREGISTRY_DESCRIPTION",
+    "PII document redaction app (ALB, ECS Fargate, Cognito, S3)",
+)
+APPREGISTRY_STACK_NAME = get_or_create_env_var(
+    "APPREGISTRY_STACK_NAME", f"{CDK_PREFIX}AppRegistryStack"
+)
+APPREGISTRY_ATTRIBUTE_GROUP_NAME = get_or_create_env_var(
+    "APPREGISTRY_ATTRIBUTE_GROUP_NAME",
+    f"{APPREGISTRY_APPLICATION_NAME}-metadata",
+)
+APPREGISTRY_REPOSITORY_URL = get_or_create_env_var(
+    "APPREGISTRY_REPOSITORY_URL",
+    "https://github.com/seanpedrick-case/doc_redaction",
+)
+
 _precheck_context_file = get_or_create_env_var("CONTEXT_FILE", "precheck.context.json")
 # Never write boto3 pre-check output into CDK's lookup cache file (causes stale
 # vpc-provider / load-balancer entries and wrong-account lookup validation errors).
