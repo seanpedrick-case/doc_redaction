@@ -80,7 +80,12 @@ def copy_upload_to_workspace(upload_path: str | Path) -> Path:
         raise FileNotFoundError(f"Uploaded file not found: {source}")
     WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
     safe_name = _sanitize_upload_filename(source.name)
-    dest = (WORKSPACE_DIR / safe_name).resolve()
+    workspace_root = WORKSPACE_DIR.resolve()
+    dest = (workspace_root / safe_name).resolve()
+    try:
+        dest.relative_to(workspace_root)
+    except ValueError as exc:
+        raise ValueError(f"Destination path is outside workspace: {dest}") from exc
     if source == dest:
         return dest
     # copyfile only: copy2/copystat raises EPERM when overwriting on Docker Desktop bind mounts.
