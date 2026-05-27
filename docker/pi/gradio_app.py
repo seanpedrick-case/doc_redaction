@@ -519,17 +519,18 @@ def build_ui() -> gr.Blocks:
                     clear = gr.Button("New session")
 
             with gr.Column(scale=2):
-                activity_log = gr.Markdown(value="_No activity yet._")
-                tool_panel = gr.Markdown(value="")
-                thinking_panel = gr.Textbox(
-                    label="Thinking (stream)",
-                    lines=12,
-                    max_lines=50,
-                    interactive=False,
-                    visible=SHOW_THINKING,
-                    elem_classes=["thinking-panel"],
-                    autoscroll=True,
-                )
+                with gr.Accordion("Thinking log", open=True):
+                    activity_log = gr.Markdown(value="_No activity yet._")
+                    tool_panel = gr.Markdown(value="", max_height=800)
+                    thinking_panel = gr.Textbox(
+                        label="Thinking (stream)",
+                        lines=12,
+                        max_lines=50,
+                        interactive=False,
+                        visible=SHOW_THINKING,
+                        elem_classes=["thinking-panel"],
+                        autoscroll=True,
+                    )
 
         with gr.Accordion("Workspace output files", open=False):
             gr.Markdown(
@@ -642,6 +643,7 @@ def build_ui() -> gr.Blocks:
 if __name__ == "__main__":
     demo = build_ui()
     demo.queue(default_concurrency_limit=1).launch(
+        theme=gr.themes.Default(primary_hue="blue"),
         css=THINKING_PANEL_CSS,
         server_name=PI_UI_HOST,
         server_port=PI_UI_PORT,
