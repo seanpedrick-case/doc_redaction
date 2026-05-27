@@ -63,8 +63,13 @@ def _sanitize_upload_filename(name: str) -> str:
 
 
 def _resolve_and_validate_upload_path(upload_path: str | Path) -> Path:
-    root = UPLOAD_ROOT.resolve()
-    source = Path(upload_path).resolve()
+    if not isinstance(upload_path, (str, Path)):
+        raise ValueError("Uploaded file path has an invalid type.")
+    if not str(upload_path).strip():
+        raise ValueError("Uploaded file path is empty.")
+
+    root = UPLOAD_ROOT.resolve(strict=True)
+    source = Path(upload_path).resolve(strict=True)
     try:
         source.relative_to(root)
     except ValueError as exc:
