@@ -520,9 +520,33 @@ def _validate_user_regex_pattern(pattern: str) -> str:
     if len(cleaned) > 256:
         raise ValueError("search_text regex is too long")
 
-    # Block common catastrophic-backtracking constructs such as nested quantifiers.
-    if re.search(r"\((?:[^()\\]|\\.)*[+*](?:[^()\\]|\\.)*\)[+*{]", cleaned):
-        raise ValueError("search_text regex contains unsupported nested quantifiers")
+    # Allow only a conservative safe subset of regex syntax.
+    # Disallow grouping/alternation/lookarounds/backrefs and other advanced features.
+    disallowed_meta = ["(", ")", "|"]
+    if any(ch in cleaned for ch in disallowed_meta):
+        raise ValueError(
+            "search_text regex contains unsupported constructs; "
+            "grouping and alternation are not allowed"
+        )
+
+    if re.search(r"\\[1-9AbBdDsSwWZ]", cleaned):
+        raise ValueError(
+            "search_text regex contains unsupported escape sequence or backreference"
+        )
+
+    # Only permit literals, whitespace, ., ^, $, simple char classes, and quantifiers.
+    if not re.fullmatch(r"[A-Za-z0-9\s\.\^\$\-\[\]\{\},\*\+\?\\]*", cleaned):
+        raise ValueError("search_text regex contains unsupported characters")
+
+    # Require bounded repetition ranges and cap them.
+    for m in re.finditer(r"\{(\d+)(?:,(\d*))?\}", cleaned):
+        lo = int(m.group(1))
+        hi_raw = m.group(2)
+        if hi_raw is None or hi_raw == "":
+            raise ValueError("search_text regex must use bounded repetition ranges")
+        hi = int(hi_raw)
+        if lo > hi or hi > 64:
+            raise ValueError("search_text regex repetition range is invalid or too large")
 
     return cleaned
 
