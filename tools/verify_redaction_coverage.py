@@ -28,9 +28,9 @@ from pathlib import Path
 from typing import Any
 
 try:
-    import pymupdf as fitz
+    import pymupdf
 except ImportError:  # pragma: no cover
-    fitz = None  # type: ignore
+    pymupdf = None  # type: ignore
 
 
 @dataclass
@@ -322,16 +322,16 @@ def sample_pixels_dark(
     dark_threshold: int = 40,
 ) -> list[str]:
     """Return box indices (as strings) whose centre pixel is not dark on redacted page."""
-    if fitz is None or not boxes:
+    if pymupdf is None or not boxes:
         return []
     failures: list[str] = []
-    doc = fitz.open(pdf_path)
+    doc = pymupdf.open(pdf_path)
     try:
         if page_num < 1 or page_num > doc.page_count:
             return failures
         page = doc[page_num - 1]
         pix = page.get_pixmap(
-            matrix=fitz.Matrix(dpi / 72, dpi / 72), colorspace=fitz.csGRAY
+            matrix=pymupdf.Matrix(dpi / 72, dpi / 72), colorspace=pymupdf.csGRAY
         )
         w, h = pix.width, pix.height
         samples = pix.samples
@@ -378,14 +378,14 @@ def verify_redaction_coverage(
     redacted_pdf = Path(redacted_pdf_path) if redacted_pdf_path else None
     if total_pages is None:
         total_pages = max(pages_in_review | pages_in_ocr | {0})
-    if total_pages <= 0 and redacted_pdf is not None and fitz is not None:
-        total_pages = fitz.open(str(redacted_pdf)).page_count
+    if total_pages <= 0 and redacted_pdf is not None and pymupdf is not None:
+        total_pages = pymupdf.open(str(redacted_pdf)).page_count
 
     report = CoverageReport(pages_total=total_pages)
 
     redacted_text_by_page: dict[int, str] = {}
-    if redacted_pdf is not None and fitz is not None and redacted_pdf.is_file():
-        doc = fitz.open(str(redacted_pdf))
+    if redacted_pdf is not None and pymupdf is not None and redacted_pdf.is_file():
+        doc = pymupdf.open(str(redacted_pdf))
         try:
             for i in range(doc.page_count):
                 redacted_text_by_page[i + 1] = doc[i].get_text()

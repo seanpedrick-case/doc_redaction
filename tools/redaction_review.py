@@ -3942,7 +3942,7 @@ def convert_pymupdf_coords_to_adobe(
     x1: float, y1: float, x2: float, y2: float, pdf_page_height: float
 ):
     """
-    Converts coordinates from PyMuPDF (fitz) space to Adobe PDF space.
+    Converts coordinates from PyMuPDF (pymupdf) space to Adobe PDF space.
 
     Parameters:
     - x1, y1, x2, y2: Coordinates in PyMuPDF space
