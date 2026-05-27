@@ -26,7 +26,7 @@ from output_files import (
 from pi_rpc_client import PiRpcClient, PiRpcError, PiStreamEvent, default_client
 from redaction_prompt import prepare_redaction_task
 
-PI_UI_TITLE = os.environ.get("PI_GRADIO_TITLE", "doc_redaction — Pi agent")
+PI_UI_TITLE = os.environ.get("PI_GRADIO_TITLE", "Agentic Document Redaction")
 PI_UI_PORT = int(os.environ.get("GRADIO_SERVER_PORT", "7862"))
 PI_UI_HOST = os.environ.get("GRADIO_SERVER_NAME", "0.0.0.0")
 SHOW_THINKING = os.environ.get("PI_GRADIO_SHOW_THINKING", "false").lower() in {

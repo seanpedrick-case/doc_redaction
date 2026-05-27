@@ -546,7 +546,9 @@ def _validate_user_regex_pattern(pattern: str) -> str:
             raise ValueError("search_text regex must use bounded repetition ranges")
         hi = int(hi_raw)
         if lo > hi or hi > 64:
-            raise ValueError("search_text regex repetition range is invalid or too large")
+            raise ValueError(
+                "search_text regex repetition range is invalid or too large"
+            )
 
     return cleaned
 
