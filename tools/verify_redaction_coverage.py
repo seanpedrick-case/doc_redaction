@@ -510,6 +510,23 @@ def verify_redaction_coverage(
     return report
 
 
+def _validate_user_regex_pattern(pattern: str) -> str:
+    """Validate user-supplied regex to reduce ReDoS/injection risk."""
+    cleaned = pattern.strip()
+    if not cleaned:
+        raise ValueError("search_text regex must not be empty")
+
+    # Conservative upper bound to reduce expensive backtracking risk.
+    if len(cleaned) > 256:
+        raise ValueError("search_text regex is too long")
+
+    # Block common catastrophic-backtracking constructs such as nested quantifiers.
+    if re.search(r"\((?:[^()\\]|\\.)*[+*](?:[^()\\]|\\.)*\)[+*{]", cleaned):
+        raise ValueError("search_text regex contains unsupported nested quantifiers")
+
+    return cleaned
+
+
 def search_words_in_ocr_csv(
     ocr_words_csv_path: str | Path,
     search_text: str,
@@ -519,10 +536,12 @@ def search_words_in_ocr_csv(
 ) -> list[dict]:
     """Literal or regex search in word OCR CSV without Gradio session state."""
     flags = re.I if case_insensitive else 0
+    cleaned_search_text = search_text.strip()
     if use_regex:
-        pat = re.compile(search_text.strip(), flags)
+        cleaned_search_text = _validate_user_regex_pattern(cleaned_search_text)
+        pat = re.compile(cleaned_search_text, flags)
     else:
-        pat = re.compile(re.escape(search_text.strip()), flags)
+        pat = re.compile(re.escape(cleaned_search_text), flags)
 
     hits: list[dict] = []
     for row in load_csv_rows(Path(ocr_words_csv_path)):
