@@ -53,6 +53,15 @@ def replace_user_requirements_section(template: str, instructions: str) -> str:
     return f"{head}{marker} (authoritative for this task)\n\n{formatted}\n"
 
 
+def _sanitize_upload_filename(name: str) -> str:
+    safe = Path(name).name
+    safe = "".join(ch if ch.isalnum() or ch in {".", "_", "-"} else "_" for ch in safe)
+    safe = safe.strip("._")
+    if not safe:
+        raise ValueError("Uploaded file has an invalid name.")
+    return safe
+
+
 def _resolve_and_validate_upload_path(upload_path: str | Path) -> Path:
     root = UPLOAD_ROOT.resolve()
     source = Path(upload_path).resolve()
@@ -70,7 +79,8 @@ def copy_upload_to_workspace(upload_path: str | Path) -> Path:
     if not source.is_file():
         raise FileNotFoundError(f"Uploaded file not found: {source}")
     WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
-    dest = (WORKSPACE_DIR / source.name).resolve()
+    safe_name = _sanitize_upload_filename(source.name)
+    dest = (WORKSPACE_DIR / safe_name).resolve()
     if source == dest:
         return dest
     # copyfile only: copy2/copystat raises EPERM when overwriting on Docker Desktop bind mounts.
