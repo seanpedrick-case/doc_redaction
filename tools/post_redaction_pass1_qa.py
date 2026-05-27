@@ -127,7 +127,7 @@ def run_post_redaction_pass1_qa(
     review_path = Path(review_csv_path)
     ocr_path = Path(ocr_words_csv_path)
     if not review_path.is_file():
-        print(f"Post-redaction Pass 1 QA skipped: review CSV not found: {review_path}")
+        print("Post-redaction Pass 1 QA skipped: review CSV not found.")
         return {
             "enabled": True,
             "paths_created": [],
@@ -137,7 +137,7 @@ def run_post_redaction_pass1_qa(
             "error": "review_csv_missing",
         }
     if not ocr_path.is_file():
-        print(f"Post-redaction Pass 1 QA skipped: OCR words CSV not found: {ocr_path}")
+        print("Post-redaction Pass 1 QA skipped: OCR words CSV not found.")
         return {
             "enabled": True,
             "paths_created": [],
