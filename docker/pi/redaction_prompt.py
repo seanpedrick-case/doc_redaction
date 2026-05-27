@@ -9,6 +9,7 @@ from pathlib import Path
 REPO_ROOT = Path(os.environ.get("PI_WORKDIR", "/workspace/doc_redaction"))
 TEMPLATE_PATH = REPO_ROOT / "skills" / "Example prompt partnership.txt"
 WORKSPACE_DIR = Path(os.environ.get("PI_WORKSPACE_DIR", "/home/user/app/workspace"))
+UPLOAD_ROOT = Path(os.environ.get("PI_UPLOAD_ROOT", "/tmp/gradio")).resolve()
 
 
 def _default_gradio_url() -> str:
@@ -52,8 +53,17 @@ def replace_user_requirements_section(template: str, instructions: str) -> str:
     return f"{head}{marker} (authoritative for this task)\n\n{formatted}\n"
 
 
-def copy_upload_to_workspace(upload_path: str | Path) -> Path:
+def _resolve_and_validate_upload_path(upload_path: str | Path) -> Path:
     source = Path(upload_path).resolve()
+    try:
+        source.relative_to(UPLOAD_ROOT)
+    except ValueError as exc:
+        raise ValueError(f"Uploaded file path is outside allowed upload root: {source}") from exc
+    return source
+
+
+def copy_upload_to_workspace(upload_path: str | Path) -> Path:
+    source = _resolve_and_validate_upload_path(upload_path)
     if not source.is_file():
         raise FileNotFoundError(f"Uploaded file not found: {source}")
     WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
