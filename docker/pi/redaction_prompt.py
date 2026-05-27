@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -10,6 +11,7 @@ REPO_ROOT = Path(os.environ.get("PI_WORKDIR", "/workspace/doc_redaction"))
 TEMPLATE_PATH = REPO_ROOT / "skills" / "Example prompt partnership.txt"
 WORKSPACE_DIR = Path(os.environ.get("PI_WORKSPACE_DIR", "/home/user/app/workspace"))
 UPLOAD_ROOT = Path(os.environ.get("PI_UPLOAD_ROOT", "/tmp/gradio")).resolve()
+_SAFE_UPLOAD_FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$")
 
 
 def _default_gradio_url() -> str:
@@ -54,10 +56,10 @@ def replace_user_requirements_section(template: str, instructions: str) -> str:
 
 
 def _sanitize_upload_filename(name: str) -> str:
-    safe = Path(name).name
-    safe = "".join(ch if ch.isalnum() or ch in {".", "_", "-"} else "_" for ch in safe)
-    safe = safe.strip("._")
-    if not safe:
+    safe = Path(name).name.strip()
+    if not safe or safe in {".", ".."}:
+        raise ValueError("Uploaded file has an invalid name.")
+    if not _SAFE_UPLOAD_FILENAME_RE.fullmatch(safe):
         raise ValueError("Uploaded file has an invalid name.")
     return safe
 
