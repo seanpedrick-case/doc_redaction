@@ -375,16 +375,17 @@ def verify_redaction_coverage(
 
     pages_in_review = {page_int(r) for r in review_rows}
     pages_in_ocr = {page_int(r) for r in ocr_rows}
+    redacted_pdf = Path(redacted_pdf_path) if redacted_pdf_path else None
     if total_pages is None:
         total_pages = max(pages_in_review | pages_in_ocr | {0})
-    if total_pages <= 0 and redacted_pdf_path and fitz is not None:
-        total_pages = fitz.open(redacted_pdf_path).page_count
+    if total_pages <= 0 and redacted_pdf is not None and fitz is not None:
+        total_pages = fitz.open(str(redacted_pdf)).page_count
 
     report = CoverageReport(pages_total=total_pages)
 
     redacted_text_by_page: dict[int, str] = {}
-    if redacted_pdf_path and fitz is not None and Path(redacted_pdf_path).is_file():
-        doc = fitz.open(redacted_pdf_path)
+    if redacted_pdf is not None and fitz is not None and redacted_pdf.is_file():
+        doc = fitz.open(str(redacted_pdf))
         try:
             for i in range(doc.page_count):
                 redacted_text_by_page[i + 1] = doc[i].get_text()
