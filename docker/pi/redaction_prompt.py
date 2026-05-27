@@ -54,11 +54,14 @@ def replace_user_requirements_section(template: str, instructions: str) -> str:
 
 
 def _resolve_and_validate_upload_path(upload_path: str | Path) -> Path:
+    root = UPLOAD_ROOT.resolve()
     source = Path(upload_path).resolve()
     try:
-        source.relative_to(UPLOAD_ROOT)
+        source.relative_to(root)
     except ValueError as exc:
         raise ValueError(f"Uploaded file path is outside allowed upload root: {source}") from exc
+    if source.is_symlink():
+        raise ValueError(f"Symlink uploads are not allowed: {source}")
     return source
 
 
