@@ -4,13 +4,13 @@
   "defaultThinkingLevel": "off",
   "hideThinkingBlock": true,
   "compaction": {
-    "enabled": false,
-    "reserveTokens": 16384,
+    "enabled": true,
+    "reserveTokens": 32768,
     "keepRecentTokens": 20000
   },
   "branchSummary": {
     "skipPrompt": true,
-    "reserveTokens": 16384
+    "reserveTokens": 32768
   },
   "retry": {
     "enabled": true,

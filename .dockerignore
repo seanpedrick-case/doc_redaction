@@ -16,6 +16,7 @@ poppler/*
 build/*
 dist/*
 docs/*
+.pi/*
 build_deps/*
 user_guide/*
 _extensions/*

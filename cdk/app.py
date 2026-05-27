@@ -79,5 +79,7 @@ if USE_CLOUDFRONT == "True" and RUN_USEAST_STACK == "True":
         cross_region_references=True,
     )
 
-# CDK CLI (deploy/synth/diff) calls app.synth() itself — do not call it here or
-# the app (and check_and_set_context) runs twice per command.
+# CDK CLI invokes this script and expects a cloud assembly in cdk.out.
+# Without app.synth(), Python defines constructs but never writes manifest.json
+# (ENOENT on deploy). See: https://github.com/aws/aws-cdk/issues/11023
+app.synth()

@@ -33,6 +33,7 @@ cdk/archive/*
 tld/*
 tmp/*
 docs/*
+.pi/*
 cdk.out/*
 cdk.json
 cdk.context.json

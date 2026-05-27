@@ -13,11 +13,11 @@
       "models": [
         {
           "id": "unsloth/Qwen3.6-27B-MTP-GGUF",
-          "name": "Qwen 3.6 27B (llama.cpp, agentic)",
+          "name": "Qwen 3.6 27B (local)",
           "reasoning": false,
           "input": ["text", "image"],
           "contextWindow": 114688,
-          "maxTokens": 8192,
+          "maxTokens": 32768,
           "cost": {
             "input": 0,
             "output": 0,
