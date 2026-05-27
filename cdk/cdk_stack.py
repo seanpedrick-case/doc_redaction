@@ -865,11 +865,17 @@ class CdkStack(Stack):
                 )
                 print("Using existing S3 bucket", log_bucket_name)
             else:
+                log_bucket_lifecycle = [
+                    s3.LifecycleRule(
+                        abort_incomplete_multipart_upload_after=Duration.days(7)
+                    )
+                ]
                 if USE_CUSTOM_KMS_KEY == "1" and isinstance(kms_key, kms.Key):
                     bucket = s3.Bucket(
                         self,
                         "LogConfigBucket",
                         bucket_name=log_bucket_name,
+                        lifecycle_rules=log_bucket_lifecycle,
                         versioned=False,
                         removal_policy=RemovalPolicy.DESTROY,
                         auto_delete_objects=True,
@@ -881,6 +887,7 @@ class CdkStack(Stack):
                         self,
                         "LogConfigBucket",
                         bucket_name=log_bucket_name,
+                        lifecycle_rules=log_bucket_lifecycle,
                         versioned=False,
                         removal_policy=RemovalPolicy.DESTROY,
                         auto_delete_objects=True,
@@ -950,6 +957,9 @@ class CdkStack(Stack):
                     )
 
                 print("Created Output bucket:", output_bucket_name)
+
+            bucket.enforce_ssl()
+            output_bucket.enforce_ssl()
 
             # Add policies to output bucket
             output_bucket.add_to_resource_policy(
@@ -1046,7 +1056,7 @@ class CdkStack(Stack):
                                 "build": {
                                     "commands": [
                                         "echo Building the Docker image",
-                                        "docker build --build-args APP_MODE=$APP_MODE --target $APP_MODE -t $ECR_REPO_NAME:latest .",
+                                        "docker build --build-arg APP_MODE=$APP_MODE --target $APP_MODE -t $ECR_REPO_NAME:latest .",
                                         "docker tag $ECR_REPO_NAME:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPO_NAME:latest",
                                     ]
                                 },
@@ -1145,6 +1155,7 @@ class CdkStack(Stack):
                         name="id", type=dynamodb.AttributeType.STRING
                     ),
                     billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+                    deletion_protection=True,
                     removal_policy=RemovalPolicy.DESTROY,
                 )
 
@@ -1156,6 +1167,7 @@ class CdkStack(Stack):
                         name="id", type=dynamodb.AttributeType.STRING
                     ),
                     billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+                    deletion_protection=True,
                     removal_policy=RemovalPolicy.DESTROY,
                 )
 
@@ -1167,6 +1179,7 @@ class CdkStack(Stack):
                         name="id", type=dynamodb.AttributeType.STRING
                     ),
                     billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+                    deletion_protection=True,
                     removal_policy=RemovalPolicy.DESTROY,
                 )
 
@@ -1219,6 +1232,23 @@ class CdkStack(Stack):
                     vpc_subnets=public_subnet_selection,  # Link to subnets
                 )
                 print("Successfully created new Application Load Balancer")
+
+            cfn_alb = alb.node.default_child
+            if isinstance(cfn_alb, elbv2.CfnLoadBalancer):
+                alb_attributes = {
+                    attr.key: attr.value
+                    for attr in (cfn_alb.load_balancer_attributes or [])
+                }
+                alb_attributes["routing.http.drop_invalid_header_fields.enabled"] = (
+                    "true"
+                )
+                alb_attributes["deletion_protection.enabled"] = "true"
+                cfn_alb.load_balancer_attributes = [
+                    elbv2.CfnLoadBalancer.LoadBalancerAttributeProperty(
+                        key=key, value=value
+                    )
+                    for key, value in alb_attributes.items()
+                ]
         except Exception as e:
             raise Exception("Could not handle application load balancer due to:", e)
 
@@ -1242,6 +1272,7 @@ class CdkStack(Stack):
                     user_pool_name=COGNITO_USER_POOL_NAME,
                     mfa=cognito.Mfa.OFF,  # Adjust as needed
                     sign_in_aliases=cognito.SignInAliases(email=True),
+                    deletion_protection=True,
                     removal_policy=RemovalPolicy.DESTROY,
                 )  # Adjust as needed
                 print(f"Created new user pool {user_pool.user_pool_id}.")
@@ -1498,6 +1529,7 @@ class CdkStack(Stack):
                         },
                     ],
                     "readonlyRootFilesystem": read_only_file_system,
+                    "user": "1000",
                 }
                 task_def_params["containerDefinitions"] = [container_def]
 
@@ -1574,6 +1606,7 @@ class CdkStack(Stack):
                     },
                     environment_files=env_files,
                     readonly_root_filesystem=read_only_file_system,
+                    user=container_def_params.get("user", "1000"),
                 )
 
                 for port_mapping in container_def_params["portMappings"]:

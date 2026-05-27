@@ -26,6 +26,10 @@ def register_doc_redaction_application(
 
     Only stacks in ``aws_region`` are associated (phase 1). Cross-region stacks
     such as RedactionStackCloudfront (us-east-1) are not included.
+
+    ``alb_dns_name`` must be a plain string (e.g. from pre-check context). Do not
+    pass a CloudFormation token from RedactionStack or synth will fail with a
+    dependency cycle against the associator stack.
     """
     associator = ApplicationAssociator(
         app,
