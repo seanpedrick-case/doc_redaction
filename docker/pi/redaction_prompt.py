@@ -71,25 +71,20 @@ def _resolve_and_validate_upload_path(upload_path: str | Path) -> Path:
         raise ValueError("Uploaded file path is empty.")
 
     root = UPLOAD_ROOT.resolve(strict=True)
-    candidate = Path(upload_path).expanduser().absolute()
+    raw_path = Path(upload_path).expanduser()
     try:
-        candidate.relative_to(root)
-    except ValueError as exc:
-        raise ValueError(
-            f"Uploaded file path is outside allowed upload root: {candidate}"
-        ) from exc
-    if not candidate.exists():
-        raise FileNotFoundError(f"Uploaded file not found: {candidate}")
-    if not candidate.is_file():
-        raise FileNotFoundError(f"Uploaded file not found: {candidate}")
+        source = raw_path.resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(f"Uploaded file not found: {raw_path}") from exc
 
-    source = candidate.resolve(strict=True)
     try:
         source.relative_to(root)
     except ValueError as exc:
         raise ValueError(
             f"Uploaded file path resolves outside allowed upload root: {source}"
         ) from exc
+    if not source.is_file():
+        raise FileNotFoundError(f"Uploaded file not found: {source}")
     if source.is_symlink():
         raise ValueError(f"Symlink uploads are not allowed: {source}")
     return source
