@@ -250,7 +250,7 @@ def _session_summary(client: PiRpcClient) -> str:
     )
 
 
-def _backend_model_choices_update(provider: str) -> gr.Update:
+def _backend_model_choices_update(provider: str):
     normalized = normalize_provider(provider)
     models = models_for_provider(normalized)
     return gr.update(choices=models, value=default_model_for_provider(normalized))
