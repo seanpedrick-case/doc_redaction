@@ -1,0 +1,8 @@
+# Paths copied from the monorepo root into the flattened Pi agent HF Space repo.
+requirements_pi_agent.txt
+docker/pi
+skills
+AGENTS.md
+config/pi_agent.env.example
+doc_redaction/example_data/example_of_emails_sent_to_a_professor_before_applying.pdf
+doc_redaction/example_data/graduate-job-example-cover-letter.pdf

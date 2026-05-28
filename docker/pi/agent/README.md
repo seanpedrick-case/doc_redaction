@@ -1,8 +1,49 @@
 # Pi agent config (Docker)
 
-These files are bind-mounted into the `pi-agent` container at `~/.pi/agent/`.
+Runtime Pi config is **generated at container start** by [`docker/pi/pi_agent_config.py`](../pi_agent_config.py) into `~/.pi/agent/models.json` and `~/.pi/agent/settings.json`.
 
-## Model id
+Files in this folder (`settings.json`, `models.json`) are **templates/references** only — they are no longer bind-mounted into the container.
+
+## LLM backends (Pi orchestration)
+
+The Pi agent (chat + redaction orchestration) can use:
+
+| Provider key | Label | Pi API | Auth |
+|--------------|-------|--------|------|
+| `llama-cpp` | Local (llama-cpp) | `openai-completions` | None (local llama-inference) |
+| `google-gemini` | Gemini | `google-generative-ai` | `GEMINI_API_KEY` or `GOOGLE_API_KEY` |
+| `amazon-bedrock` | AWS Bedrock | `bedrock-converse-stream` | AWS SDK credentials (`AWS_ACCESS_KEY_ID`, etc.) |
+
+This is separate from doc_redaction **Pass 2 VLM** (`{VLM_BASE_URL}` in redaction prompts), which still targets local llama-inference by default.
+
+### Environment variables
+
+Copy [`config/pi_agent.env.example`](../../../config/pi_agent.env.example) to `config/pi_agent.env` (gitignored) or set on the host before `docker compose up`:
+
+| Variable | Purpose |
+|----------|---------|
+| `PI_DEFAULT_PROVIDER` | `llama-cpp` \| `google-gemini` \| `amazon-bedrock` |
+| `PI_DEFAULT_MODEL` | Model id within provider |
+| `PI_LLAMA_BASE_URL` | Local OpenAI-compatible URL (default `http://llama-inference:8080/v1`) |
+| `PI_LLAMA_MODEL_ID` | Local model id |
+| `GEMINI_API_KEY` / `GOOGLE_API_KEY` | Gemini API key |
+| `AWS_REGION` / `AWS_DEFAULT_REGION` | Bedrock region |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | Bedrock credentials |
+| `AWS_PROFILE` | Alternative Bedrock auth |
+
+At startup, if only `GOOGLE_API_KEY` is set, it is mirrored to `GEMINI_API_KEY` for Pi.
+
+### Gradio UI
+
+Open **http://localhost:7862** → **Agent backend** accordion:
+
+- Select provider and model
+- Optionally enter Gemini / AWS credentials (**session-only** — not written to disk)
+- Click **Apply backend** — regenerates config, restarts the Pi RPC subprocess, and starts a new session
+
+Credential fields are cleared after apply.
+
+## Local model id
 
 After the llama.cpp service is healthy, confirm the model id:
 
@@ -10,7 +51,7 @@ After the llama.cpp service is healthy, confirm the model id:
 curl http://localhost:8000/v1/models
 ```
 
-If the returned `id` differs from `unsloth/Qwen3.6-27B-MTP-GGUF`, update `models.json` and `settings.json` `defaultModel` to match.
+If the returned `id` differs from `unsloth/Qwen3.6-27B-MTP-GGUF`, set `PI_LLAMA_MODEL_ID` in `config/pi_agent.env` or compose environment and restart `pi-agent`.
 
 ## In-container URLs for task prompts
 
@@ -45,11 +86,13 @@ Open **http://localhost:7862**. Use the **Redaction task** panel to upload a doc
 
 The UI also shows:
 
+- **Agent backend** — switch between local, Gemini, and Bedrock
 - **Chat** — streamed assistant text
 - **Activity** — agent/turn lifecycle, compaction, auto-retry, tool start/end
 - **Tool output** — live bash/read output from `tool_execution_update` / `tool_execution_end`
 - **Thinking** — optional stream (`PI_GRADIO_SHOW_THINKING=true`)
 - **Abort** — sends Pi RPC `abort` and cancels the in-flight Gradio handler
+- **Workspace output files** — browse and download redaction artifacts
 
 Optional env vars on `pi-agent`: `PI_GRADIO_SHOW_THINKING`, `PI_GRADIO_SHOW_TOOL_OUTPUT`, `PI_GRADIO_TOOL_OUTPUT_MAX`, `PI_GRADIO_ACTIVITY_MAX_LINES`.
 
@@ -58,6 +101,7 @@ Run the UI locally (outside Docker):
 ```powershell
 cd docker/pi
 pip install -r ../../requirements_pi_agent.txt
+python pi_agent_config.py
 python gradio_app.py
 ```
 
@@ -81,3 +125,26 @@ Rebuild after changing that file:
 docker compose -f docker-compose_llama_agentic.yml --profile 27b_36 build pi-agent
 ```
 
+## HF Space profile (remote redaction backend)
+
+Set `PI_DEPLOYMENT_PROFILE=hf-space` to run the Pi Gradio UI as a **Hugging Face Docker Space** that orchestrates with **Gemini only** and calls a **remote** doc_redaction Space over HTTPS.
+
+| Area | HF Space value |
+|------|----------------|
+| Pi LLM | Gemini only (`PI_DEFAULT_PROVIDER=google-gemini`) |
+| Redaction app | `DOC_REDACTION_GRADIO_URL` (default `https://seanpedrickcase-document-redaction.hf.space`) |
+| Auth to redaction | `HF_TOKEN` / `DOC_REDACTION_HF_TOKEN` (Space secret + optional UI override) |
+| Text extraction / PII | Locked to `Local model - selectable text` + `Local` |
+| VLM faces / signatures | Disabled |
+| Port | `7860` |
+
+Package and Dockerfile: [`hf-spaces/pi-agent/`](../../../hf-spaces/pi-agent/). Pushes to [agentic_document_redaction](https://huggingface.co/spaces/seanpedrickcase/agentic_document_redaction) on **`dev`** branch via [`.github/workflows/sync-pi-agent-space.yml`](../../../.github/workflows/sync-pi-agent-space.yml) (GitHub secrets: `HF_TOKEN`, `HF_USERNAME`, `HF_EMAIL`).
+
+Local build test from monorepo root:
+
+```powershell
+docker build -f hf-spaces/pi-agent/Dockerfile -t pi-agent-hf-space .
+docker run --rm -p 7860:7860 -e GEMINI_API_KEY=... -e HF_TOKEN=... pi-agent-hf-space
+```
+
+Pi uses `gradio_client` + `docker/pi/remote_redaction.py` to upload/download from the remote Space; prompts include `{REMOTE_BACKEND_GUIDANCE}` (see [`redaction_prompt.py`](../redaction_prompt.py)).

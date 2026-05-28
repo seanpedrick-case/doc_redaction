@@ -11,6 +11,7 @@ from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_elasticloadbalancingv2 as elb
 from aws_cdk import aws_elasticloadbalancingv2_actions as elb_act
 from aws_cdk import aws_iam as iam
+from aws_cdk import aws_s3 as s3
 from aws_cdk import aws_wafv2 as wafv2
 from botocore.exceptions import ClientError, NoCredentialsError
 from cdk_config import (
@@ -291,6 +292,19 @@ def add_statement_to_policy(role: iam.IRole, policy_document: Dict[str, Any]):
             print(
                 f"Warning: Could not process policy statement: {statement_dict}. Error: {e}"
             )
+
+
+def add_s3_enforce_ssl_policy(bucket: s3.IBucket) -> None:
+    """Deny non-TLS S3 requests (Security Hub S3.5). Compatible with all CDK versions."""
+    bucket.add_to_resource_policy(
+        iam.PolicyStatement(
+            effect=iam.Effect.DENY,
+            principals=[iam.AnyPrincipal()],
+            actions=["s3:*"],
+            resources=[bucket.bucket_arn, f"{bucket.bucket_arn}/*"],
+            conditions={"Bool": {"aws:SecureTransport": "false"}},
+        )
+    )
 
 
 def add_custom_policies(

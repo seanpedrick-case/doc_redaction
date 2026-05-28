@@ -1,0 +1,47 @@
+name: Sync Pi agent to Hugging Face Space
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - "docker/pi/**"
+      - "skills/**"
+      - "hf-spaces/pi-agent/**"
+      - "doc_redaction/example_data/**"
+      - "requirements_pi_agent.txt"
+      - "AGENTS.md"
+      - ".github/workflows/sync-pi-agent-space.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync-pi-agent-space:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Flatten Pi agent Space tree
+        run: |
+          chmod +x hf-spaces/pi-agent/sync_to_space.sh
+          hf-spaces/pi-agent/sync_to_space.sh /tmp/pi-agent-space
+
+      - name: Push to Hugging Face Space
+        run: |
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          echo "Syncing Pi agent Space: seanpedrickcase/agentic_document_redaction"
+          cd /tmp/pi-agent-space
+          git init -b main
+          git config user.name "$HF_USERNAME"
+          git config user.email "$HF_EMAIL"
+          git add .
+          git commit -m "Sync Pi agent Space: $COMMIT_MSG"
+          git remote add hf "https://${HF_USERNAME}:${HF_TOKEN}@huggingface.co/spaces/${HF_USERNAME}/agentic_document_redaction"
+          git push --force hf main
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_USERNAME: ${{ secrets.HF_USERNAME }}
+          HF_EMAIL: ${{ secrets.HF_EMAIL }}

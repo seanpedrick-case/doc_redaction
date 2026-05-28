@@ -69,7 +69,8 @@ dependencies = [
     "google-genai<=1.73.0",
     "openai<=2.31.0",
     "markdown<=3.10.2",
-    "tabulate<=0.10.0"
+    "tabulate<=0.10.0",
+    "starlette>=1.0.1"
 ]
 
 [project.optional-dependencies]

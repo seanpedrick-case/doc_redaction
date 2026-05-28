@@ -22,6 +22,7 @@ logs/*
 usage/*
 feedback/*
 config/*
+!config/pi_agent.env.example
 workspace/*
 user_guide/*
 _extensions/*

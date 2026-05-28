@@ -151,9 +151,10 @@ For **simple user sections** (non-expert bullets only), keep VLM connection deta
 - **Do not** bypass `/review_apply` with custom PyMuPDF “true redaction” scripts when `text_layer_leaks` appear — fix CSV boxes/coordinates and re-apply (see `doc-redaction-modifications` § Endpoint semantics)
 - If resuming a partial run: record which `*_redacted.pdf` is post-apply, re-run `verify_redaction_coverage` with that path (do not trust stale JSON without checking the PDF it was run against)
 - If the deployment has `POST_REDACT_PASS1_QA=True`, initial redaction may already emit `*_coverage_report.json` (and optional `*_review_file_pruned.csv`) — that is **deployment sanity QA**, not a substitute for this task's Pass 1 review and `/review_apply`
-- Use the 'hybrid-paddle-inference-server' option for the initial text extraction, and 'Local' for the PII identification model, unless the user specifies otherwise. Use a very long timeout with this method - allow for two minutes to complete each page.
-- If the user asks to redact faces, then pass the entity CUSTOM_VLM_FACES in the initial redaction entity selection
-- If the user asked to redact signatures, then pass the CUSTOM_VLM_SIGNATURE entity in the initial redaction entity selection, unless the text extraction option is AWS Textract, in which case the handwrite_signature_textbox parameter for the doc_redact endpoint should include 'Extract signatures'
+- Use `{DEFAULT_OCR_METHOD}` for the initial text extraction, and `{DEFAULT_PII_METHOD}` for the PII identification model, unless the user specifies otherwise. Use a very long timeout with this method - allow for two minutes to complete each page.
+- {REMOTE_BACKEND_GUIDANCE}
+- {VLM_FACES_GUIDANCE}
+- {VLM_SIGNATURE_GUIDANCE}
 - Ensure that all redaction boxes cover genuine PII and are not false positives, unless the terms are specified by the user for redaction.
 - If you get stuck in a loop unable to redact, review pages, or apply modified redactions to a document, please refer back to the relevant skill (doc-redaction-app, or doc-redaction_modifications) for instructions on how to use the app properly.
 - Ensure that you save all the relevant output files to the output folder, including the redacted PDF, the review PDF, and the CSV review file.

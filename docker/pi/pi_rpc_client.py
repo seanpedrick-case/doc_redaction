@@ -224,6 +224,27 @@ class PiRpcClient:
         data = response.get("data") if response else {}
         return data if isinstance(data, dict) else {}
 
+    def set_model(self, provider: str, model_id: str) -> dict[str, Any]:
+        response = self._send_command(
+            {
+                "type": "set_model",
+                "provider": provider,
+                "modelId": model_id,
+            }
+        )
+        data = response.get("data") if response else {}
+        return data if isinstance(data, dict) else {}
+
+    def get_available_models(self) -> list[dict[str, Any]]:
+        response = self._send_command({"type": "get_available_models"})
+        data = response.get("data") if response else {}
+        models = data.get("models") if isinstance(data, dict) else []
+        return models if isinstance(models, list) else []
+
+    def restart(self) -> None:
+        self.close()
+        self.start()
+
     def prompt_events(self, message: str) -> Iterator[PiStreamEvent]:
         """Send a user message and yield structured events until ``agent_end``."""
         self.clear_abort()
@@ -445,4 +466,8 @@ def default_client() -> PiRpcClient:
     repo_root = os.environ.get("PI_WORKDIR", "/workspace/doc_redaction")
     env = os.environ.copy()
     env.setdefault("HOME", os.path.expanduser("~"))
+    if not env.get("GEMINI_API_KEY") and env.get("GOOGLE_API_KEY"):
+        env["GEMINI_API_KEY"] = env["GOOGLE_API_KEY"]
+    if not env.get("HF_TOKEN") and env.get("DOC_REDACTION_HF_TOKEN"):
+        env["HF_TOKEN"] = env["DOC_REDACTION_HF_TOKEN"]
     return PiRpcClient(cwd=repo_root, env=env)

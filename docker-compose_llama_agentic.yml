@@ -6,10 +6,10 @@
 # (same filename per repo) and -hf downloads are not shared across profiles.
 # Example CLI commands (all are recommended for 24gb VRAM systems minimum, add --build to the below commands if you want to rebuild the app images):
 
-# docker compose -f docker-compose_llama_long_context.yml --profile 35b_36 up -d
-# docker compose -f docker-compose_llama_long_context.yml --profile 27b_36 up -d
-# docker compose -f docker-compose_llama_long_context.yml --profile gemma4-31b up -d
-# docker compose -f docker-compose_llama_long_context.yml --profile gemma4-26b up -d
+# docker compose -f docker-compose_llama_agentic.yml --profile 35b_36 up -d
+# docker compose -f docker-compose_llama_agentic.yml --profile 27b_36 up -d
+# docker compose -f docker-compose_llama_agentic.yml --profile gemma4-31b up -d
+# docker compose -f docker-compose_llama_agentic.yml --profile gemma4-26b up -d
 
 # For agentic usage with pi
 # docker compose -f docker-compose_llama_agentic.yml --profile 27b_36 up -d --build
@@ -194,11 +194,11 @@ services:
       - --n-gpu-layers
       - "-1"
       - --tensor-split
-      - "24,18"
+      - "24,16"
       - --ctx-size
       - "65536"
       - -ub
-      - "512"
+      - "1024"
       - --fit
       - "off"
       - --temp
@@ -226,6 +226,8 @@ services:
       #- "1800"
       - -hfrd # This and the following parameters are for enabling speculative decoding. This should only be enabled when not using the mmproj parameter (i.e. no vision model available)
       - unsloth/gemma-4-E2B-it-GGUF:IQ4_NL
+      - --spec-type
+      - "draft-simple"
       - --spec-draft-n-min
       - "1"
       - --spec-draft-n-max
@@ -421,11 +423,24 @@ services:
       - GRADIO_SERVER_PORT=7862
       - PYTHONPATH=/workspace/doc_redaction/docker/pi
       - PI_WORKSPACE_DIR=/home/user/app/workspace
+      - PI_DEFAULT_PROVIDER=${PI_DEFAULT_PROVIDER:-llama-cpp}
+      - PI_DEFAULT_MODEL=${PI_DEFAULT_MODEL:-}
+      - PI_LLAMA_BASE_URL=${PI_LLAMA_BASE_URL:-http://llama-inference:8080/v1}
+      - PI_LLAMA_MODEL_ID=${PI_LLAMA_MODEL_ID:-unsloth/Qwen3.6-27B-MTP-GGUF}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - AWS_REGION=${AWS_REGION:-}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
+      - AWS_PROFILE=${AWS_PROFILE:-}
+    env_file:
+      - path: config/pi_agent.env
+        required: false
     ports:
       - "7862:7862"
     volumes:
-      - ./docker/pi/agent/settings.json:/home/node/.pi/agent/settings.json:ro
-      - ./docker/pi/agent/models.json:/home/node/.pi/agent/models.json:ro
       - .:/workspace/doc_redaction:rw
       - ./workspace:/home/user/app/workspace:rw
       - pi-agent-sessions:/home/node/.pi/agent/sessions

@@ -23,12 +23,38 @@ from output_files import (
     refresh_workspace_output_files_stub,
     workspace_files_download_fn,
 )
+from pi_agent_config import (
+    DEFAULT_PROVIDER,
+    apply_session_credentials,
+    credential_status_markdown,
+    default_model_for_provider,
+    gemini_api_key_configured,
+    is_hf_space_profile,
+    mirror_hf_token_from_env,
+    models_for_provider,
+    normalize_provider,
+    provider_choices,
+    provider_label,
+    write_runtime_config,
+)
+from pi_examples import example_rows
 from pi_rpc_client import PiRpcClient, PiRpcError, PiStreamEvent, default_client
-from redaction_prompt import prepare_redaction_task
+from redaction_prompt import (
+    DEFAULT_OCR_METHOD,
+    DEFAULT_PII_METHOD,
+    OCR_METHOD_CHOICES,
+    PII_METHOD_CHOICES,
+    RedactionTaskSettings,
+    prepare_redaction_task,
+)
 
 PI_UI_TITLE = os.environ.get("PI_GRADIO_TITLE", "Agentic Document Redaction")
-PI_UI_PORT = int(os.environ.get("GRADIO_SERVER_PORT", "7862"))
+PI_UI_PORT = int(
+    os.environ.get("GRADIO_SERVER_PORT", "7860" if is_hf_space_profile() else "7862")
+)
 PI_UI_HOST = os.environ.get("GRADIO_SERVER_NAME", "0.0.0.0")
+IS_HF_SPACE = is_hf_space_profile()
+mirror_hf_token_from_env()
 SHOW_THINKING = os.environ.get("PI_GRADIO_SHOW_THINKING", "false").lower() in {
     "1",
     "true",
@@ -68,7 +94,19 @@ def _assistant_display_text(completed_segments: list[str], current: str) -> str:
     return "\n\n".join(parts)
 
 
+def _gemini_key_error() -> str | None:
+    if IS_HF_SPACE and not gemini_api_key_configured():
+        return (
+            "**Gemini API key required.** Paste your key in **Agent backend** and click "
+            "**Apply backend** before chatting or starting a redaction task."
+        )
+    return None
+
+
 def _ensure_client(client: PiRpcClient | None) -> PiRpcClient:
+    key_error = _gemini_key_error()
+    if key_error:
+        raise PiRpcError(key_error)
     if isinstance(client, PiRpcClient) and client.running:
         return client
     client = default_client()
@@ -198,14 +236,88 @@ def _session_summary(client: PiRpcClient) -> str:
     except PiRpcError as exc:
         return f"_Could not read Pi state: {exc}_"
     model = state.get("model") or {}
+    provider = model.get("provider") or state.get("provider") or "—"
     model_label = model.get("id") or model.get("name") or "unknown"
     session_file = state.get("sessionFile") or "—"
     streaming = state.get("isStreaming")
     compacting = state.get("isCompacting")
     return (
+        f"**Provider:** `{provider}`  \n"
         f"**Model:** `{model_label}`  \n"
         f"**Streaming:** `{streaming}` · **Compacting:** `{compacting}`  \n"
-        f"**Session:** `{session_file}`"
+        f"**Session:** `{session_file}`  \n"
+        f"{credential_status_markdown()}"
+    )
+
+
+def _backend_model_choices_update(provider: str) -> gr.Update:
+    normalized = normalize_provider(provider)
+    models = models_for_provider(normalized)
+    return gr.update(choices=models, value=default_model_for_provider(normalized))
+
+
+def apply_backend(
+    provider: str,
+    model_id: str,
+    gemini_api_key: str,
+    hf_token: str,
+    aws_region: str,
+    aws_access_key_id: str,
+    aws_secret_access_key: str,
+    aws_session_token: str,
+    client: PiRpcClient | None,
+):
+    normalized = normalize_provider(provider)
+    model = (model_id or default_model_for_provider(normalized)).strip()
+    if model not in models_for_provider(normalized):
+        model = default_model_for_provider(normalized)
+
+    apply_session_credentials(
+        gemini_api_key=gemini_api_key or None,
+        hf_token=hf_token or None,
+        aws_region=aws_region or None,
+        aws_access_key_id=aws_access_key_id or None,
+        aws_secret_access_key=aws_secret_access_key or None,
+        aws_session_token=aws_session_token or None,
+    )
+    if hf_token and hf_token.strip():
+        os.environ["_HF_TOKEN_FROM_UI"] = "1"
+    write_runtime_config(default_provider=normalized, default_model=model)
+
+    existing = _coerce_client(client)
+    if existing is not None:
+        existing.close()
+
+    key_error = _gemini_key_error()
+    if key_error:
+        return (
+            None,
+            key_error,
+            gr.update(value=""),
+            gr.update(value=""),
+            gr.update(value=""),
+            gr.update(value=""),
+        )
+
+    rpc = default_client()
+    rpc.start()
+    try:
+        rpc.set_model(normalized, model)
+        rpc.new_session()
+        summary = (
+            f"**Backend applied:** `{provider_label(normalized)}` / `{model}`  \n\n"
+            f"{_session_summary(rpc)}"
+        )
+    except PiRpcError as exc:
+        summary = f"**Backend error:** {exc}  \n\n{credential_status_markdown()}"
+
+    return (
+        rpc,
+        summary,
+        gr.update(value=""),
+        gr.update(value=""),
+        gr.update(value=""),
+        gr.update(value=""),
     )
 
 
@@ -382,14 +494,29 @@ def submit_redaction_task(
     upload_file: str | None,
     user_instructions: str,
     page_range: str,
+    ocr_method: str,
+    pii_method: str,
+    encourage_vlm_faces: bool,
+    encourage_vlm_signatures: bool,
     history: list[dict[str, Any]] | None,
     client: PiRpcClient | None,
 ):
+    settings = (
+        RedactionTaskSettings.hf_space_defaults()
+        if IS_HF_SPACE
+        else RedactionTaskSettings.from_ui(
+            ocr_method,
+            pii_method,
+            encourage_vlm_faces,
+            encourage_vlm_signatures,
+        )
+    )
     try:
         _file_name, prompt = prepare_redaction_task(
             upload_file,
             user_instructions,
             page_range=page_range or "all",
+            settings=settings,
         )
     except (ValueError, FileNotFoundError, OSError) as exc:
         history = list(history or [])
@@ -413,7 +540,11 @@ def submit_redaction_task(
 
     chat_summary = (
         f"**Redaction task:** `{_file_name}`  \n"
-        f"**Page range:** `{page_range or 'all'}`\n\n"
+        f"**Page range:** `{page_range or 'all'}`  \n"
+        f"**OCR / text extraction:** `{settings.ocr_method}`  \n"
+        f"**PII model:** `{settings.pii_method}`  \n"
+        f"**VLM faces guidance:** {'on' if settings.encourage_vlm_faces else 'off'}  \n"
+        f"**VLM signature guidance:** {'on' if settings.encourage_vlm_signatures else 'off'}\n\n"
         f"{user_instructions.strip()}"
     )
     yield from _run_pi_chat(
@@ -452,7 +583,51 @@ def new_chat(_history, client: PiRpcClient | None):
     return _chat_yield([], client, ["New session."], "", "", "")
 
 
+def _startup_session_info() -> str:
+    if IS_HF_SPACE:
+        return (
+            "**Hugging Face Space profile** — Gemini orchestration with remote doc_redaction "
+            "backend.  \n\n"
+            "1. Paste your **Gemini API key** (and optional **HF token** for the private "
+            "redaction Space).  \n"
+            "2. Click **Apply backend**.  \n\n"
+            f"{credential_status_markdown()}"
+        )
+    return "_Ready._"
+
+
 def build_ui() -> gr.Blocks:
+    hf_redaction_blurb = (
+        "Upload a document and add bullet-point requirements. Redaction runs on a **remote** "
+        "doc_redaction Hugging Face Space; Pi downloads artifacts into this Space's workspace."
+        if IS_HF_SPACE
+        else (
+            "Upload a PDF (or other supported document). Add bullet-point instructions, "
+            "then **Start redaction task**. Pi receives the full task prompt from "
+            "`skills/Example prompt partnership.txt` with your file copied to the shared "
+            "workspace (`/home/user/app/workspace/` in Docker)."
+        )
+    )
+    backend_blurb = (
+        "Gemini powers the Pi agent on this Space. Paste your **Gemini API key** "
+        "(session-only, not stored on disk). Optionally override the **HF token** used "
+        "to reach the private redaction backend."
+        if IS_HF_SPACE
+        else (
+            "Choose which LLM powers the Pi agent (chat and redaction orchestration). "
+            "Credentials from the UI apply **for this container session only**; "
+            "defaults can be set via `config/pi_agent.env` or compose environment."
+        )
+    )
+    hf_locked_settings_md = (
+        f"**Locked defaults (HF Space):**  \n"
+        f"- Text extraction: `{DEFAULT_OCR_METHOD}`  \n"
+        f"- PII model: `{DEFAULT_PII_METHOD}`  \n"
+        f"- Face/signature VLM: unavailable"
+        if IS_HF_SPACE
+        else ""
+    )
+
     with gr.Blocks(
         title=PI_UI_TITLE,
         fill_height=True,
@@ -463,17 +638,12 @@ def build_ui() -> gr.Blocks:
         )
         client_state = gr.State(None)
 
-        session_info = gr.Markdown("_Ready._")
+        session_info = gr.Markdown(_startup_session_info())
 
         with gr.Row(equal_height=False):
             with gr.Column(scale=2):
                 with gr.Accordion("Redaction task", open=True):
-                    gr.Markdown(
-                        "Upload a PDF (or other supported document). Add bullet-point instructions, "
-                        "then **Start redaction task**. Pi receives the full task prompt from "
-                        "`skills/Example prompt partnership.txt` with your file copied to the shared "
-                        "workspace (`/home/user/app/workspace/` in Docker)."
-                    )
+                    gr.Markdown(hf_redaction_blurb)
                     redact_file = gr.File(
                         label="Document to redact",
                         file_types=[
@@ -486,6 +656,7 @@ def build_ui() -> gr.Blocks:
                             ".xlsx",
                         ],
                         type="filepath",
+                        render=False,
                     )
                     redact_instructions = gr.Textbox(
                         label="Redaction requirements",
@@ -495,14 +666,146 @@ def build_ui() -> gr.Blocks:
                             "- Keep publication titles visible"
                         ),
                         lines=8,
+                        render=False,
                     )
                     page_range = gr.Textbox(
                         label="Page range",
                         value="all",
                         placeholder="all or e.g. 1-56",
+                        render=False,
                     )
+                    if IS_HF_SPACE:
+                        ocr_method = gr.State(DEFAULT_OCR_METHOD)
+                        pii_method = gr.State(DEFAULT_PII_METHOD)
+                        encourage_vlm_faces = gr.State(False)
+                        encourage_vlm_signatures = gr.State(False)
+                        settings_accordion = None
+                    else:
+                        settings_accordion = gr.Accordion(
+                            "Redaction settings (prompt defaults)",
+                            open=False,
+                            render=False,
+                        )
+                        with settings_accordion:
+                            gr.Markdown(
+                                "These values are injected into the task prompt under "
+                                "**Technical constraints** — they suggest defaults to Pi for "
+                                "`/doc_redact`, not hard-coded app settings."
+                            )
+                            ocr_method = gr.Dropdown(
+                                label="Default text extraction method",
+                                choices=list(OCR_METHOD_CHOICES),
+                                value=DEFAULT_OCR_METHOD,
+                                allow_custom_value=True,
+                            )
+                            pii_method = gr.Dropdown(
+                                label="Default PII identification model",
+                                choices=list(PII_METHOD_CHOICES),
+                                value=DEFAULT_PII_METHOD,
+                                allow_custom_value=True,
+                            )
+                            encourage_vlm_faces = gr.Checkbox(
+                                label="Encourage CUSTOM_VLM_FACES when user asks to redact faces",
+                                value=True,
+                            )
+                            encourage_vlm_signatures = gr.Checkbox(
+                                label=(
+                                    "Encourage CUSTOM_VLM_SIGNATURE when user asks "
+                                    "to redact signatures"
+                                ),
+                                value=True,
+                            )
+
+                    pi_example_rows, pi_example_labels = example_rows()
+                    if pi_example_rows:
+                        gr.Markdown(
+                            "### Try an example — click to load the sample document and "
+                            "redaction instructions, then **Start redaction task**"
+                        )
+                        gr.Examples(
+                            examples=pi_example_rows,
+                            inputs=[
+                                redact_file,
+                                redact_instructions,
+                                page_range,
+                                ocr_method,
+                                pii_method,
+                                encourage_vlm_faces,
+                                encourage_vlm_signatures,
+                            ],
+                            example_labels=pi_example_labels,
+                            cache_examples=False,
+                        )
+
+                    redact_file.render()
+                    redact_instructions.render()
+                    page_range.render()
+                    if IS_HF_SPACE:
+                        gr.Markdown(hf_locked_settings_md)
+                    elif settings_accordion is not None:
+                        settings_accordion.render()
+
                     start_redact_btn = gr.Button(
                         "Start redaction task",
+                        variant="primary",
+                    )
+
+                with gr.Accordion("Agent backend", open=IS_HF_SPACE):
+                    gr.Markdown(backend_blurb)
+                    backend_provider = gr.Radio(
+                        label="Provider",
+                        choices=[
+                            (provider_label(key), key) for key in provider_choices()
+                        ],
+                        value=DEFAULT_PROVIDER,
+                    )
+                    backend_model = gr.Dropdown(
+                        label="Model",
+                        choices=models_for_provider(DEFAULT_PROVIDER),
+                        value=default_model_for_provider(DEFAULT_PROVIDER),
+                        allow_custom_value=True,
+                    )
+                    gemini_api_key = gr.Textbox(
+                        label=(
+                            "Gemini API key (required on HF Space)"
+                            if IS_HF_SPACE
+                            else "Gemini API key (session override)"
+                        ),
+                        type="password",
+                        placeholder=(
+                            "Required — get a key from Google AI Studio"
+                            if IS_HF_SPACE
+                            else "Uses GEMINI_API_KEY / GOOGLE_API_KEY from env if empty"
+                        ),
+                    )
+                    hf_token = gr.Textbox(
+                        label="HF token for redaction Space (session override)",
+                        type="password",
+                        placeholder="Uses HF_TOKEN Space secret if empty",
+                        visible=IS_HF_SPACE,
+                    )
+                    aws_region = gr.Textbox(
+                        label="AWS region (session override)",
+                        placeholder="e.g. eu-west-2",
+                        visible=not IS_HF_SPACE,
+                    )
+                    aws_access_key_id = gr.Textbox(
+                        label="AWS access key ID (session override)",
+                        type="password",
+                        visible=not IS_HF_SPACE,
+                    )
+                    aws_secret_access_key = gr.Textbox(
+                        label="AWS secret access key (session override)",
+                        type="password",
+                        visible=not IS_HF_SPACE,
+                    )
+                    aws_session_token = gr.Textbox(
+                        label="AWS session token (optional)",
+                        type="password",
+                        visible=not IS_HF_SPACE,
+                    )
+                    apply_backend_btn = gr.Button(
+                        "Apply backend",
                         variant="primary",
                     )
 
@@ -601,6 +904,10 @@ def build_ui() -> gr.Blocks:
                 redact_file,
                 redact_instructions,
                 page_range,
+                ocr_method,
+                pii_method,
+                encourage_vlm_faces,
+                encourage_vlm_signatures,
                 chatbot,
                 client_state,
             ],
@@ -614,6 +921,34 @@ def build_ui() -> gr.Blocks:
             queue=False,
         )
         clear.click(new_chat, inputs=[chatbot, client_state], outputs=chat_outputs)
+
+        backend_provider.change(
+            _backend_model_choices_update,
+            inputs=[backend_provider],
+            outputs=[backend_model],
+        )
+        apply_backend_btn.click(
+            apply_backend,
+            inputs=[
+                backend_provider,
+                backend_model,
+                gemini_api_key,
+                hf_token,
+                aws_region,
+                aws_access_key_id,
+                aws_secret_access_key,
+                aws_session_token,
+                client_state,
+            ],
+            outputs=[
+                client_state,
+                session_info,
+                gemini_api_key,
+                hf_token,
+                aws_secret_access_key,
+                aws_session_token,
+            ],
+        )
 
         refresh_outputs_btn.click(
             fn=refresh_workspace_output_files_stub,

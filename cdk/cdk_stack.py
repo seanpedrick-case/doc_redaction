@@ -94,6 +94,7 @@ from cdk_config import (
 from cdk_functions import (  # Only keep CDK-native functions
     add_alb_https_listener_with_cert,
     add_custom_policies,
+    add_s3_enforce_ssl_policy,
     create_nat_gateway,
     create_subnets,
     create_web_acl_with_common_rules,
@@ -958,8 +959,8 @@ class CdkStack(Stack):
 
                 print("Created Output bucket:", output_bucket_name)
 
-            bucket.enforce_ssl()
-            output_bucket.enforce_ssl()
+            add_s3_enforce_ssl_policy(bucket)
+            add_s3_enforce_ssl_policy(output_bucket)
 
             # Add policies to output bucket
             output_bucket.add_to_resource_policy(
@@ -1230,25 +1231,10 @@ class CdkStack(Stack):
                     internet_facing=True,
                     security_group=alb_security_group,  # Link to SG
                     vpc_subnets=public_subnet_selection,  # Link to subnets
+                    drop_invalid_header_fields=True,
+                    deletion_protection=True,
                 )
                 print("Successfully created new Application Load Balancer")
-
-            cfn_alb = alb.node.default_child
-            if isinstance(cfn_alb, elbv2.CfnLoadBalancer):
-                alb_attributes = {
-                    attr.key: attr.value
-                    for attr in (cfn_alb.load_balancer_attributes or [])
-                }
-                alb_attributes["routing.http.drop_invalid_header_fields.enabled"] = (
-                    "true"
-                )
-                alb_attributes["deletion_protection.enabled"] = "true"
-                cfn_alb.load_balancer_attributes = [
-                    elbv2.CfnLoadBalancer.LoadBalancerAttributeProperty(
-                        key=key, value=value
-                    )
-                    for key, value in alb_attributes.items()
-                ]
         except Exception as e:
             raise Exception("Could not handle application load balancer due to:", e)
 
@@ -1717,7 +1703,7 @@ class CdkStack(Stack):
         # This section should primarily define the resources if they are managed by this stack.
         # CDK handles adding/removing targets and actions on updates.
         # If they might pre-exist outside the stack, you need lookups.
-        cookie_duration = Duration.hours(12)
+        cookie_duration = Duration.hours(8)
         target_group_name = ALB_TARGET_GROUP_NAME  # Explicit resource name
         cloudfront_distribution_url = "cloudfront_placeholder.net"  # Need to replace this afterwards with the actual cloudfront_distribution.domain_name
 

@@ -7,6 +7,8 @@ from pathlib import Path
 
 import gradio as gr
 
+from pi_examples import gradio_example_allowed_paths
+
 WORKSPACE_DIR = Path(os.environ.get("PI_WORKSPACE_DIR", "/home/user/app/workspace"))
 # Harmless alternate root used to force FileExplorer refresh (Gradio workaround).
 REFRESH_STUB_DIR = Path(os.environ.get("PI_FILEEXPLORER_STUB_DIR", "/tmp"))
@@ -68,6 +70,9 @@ def gradio_allowed_paths() -> list[str]:
             continue
         if resolved not in paths:
             paths.append(resolved)
+    for raw in gradio_example_allowed_paths():
+        if raw not in paths:
+            paths.append(raw)
     return paths
 
 

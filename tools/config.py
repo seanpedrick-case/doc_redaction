@@ -1805,13 +1805,11 @@ if SHOW_AWS_BEDROCK_LLM_MODELS:
     )
     model_source.extend(["AWS"] * len(amazon_models))
 
-gemini_models = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"]
+gemini_models = ["gemini-flash-lite-latest", "gemini-flash-latest", "gemini-pro-latest"]
 
 if SHOW_GEMINI_LLM_MODELS:
     model_full_names.extend(gemini_models)
-    model_short_names.extend(
-        ["gemini_flash_lite_2.5", "gemini_flash_2.5", "gemini_pro"]
-    )
+    model_short_names.extend(["gemini_flash_lite", "gemini_flash", "gemini_pro"])
     model_source.extend(["Gemini"] * len(gemini_models))
 
 azure_models = ["gpt-5-mini", "gpt-4o-mini"]
