@@ -7,7 +7,13 @@ import os
 from pathlib import Path
 from typing import Any
 
-AGENT_DIR = Path(os.environ.get("PI_CODING_AGENT_DIR", Path.home() / ".pi" / "agent"))
+
+def resolve_agent_dir() -> Path:
+    return Path(os.environ.get("PI_CODING_AGENT_DIR", Path.home() / ".pi" / "agent"))
+
+
+# Back-compat alias; prefer resolve_agent_dir() when env may change after import.
+AGENT_DIR = resolve_agent_dir()
 TEMPLATE_DIR = Path(__file__).resolve().parent / "agent"
 SETTINGS_TEMPLATE = TEMPLATE_DIR / "settings.json"
 
@@ -29,7 +35,8 @@ PROVIDER_LABELS: dict[str, str] = {
 
 
 def is_hf_space_profile() -> bool:
-    return DEPLOYMENT_PROFILE == DEPLOYMENT_HF_SPACE
+    profile = os.environ.get("PI_DEPLOYMENT_PROFILE", DEPLOYMENT_LOCAL).strip().lower()
+    return profile == DEPLOYMENT_HF_SPACE
 
 
 def _default_provider() -> str:
@@ -225,7 +232,7 @@ def ensure_session_dir(session_dir: str | None = None) -> Path:
     raw = (session_dir or resolve_session_dir()).strip()
     path = Path(raw)
     if not path.is_absolute():
-        path = (AGENT_DIR / path).resolve()
+        path = (resolve_agent_dir() / path).resolve()
     else:
         path = path.resolve()
     path.mkdir(parents=True, exist_ok=True)
@@ -259,7 +266,7 @@ def write_runtime_config(
     default_model: str | None = None,
 ) -> tuple[Path, Path]:
     """Write models.json and settings.json; return their paths."""
-    target = Path(agent_dir or AGENT_DIR)
+    target = Path(agent_dir or resolve_agent_dir())
     target.mkdir(parents=True, exist_ok=True)
 
     models_path = target / "models.json"
