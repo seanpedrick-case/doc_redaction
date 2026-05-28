@@ -244,6 +244,18 @@ def _resolve_and_validate_upload_path(upload_path: str | Path) -> Path:
     return source
 
 
+def _resolve_and_validate_workspace_dir(workspace_dir: Path | None) -> Path:
+    base_root = WORKSPACE_DIR.resolve()
+    candidate = (workspace_dir or WORKSPACE_DIR).resolve()
+    try:
+        candidate.relative_to(base_root)
+    except ValueError as exc:
+        raise ValueError(
+            f"Workspace path resolves outside allowed workspace root: {candidate}"
+        ) from exc
+    return candidate
+
+
 def copy_upload_to_workspace(
     upload_path: str | Path,
     *,
@@ -252,7 +264,7 @@ def copy_upload_to_workspace(
     source = _resolve_and_validate_upload_path(upload_path)
     if not source.is_file():
         raise FileNotFoundError(f"Uploaded file not found: {source}")
-    workspace_root = (workspace_dir or WORKSPACE_DIR).resolve()
+    workspace_root = _resolve_and_validate_workspace_dir(workspace_dir)
     workspace_root.mkdir(parents=True, exist_ok=True)
     safe_name = _sanitize_upload_filename(source.name)
     dest = (workspace_root / safe_name).resolve()
@@ -334,7 +346,7 @@ def prepare_redaction_task(
     """
     if upload_path is None:
         raise ValueError("Please upload a document.")
-    root = (workspace_dir or WORKSPACE_DIR).resolve()
+    root = _resolve_and_validate_workspace_dir(workspace_dir)
     dest = copy_upload_to_workspace(upload_path, workspace_dir=root)
     prompt = build_redaction_prompt(
         dest.name,
