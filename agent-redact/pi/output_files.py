@@ -8,7 +8,11 @@ from typing import Any
 
 import gradio as gr
 from pi_examples import gradio_example_allowed_paths
-from session_workspace import WORKSPACE_BASE_DIR, workspace_base_dir
+from session_workspace import (
+    WORKSPACE_BASE_DIR,
+    session_workspace_dir,
+    workspace_base_dir,
+)
 
 # Back-compat alias for modules that import WORKSPACE_DIR.
 WORKSPACE_DIR = WORKSPACE_BASE_DIR
@@ -38,13 +42,13 @@ def _is_under_final_output_dir(relative_path: Path) -> bool:
 
 
 def collect_final_output_files(
-    session_workspace: str | None = None,
+    session_hash: str | None = None,
 ) -> list[str] | None:
     """
     Collect deliverable files from ``review/output_review_final/`` (and aliases)
     anywhere under the session workspace, newest first.
     """
-    root = workspace_root_from(session_workspace)
+    root = workspace_root_from(session_hash)
     if not root.is_dir():
         return None
 
@@ -74,16 +78,11 @@ def collect_final_output_files(
     return [str(path.resolve()) for path in candidates]
 
 
-def workspace_root_from(session_workspace: str | None = None) -> Path:
-    base_root = workspace_base_dir().resolve()
-    if session_workspace and str(session_workspace).strip():
-        try:
-            candidate = Path(session_workspace).resolve()
-            candidate.relative_to(base_root)
-            return candidate
-        except (OSError, ValueError):
-            return base_root
-    return base_root
+def workspace_root_from(session_hash: str | None = None) -> Path:
+    """Resolve the session workspace from a sanitized Gradio session hash only."""
+    if not session_hash or not str(session_hash).strip():
+        return workspace_base_dir().resolve()
+    return session_workspace_dir(str(session_hash).strip())
 
 
 def _is_file_path(path: str) -> bool:
@@ -131,8 +130,8 @@ def _resolve_under_workspace(
     return resolved if resolved.is_file() else None
 
 
-def load_workspace_output_files(session_workspace: str = ""):
-    root = workspace_root_from(session_workspace or None)
+def load_workspace_output_files(session_hash: str = ""):
+    root = workspace_root_from(session_hash or None)
     root.mkdir(parents=True, exist_ok=True)
     return gr.FileExplorer(root_dir=str(root))
 
@@ -163,23 +162,23 @@ def gradio_allowed_paths() -> list[str]:
 
 
 def refresh_workspace_panel(
-    session_workspace: str = "",
+    session_hash: str = "",
 ) -> tuple[Any, list[str] | None]:
     """Refresh file explorer and auto-detected final deliverables."""
     return (
-        load_workspace_output_files(session_workspace),
-        collect_final_output_files(session_workspace),
+        load_workspace_output_files(session_hash),
+        collect_final_output_files(session_hash),
     )
 
 
 def workspace_files_download_fn(
     selected: list[str] | None,
-    session_workspace: str = "",
+    session_hash: str = "",
 ) -> list[str] | None:
     """Return only file paths under the session workspace (for gr.File download)."""
     if not selected:
         return None
-    root = workspace_root_from(session_workspace or None)
+    root = workspace_root_from(session_hash or None)
     downloads: list[str] = []
     for raw in selected:
         if not _is_file_path(raw):

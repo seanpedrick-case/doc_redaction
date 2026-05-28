@@ -67,11 +67,11 @@ def ensure_session_workspace(session_hash: str) -> Path:
 
 def init_session_workspace(
     request: gr.Request,
-) -> tuple[str, str, gr.FileExplorer, str]:
+) -> tuple[str, gr.FileExplorer, str]:
     """
     App-load handler: create the session subfolder and scope the file explorer.
 
-    Returns ``(session_hash, workspace_path, file_explorer_update, status_markdown)``.
+    Returns ``(session_hash, file_explorer_update, status_markdown)``.
     """
     session_hash = resolve_session_hash(request)
     workspace = ensure_session_workspace(session_hash)
@@ -88,17 +88,16 @@ def init_session_workspace(
 
     return (
         session_hash,
-        workspace_posix,
         gr.FileExplorer(root_dir=workspace_posix),
         status,
     )
 
 
-def workspace_context_prefix(workspace_path: str) -> str:
+def workspace_context_prefix(session_hash: str) -> str:
     """Prefix Pi prompts so the agent uses the session workspace."""
-    if not session_workspace_enabled() or not workspace_path.strip():
+    if not session_workspace_enabled() or not session_hash.strip():
         return ""
-    root = workspace_path.rstrip("/")
+    root = session_workspace_dir(session_hash).as_posix().rstrip("/")
     return (
         f"**Session workspace (mandatory):** all uploads, downloads, and redaction "
         f"artifacts for this user must live under `{root}/`. "

@@ -48,9 +48,9 @@ def test_sanitize_session_id_strips_unsafe_chars():
     assert sanitize_session_id("foo@bar/baz") == "foo_bar_baz"
 
 
-def test_workspace_context_prefix_includes_path():
-    prefix = workspace_context_prefix("/home/user/app/workspace/abc123")
-    assert "/home/user/app/workspace/abc123" in prefix
+def test_workspace_context_prefix_includes_path(workspace_base):
+    prefix = workspace_context_prefix("abc123")
+    assert (workspace_base / "abc123").as_posix() in prefix
     assert "mandatory" in prefix.lower()
 
 

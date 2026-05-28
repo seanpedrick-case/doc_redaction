@@ -56,6 +56,7 @@ from redaction_prompt import (
 )
 from session_workspace import (
     init_session_workspace,
+    session_workspace_dir,
     workspace_context_prefix,
 )
 
@@ -381,14 +382,13 @@ def apply_backend(
 
 def _init_session_ui(
     request: gr.Request,
-) -> tuple[str, str, Any, str, list[str] | None]:
-    session_hash, workspace_path, explorer, status = init_session_workspace(request)
+) -> tuple[str, Any, str, list[str] | None]:
+    session_hash, explorer, status = init_session_workspace(request)
     return (
         session_hash,
-        workspace_path,
         explorer,
         status,
-        collect_final_output_files(workspace_path),
+        collect_final_output_files(session_hash),
     )
 
 
@@ -405,12 +405,12 @@ def _chat_yield(
     abort_enabled: bool = False,
     redact_enabled: bool = True,
     session_info: str | None = None,
-    session_workspace: str = "",
+    session_hash: str = "",
     refresh_final_files: bool = False,
 ):
     final_files: list[str] | None | dict[str, Any]
     if refresh_final_files:
-        final_files = collect_final_output_files(session_workspace)
+        final_files = collect_final_output_files(session_hash)
     else:
         final_files = gr.update()
 
@@ -435,7 +435,7 @@ def _run_pi_chat(
     client: PiRpcClient | None,
     *,
     chat_user_message: str | None = None,
-    session_workspace: str = "",
+    session_hash: str = "",
 ):
     if not message or not message.strip():
         client = client if client and client.running else None
@@ -447,7 +447,7 @@ def _run_pi_chat(
                 "",
                 "",
                 "",
-                session_workspace=session_workspace,
+                session_hash=session_hash,
             )
         else:
             yield (
@@ -490,11 +490,11 @@ def _run_pi_chat(
         abort_enabled=True,
         redact_enabled=False,
         session_info=session_info,
-        session_workspace=session_workspace,
+        session_hash=session_hash,
     )
 
     try:
-        pi_message = workspace_context_prefix(session_workspace) + message.strip()
+        pi_message = workspace_context_prefix(session_hash) + message.strip()
         for event in client.prompt_events(pi_message):
             (
                 history,
@@ -525,7 +525,7 @@ def _run_pi_chat(
                 abort_enabled=True,
                 redact_enabled=False,
                 session_info=session_info,
-                session_workspace=session_workspace,
+                session_hash=session_hash,
             )
     except PiRpcError as exc:
         history[-1]["content"] = f"**Pi error:** {exc}"
@@ -541,7 +541,7 @@ def _run_pi_chat(
             abort_enabled=False,
             redact_enabled=True,
             session_info=_session_summary(client),
-            session_workspace=session_workspace,
+            session_hash=session_hash,
             refresh_final_files=True,
         )
         return
@@ -559,7 +559,7 @@ def _run_pi_chat(
                 abort_enabled=False,
                 redact_enabled=True,
                 session_info=_session_summary(client),
-                session_workspace=session_workspace,
+                session_hash=session_hash,
                 refresh_final_files=True,
             )
             return
@@ -584,7 +584,7 @@ def _run_pi_chat(
         abort_enabled=False,
         redact_enabled=True,
         session_info=_session_summary(client),
-        session_workspace=session_workspace,
+        session_hash=session_hash,
         refresh_final_files=True,
     )
 
@@ -593,13 +593,13 @@ def chat_respond(
     message: str,
     history: list[dict[str, Any]] | None,
     client: PiRpcClient | None,
-    session_workspace: str,
+    session_hash: str,
 ):
     yield from _run_pi_chat(
         message,
         history,
         client,
-        session_workspace=session_workspace,
+        session_hash=session_hash,
     )
 
 
@@ -613,7 +613,7 @@ def submit_redaction_task(
     encourage_vlm_signatures: bool,
     history: list[dict[str, Any]] | None,
     client: PiRpcClient | None,
-    session_workspace: str,
+    session_hash: str,
 ):
     settings = (
         RedactionTaskSettings.hf_space_defaults()
@@ -625,7 +625,9 @@ def submit_redaction_task(
             encourage_vlm_signatures,
         )
     )
-    workspace_path = Path(session_workspace) if session_workspace else None
+    workspace_path = (
+        session_workspace_dir(session_hash) if session_hash.strip() else None
+    )
     try:
         _file_name, prompt = prepare_redaction_task(
             upload_file,
@@ -669,7 +671,7 @@ def submit_redaction_task(
         history,
         client,
         chat_user_message=chat_summary,
-        session_workspace=session_workspace,
+        session_hash=session_hash,
     )
 
 
@@ -690,7 +692,7 @@ def abort_agent(client: PiRpcClient | None):
 def new_chat(
     _history,
     client: PiRpcClient | None,
-    session_workspace: str,
+    session_hash: str,
 ):
     if client is not None:
         try:
@@ -709,7 +711,7 @@ def new_chat(
         "",
         "",
         "",
-        session_workspace=session_workspace,
+        session_hash=session_hash,
         refresh_final_files=True,
     )
 
@@ -769,7 +771,6 @@ def build_ui():
         )
         client_state = gr.State(None)
         session_hash_state = gr.State("")
-        session_workspace_state = gr.State("")
 
         session_info = gr.Markdown(_startup_session_info())
 
@@ -1034,12 +1035,12 @@ def build_ui():
 
         run_event = send.click(
             chat_respond,
-            inputs=[msg, chatbot, client_state, session_workspace_state],
+            inputs=[msg, chatbot, client_state, session_hash_state],
             outputs=chat_outputs,
         )
         msg.submit(
             chat_respond,
-            inputs=[msg, chatbot, client_state, session_workspace_state],
+            inputs=[msg, chatbot, client_state, session_hash_state],
             outputs=chat_outputs,
         )
         run_redact_event = start_redact_btn.click(
@@ -1054,7 +1055,7 @@ def build_ui():
                 encourage_vlm_signatures,
                 chatbot,
                 client_state,
-                session_workspace_state,
+                session_hash_state,
             ],
             outputs=chat_outputs,
         )
@@ -1067,7 +1068,7 @@ def build_ui():
         )
         clear.click(
             new_chat,
-            inputs=[chatbot, client_state, session_workspace_state],
+            inputs=[chatbot, client_state, session_hash_state],
             outputs=chat_outputs,
         )
 
@@ -1106,13 +1107,13 @@ def build_ui():
             outputs=workspace_output_explorer,
         ).success(
             fn=refresh_workspace_panel,
-            inputs=[session_workspace_state],
+            inputs=[session_hash_state],
             outputs=[workspace_output_explorer, workspace_output_download],
         )
 
         workspace_output_explorer.input(
             fn=workspace_files_download_fn,
-            inputs=[workspace_output_explorer, session_workspace_state],
+            inputs=[workspace_output_explorer, session_hash_state],
             outputs=workspace_output_download,
         )
 
@@ -1121,7 +1122,6 @@ def build_ui():
             inputs=None,
             outputs=[
                 session_hash_state,
-                session_workspace_state,
                 workspace_output_explorer,
                 workspace_session_info,
                 workspace_output_download,

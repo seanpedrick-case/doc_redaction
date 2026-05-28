@@ -270,6 +270,19 @@ services:
       - "-1"
       - --ctx-size
       - "65536"
+      - --no-mmproj
+      # - -mg
+      # - "0"
+      # - -dev 
+      # - "cuda0,cuda1"
+      - -dev 
+      - "cuda0"
+      # - -sm
+      # - "row"
+      # - --tensor-split
+      # - "24,16"
+      - -ub
+      - "1024"
       - --fit
       - "off"
       - --temp

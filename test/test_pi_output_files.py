@@ -97,37 +97,63 @@ def test_resolve_under_workspace_rejects_unsafe_relative_segments(tmp_path):
 
 
 def test_workspace_files_download_fn_returns_absolute_paths(tmp_path, monkeypatch):
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    pdf = workspace / "out.pdf"
+    base = tmp_path / "workspace"
+    base.mkdir()
+    session_dir = base / "user1"
+    session_dir.mkdir()
+    pdf = session_dir / "out.pdf"
     pdf.write_bytes(b"%PDF")
 
-    monkeypatch.setattr(of, "WORKSPACE_DIR", workspace)
+    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
 
-    result = of.workspace_files_download_fn([str(pdf)], str(workspace))
+    result = of.workspace_files_download_fn([str(pdf)], "user1")
     assert result == [str(pdf.resolve())]
 
 
-def test_collect_final_output_files_finds_review_final_folder(tmp_path):
-    workspace = tmp_path / "session"
-    final_dir = workspace / "redact" / "doc.pdf" / "review" / "output_review_final"
+def test_collect_final_output_files_finds_review_final_folder(tmp_path, monkeypatch):
+    base = tmp_path / "workspace"
+    session_dir = base / "session"
+    final_dir = session_dir / "redact" / "doc.pdf" / "review" / "output_review_final"
     final_dir.mkdir(parents=True)
     redacted = final_dir / "doc_redacted.pdf"
     redacted.write_bytes(b"%PDF")
-    other = workspace / "redact" / "doc.pdf" / "output_redact" / "draft.csv"
+    other = session_dir / "redact" / "doc.pdf" / "output_redact" / "draft.csv"
     other.parent.mkdir(parents=True)
     other.write_text("x")
 
-    result = of.collect_final_output_files(str(workspace))
+    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+
+    result = of.collect_final_output_files("session")
     assert result == [str(redacted.resolve())]
 
 
-def test_collect_final_output_files_supports_output_final_alias(tmp_path):
-    workspace = tmp_path / "session"
-    final_dir = workspace / "redact" / "doc.pdf" / "review" / "output_final"
+def test_collect_final_output_files_supports_output_final_alias(tmp_path, monkeypatch):
+    base = tmp_path / "workspace"
+    session_dir = base / "session"
+    final_dir = session_dir / "redact" / "doc.pdf" / "review" / "output_final"
     final_dir.mkdir(parents=True)
     redacted = final_dir / "doc_redacted.pdf"
     redacted.write_bytes(b"%PDF")
 
-    result = of.collect_final_output_files(str(workspace))
+    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+
+    result = of.collect_final_output_files("session")
     assert result == [str(redacted.resolve())]
+
+
+def test_workspace_root_from_uses_session_hash_only(tmp_path, monkeypatch):
+    base = tmp_path / "workspace"
+    base.mkdir()
+    session_dir = base / "abc123"
+    session_dir.mkdir()
+
+    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+
+    assert of.workspace_root_from("abc123") == session_dir
+    assert of.workspace_root_from(None) == base.resolve()
+    evil = of.workspace_root_from("/etc/passwd")
+    evil.relative_to(base.resolve())
