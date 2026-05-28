@@ -24,6 +24,7 @@ feedback/*
 config/*
 !config/pi_agent.env.example
 !config/docker_app_config.env.example
+!config/app_config.env.example
 workspace/*
 user_guide/*
 _extensions/*

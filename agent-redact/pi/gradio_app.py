@@ -44,6 +44,7 @@ from pi_agent_config import (
     normalize_provider,
     provider_choices,
     provider_label,
+    resolved_default_model,
     write_runtime_config,
 )
 from pi_examples import example_rows, examples_status_markdown
@@ -261,6 +262,12 @@ def _ensure_client(client: PiRpcClient | None) -> PiRpcClient:
         return client
     client = default_client()
     client.start()
+    provider = normalize_provider(DEFAULT_PROVIDER)
+    model = resolved_default_model(provider)
+    try:
+        client.set_model(provider, model)
+    except PiRpcError:
+        pass
     return client
 
 

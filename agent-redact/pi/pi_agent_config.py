@@ -95,10 +95,26 @@ DEFAULT_MODEL_BY_PROVIDER: dict[str, str] = {
     PROVIDER_BEDROCK: "anthropic.claude-sonnet-4-6",
 }
 
-DEFAULT_MODEL = os.environ.get(
-    "PI_DEFAULT_MODEL",
-    DEFAULT_MODEL_BY_PROVIDER.get(DEFAULT_PROVIDER, LLAMA_MODEL_ID),
+_env_default_model = (os.environ.get("PI_DEFAULT_MODEL") or "").strip()
+DEFAULT_MODEL = _env_default_model or DEFAULT_MODEL_BY_PROVIDER.get(
+    DEFAULT_PROVIDER, LLAMA_MODEL_ID
 )
+
+
+def resolved_default_model(provider: str, *, override: str | None = None) -> str:
+    """
+    Pick the default model id for a provider.
+
+    Order: explicit override → ``PI_DEFAULT_MODEL`` (if listed for provider) →
+    built-in per-provider default.
+    """
+    models = PROVIDER_MODELS.get(provider, [])
+    if override and override in models:
+        return override
+    env_model = (DEFAULT_MODEL or "").strip()
+    if env_model and env_model in models:
+        return env_model
+    return DEFAULT_MODEL_BY_PROVIDER.get(provider, LLAMA_MODEL_ID)
 
 
 def _zero_cost() -> dict[str, int]:
@@ -482,9 +498,7 @@ def build_settings_config(
     provider = default_provider or DEFAULT_PROVIDER
     if provider not in PROVIDER_MODELS:
         provider = PROVIDER_GEMINI if is_hf_space_profile() else PROVIDER_LLAMA
-    model = default_model or DEFAULT_MODEL_BY_PROVIDER.get(provider, DEFAULT_MODEL)
-    if model not in PROVIDER_MODELS.get(provider, []):
-        model = DEFAULT_MODEL_BY_PROVIDER[provider]
+    model = resolved_default_model(provider, override=default_model)
 
     settings = _load_settings_template()
     settings["defaultProvider"] = provider
@@ -546,7 +560,7 @@ def models_for_provider(provider: str) -> list[str]:
 
 
 def default_model_for_provider(provider: str) -> str:
-    return DEFAULT_MODEL_BY_PROVIDER.get(provider, DEFAULT_MODEL)
+    return resolved_default_model(provider)
 
 
 def normalize_provider(provider: str) -> str:

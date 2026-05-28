@@ -22,16 +22,30 @@ HF_DEFAULT_OCR = "Local model - selectable text"
 HF_DEFAULT_PII = "Local"
 HF_DEFAULT_GRADIO_URL = "https://seanpedrickcase-document-redaction.hf.space"
 
-_LOCAL_DEFAULT_OCR = "hybrid-paddle-inference-server"
-_LOCAL_DEFAULT_PII = "Local"
+# Used only when PI_DEFAULT_OCR_METHOD / PI_DEFAULT_PII_METHOD are unset (local-docker profile).
+_FALLBACK_LOCAL_OCR = "hybrid-paddle-inference-server"
+_FALLBACK_LOCAL_PII = "Local"
 
-DEFAULT_OCR_METHOD = os.environ.get(
+
+def _env_default(key: str, *, hf_default: str, local_fallback: str) -> str:
+    """Resolve Pi redaction defaults from env (e.g. config/pi_agent.env) with profile fallbacks."""
+    explicit = (os.environ.get(key) or "").strip()
+    if explicit:
+        return explicit
+    if is_hf_space_profile():
+        return hf_default
+    return local_fallback
+
+
+DEFAULT_OCR_METHOD = _env_default(
     "PI_DEFAULT_OCR_METHOD",
-    HF_DEFAULT_OCR if is_hf_space_profile() else _LOCAL_DEFAULT_OCR,
+    hf_default=HF_DEFAULT_OCR,
+    local_fallback=_FALLBACK_LOCAL_OCR,
 )
-DEFAULT_PII_METHOD = os.environ.get(
+DEFAULT_PII_METHOD = _env_default(
     "PI_DEFAULT_PII_METHOD",
-    HF_DEFAULT_PII if is_hf_space_profile() else _LOCAL_DEFAULT_PII,
+    hf_default=HF_DEFAULT_PII,
+    local_fallback=_FALLBACK_LOCAL_PII,
 )
 
 OCR_METHOD_CHOICES: tuple[str, ...] = (

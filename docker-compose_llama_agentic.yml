@@ -66,8 +66,10 @@ x-pi-agent-env: &pi-agent-env
   GRADIO_SERVER_PORT: "7862"
   PYTHONPATH: /workspace/doc_redaction:/workspace/doc_redaction/agent-redact/pi
   PI_WORKSPACE_DIR: /home/user/app/workspace
-  PI_DEFAULT_PROVIDER: ${PI_DEFAULT_PROVIDER:-llama-cpp}
-  PI_DEFAULT_MODEL: ${PI_DEFAULT_MODEL:-}
+  # PI_DEFAULT_PROVIDER: ${PI_DEFAULT_PROVIDER:-llama-cpp}
+  # PI_DEFAULT_MODEL: ${PI_DEFAULT_MODEL:-}
+  # PI_DEFAULT_OCR_METHOD: ${PI_DEFAULT_OCR_METHOD:-hybrid-paddle-inference-server}
+  # PI_DEFAULT_PII_METHOD: ${PI_DEFAULT_PII_METHOD:-Local}
   PI_LLAMA_BASE_URL: ${PI_LLAMA_BASE_URL:-http://llama-inference:8080/v1}
   GEMINI_API_KEY: ${GEMINI_API_KEY:-}
   GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
@@ -79,7 +81,7 @@ x-pi-agent-env: &pi-agent-env
   AWS_PROFILE: ${AWS_PROFILE:-}
   RUN_AWS_FUNCTIONS: ${RUN_AWS_FUNCTIONS:-False}
   PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS: ${PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:-True}
-  PI_VLM_BASE_URL: http://llama-inference:8080
+  # PI_VLM_BASE_URL: http://llama-inference:8080
   RUN_FASTAPI: ${RUN_FASTAPI:-False}
   ROOT_PATH: ${ROOT_PATH:-}
   FASTAPI_ROOT_PATH: ${FASTAPI_ROOT_PATH:-/}
@@ -506,7 +508,7 @@ services:
       - INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES=True
       - PREPROCESS_LOCAL_OCR_IMAGES=False
       - INFERENCE_SERVER_DISABLE_THINKING=True
-      - MAX_NEW_TOKENS=196608
+      - MAX_NEW_TOKENS=8192
       - SAVE_EXAMPLE_HYBRID_IMAGES=False
       - SAVE_VLM_INPUT_IMAGES=False
       - VLM_MAX_DPI=200.0
@@ -567,7 +569,7 @@ services:
       - HYBRID_OCR_CONFIDENCE_THRESHOLD=97
       - INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES=False
       - PREPROCESS_LOCAL_OCR_IMAGES=False
-      - MAX_NEW_TOKENS=32768
+      - MAX_NEW_TOKENS=8192
       - SAVE_EXAMPLE_HYBRID_IMAGES=False
       - SAVE_VLM_INPUT_IMAGES=False
       - VLM_MAX_DPI=200.0
@@ -617,7 +619,7 @@ services:
       - HYBRID_OCR_CONFIDENCE_THRESHOLD=97
       - INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES=False
       - PREPROCESS_LOCAL_OCR_IMAGES=False
-      - MAX_NEW_TOKENS=32768
+      - MAX_NEW_TOKENS=8192
       - SAVE_EXAMPLE_HYBRID_IMAGES=False
       - SAVE_VLM_INPUT_IMAGES=False
       - VLM_MAX_DPI=200.0
@@ -634,6 +636,8 @@ services:
       - S3_OUTPUTS_FOLDER=${S3_OUTPUTS_FOLDER:-}
       - S3_OUTPUTS_BUCKET=${S3_OUTPUTS_BUCKET:-}
       - DOCUMENT_REDACTION_BUCKET=${DOCUMENT_REDACTION_BUCKET:-}
+      - INCLUDE_FACE_IDENTIFICATION_TEXTRACT_OPTION=True
+
     volumes:
       - ./workspace:/home/user/app/workspace:rw
       - ${USERPROFILE}/.aws:/home/user/.aws:rw
@@ -730,17 +734,17 @@ services:
         condition: service_started
     environment:
       <<: *pi-agent-env
-      PI_DEFAULT_PROVIDER: amazon-bedrock
-      PI_DEFAULT_MODEL: ${PI_DEFAULT_MODEL:-anthropic.claude-sonnet-4-6}
-      PI_DEFAULT_OCR_METHOD: hybrid-paddle-vlm
-      PI_DEFAULT_PII_METHOD: LLM (AWS Bedrock)
+      # PI_DEFAULT_PROVIDER: amazon-bedrock
+      # PI_DEFAULT_MODEL: ${PI_DEFAULT_MODEL:-anthropic.claude-sonnet-4-6}
+      # PI_DEFAULT_OCR_METHOD: AWS Textract service - all PDF types
+      # PI_DEFAULT_PII_METHOD: AWS Comprehend
       PI_VLM_BASE_URL: http://redaction-app-llama:7860
-      PI_VLM_MODEL: ${PI_VLM_MODEL:-anthropic.claude-sonnet-4-6}
+      # PI_VLM_MODEL: ${PI_VLM_MODEL:-anthropic.claude-sonnet-4-6}
       RUN_AWS_FUNCTIONS: "True"
-      AWS_REGION: ${AWS_REGION:-eu-west-2}
-      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-${AWS_REGION:-eu-west-2}}
-      AWS_PROFILE: ${AWS_PROFILE:-${PI_AWS_PROFILE:-}}
-      PI_AWS_PROFILE: ${PI_AWS_PROFILE:-}
+      # AWS_REGION: ${AWS_REGION:-eu-west-2}
+      # AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-${AWS_REGION:-eu-west-2}}
+      # AWS_PROFILE: ${AWS_PROFILE:-${PI_AWS_PROFILE:-}}
+      # PI_AWS_PROFILE: ${PI_AWS_PROFILE:-}
 
 networks:
   redaction-net-llama:

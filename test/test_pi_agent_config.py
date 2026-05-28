@@ -11,6 +11,24 @@ if str(_PI_SRC) not in sys.path:
 import pi_agent_config as pac
 
 
+def test_build_settings_config_uses_pi_default_model_for_bedrock(tmp_path, monkeypatch):
+    monkeypatch.setenv("PI_DEFAULT_PROVIDER", "amazon-bedrock")
+    monkeypatch.setenv("PI_DEFAULT_MODEL", "amazon.nova-lite-v1:0")
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
+
+    import importlib
+
+    importlib.reload(pac)
+
+    settings = pac.build_settings_config()
+    assert settings["defaultProvider"] == "amazon-bedrock"
+    assert settings["defaultModel"] == "amazon.nova-lite-v1:0"
+    assert pac.default_model_for_provider(pac.PROVIDER_BEDROCK) == (
+        "amazon.nova-lite-v1:0"
+    )
+    assert pac.resolved_default_model(pac.PROVIDER_LLAMA) == pac.LLAMA_MODEL_ID
+
+
 def test_hf_profile_defaults_session_dir_to_tmp(tmp_path, monkeypatch):
     monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "hf-space")
     monkeypatch.delenv("PI_SESSION_DIR", raising=False)
