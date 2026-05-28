@@ -46,9 +46,9 @@ LLAMA_CONTEXT = int(os.environ.get("PI_LLAMA_CONTEXT_WINDOW", "114688"))
 LLAMA_MAX_TOKENS = int(os.environ.get("PI_LLAMA_MAX_TOKENS", "32768"))
 
 GEMINI_MODELS: tuple[tuple[str, str, int, bool], ...] = (
-    ("gemini-flash-lite-latest", "Gemini 2.5 Flash Lite", 1048576, False),
-    ("gemini-flash-latest", "Gemini 2.5 Flash", 1048576, True),
-    ("gemini-pro-latest", "Gemini 2.5 Pro", 1048576, True),
+    ("gemini-flash-lite-latest", "Gemini Flash Lite", 1048576, False),
+    ("gemini-flash-latest", "Gemini Flash", 1048576, True),
+    ("gemini-pro-latest", "Gemini Pro", 1048576, True),
 )
 
 BEDROCK_MODELS: tuple[tuple[str, str, int, bool], ...] = (
@@ -210,6 +210,28 @@ def _load_settings_template() -> dict[str, Any]:
     }
 
 
+def resolve_session_dir() -> str:
+    """Pi session JSONL directory (absolute path or relative to ``AGENT_DIR``)."""
+    explicit = os.environ.get("PI_SESSION_DIR", "").strip()
+    if explicit:
+        return explicit
+    if is_hf_space_profile():
+        return "/tmp/pi-sessions"
+    return "sessions"
+
+
+def ensure_session_dir(session_dir: str | None = None) -> Path:
+    """Create the Pi session directory and return its resolved absolute path."""
+    raw = (session_dir or resolve_session_dir()).strip()
+    path = Path(raw)
+    if not path.is_absolute():
+        path = (AGENT_DIR / path).resolve()
+    else:
+        path = path.resolve()
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def build_settings_config(
     *,
     default_provider: str | None = None,
@@ -225,6 +247,8 @@ def build_settings_config(
     settings = _load_settings_template()
     settings["defaultProvider"] = provider
     settings["defaultModel"] = model
+    session_path = ensure_session_dir(resolve_session_dir())
+    settings["sessionDir"] = session_path.as_posix()
     return settings
 
 

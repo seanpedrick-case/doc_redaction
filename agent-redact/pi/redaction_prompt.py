@@ -248,7 +248,9 @@ def _resolve_and_validate_workspace_dir(workspace_dir: Path | None) -> Path:
     if workspace_dir is not None and not isinstance(workspace_dir, Path):
         raise ValueError("Workspace path has an invalid type.")
     base_root = WORKSPACE_DIR.resolve()
-    candidate = (workspace_dir if workspace_dir is not None else WORKSPACE_DIR).resolve()
+    candidate = (
+        workspace_dir if workspace_dir is not None else WORKSPACE_DIR
+    ).resolve()
     try:
         candidate.relative_to(base_root)
     except ValueError as exc:

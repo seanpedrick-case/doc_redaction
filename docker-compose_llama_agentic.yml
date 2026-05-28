@@ -200,7 +200,7 @@ services:
       - --fit
       - "off"
       - --temp
-      - "0.0"
+      - "0.1"
       - --top-k
       - "64"
       - --top-p
@@ -218,6 +218,8 @@ services:
       - "q8_0"
       - --cache-type-v
       - "q8_0"
+      - --chat-template-kwargs
+      - "{\"enable_thinking\": false}"
       # - --image_min_tokens
       # - "300"
       #- --image_max_tokens
@@ -300,6 +302,8 @@ services:
       - "42"
       - --parallel
       - "1"
+      - --chat-template-kwargs
+      - "{\"enable_thinking\": false}"
       - --cache-type-k
       - "q8_0"
       - --cache-type-v

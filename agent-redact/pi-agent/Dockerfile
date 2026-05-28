@@ -19,6 +19,7 @@ ENV GRADIO_SERVER_PORT=7860
 ENV PI_WORKSPACE_DIR=/home/user/app/workspace
 ENV PI_WORKDIR=/workspace/doc_redaction
 ENV PI_UPLOAD_ROOT=/tmp/gradio
+ENV PI_SESSION_DIR=/tmp/pi-sessions
 ENV PI_OFFLINE=1
 ENV PI_SKIP_VERSION_CHECK=1
 ENV PI_GRADIO_SHOW_EXAMPLES=true
@@ -54,8 +55,8 @@ RUN test -f doc_redaction/example_data/example_of_emails_sent_to_a_professor_bef
     && ! head -1 doc_redaction/example_data/example_of_emails_sent_to_a_professor_before_applying.pdf \
         | grep -q "^version https://git-lfs.github.com/spec/v1"
 
-RUN mkdir -p /home/node/.pi/agent/sessions /home/user/app/workspace /tmp/gradio \
-    && chown -R node:node /home/node/.pi /home/user/app /tmp/gradio /workspace
+RUN mkdir -p /home/node/.pi/agent /home/user/app/workspace /tmp/gradio /tmp/pi-sessions \
+    && chown -R node:node /home/node/.pi /home/user/app /tmp/gradio /tmp/pi-sessions /workspace
 
 USER node
 
@@ -63,4 +64,4 @@ RUN pi --version
 
 EXPOSE 7860
 
-CMD ["bash", "-c", "python3 agent-redact/pi/pi_agent_config.py && exec python3 agent-redact/pi/gradio_app.py"]
+CMD ["bash", "-c", "mkdir -p \"${PI_SESSION_DIR:-/tmp/pi-sessions}\" && python3 agent-redact/pi/pi_agent_config.py && exec python3 agent-redact/pi/gradio_app.py"]
