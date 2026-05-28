@@ -9,9 +9,6 @@ export PYTHONPATH="${PI_WORKDIR}/agent-redact/pi:${PYTHONPATH:-}"
 cd "$PI_WORKDIR"
 
 mkdir -p "${PI_WORKSPACE_DIR:-/home/user/app/workspace}"
-if [ -n "${PI_SESSION_DIR:-}" ]; then
-  mkdir -p "${PI_SESSION_DIR}"
-fi
 python3 agent-redact/pi/pi_agent_config.py
 python3 agent-redact/pi/gradio_app.py &
 

@@ -64,4 +64,4 @@ RUN pi --version
 
 EXPOSE 7860
 
-CMD ["bash", "-c", "mkdir -p \"${PI_SESSION_DIR:-/tmp/pi-sessions}\" && python3 agent-redact/pi/pi_agent_config.py && exec python3 agent-redact/pi/gradio_app.py"]
+CMD ["bash", "-c", "python3 agent-redact/pi/pi_agent_config.py && exec python3 agent-redact/pi/gradio_app.py"]
