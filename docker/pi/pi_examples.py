@@ -9,11 +9,21 @@ from pathlib import Path
 from pi_agent_config import is_hf_space_profile
 from redaction_prompt import HF_DEFAULT_OCR
 
-SHOW_PI_EXAMPLES = os.environ.get("PI_GRADIO_SHOW_EXAMPLES", "true").lower() in {
-    "1",
-    "true",
-    "yes",
-}
+def _show_examples_from_env() -> bool:
+    """True unless PI_GRADIO_SHOW_EXAMPLES or SHOW_PI_EXAMPLES is explicitly false."""
+    for key in ("PI_GRADIO_SHOW_EXAMPLES", "SHOW_PI_EXAMPLES"):
+        raw = os.environ.get(key)
+        if raw is None:
+            continue
+        lowered = raw.strip().lower()
+        if lowered in {"0", "false", "no"}:
+            return False
+        if lowered in {"1", "true", "yes"}:
+            return True
+    return True
+
+
+SHOW_PI_EXAMPLES = _show_examples_from_env()
 
 
 @dataclass(frozen=True)
@@ -59,7 +69,19 @@ def example_file_path(file_name: str) -> Path | None:
         path.relative_to(root)
     except ValueError:
         return None
-    return path if path.is_file() else None
+    if not path.is_file():
+        return None
+    if _is_lfs_pointer(path):
+        return None
+    return path
+
+
+def _is_lfs_pointer(path: Path) -> bool:
+    try:
+        first_line = path.read_text(encoding="utf-8", errors="ignore").splitlines()[0]
+    except (OSError, IndexError):
+        return False
+    return first_line.startswith("version https://git-lfs.github.com/spec/v1")
 
 
 def _catalog() -> tuple[PiRedactionExample, ...]:
@@ -139,3 +161,26 @@ def gradio_example_allowed_paths() -> list[str]:
     if root is None:
         return []
     return [str(root)]
+
+
+def examples_status_markdown() -> str:
+    """Human-readable status for the UI when examples are missing or disabled."""
+    if not SHOW_PI_EXAMPLES:
+        return (
+            "_Examples are disabled. Set Space variable "
+            "`PI_GRADIO_SHOW_EXAMPLES=true` (or `SHOW_PI_EXAMPLES=true`) and restart._"
+        )
+    root = resolve_example_data_dir()
+    if root is None:
+        return (
+            "_Example PDFs not found — expected under "
+            "`doc_redaction/example_data/` in the Space image._"
+        )
+    available = available_pi_examples()
+    if not available:
+        return (
+            f"_Example PDFs not found under `{root}`. "
+            "Rebuild the Space after syncing example files from the monorepo._"
+        )
+    names = ", ".join(f"`{ex.file_name}`" for ex in available)
+    return f"_Examples loaded from `{root}`: {names}_"

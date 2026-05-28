@@ -37,7 +37,7 @@ from pi_agent_config import (
     provider_label,
     write_runtime_config,
 )
-from pi_examples import example_rows
+from pi_examples import example_rows, examples_status_markdown
 from pi_rpc_client import PiRpcClient, PiRpcError, PiStreamEvent, default_client
 from redaction_prompt import (
     DEFAULT_OCR_METHOD,
@@ -644,6 +644,9 @@ def build_ui():
             with gr.Column(scale=2):
                 with gr.Accordion("Redaction task", open=True):
                     gr.Markdown(hf_redaction_blurb)
+
+                    pi_example_rows, pi_example_labels = example_rows()
+
                     redact_file = gr.File(
                         label="Document to redact",
                         file_types=[
@@ -716,11 +719,11 @@ def build_ui():
                                 value=True,
                             )
 
-                    pi_example_rows, pi_example_labels = example_rows()
                     if pi_example_rows:
                         gr.Markdown(
-                            "### Try an example — click to load the sample document and "
-                            "redaction instructions, then **Start redaction task**"
+                            "### Try an example\n"
+                            "Click a row to load the sample PDF and redaction instructions, "
+                            "then **Start redaction task**."
                         )
                         gr.Examples(
                             examples=pi_example_rows,
@@ -734,8 +737,11 @@ def build_ui():
                                 encourage_vlm_signatures,
                             ],
                             example_labels=pi_example_labels,
+                            examples_per_page=2,
                             cache_examples=False,
                         )
+                    else:
+                        gr.Markdown(examples_status_markdown())
 
                     redact_file.render()
                     redact_instructions.render()

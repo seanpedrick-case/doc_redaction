@@ -21,6 +21,7 @@ ENV PI_WORKDIR=/workspace/doc_redaction
 ENV PI_UPLOAD_ROOT=/tmp/gradio
 ENV PI_OFFLINE=1
 ENV PI_SKIP_VERSION_CHECK=1
+ENV PI_GRADIO_SHOW_EXAMPLES=true
 ENV HOME=/home/node
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -47,6 +48,11 @@ COPY docker/pi docker/pi
 COPY skills skills
 COPY AGENTS.md AGENTS.md
 COPY doc_redaction/example_data doc_redaction/example_data
+
+RUN test -f doc_redaction/example_data/example_of_emails_sent_to_a_professor_before_applying.pdf \
+    && test -f doc_redaction/example_data/graduate-job-example-cover-letter.pdf \
+    && ! head -1 doc_redaction/example_data/example_of_emails_sent_to_a_professor_before_applying.pdf \
+        | grep -q "^version https://git-lfs.github.com/spec/v1"
 
 RUN mkdir -p /home/node/.pi/agent/sessions /home/user/app/workspace /tmp/gradio \
     && chown -R node:node /home/node/.pi /home/user/app /tmp/gradio /workspace
