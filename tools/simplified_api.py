@@ -184,6 +184,64 @@ def _filter_files_within_root(paths: Iterable[Any], root_dir: str) -> list[str]:
     return kept
 
 
+_REDACTION_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _allowed_io_roots() -> list[str]:
+    roots: list[str] = [str(_REDACTION_REPO_ROOT)]
+    for folder in (INPUT_FOLDER, OUTPUT_FOLDER):
+        if folder:
+            roots.append(str(folder))
+    return roots
+
+
+def _resolve_existing_io_path(path: str) -> str:
+    """Resolve a readable file path under repo root, INPUT_FOLDER, or OUTPUT_FOLDER."""
+    raw = str(path or "").strip()
+    if not raw:
+        raise ValueError("Path must not be empty.")
+    expanded = os.path.expanduser(raw)
+    if os.path.isabs(expanded):
+        candidate = os.path.realpath(os.path.abspath(expanded))
+    else:
+        candidate = os.path.realpath(
+            os.path.abspath(os.path.join(str(_REDACTION_REPO_ROOT), expanded))
+        )
+    if not os.path.isfile(candidate):
+        raise ValueError(f"Not a file or missing: {candidate}")
+    for root in _allowed_io_roots():
+        root_real = os.path.realpath(str(root))
+        try:
+            if os.path.commonpath([candidate, root_real]) == root_real:
+                return candidate
+        except ValueError:
+            continue
+    raise ValueError("Path must be under the app repo, INPUT_FOLDER, or OUTPUT_FOLDER")
+
+
+def _resolve_writable_io_path(path: str) -> str:
+    """Resolve an output path that may be created under allowed roots."""
+    raw = str(path or "").strip()
+    if not raw:
+        raise ValueError("Path must not be empty.")
+    expanded = os.path.expanduser(raw)
+    if os.path.isabs(expanded):
+        candidate = os.path.realpath(os.path.abspath(expanded))
+    else:
+        candidate = os.path.realpath(
+            os.path.abspath(os.path.join(str(_REDACTION_REPO_ROOT), expanded))
+        )
+    parent = os.path.realpath(os.path.dirname(candidate))
+    for root in _allowed_io_roots():
+        root_real = os.path.realpath(str(root))
+        try:
+            if os.path.commonpath([parent, root_real]) == root_real:
+                return candidate
+        except ValueError:
+            continue
+    raise ValueError("Path must be under the app repo, INPUT_FOLDER, or OUTPUT_FOLDER")
+
+
 def _validate_review_csv_path(path: str) -> None:
     base = (get_file_name_without_type(path) or "").lower()
     if "_review_file" not in base:
@@ -1236,24 +1294,10 @@ def run_verify_redaction_coverage(
         verify_redaction_coverage,
     )
 
-    safe_review_csv_path = validate_path_safety(
-        review_csv_path,
-        [INPUT_FOLDER, OUTPUT_FOLDER],
-        is_input=True,
-    )
-    safe_ocr_words_csv_path = validate_path_safety(
-        ocr_words_csv_path,
-        [INPUT_FOLDER, OUTPUT_FOLDER],
-        is_input=True,
-    )
+    safe_review_csv_path = _resolve_existing_io_path(review_csv_path)
+    safe_ocr_words_csv_path = _resolve_existing_io_path(ocr_words_csv_path)
     safe_redacted_pdf_path = (
-        validate_path_safety(
-            redacted_pdf_path,
-            [INPUT_FOLDER, OUTPUT_FOLDER],
-            is_input=True,
-        )
-        if redacted_pdf_path
-        else None
+        _resolve_existing_io_path(redacted_pdf_path) if redacted_pdf_path else None
     )
 
     review_path = Path(safe_review_csv_path)
@@ -1261,11 +1305,7 @@ def run_verify_redaction_coverage(
     prune_log: dict | None = None
     if auto_prune_suspicious:
         if pruned_output_path:
-            safe_pruned_output_path = validate_path_safety(
-                pruned_output_path,
-                [INPUT_FOLDER, OUTPUT_FOLDER],
-                is_input=False,
-            )
+            safe_pruned_output_path = _resolve_writable_io_path(pruned_output_path)
             out = Path(safe_pruned_output_path)
         else:
             out = review_path.with_name(f"{review_path.stem}_pruned.csv")
