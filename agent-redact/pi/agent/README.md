@@ -28,8 +28,11 @@ Copy [`config/pi_agent.env.example`](../../../config/pi_agent.env.example) to `c
 | `PI_LLAMA_MODEL_ID` | Local model id |
 | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | Gemini API key |
 | `AWS_REGION` / `AWS_DEFAULT_REGION` | Bedrock region |
-| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | Bedrock credentials |
-| `AWS_PROFILE` | Alternative Bedrock auth |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | Bedrock credentials (when not using SSO) |
+| `AWS_PROFILE` | Named profile for SSO / shared credentials file (**required for Pi Bedrock with SSO**) |
+| `PI_AWS_PROFILE` | Alternative to `AWS_PROFILE`; also used to auto-select profile when only `~/.aws` is mounted |
+| `RUN_AWS_FUNCTIONS` | When `True`, use the AWS default credential chain (SSO, profile, role) |
+| `PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS` | When `True` with `RUN_AWS_FUNCTIONS`, prefer SSO/chain over static env keys (default `True`, same as main app) |
 
 At startup, if only `GOOGLE_API_KEY` is set, it is mirrored to `GEMINI_API_KEY` for Pi.
 

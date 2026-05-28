@@ -171,6 +171,187 @@ def _bedrock_region() -> str:
     )
 
 
+_AWS_CREDENTIAL_ENV_KEYS: tuple[str, ...] = (
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AWS_ACCESS_KEY",
+    "AWS_SECRET_KEY",
+)
+
+
+def _env_flag(name: str, *, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _strip_empty_env_vars(names: tuple[str, ...]) -> None:
+    for name in names:
+        if not (os.environ.get(name) or "").strip():
+            os.environ.pop(name, None)
+
+
+def _mirror_legacy_aws_key_env_vars() -> None:
+    if not (os.environ.get("AWS_ACCESS_KEY_ID") or "").strip():
+        legacy = (os.environ.get("AWS_ACCESS_KEY") or "").strip()
+        if legacy:
+            os.environ["AWS_ACCESS_KEY_ID"] = legacy
+    if not (os.environ.get("AWS_SECRET_ACCESS_KEY") or "").strip():
+        legacy = (os.environ.get("AWS_SECRET_KEY") or "").strip()
+        if legacy:
+            os.environ["AWS_SECRET_ACCESS_KEY"] = legacy
+
+
+def _has_explicit_aws_access_keys() -> bool:
+    access = (
+        os.environ.get("AWS_ACCESS_KEY_ID") or os.environ.get("AWS_ACCESS_KEY") or ""
+    ).strip()
+    secret = (
+        os.environ.get("AWS_SECRET_ACCESS_KEY")
+        or os.environ.get("AWS_SECRET_KEY")
+        or ""
+    ).strip()
+    return bool(access and secret)
+
+
+def _aws_config_path() -> Path | None:
+    explicit = (os.environ.get("AWS_CONFIG_FILE") or "").strip()
+    if explicit:
+        path = Path(explicit).expanduser()
+        return path if path.is_file() else None
+    home = Path(os.environ.get("HOME", "/home/node"))
+    path = home / ".aws" / "config"
+    return path if path.is_file() else None
+
+
+def _discover_aws_profile_from_config() -> str | None:
+    """Return an AWS profile name for Pi/Bedrock when only ~/.aws is mounted."""
+    explicit = (
+        os.environ.get("PI_AWS_PROFILE") or os.environ.get("AWS_PROFILE") or ""
+    ).strip()
+    if explicit:
+        return explicit
+
+    path = _aws_config_path()
+    if not path:
+        return None
+
+    current_profile: str | None = None
+    sso_profiles: list[str] = []
+    all_profiles: list[str] = []
+
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or line.startswith(";"):
+            continue
+        if line == "[default]":
+            current_profile = "default"
+            all_profiles.append("default")
+            continue
+        if line.startswith("[profile ") and line.endswith("]"):
+            current_profile = line[len("[profile ") : -1].strip()
+            if current_profile:
+                all_profiles.append(current_profile)
+            continue
+        if current_profile and line.startswith("sso_session"):
+            sso_profiles.append(current_profile)
+
+    if sso_profiles:
+        return sso_profiles[0]
+    if "default" in all_profiles:
+        return "default"
+    return all_profiles[0] if all_profiles else None
+
+
+def _pi_bedrock_auth_visible() -> bool:
+    """True when Pi's amazon-bedrock provider would detect configured auth."""
+    if (os.environ.get("AWS_PROFILE") or "").strip():
+        return True
+    if _has_explicit_aws_access_keys():
+        return True
+    if (os.environ.get("AWS_BEARER_TOKEN_BEDROCK") or "").strip():
+        return True
+    return False
+
+
+def _ensure_pi_bedrock_auth_env() -> None:
+    """
+    Pi checks env vars (not ~/.aws alone) before Bedrock is usable.
+
+    When SSO credentials live in a mounted ``~/.aws`` tree, set ``AWS_PROFILE``
+    so Pi passes its auth preflight and the AWS SDK loads the profile.
+    """
+    if _pi_bedrock_auth_visible():
+        return
+    profile = _discover_aws_profile_from_config()
+    if profile:
+        os.environ["AWS_PROFILE"] = profile
+
+
+def configure_aws_credentials(
+    *,
+    session_access_key_id: str | None = None,
+    session_secret_access_key: str | None = None,
+    session_session_token: str | None = None,
+) -> None:
+    """
+    Align Pi Bedrock AWS env with doc_redaction SSO/key priority.
+
+    Mirrors ``tools/file_redaction.py``: when ``RUN_AWS_FUNCTIONS`` is enabled,
+    prefer the default credential chain (SSO profile, instance role, etc.) over
+    static env keys when ``PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS`` is true.
+    Explicit UI session keys from **Apply backend** always win.
+    """
+    _strip_empty_env_vars(_AWS_CREDENTIAL_ENV_KEYS)
+    _mirror_legacy_aws_key_env_vars()
+
+    session_explicit = bool(
+        session_access_key_id
+        and session_access_key_id.strip()
+        and session_secret_access_key
+        and session_secret_access_key.strip()
+    )
+    if session_explicit:
+        os.environ["AWS_ACCESS_KEY_ID"] = session_access_key_id.strip()
+        os.environ["AWS_SECRET_ACCESS_KEY"] = session_secret_access_key.strip()
+        if session_session_token and session_session_token.strip():
+            os.environ["AWS_SESSION_TOKEN"] = session_session_token.strip()
+        else:
+            os.environ.pop("AWS_SESSION_TOKEN", None)
+        return
+
+    run_aws = _env_flag("RUN_AWS_FUNCTIONS")
+    prioritise_sso = _env_flag("PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS", default=True)
+
+    if run_aws and prioritise_sso:
+        for key in _AWS_CREDENTIAL_ENV_KEYS:
+            os.environ.pop(key, None)
+        _ensure_pi_bedrock_auth_env()
+        return
+
+    if run_aws:
+        for key in _AWS_CREDENTIAL_ENV_KEYS:
+            os.environ.pop(key, None)
+        _ensure_pi_bedrock_auth_env()
+
+
+def _aws_credential_status() -> str:
+    if _has_explicit_aws_access_keys():
+        return "access keys"
+    profile = (os.environ.get("AWS_PROFILE") or "").strip()
+    if profile:
+        return f"profile `{profile}`"
+    if (os.environ.get("AWS_BEARER_TOKEN_BEDROCK") or "").strip():
+        return "Bedrock bearer token"
+    if _aws_config_path():
+        return "SSO config mounted (profile not set)"
+    if _env_flag("RUN_AWS_FUNCTIONS"):
+        return "SSO/default chain (missing profile)"
+    return "missing"
+
+
 def _bedrock_provider() -> dict[str, Any]:
     region = _bedrock_region()
     return {
@@ -343,12 +524,11 @@ def apply_session_credentials(
     if aws_region and aws_region.strip():
         os.environ["AWS_REGION"] = aws_region.strip()
         os.environ["AWS_DEFAULT_REGION"] = aws_region.strip()
-    if aws_access_key_id and aws_access_key_id.strip():
-        os.environ["AWS_ACCESS_KEY_ID"] = aws_access_key_id.strip()
-    if aws_secret_access_key and aws_secret_access_key.strip():
-        os.environ["AWS_SECRET_ACCESS_KEY"] = aws_secret_access_key.strip()
-    if aws_session_token and aws_session_token.strip():
-        os.environ["AWS_SESSION_TOKEN"] = aws_session_token.strip()
+    configure_aws_credentials(
+        session_access_key_id=aws_access_key_id,
+        session_secret_access_key=aws_secret_access_key,
+        session_session_token=aws_session_token,
+    )
 
 
 def mirror_hf_token_from_env() -> None:
@@ -379,13 +559,8 @@ def credential_status_markdown() -> str:
     if is_hf_space_profile():
         lines.append(f"HF token (redaction backend) `{_hf_token_status()}`")
     else:
-        aws = (
-            "set"
-            if os.environ.get("AWS_ACCESS_KEY_ID") or os.environ.get("AWS_PROFILE")
-            else "profile/role"
-        )
         region = _bedrock_region()
-        lines.append(f"AWS `{aws}` · region `{region}`")
+        lines.append(f"AWS `{_aws_credential_status()}` · region `{region}`")
     return " · ".join(lines)
 
 
@@ -404,6 +579,7 @@ def provider_label(provider: str) -> str:
 
 
 if __name__ == "__main__":
+    configure_aws_credentials()
     models_path, settings_path = write_runtime_config()
     print(f"Wrote {models_path}")
     print(f"Wrote {settings_path}")

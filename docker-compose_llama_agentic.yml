@@ -17,6 +17,14 @@
 # docker compose -f docker-compose_llama_agentic.yml --profile gemma4-31b up -d pi-agent-gemma-31b
 # docker compose -f docker-compose_llama_agentic.yml --profile gemma4-26b up -d pi-agent-gemma-26b
 
+# Cloud-only Pi agent (no local llama.cpp GPU model; redaction app still runs locally):
+# Set GEMINI_API_KEY (and optionally GOOGLE_API_KEY) in .env or config/pi_agent.env before starting pi-gemini.
+# docker compose -f docker-compose_llama_agentic.yml --profile pi-gemini up -d
+# Set AWS_REGION plus AWS credentials (or AWS_PROFILE via mounted ~/.aws) before starting pi-bedrock.
+# SSO (recommended): mount host ~/.aws, set AWS_PROFILE (or PI_AWS_PROFILE) to your SSO profile name, run `aws sso login` on the host.
+# Pi requires AWS_PROFILE in the container env — mounting ~/.aws alone is not enough for Pi's auth check.
+# docker compose -f docker-compose_llama_agentic.yml --profile pi-bedrock up -d
+
 x-pi-agent-common: &pi-agent-common
   build:
     context: .
@@ -45,7 +53,7 @@ x-pi-agent-env: &pi-agent-env
   DOC_REDACTION_GRADIO_URL: http://redaction-app-llama:7860
   GRADIO_SERVER_NAME: 0.0.0.0
   GRADIO_SERVER_PORT: "7862"
-  PYTHONPATH: /workspace/doc_redaction/agent-redact/pi
+  PYTHONPATH: /workspace/doc_redaction:/workspace/doc_redaction/agent-redact/pi
   PI_WORKSPACE_DIR: /home/user/app/workspace
   PI_DEFAULT_PROVIDER: ${PI_DEFAULT_PROVIDER:-llama-cpp}
   PI_DEFAULT_MODEL: ${PI_DEFAULT_MODEL:-}
@@ -58,7 +66,52 @@ x-pi-agent-env: &pi-agent-env
   AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
   AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
   AWS_PROFILE: ${AWS_PROFILE:-}
+  RUN_AWS_FUNCTIONS: ${RUN_AWS_FUNCTIONS:-False}
+  PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS: ${PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:-True}
   PI_VLM_BASE_URL: http://llama-inference:8080
+  RUN_FASTAPI: ${RUN_FASTAPI:-False}
+  ROOT_PATH: ${ROOT_PATH:-}
+  FASTAPI_ROOT_PATH: ${FASTAPI_ROOT_PATH:-/}
+  ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
+  ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+  COGNITO_AUTH: ${COGNITO_AUTH:-False}
+  AWS_USER_POOL_ID: ${AWS_USER_POOL_ID:-}
+  AWS_CLIENT_ID: ${AWS_CLIENT_ID:-}
+  AWS_CLIENT_SECRET: ${AWS_CLIENT_SECRET:-}
+  SESSION_OUTPUT_FOLDER: ${SESSION_OUTPUT_FOLDER:-True}
+  SAVE_LOGS_TO_CSV: ${SAVE_LOGS_TO_CSV:-True}
+  SAVE_LOGS_TO_DYNAMODB: ${SAVE_LOGS_TO_DYNAMODB:-False}
+  SAVE_OUTPUTS_TO_S3: ${SAVE_OUTPUTS_TO_S3:-False}
+  S3_OUTPUTS_FOLDER: ${S3_OUTPUTS_FOLDER:-}
+  S3_OUTPUTS_BUCKET: ${S3_OUTPUTS_BUCKET:-}
+  CUSTOM_HEADER: ${CUSTOM_HEADER:-}
+  CUSTOM_HEADER_VALUE: ${CUSTOM_HEADER_VALUE:-}
+
+x-redaction-app-build: &redaction-app-build
+  image: redaction-app-main
+  build:
+    context: .
+    dockerfile: Dockerfile
+    target: gradio
+    args:
+      - TORCH_GPU_ENABLED=False
+      - INSTALL_VLM=False
+      - PADDLE_GPU_ENABLED=True
+      - INSTALL_PADDLEOCR=True
+  shm_size: '8gb'
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+  ports:
+    - "7861:7860"
+  volumes:
+    - ./workspace:/home/user/app/workspace:rw
+  networks:
+    - redaction-net-llama
 
 services:
 
@@ -463,6 +516,119 @@ services:
     networks:
       - redaction-net-llama
 
+  # Cloud-backed redaction app (no llama.cpp). Network alias keeps pi-agent URL unchanged.
+  redaction-app-llama-gemini:
+    <<: *redaction-app-build
+    profiles: ["pi-gemini"]
+    environment:
+      - FLAGS_fraction_of_gpu_memory_to_use=0.05
+      - RUN_FASTAPI=True
+      - APP_MODE=fastapi
+      - SHOW_PADDLE_MODEL_OPTIONS=True
+      - SHOW_LOCAL_OCR_MODEL_OPTIONS=True
+      - SHOW_LOCAL_PII_DETECTION_OPTIONS=True
+      - SHOW_INFERENCE_SERVER_PII_OPTIONS=False
+      - SHOW_INFERENCE_SERVER_VLM_OPTIONS=False
+      - SHOW_HYBRID_MODELS=True
+      - SHOW_VLM_MODEL_OPTIONS=True
+      - SHOW_GEMINI_VLM_MODELS=True
+      - SHOW_GEMINI_LLM_MODELS=True
+      - SHOW_GEMINI_LLM_PII_OPTIONS=True
+      - SHOW_DIFFICULT_OCR_EXAMPLES=True
+      - SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER=True
+      - SHOW_SUMMARISATION=True
+      - SHOW_AWS_API_KEYS=True
+      - DEFAULT_TEXT_EXTRACTION_MODEL=Local OCR model - PDFs without selectable text
+      - DEFAULT_LOCAL_OCR_MODEL=hybrid-paddle-vlm
+      - DEFAULT_PII_DETECTION_MODEL=Local
+      - CLOUD_VLM_MODEL_CHOICE=${CLOUD_VLM_MODEL_CHOICE:-gemini-flash-latest}
+      - CUSTOM_VLM_BACKEND=bedrock_vlm
+      - SHOW_CUSTOM_VLM_ENTITIES=False
+      - MAX_WORKERS=12
+      - TESSERACT_MAX_WORKERS=8
+      - PADDLE_MAX_WORKERS=1
+      - LOAD_PADDLE_AT_STARTUP=False
+      - EFFICIENT_OCR=True
+      - SESSION_OUTPUT_FOLDER=True
+      - SAVE_PAGE_OCR_VISUALISATIONS=False
+      - HYBRID_OCR_CONFIDENCE_THRESHOLD=97
+      - INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES=True
+      - PREPROCESS_LOCAL_OCR_IMAGES=False
+      - MAX_NEW_TOKENS=196608
+      - SAVE_EXAMPLE_HYBRID_IMAGES=False
+      - SAVE_VLM_INPUT_IMAGES=False
+      - VLM_MAX_DPI=200.0
+      - DEFAULT_NEW_BATCH_CHAR_COUNT=1250
+      - REPORT_VLM_OUTPUTS_TO_GUI=True
+      - REPORT_LLM_OUTPUTS_TO_GUI=True
+      - ADD_VLM_BOUNDING_BOX_RULES=False
+      - RUN_MCP_SERVER=True
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+    networks:
+      redaction-net-llama:
+        aliases:
+          - redaction-app-llama
+
+  redaction-app-llama-bedrock:
+    <<: *redaction-app-build
+    profiles: ["pi-bedrock"]
+    environment:
+      - FLAGS_fraction_of_gpu_memory_to_use=0.05
+      - RUN_FASTAPI=True
+      - APP_MODE=fastapi
+      - SHOW_PADDLE_MODEL_OPTIONS=True
+      - SHOW_LOCAL_OCR_MODEL_OPTIONS=True
+      - SHOW_LOCAL_PII_DETECTION_OPTIONS=True
+      - SHOW_INFERENCE_SERVER_PII_OPTIONS=False
+      - SHOW_INFERENCE_SERVER_VLM_OPTIONS=False
+      - SHOW_HYBRID_MODELS=True
+      - SHOW_VLM_MODEL_OPTIONS=True
+      - SHOW_AWS_PII_DETECTION_OPTIONS=True
+      - SHOW_AWS_BEDROCK_LLM_MODELS=True
+      - SHOW_BEDROCK_VLM_MODELS=True
+      - SHOW_DIFFICULT_OCR_EXAMPLES=True
+      - SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER=True
+      - SHOW_SUMMARISATION=True
+      - SHOW_AWS_API_KEYS=True
+      - DEFAULT_TEXT_EXTRACTION_MODEL=Local OCR model - PDFs without selectable text
+      - DEFAULT_LOCAL_OCR_MODEL=hybrid-paddle-vlm
+      - DEFAULT_PII_DETECTION_MODEL=LLM (AWS Bedrock)
+      - CLOUD_VLM_MODEL_CHOICE=${CLOUD_VLM_MODEL_CHOICE:-anthropic.claude-sonnet-4-6}
+      - CUSTOM_VLM_BACKEND=bedrock_vlm
+      - SHOW_CUSTOM_VLM_ENTITIES=True
+      - MAX_WORKERS=12
+      - TESSERACT_MAX_WORKERS=8
+      - PADDLE_MAX_WORKERS=1
+      - LOAD_PADDLE_AT_STARTUP=False
+      - EFFICIENT_OCR=True
+      - SESSION_OUTPUT_FOLDER=True
+      - SAVE_PAGE_OCR_VISUALISATIONS=False
+      - HYBRID_OCR_CONFIDENCE_THRESHOLD=97
+      - INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES=True
+      - PREPROCESS_LOCAL_OCR_IMAGES=False
+      - MAX_NEW_TOKENS=196608
+      - SAVE_EXAMPLE_HYBRID_IMAGES=False
+      - SAVE_VLM_INPUT_IMAGES=False
+      - VLM_MAX_DPI=200.0
+      - DEFAULT_NEW_BATCH_CHAR_COUNT=1250
+      - REPORT_VLM_OUTPUTS_TO_GUI=True
+      - REPORT_LLM_OUTPUTS_TO_GUI=True
+      - ADD_VLM_BOUNDING_BOX_RULES=False
+      - RUN_MCP_SERVER=True
+      - RUN_AWS_FUNCTIONS=True
+      - PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS=${PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:-True}
+      - AWS_REGION=${AWS_REGION:-}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-}
+      - AWS_PROFILE=${AWS_PROFILE:-}
+    volumes:
+      - ./workspace:/home/user/app/workspace:rw
+      - ${USERPROFILE}/.aws:/home/user/.aws:ro
+    networks:
+      redaction-net-llama:
+        aliases:
+          - redaction-app-llama
+
   pi-agent:
     <<: *pi-agent-common
     profiles: ["27b_36"]
@@ -522,6 +688,44 @@ services:
       PI_LLAMA_CONTEXT_WINDOW: ${PI_LLAMA_CONTEXT_WINDOW:-65536}
       PI_LLAMA_MAX_TOKENS: ${PI_LLAMA_MAX_TOKENS:-32768}
       PI_VLM_MODEL: ${PI_VLM_MODEL:-unsloth/gemma-4-26B-A4B-it-GGUF}
+
+  pi-agent-gemini:
+    <<: *pi-agent-common
+    profiles: ["pi-gemini"]
+    depends_on:
+      redaction-app-llama-gemini:
+        condition: service_started
+    environment:
+      <<: *pi-agent-env
+      PI_DEFAULT_PROVIDER: google-gemini
+      PI_DEFAULT_MODEL: ${PI_DEFAULT_MODEL:-gemini-flash-latest}
+      PI_DEFAULT_OCR_METHOD: hybrid-paddle-vlm
+      PI_DEFAULT_PII_METHOD: Local
+      PI_VLM_BASE_URL: http://redaction-app-llama:7860
+      PI_VLM_MODEL: ${PI_VLM_MODEL:-gemini-flash-latest}
+
+  pi-agent-bedrock:
+    <<: *pi-agent-common
+    profiles: ["pi-bedrock"]
+    volumes:
+      - .:/workspace/doc_redaction:rw
+      - ./workspace:/home/user/app/workspace:rw
+      - pi-agent-sessions:/home/node/.pi/agent/sessions
+      - ${USERPROFILE}/.aws:/home/node/.aws:ro
+    depends_on:
+      redaction-app-llama-bedrock:
+        condition: service_started
+    environment:
+      <<: *pi-agent-env
+      PI_DEFAULT_PROVIDER: amazon-bedrock
+      PI_DEFAULT_MODEL: ${PI_DEFAULT_MODEL:-anthropic.claude-sonnet-4-6}
+      PI_DEFAULT_OCR_METHOD: hybrid-paddle-vlm
+      PI_DEFAULT_PII_METHOD: LLM (AWS Bedrock)
+      PI_VLM_BASE_URL: http://redaction-app-llama:7860
+      PI_VLM_MODEL: ${PI_VLM_MODEL:-anthropic.claude-sonnet-4-6}
+      RUN_AWS_FUNCTIONS: "True"
+      AWS_PROFILE: ${AWS_PROFILE:-${PI_AWS_PROFILE:-}}
+      PI_AWS_PROFILE: ${PI_AWS_PROFILE:-}
 
 networks:
   redaction-net-llama:

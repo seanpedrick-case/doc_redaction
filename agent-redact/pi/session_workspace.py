@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from pathlib import Path
 
 import gradio as gr
 from pi_agent_config import is_hf_space_profile
 
-_SESSION_ID_RE = re.compile(r"[^a-zA-Z0-9_-]+")
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from tools.config import SESSION_OUTPUT_FOLDER  # noqa: E402
+
+_SESSION_ID_RE = re.compile(r"[^a-zA-Z0-9_@.+-]+")
 
 
 def workspace_base_dir() -> Path:
@@ -27,6 +34,8 @@ def session_workspace_enabled() -> bool:
         return True
     if raw in {"0", "false", "no", "off"}:
         return False
+    if SESSION_OUTPUT_FOLDER:
+        return True
     return is_hf_space_profile()
 
 
@@ -36,19 +45,23 @@ def sanitize_session_id(raw: str) -> str:
 
 
 def resolve_session_hash(request: gr.Request | None) -> str:
-    """Resolve session id the same way as main app ``get_connection_params`` (simplified)."""
+    """Resolve session id using the same rules as the main app."""
     if request is None:
         return "default"
+    from tools.gradio_platform import resolve_session_identity
 
-    username = getattr(request, "username", None)
-    if username:
-        return sanitize_session_id(str(username))
+    identity = resolve_session_identity(request)
+    return sanitize_session_id(str(identity))
 
-    session_hash = getattr(request, "session_hash", None)
-    if session_hash:
-        return sanitize_session_id(str(session_hash))
 
-    return "default"
+def session_s3_outputs_prefix(session_hash: str) -> str:
+    """Session-scoped S3 output prefix (shared env vars with main app)."""
+    from tools.gradio_platform import build_s3_outputs_prefix
+
+    return build_s3_outputs_prefix(
+        session_hash,
+        session_scoped=session_workspace_enabled(),
+    )
 
 
 def session_workspace_dir(session_hash: str) -> Path:
@@ -72,15 +85,16 @@ def ensure_session_workspace(session_hash: str) -> Path:
 
 def init_session_workspace(
     request: gr.Request,
-) -> tuple[str, gr.FileExplorer, str]:
+) -> tuple[str, gr.FileExplorer, str, str]:
     """
     App-load handler: create the session subfolder and scope the file explorer.
 
-    Returns ``(session_hash, file_explorer_update, status_markdown)``.
+    Returns ``(session_hash, file_explorer_update, status_markdown, s3_output_prefix)``.
     """
     session_hash = resolve_session_hash(request)
     workspace = ensure_session_workspace(session_hash)
     workspace_posix = workspace.as_posix()
+    s3_prefix = session_s3_outputs_prefix(session_hash)
 
     if session_workspace_enabled():
         status = (
@@ -95,6 +109,7 @@ def init_session_workspace(
         session_hash,
         gr.FileExplorer(root_dir=workspace_posix),
         status,
+        s3_prefix,
     )
 
 

@@ -27,3 +27,9 @@ pymupdf<=1.27.1
 tabulate<=0.10.0
 rapidfuzz<=3.14.5
 defusedxml<=0.7.1
+
+# --- Shared platform features (logging, Cognito, S3 via tools/) ---
+boto3<=1.42.61
+bleach<=6.3.0
+fastapi>=0.115.0
+uvicorn>=0.34.0

@@ -2,9 +2,13 @@
 
 import sys
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
+
+_REPO = Path(__file__).resolve().parents[1]
+if str(_REPO) not in sys.path:
+    sys.path.insert(0, str(_REPO))
 
 _PI_SRC = Path(__file__).resolve().parents[1] / "agent-redact" / "pi"
 if str(_PI_SRC) not in sys.path:
@@ -45,7 +49,7 @@ def test_ensure_session_workspace_creates_directory(workspace_base):
 
 
 def test_sanitize_session_id_strips_unsafe_chars():
-    assert sanitize_session_id("foo@bar/baz") == "foo_bar_baz"
+    assert sanitize_session_id("foo@bar/baz") == "foo@bar_baz"
 
 
 def test_workspace_context_prefix_includes_path(workspace_base):
@@ -59,5 +63,12 @@ class _FakeRequest:
     username = None
 
 
-def test_resolve_session_hash_from_gradio_request():
+def test_resolve_session_hash_from_gradio_request(monkeypatch):
+    monkeypatch.setitem(
+        sys.modules,
+        "tools.gradio_platform",
+        SimpleNamespace(
+            resolve_session_identity=lambda request: request.session_hash,
+        ),
+    )
     assert resolve_session_hash(_FakeRequest()) == "gradio_session_xyz"

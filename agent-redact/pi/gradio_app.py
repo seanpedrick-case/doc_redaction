@@ -15,6 +15,12 @@ import time
 from pathlib import Path
 from typing import Any
 
+from fastapi import FastAPI
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import gradio as gr
@@ -28,6 +34,7 @@ from output_files import (
 from pi_agent_config import (
     DEFAULT_PROVIDER,
     apply_session_credentials,
+    configure_aws_credentials,
     credential_status_markdown,
     default_model_for_provider,
     gemini_api_key_configured,
@@ -63,6 +70,15 @@ from session_workspace import (
     workspace_context_prefix,
 )
 
+from tools.aws_functions import export_outputs_to_s3
+from tools.config import HOST_NAME, RUN_FASTAPI, SAVE_OUTPUTS_TO_S3
+from tools.gradio_platform import (
+    create_fastapi_app,
+    log_pi_usage_event,
+    log_platform_access,
+    mount_or_launch,
+)
+
 PI_UI_TITLE = os.environ.get("PI_GRADIO_TITLE", "Agentic Document Redaction")
 PI_UI_PORT = int(
     os.environ.get("GRADIO_SERVER_PORT", "7860" if is_hf_space_profile() else "7862")
@@ -70,6 +86,7 @@ PI_UI_PORT = int(
 PI_UI_HOST = os.environ.get("GRADIO_SERVER_NAME", "0.0.0.0")
 IS_HF_SPACE = is_hf_space_profile()
 mirror_hf_token_from_env()
+configure_aws_credentials()
 SHOW_THINKING = os.environ.get("PI_GRADIO_SHOW_THINKING", "false").lower() in {
     "1",
     "true",
@@ -95,6 +112,69 @@ QUOTA_CONTINUE_PROMPT = (
     "Continue the redaction task from where you left off. "
     "Do not re-read skills or repeat completed tool steps unless required."
 )
+
+app = None
+
+
+def _client_provider_model(client: PiRpcClient | None) -> tuple[str, str]:
+    if client is None:
+        return "", ""
+    try:
+        state = client.get_state()
+    except PiRpcError:
+        return "", ""
+    model = state.get("model") or {}
+    provider = str(model.get("provider") or state.get("provider") or "")
+    model_label = str(model.get("id") or model.get("name") or "")
+    return provider, model_label
+
+
+def _after_pi_task(
+    *,
+    session_hash: str,
+    client: PiRpcClient | None,
+    event: str,
+    s3_output_folder: str,
+    save_outputs_to_s3: bool,
+    document_name: str = "",
+    started_at: float | None = None,
+    base_file: str | None = None,
+) -> None:
+    duration = round(time.time() - started_at, 2) if started_at else ""
+    provider, model = _client_provider_model(client)
+    log_pi_usage_event(
+        session_hash=session_hash,
+        event=event,
+        document_name=document_name,
+        duration_seconds=duration,
+        provider=provider,
+        model=model,
+        deployment_profile=os.environ.get("PI_DEPLOYMENT_PROFILE", ""),
+    )
+    file_paths = collect_final_output_files(session_hash)
+    if file_paths and save_outputs_to_s3 and s3_output_folder:
+        export_outputs_to_s3(
+            file_paths,
+            s3_output_folder,
+            save_outputs_to_s3,
+            base_file,
+        )
+
+
+def _export_workspace_outputs(
+    session_hash: str,
+    s3_output_folder: str,
+    save_outputs_to_s3: bool,
+    base_file: str | None = None,
+) -> None:
+    file_paths = collect_final_output_files(session_hash)
+    if file_paths and save_outputs_to_s3 and s3_output_folder:
+        export_outputs_to_s3(
+            file_paths,
+            s3_output_folder,
+            save_outputs_to_s3,
+            base_file,
+        )
 
 
 def _clone_history(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -410,13 +490,15 @@ def apply_backend(
 
 def _init_session_ui(
     request: gr.Request,
-) -> tuple[str, Any, str, list[str] | None]:
-    session_hash, explorer, status = init_session_workspace(request)
+) -> tuple[str, Any, str, list[str] | None, str]:
+    session_hash, explorer, status, s3_prefix = init_session_workspace(request)
+    log_platform_access(session_hash, HOST_NAME)
     return (
         session_hash,
         explorer,
         status,
         collect_final_output_files(session_hash),
+        s3_prefix,
     )
 
 
@@ -464,6 +546,11 @@ def _run_pi_chat(
     *,
     chat_user_message: str | None = None,
     session_hash: str = "",
+    s3_output_folder: str = "",
+    save_outputs_to_s3: bool = False,
+    usage_event: str | None = None,
+    document_name: str = "",
+    base_file: str | None = None,
 ):
     if not message or not message.strip():
         client = client if client and client.running else None
@@ -501,6 +588,21 @@ def _run_pi_chat(
     tool_heading = ""
     completed_segments: list[str] = []
     streaming_text = ""
+    task_started_at = time.time()
+
+    def _complete_pi_task() -> None:
+        if not usage_event:
+            return
+        _after_pi_task(
+            session_hash=session_hash,
+            client=client,
+            event=usage_event,
+            s3_output_folder=s3_output_folder,
+            save_outputs_to_s3=save_outputs_to_s3,
+            document_name=document_name,
+            started_at=task_started_at,
+            base_file=base_file,
+        )
 
     history.append({"role": "user", "content": chat_user_message or message.strip()})
     history.append({"role": "assistant", "content": ""})
@@ -580,6 +682,7 @@ def _run_pi_chat(
                         activity,
                         f"**Quota retries exhausted** ({QUOTA_RETRY_ATTEMPTS} attempts).",
                     )
+                    _complete_pi_task()
                     yield _chat_yield(
                         history,
                         client,
@@ -627,6 +730,7 @@ def _run_pi_chat(
     except PiRpcError as exc:
         history[-1]["content"] = f"**Pi error:** {exc}"
         activity = _append_activity(activity, f"**Pi error:** {exc}")
+        _complete_pi_task()
         yield _chat_yield(
             history,
             client,
@@ -645,6 +749,7 @@ def _run_pi_chat(
     except Exception:
         if client.abort_requested:
             activity = _append_activity(activity, "**Aborted.**")
+            _complete_pi_task()
             yield _chat_yield(
                 history,
                 client,
@@ -670,6 +775,7 @@ def _run_pi_chat(
         activity=activity,
     )
 
+    _complete_pi_task()
     yield _chat_yield(
         history,
         client,
@@ -691,12 +797,17 @@ def chat_respond(
     history: list[dict[str, Any]] | None,
     client: PiRpcClient | None,
     session_hash: str,
+    s3_output_folder: str,
+    save_outputs_to_s3: bool,
 ):
     yield from _run_pi_chat(
         message,
         history,
         client,
         session_hash=session_hash,
+        s3_output_folder=s3_output_folder,
+        save_outputs_to_s3=save_outputs_to_s3,
+        usage_event="chat_message",
     )
 
 
@@ -711,6 +822,8 @@ def submit_redaction_task(
     history: list[dict[str, Any]] | None,
     client: PiRpcClient | None,
     session_hash: str,
+    s3_output_folder: str,
+    save_outputs_to_s3: bool,
 ):
     settings = (
         RedactionTaskSettings.hf_space_defaults()
@@ -769,6 +882,11 @@ def submit_redaction_task(
         client,
         chat_user_message=chat_summary,
         session_hash=session_hash,
+        s3_output_folder=s3_output_folder,
+        save_outputs_to_s3=save_outputs_to_s3,
+        usage_event="redaction_task",
+        document_name=_file_name,
+        base_file=upload_file,
     )
 
 
@@ -868,6 +986,8 @@ def build_ui():
         )
         client_state = gr.State(None)
         session_hash_state = gr.State("")
+        s3_output_folder_state = gr.State("")
+        save_outputs_to_s3_state = gr.State(SAVE_OUTPUTS_TO_S3)
 
         session_info = gr.Markdown(_startup_session_info())
 
@@ -1132,12 +1252,26 @@ def build_ui():
 
         run_event = send.click(
             chat_respond,
-            inputs=[msg, chatbot, client_state, session_hash_state],
+            inputs=[
+                msg,
+                chatbot,
+                client_state,
+                session_hash_state,
+                s3_output_folder_state,
+                save_outputs_to_s3_state,
+            ],
             outputs=chat_outputs,
         )
         msg.submit(
             chat_respond,
-            inputs=[msg, chatbot, client_state, session_hash_state],
+            inputs=[
+                msg,
+                chatbot,
+                client_state,
+                session_hash_state,
+                s3_output_folder_state,
+                save_outputs_to_s3_state,
+            ],
             outputs=chat_outputs,
         )
         run_redact_event = start_redact_btn.click(
@@ -1153,6 +1287,8 @@ def build_ui():
                 chatbot,
                 client_state,
                 session_hash_state,
+                s3_output_folder_state,
+                save_outputs_to_s3_state,
             ],
             outputs=chat_outputs,
         )
@@ -1206,6 +1342,14 @@ def build_ui():
             fn=refresh_workspace_panel,
             inputs=[session_hash_state],
             outputs=[workspace_output_explorer, workspace_output_download],
+        ).success(
+            fn=_export_workspace_outputs,
+            inputs=[
+                session_hash_state,
+                s3_output_folder_state,
+                save_outputs_to_s3_state,
+            ],
+            outputs=None,
         )
 
         workspace_output_explorer.input(
@@ -1222,19 +1366,42 @@ def build_ui():
                 workspace_output_explorer,
                 workspace_session_info,
                 workspace_output_download,
+                s3_output_folder_state,
             ],
         )
 
     return demo
 
 
-if __name__ == "__main__":
+def launch_pi_ui() -> FastAPI | None:
+    """Build UI and mount on FastAPI or launch Gradio directly."""
     demo = build_ui()
-    demo.queue(default_concurrency_limit=1).launch(
-        theme=gr.themes.Default(primary_hue="blue"),
+    demo.queue(default_concurrency_limit=1)
+    return mount_or_launch(
+        demo,
+        fastapi_app=create_fastapi_app() if RUN_FASTAPI else None,
+        allowed_paths=gradio_allowed_paths(),
         css=THINKING_PANEL_CSS,
         server_name=PI_UI_HOST,
         server_port=PI_UI_PORT,
-        show_error=True,
-        allowed_paths=gradio_allowed_paths(),
     )
+
+
+if RUN_FASTAPI:
+    app = launch_pi_ui()
+else:
+    app = None
+
+
+if __name__ == "__main__":
+    if RUN_FASTAPI:
+        import uvicorn
+
+        uvicorn.run(
+            "gradio_app:app",
+            host=PI_UI_HOST,
+            port=PI_UI_PORT,
+            factory=False,
+        )
+    else:
+        launch_pi_ui()

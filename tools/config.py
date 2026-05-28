@@ -514,6 +514,10 @@ USAGE_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var(
 )
 DYNAMODB_USAGE_LOG_HEADERS = get_or_create_env_var("DYNAMODB_USAGE_LOG_HEADERS", "")
 
+PI_USAGE_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var(
+    "PI_USAGE_LOG_DYNAMODB_TABLE_NAME", "redaction_usage"
+)
+
 # Report logging to console?
 LOGGING = convert_string_to_boolean(get_or_create_env_var("LOGGING", "False"))
 
@@ -526,6 +530,19 @@ if LOGGING:
 LOG_FILE_NAME = get_or_create_env_var("LOG_FILE_NAME", "log.csv")
 USAGE_LOG_FILE_NAME = get_or_create_env_var("USAGE_LOG_FILE_NAME", LOG_FILE_NAME)
 FEEDBACK_LOG_FILE_NAME = get_or_create_env_var("FEEDBACK_LOG_FILE_NAME", LOG_FILE_NAME)
+PI_USAGE_LOG_FILE_NAME = get_or_create_env_var(
+    "PI_USAGE_LOG_FILE_NAME", "pi_usage_log.csv"
+)
+PI_LOG_CHAT_USAGE = convert_string_to_boolean(
+    get_or_create_env_var("PI_LOG_CHAT_USAGE", "False")
+)
+CSV_PI_USAGE_LOG_HEADERS = get_or_create_env_var(
+    "CSV_PI_USAGE_LOG_HEADERS",
+    '["session_hash", "event", "document_name", "duration_seconds", "provider", "model", "host_name", "deployment_profile"]',
+)
+DYNAMODB_PI_USAGE_LOG_HEADERS = get_or_create_env_var(
+    "DYNAMODB_PI_USAGE_LOG_HEADERS", ""
+)
 
 
 ###
@@ -2787,6 +2804,8 @@ CSV_USAGE_LOG_HEADERS = _get_env_list(CSV_USAGE_LOG_HEADERS)
 
 DYNAMODB_ACCESS_LOG_HEADERS = _get_env_list(DYNAMODB_ACCESS_LOG_HEADERS)
 DYNAMODB_FEEDBACK_LOG_HEADERS = _get_env_list(DYNAMODB_FEEDBACK_LOG_HEADERS)
+DYNAMODB_PI_USAGE_LOG_HEADERS = _get_env_list(DYNAMODB_PI_USAGE_LOG_HEADERS)
+CSV_PI_USAGE_LOG_HEADERS = _get_env_list(CSV_PI_USAGE_LOG_HEADERS)
 DYNAMODB_USAGE_LOG_HEADERS = _get_env_list(DYNAMODB_USAGE_LOG_HEADERS)
 if CHOSEN_COMPREHEND_ENTITIES:
     CHOSEN_COMPREHEND_ENTITIES = _get_env_list(CHOSEN_COMPREHEND_ENTITIES)

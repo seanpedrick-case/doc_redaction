@@ -589,6 +589,9 @@ class PiRpcClient:
 
 def default_client() -> PiRpcClient:
     repo_root = os.environ.get("PI_WORKDIR", "/workspace/doc_redaction")
+    from pi_agent_config import configure_aws_credentials
+
+    configure_aws_credentials()
     env = os.environ.copy()
     env.setdefault("HOME", os.path.expanduser("~"))
     if not env.get("GEMINI_API_KEY") and env.get("GOOGLE_API_KEY"):
