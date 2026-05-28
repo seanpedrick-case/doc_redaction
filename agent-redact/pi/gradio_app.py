@@ -70,6 +70,9 @@ from session_workspace import (
     workspace_context_prefix,
 )
 
+mirror_hf_token_from_env()
+configure_aws_credentials()
+
 from tools.aws_functions import export_outputs_to_s3
 from tools.config import HOST_NAME, RUN_FASTAPI, SAVE_OUTPUTS_TO_S3
 from tools.gradio_platform import (
@@ -85,8 +88,6 @@ PI_UI_PORT = int(
 )
 PI_UI_HOST = os.environ.get("GRADIO_SERVER_NAME", "0.0.0.0")
 IS_HF_SPACE = is_hf_space_profile()
-mirror_hf_token_from_env()
-configure_aws_credentials()
 SHOW_THINKING = os.environ.get("PI_GRADIO_SHOW_THINKING", "false").lower() in {
     "1",
     "true",

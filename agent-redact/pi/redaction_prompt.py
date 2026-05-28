@@ -56,6 +56,95 @@ PII_METHOD_CHOICES: tuple[str, ...] = (
     "Only extract text (no redaction)",
 )
 
+_DEFAULT_MAX_PAGES = 3000
+
+
+def max_pages_limit() -> int:
+    """
+    Maximum PDF pages allowed for a Pi redaction task.
+
+    Resolution order: ``PI_MAX_PAGES`` → ``MAX_PAGES`` → ``MAX_DOC_PAGES`` → 3000.
+    """
+    for key in ("PI_MAX_PAGES", "MAX_PAGES", "MAX_DOC_PAGES"):
+        raw = (os.environ.get(key) or "").strip()
+        if raw:
+            value = int(raw)
+            if value < 1:
+                raise ValueError(f"{key} must be a positive integer.")
+            return value
+    return _DEFAULT_MAX_PAGES
+
+
+def pages_to_process_count(page_range: str, total_pages: int) -> int:
+    """Return how many pages ``page_range`` selects from a ``total_pages`` PDF."""
+    if total_pages < 1:
+        raise ValueError("PDF has no pages.")
+
+    text = (page_range or "all").strip().lower()
+    if not text or text == "all":
+        return total_pages
+
+    if "-" in text:
+        start_text, end_text = text.split("-", 1)
+        try:
+            start = int(start_text.strip())
+            end = int(end_text.strip())
+        except ValueError as exc:
+            raise ValueError(f"Invalid page range: {page_range!r}") from exc
+        if start < 1 or end < start:
+            raise ValueError(f"Invalid page range: {page_range!r}")
+        if end > total_pages:
+            raise ValueError(
+                f"Page range {page_range!r} exceeds document length "
+                f"({total_pages} pages)."
+            )
+        return end - start + 1
+
+    try:
+        page = int(text)
+    except ValueError as exc:
+        raise ValueError(f"Invalid page range: {page_range!r}") from exc
+    if page < 1 or page > total_pages:
+        raise ValueError(
+            f"Page {page} is out of range (document has {total_pages} pages)."
+        )
+    return 1
+
+
+def pdf_page_count(file_path: str | Path) -> int:
+    import pymupdf
+
+    path = Path(file_path)
+    with pymupdf.open(path) as doc:
+        return int(doc.page_count)
+
+
+def validate_pdf_page_limit(
+    file_path: str | Path,
+    *,
+    page_range: str = "all",
+    max_pages: int | None = None,
+) -> None:
+    """Reject PDFs whose selected page count exceeds ``max_pages_limit()``."""
+    path = Path(file_path)
+    if path.suffix.lower() != ".pdf":
+        return
+
+    limit = max_pages if max_pages is not None else max_pages_limit()
+    try:
+        total = pdf_page_count(path)
+    except Exception as exc:
+        raise ValueError(f"Could not read PDF page count for {path.name}.") from exc
+
+    count = pages_to_process_count(page_range, total)
+    if count > limit:
+        scope = page_range.strip() or "all"
+        raise ValueError(
+            f"Number of pages to process ({count}) exceeds the maximum allowed "
+            f"({limit}). Submit a smaller document or narrow the page range "
+            f"({scope!r})."
+        )
+
 
 @dataclass(frozen=True)
 class RedactionTaskSettings:
@@ -351,6 +440,7 @@ def prepare_redaction_task(
     if upload_path is None:
         raise ValueError("Please upload a document.")
     root = _resolve_and_validate_workspace_dir(workspace_dir)
+    validate_pdf_page_limit(upload_path, page_range=page_range)
     dest = copy_upload_to_workspace(upload_path, workspace_dir=root)
     prompt = build_redaction_prompt(
         dest.name,

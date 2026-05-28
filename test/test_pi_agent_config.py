@@ -76,6 +76,52 @@ def test_configure_aws_credentials_discovers_sso_profile_from_aws_config(
     assert os.environ["AWS_PROFILE"] == "corp-sso"
 
 
+def test_configure_aws_credentials_strips_empty_profile_and_uses_pi_alias(
+    monkeypatch,
+):
+    monkeypatch.setenv("RUN_AWS_FUNCTIONS", "True")
+    monkeypatch.setenv("PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS", "True")
+    monkeypatch.setenv("AWS_PROFILE", "")
+    monkeypatch.setenv("PI_AWS_PROFILE", "bedrock-sso")
+
+    pac.configure_aws_credentials()
+
+    assert os.environ["AWS_PROFILE"] == "bedrock-sso"
+
+
+def test_configure_aws_credentials_sets_region_from_profile_config(
+    tmp_path, monkeypatch
+):
+    aws_dir = tmp_path / ".aws"
+    aws_dir.mkdir()
+    (aws_dir / "config").write_text(
+        "[profile corp-sso]\n" "sso_session = corp\n" "region = eu-west-1\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("RUN_AWS_FUNCTIONS", "True")
+    monkeypatch.setenv("AWS_PROFILE", "corp-sso")
+    monkeypatch.delenv("AWS_REGION", raising=False)
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+
+    pac.configure_aws_credentials()
+
+    assert os.environ["AWS_REGION"] == "eu-west-1"
+    assert os.environ["AWS_DEFAULT_REGION"] == "eu-west-1"
+
+
+def test_configure_aws_credentials_defaults_region_when_unset(monkeypatch):
+    monkeypatch.delenv("AWS_REGION", raising=False)
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+    monkeypatch.delenv("PI_AWS_PROFILE", raising=False)
+
+    pac.configure_aws_credentials()
+
+    assert os.environ["AWS_REGION"] == "eu-west-2"
+    assert os.environ["AWS_DEFAULT_REGION"] == "eu-west-2"
+
+
 def test_configure_aws_credentials_keeps_env_keys_without_run_aws(monkeypatch):
     monkeypatch.delenv("RUN_AWS_FUNCTIONS", raising=False)
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAEXAMPLE")

@@ -19,6 +19,16 @@ from tools.secure_path_utils import secure_join
 PandasDataFrame = Type[pd.DataFrame]
 
 
+def _effective_aws_region() -> str:
+    """Resolve region at call time (env may be set after ``tools.config`` import)."""
+    return (
+        os.environ.get("AWS_REGION")
+        or os.environ.get("AWS_DEFAULT_REGION")
+        or AWS_REGION
+        or ""
+    ).strip()
+
+
 def connect_to_bedrock_runtime(
     model_name_map: dict,
     model_choice: str,
@@ -30,7 +40,11 @@ def connect_to_bedrock_runtime(
     model_source = model_name_map[model_choice]["source"]
 
     # Use aws_region_textbox if provided, otherwise fall back to AWS_REGION from config
-    region = aws_region_textbox if aws_region_textbox else AWS_REGION
+    region = (
+        aws_region_textbox
+        if aws_region_textbox
+        else _effective_aws_region() or AWS_REGION
+    )
 
     if "AWS" in model_source:
         if RUN_AWS_FUNCTIONS and PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS == "1":
@@ -69,8 +83,13 @@ def connect_to_bedrock_runtime(
 
 
 def get_assumed_role_info():
-    sts_endpoint = "https://sts." + AWS_REGION + ".amazonaws.com"
-    sts = boto3.client("sts", region_name=AWS_REGION, endpoint_url=sts_endpoint)
+    region = _effective_aws_region()
+    if not region:
+        raise ValueError(
+            "AWS region is not configured (set AWS_REGION or profile region)"
+        )
+    sts_endpoint = f"https://sts.{region}.amazonaws.com"
+    sts = boto3.client("sts", region_name=region, endpoint_url=sts_endpoint)
     response = sts.get_caller_identity()
 
     # Extract ARN of the assumed role
@@ -83,21 +102,31 @@ def get_assumed_role_info():
 
 
 if RUN_AWS_FUNCTIONS:
-    try:
-        session = boto3.Session(region_name=AWS_REGION)
+    # Empty AWS_PROFILE (common from compose ``AWS_PROFILE=${AWS_PROFILE:-}``) breaks boto3.
+    if not (os.environ.get("AWS_PROFILE") or "").strip():
+        os.environ.pop("AWS_PROFILE", None)
+    region = _effective_aws_region()
+    if region:
+        try:
+            session = boto3.Session(region_name=region)
 
-    except Exception as e:
-        print("Could not start boto3 session:", e)
+        except Exception as e:
+            print("Could not start boto3 session:", e)
 
-    try:
-        assumed_role_arn, assumed_role_name = get_assumed_role_info()
+        try:
+            assumed_role_arn, assumed_role_name = get_assumed_role_info()
 
-        print("Successfully assumed ARN role")
-        # print("Assumed Role ARN:", assumed_role_arn)
-        # print("Assumed Role Name:", assumed_role_name)
+            print("Successfully assumed ARN role")
+            # print("Assumed Role ARN:", assumed_role_arn)
+            # print("Assumed Role Name:", assumed_role_name)
 
-    except Exception as e:
-        print("Could not get assumed role from STS:", e)
+        except Exception as e:
+            print("Could not get assumed role from STS:", e)
+    else:
+        print(
+            "Skipping AWS startup checks: AWS_REGION is not set "
+            "(set AWS_REGION or run Pi configure_aws_credentials before importing tools.aws_functions)"
+        )
 
 
 # Download direct from S3 - requires login credentials

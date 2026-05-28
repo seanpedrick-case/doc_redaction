@@ -86,6 +86,7 @@ x-pi-agent-env: &pi-agent-env
   S3_OUTPUTS_BUCKET: ${S3_OUTPUTS_BUCKET:-}
   CUSTOM_HEADER: ${CUSTOM_HEADER:-}
   CUSTOM_HEADER_VALUE: ${CUSTOM_HEADER_VALUE:-}
+  PI_MAX_PAGES: ${PI_MAX_PAGES:-${MAX_DOC_PAGES:-3000}}
 
 x-redaction-app-build: &redaction-app-build
   image: redaction-app-main
@@ -618,8 +619,8 @@ services:
       - RUN_MCP_SERVER=True
       - RUN_AWS_FUNCTIONS=True
       - PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS=${PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:-True}
-      - AWS_REGION=${AWS_REGION:-}
-      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-}
+      - AWS_REGION=${AWS_REGION:-eu-west-2}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-${AWS_REGION:-eu-west-2}}
       - AWS_PROFILE=${AWS_PROFILE:-}
     volumes:
       - ./workspace:/home/user/app/workspace:rw
@@ -724,6 +725,8 @@ services:
       PI_VLM_BASE_URL: http://redaction-app-llama:7860
       PI_VLM_MODEL: ${PI_VLM_MODEL:-anthropic.claude-sonnet-4-6}
       RUN_AWS_FUNCTIONS: "True"
+      AWS_REGION: ${AWS_REGION:-eu-west-2}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-${AWS_REGION:-eu-west-2}}
       AWS_PROFILE: ${AWS_PROFILE:-${PI_AWS_PROFILE:-}}
       PI_AWS_PROFILE: ${PI_AWS_PROFILE:-}
 

@@ -33,6 +33,7 @@ Copy [`config/pi_agent.env.example`](../../../config/pi_agent.env.example) to `c
 | `PI_AWS_PROFILE` | Alternative to `AWS_PROFILE`; also used to auto-select profile when only `~/.aws` is mounted |
 | `RUN_AWS_FUNCTIONS` | When `True`, use the AWS default credential chain (SSO, profile, role) |
 | `PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS` | When `True` with `RUN_AWS_FUNCTIONS`, prefer SSO/chain over static env keys (default `True`, same as main app) |
+| `PI_MAX_PAGES` | Maximum PDF pages allowed per redaction upload (falls back to `MAX_PAGES` / `MAX_DOC_PAGES`, default `3000`) |
 
 At startup, if only `GOOGLE_API_KEY` is set, it is mirrored to `GEMINI_API_KEY` for Pi.
 

@@ -178,6 +178,7 @@ _AWS_CREDENTIAL_ENV_KEYS: tuple[str, ...] = (
     "AWS_ACCESS_KEY",
     "AWS_SECRET_KEY",
 )
+_AWS_PROFILE_ENV_KEYS: tuple[str, ...] = ("AWS_PROFILE", "PI_AWS_PROFILE")
 
 
 def _env_flag(name: str, *, default: bool = False) -> bool:
@@ -228,9 +229,9 @@ def _aws_config_path() -> Path | None:
 
 def _discover_aws_profile_from_config() -> str | None:
     """Return an AWS profile name for Pi/Bedrock when only ~/.aws is mounted."""
-    explicit = (
-        os.environ.get("PI_AWS_PROFILE") or os.environ.get("AWS_PROFILE") or ""
-    ).strip()
+    explicit = (os.environ.get("PI_AWS_PROFILE") or "").strip()
+    if not explicit:
+        explicit = (os.environ.get("AWS_PROFILE") or "").strip()
     if explicit:
         return explicit
 
@@ -263,6 +264,52 @@ def _discover_aws_profile_from_config() -> str | None:
     if "default" in all_profiles:
         return "default"
     return all_profiles[0] if all_profiles else None
+
+
+def _region_from_aws_config(profile: str | None = None) -> str | None:
+    """Read ``region =`` from a profile block in ``~/.aws/config``."""
+    path = _aws_config_path()
+    if not path:
+        return None
+
+    target = (profile or _discover_aws_profile_from_config() or "").strip()
+    if not target:
+        return None
+
+    current_profile: str | None = None
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or line.startswith(";"):
+            continue
+        if line == "[default]":
+            current_profile = "default"
+            continue
+        if line.startswith("[profile ") and line.endswith("]"):
+            current_profile = line[len("[profile ") : -1].strip()
+            continue
+        if current_profile != target:
+            continue
+        if line.startswith("region"):
+            _, _, value = line.partition("=")
+            region = value.strip()
+            if region:
+                return region
+    return None
+
+
+def _ensure_aws_region_env() -> None:
+    """Ensure AWS SDK env has a non-empty region (profile config, then eu-west-2)."""
+    _strip_empty_env_vars(("AWS_REGION", "AWS_DEFAULT_REGION"))
+    region = (
+        os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or ""
+    ).strip()
+    if not region:
+        profile = (os.environ.get("AWS_PROFILE") or "").strip()
+        region = (_region_from_aws_config(profile) or "").strip()
+    if not region:
+        region = _bedrock_region()
+    os.environ["AWS_REGION"] = region
+    os.environ["AWS_DEFAULT_REGION"] = region
 
 
 def _pi_bedrock_auth_visible() -> bool:
@@ -305,6 +352,7 @@ def configure_aws_credentials(
     Explicit UI session keys from **Apply backend** always win.
     """
     _strip_empty_env_vars(_AWS_CREDENTIAL_ENV_KEYS)
+    _strip_empty_env_vars(_AWS_PROFILE_ENV_KEYS)
     _mirror_legacy_aws_key_env_vars()
 
     session_explicit = bool(
@@ -320,6 +368,7 @@ def configure_aws_credentials(
             os.environ["AWS_SESSION_TOKEN"] = session_session_token.strip()
         else:
             os.environ.pop("AWS_SESSION_TOKEN", None)
+        _ensure_aws_region_env()
         return
 
     run_aws = _env_flag("RUN_AWS_FUNCTIONS")
@@ -329,12 +378,17 @@ def configure_aws_credentials(
         for key in _AWS_CREDENTIAL_ENV_KEYS:
             os.environ.pop(key, None)
         _ensure_pi_bedrock_auth_env()
-        return
-
-    if run_aws:
+    elif run_aws:
         for key in _AWS_CREDENTIAL_ENV_KEYS:
             os.environ.pop(key, None)
         _ensure_pi_bedrock_auth_env()
+
+    # Propagate PI_AWS_PROFILE when only that alias is set (e.g. pi_agent.env).
+    pi_profile = (os.environ.get("PI_AWS_PROFILE") or "").strip()
+    if pi_profile and not (os.environ.get("AWS_PROFILE") or "").strip():
+        os.environ["AWS_PROFILE"] = pi_profile
+
+    _ensure_aws_region_env()
 
 
 def _aws_credential_status() -> str:
