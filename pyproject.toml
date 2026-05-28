@@ -70,7 +70,7 @@ dependencies = [
     "openai<=2.31.0",
     "markdown<=3.10.2",
     "tabulate<=0.10.0",
-    "starlette>=1.0.1"
+    "starlette>=0.52.1"
 ]
 
 [project.optional-dependencies]

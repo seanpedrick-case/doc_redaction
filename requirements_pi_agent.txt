@@ -10,7 +10,7 @@ gradio>=6.9.0,<=6.10.0
 gradio-client>=2.0.0,<=2.4.0
 httpx<=0.28.1
 requests<=2.34.2
-starlette>=1.0.1
+starlette>=0.52.1
 
 # --- Config ---
 python-dotenv<=1.2.2
