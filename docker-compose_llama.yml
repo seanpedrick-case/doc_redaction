@@ -14,6 +14,15 @@
 
 # Recommended for 16gb VRAM systems
 # docker compose -f docker-compose_llama.yml --profile 9b up -d
+#
+# Optional Docker-only settings for redaction-app-llama: config/docker_app_config.env
+# (see config/docker_app_config.env.example). Loaded at container start; the
+# service environment: block overrides values from that file.
+
+x-redaction-app-env: &redaction-app-env
+  env_file:
+    - path: config/docker_app_config.env
+      required: false
 
 services:
   # Qwen 3.6 27B model setup below requires 40GB of VRAM to run. For 24GB, Change to -hf-file parameter to Qwen3.6-27B-UD-Q4_K_XL.gguf, or Qwen3.6-27B-IQ4_NL.gguf
@@ -364,6 +373,7 @@ services:
           - llama-inference
 
   redaction-app-llama:
+    <<: *redaction-app-env
     profiles: ["35b_36", "27b_36", "35b", "27b", "9b", "gemma4-31b", "gemma4-26b"]
     image: redaction-app-main
     build:

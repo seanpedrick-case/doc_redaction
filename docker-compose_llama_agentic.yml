@@ -20,10 +20,21 @@
 # Cloud-only Pi agent (no local llama.cpp GPU model; redaction app still runs locally):
 # Set GEMINI_API_KEY (and optionally GOOGLE_API_KEY) in .env or config/pi_agent.env before starting pi-gemini.
 # docker compose -f docker-compose_llama_agentic.yml --profile pi-gemini up -d
+
 # Set AWS_REGION plus AWS credentials (or AWS_PROFILE via mounted ~/.aws) before starting pi-bedrock.
-# SSO (recommended): mount host ~/.aws, set AWS_PROFILE (or PI_AWS_PROFILE) to your SSO profile name, run `aws sso login` on the host.
+# SSO (recommended): mount host ~/.aws (read-write — SSO token refresh writes to sso/cache),
+# set AWS_PROFILE (or PI_AWS_PROFILE) to your SSO profile name, run `aws sso login` on the host.
 # Pi requires AWS_PROFILE in the container env — mounting ~/.aws alone is not enough for Pi's auth check.
 # docker compose -f docker-compose_llama_agentic.yml --profile pi-bedrock up -d
+#
+# Optional Docker-only settings for redaction-app services: copy settings into
+# config/docker_app_config.env (see config/docker_app_config.env.example). Loaded
+# at container start; values in each service's environment: block override these.
+
+x-redaction-app-env: &redaction-app-env
+  env_file:
+    - path: config/docker_app_config.env
+      required: false
 
 x-pi-agent-common: &pi-agent-common
   build:
@@ -89,6 +100,7 @@ x-pi-agent-env: &pi-agent-env
   PI_MAX_PAGES: ${PI_MAX_PAGES:-${MAX_DOC_PAGES:-3000}}
 
 x-redaction-app-build: &redaction-app-build
+  <<: *redaction-app-env
   image: redaction-app-main
   build:
     context: .
@@ -435,6 +447,7 @@ services:
           - llama-inference
 
   redaction-app-llama:
+    <<: *redaction-app-env
     profiles: ["35b_36", "27b_36", "gemma4-31b", "gemma4-26b"]
     image: redaction-app-main
     build:
@@ -524,14 +537,13 @@ services:
     environment:
       - FLAGS_fraction_of_gpu_memory_to_use=0.05
       - RUN_FASTAPI=True
-      - APP_MODE=fastapi
       - SHOW_PADDLE_MODEL_OPTIONS=True
       - SHOW_LOCAL_OCR_MODEL_OPTIONS=True
       - SHOW_LOCAL_PII_DETECTION_OPTIONS=True
       - SHOW_INFERENCE_SERVER_PII_OPTIONS=False
       - SHOW_INFERENCE_SERVER_VLM_OPTIONS=False
-      - SHOW_HYBRID_MODELS=True
-      - SHOW_VLM_MODEL_OPTIONS=True
+      - SHOW_HYBRID_MODELS=False
+      - SHOW_VLM_MODEL_OPTIONS=False
       - SHOW_GEMINI_VLM_MODELS=True
       - SHOW_GEMINI_LLM_MODELS=True
       - SHOW_GEMINI_LLM_PII_OPTIONS=True
@@ -540,30 +552,26 @@ services:
       - SHOW_SUMMARISATION=True
       - SHOW_AWS_API_KEYS=True
       - DEFAULT_TEXT_EXTRACTION_MODEL=Local OCR model - PDFs without selectable text
-      - DEFAULT_LOCAL_OCR_MODEL=hybrid-paddle-vlm
+      - DEFAULT_LOCAL_OCR_MODEL=paddle
       - DEFAULT_PII_DETECTION_MODEL=Local
       - CLOUD_VLM_MODEL_CHOICE=${CLOUD_VLM_MODEL_CHOICE:-gemini-flash-latest}
       - CUSTOM_VLM_BACKEND=bedrock_vlm
       - SHOW_CUSTOM_VLM_ENTITIES=False
-      - MAX_WORKERS=12
-      - TESSERACT_MAX_WORKERS=8
+      - MAX_WORKERS=8
+      - TESSERACT_MAX_WORKERS=4
       - PADDLE_MAX_WORKERS=1
       - LOAD_PADDLE_AT_STARTUP=False
       - EFFICIENT_OCR=True
       - SESSION_OUTPUT_FOLDER=True
       - SAVE_PAGE_OCR_VISUALISATIONS=False
       - HYBRID_OCR_CONFIDENCE_THRESHOLD=97
-      - INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES=True
+      - INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES=False
       - PREPROCESS_LOCAL_OCR_IMAGES=False
-      - MAX_NEW_TOKENS=196608
+      - MAX_NEW_TOKENS=32768
       - SAVE_EXAMPLE_HYBRID_IMAGES=False
       - SAVE_VLM_INPUT_IMAGES=False
       - VLM_MAX_DPI=200.0
-      - DEFAULT_NEW_BATCH_CHAR_COUNT=1250
-      - REPORT_VLM_OUTPUTS_TO_GUI=True
-      - REPORT_LLM_OUTPUTS_TO_GUI=True
-      - ADD_VLM_BOUNDING_BOX_RULES=False
-      - RUN_MCP_SERVER=True
+      - ADD_VLM_BOUNDING_BOX_RULES=True
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
     networks:
@@ -583,8 +591,8 @@ services:
       - SHOW_LOCAL_PII_DETECTION_OPTIONS=True
       - SHOW_INFERENCE_SERVER_PII_OPTIONS=False
       - SHOW_INFERENCE_SERVER_VLM_OPTIONS=False
-      - SHOW_HYBRID_MODELS=True
-      - SHOW_VLM_MODEL_OPTIONS=True
+      - SHOW_HYBRID_MODELS=False
+      - SHOW_VLM_MODEL_OPTIONS=False
       - SHOW_AWS_PII_DETECTION_OPTIONS=True
       - SHOW_AWS_BEDROCK_LLM_MODELS=True
       - SHOW_BEDROCK_VLM_MODELS=True
@@ -592,39 +600,43 @@ services:
       - SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER=True
       - SHOW_SUMMARISATION=True
       - SHOW_AWS_API_KEYS=True
-      - DEFAULT_TEXT_EXTRACTION_MODEL=Local OCR model - PDFs without selectable text
-      - DEFAULT_LOCAL_OCR_MODEL=hybrid-paddle-vlm
-      - DEFAULT_PII_DETECTION_MODEL=LLM (AWS Bedrock)
-      - CLOUD_VLM_MODEL_CHOICE=${CLOUD_VLM_MODEL_CHOICE:-anthropic.claude-sonnet-4-6}
+      - DEFAULT_TEXT_EXTRACTION_MODEL=AWS Textract
+      - DEFAULT_LOCAL_OCR_MODEL=tesseract
+      - DEFAULT_PII_DETECTION_MODEL=AWS Comprehend
+      - CLOUD_VLM_MODEL_CHOICE=${CLOUD_VLM_MODEL_CHOICE:-amazon.nova-pro-v1:0}
       - CUSTOM_VLM_BACKEND=bedrock_vlm
+      - HYBRID_TEXTRACT_BEDROCK_VLM=True
       - SHOW_CUSTOM_VLM_ENTITIES=True
-      - MAX_WORKERS=12
-      - TESSERACT_MAX_WORKERS=8
+      - MAX_WORKERS=8
+      - TESSERACT_MAX_WORKERS=4
       - PADDLE_MAX_WORKERS=1
       - LOAD_PADDLE_AT_STARTUP=False
       - EFFICIENT_OCR=True
       - SESSION_OUTPUT_FOLDER=True
       - SAVE_PAGE_OCR_VISUALISATIONS=False
       - HYBRID_OCR_CONFIDENCE_THRESHOLD=97
-      - INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES=True
+      - INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES=False
       - PREPROCESS_LOCAL_OCR_IMAGES=False
-      - MAX_NEW_TOKENS=196608
+      - MAX_NEW_TOKENS=32768
       - SAVE_EXAMPLE_HYBRID_IMAGES=False
       - SAVE_VLM_INPUT_IMAGES=False
       - VLM_MAX_DPI=200.0
-      - DEFAULT_NEW_BATCH_CHAR_COUNT=1250
-      - REPORT_VLM_OUTPUTS_TO_GUI=True
-      - REPORT_LLM_OUTPUTS_TO_GUI=True
-      - ADD_VLM_BOUNDING_BOX_RULES=False
-      - RUN_MCP_SERVER=True
+      - ADD_VLM_BOUNDING_BOX_RULES=True
       - RUN_AWS_FUNCTIONS=True
       - PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS=${PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:-True}
       - AWS_REGION=${AWS_REGION:-eu-west-2}
       - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-${AWS_REGION:-eu-west-2}}
       - AWS_PROFILE=${AWS_PROFILE:-}
+      - USAGE_LOG_FILE_NAME=usage_log.csv
+      - SAVE_LOGS_TO_CSV=True
+      - SAVE_LOGS_TO_DYNAMODB=False
+      - SAVE_OUTPUTS_TO_S3=False
+      - S3_OUTPUTS_FOLDER=${S3_OUTPUTS_FOLDER:-}
+      - S3_OUTPUTS_BUCKET=${S3_OUTPUTS_BUCKET:-}
+      - DOCUMENT_REDACTION_BUCKET=${DOCUMENT_REDACTION_BUCKET:-}
     volumes:
       - ./workspace:/home/user/app/workspace:rw
-      - ${USERPROFILE}/.aws:/home/user/.aws:ro
+      - ${USERPROFILE}/.aws:/home/user/.aws:rw
     networks:
       redaction-net-llama:
         aliases:
@@ -712,7 +724,7 @@ services:
       - .:/workspace/doc_redaction:rw
       - ./workspace:/home/user/app/workspace:rw
       - pi-agent-sessions:/home/node/.pi/agent/sessions
-      - ${USERPROFILE}/.aws:/home/node/.aws:ro
+      - ${USERPROFILE}/.aws:/home/node/.aws:rw
     depends_on:
       redaction-app-llama-bedrock:
         condition: service_started
