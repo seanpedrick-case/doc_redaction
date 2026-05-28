@@ -160,11 +160,23 @@ def _apply_event(
             completed_segments, streaming_text
         )
 
-    elif event.kind == "thinking_snapshot" and SHOW_THINKING:
-        thinking = event.text
+    elif event.kind == "thinking_snapshot":
+        if SHOW_THINKING:
+            thinking = event.text
+        if not _assistant_display_text(completed_segments, streaming_text).strip():
+            streaming_text = event.text
+            history[-1]["content"] = _assistant_display_text(
+                completed_segments, streaming_text
+            )
 
-    elif event.kind == "thinking_delta" and SHOW_THINKING:
-        thinking += event.text
+    elif event.kind == "thinking_delta":
+        if SHOW_THINKING:
+            thinking += event.text
+        if not _assistant_display_text(completed_segments, streaming_text).strip():
+            streaming_text += event.text
+            history[-1]["content"] = _assistant_display_text(
+                completed_segments, streaming_text
+            )
 
     elif event.kind == "status":
         activity = _append_activity(activity, event.text)
@@ -830,7 +842,7 @@ def build_ui():
             with gr.Column(scale=2):
                 with gr.Accordion("Thinking log", open=True):
                     activity_log = gr.Markdown(value="_No activity yet._")
-                    tool_panel = gr.Markdown(value="", max_height=800)
+                    tool_panel = gr.Markdown(value="", max_height=480)
                     thinking_panel = gr.Textbox(
                         label="Thinking (stream)",
                         lines=12,

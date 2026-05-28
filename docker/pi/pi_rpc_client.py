@@ -60,14 +60,35 @@ def extract_assistant_display(message: dict[str, Any] | None) -> tuple[str, str]
     texts: list[str] = []
     thinkings: list[str] = []
     for block in content:
+        if isinstance(block, str):
+            if block.strip():
+                texts.append(block)
+            continue
         if not isinstance(block, dict):
             continue
         block_type = block.get("type")
-        if block_type == "text":
-            texts.append(str(block.get("text") or ""))
-        elif block_type == "thinking":
-            thinkings.append(str(block.get("thinking") or ""))
+        if block_type in (None, "text", "output_text"):
+            text = block.get("text") or block.get("content") or ""
+            if text:
+                texts.append(str(text))
+        elif block_type in ("thinking", "reasoning", "thought"):
+            thought = (
+                block.get("thinking")
+                or block.get("text")
+                or block.get("reasoning")
+                or block.get("content")
+                or ""
+            )
+            if thought:
+                thinkings.append(str(thought))
     return "".join(texts), "".join(thinkings)
+
+
+def assistant_chat_text(visible: str, thinking: str) -> str:
+    """Text to show in the main chat — visible answer, or thinking when Gemini sends only that."""
+    if visible.strip():
+        return visible
+    return thinking
 
 
 def partial_message_from_update(event: dict[str, Any]) -> dict[str, Any] | None:
@@ -407,9 +428,10 @@ class PiRpcClient:
         partial = partial_message_from_update(event)
         if partial is not None:
             visible, thinking = extract_assistant_display(partial)
-            if visible:
-                yield PiStreamEvent(kind="text_snapshot", text=visible)
-            if thinking:
+            chat_text = assistant_chat_text(visible, thinking)
+            if chat_text:
+                yield PiStreamEvent(kind="text_snapshot", text=chat_text)
+            if thinking.strip() and visible.strip():
                 yield PiStreamEvent(kind="thinking_snapshot", text=thinking)
 
         if delta_type == "text_delta":
@@ -419,7 +441,10 @@ class PiRpcClient:
 
         elif delta_type == "thinking_delta":
             chunk = delta.get("delta") or ""
-            if chunk and partial is None:
+            if chunk:
+                if partial is None:
+                    # No snapshot yet — stream thinking into chat (Gemini reasoning path).
+                    yield PiStreamEvent(kind="text_delta", text=chunk)
                 yield PiStreamEvent(kind="thinking_delta", text=chunk)
 
         elif delta_type == "toolcall_start":

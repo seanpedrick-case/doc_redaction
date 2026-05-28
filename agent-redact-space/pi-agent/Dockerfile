@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Pi agent Gradio UI for Hugging Face Docker Space (remote doc_redaction backend).
-# Build from monorepo root: docker build -f hf-spaces/pi-agent/Dockerfile .
+# Build from monorepo root: docker build -f agent-redact-space/pi-agent/Dockerfile .
 
 FROM node:22-bookworm-slim
 
@@ -12,7 +12,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONPATH=/workspace/doc_redaction/docker/pi
 ENV PI_DEPLOYMENT_PROFILE=hf-space
 ENV PI_DEFAULT_PROVIDER=google-gemini
-ENV PI_DEFAULT_MODEL=gemini-flash-latest
+ENV PI_DEFAULT_MODEL=gemini-flash-lite-latest
 ENV DOC_REDACTION_GRADIO_URL=https://seanpedrickcase-document-redaction.hf.space
 ENV GRADIO_SERVER_NAME=0.0.0.0
 ENV GRADIO_SERVER_PORT=7860

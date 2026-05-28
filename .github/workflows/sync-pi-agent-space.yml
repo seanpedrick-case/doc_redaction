@@ -6,7 +6,7 @@ on:
     paths:
       - "docker/pi/**"
       - "skills/**"
-      - "hf-spaces/pi-agent/**"
+      - "agent-redact-space/pi-agent/**"
       - "doc_redaction/example_data/**"
       - "requirements_pi_agent.txt"
       - "AGENTS.md"
@@ -42,8 +42,8 @@ jobs:
 
       - name: Flatten Pi agent Space tree
         run: |
-          chmod +x hf-spaces/pi-agent/sync_to_space.sh
-          hf-spaces/pi-agent/sync_to_space.sh /tmp/pi-agent-space
+          chmod +x agent-redact-space/pi-agent/sync_to_space.sh
+          agent-redact-space/pi-agent/sync_to_space.sh /tmp/pi-agent-space
 
       - name: Push to Hugging Face Space
         run: |

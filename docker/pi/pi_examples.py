@@ -9,6 +9,7 @@ from pathlib import Path
 from pi_agent_config import is_hf_space_profile
 from redaction_prompt import HF_DEFAULT_OCR
 
+
 def _show_examples_from_env() -> bool:
     """True unless PI_GRADIO_SHOW_EXAMPLES or SHOW_PI_EXAMPLES is explicitly false."""
     for key in ("PI_GRADIO_SHOW_EXAMPLES", "SHOW_PI_EXAMPLES"):
@@ -88,36 +89,32 @@ def _catalog() -> tuple[PiRedactionExample, ...]:
     selectable_text_ocr = (
         HF_DEFAULT_OCR if is_hf_space_profile() else "Local model - selectable text"
     )
-    local_ocr = (
-        HF_DEFAULT_OCR
-        if is_hf_space_profile()
-        else "Local OCR model - PDFs without selectable text"
-    )
+    # local_ocr = (
+    #     HF_DEFAULT_OCR
+    #     if is_hf_space_profile()
+    #     else "Local OCR model - PDFs without selectable text"
+    # )
     return (
         PiRedactionExample(
-            label="PDF with selectable text redaction",
+            label="Emails with specific names",
             file_name="example_of_emails_sent_to_a_professor_before_applying.pdf",
             ocr_method=selectable_text_ocr,
+            pii_method="Local",
             instructions=(
-                "- Redact all personal names, email addresses, and phone numbers\n"
-                "- Keep university or department names visible unless they identify "
-                "a specific individual\n"
-                "- Use Local model - selectable text for text extraction\n"
-                "- Use Local PII detection with the default entity set"
+                "- Any redaction box related to Dr Kornbluth should be removed\n"
+                "- References to Dr Hyde, or Dr Hyde's lab should be redacted. Also any references to Lauren, or Lauren Lilley\n"
+                "- All mentions of Universities and their names should be redacted\n"
             ),
         ),
         PiRedactionExample(
             label="PDF redaction with custom entities (Titles, Person, Dates)",
             file_name="graduate-job-example-cover-letter.pdf",
-            ocr_method=local_ocr,
+            ocr_method=selectable_text_ocr,
+            pii_method="Local",
             instructions=(
-                "- Redact honorifics and titles (Mr, Mrs, Ms, Dr, Professor), "
-                "person names, and dates\n"
-                "- For the initial `/doc_redact` call, pass `redact_entities`: "
-                "TITLES, PERSON, DATE_TIME\n"
-                "- Do not redact organisation names, job descriptions, or addresses "
-                "unless they contain a person's name\n"
-                "- Use Local PII detection"
+                "- Redact any names and titles, apart from Mr Wilson\n"
+                "- Redact any organisation names\n"
+                "- Redact any place names\n"
             ),
         ),
     )

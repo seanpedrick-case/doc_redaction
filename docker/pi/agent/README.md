@@ -138,12 +138,12 @@ Set `PI_DEPLOYMENT_PROFILE=hf-space` to run the Pi Gradio UI as a **Hugging Face
 | VLM faces / signatures | Disabled |
 | Port | `7860` |
 
-Package and Dockerfile: [`hf-spaces/pi-agent/`](../../../hf-spaces/pi-agent/). Pushes to [agentic_document_redaction](https://huggingface.co/spaces/seanpedrickcase/agentic_document_redaction) on **`dev`** branch via [`.github/workflows/sync-pi-agent-space.yml`](../../../.github/workflows/sync-pi-agent-space.yml) (GitHub secrets: `HF_TOKEN`, `HF_USERNAME`, `HF_EMAIL`).
+Package and Dockerfile: [`agent-redact-space/pi-agent/`](../../../agent-redact-space/pi-agent/). Pushes to [agentic_document_redaction](https://huggingface.co/spaces/seanpedrickcase/agentic_document_redaction) on **`dev`** branch via [`.github/workflows/sync-pi-agent-space.yml`](../../../.github/workflows/sync-pi-agent-space.yml) (GitHub secrets: `HF_TOKEN`, `HF_USERNAME`, `HF_EMAIL`).
 
 Local build test from monorepo root:
 
 ```powershell
-docker build -f hf-spaces/pi-agent/Dockerfile -t pi-agent-hf-space .
+docker build -f agent-redact-space/pi-agent/Dockerfile -t pi-agent-hf-space .
 docker run --rm -p 7860:7860 -e GEMINI_API_KEY=... -e HF_TOKEN=... pi-agent-hf-space
 ```
 

@@ -28,13 +28,13 @@ def _resolve_under_workspace(path: str) -> Path | None:
         return None
 
     try:
+        workspace_root = os.path.realpath(str(WORKSPACE_DIR.resolve()))
         user_path = Path(path)
         if user_path.is_absolute():
-            return None
-
-        workspace_root = os.path.realpath(str(WORKSPACE_DIR.resolve()))
-        candidate = os.path.normpath(os.path.join(workspace_root, str(user_path)))
-        candidate_real = os.path.realpath(candidate)
+            candidate_real = os.path.realpath(str(user_path))
+        else:
+            candidate = os.path.normpath(os.path.join(workspace_root, str(user_path)))
+            candidate_real = os.path.realpath(candidate)
 
         if os.path.commonpath([workspace_root, candidate_real]) != workspace_root:
             return None
