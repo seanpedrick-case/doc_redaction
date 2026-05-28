@@ -1219,7 +1219,7 @@ def build_ui():
 
             with gr.Column(scale=2):
                 with gr.Accordion("Thinking log", open=True):
-                    activity_log = gr.Markdown(value="_No activity yet._")
+                    activity_log = gr.Markdown(value="_No activity yet._", max_height=480)
                     tool_panel = gr.Markdown(value="", max_height=480)
                     thinking_panel = gr.Textbox(
                         label="Thinking (stream)",
