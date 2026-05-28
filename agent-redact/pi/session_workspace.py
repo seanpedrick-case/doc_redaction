@@ -56,7 +56,12 @@ def session_workspace_dir(session_hash: str) -> Path:
     if not session_workspace_enabled():
         return base
     safe_id = sanitize_session_id(session_hash)
-    return (base / safe_id).resolve()
+    candidate = (base / safe_id).resolve()
+    try:
+        candidate.relative_to(base)
+    except ValueError:
+        return (base / "default").resolve()
+    return candidate
 
 
 def ensure_session_workspace(session_hash: str) -> Path:
