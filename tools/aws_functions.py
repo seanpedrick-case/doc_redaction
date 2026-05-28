@@ -143,7 +143,7 @@ def download_file_from_s3(
             # Ensure the local directory exists
             os.makedirs(os.path.dirname(local_file_path_and_name), exist_ok=True)
 
-            s3 = boto3.client("s3", region_name=AWS_REGION)
+            s3 = boto3.client("s3", region_name=_effective_aws_region())
             s3.download_file(bucket_name, key, local_file_path_and_name)
             print(
                 f"File downloaded from s3://{bucket_name}/{key} to {local_file_path_and_name}"
@@ -164,7 +164,7 @@ def download_folder_from_s3(
     if RUN_AWS_FUNCTIONS:
         if bucket_name and s3_folder and local_folder:
 
-            s3 = boto3.client("s3", region_name=AWS_REGION)
+            s3 = boto3.client("s3", region_name=_effective_aws_region())
 
             # List objects in the specified S3 folder
             response = s3.list_objects_v2(Bucket=bucket_name, Prefix=s3_folder)
@@ -208,7 +208,7 @@ def download_files_from_s3(
     if RUN_AWS_FUNCTIONS:
         if bucket_name and s3_folder and local_folder and filenames:
 
-            s3 = boto3.client("s3", region_name=AWS_REGION)
+            s3 = boto3.client("s3", region_name=_effective_aws_region())
 
             print("Trying to download file: ", filenames)
 
@@ -272,7 +272,7 @@ def upload_file_to_s3(
             # Allow empty s3_key for uploads to bucket root
             if s3_bucket and local_file_paths:
 
-                s3_client = boto3.client("s3", region_name=AWS_REGION)
+                s3_client = boto3.client("s3", region_name=_effective_aws_region())
                 s3_key_prefix = s3_key if s3_key else ""
 
                 if isinstance(local_file_paths, str):
@@ -340,7 +340,7 @@ def upload_log_file_to_s3(
         try:
             if s3_bucket and s3_key and local_file_paths:
 
-                s3_client = boto3.client("s3", region_name=AWS_REGION)
+                s3_client = boto3.client("s3", region_name=_effective_aws_region())
 
                 if isinstance(local_file_paths, str):
                     local_file_paths = [local_file_paths]

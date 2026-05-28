@@ -67,14 +67,17 @@ from redaction_prompt import (
     pdf_page_count,
     prepare_redaction_task,
 )
+
+# Before any ``tools.config`` import (e.g. session_workspace): compose may inject
+# empty AWS_REGION= which would freeze a blank region in tools.config.AWS_REGION.
+mirror_hf_token_from_env()
+configure_aws_credentials()
+
 from session_workspace import (
     init_session_workspace,
     session_workspace_dir,
     workspace_context_prefix,
 )
-
-mirror_hf_token_from_env()
-configure_aws_credentials()
 
 from tools.aws_functions import export_outputs_to_s3
 from tools.config import HOST_NAME, RUN_FASTAPI, SAVE_OUTPUTS_TO_S3
@@ -1219,8 +1222,8 @@ def build_ui():
 
             with gr.Column(scale=2):
                 with gr.Accordion("Thinking log", open=True):
-                    activity_log = gr.Markdown(value="_No activity yet._", max_height=480)
-                    tool_panel = gr.Markdown(value="", max_height=480)
+                    activity_log = gr.Markdown(value="_No activity yet._", max_height=480, height=480)
+                    tool_panel = gr.Markdown(value="", max_height=480, height=480)
                     thinking_panel = gr.Textbox(
                         label="Thinking (stream)",
                         lines=12,
