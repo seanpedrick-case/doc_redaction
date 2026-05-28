@@ -84,7 +84,7 @@ PROVIDER_MODELS: dict[str, list[str]] = {
 
 DEFAULT_MODEL_BY_PROVIDER: dict[str, str] = {
     PROVIDER_LLAMA: LLAMA_MODEL_ID,
-    PROVIDER_GEMINI: GEMINI_MODELS[1][0],
+    PROVIDER_GEMINI: GEMINI_MODELS[0][0],  # Gemini Flash Lite
     PROVIDER_BEDROCK: "anthropic.claude-sonnet-4-6",
 }
 

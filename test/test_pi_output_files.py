@@ -55,6 +55,18 @@ def test_resolve_under_workspace_rejects_outside_workspace(tmp_path, monkeypatch
     assert of._resolve_under_workspace(str(outside)) is None
 
 
+def test_resolve_under_workspace_rejects_path_traversal(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "secret.pdf"
+    outside.write_bytes(b"%PDF")
+
+    monkeypatch.setattr(of, "WORKSPACE_DIR", workspace)
+
+    assert of._resolve_under_workspace("../secret.pdf") is None
+    assert of._resolve_under_workspace(f"../{outside.name}") is None
+
+
 def test_workspace_files_download_fn_returns_absolute_paths(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
     workspace.mkdir()

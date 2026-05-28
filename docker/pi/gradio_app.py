@@ -38,7 +38,13 @@ from pi_agent_config import (
     write_runtime_config,
 )
 from pi_examples import example_rows, examples_status_markdown
-from pi_rpc_client import PiRpcClient, PiRpcError, PiStreamEvent, default_client
+from pi_rpc_client import (
+    PiRpcClient,
+    PiRpcError,
+    PiStreamEvent,
+    assistant_text_since_last_user,
+    default_client,
+)
 from redaction_prompt import (
     DEFAULT_OCR_METHOD,
     DEFAULT_PII_METHOD,
@@ -92,6 +98,41 @@ def _assistant_display_text(completed_segments: list[str], current: str) -> str:
     if current.strip():
         parts.append(current.strip())
     return "\n\n".join(parts)
+
+
+def _finalize_assistant_chat(
+    client: PiRpcClient,
+    history: list[dict[str, Any]],
+    *,
+    completed_segments: list[str],
+    streaming_text: str,
+    activity: list[str],
+) -> None:
+    """Fill an empty assistant bubble after tool-only Gemini turns."""
+    if not history or history[-1].get("role") != "assistant":
+        return
+    if _assistant_display_text(completed_segments, streaming_text).strip():
+        history[-1]["content"] = _assistant_display_text(
+            completed_segments, streaming_text
+        )
+        return
+    if history[-1].get("content", "").strip():
+        return
+
+    try:
+        fallback = assistant_text_since_last_user(client.get_messages())
+    except PiRpcError:
+        fallback = ""
+
+    if fallback.strip():
+        history[-1]["content"] = fallback
+        return
+
+    if activity:
+        history[-1]["content"] = (
+            "_This run completed using tools only (no assistant prose was streamed). "
+            "See **Thinking log** for step-by-step activity._"
+        )
 
 
 def _gemini_key_error() -> str | None:
@@ -479,6 +520,14 @@ def _run_pi_chat(
             )
             return
         raise
+
+    _finalize_assistant_chat(
+        client,
+        history,
+        completed_segments=completed_segments,
+        streaming_text=streaming_text,
+        activity=activity,
+    )
 
     yield _chat_yield(
         history,

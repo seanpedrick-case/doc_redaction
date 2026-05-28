@@ -96,7 +96,7 @@ def _catalog() -> tuple[PiRedactionExample, ...]:
     # )
     return (
         PiRedactionExample(
-            label="Emails with specific names",
+            label="Emails to a professor",
             file_name="example_of_emails_sent_to_a_professor_before_applying.pdf",
             ocr_method=selectable_text_ocr,
             pii_method="Local",
@@ -107,7 +107,7 @@ def _catalog() -> tuple[PiRedactionExample, ...]:
             ),
         ),
         PiRedactionExample(
-            label="PDF redaction with custom entities (Titles, Person, Dates)",
+            label="Graduate cover letter",
             file_name="graduate-job-example-cover-letter.pdf",
             ocr_method=selectable_text_ocr,
             pii_method="Local",

@@ -1,5 +1,5 @@
 ---
-title: Pi Agentic Document Redaction
+title: Agentic Document Redaction
 emoji: 🤖
 colorFrom: blue
 colorTo: indigo

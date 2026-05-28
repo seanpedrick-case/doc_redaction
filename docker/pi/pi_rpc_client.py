@@ -91,6 +91,52 @@ def assistant_chat_text(visible: str, thinking: str) -> str:
     return thinking
 
 
+def format_assistant_message_for_chat(message: dict[str, Any]) -> str:
+    """Render one assistant message for the chat UI (text, thinking, or tool calls)."""
+    visible, thinking = extract_assistant_display(message)
+    text = assistant_chat_text(visible, thinking)
+    if text.strip():
+        return text
+
+    content = message.get("content")
+    if not isinstance(content, list):
+        return ""
+
+    tool_lines: list[str] = []
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") != "toolCall":
+            continue
+        name = str(block.get("name") or "tool")
+        args = block.get("arguments")
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except json.JSONDecodeError:
+                args = {"raw": args}
+        if not isinstance(args, dict):
+            args = {}
+        tool_lines.append(f"**{name}:** {format_tool_args(name, args)}")
+    return "\n".join(tool_lines)
+
+
+def assistant_text_since_last_user(messages: list[dict[str, Any]]) -> str:
+    """Combine assistant messages from the latest user turn."""
+    last_user = -1
+    for index, message in enumerate(messages):
+        if message.get("role") == "user":
+            last_user = index
+
+    turn_messages = messages[last_user + 1 :] if last_user >= 0 else messages
+    parts: list[str] = []
+    for message in turn_messages:
+        if message.get("role") != "assistant":
+            continue
+        part = format_assistant_message_for_chat(message)
+        if part.strip():
+            parts.append(part)
+    return "\n\n".join(parts)
+
+
 def partial_message_from_update(event: dict[str, Any]) -> dict[str, Any] | None:
     delta = event.get("assistantMessageEvent") or {}
     partial = delta.get("partial")
@@ -244,6 +290,12 @@ class PiRpcClient:
         response = self._send_command({"type": "get_state"})
         data = response.get("data") if response else {}
         return data if isinstance(data, dict) else {}
+
+    def get_messages(self) -> list[dict[str, Any]]:
+        response = self._send_command({"type": "get_messages"})
+        data = response.get("data") if response else {}
+        messages = data.get("messages") if isinstance(data, dict) else []
+        return messages if isinstance(messages, list) else []
 
     def set_model(self, provider: str, model_id: str) -> dict[str, Any]:
         response = self._send_command(
