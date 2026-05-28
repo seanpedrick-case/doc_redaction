@@ -18,6 +18,8 @@ def test_hf_profile_defaults_session_dir_to_tmp(tmp_path, monkeypatch):
     settings = pac.build_settings_config()
     assert Path(settings["sessionDir"]).resolve() == Path("/tmp/pi-sessions").resolve()
     assert Path(settings["sessionDir"]).is_dir()
+    assert settings["retry"]["baseDelayMs"] == 60000
+    assert settings["retry"]["maxRetries"] == 3
 
 
 def test_pi_session_dir_override(tmp_path, monkeypatch):

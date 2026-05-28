@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,8 @@ from pi_rpc_client import (
     PiStreamEvent,
     assistant_text_since_last_user,
     default_client,
+    is_rate_limit_error,
+    last_assistant_turn_error,
 )
 from redaction_prompt import (
     DEFAULT_OCR_METHOD,
@@ -86,6 +89,12 @@ THINKING_PANEL_CSS = """
     overflow-y: auto !important;
 }
 """
+QUOTA_RETRY_ATTEMPTS = int(os.environ.get("PI_QUOTA_RETRY_ATTEMPTS", "3"))
+QUOTA_RETRY_DELAY_S = int(os.environ.get("PI_QUOTA_RETRY_DELAY_S", "60"))
+QUOTA_CONTINUE_PROMPT = (
+    "Continue the redaction task from where you left off. "
+    "Do not re-read skills or repeat completed tool steps unless required."
+)
 
 
 def _clone_history(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -184,6 +193,23 @@ def _append_activity(lines: list[str], text: str) -> list[str]:
     return lines
 
 
+def _append_chat_segment(
+    completed_segments: list[str],
+    streaming_text: str,
+    segment: str,
+) -> tuple[list[str], str]:
+    """Append a new visible chat segment (tool line or prose), preserving prior segments."""
+    segment = segment.strip()
+    if not segment:
+        return completed_segments, streaming_text
+    if streaming_text.strip():
+        completed_segments = completed_segments + [streaming_text.strip()]
+        streaming_text = ""
+    if not completed_segments or completed_segments[-1] != segment:
+        completed_segments = completed_segments + [segment]
+    return completed_segments, streaming_text
+
+
 def _apply_event(
     event: PiStreamEvent,
     *,
@@ -196,7 +222,12 @@ def _apply_event(
     streaming_text: str,
 ) -> tuple[list[dict[str, Any]], list[str], str, str, str, list[str], str]:
     if event.kind == "text_snapshot":
-        streaming_text = event.text
+        if event.text.strip().startswith("**") and ":" in event.text.split("\n", 1)[0]:
+            completed_segments, streaming_text = _append_chat_segment(
+                completed_segments, streaming_text, event.text
+            )
+        else:
+            streaming_text = event.text
         history[-1]["content"] = _assistant_display_text(
             completed_segments, streaming_text
         )
@@ -210,33 +241,30 @@ def _apply_event(
     elif event.kind == "thinking_snapshot":
         if SHOW_THINKING:
             thinking = event.text
-        if not _assistant_display_text(completed_segments, streaming_text).strip():
-            streaming_text = event.text
-            history[-1]["content"] = _assistant_display_text(
-                completed_segments, streaming_text
-            )
 
     elif event.kind == "thinking_delta":
         if SHOW_THINKING:
             thinking += event.text
-        if not _assistant_display_text(completed_segments, streaming_text).strip():
-            streaming_text += event.text
-            history[-1]["content"] = _assistant_display_text(
-                completed_segments, streaming_text
-            )
 
     elif event.kind == "status":
         activity = _append_activity(activity, event.text)
 
+    elif event.kind == "turn_end":
+        activity = _append_activity(activity, event.text)
+
     elif event.kind == "tool_start":
         if streaming_text.strip():
-            completed_segments.append(streaming_text)
+            completed_segments.append(streaming_text.strip())
             streaming_text = ""
-            history[-1]["content"] = _assistant_display_text(
-                completed_segments, streaming_text
-            )
         label = event.tool_name or "tool"
         detail = event.text or label
+        tool_line = f"**{label}:** {detail}" if detail != label else f"**{label}**"
+        completed_segments, streaming_text = _append_chat_segment(
+            completed_segments, streaming_text, tool_line
+        )
+        history[-1]["content"] = _assistant_display_text(
+            completed_segments, streaming_text
+        )
         activity = _append_activity(activity, f"**Tool start:** `{label}` — {detail}")
         tool_heading = f"### {label}\n{detail}\n\n```\n"
         tool_output = ""
@@ -493,40 +521,109 @@ def _run_pi_chat(
         session_hash=session_hash,
     )
 
+    pi_message = workspace_context_prefix(session_hash) + message.strip()
+    prompt_to_send = pi_message
+    quota_failures = 0
+
     try:
-        pi_message = workspace_context_prefix(session_hash) + message.strip()
-        for event in client.prompt_events(pi_message):
-            (
-                history,
-                activity,
-                thinking,
-                tool_output,
-                tool_heading,
-                completed_segments,
-                streaming_text,
-            ) = _apply_event(
-                event,
-                history=history,
-                activity=activity,
-                thinking=thinking,
-                tool_output=tool_output,
-                tool_heading=tool_heading,
-                completed_segments=completed_segments,
-                streaming_text=streaming_text,
-            )
-            yield _chat_yield(
-                history,
-                client,
-                activity,
-                thinking,
-                tool_heading,
-                tool_output,
-                send_enabled=False,
-                abort_enabled=True,
-                redact_enabled=False,
-                session_info=session_info,
-                session_hash=session_hash,
-            )
+        while True:
+            turn_error: str | None = None
+            try:
+                for event in client.prompt_events(prompt_to_send):
+                    (
+                        history,
+                        activity,
+                        thinking,
+                        tool_output,
+                        tool_heading,
+                        completed_segments,
+                        streaming_text,
+                    ) = _apply_event(
+                        event,
+                        history=history,
+                        activity=activity,
+                        thinking=thinking,
+                        tool_output=tool_output,
+                        tool_heading=tool_heading,
+                        completed_segments=completed_segments,
+                        streaming_text=streaming_text,
+                    )
+                    yield _chat_yield(
+                        history,
+                        client,
+                        activity,
+                        thinking,
+                        tool_heading,
+                        tool_output,
+                        send_enabled=False,
+                        abort_enabled=True,
+                        redact_enabled=False,
+                        session_info=session_info,
+                        session_hash=session_hash,
+                    )
+                turn_error = last_assistant_turn_error(client.get_messages())
+            except PiRpcError as exc:
+                if not is_rate_limit_error(str(exc)):
+                    raise
+                turn_error = str(exc)
+
+            if turn_error and is_rate_limit_error(turn_error):
+                quota_failures += 1
+                if quota_failures >= QUOTA_RETRY_ATTEMPTS:
+                    err_summary = turn_error[:500].replace("\n", " ")
+                    history[-1]["content"] = (
+                        f"**Gemini rate limit / quota:** stopped after "
+                        f"{QUOTA_RETRY_ATTEMPTS} consecutive attempts.\n\n"
+                        f"{err_summary}"
+                    )
+                    activity = _append_activity(
+                        activity,
+                        f"**Quota retries exhausted** ({QUOTA_RETRY_ATTEMPTS} attempts).",
+                    )
+                    yield _chat_yield(
+                        history,
+                        client,
+                        activity,
+                        thinking,
+                        tool_heading,
+                        tool_output,
+                        send_enabled=True,
+                        abort_enabled=False,
+                        redact_enabled=True,
+                        session_info=_session_summary(client),
+                        session_hash=session_hash,
+                        refresh_final_files=True,
+                    )
+                    return
+
+                activity = _append_activity(
+                    activity,
+                    (
+                        f"Gemini rate limit — waiting {QUOTA_RETRY_DELAY_S}s before "
+                        f"retry {quota_failures}/{QUOTA_RETRY_ATTEMPTS}…"
+                    ),
+                )
+                yield _chat_yield(
+                    history,
+                    client,
+                    activity,
+                    thinking,
+                    tool_heading,
+                    tool_output,
+                    send_enabled=False,
+                    abort_enabled=True,
+                    redact_enabled=False,
+                    session_info=session_info,
+                    session_hash=session_hash,
+                )
+                time.sleep(QUOTA_RETRY_DELAY_S)
+                prompt_to_send = QUOTA_CONTINUE_PROMPT
+                history.append({"role": "assistant", "content": ""})
+                completed_segments = []
+                streaming_text = ""
+                continue
+
+            break
     except PiRpcError as exc:
         history[-1]["content"] = f"**Pi error:** {exc}"
         activity = _append_activity(activity, f"**Pi error:** {exc}")

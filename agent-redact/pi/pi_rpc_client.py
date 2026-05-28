@@ -91,23 +91,16 @@ def assistant_chat_text(visible: str, thinking: str) -> str:
     return thinking
 
 
-def format_assistant_message_for_chat(message: dict[str, Any]) -> str:
-    """Render one assistant message for the chat UI (text, thinking, or tool calls)."""
-    visible, thinking = extract_assistant_display(message)
-    text = assistant_chat_text(visible, thinking)
-    if text.strip():
-        return text
-
-    content = message.get("content")
-    if not isinstance(content, list):
-        return ""
-
+def _tool_lines_from_content(content: list[Any]) -> list[str]:
     tool_lines: list[str] = []
     for block in content:
-        if not isinstance(block, dict) or block.get("type") != "toolCall":
+        if not isinstance(block, dict):
             continue
-        name = str(block.get("name") or "tool")
-        args = block.get("arguments")
+        block_type = block.get("type")
+        if block_type not in {"toolCall", "tool_use", "functionCall"}:
+            continue
+        name = str(block.get("name") or block.get("toolName") or "tool")
+        args = block.get("arguments") or block.get("input") or block.get("args")
         if isinstance(args, str):
             try:
                 args = json.loads(args)
@@ -116,7 +109,67 @@ def format_assistant_message_for_chat(message: dict[str, Any]) -> str:
         if not isinstance(args, dict):
             args = {}
         tool_lines.append(f"**{name}:** {format_tool_args(name, args)}")
-    return "\n".join(tool_lines)
+    return tool_lines
+
+
+def format_assistant_message_for_chat(message: dict[str, Any]) -> str:
+    """Render one assistant message for the chat UI (visible text or tool calls; no thinking)."""
+    visible, _thinking = extract_assistant_display(message)
+    if visible.strip():
+        return visible
+
+    content = message.get("content")
+    if not isinstance(content, list):
+        return ""
+
+    return "\n".join(_tool_lines_from_content(content))
+
+
+def chat_text_from_assistant_message(message: dict[str, Any] | None) -> str:
+    """Non-thinking chat text from a Pi/Gemini assistant message snapshot."""
+    if not message or message.get("role") != "assistant":
+        return ""
+    return format_assistant_message_for_chat(message)
+
+
+_RATE_LIMIT_MARKERS = (
+    "429",
+    "quota",
+    "rate limit",
+    "rate-limit",
+    "resource_exhausted",
+    "too many requests",
+)
+
+
+def is_rate_limit_error(text: str | None) -> bool:
+    """True when *text* looks like a provider quota or rate-limit failure."""
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(marker in lowered for marker in _RATE_LIMIT_MARKERS)
+
+
+def last_assistant_turn_error(messages: list[dict[str, Any]]) -> str | None:
+    """Return the latest assistant error in the current user turn, if any."""
+    last_user = -1
+    for index, message in enumerate(messages):
+        if message.get("role") == "user":
+            last_user = index
+
+    turn_messages = messages[last_user + 1 :] if last_user >= 0 else messages
+    for message in reversed(turn_messages):
+        if message.get("role") != "assistant":
+            continue
+        error = message.get("errorMessage")
+        if error:
+            return str(error)
+        if message.get("stopReason") == "error":
+            visible, _ = extract_assistant_display(message)
+            if visible.strip():
+                return visible
+            return "assistant turn failed"
+    return None
 
 
 def assistant_text_since_last_user(messages: list[dict[str, Any]]) -> str:
@@ -352,7 +405,7 @@ class PiRpcClient:
                 yield PiStreamEvent(kind="status", text="Turn started.")
 
             elif event_type == "turn_end":
-                yield PiStreamEvent(kind="status", text="Turn finished.")
+                yield PiStreamEvent(kind="turn_end", text="Turn finished.")
 
             elif event_type == "message_update":
                 yield from self._parse_message_update(event)
@@ -480,23 +533,21 @@ class PiRpcClient:
         partial = partial_message_from_update(event)
         if partial is not None:
             visible, thinking = extract_assistant_display(partial)
-            chat_text = assistant_chat_text(visible, thinking)
-            if chat_text:
+            if visible.strip():
+                yield PiStreamEvent(kind="text_snapshot", text=visible)
+            elif chat_text := chat_text_from_assistant_message(partial):
                 yield PiStreamEvent(kind="text_snapshot", text=chat_text)
-            if thinking.strip() and visible.strip():
+            if thinking.strip():
                 yield PiStreamEvent(kind="thinking_snapshot", text=thinking)
 
         if delta_type == "text_delta":
             chunk = delta.get("delta") or ""
-            if chunk and partial is None:
+            if chunk:
                 yield PiStreamEvent(kind="text_delta", text=chunk)
 
         elif delta_type == "thinking_delta":
             chunk = delta.get("delta") or ""
             if chunk:
-                if partial is None:
-                    # No snapshot yet — stream thinking into chat (Gemini reasoning path).
-                    yield PiStreamEvent(kind="text_delta", text=chunk)
                 yield PiStreamEvent(kind="thinking_delta", text=chunk)
 
         elif delta_type == "toolcall_start":
@@ -510,12 +561,9 @@ class PiRpcClient:
                     tool_args = {"raw": tool_args}
             if not isinstance(tool_args, dict):
                 tool_args = {}
-            yield PiStreamEvent(
-                kind="status",
-                text=f"Calling `{tool_name}`…",
-                tool_name=str(tool_name),
-                tool_args=tool_args,
-            )
+            detail = format_tool_args(str(tool_name), tool_args)
+            chat_line = f"**{tool_name}:** {detail}" if detail else f"**{tool_name}**"
+            yield PiStreamEvent(kind="text_snapshot", text=chat_line)
 
         elif delta_type == "error":
             yield PiStreamEvent(

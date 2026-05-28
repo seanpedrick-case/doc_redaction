@@ -256,6 +256,20 @@ def build_settings_config(
     settings["defaultModel"] = model
     session_path = ensure_session_dir(resolve_session_dir())
     settings["sessionDir"] = session_path.as_posix()
+    if is_hf_space_profile():
+        # Gemini free tier is often 5 req/min — wait ~1 min between Pi retries.
+        base_delay_ms = int(os.environ.get("PI_GEMINI_RETRY_BASE_DELAY_MS", "60000"))
+        max_delay_ms = int(os.environ.get("PI_GEMINI_RETRY_MAX_DELAY_MS", "90000"))
+        settings["retry"] = {
+            "enabled": True,
+            "maxRetries": 3,
+            "baseDelayMs": base_delay_ms,
+            "provider": {
+                "timeoutMs": 3600000,
+                "maxRetries": 3,
+                "maxRetryDelayMs": max_delay_ms,
+            },
+        }
     return settings
 
 
