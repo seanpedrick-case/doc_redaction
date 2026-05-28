@@ -75,9 +75,15 @@ def collect_final_output_files(
 
 
 def workspace_root_from(session_workspace: str | None = None) -> Path:
+    base_root = workspace_base_dir().resolve()
     if session_workspace and str(session_workspace).strip():
-        return Path(session_workspace).resolve()
-    return workspace_base_dir().resolve()
+        try:
+            candidate = Path(session_workspace).resolve()
+            candidate.relative_to(base_root)
+            return candidate
+        except (OSError, ValueError):
+            return base_root
+    return base_root
 
 
 def _is_file_path(path: str) -> bool:
