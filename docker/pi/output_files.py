@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 
 import gradio as gr
-
 from pi_examples import gradio_example_allowed_paths
 
 WORKSPACE_DIR = Path(os.environ.get("PI_WORKSPACE_DIR", "/home/user/app/workspace"))

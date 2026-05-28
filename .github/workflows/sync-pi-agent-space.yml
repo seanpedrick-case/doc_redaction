@@ -23,6 +23,22 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 1
+          lfs: true
+
+      - name: Install Git LFS
+        run: git lfs install
+
+      - name: Materialize example PDFs (Git LFS)
+        run: |
+          git lfs pull --include="doc_redaction/example_data/*.pdf"
+          for f in \
+            doc_redaction/example_data/example_of_emails_sent_to_a_professor_before_applying.pdf \
+            doc_redaction/example_data/graduate-job-example-cover-letter.pdf; do
+            if head -1 "$f" | grep -q "^version https://git-lfs.github.com/spec/v1"; then
+              echo "Example PDF is still an LFS pointer (not materialized): $f" >&2
+              exit 1
+            fi
+          done
 
       - name: Flatten Pi agent Space tree
         run: |
