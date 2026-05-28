@@ -126,7 +126,12 @@ def test_collect_final_output_files_finds_review_final_folder(tmp_path, monkeypa
     monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
 
     result = of.collect_final_output_files("session")
-    assert result == [str(redacted.resolve())]
+    assert result == [
+        str((session_dir / "output_final_download" / "doc_redacted.pdf").resolve())
+    ]
+    assert (
+        session_dir / "output_final_download" / "doc_redacted.pdf"
+    ).read_bytes() == b"%PDF"
 
 
 def test_collect_final_output_files_supports_output_final_alias(tmp_path, monkeypatch):
@@ -141,7 +146,48 @@ def test_collect_final_output_files_supports_output_final_alias(tmp_path, monkey
     monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
 
     result = of.collect_final_output_files("session")
-    assert result == [str(redacted.resolve())]
+    assert result == [
+        str((session_dir / "output_final_download" / "doc_redacted.pdf").resolve())
+    ]
+
+
+def test_strip_gradio_cache_prefix_removes_long_hash(tmp_path):
+    assert of.strip_gradio_cache_prefix("abc12345678901234_report.pdf") == "report.pdf"
+    assert of.strip_gradio_cache_prefix("report.pdf") == "report.pdf"
+    assert (
+        of.strip_gradio_cache_prefix("short_hash_report.pdf") == "short_hash_report.pdf"
+    )
+
+
+def test_collect_final_output_files_deduplicates_and_strips_prefix(
+    tmp_path, monkeypatch
+):
+    import time
+
+    base = tmp_path / "workspace"
+    session_dir = base / "session"
+    final_dir = session_dir / "redact" / "doc.pdf" / "review" / "output_review_final"
+    final_dir.mkdir(parents=True)
+
+    older = final_dir / "aaaaaaaaaaaaaaaa_report.pdf"
+    older.write_bytes(b"old")
+    time.sleep(0.02)
+    newer = final_dir / "bbbbbbbbbbbbbbbb_report.pdf"
+    newer.write_bytes(b"new")
+    plain = final_dir / "notes.txt"
+    plain.write_text("notes")
+
+    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+
+    result = of.collect_final_output_files("session")
+    download_dir = session_dir / "output_final_download"
+    assert result == [
+        str((download_dir / "notes.txt").resolve()),
+        str((download_dir / "report.pdf").resolve()),
+    ]
+    assert (download_dir / "report.pdf").read_bytes() == b"new"
+    assert (download_dir / "notes.txt").read_text() == "notes"
 
 
 def test_workspace_root_from_uses_session_hash_only(tmp_path, monkeypatch):

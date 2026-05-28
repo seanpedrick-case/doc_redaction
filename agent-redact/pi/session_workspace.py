@@ -122,5 +122,6 @@ def workspace_context_prefix(session_hash: str) -> str:
         f"**Session workspace (mandatory):** all uploads, downloads, and redaction "
         f"artifacts for this user must live under `{root}/`. "
         f"Use `{root}/redact/<document>/` for per-document output trees. "
+        f"Do not write to `{root}/output_final_download/` (UI-managed download copies only). "
         f"Do not read or write other session folders under `{workspace_base_dir().as_posix()}/`.\n\n"
     )

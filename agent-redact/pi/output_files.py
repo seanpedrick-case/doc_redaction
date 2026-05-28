@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import re
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +22,8 @@ REFRESH_STUB_DIR = Path(os.environ.get("PI_FILEEXPLORER_STUB_DIR", "/tmp"))
 
 # Folder names under ``.../review/`` where Pass 1 deliverables are saved (see partnership prompt).
 _DEFAULT_FINAL_OUTPUT_FOLDER_NAMES = ("output_review_final", "output_final")
+_DEFAULT_FINAL_DOWNLOAD_FOLDER = "output_final_download"
+_DEFAULT_GRADIO_PREFIX_MIN_LEN = 16
 
 
 def final_output_folder_names() -> frozenset[str]:
@@ -41,17 +45,57 @@ def _is_under_final_output_dir(relative_path: Path) -> bool:
     return False
 
 
-def collect_final_output_files(
+def final_download_folder_name() -> str:
+    raw = os.environ.get("PI_FINAL_DOWNLOAD_FOLDER", _DEFAULT_FINAL_DOWNLOAD_FOLDER)
+    stripped = raw.strip() if raw else ""
+    return stripped or _DEFAULT_FINAL_DOWNLOAD_FOLDER
+
+
+def _gradio_prefix_min_len() -> int:
+    raw = os.environ.get(
+        "PI_GRADIO_FILENAME_PREFIX_MIN_LEN",
+        str(_DEFAULT_GRADIO_PREFIX_MIN_LEN),
+    )
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return _DEFAULT_GRADIO_PREFIX_MIN_LEN
+
+
+def strip_gradio_cache_prefix(filename: str) -> str:
+    """
+    Remove a leading Gradio cache id prefix (``{alphanumeric}_{name}``).
+
+    Gradio client downloads often prefix filenames with a long hash so repeated
+    exports do not collide; users expect the original basename instead.
+    """
+    pattern = re.compile(rf"^[A-Za-z0-9]{{{_gradio_prefix_min_len()},}}_(.+)$")
+    match = pattern.match(filename)
+    if match:
+        return match.group(1)
+    return filename
+
+
+def _file_created_timestamp(path: Path) -> float:
+    stat = path.stat()
+    birth = getattr(stat, "st_birthtime", None)
+    if birth is not None and birth > 0:
+        return float(birth)
+    return float(stat.st_mtime)
+
+
+def _collect_raw_final_output_files(
     session_hash: str | None = None,
-) -> list[str] | None:
+) -> list[Path] | None:
     """
     Collect deliverable files from ``review/output_review_final/`` (and aliases)
-    anywhere under the session workspace, newest first.
+    anywhere under the session workspace.
     """
     root = workspace_root_from(session_hash)
     if not root.is_dir():
         return None
 
+    download_folder = final_download_folder_name()
     candidates: list[Path] = []
     try:
         for path in root.rglob("*"):
@@ -60,6 +104,8 @@ def collect_final_output_files(
             try:
                 relative = path.relative_to(root)
             except ValueError:
+                continue
+            if download_folder in relative.parts:
                 continue
             if not _is_under_final_output_dir(relative):
                 continue
@@ -73,9 +119,48 @@ def collect_final_output_files(
 
     if not candidates:
         return None
+    return candidates
 
-    candidates.sort(key=lambda item: item.stat().st_mtime, reverse=True)
-    return [str(path.resolve()) for path in candidates]
+
+def build_final_download_files(
+    session_hash: str | None = None,
+) -> list[str] | None:
+    """
+    Stage cleaned deliverables under ``output_final_download/``.
+
+    Copies files from agent final-output folders, strips Gradio cache prefixes,
+    deduplicates by basename (newest file wins), and returns paths for ``gr.File``.
+    """
+    root = workspace_root_from(session_hash)
+    raw_files = _collect_raw_final_output_files(session_hash)
+    if not raw_files:
+        return None
+
+    download_dir = root / final_download_folder_name()
+    if download_dir.exists():
+        shutil.rmtree(download_dir)
+    download_dir.mkdir(parents=True, exist_ok=True)
+
+    ordered = sorted(raw_files, key=_file_created_timestamp)
+    latest_by_name: dict[str, Path] = {}
+    for path in ordered:
+        latest_by_name[strip_gradio_cache_prefix(path.name)] = path
+
+    staged: list[str] = []
+    for name in sorted(latest_by_name):
+        source = latest_by_name[name]
+        destination = download_dir / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        staged.append(str(destination.resolve()))
+    return staged or None
+
+
+def collect_final_output_files(
+    session_hash: str | None = None,
+) -> list[str] | None:
+    """Return deduplicated, prefix-stripped deliverables for download and S3 export."""
+    return build_final_download_files(session_hash)
 
 
 def workspace_root_from(session_hash: str | None = None) -> Path:

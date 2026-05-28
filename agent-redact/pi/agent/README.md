@@ -35,6 +35,20 @@ Copy [`config/pi_agent.env.example`](../../../config/pi_agent.env.example) to `c
 | `PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS` | When `True` with `RUN_AWS_FUNCTIONS`, prefer SSO/chain over static env keys (default `True`, same as main app) |
 | `PI_MAX_PAGES` | Maximum PDF pages allowed per redaction upload (falls back to `MAX_PAGES` / `MAX_DOC_PAGES`, default `3000`) |
 
+### Usage logging (CSV / DynamoDB / S3)
+
+Each completed Pi agent run (chat message or redaction task) writes **one row** to the **same usage log schema** as the main redaction app (`USAGE_LOG_FILE_NAME`, `USAGE_LOGS_FOLDER`, `S3_USAGE_LOGS_FOLDER`, `USAGE_LOG_DYNAMODB_TABLE_NAME`). Key fields:
+
+| Log column | Pi agent value |
+|------------|----------------|
+| `task` | `agent` |
+| `llm_model_name` | Pi provider/model (e.g. `amazon-bedrock/anthropic.claude-sonnet-4-6`) |
+| `text_extraction_method` / `pii_detection_method` | From redaction task settings when applicable |
+| `actual_time_taken_number` | Wall-clock seconds for the Pi RPC turn |
+| `total_page_count` | Pages in scope for PDF redaction tasks |
+
+Toggle with `SAVE_LOGS_TO_CSV`, `SAVE_LOGS_TO_DYNAMODB`, and `RUN_AWS_FUNCTIONS` (required for S3 log upload). Access logs on session load use the main app access log paths separately.
+
 At startup, if only `GOOGLE_API_KEY` is set, it is mirrored to `GEMINI_API_KEY` for Pi.
 
 ### Gradio UI

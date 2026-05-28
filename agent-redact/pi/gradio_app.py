@@ -62,6 +62,8 @@ from redaction_prompt import (
     OCR_METHOD_CHOICES,
     PII_METHOD_CHOICES,
     RedactionTaskSettings,
+    pages_to_process_count,
+    pdf_page_count,
     prepare_redaction_task,
 )
 from session_workspace import (
@@ -77,7 +79,7 @@ from tools.aws_functions import export_outputs_to_s3
 from tools.config import HOST_NAME, RUN_FASTAPI, SAVE_OUTPUTS_TO_S3
 from tools.gradio_platform import (
     create_fastapi_app,
-    log_pi_usage_event,
+    log_agent_usage_event,
     log_platform_access,
     mount_or_launch,
 )
@@ -130,27 +132,38 @@ def _client_provider_model(client: PiRpcClient | None) -> tuple[str, str]:
     return provider, model_label
 
 
+def _llm_model_label(client: PiRpcClient | None) -> str:
+    provider, model = _client_provider_model(client)
+    if provider and model:
+        return f"{provider}/{model}"
+    return model or provider
+
+
 def _after_pi_task(
     *,
     session_hash: str,
     client: PiRpcClient | None,
-    event: str,
     s3_output_folder: str,
     save_outputs_to_s3: bool,
     document_name: str = "",
     started_at: float | None = None,
     base_file: str | None = None,
+    ocr_method: str = "",
+    pii_method: str = "",
+    total_page_count: int = 0,
+    vlm_model_name: str | None = None,
 ) -> None:
     duration = round(time.time() - started_at, 2) if started_at else ""
-    provider, model = _client_provider_model(client)
-    log_pi_usage_event(
+    log_agent_usage_event(
         session_hash=session_hash,
-        event=event,
-        document_name=document_name,
         duration_seconds=duration,
-        provider=provider,
-        model=model,
-        deployment_profile=os.environ.get("PI_DEPLOYMENT_PROFILE", ""),
+        document_name=document_name,
+        total_page_count=total_page_count,
+        ocr_method=ocr_method,
+        pii_method=pii_method,
+        llm_model_name=_llm_model_label(client),
+        vlm_model_name=vlm_model_name or os.environ.get("PI_VLM_MODEL", ""),
+        task="agent",
     )
     file_paths = collect_final_output_files(session_hash)
     if file_paths and save_outputs_to_s3 and s3_output_folder:
@@ -549,9 +562,12 @@ def _run_pi_chat(
     session_hash: str = "",
     s3_output_folder: str = "",
     save_outputs_to_s3: bool = False,
-    usage_event: str | None = None,
     document_name: str = "",
     base_file: str | None = None,
+    ocr_method: str = "",
+    pii_method: str = "",
+    total_page_count: int = 0,
+    vlm_model_name: str | None = None,
 ):
     if not message or not message.strip():
         client = client if client and client.running else None
@@ -592,17 +608,18 @@ def _run_pi_chat(
     task_started_at = time.time()
 
     def _complete_pi_task() -> None:
-        if not usage_event:
-            return
         _after_pi_task(
             session_hash=session_hash,
             client=client,
-            event=usage_event,
             s3_output_folder=s3_output_folder,
             save_outputs_to_s3=save_outputs_to_s3,
             document_name=document_name,
             started_at=task_started_at,
             base_file=base_file,
+            ocr_method=ocr_method,
+            pii_method=pii_method,
+            total_page_count=total_page_count,
+            vlm_model_name=vlm_model_name,
         )
 
     history.append({"role": "user", "content": chat_user_message or message.strip()})
@@ -808,8 +825,17 @@ def chat_respond(
         session_hash=session_hash,
         s3_output_folder=s3_output_folder,
         save_outputs_to_s3=save_outputs_to_s3,
-        usage_event="chat_message",
     )
+
+
+def _redaction_page_count(upload_file: str | None, page_range: str) -> int:
+    if not upload_file or not str(upload_file).lower().endswith(".pdf"):
+        return 0
+    try:
+        total = pdf_page_count(upload_file)
+        return pages_to_process_count(page_range or "all", total)
+    except (ValueError, OSError):
+        return 0
 
 
 def submit_redaction_task(
@@ -868,6 +894,7 @@ def submit_redaction_task(
         )
         return
 
+    page_count = _redaction_page_count(upload_file, page_range or "all")
     chat_summary = (
         f"**Redaction task:** `{_file_name}`  \n"
         f"**Page range:** `{page_range or 'all'}`  \n"
@@ -885,9 +912,12 @@ def submit_redaction_task(
         session_hash=session_hash,
         s3_output_folder=s3_output_folder,
         save_outputs_to_s3=save_outputs_to_s3,
-        usage_event="redaction_task",
         document_name=_file_name,
         base_file=upload_file,
+        ocr_method=settings.ocr_method,
+        pii_method=settings.pii_method,
+        total_page_count=page_count,
+        vlm_model_name=os.environ.get("PI_VLM_MODEL"),
     )
 
 
@@ -1201,6 +1231,8 @@ def build_ui():
             gr.Markdown(
                 "**Final deliverables** appear automatically when the agent saves to "
                 "`review/output_review_final/` (or `review/output_final/`). "
+                "Downloads below are copied to `output_final_download/`, Gradio cache "
+                "prefixes removed, and duplicate filenames collapsed to the newest file. "
                 "Use the file explorer below to browse or download other workspace files."
             )
             workspace_output_download = gr.File(

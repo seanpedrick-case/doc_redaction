@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import boto3
@@ -27,19 +28,18 @@ from tools.config import (
     AWS_USER_POOL_ID,
     COGNITO_AUTH,
     CSV_ACCESS_LOG_HEADERS,
-    CSV_PI_USAGE_LOG_HEADERS,
+    CSV_USAGE_LOG_HEADERS,
     CUSTOM_HEADER,
     CUSTOM_HEADER_VALUE,
+    DEFAULT_COST_CODE,
+    DISPLAY_FILE_NAMES_IN_LOGS,
     DYNAMODB_ACCESS_LOG_HEADERS,
-    DYNAMODB_PI_USAGE_LOG_HEADERS,
+    DYNAMODB_USAGE_LOG_HEADERS,
     FASTAPI_ROOT_PATH,
     GRADIO_SERVER_NAME,
     GRADIO_SERVER_PORT,
     HOST_NAME,
     LOG_FILE_NAME,
-    PI_LOG_CHAT_USAGE,
-    PI_USAGE_LOG_DYNAMODB_TABLE_NAME,
-    PI_USAGE_LOG_FILE_NAME,
     ROOT_PATH,
     RUN_FASTAPI,
     S3_ACCESS_LOGS_FOLDER,
@@ -48,6 +48,8 @@ from tools.config import (
     SAVE_LOGS_TO_CSV,
     SAVE_LOGS_TO_DYNAMODB,
     SAVE_OUTPUTS_TO_S3,
+    USAGE_LOG_DYNAMODB_TABLE_NAME,
+    USAGE_LOG_FILE_NAME,
     USAGE_LOGS_FOLDER,
 )
 from tools.custom_csvlogger import CSVLogger_custom
@@ -227,61 +229,109 @@ class PlatformAccessLogger:
         )
 
 
-class PlatformPiUsageLogger:
-    """PI orchestration usage log writer."""
+class PlatformAgentUsageLogger:
+    """Agent orchestration usage log writer (main-app CSV / DynamoDB / S3 schema)."""
+
+    _MAIN_USAGE_FIELD_LABELS: tuple[str, ...] = (
+        "session_hash_textbox",
+        "doc_full_file_name_textbox",
+        "data_full_file_name_textbox",
+        "actual_time_taken_number",
+        "total_page_count",
+        "textract_query_number",
+        "pii_detection_method",
+        "comprehend_query_number",
+        "cost_code",
+        "textract_handwriting_signature",
+        "host_name_textbox",
+        "text_extraction_method",
+        "is_this_a_textract_api_call",
+        "task",
+        "vlm_model_name",
+        "vlm_total_input_tokens",
+        "vlm_total_output_tokens",
+        "llm_model_name",
+        "llm_total_input_tokens",
+        "llm_total_output_tokens",
+    )
 
     def __init__(self) -> None:
-        self._callback = CSVLogger_custom(dataset_file_name=PI_USAGE_LOG_FILE_NAME)
-        self._fields = [
-            _LogField("session_hash"),
-            _LogField("event"),
-            _LogField("document_name"),
-            _LogField("duration_seconds"),
-            _LogField("provider"),
-            _LogField("model"),
-            _LogField("host_name"),
-            _LogField("deployment_profile"),
-        ]
+        self._callback = CSVLogger_custom(dataset_file_name=USAGE_LOG_FILE_NAME)
+        labels = (
+            list(CSV_USAGE_LOG_HEADERS)
+            if CSV_USAGE_LOG_HEADERS
+            else list(self._MAIN_USAGE_FIELD_LABELS)
+        )
+        self._fields = [_LogField(label) for label in labels]
         self._callback.setup(self._fields, USAGE_LOGS_FOLDER)
 
-    def log(
-        self,
-        *,
-        session_hash: str,
-        event: str,
-        document_name: str = "",
-        duration_seconds: float | int | str = "",
-        provider: str = "",
-        model: str = "",
-        host_name: str = HOST_NAME,
-        deployment_profile: str = "",
-    ) -> None:
+    def log_row(self, row: list[Any]) -> None:
         self._callback.flag(
-            [
-                session_hash,
-                event,
-                document_name,
-                duration_seconds,
-                provider,
-                model,
-                host_name,
-                deployment_profile,
-            ],
+            row,
             save_to_csv=SAVE_LOGS_TO_CSV,
             save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
-            dynamodb_table_name=PI_USAGE_LOG_DYNAMODB_TABLE_NAME,
-            dynamodb_headers=DYNAMODB_PI_USAGE_LOG_HEADERS,
-            replacement_headers=CSV_PI_USAGE_LOG_HEADERS or None,
+            dynamodb_table_name=USAGE_LOG_DYNAMODB_TABLE_NAME,
+            dynamodb_headers=DYNAMODB_USAGE_LOG_HEADERS,
+            replacement_headers=CSV_USAGE_LOG_HEADERS or None,
         )
         upload_log_file_to_s3(
-            USAGE_LOGS_FOLDER + PI_USAGE_LOG_FILE_NAME,
+            USAGE_LOGS_FOLDER + USAGE_LOG_FILE_NAME,
             S3_USAGE_LOGS_FOLDER,
         )
 
 
+def _doc_name_for_usage_log(document_name: str) -> str:
+    if DISPLAY_FILE_NAMES_IN_LOGS:
+        if not document_name:
+            return ""
+        return Path(document_name).stem
+    return "document" if document_name else ""
+
+
+def build_agent_usage_log_row(
+    *,
+    session_hash: str,
+    duration_seconds: float | int | str = "",
+    document_name: str = "",
+    total_page_count: int | str = 0,
+    ocr_method: str = "",
+    pii_method: str = "",
+    llm_model_name: str = "",
+    vlm_model_name: str = "",
+    llm_input_tokens: int | str = 0,
+    llm_output_tokens: int | str = 0,
+    vlm_input_tokens: int | str = 0,
+    vlm_output_tokens: int | str = 0,
+    task: str = "agent",
+) -> list[Any]:
+    """Build a usage log row matching the main redaction app schema."""
+    return [
+        session_hash,
+        _doc_name_for_usage_log(document_name),
+        "",
+        duration_seconds,
+        total_page_count,
+        0,
+        pii_method,
+        0,
+        DEFAULT_COST_CODE,
+        False,
+        HOST_NAME,
+        ocr_method,
+        False,
+        task,
+        vlm_model_name,
+        vlm_input_tokens,
+        vlm_output_tokens,
+        llm_model_name,
+        llm_input_tokens,
+        llm_output_tokens,
+    ]
+
+
 # Module-level singletons for PI / lightweight callers
 _access_logger: PlatformAccessLogger | None = None
-_pi_usage_logger: PlatformPiUsageLogger | None = None
+_agent_usage_logger: PlatformAgentUsageLogger | None = None
 
 
 def get_access_logger() -> PlatformAccessLogger:
@@ -291,11 +341,11 @@ def get_access_logger() -> PlatformAccessLogger:
     return _access_logger
 
 
-def get_pi_usage_logger() -> PlatformPiUsageLogger:
-    global _pi_usage_logger
-    if _pi_usage_logger is None:
-        _pi_usage_logger = PlatformPiUsageLogger()
-    return _pi_usage_logger
+def get_agent_usage_logger() -> PlatformAgentUsageLogger:
+    global _agent_usage_logger
+    if _agent_usage_logger is None:
+        _agent_usage_logger = PlatformAgentUsageLogger()
+    return _agent_usage_logger
 
 
 def log_platform_access(session_hash: str, host_name: str = HOST_NAME) -> None:
@@ -304,34 +354,62 @@ def log_platform_access(session_hash: str, host_name: str = HOST_NAME) -> None:
     get_access_logger().log(session_hash, host_name)
 
 
-def log_pi_usage_event(
+def log_agent_usage_event(
     *,
     session_hash: str,
-    event: str,
-    document_name: str = "",
     duration_seconds: float | int | str = "",
-    provider: str = "",
-    model: str = "",
-    deployment_profile: str = "",
+    document_name: str = "",
+    total_page_count: int | str = 0,
+    ocr_method: str = "",
+    pii_method: str = "",
+    llm_model_name: str = "",
+    vlm_model_name: str = "",
+    llm_input_tokens: int | str = 0,
+    llm_output_tokens: int | str = 0,
+    vlm_input_tokens: int | str = 0,
+    vlm_output_tokens: int | str = 0,
+    task: str = "agent",
 ) -> None:
+    """Log one Pi agent run to the main-app usage CSV / DynamoDB / S3 locations."""
     if not SAVE_LOGS_TO_CSV and not SAVE_LOGS_TO_DYNAMODB:
         return
-    if event == "chat_message" and not PI_LOG_CHAT_USAGE:
-        return
-    get_pi_usage_logger().log(
+    row = build_agent_usage_log_row(
         session_hash=session_hash,
-        event=event,
-        document_name=document_name,
         duration_seconds=duration_seconds,
-        provider=provider,
-        model=model,
-        deployment_profile=deployment_profile,
+        document_name=document_name,
+        total_page_count=total_page_count,
+        ocr_method=ocr_method,
+        pii_method=pii_method,
+        llm_model_name=llm_model_name,
+        vlm_model_name=vlm_model_name,
+        llm_input_tokens=llm_input_tokens,
+        llm_output_tokens=llm_output_tokens,
+        vlm_input_tokens=vlm_input_tokens,
+        vlm_output_tokens=vlm_output_tokens,
+        task=task,
+    )
+    get_agent_usage_logger().log_row(row)
+
+
+def log_pi_usage_event(**kwargs: Any) -> None:
+    """Back-compat alias — maps legacy Pi kwargs onto ``log_agent_usage_event``."""
+    event = kwargs.pop("event", "")
+    provider = kwargs.pop("provider", "")
+    model = kwargs.pop("model", "")
+    deployment_profile = kwargs.pop("deployment_profile", "")
+    llm_model_name = kwargs.pop("llm_model_name", "")
+    if not llm_model_name:
+        parts = [part for part in (provider, model, deployment_profile, event) if part]
+        llm_model_name = "/".join(parts) if parts else model
+    log_agent_usage_event(
+        llm_model_name=llm_model_name,
+        **kwargs,
     )
 
 
 def wire_pi_usage_logging(**kwargs: Any) -> None:
-    """Log a PI orchestration usage event (direct-call helper for Gradio handlers)."""
-    log_pi_usage_event(**kwargs)
+    """Log a Pi agent usage event (direct-call helper for Gradio handlers)."""
+    log_agent_usage_event(**kwargs)
 
 
 def wire_access_logging(

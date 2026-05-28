@@ -78,13 +78,46 @@ def test_log_platform_access_calls_logger(monkeypatch):
     logger.log.assert_called_once_with("user-a", "host-1")
 
 
-def test_log_pi_usage_event_skips_chat_when_disabled(monkeypatch):
+def test_build_agent_usage_log_row_uses_main_app_schema(monkeypatch):
+    monkeypatch.setattr(gradio_platform, "DISPLAY_FILE_NAMES_IN_LOGS", True)
+    monkeypatch.setattr(gradio_platform, "DEFAULT_COST_CODE", "CC1")
+    monkeypatch.setattr(gradio_platform, "HOST_NAME", "test-host")
+    row = gradio_platform.build_agent_usage_log_row(
+        session_hash="user-1",
+        duration_seconds=12.5,
+        document_name="report.pdf",
+        total_page_count=3,
+        ocr_method="hybrid-paddle-vlm",
+        pii_method="LLM (AWS Bedrock)",
+        llm_model_name="amazon-bedrock/anthropic.claude-sonnet-4-6",
+        vlm_model_name="anthropic.claude-sonnet-4-6",
+        task="agent",
+    )
+    assert row[0] == "user-1"
+    assert row[1] == "report"
+    assert row[3] == 12.5
+    assert row[4] == 3
+    assert row[6] == "LLM (AWS Bedrock)"
+    assert row[11] == "hybrid-paddle-vlm"
+    assert row[13] == "agent"
+    assert row[17] == "amazon-bedrock/anthropic.claude-sonnet-4-6"
+
+
+def test_log_agent_usage_event_writes_via_logger(monkeypatch):
     logger = MagicMock()
-    monkeypatch.setattr(gradio_platform, "get_pi_usage_logger", lambda: logger)
+    monkeypatch.setattr(gradio_platform, "get_agent_usage_logger", lambda: logger)
     monkeypatch.setattr(gradio_platform, "SAVE_LOGS_TO_CSV", True)
-    monkeypatch.setattr(gradio_platform, "PI_LOG_CHAT_USAGE", False)
-    gradio_platform.log_pi_usage_event(session_hash="u1", event="chat_message")
-    logger.log.assert_not_called()
+    monkeypatch.setattr(gradio_platform, "SAVE_LOGS_TO_DYNAMODB", False)
+    gradio_platform.log_agent_usage_event(
+        session_hash="user-1",
+        duration_seconds=5,
+        llm_model_name="amazon-bedrock/claude",
+        task="agent",
+    )
+    logger.log_row.assert_called_once()
+    row = logger.log_row.call_args.args[0]
+    assert row[13] == "agent"
+    assert row[17] == "amazon-bedrock/claude"
 
 
 def test_create_fastapi_app_exposes_health():
