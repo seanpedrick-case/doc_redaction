@@ -7752,22 +7752,20 @@ def redact_image_pdf(
                 # To keep memory usage low on large documents, we avoid storing full image
                 # objects or image bytes here; workers will reopen the image from disk.
                 if use_ocr_parallel_textract:
-                    if not image:
-                        try:
-                            _pn, _ip, _w, _h = process_single_page_for_image_conversion(
-                                file_path, page_no
-                            )
-                            normalized_path = os.path.normpath(
-                                os.path.abspath(image_path)
-                            )
-                            if validate_path_containment(normalized_path, input_folder):
-                                image = Image.open(normalized_path)
-                                page_width, page_height = image.size
-                        except Exception as e:
+                    if not image or _is_placeholder_image_path(image_path):
+                        image, image_path = open_page_image_for_pipeline(
+                            image_path,
+                            file_path,
+                            page_no,
+                            input_folder=input_folder,
+                            page_sizes_df=page_sizes_df,
+                        )
+                        if image is None:
                             print(
-                                f"Could not load image for Textract job page {reported_page_number}: {e}"
+                                f"Could not load image for Textract job page {reported_page_number}"
                             )
                             continue
+                        page_width, page_height = image.size
                     page_exists = (
                         any(
                             pg.get("page_no") == reported_page_number
@@ -8344,21 +8342,14 @@ def redact_image_pdf(
                     page_line_level_ocr_results_with_words
                     and "results" in page_line_level_ocr_results_with_words
                 ):
-                    # Ensure image is set - if None, try to use image_path or file_path for image files
-                    image_for_visualization = image
-                    if image_for_visualization is None:
-                        # If image is None and input file is an image file, try to use image_path or file_path
-                        if is_pdf(file_path) is False:
-                            if isinstance(image_path, str) and image_path:
-                                # Try to use image_path if it's a valid string
-                                image_for_visualization = image_path
-                            elif isinstance(file_path, str) and file_path:
-                                # Fall back to using the original file_path for image files
-                                image_for_visualization = file_path
-                        else:
-                            # For PDF files, we need an image object or image path
-                            if isinstance(image_path, str) and image_path:
-                                image_for_visualization = image_path
+                    image_for_visualization = resolve_image_for_ocr_visualization(
+                        image,
+                        image_path,
+                        file_path,
+                        page_no,
+                        input_folder=input_folder,
+                        page_sizes_df=page_sizes_df,
+                    )
 
                     # Only proceed if we have a valid image or image path
                     if image_for_visualization is not None:
@@ -8379,6 +8370,10 @@ def redact_image_pdf(
                             chosen_local_ocr_model=chosen_local_ocr_model,
                             log_files_output_paths=log_files_output_paths,
                             textract_hybrid_bedrock_used=hybrid_textract_bedrock_vlm,
+                            file_path=file_path,
+                            page_no=page_no,
+                            input_folder=input_folder,
+                            page_sizes_df=page_sizes_df,
                         )
                         # If config is enabled and a new visualization file was added, add it to out_file_paths
                         if (
@@ -8573,14 +8568,13 @@ def redact_image_pdf(
             post_process_pbar.set_postfix_str(f"page {reported_page_number}")
             image_path = job["image_path"]
             # Reopen image on demand instead of storing it in every job to reduce memory usage.
-            try:
-                if isinstance(image_path, str) and image_path:
-                    normalized_path = os.path.normpath(os.path.abspath(image_path))
-                    image = Image.open(normalized_path)
-                else:
-                    image = None
-            except Exception:
-                image = None
+            image, image_path = open_page_image_for_pipeline(
+                image_path,
+                file_path,
+                page_no,
+                input_folder=input_folder,
+                page_sizes_df=page_sizes_df,
+            )
             page_width = job["page_width"]
             page_height = job["page_height"]
             original_cropbox = job["original_cropbox"]
@@ -8901,16 +8895,14 @@ def redact_image_pdf(
                     page_line_level_ocr_results_with_words
                     and "results" in page_line_level_ocr_results_with_words
                 ):
-                    image_for_visualization = image
-                    if image_for_visualization is None:
-                        if is_pdf(file_path) is False:
-                            if isinstance(image_path, str) and image_path:
-                                image_for_visualization = image_path
-                            elif isinstance(file_path, str) and file_path:
-                                image_for_visualization = file_path
-                        else:
-                            if isinstance(image_path, str) and image_path:
-                                image_for_visualization = image_path
+                    image_for_visualization = resolve_image_for_ocr_visualization(
+                        image,
+                        image_path,
+                        file_path,
+                        page_no,
+                        input_folder=input_folder,
+                        page_sizes_df=page_sizes_df,
+                    )
                     if image_for_visualization is not None:
                         log_files_output_paths_length_before = len(
                             log_files_output_paths
@@ -8924,6 +8916,10 @@ def redact_image_pdf(
                             chosen_local_ocr_model=chosen_local_ocr_model,
                             log_files_output_paths=log_files_output_paths,
                             textract_hybrid_bedrock_used=hybrid_textract_bedrock_vlm,
+                            file_path=file_path,
+                            page_no=page_no,
+                            input_folder=input_folder,
+                            page_sizes_df=page_sizes_df,
                         )
                         if (
                             INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES
@@ -12016,6 +12012,100 @@ def _ocr_viz_draw_position_from_left_edge(
     return draw_x, draw_y
 
 
+def _is_placeholder_image_path(image_path: object) -> bool:
+    return isinstance(image_path, str) and (
+        "placeholder_image" in image_path or "image_placeholder" in image_path
+    )
+
+
+def _page_num_from_placeholder_path(image_path: str, default_page_no: int) -> int:
+    try:
+        return int(image_path.split("_")[-1].split(".")[0])
+    except Exception:
+        return default_page_no
+
+
+def open_page_image_for_pipeline(
+    image_path: str,
+    file_path: str,
+    page_no: int,
+    *,
+    input_folder: str = INPUT_FOLDER,
+    page_sizes_df: Optional[pd.DataFrame] = None,
+    image_dpi: float = IMAGES_DPI,
+) -> Tuple[Optional[Image.Image], str]:
+    """
+    Open a page raster for OCR / visualization, materialising PNGs when only a
+    placeholder path exists (e.g. cached Textract with prepare_images_flag=False).
+    """
+    resolved_path = image_path if isinstance(image_path, str) else ""
+
+    if _is_placeholder_image_path(resolved_path) or not resolved_path:
+        page_num = (
+            _page_num_from_placeholder_path(resolved_path, page_no)
+            if _is_placeholder_image_path(resolved_path)
+            else page_no
+        )
+        try:
+            _, created_path, _, _ = process_single_page_for_image_conversion(
+                pdf_path=file_path,
+                page_num=page_num,
+                image_dpi=image_dpi,
+                create_images=True,
+                input_folder=input_folder,
+            )
+            if created_path and os.path.exists(created_path):
+                resolved_path = created_path
+                if page_sizes_df is not None and not page_sizes_df.empty:
+                    page_sizes_df.loc[
+                        page_sizes_df["page"] == (page_no + 1),
+                        "image_path",
+                    ] = created_path
+        except Exception:
+            pass
+
+    if not resolved_path or _is_placeholder_image_path(resolved_path):
+        return None, resolved_path
+
+    try:
+        normalized_path = os.path.normpath(os.path.abspath(resolved_path))
+        if validate_path_containment(normalized_path, input_folder) or os.path.isfile(
+            normalized_path
+        ):
+            return Image.open(normalized_path), normalized_path
+    except Exception:
+        pass
+    return None, resolved_path
+
+
+def resolve_image_for_ocr_visualization(
+    image: Optional[Image.Image],
+    image_path: str,
+    file_path: str,
+    page_no: int,
+    *,
+    input_folder: str = INPUT_FOLDER,
+    page_sizes_df: Optional[pd.DataFrame] = None,
+) -> Optional[Union[str, Image.Image]]:
+    """Return a PIL image or on-disk path suitable for OCR bbox visualization."""
+    if image is not None:
+        return image
+    pil_image, resolved_path = open_page_image_for_pipeline(
+        image_path,
+        file_path,
+        page_no,
+        input_folder=input_folder,
+        page_sizes_df=page_sizes_df,
+    )
+    if pil_image is not None:
+        return pil_image
+    if resolved_path and not _is_placeholder_image_path(resolved_path):
+        return resolved_path
+    if is_pdf(file_path) is False and isinstance(file_path, str) and file_path:
+        return file_path
+    return None
+
+
 def visualise_ocr_words_bounding_boxes(
     image: Union[str, Image.Image],
     ocr_results: Dict[str, Any],
@@ -12028,6 +12118,10 @@ def visualise_ocr_words_bounding_boxes(
     chosen_local_ocr_model: str = None,
     log_files_output_paths: List[str] = list(),
     textract_hybrid_bedrock_used: bool = False,
+    file_path: Optional[str] = None,
+    page_no: Optional[int] = None,
+    input_folder: str = INPUT_FOLDER,
+    page_sizes_df: Optional[pd.DataFrame] = None,
 ) -> None:
     """
     Visualizes OCR bounding boxes with confidence-based colors and a legend.
@@ -12123,6 +12217,26 @@ def visualise_ocr_words_bounding_boxes(
 
     if not ocr_results:
         return log_files_output_paths
+
+    if isinstance(image, str) and _is_placeholder_image_path(image):
+        if file_path is not None and page_no is not None:
+            resolved = resolve_image_for_ocr_visualization(
+                None,
+                image,
+                file_path,
+                page_no,
+                input_folder=input_folder,
+                page_sizes_df=page_sizes_df,
+            )
+            if resolved is None:
+                raise FileNotFoundError(
+                    f"Could not resolve placeholder page image {image!r} for visualization"
+                )
+            image = resolved
+        else:
+            raise FileNotFoundError(
+                f"Placeholder page image path cannot be opened: {image!r}"
+            )
 
     if isinstance(image, str):
         image = Image.open(image)
