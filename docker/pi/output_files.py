@@ -45,12 +45,12 @@ def _resolve_under_workspace(path: str) -> Path | None:
     return resolved if resolved.is_file() else None
 
 
-def load_workspace_output_files() -> gr.FileExplorer:
+def load_workspace_output_files():
     WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
     return gr.FileExplorer(root_dir=str(WORKSPACE_DIR.resolve()))
 
 
-def refresh_workspace_output_files_stub() -> gr.FileExplorer:
+def refresh_workspace_output_files_stub():
     return gr.FileExplorer(root_dir=str(REFRESH_STUB_DIR.resolve()))
 
 

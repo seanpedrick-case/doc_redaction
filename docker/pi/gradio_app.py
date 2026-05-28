@@ -596,7 +596,7 @@ def _startup_session_info() -> str:
     return "_Ready._"
 
 
-def build_ui() -> gr.Blocks:
+def build_ui():
     hf_redaction_blurb = (
         "Upload a document and add bullet-point requirements. Redaction runs on a **remote** "
         "doc_redaction Hugging Face Space; Pi downloads artifacts into this Space's workspace."
@@ -922,11 +922,12 @@ def build_ui() -> gr.Blocks:
         )
         clear.click(new_chat, inputs=[chatbot, client_state], outputs=chat_outputs)
 
-        backend_provider.change(
-            _backend_model_choices_update,
-            inputs=[backend_provider],
-            outputs=[backend_model],
-        )
+        if not IS_HF_SPACE:
+            backend_provider.change(
+                _backend_model_choices_update,
+                inputs=[backend_provider],
+                outputs=[backend_model],
+            )
         apply_backend_btn.click(
             apply_backend,
             inputs=[
