@@ -22,7 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 
-COPY requirements_pi_agent.txt /tmp/requirements_pi_agent.txt
+COPY agent-redact/requirements_pi_agent.txt /tmp/requirements_pi_agent.txt
 RUN pip3 install --no-cache-dir --break-system-packages \
     -r /tmp/requirements_pi_agent.txt \
     && rm /tmp/requirements_pi_agent.txt

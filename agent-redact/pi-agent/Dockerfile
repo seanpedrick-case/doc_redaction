@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Pi agent Gradio UI for Hugging Face Docker Space (remote doc_redaction backend).
-# Build from monorepo root: docker build -f agent-redact-space/pi-agent/Dockerfile .
+# Build from monorepo root: docker build -f agent-redact/pi-agent/Dockerfile .
 
 FROM node:22-bookworm-slim
 
@@ -9,7 +9,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV NPM_CONFIG_LOGLEVEL=warn
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONPATH=/workspace/doc_redaction/docker/pi
+ENV PYTHONPATH=/workspace/doc_redaction/agent-redact/pi
 ENV PI_DEPLOYMENT_PROFILE=hf-space
 ENV PI_DEFAULT_PROVIDER=google-gemini
 ENV PI_DEFAULT_MODEL=gemini-flash-lite-latest
@@ -37,14 +37,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 
-COPY requirements_pi_agent.txt /tmp/requirements_pi_agent.txt
+COPY agent-redact/requirements_pi_agent.txt /tmp/requirements_pi_agent.txt
 RUN pip3 install --no-cache-dir --break-system-packages \
     -r /tmp/requirements_pi_agent.txt \
     && rm /tmp/requirements_pi_agent.txt
 
 WORKDIR /workspace/doc_redaction
 
-COPY docker/pi docker/pi
+COPY agent-redact/pi agent-redact/pi
 COPY skills skills
 COPY AGENTS.md AGENTS.md
 COPY doc_redaction/example_data doc_redaction/example_data
@@ -63,4 +63,4 @@ RUN pi --version
 
 EXPOSE 7860
 
-CMD ["bash", "-c", "python3 docker/pi/pi_agent_config.py && exec python3 docker/pi/gradio_app.py"]
+CMD ["bash", "-c", "python3 agent-redact/pi/pi_agent_config.py && exec python3 agent-redact/pi/gradio_app.py"]

@@ -1,6 +1,13 @@
 """Tests for Pi RPC assistant display extraction (Gemini reasoning blocks)."""
 
-from docker.pi.pi_rpc_client import (
+import sys
+from pathlib import Path
+
+_PI_SRC = Path(__file__).resolve().parents[1] / "agent-redact" / "pi"
+if str(_PI_SRC) not in sys.path:
+    sys.path.insert(0, str(_PI_SRC))
+
+from pi_rpc_client import (
     assistant_chat_text,
     assistant_text_since_last_user,
     extract_assistant_display,

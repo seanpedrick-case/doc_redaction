@@ -4,12 +4,11 @@ on:
   push:
     branches: [dev]
     paths:
-      - "docker/pi/**"
+      - "agent-redact/**"
       - "skills/**"
-      - "agent-redact-space/pi-agent/**"
       - "doc_redaction/example_data/**"
-      - "requirements_pi_agent.txt"
       - "AGENTS.md"
+      - "config/pi_agent.env.example"
       - ".github/workflows/sync-pi-agent-space.yml"
   workflow_dispatch:
 
@@ -42,8 +41,8 @@ jobs:
 
       - name: Flatten Pi agent Space tree
         run: |
-          chmod +x agent-redact-space/pi-agent/sync_to_space.sh
-          agent-redact-space/pi-agent/sync_to_space.sh /tmp/pi-agent-space
+          chmod +x agent-redact/pi-agent/sync_to_space.sh
+          agent-redact/pi-agent/sync_to_space.sh /tmp/pi-agent-space
 
       - name: Push to Hugging Face Space
         run: |

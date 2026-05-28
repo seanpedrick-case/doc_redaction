@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Flatten monorepo paths into a temp directory for the Pi agent HF Space repo.
 # Usage (from repo root):
-#   agent-redact-space/pi-agent/sync_to_space.sh /path/to/output-dir
+#   agent-redact/pi-agent/sync_to_space.sh /path/to/output-dir
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"

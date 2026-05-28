@@ -57,4 +57,4 @@ docker_compose/*
 **/*.quarto_ipynb
 skills/example_prompts/*
 .pi/sessions/
-docker/pi/agent/sessions/
+agent-redact/pi/agent/sessions/

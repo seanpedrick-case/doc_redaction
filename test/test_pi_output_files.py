@@ -1,7 +1,12 @@
 """Tests for Pi workspace FileExplorer → gr.File download wiring."""
 
 import sys
+from pathlib import Path
 from types import ModuleType
+
+_PI_SRC = Path(__file__).resolve().parents[1] / "agent-redact" / "pi"
+if str(_PI_SRC) not in sys.path:
+    sys.path.insert(0, str(_PI_SRC))
 
 # output_files imports gradio at module level; stub it for unit tests.
 if "gradio" not in sys.modules:
@@ -14,7 +19,7 @@ if "pi_examples" not in sys.modules:
     _pi_examples.gradio_example_allowed_paths = lambda: []  # type: ignore[attr-defined]
     sys.modules["pi_examples"] = _pi_examples
 
-from docker.pi import output_files as of
+import output_files as of
 
 
 def test_resolve_under_workspace_accepts_absolute_paths(tmp_path, monkeypatch):
@@ -28,7 +33,7 @@ def test_resolve_under_workspace_accepts_absolute_paths(tmp_path, monkeypatch):
 
     monkeypatch.setattr(of, "WORKSPACE_DIR", workspace)
 
-    resolved = of._resolve_under_workspace(str(pdf))
+    resolved = of._resolve_under_workspace(str(pdf), workspace_root=workspace)
     assert resolved == pdf.resolve()
 
 
@@ -40,7 +45,7 @@ def test_resolve_under_workspace_accepts_relative_paths(tmp_path, monkeypatch):
 
     monkeypatch.setattr(of, "WORKSPACE_DIR", workspace)
 
-    resolved = of._resolve_under_workspace("report.csv")
+    resolved = of._resolve_under_workspace("report.csv", workspace_root=workspace)
     assert resolved == pdf.resolve()
 
 
@@ -52,7 +57,7 @@ def test_resolve_under_workspace_rejects_outside_workspace(tmp_path, monkeypatch
 
     monkeypatch.setattr(of, "WORKSPACE_DIR", workspace)
 
-    assert of._resolve_under_workspace(str(outside)) is None
+    assert of._resolve_under_workspace(str(outside), workspace_root=workspace) is None
 
 
 def test_resolve_under_workspace_rejects_path_traversal(tmp_path, monkeypatch):
@@ -63,8 +68,32 @@ def test_resolve_under_workspace_rejects_path_traversal(tmp_path, monkeypatch):
 
     monkeypatch.setattr(of, "WORKSPACE_DIR", workspace)
 
-    assert of._resolve_under_workspace("../secret.pdf") is None
-    assert of._resolve_under_workspace(f"../{outside.name}") is None
+    assert (
+        of._resolve_under_workspace("../secret.pdf", workspace_root=workspace) is None
+    )
+    assert (
+        of._resolve_under_workspace(f"../{outside.name}", workspace_root=workspace)
+        is None
+    )
+
+
+def test_resolve_under_workspace_rejects_unsafe_relative_segments(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    nested = workspace / "redact" / "demo"
+    nested.mkdir(parents=True)
+    pdf = nested / "output.pdf"
+    pdf.write_bytes(b"%PDF")
+
+    assert of._is_safe_workspace_relative_path("redact/demo/output.pdf") is True
+    assert of._is_safe_workspace_relative_path("../secret.pdf") is False
+    assert of._is_safe_workspace_relative_path("/etc/passwd") is False
+
+    resolved = of._resolve_under_workspace(
+        "redact/demo/output.pdf",
+        workspace_root=workspace,
+    )
+    assert resolved == pdf.resolve()
 
 
 def test_workspace_files_download_fn_returns_absolute_paths(tmp_path, monkeypatch):
@@ -75,5 +104,30 @@ def test_workspace_files_download_fn_returns_absolute_paths(tmp_path, monkeypatc
 
     monkeypatch.setattr(of, "WORKSPACE_DIR", workspace)
 
-    result = of.workspace_files_download_fn([str(pdf)])
+    result = of.workspace_files_download_fn([str(pdf)], str(workspace))
     assert result == [str(pdf.resolve())]
+
+
+def test_collect_final_output_files_finds_review_final_folder(tmp_path):
+    workspace = tmp_path / "session"
+    final_dir = workspace / "redact" / "doc.pdf" / "review" / "output_review_final"
+    final_dir.mkdir(parents=True)
+    redacted = final_dir / "doc_redacted.pdf"
+    redacted.write_bytes(b"%PDF")
+    other = workspace / "redact" / "doc.pdf" / "output_redact" / "draft.csv"
+    other.parent.mkdir(parents=True)
+    other.write_text("x")
+
+    result = of.collect_final_output_files(str(workspace))
+    assert result == [str(redacted.resolve())]
+
+
+def test_collect_final_output_files_supports_output_final_alias(tmp_path):
+    workspace = tmp_path / "session"
+    final_dir = workspace / "redact" / "doc.pdf" / "review" / "output_final"
+    final_dir.mkdir(parents=True)
+    redacted = final_dir / "doc_redacted.pdf"
+    redacted.write_bytes(b"%PDF")
+
+    result = of.collect_final_output_files(str(workspace))
+    assert result == [str(redacted.resolve())]

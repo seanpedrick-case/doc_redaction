@@ -18,9 +18,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import gradio as gr
 from output_files import (
+    collect_final_output_files,
     gradio_allowed_paths,
-    load_workspace_output_files,
     refresh_workspace_output_files_stub,
+    refresh_workspace_panel,
     workspace_files_download_fn,
 )
 from pi_agent_config import (
@@ -52,6 +53,10 @@ from redaction_prompt import (
     PII_METHOD_CHOICES,
     RedactionTaskSettings,
     prepare_redaction_task,
+)
+from session_workspace import (
+    init_session_workspace,
+    workspace_context_prefix,
 )
 
 PI_UI_TITLE = os.environ.get("PI_GRADIO_TITLE", "Agentic Document Redaction")
@@ -374,6 +379,19 @@ def apply_backend(
     )
 
 
+def _init_session_ui(
+    request: gr.Request,
+) -> tuple[str, str, Any, str, list[str] | None]:
+    session_hash, workspace_path, explorer, status = init_session_workspace(request)
+    return (
+        session_hash,
+        workspace_path,
+        explorer,
+        status,
+        collect_final_output_files(workspace_path),
+    )
+
+
 def _chat_yield(
     history: list[dict[str, Any]],
     client: PiRpcClient,
@@ -387,7 +405,15 @@ def _chat_yield(
     abort_enabled: bool = False,
     redact_enabled: bool = True,
     session_info: str | None = None,
+    session_workspace: str = "",
+    refresh_final_files: bool = False,
 ):
+    final_files: list[str] | None | dict[str, Any]
+    if refresh_final_files:
+        final_files = collect_final_output_files(session_workspace)
+    else:
+        final_files = gr.update()
+
     return (
         _clone_history(history),
         client,
@@ -399,6 +425,7 @@ def _chat_yield(
         gr.update(interactive=send_enabled),
         gr.update(interactive=abort_enabled),
         gr.update(interactive=redact_enabled),
+        final_files,
     )
 
 
@@ -408,11 +435,20 @@ def _run_pi_chat(
     client: PiRpcClient | None,
     *,
     chat_user_message: str | None = None,
+    session_workspace: str = "",
 ):
     if not message or not message.strip():
         client = client if client and client.running else None
         if client:
-            yield _chat_yield(history or [], client, [], "", "", "")
+            yield _chat_yield(
+                history or [],
+                client,
+                [],
+                "",
+                "",
+                "",
+                session_workspace=session_workspace,
+            )
         else:
             yield (
                 history or [],
@@ -425,6 +461,7 @@ def _run_pi_chat(
                 gr.update(interactive=True),
                 gr.update(interactive=False),
                 gr.update(interactive=True),
+                gr.update(),
             )
         return
 
@@ -453,10 +490,12 @@ def _run_pi_chat(
         abort_enabled=True,
         redact_enabled=False,
         session_info=session_info,
+        session_workspace=session_workspace,
     )
 
     try:
-        for event in client.prompt_events(message.strip()):
+        pi_message = workspace_context_prefix(session_workspace) + message.strip()
+        for event in client.prompt_events(pi_message):
             (
                 history,
                 activity,
@@ -486,6 +525,7 @@ def _run_pi_chat(
                 abort_enabled=True,
                 redact_enabled=False,
                 session_info=session_info,
+                session_workspace=session_workspace,
             )
     except PiRpcError as exc:
         history[-1]["content"] = f"**Pi error:** {exc}"
@@ -501,6 +541,8 @@ def _run_pi_chat(
             abort_enabled=False,
             redact_enabled=True,
             session_info=_session_summary(client),
+            session_workspace=session_workspace,
+            refresh_final_files=True,
         )
         return
     except Exception:
@@ -517,6 +559,8 @@ def _run_pi_chat(
                 abort_enabled=False,
                 redact_enabled=True,
                 session_info=_session_summary(client),
+                session_workspace=session_workspace,
+                refresh_final_files=True,
             )
             return
         raise
@@ -540,6 +584,8 @@ def _run_pi_chat(
         abort_enabled=False,
         redact_enabled=True,
         session_info=_session_summary(client),
+        session_workspace=session_workspace,
+        refresh_final_files=True,
     )
 
 
@@ -547,8 +593,14 @@ def chat_respond(
     message: str,
     history: list[dict[str, Any]] | None,
     client: PiRpcClient | None,
+    session_workspace: str,
 ):
-    yield from _run_pi_chat(message, history, client)
+    yield from _run_pi_chat(
+        message,
+        history,
+        client,
+        session_workspace=session_workspace,
+    )
 
 
 def submit_redaction_task(
@@ -561,6 +613,7 @@ def submit_redaction_task(
     encourage_vlm_signatures: bool,
     history: list[dict[str, Any]] | None,
     client: PiRpcClient | None,
+    session_workspace: str,
 ):
     settings = (
         RedactionTaskSettings.hf_space_defaults()
@@ -572,12 +625,14 @@ def submit_redaction_task(
             encourage_vlm_signatures,
         )
     )
+    workspace_path = Path(session_workspace) if session_workspace else None
     try:
         _file_name, prompt = prepare_redaction_task(
             upload_file,
             user_instructions,
             page_range=page_range or "all",
             settings=settings,
+            workspace_dir=workspace_path,
         )
     except (ValueError, FileNotFoundError, OSError) as exc:
         history = list(history or [])
@@ -596,6 +651,7 @@ def submit_redaction_task(
             gr.update(interactive=True),
             gr.update(interactive=False),
             gr.update(interactive=True),
+            gr.update(),
         )
         return
 
@@ -613,6 +669,7 @@ def submit_redaction_task(
         history,
         client,
         chat_user_message=chat_summary,
+        session_workspace=session_workspace,
     )
 
 
@@ -630,7 +687,11 @@ def abort_agent(client: PiRpcClient | None):
     )
 
 
-def new_chat(_history, client: PiRpcClient | None):
+def new_chat(
+    _history,
+    client: PiRpcClient | None,
+    session_workspace: str,
+):
     if client is not None:
         try:
             client.new_session()
@@ -641,7 +702,16 @@ def new_chat(_history, client: PiRpcClient | None):
     else:
         client = default_client()
         client.start()
-    return _chat_yield([], client, ["New session."], "", "", "")
+    return _chat_yield(
+        [],
+        client,
+        ["New session."],
+        "",
+        "",
+        "",
+        session_workspace=session_workspace,
+        refresh_final_files=True,
+    )
 
 
 def _startup_session_info() -> str:
@@ -649,7 +719,7 @@ def _startup_session_info() -> str:
         return (
             "**Hugging Face Space profile** — Gemini orchestration with remote doc_redaction "
             "backend.  \n\n"
-            "1. Paste your **Gemini API key** (and optional **HF token** for the private "
+            "1. Paste your **Gemini API key** (and optional **HF token** for a private "
             "redaction Space).  \n"
             "2. Click **Apply backend**.  \n\n"
             f"{credential_status_markdown()}"
@@ -695,14 +765,76 @@ def build_ui():
     ) as demo:
         gr.Markdown(
             f"# {PI_UI_TITLE}\n"
-            "Upload a document, add redaction requirements, and start a task — or chat with Pi directly."
+            "Upload a document, add redaction requirements, and start a task."
         )
         client_state = gr.State(None)
+        session_hash_state = gr.State("")
+        session_workspace_state = gr.State("")
 
         session_info = gr.Markdown(_startup_session_info())
 
         with gr.Row(equal_height=False):
             with gr.Column(scale=2):
+
+                with gr.Accordion("Agent backend/API keys", open=IS_HF_SPACE):
+                    gr.Markdown(backend_blurb)
+                    backend_provider = gr.Radio(
+                        label="Provider",
+                        choices=[
+                            (provider_label(key), key) for key in provider_choices()
+                        ],
+                        value=DEFAULT_PROVIDER,
+                    )
+                    backend_model = gr.Dropdown(
+                        label="Model",
+                        choices=models_for_provider(DEFAULT_PROVIDER),
+                        value=default_model_for_provider(DEFAULT_PROVIDER),
+                        allow_custom_value=True,
+                    )
+                    gemini_api_key = gr.Textbox(
+                        label=(
+                            "Gemini API key (required on HF Space)"
+                            if IS_HF_SPACE
+                            else "Gemini API key (session override)"
+                        ),
+                        type="password",
+                        placeholder=(
+                            "Required — get a key from Google AI Studio"
+                            if IS_HF_SPACE
+                            else "Uses GEMINI_API_KEY / GOOGLE_API_KEY from env if empty"
+                        ),
+                    )
+                    hf_token = gr.Textbox(
+                        label="HF token for redaction Space (session override)",
+                        type="password",
+                        placeholder="Uses HF_TOKEN Space secret if empty",
+                        visible=IS_HF_SPACE,
+                    )
+                    aws_region = gr.Textbox(
+                        label="AWS region (session override)",
+                        placeholder="e.g. eu-west-2",
+                        visible=not IS_HF_SPACE,
+                    )
+                    aws_access_key_id = gr.Textbox(
+                        label="AWS access key ID (session override)",
+                        type="password",
+                        visible=not IS_HF_SPACE,
+                    )
+                    aws_secret_access_key = gr.Textbox(
+                        label="AWS secret access key (session override)",
+                        type="password",
+                        visible=not IS_HF_SPACE,
+                    )
+                    aws_session_token = gr.Textbox(
+                        label="AWS session token (optional)",
+                        type="password",
+                        visible=not IS_HF_SPACE,
+                    )
+                    apply_backend_btn = gr.Button(
+                        "Apply backend",
+                        variant="primary",
+                    )
+
                 with gr.Accordion("Redaction task", open=True):
                     gr.Markdown(hf_redaction_blurb)
 
@@ -817,65 +949,6 @@ def build_ui():
                         variant="primary",
                     )
 
-                with gr.Accordion("Agent backend", open=IS_HF_SPACE):
-                    gr.Markdown(backend_blurb)
-                    backend_provider = gr.Radio(
-                        label="Provider",
-                        choices=[
-                            (provider_label(key), key) for key in provider_choices()
-                        ],
-                        value=DEFAULT_PROVIDER,
-                    )
-                    backend_model = gr.Dropdown(
-                        label="Model",
-                        choices=models_for_provider(DEFAULT_PROVIDER),
-                        value=default_model_for_provider(DEFAULT_PROVIDER),
-                        allow_custom_value=True,
-                    )
-                    gemini_api_key = gr.Textbox(
-                        label=(
-                            "Gemini API key (required on HF Space)"
-                            if IS_HF_SPACE
-                            else "Gemini API key (session override)"
-                        ),
-                        type="password",
-                        placeholder=(
-                            "Required — get a key from Google AI Studio"
-                            if IS_HF_SPACE
-                            else "Uses GEMINI_API_KEY / GOOGLE_API_KEY from env if empty"
-                        ),
-                    )
-                    hf_token = gr.Textbox(
-                        label="HF token for redaction Space (session override)",
-                        type="password",
-                        placeholder="Uses HF_TOKEN Space secret if empty",
-                        visible=IS_HF_SPACE,
-                    )
-                    aws_region = gr.Textbox(
-                        label="AWS region (session override)",
-                        placeholder="e.g. eu-west-2",
-                        visible=not IS_HF_SPACE,
-                    )
-                    aws_access_key_id = gr.Textbox(
-                        label="AWS access key ID (session override)",
-                        type="password",
-                        visible=not IS_HF_SPACE,
-                    )
-                    aws_secret_access_key = gr.Textbox(
-                        label="AWS secret access key (session override)",
-                        type="password",
-                        visible=not IS_HF_SPACE,
-                    )
-                    aws_session_token = gr.Textbox(
-                        label="AWS session token (optional)",
-                        type="password",
-                        visible=not IS_HF_SPACE,
-                    )
-                    apply_backend_btn = gr.Button(
-                        "Apply backend",
-                        variant="primary",
-                    )
-
             with gr.Column(scale=3):
                 chatbot = gr.Chatbot(label="Chat", height=480)
                 msg = gr.Textbox(
@@ -902,27 +975,17 @@ def build_ui():
                         autoscroll=True,
                     )
 
-        with gr.Accordion("Workspace output files", open=False):
+        with gr.Accordion("Workspace output files", open=True):
+            workspace_session_info = gr.Markdown(
+                "_Loading your session workspace…_",
+            )
             gr.Markdown(
-                "Browse files written under the shared workspace (e.g. "
-                "`redact/<document>/output_redact/`). Select files in the explorer, "
-                "then download them below."
-            )
-            refresh_outputs_btn = gr.Button(
-                "Refresh workspace files",
-                variant="secondary",
-            )
-            workspace_output_explorer = gr.FileExplorer(
-                root_dir=str(
-                    os.environ.get("PI_WORKSPACE_DIR", "/home/user/app/workspace")
-                ),
-                label="Workspace files",
-                file_count="multiple",
-                interactive=True,
-                max_height=400,
+                "**Final deliverables** appear automatically when the agent saves to "
+                "`review/output_review_final/` (or `review/output_final/`). "
+                "Use the file explorer below to browse or download other workspace files."
             )
             workspace_output_download = gr.File(
-                label="Download selected files",
+                label="Final deliverables (download)",
                 file_count="multiple",
                 file_types=[
                     ".pdf",
@@ -941,6 +1004,19 @@ def build_ui():
                 interactive=False,
                 height=200,
             )
+            refresh_outputs_btn = gr.Button(
+                "Refresh workspace files",
+                variant="secondary",
+            )
+            workspace_output_explorer = gr.FileExplorer(
+                root_dir=str(
+                    os.environ.get("PI_WORKSPACE_DIR", "/home/user/app/workspace")
+                ),
+                label="Browse session workspace",
+                file_count="multiple",
+                interactive=True,
+                max_height=400,
+            )
 
         chat_outputs = [
             chatbot,
@@ -953,16 +1029,17 @@ def build_ui():
             send,
             abort_btn,
             start_redact_btn,
+            workspace_output_download,
         ]
 
         run_event = send.click(
             chat_respond,
-            inputs=[msg, chatbot, client_state],
+            inputs=[msg, chatbot, client_state, session_workspace_state],
             outputs=chat_outputs,
         )
         msg.submit(
             chat_respond,
-            inputs=[msg, chatbot, client_state],
+            inputs=[msg, chatbot, client_state, session_workspace_state],
             outputs=chat_outputs,
         )
         run_redact_event = start_redact_btn.click(
@@ -977,6 +1054,7 @@ def build_ui():
                 encourage_vlm_signatures,
                 chatbot,
                 client_state,
+                session_workspace_state,
             ],
             outputs=chat_outputs,
         )
@@ -987,7 +1065,11 @@ def build_ui():
             cancels=[run_event, run_redact_event],
             queue=False,
         )
-        clear.click(new_chat, inputs=[chatbot, client_state], outputs=chat_outputs)
+        clear.click(
+            new_chat,
+            inputs=[chatbot, client_state, session_workspace_state],
+            outputs=chat_outputs,
+        )
 
         if not IS_HF_SPACE:
             backend_provider.change(
@@ -1023,21 +1105,27 @@ def build_ui():
             inputs=None,
             outputs=workspace_output_explorer,
         ).success(
-            fn=load_workspace_output_files,
-            inputs=None,
-            outputs=workspace_output_explorer,
+            fn=refresh_workspace_panel,
+            inputs=[session_workspace_state],
+            outputs=[workspace_output_explorer, workspace_output_download],
         )
 
         workspace_output_explorer.input(
             fn=workspace_files_download_fn,
-            inputs=workspace_output_explorer,
+            inputs=[workspace_output_explorer, session_workspace_state],
             outputs=workspace_output_download,
         )
 
         demo.load(
-            fn=load_workspace_output_files,
+            fn=_init_session_ui,
             inputs=None,
-            outputs=workspace_output_explorer,
+            outputs=[
+                session_hash_state,
+                session_workspace_state,
+                workspace_output_explorer,
+                workspace_session_info,
+                workspace_output_download,
+            ],
         )
 
     return demo

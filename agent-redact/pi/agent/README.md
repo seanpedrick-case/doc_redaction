@@ -1,6 +1,6 @@
 # Pi agent config (Docker)
 
-Runtime Pi config is **generated at container start** by [`docker/pi/pi_agent_config.py`](../pi_agent_config.py) into `~/.pi/agent/models.json` and `~/.pi/agent/settings.json`.
+Runtime Pi config is **generated at container start** by [`agent-redact/pi/pi_agent_config.py`](../pi_agent_config.py) into `~/.pi/agent/models.json` and `~/.pi/agent/settings.json`.
 
 Files in this folder (`settings.json`, `models.json`) are **templates/references** only — they are no longer bind-mounted into the container.
 
@@ -61,8 +61,8 @@ When filling [`skills/doc-redaction-task-prompt/TASK_PROMPT_TEMPLATE.md`](../../
 |-------------|-------------------|
 | `{GRADIO_URL}` | `http://redaction-app-llama:7860` |
 | `{VLM_BASE_URL}` | `http://llama-inference:8080` |
-| `{INPUT_PATH}` | `/home/user/app/workspace/{FILE_NAME}` |
-| `{OUTPUT_BASE}` | `/home/user/app/workspace/redact/{FILE_NAME}/` |
+| `{INPUT_PATH}` | `/home/user/app/workspace/{session_hash}/{FILE_NAME}` (when `PI_SESSION_WORKSPACE=true`) |
+| `{OUTPUT_BASE}` | `/home/user/app/workspace/{session_hash}/redact/{FILE_NAME}/` |
 
 Host-side examples (`host.docker.internal`, `localhost:7861`) do not apply inside the compose network.
 
@@ -99,8 +99,8 @@ Optional env vars on `pi-agent`: `PI_GRADIO_SHOW_THINKING`, `PI_GRADIO_SHOW_TOOL
 Run the UI locally (outside Docker):
 
 ```powershell
-cd docker/pi
-pip install -r ../../requirements_pi_agent.txt
+cd agent-redact/pi
+pip install -r ../requirements_pi_agent.txt
 python pi_agent_config.py
 python gradio_app.py
 ```
@@ -117,7 +117,7 @@ Sessions persist in the `pi-agent-sessions` Docker volume at `~/.pi/agent/sessio
 
 ## Python dependencies
 
-The Pi image installs [`requirements_pi_agent.txt`](../../requirements_pi_agent.txt) — Gradio UI + `gradio-client`, HTTP clients, CSV/PDF review helpers (`pandas`, `pymupdf`), and common utilities. It **does not** include spaCy, Presidio, or OCR; heavy redaction runs in `redaction-app-llama`.
+The Pi image installs [`requirements_pi_agent.txt`](../requirements_pi_agent.txt) — Gradio UI + `gradio-client`, HTTP clients, CSV/PDF review helpers (`pandas`, `pymupdf`), and common utilities. It **does not** include spaCy, Presidio, or OCR; heavy redaction runs in `redaction-app-llama`.
 
 Rebuild after changing that file:
 
@@ -138,13 +138,13 @@ Set `PI_DEPLOYMENT_PROFILE=hf-space` to run the Pi Gradio UI as a **Hugging Face
 | VLM faces / signatures | Disabled |
 | Port | `7860` |
 
-Package and Dockerfile: [`agent-redact-space/pi-agent/`](../../../agent-redact-space/pi-agent/). Pushes to [agentic_document_redaction](https://huggingface.co/spaces/seanpedrickcase/agentic_document_redaction) on **`dev`** branch via [`.github/workflows/sync-pi-agent-space.yml`](../../../.github/workflows/sync-pi-agent-space.yml) (GitHub secrets: `HF_TOKEN`, `HF_USERNAME`, `HF_EMAIL`).
+Package and Dockerfile: [`agent-redact/pi-agent/`](../../pi-agent/). Pushes to [agentic_document_redaction](https://huggingface.co/spaces/seanpedrickcase/agentic_document_redaction) on **`dev`** branch via [`.github/workflows/sync-pi-agent-space.yml`](../../../.github/workflows/sync-pi-agent-space.yml) (GitHub secrets: `HF_TOKEN`, `HF_USERNAME`, `HF_EMAIL`).
 
 Local build test from monorepo root:
 
 ```powershell
-docker build -f agent-redact-space/pi-agent/Dockerfile -t pi-agent-hf-space .
+docker build -f agent-redact/pi-agent/Dockerfile -t pi-agent-hf-space .
 docker run --rm -p 7860:7860 -e GEMINI_API_KEY=... -e HF_TOKEN=... pi-agent-hf-space
 ```
 
-Pi uses `gradio_client` + `docker/pi/remote_redaction.py` to upload/download from the remote Space; prompts include `{REMOTE_BACKEND_GUIDANCE}` (see [`redaction_prompt.py`](../redaction_prompt.py)).
+Pi uses `gradio_client` + `agent-redact/pi/remote_redaction.py` to upload/download from the remote Space; prompts include `{REMOTE_BACKEND_GUIDANCE}` (see [`redaction_prompt.py`](../redaction_prompt.py)).

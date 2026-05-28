@@ -9,12 +9,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from pi_agent_config import is_hf_space_profile
+from session_workspace import WORKSPACE_BASE_DIR
+
+UPLOAD_ROOT = Path(os.environ.get("PI_UPLOAD_ROOT", "/tmp/gradio")).resolve()
+_SAFE_UPLOAD_FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$")
 
 REPO_ROOT = Path(os.environ.get("PI_WORKDIR", "/workspace/doc_redaction"))
 TEMPLATE_PATH = REPO_ROOT / "skills" / "Example prompt partnership.txt"
-WORKSPACE_DIR = Path(os.environ.get("PI_WORKSPACE_DIR", "/home/user/app/workspace"))
-UPLOAD_ROOT = Path(os.environ.get("PI_UPLOAD_ROOT", "/tmp/gradio")).resolve()
-_SAFE_UPLOAD_FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$")
+WORKSPACE_DIR = WORKSPACE_BASE_DIR
 
 HF_DEFAULT_OCR = "Local model - selectable text"
 HF_DEFAULT_PII = "Local"
@@ -182,13 +184,18 @@ def build_vlm_signature_guidance(encourage: bool, ocr_method: str) -> str:
     )
 
 
-def build_remote_backend_guidance(*, gradio_url: str, output_base: str) -> str:
+def build_remote_backend_guidance(
+    *,
+    gradio_url: str,
+    output_base: str,
+    workspace_root: str,
+) -> str:
     if not is_hf_space_profile():
         return ""
     return (
         f"- **Remote redaction backend:** the doc_redaction app runs at `{gradio_url}` "
         "(private Hugging Face Space). Use **`gradio_client` only** — upload local files "
-        f"with `handle_file()` from `{WORKSPACE_DIR.as_posix()}/`. "
+        f"with `handle_file()` from `{workspace_root.rstrip('/')}/`. "
         "**Do not** call `/agent/*` routes or use server-side paths from the redaction container.\n"
         f"- Download all `/doc_redact` and `/review_apply` outputs via "
         f"`{gradio_url.rstrip('/')}/gradio_api/file=…` with "
@@ -197,7 +204,7 @@ def build_remote_backend_guidance(*, gradio_url: str, output_base: str) -> str:
         "workspace (pandas/PyMuPDF), not via Agent API.\n"
         "- **Pass 2 VLM is not available** — do not call a VLM endpoint or use "
         "`CUSTOM_VLM_FACES` / `CUSTOM_VLM_SIGNATURE` entities.\n"
-        "- Helper module: `docker/pi/remote_redaction.py` (`make_redaction_client`, "
+        "- Helper module: `agent-redact/pi/remote_redaction.py` (`make_redaction_client`, "
         "`download_gradio_files`)."
     ).format(output_base=output_base.rstrip("/") + "/")
 
@@ -237,13 +244,17 @@ def _resolve_and_validate_upload_path(upload_path: str | Path) -> Path:
     return source
 
 
-def copy_upload_to_workspace(upload_path: str | Path) -> Path:
+def copy_upload_to_workspace(
+    upload_path: str | Path,
+    *,
+    workspace_dir: Path | None = None,
+) -> Path:
     source = _resolve_and_validate_upload_path(upload_path)
     if not source.is_file():
         raise FileNotFoundError(f"Uploaded file not found: {source}")
-    WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+    workspace_root = (workspace_dir or WORKSPACE_DIR).resolve()
+    workspace_root.mkdir(parents=True, exist_ok=True)
     safe_name = _sanitize_upload_filename(source.name)
-    workspace_root = WORKSPACE_DIR.resolve()
     dest = (workspace_root / safe_name).resolve()
     try:
         dest.relative_to(workspace_root)
@@ -263,6 +274,7 @@ def build_redaction_prompt(
     page_range: str = "all",
     template: str | None = None,
     settings: RedactionTaskSettings | None = None,
+    workspace_dir: Path | None = None,
 ) -> str:
     if not file_name.strip():
         raise ValueError("A document file name is required.")
@@ -270,14 +282,16 @@ def build_redaction_prompt(
         raise ValueError("Redaction requirements are required (use bullet points).")
 
     task_settings = settings or RedactionTaskSettings()
+    workspace_root = (workspace_dir or WORKSPACE_DIR).resolve()
     file_name = Path(file_name).name
-    input_path = f"{WORKSPACE_DIR.as_posix().rstrip('/')}/{file_name}"
-    output_base = f"{WORKSPACE_DIR.as_posix().rstrip('/')}/redact/{file_name}/"
+    input_path = f"{workspace_root.as_posix().rstrip('/')}/{file_name}"
+    output_base = f"{workspace_root.as_posix().rstrip('/')}/redact/{file_name}/"
 
     text = template if template is not None else load_template()
     remote_guidance = build_remote_backend_guidance(
         gradio_url=_default_gradio_url(),
         output_base=output_base,
+        workspace_root=workspace_root.as_posix(),
     )
     replacements = {
         "{FILE_NAME}": file_name,
@@ -313,17 +327,20 @@ def prepare_redaction_task(
     *,
     page_range: str = "all",
     settings: RedactionTaskSettings | None = None,
+    workspace_dir: Path | None = None,
 ) -> tuple[str, str]:
     """
     Copy upload into workspace and return (file_name, full_prompt).
     """
     if upload_path is None:
         raise ValueError("Please upload a document.")
-    dest = copy_upload_to_workspace(upload_path)
+    root = (workspace_dir or WORKSPACE_DIR).resolve()
+    dest = copy_upload_to_workspace(upload_path, workspace_dir=root)
     prompt = build_redaction_prompt(
         dest.name,
         user_instructions,
         page_range=page_range,
         settings=settings,
+        workspace_dir=root,
     )
     return dest.name, prompt

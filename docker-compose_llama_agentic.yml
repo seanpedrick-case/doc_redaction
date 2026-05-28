@@ -13,8 +13,6 @@
 
 # For agentic usage with pi
 # docker compose -f docker-compose_llama_agentic.yml --profile 27b_36 up -d --build
-# docker compose -f docker-compose_llama_agentic.yml exec -it pi-agent pi
-
 # docker compose -f docker-compose_llama_agentic.yml --profile 27b_36 up -d pi-agent
 
 services:
@@ -220,8 +218,8 @@ services:
       - "q8_0"
       - --cache-type-v
       - "q8_0"
-      #- --image_min_tokens
-      #- "300"
+      # - --image_min_tokens
+      # - "300"
       #- --image_max_tokens
       #- "1800"
       - -hfrd # This and the following parameters are for enabling speculative decoding. This should only be enabled when not using the mmproj parameter (i.e. no vision model available)
@@ -266,8 +264,8 @@ services:
       - unsloth/gemma-4-26B-A4B-it-GGUF
       - --hf-file
       - gemma-4-26B-A4B-it-UD-IQ4_NL.gguf
-      - --mmproj-url
-      - https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/main/mmproj-F16.gguf
+      # - --mmproj-url
+      # - https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/main/mmproj-F16.gguf
       - --n-gpu-layers
       - "-1"
       - --ctx-size
@@ -275,7 +273,7 @@ services:
       - --fit
       - "off"
       - --temp
-      - "1.0"
+      - "0.1"
       - --top-k
       - "64"
       - --top-p
@@ -293,8 +291,8 @@ services:
       - "q8_0"
       - --cache-type-v
       - "q8_0"
-      - --image_min_tokens
-      - "300"
+      # - --image_min_tokens
+      # - "300"
     ports:
       - "8002:8080"
     volumes:
@@ -421,7 +419,7 @@ services:
       - DOC_REDACTION_GRADIO_URL=http://redaction-app-llama:7860
       - GRADIO_SERVER_NAME=0.0.0.0
       - GRADIO_SERVER_PORT=7862
-      - PYTHONPATH=/workspace/doc_redaction/docker/pi
+      - PYTHONPATH=/workspace/doc_redaction/agent-redact/pi
       - PI_WORKSPACE_DIR=/home/user/app/workspace
       - PI_DEFAULT_PROVIDER=${PI_DEFAULT_PROVIDER:-llama-cpp}
       - PI_DEFAULT_MODEL=${PI_DEFAULT_MODEL:-}
@@ -447,7 +445,7 @@ services:
     working_dir: /workspace/doc_redaction
     stdin_open: true
     tty: true
-    entrypoint: ["/bin/bash", "/workspace/doc_redaction/docker/pi/start.sh"]
+    entrypoint: ["/bin/bash", "/workspace/doc_redaction/agent-redact/pi/start.sh"]
     networks:
       - redaction-net-llama
 
