@@ -11,8 +11,9 @@ from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_elasticloadbalancingv2 as elb
 from aws_cdk import aws_elasticloadbalancingv2_actions as elb_act
 from aws_cdk import aws_iam as iam
+from aws_cdk import aws_s3 as s3
 from aws_cdk import aws_wafv2 as wafv2
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, NoCredentialsError
 from cdk_config import (
     ACCESS_LOG_DYNAMODB_TABLE_NAME,
     AWS_REGION,
@@ -32,11 +33,175 @@ from cdk_config import (
 from constructs import Construct
 from dotenv import set_key
 
+# CDK CLI stores lookup-provider results under these key prefixes in cdk.context.json.
+_CDK_LOOKUP_CONTEXT_PREFIXES = (
+    "vpc-provider:",
+    "load-balancer:",
+    "availability-zones:",
+    "hosted-zone:",
+    "security-group:",
+    "key-provider:",
+    "ami:",
+)
+
+
+def purge_cdk_lookup_context(file_path: str) -> int:
+    """Remove stale CDK lookup cache entries that require the bootstrap lookup role."""
+    if not os.path.exists(file_path):
+        return 0
+    with open(file_path, "r", encoding="utf-8") as f:
+        context_data = json.load(f)
+    cleaned = {
+        key: value
+        for key, value in context_data.items()
+        if not key.startswith(_CDK_LOOKUP_CONTEXT_PREFIXES)
+    }
+    removed = len(context_data) - len(cleaned)
+    if removed:
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(cleaned, f, indent=2)
+        print(f"Removed {removed} stale CDK lookup context key(s) from {file_path}.")
+    return removed
+
+
+def log_aws_credential_context(
+    expected_account_id: Optional[str] = None,
+    expected_region: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Print the active AWS identity and non-secret credential hints for CDK debugging.
+
+    Helps distinguish SSO/assumed-role sessions from long-lived access keys in
+    ~/.aws/credentials or environment variables.
+    """
+    profile = os.environ.get("AWS_PROFILE") or "(not set — using default profile chain)"
+    default_region = (
+        os.environ.get("AWS_REGION")
+        or os.environ.get("AWS_DEFAULT_REGION")
+        or "(not set in environment)"
+    )
+    env_access_key_set = bool(os.environ.get("AWS_ACCESS_KEY_ID"))
+    env_secret_key_set = bool(os.environ.get("AWS_SECRET_ACCESS_KEY"))
+    env_session_token_set = bool(os.environ.get("AWS_SESSION_TOKEN"))
+
+    print("\n--- AWS credential context (CDK / boto3) ---")
+    print(f"AWS_PROFILE: {profile}")
+    print(f"AWS_REGION / AWS_DEFAULT_REGION (env): {default_region}")
+    print(
+        "Environment credential variables: "
+        f"AWS_ACCESS_KEY_ID={'set' if env_access_key_set else 'not set'}, "
+        f"AWS_SECRET_ACCESS_KEY={'set' if env_secret_key_set else 'not set'}, "
+        f"AWS_SESSION_TOKEN={'set' if env_session_token_set else 'not set'}"
+    )
+    if expected_account_id:
+        print(f"Configured CDK target account (AWS_ACCOUNT_ID): {expected_account_id}")
+    if expected_region:
+        print(f"Configured CDK target region (AWS_REGION): {expected_region}")
+
+    session = boto3.Session()
+    active_profile = session.profile_name or "(default)"
+    print(f"boto3 session profile: {active_profile}")
+    print(f"boto3 session region: {session.region_name or '(not set)'}")
+
+    credentials = session.get_credentials()
+    credential_summary: Dict[str, Any] = {
+        "profile": profile,
+        "session_profile": active_profile,
+    }
+
+    if credentials is None:
+        print("WARNING: No AWS credentials found in the default provider chain.")
+        print("--- End AWS credential context ---\n")
+        credential_summary["error"] = "no_credentials"
+        return credential_summary
+
+    frozen = credentials.get_frozen_credentials()
+    access_key = frozen.access_key or ""
+    access_key_prefix = (access_key[:4] + "...") if len(access_key) >= 4 else "(none)"
+    credential_summary["access_key_prefix"] = access_key_prefix
+
+    if env_access_key_set:
+        credential_source = "environment variables (highest precedence)"
+    elif access_key.startswith("AKIA"):
+        credential_source = "long-lived access key (likely ~/.aws/credentials [default] or named profile)"
+    elif access_key.startswith("ASIA"):
+        credential_source = "temporary credentials (SSO, assumed role, or STS session)"
+    else:
+        credential_source = (
+            "resolved credentials (source could not be classified from key prefix)"
+        )
+
+    print(f"Inferred credential type: {credential_source}")
+    credential_summary["inferred_credential_type"] = credential_source
+
+    if env_access_key_set and profile != "(not set — using default profile chain)":
+        print(
+            "NOTE: AWS_ACCESS_KEY_ID is set in the environment, so it overrides "
+            f"profile '{profile}' and SSO."
+        )
+
+    try:
+        sts = session.client("sts", region_name=session.region_name or expected_region)
+        identity = sts.get_caller_identity()
+    except (ClientError, NoCredentialsError) as exc:
+        print(f"WARNING: sts:GetCallerIdentity failed: {exc}")
+        print("--- End AWS credential context ---\n")
+        credential_summary["error"] = str(exc)
+        return credential_summary
+
+    account = identity.get("Account", "")
+    arn = identity.get("Arn", "")
+    user_id = identity.get("UserId", "")
+
+    print(f"Caller account: {account}")
+    print(f"Caller ARN: {arn}")
+    print(f"Caller UserId: {user_id}")
+
+    if ":assumed-role/" in arn:
+        principal_kind = "assumed IAM role (typical for SSO or role chaining)"
+    elif ":user/" in arn:
+        principal_kind = "IAM user (typical for static access keys in credentials file)"
+    elif ":federated-user/" in arn:
+        principal_kind = "federated user"
+    else:
+        principal_kind = "other IAM principal"
+
+    print(f"Principal kind: {principal_kind}")
+    credential_summary.update(
+        {
+            "account": account,
+            "arn": arn,
+            "user_id": user_id,
+            "principal_kind": principal_kind,
+        }
+    )
+
+    if expected_account_id and account and account != str(expected_account_id):
+        print(
+            "WARNING: Caller account does not match configured AWS_ACCOUNT_ID. "
+            "CDK will target the configured account but act as this identity — "
+            "deployments and lookups may fail. Set AWS_PROFILE to your SSO profile "
+            "and unset AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY if needed."
+        )
+        credential_summary["account_mismatch"] = True
+    elif expected_account_id and account == str(expected_account_id):
+        print("Caller account matches configured AWS_ACCOUNT_ID.")
+
+    if profile == "(not set — using default profile chain)":
+        print(
+            "TIP: Set AWS_PROFILE to your SSO profile name so Python and the CDK CLI "
+            "(Node) use the same session. Example: "
+            '$env:AWS_PROFILE = "YourSsoProfileName"'
+        )
+
+    print("--- End AWS credential context ---\n")
+    return credential_summary
+
 
 # --- Function to load context from file ---
 def load_context_from_file(app: App, file_path: str):
     if os.path.exists(file_path):
-        with open(file_path, "r") as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             context_data = json.load(f)
             for key, value in context_data.items():
                 app.node.set_context(key, value)
@@ -127,6 +292,19 @@ def add_statement_to_policy(role: iam.IRole, policy_document: Dict[str, Any]):
             print(
                 f"Warning: Could not process policy statement: {statement_dict}. Error: {e}"
             )
+
+
+def add_s3_enforce_ssl_policy(bucket: s3.IBucket) -> None:
+    """Deny non-TLS S3 requests (Security Hub S3.5). Compatible with all CDK versions."""
+    bucket.add_to_resource_policy(
+        iam.PolicyStatement(
+            effect=iam.Effect.DENY,
+            principals=[iam.AnyPrincipal()],
+            actions=["s3:*"],
+            resources=[bucket.bucket_arn, f"{bucket.bucket_arn}/*"],
+            conditions={"Bool": {"aws:SecureTransport": "false"}},
+        )
+    )
 
 
 def add_custom_policies(
@@ -358,17 +536,19 @@ def check_codebuild_project_exists(
         if response["projects"]:
             # If the project is found in the 'projects' list
             print(f"CodeBuild project '{project_name}' found.")
+            project = response["projects"][0]
             return (
                 True,
-                response["projects"][0]["arn"],
-            )  # Return True and the project details dict
+                project["arn"],
+                project.get("serviceRole"),
+            )
         elif (
             response["projectsNotFound"]
             and project_name in response["projectsNotFound"]
         ):
             # If the project name is explicitly in the 'projectsNotFound' list
             print(f"CodeBuild project '{project_name}' not found.")
-            return False, None
+            return False, None, None
         else:
             # This case is less expected for a single name lookup,
             # but could happen if there's an internal issue or the response
@@ -377,7 +557,7 @@ def check_codebuild_project_exists(
             print(
                 f"CodeBuild project '{project_name}' not found (not in 'projects' list)."
             )
-            return False, None
+            return False, None, None
 
     except ClientError as e:
         # Catch specific ClientErrors. batch_get_projects might not throw
@@ -451,10 +631,21 @@ def _get_existing_subnets_in_vpc(vpc_id: str) -> Dict[str, Any]:
     ec2_client = boto3.client("ec2")
     existing_subnets_data = {
         "by_name": {},  # {subnet_name: {'id': 'subnet-id', 'cidr': 'x.x.x.x/x'}}
-        "by_id": {},  # {subnet_id: {'name': 'subnet-name', 'cidr': 'x.x.x.x/x'}}
+        "by_id": {},  # {subnet_id: {'name': 'subnet-name', 'cidr': 'x.x.x.x/x/x'}}
         "cidr_networks": [],  # List of ipaddress.IPv4Network objects
     }
     try:
+        subnet_to_route_table: Dict[str, str] = {}
+        rt_response = ec2_client.describe_route_tables(
+            Filters=[{"Name": "vpc-id", "Values": [vpc_id]}]
+        )
+        for route_table in rt_response.get("RouteTables", []):
+            route_table_id = route_table["RouteTableId"]
+            for association in route_table.get("Associations", []):
+                associated_subnet_id = association.get("SubnetId")
+                if associated_subnet_id:
+                    subnet_to_route_table[associated_subnet_id] = route_table_id
+
         response = ec2_client.describe_subnets(
             Filters=[{"Name": "vpc-id", "Values": [vpc_id]}]
         )
@@ -467,7 +658,13 @@ def _get_existing_subnets_in_vpc(vpc_id: str) -> Dict[str, Any]:
                 None,
             )
 
-            subnet_info = {"id": subnet_id, "cidr": cidr_block, "name": name_tag}
+            subnet_info = {
+                "id": subnet_id,
+                "cidr": cidr_block,
+                "name": name_tag,
+                "az": s.get("AvailabilityZone"),
+                "route_table_id": subnet_to_route_table.get(subnet_id),
+            }
 
             if name_tag:
                 existing_subnets_data["by_name"][name_tag] = subnet_info

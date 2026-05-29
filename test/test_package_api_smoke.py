@@ -161,8 +161,26 @@ def test_load_and_prepare_documents_or_data_notimplemented() -> None:
         load_and_prepare_documents_or_data()
 
 
-def test_word_level_ocr_text_search_notimplemented() -> None:
-    from doc_redaction.api import word_level_ocr_text_search
+def test_word_level_ocr_text_search_requires_paths() -> None:
+    from tools.verify_redaction_coverage import run_word_level_ocr_text_search
 
-    with pytest.raises(NotImplementedError):
-        word_level_ocr_text_search()
+    paths = _partnership_paths_optional()
+    if not paths:
+        pytest.skip("Partnership example fixtures not present")
+    _, words = paths
+    out = run_word_level_ocr_text_search(str(words), "Partnership")
+    assert out["match_count"] >= 1
+
+
+def _partnership_paths_optional():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    ex = root / "doc_redaction" / "example_data" / "example_outputs"
+    review = ex / "Partnership-Agreement-Toolkit_0_0.pdf_review_file.csv"
+    words = (
+        ex / "Partnership-Agreement-Toolkit_0_0_ocr_results_with_words_local_ocr.csv"
+    )
+    if review.is_file() and words.is_file():
+        return review, words
+    return None

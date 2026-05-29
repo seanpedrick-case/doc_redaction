@@ -17,6 +17,7 @@ from tools.config import (
     PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS,
     RUN_AWS_FUNCTIONS,
     SPLIT_PUNCTUATION_FROM_WORDS,
+    TEXTRACT_TEXT_EXTRACT_OPTION,
 )
 from tools.custom_image_analyser_engine import CustomImageRecognizerResult, OCRResult
 from tools.helper_functions import _generate_unique_ids
@@ -30,6 +31,22 @@ def extract_textract_metadata(response: object):
     pages = response["DocumentMetadata"]["Pages"]
 
     return str({"RequestId": request_id, "Pages": pages})
+
+
+def textract_prioritizes_signature_extraction(
+    text_extraction_method: str,
+    handwrite_signature_checkbox: List[str] | None = None,
+) -> bool:
+    """
+    True when AWS Textract signature analysis is active.
+
+    CUSTOM_VLM_SIGNATURE VLM passes should be skipped in this case so signatures
+    are not detected twice (Textract signature extraction takes priority).
+    """
+    return (
+        text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+        and "Extract signatures" in (handwrite_signature_checkbox or [])
+    )
 
 
 def analyse_page_with_textract(
@@ -640,6 +657,7 @@ def json_to_ocrresult(
                 line_geom["height"],
                 round(line["confidence"], 0),
                 line_num,
+                model="Textract",
             )
         )
         ocr_results_with_words[f"text_line_{line_num}"] = {
@@ -654,6 +672,7 @@ def json_to_ocrresult(
             ),
             "words": line["words"],
             "page": page_no,
+            "model": "Textract",
         }
     for selection in unmatched_selections:
         sel_geom = selection["geometry"]

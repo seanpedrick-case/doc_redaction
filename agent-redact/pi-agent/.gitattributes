@@ -1,0 +1,2 @@
+# Example PDFs must be plain files in the Space repo (not Git LFS pointers).
+*.pdf -filter -diff -merge

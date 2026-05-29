@@ -231,10 +231,8 @@ For Python examples in using the Python package, please see [Python Package usag
 You can customise the application's behavior by creating a configuration file. This allows you to change settings without modifying the source code, such as enabling AWS features, changing logging behavior, or pointing to local Tesseract/Poppler installations. A full overview of all the potential settings you can modify in the app_config.env file can be seen in tools/config.py, with explanation on the documentation website for [the github repo](https://seanpedrick-case.github.io/doc_redaction/)
 
 To get started:
-1.  Locate the `example_config.env` file in the root of the project.
-2.  Create a new file named `app_config.env` inside the `config/` directory (i.e., `config/app_config.env`).
-3.  Copy the contents from `example_config.env` into your new `config/app_config.env` file.
-4.  Modify the values in `config/app_config.env` to suit your needs. The application will automatically load these settings on startup.
+1.  Copy `config/app_config.env.example` to `config/app_config.env`.
+2.  Modify the values in `config/app_config.env` to suit your needs. The application will automatically load these settings on startup.
 
 If you do not create this file, the application will run with default settings.
 
@@ -319,7 +317,7 @@ If you are an LLM/agent interacting with this app over HTTP (e.g. Hugging Face S
 Fetch `/gradio_api/info` and then prefer the simplest route that exists:
 
 - **Apply edited review CSV to a PDF**: `/review_apply`
-- **Redact a PDF/image document**: `/doc_redact`
+- **Redact a PDF/image document**: `/doc_redact` — optional `handwrite_signature_checkbox` for AWS Textract (e.g. `Extract handwriting`, `Extract signatures`)
 - **Summarise a PDF**: `/pdf_summarise`
 - **Redact tabular files (CSV/XLSX/Parquet/DOCX)**: `/tabular_redact`
 

@@ -22,6 +22,10 @@ logs/*
 usage/*
 feedback/*
 config/*
+!config/pi_agent.env.example
+!config/docker_app_config.env.example
+!config/app_config.env.example
+workspace/*
 user_guide/*
 _extensions/*
 doc_redaction.egg-info/*
@@ -32,9 +36,11 @@ cdk/archive/*
 tld/*
 tmp/*
 docs/*
+.pi/*
 cdk.out/*
 cdk.json
 cdk.context.json
+precheck.context.json
 .quarto/*
 /.quarto/
 /_site/
@@ -52,3 +58,5 @@ src/doc_redaction.egg-info/*
 docker_compose/*
 **/*.quarto_ipynb
 skills/example_prompts/*
+.pi/sessions/
+agent-redact/pi/agent/sessions/

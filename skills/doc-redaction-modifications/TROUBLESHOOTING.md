@@ -110,3 +110,21 @@ Use this file only when the standard `SKILL.md` workflow fails.
 - Validate page numbers before apply:
   - First page is `1`, not `0`.
   - Max page value does not exceed source PDF page count.
+
+## 9) Text layer leaks but word OCR shows 100% covered
+
+### Symptoms
+- Post-apply `verify_redaction_coverage` lists `text_layer_leaks` on `*_redacted.pdf`
+- Word OCR overlap looks complete; agent concludes `/review_apply` “only draws overlays”
+
+### Cause
+- Wrong PDF tested (`*_redactions_for_review.pdf` retains text)
+- CSV coordinates not normalized (pixel/point values >1) — boxes miss text silently on headless apply before validation was added
+- Text baked into embedded images — text redaction cannot target it precisely
+- Multi-line PyMuPDF blocks overlapped by one large box but substring positions still leak
+
+### Fix
+1. Confirm PDF is `*_redacted.pdf`.
+2. Check coverage report `leak_likely_causes` per page.
+3. Validate CSV: all bbox values in **[0, 1]**; normalize any PyMuPDF absolute coords before apply.
+4. Add/widen `CUSTOM` boxes or use targeted Pass 2 VLM for image text — **do not** reimplement apply with PyMuPDF unless `/review_apply` itself errors.

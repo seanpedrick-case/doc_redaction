@@ -56,6 +56,7 @@ from tools.config import (
     LLM_TEMPERATURE,
     LOAD_PADDLE_AT_STARTUP,
     LOCAL_OCR_MODEL_OPTIONS,
+    LOCAL_OCR_READING_ORDER,
     LOCAL_PII_OPTION,
     LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
     LOCAL_TRANSFORMERS_LLM_PII_OPTION,
@@ -67,6 +68,7 @@ from tools.config import (
     PADDLE_DET_DB_UNCLIP_RATIO,
     PADDLE_FONT_PATH,
     PADDLE_MODEL_PATH,
+    PADDLE_PRESERVE_LINE_BOXES,
     PADDLE_USE_TEXTLINE_ORIENTATION,
     PREPARE_PAGE_FOR_HYBRID_VLM_BEFORE_PADDLE,
     PREPROCESS_LOCAL_OCR_IMAGES,
@@ -89,9 +91,14 @@ from tools.config import (
     VLM_MIN_DPI,
     VLM_MIN_IMAGE_SIZE,
 )
-from tools.helper_functions import clean_unicode_text, get_system_font_path
+from tools.helper_functions import (
+    clean_unicode_text,
+    get_system_font_path,
+    model_from_ocr_boxes,
+)
 from tools.llm_funcs import _extract_choice_message_text
 from tools.load_spacy_model_custom_recognisers import custom_entities
+from tools.ocr_reading_order import build_line_groups
 from tools.presidio_analyzer_custom import recognizer_result_from_dict
 from tools.run_vlm import (
     extract_text_from_image_vlm,
@@ -9028,7 +9035,19 @@ class CustomImageAnalyzerEngine:
             # print("Finished rescaling ocr_data")
 
         # Convert line-level results to word-level if configured and needed
-        if CONVERT_LINE_TO_WORD_LEVEL and self._is_line_level_data(ocr_data):
+        _paddle_line_engines = (
+            "paddle",
+            "hybrid-paddle-vlm",
+            "hybrid-paddle-inference-server",
+        )
+        _skip_line_to_word = PADDLE_PRESERVE_LINE_BOXES and (
+            self.ocr_engine in _paddle_line_engines
+        )
+        if (
+            CONVERT_LINE_TO_WORD_LEVEL
+            and not _skip_line_to_word
+            and self._is_line_level_data(ocr_data)
+        ):
             # print("Converting line-level OCR results to word-level...")
 
             # Check if coordinates need to be scaled to match the image we're cropping from
@@ -12804,6 +12823,8 @@ def recreate_page_line_level_ocr_results_with_page(
             conf = line_data.get("confidence", line_data.get("conf", 0.0))
 
         # Recreate the OCRResult
+        model = line_data.get("model")
+
         line_result = OCRResult(
             text=text,
             left=bbox[0],
@@ -12812,6 +12833,7 @@ def recreate_page_line_level_ocr_results_with_page(
             height=bbox[3] - bbox[1],
             line=line_number,
             conf=round(float(conf), 0),
+            model=model,
         )
         reconstructed_results.append(line_result)
 
@@ -12945,11 +12967,11 @@ def create_ocr_result_with_children(
                     word.top + word.height,
                 ),
                 "conf": word.conf,
-                "model": word.model,
             }
             for word in current_line
         ],
         "conf": current_bbox.conf,
+        "model": getattr(current_bbox, "model", None),
     }
     return combined_results["text_line_" + str(i)]
 
@@ -12959,24 +12981,25 @@ def combine_ocr_results(
     x_threshold: float = 50.0,
     y_threshold: float = 12.0,
     page: int = 1,
+    preserve_line_boxes: bool = False,
+    reading_order_mode: Optional[str] = None,
 ):
     """
     Group OCR results into lines, splitting words from punctuation.
+
+    When reading_order_mode is "column" (default), boxes are ordered for multi-column
+    layouts before line numbers are assigned. Set preserve_line_boxes=True to keep each
+    input box as its own line (Paddle line-level fast path).
     """
     if not ocr_results:
         return {"page": page, "results": []}, {"page": page, "results": {}}
 
-    lines = list()
-    current_line = list()
-
-    for result in sorted(ocr_results, key=lambda x: (x.top, x.left)):
-        if not current_line or abs(result.top - current_line[0].top) <= y_threshold:
-            current_line.append(result)
-        else:
-            lines.append(sorted(current_line, key=lambda x: x.left))
-            current_line = [result]
-    if current_line:
-        lines.append(sorted(current_line, key=lambda x: x.left))
+    lines, _, _ = build_line_groups(
+        ocr_results,
+        reading_order_mode=reading_order_mode or LOCAL_OCR_READING_ORDER,
+        preserve_line_boxes=preserve_line_boxes,
+        y_threshold=y_threshold if reading_order_mode == "legacy" else None,
+    )
 
     page_line_level_ocr_results = list()
     page_line_level_ocr_results_with_words = {}
@@ -13007,6 +13030,7 @@ def combine_ocr_results(
             height=line_bottom - line_top,
             line=line_counter,
             conf=line_conf,
+            model=model_from_ocr_boxes(line),
         )
 
         page_line_level_ocr_results.append(final_line_bbox)

@@ -49,7 +49,10 @@ from tools.file_conversion import (
 )
 from tools.file_redaction import run_redaction
 from tools.helper_functions import get_file_name_without_type
-from tools.redaction_review import apply_redactions_to_review_df_and_files
+from tools.redaction_review import (
+    apply_redactions_to_review_df_and_files,
+    validate_review_file_df_headless,
+)
 from tools.redaction_types import RedactionContext, RedactionOptions
 from tools.secure_path_utils import validate_path_safety
 from tools.summaries import (
@@ -74,6 +77,26 @@ class HeadlessGradioProgress:
 
     def tqdm(self, iterable, desc: str | None = None, unit: str | None = None):
         return iterable
+
+
+def _format_review_apply_message(unique_paths: list[str], prep_msg: str | None) -> str:
+    """Build a status string that distinguishes deliverable vs review-copy PDFs."""
+    redacted = [p for p in unique_paths if p.endswith("_redacted.pdf")]
+    review_copy = [p for p in unique_paths if "_redactions_for_review" in p]
+    parts: list[str] = []
+    if prep_msg and str(prep_msg).strip():
+        parts.append(str(prep_msg).strip())
+    parts.append(
+        "Applied redactions via PyMuPDF redaction annotations (text removed in *_redacted.pdf)."
+    )
+    if redacted:
+        parts.append(f"Deliverable: {Path(redacted[0]).name}")
+    if review_copy:
+        parts.append(
+            f"Review copy (text retained): {Path(review_copy[0]).name} "
+            "— do not use for text-layer leak checks."
+        )
+    return " ".join(parts)
 
 
 def _folder_with_trailing_sep(folder: str) -> str:
@@ -159,6 +182,64 @@ def _filter_files_within_root(paths: Iterable[Any], root_dir: str) -> list[str]:
         seen.add(resolved)
         kept.append(resolved)
     return kept
+
+
+_REDACTION_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _allowed_io_roots() -> list[str]:
+    roots: list[str] = [str(_REDACTION_REPO_ROOT)]
+    for folder in (INPUT_FOLDER, OUTPUT_FOLDER):
+        if folder:
+            roots.append(str(folder))
+    return roots
+
+
+def _resolve_existing_io_path(path: str) -> str:
+    """Resolve a readable file path under repo root, INPUT_FOLDER, or OUTPUT_FOLDER."""
+    raw = str(path or "").strip()
+    if not raw:
+        raise ValueError("Path must not be empty.")
+    expanded = os.path.expanduser(raw)
+    if os.path.isabs(expanded):
+        candidate = os.path.realpath(os.path.abspath(expanded))
+    else:
+        candidate = os.path.realpath(
+            os.path.abspath(os.path.join(str(_REDACTION_REPO_ROOT), expanded))
+        )
+    if not os.path.isfile(candidate):
+        raise ValueError(f"Not a file or missing: {candidate}")
+    for root in _allowed_io_roots():
+        root_real = os.path.realpath(str(root))
+        try:
+            if os.path.commonpath([candidate, root_real]) == root_real:
+                return candidate
+        except ValueError:
+            continue
+    raise ValueError("Path must be under the app repo, INPUT_FOLDER, or OUTPUT_FOLDER")
+
+
+def _resolve_writable_io_path(path: str) -> str:
+    """Resolve an output path that may be created under allowed roots."""
+    raw = str(path or "").strip()
+    if not raw:
+        raise ValueError("Path must not be empty.")
+    expanded = os.path.expanduser(raw)
+    if os.path.isabs(expanded):
+        candidate = os.path.realpath(os.path.abspath(expanded))
+    else:
+        candidate = os.path.realpath(
+            os.path.abspath(os.path.join(str(_REDACTION_REPO_ROOT), expanded))
+        )
+    parent = os.path.realpath(os.path.dirname(candidate))
+    for root in _allowed_io_roots():
+        root_real = os.path.realpath(str(root))
+        try:
+            if os.path.commonpath([parent, root_real]) == root_real:
+                return candidate
+        except ValueError:
+            continue
+    raise ValueError("Path must be under the app repo, INPUT_FOLDER, or OUTPUT_FOLDER")
 
 
 def _validate_review_csv_path(path: str) -> None:
@@ -360,6 +441,11 @@ def run_apply_review_redactions(
 
     if not isinstance(review_df, pd.DataFrame):
         review_df = pd.DataFrame()
+    if review_df.empty:
+        raise ValueError(
+            "Review CSV produced no rows after prepare; check review_csv_path."
+        )
+    validate_review_file_df_headless(review_df)
     if not page_sizes:
         raise ValueError(
             "prepare_image_or_pdf produced empty page_sizes; check pdf_path and logs."
@@ -450,7 +536,7 @@ def run_apply_review_redactions(
         "output_paths": unique_paths,
         "output_dir": out_folder.rstrip(os.sep),
         "input_dir": in_folder.rstrip(os.sep),
-        "message": (str(prep_msg) if prep_msg else "apply_review_redactions completed"),
+        "message": _format_review_apply_message(unique_paths, prep_msg),
         "gradio_api_name": "apply_review_redactions",
     }
 
@@ -688,7 +774,7 @@ def redact_document_from_upload_for_gradio_api(
     deny_list: list[str] | None = None,
     page_min: int | None = None,
     page_max: int | None = None,
-    llm_instruction: str | None = "",
+    handwrite_signature_checkbox: list[str] | None = None,
 ) -> tuple[list[str], str]:
     """
     Short, stateless ``gr.api`` wrapper for PDF/image document redaction.
@@ -705,8 +791,14 @@ def redact_document_from_upload_for_gradio_api(
             (`Local`, `AWS Comprehend`, `LLM (AWS Bedrock)`, `Local inference server`,
             `Local transformers LLM`, `None`) plus common aliases.
         allow_list / deny_list: Optional explicit token lists for matching behaviour.
+            ``deny_list`` terms are matched via the ``CUSTOM`` entity (appended to
+            ``redact_entities`` automatically when ``deny_list`` is non-empty).
         page_min / page_max: Optional page bounds (0 means all, CLI semantics).
-        llm_instruction: Optional custom instruction for LLM-backed detection.
+        handwrite_signature_checkbox: AWS Textract extraction options when using
+            `AWS Textract` (or hybrid Textract routes). Typical values include
+            `Extract handwriting`, `Extract signatures`; deployment config may
+            also expose `Extract forms`, `Extract layout`, `Extract tables`, or
+            `Face detection`. When omitted, CLI/deployment defaults apply.
 
     Returns:
         (output_paths, message)
@@ -737,10 +829,17 @@ def redact_document_from_upload_for_gradio_api(
         overrides["allow_list"] = list(allow_list)
     if deny_list is not None:
         overrides["deny_list"] = list(deny_list)
+        if deny_list:
+            if redact_entities is not None:
+                ents = list(overrides.get("local_redact_entities") or [])
+                if "CUSTOM" not in ents:
+                    overrides["local_redact_entities"] = [*ents, "CUSTOM"]
     if page_min is not None:
         overrides["page_min"] = int(page_min)
     if page_max is not None:
         overrides["page_max"] = int(page_max)
+    if handwrite_signature_checkbox is not None:
+        overrides["handwrite_signature_extraction"] = list(handwrite_signature_checkbox)
 
     cli_ocr_method, ocr_overrides = _resolve_cli_ocr_inputs(ocr_method)
     cli_pii_method = _resolve_cli_pii_method(pii_method)
@@ -752,7 +851,6 @@ def redact_document_from_upload_for_gradio_api(
         output_dir=safe_out_dir,
         ocr_method=cli_ocr_method,
         pii_detector=cli_pii_method,
-        instruction=llm_instruction,
         overrides=merged_overrides or None,
     )
 
@@ -1175,6 +1273,84 @@ def preview_boxes_api(
     return zip_path, msg
 
 
+def run_verify_redaction_coverage(
+    review_csv_path: str,
+    ocr_words_csv_path: str,
+    *,
+    must_redact: list[str] | None = None,
+    must_not_redact: list[str] | None = None,
+    redacted_pdf_path: str | None = None,
+    total_pages: int | None = None,
+    min_word_length: int = 3,
+    sample_pixels: bool = False,
+    auto_prune_suspicious: bool = False,
+    pruned_output_path: str | None = None,
+) -> tuple[dict, str | None, dict | None]:
+    """Headless Pass 1 coverage report (see ``tools.verify_redaction_coverage``)."""
+    from pathlib import Path
+
+    from tools.verify_redaction_coverage import (
+        prune_suspicious_review_csv,
+        verify_redaction_coverage,
+    )
+
+    safe_review_csv_path = _resolve_existing_io_path(review_csv_path)
+    safe_ocr_words_csv_path = _resolve_existing_io_path(ocr_words_csv_path)
+    safe_redacted_pdf_path = (
+        _resolve_existing_io_path(redacted_pdf_path) if redacted_pdf_path else None
+    )
+
+    review_path = Path(safe_review_csv_path)
+    pruned_csv_path: str | None = None
+    prune_log: dict | None = None
+    if auto_prune_suspicious:
+        if pruned_output_path:
+            safe_pruned_output_path = _resolve_writable_io_path(pruned_output_path)
+            out = Path(safe_pruned_output_path)
+        else:
+            out = review_path.with_name(f"{review_path.stem}_pruned.csv")
+        prune_log = prune_suspicious_review_csv(
+            review_path,
+            out,
+            must_redact=must_redact,
+            min_word_length=min_word_length,
+        )
+        review_path = out
+        pruned_csv_path = str(out)
+
+    report = verify_redaction_coverage(
+        review_path,
+        safe_ocr_words_csv_path,
+        must_redact=must_redact,
+        must_not_redact=must_not_redact,
+        redacted_pdf_path=safe_redacted_pdf_path,
+        total_pages=total_pages,
+        min_word_length=min_word_length,
+        sample_pixels=sample_pixels,
+    )
+    return report.to_dict(), pruned_csv_path, prune_log
+
+
+def run_word_level_ocr_text_search_api(
+    ocr_words_csv_path: str,
+    search_text: str,
+    *,
+    similarity_threshold: float = 1.0,
+    use_regex: bool = False,
+    review_csv_path: str | None = None,
+) -> dict:
+    """Headless word-level OCR search with optional review-box coverage flags."""
+    from tools.verify_redaction_coverage import run_word_level_ocr_text_search
+
+    return run_word_level_ocr_text_search(
+        ocr_words_csv_path,
+        search_text,
+        similarity_threshold=similarity_threshold,
+        use_regex=use_regex,
+        review_csv_path=review_csv_path,
+    )
+
+
 def doc_redact_api(
     document_file: Any,
     redact_entities: list[str] | None = None,
@@ -1185,7 +1361,7 @@ def doc_redact_api(
     deny_list: list[str] | None = None,
     page_min: int | None = None,
     page_max: int | None = None,
-    llm_instruction: str | None = "",
+    handwrite_signature_checkbox: list[str] | None = None,
 ) -> tuple[list[str], str]:
     """Short-name wrapper; prefer calling this via `api_name='/doc_redact'`."""
     return redact_document_from_upload_for_gradio_api(
@@ -1198,7 +1374,7 @@ def doc_redact_api(
         deny_list=deny_list,
         page_min=page_min,
         page_max=page_max,
-        llm_instruction=llm_instruction,
+        handwrite_signature_checkbox=handwrite_signature_checkbox,
     )
 
 
@@ -1216,4 +1392,6 @@ __all__ = [
     "summarise_document_from_upload_for_gradio_api",
     "pdf_summarise_api",
     "preview_boxes_api",
+    "run_verify_redaction_coverage",
+    "run_word_level_ocr_text_search_api",
 ]

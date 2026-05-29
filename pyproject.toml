@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc_redaction"
-version = "2.2.8"
+version = "2.3.0"
 description = "Redact PDF/image-based documents, Word, or CSV/XLSX files using a Gradio-based GUI interface"
 readme = "README_PYPI.md"
 authors = [
@@ -69,7 +69,8 @@ dependencies = [
     "google-genai<=1.73.0",
     "openai<=2.31.0",
     "markdown<=3.10.2",
-    "tabulate<=0.10.0"
+    "tabulate<=0.10.0",
+    "starlette>=0.52.1"
 ]
 
 [project.optional-dependencies]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import pytest
@@ -41,7 +42,10 @@ def test_doc_redact_simple_calls_cli_and_returns_paths(
     expected = safe_out / "mock_redacted.pdf"
     expected.write_bytes(b"%PDF-1.4\n%mock\n")
 
+    captured: dict = {}
+
     def _mock_redact_document(*args, **kwargs):
+        captured.update(kwargs)
         return [str(expected)]
 
     monkeypatch.setattr("doc_redaction.cli_api.redact_document", _mock_redact_document)
@@ -49,6 +53,135 @@ def test_doc_redact_simple_calls_cli_and_returns_paths(
     paths, msg = redact_document_from_upload_for_gradio_api(
         str(pdf),
         redact_entities=["PERSON"],
+        handwrite_signature_checkbox=["Extract handwriting", "Extract signatures"],
     )
     assert paths == [str(expected)]
     assert msg
+    assert captured["overrides"]["handwrite_signature_extraction"] == [
+        "Extract handwriting",
+        "Extract signatures",
+    ]
+    assert "instruction" not in captured
+
+
+def test_doc_redact_passes_inline_deny_list_and_adds_custom(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tools.config import OUTPUT_FOLDER
+    from tools.simplified_api import redact_document_from_upload_for_gradio_api
+
+    pdf = _example_pdf()
+    if not pdf.is_file():
+        pytest.skip("fixture missing")
+
+    safe_out = Path(OUTPUT_FOLDER).resolve()
+    safe_out.mkdir(parents=True, exist_ok=True)
+    expected = safe_out / "mock_redacted.pdf"
+    expected.write_bytes(b"%PDF-1.4\n%mock\n")
+
+    captured: dict = {}
+
+    def _mock_redact_document(*args, **kwargs):
+        captured.update(kwargs)
+        return [str(expected)]
+
+    monkeypatch.setattr("doc_redaction.cli_api.redact_document", _mock_redact_document)
+
+    redact_document_from_upload_for_gradio_api(
+        str(pdf),
+        redact_entities=["PERSON"],
+        deny_list=["Acme Corp", "Cora Fyller"],
+    )
+
+    overrides = captured["overrides"]
+    assert overrides["deny_list"] == ["Acme Corp", "Cora Fyller"]
+    assert overrides["local_redact_entities"] == ["PERSON", "CUSTOM"]
+
+
+def test_cli_resolve_deny_list_prefers_inline_over_file() -> None:
+    from cli_redact import resolve_deny_list_for_redaction
+
+    args = argparse.Namespace(
+        deny_list=["inline-term"],
+        deny_list_file="config/default_deny_list.csv",
+    )
+    assert resolve_deny_list_for_redaction(args) == ["inline-term"]
+
+
+def test_cli_resolve_deny_list_falls_back_to_file() -> None:
+    from cli_redact import resolve_deny_list_for_redaction
+
+    args = argparse.Namespace(
+        deny_list_file="config/default_deny_list.csv",
+    )
+    assert resolve_deny_list_for_redaction(args) == "config/default_deny_list.csv"
+
+
+def test_cli_resolve_allow_list_prefers_inline_over_file() -> None:
+    from cli_redact import resolve_allow_list_for_redaction
+
+    args = argparse.Namespace(
+        allow_list=["keep-me"],
+        allow_list_file="config/default_allow_list.csv",
+    )
+    assert resolve_allow_list_for_redaction(args) == ["keep-me"]
+
+
+def test_cli_resolve_efficient_ocr_uses_config_when_unset() -> None:
+    from cli_redact import resolve_efficient_ocr_for_redaction
+    from tools.config import EFFICIENT_OCR
+
+    args = argparse.Namespace(efficient_ocr=None)
+    assert resolve_efficient_ocr_for_redaction(args) is bool(EFFICIENT_OCR)
+
+
+def test_cli_resolve_efficient_ocr_honours_explicit_false() -> None:
+    from cli_redact import resolve_efficient_ocr_for_redaction
+
+    args = argparse.Namespace(efficient_ocr=False)
+    assert resolve_efficient_ocr_for_redaction(args) is False
+
+
+def test_cli_resolve_chosen_local_ocr_model_from_args() -> None:
+    from cli_redact import resolve_chosen_local_ocr_model_for_redaction
+
+    args = argparse.Namespace(chosen_local_ocr_model="hybrid-paddle-inference-server")
+    assert (
+        resolve_chosen_local_ocr_model_for_redaction(args)
+        == "hybrid-paddle-inference-server"
+    )
+
+
+def test_doc_redact_maps_hybrid_ocr_model_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tools.config import OUTPUT_FOLDER
+    from tools.simplified_api import redact_document_from_upload_for_gradio_api
+
+    pdf = _example_pdf()
+    if not pdf.is_file():
+        pytest.skip("fixture missing")
+
+    safe_out = Path(OUTPUT_FOLDER).resolve()
+    safe_out.mkdir(parents=True, exist_ok=True)
+    expected = safe_out / "mock_redacted.pdf"
+    expected.write_bytes(b"%PDF-1.4\n%mock\n")
+
+    captured: dict = {}
+
+    def _mock_redact_document(*args, **kwargs):
+        captured.update(kwargs)
+        return [str(expected)]
+
+    monkeypatch.setattr("doc_redaction.cli_api.redact_document", _mock_redact_document)
+
+    redact_document_from_upload_for_gradio_api(
+        str(pdf),
+        ocr_method="hybrid-paddle-inference-server",
+        redact_entities=["CUSTOM_VLM_FACES"],
+    )
+
+    assert captured["ocr_method"] == "Local OCR"
+    assert captured["overrides"]["chosen_local_ocr_model"] == (
+        "hybrid-paddle-inference-server"
+    )

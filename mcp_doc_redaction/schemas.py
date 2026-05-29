@@ -20,6 +20,7 @@ class RedactDocumentOptions(BaseOptions):
     deny_list: list[str] | None = None
     page_min: int | None = None
     page_max: int | None = None
+    handwrite_signature_checkbox: list[str] | None = None
 
 
 class ApplyReviewOptions(BaseOptions):

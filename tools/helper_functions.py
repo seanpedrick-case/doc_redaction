@@ -3,6 +3,7 @@ import os
 import platform
 import random
 import re
+import shutil
 import string
 import sys
 import tempfile
@@ -13,23 +14,15 @@ from math import ceil
 from pathlib import Path
 from typing import List, Set
 
-import boto3
 import gradio as gr
 import numpy as np
 import pandas as pd
-from botocore.exceptions import (
-    BotoCoreError,
-    ClientError,
-    NoCredentialsError,
-    PartialCredentialsError,
-)
 from fastapi import FastAPI
 
 from tools.aws_functions import download_file_from_s3, upload_file_to_s3
 from tools.config import (
     AWS_LLM_PII_OPTION,
     AWS_PII_OPTION,
-    AWS_USER_POOL_ID,
     BEDROCK_LLM_INPUT_COST,
     BEDROCK_LLM_INPUT_TOKENS_PER_PAGE,
     BEDROCK_LLM_OUTPUT_COST,
@@ -39,8 +32,6 @@ from tools.config import (
     BEDROCK_VLM_PIXELS_PER_INPUT_TOKEN,
     BEDROCK_VLM_TEXT_EXTRACT_OPTION,
     COST_CODES_PATH,
-    CUSTOM_HEADER,
-    CUSTOM_HEADER_VALUE,
     DEFAULT_COST_CODE,
     DEFAULT_LANGUAGE,
     DEFAULT_LOCAL_OCR_MODEL,
@@ -60,7 +51,6 @@ from tools.config import (
     RUN_AWS_FUNCTIONS,
     S3_COST_CODES_PATH,
     S3_OUTPUTS_FOLDER,
-    SAVE_OUTPUTS_TO_S3,
     SELECTABLE_TEXT_EXTRACT_OPTION,
     SESSION_DEFAULT_COST_CODES_FILENAME,
     SESSION_OUTPUT_FOLDER,
@@ -76,6 +66,7 @@ from tools.config import (
     ensure_folder_within_app_directory,
     textract_language_choices,
 )
+from tools.gradio_platform import build_s3_outputs_prefix, resolve_session_identity
 from tools.secure_path_utils import (
     sanitize_filename,
     secure_path_join,
@@ -1183,6 +1174,67 @@ def check_for_relevant_ocr_output_with_words(
         return False
 
 
+def _is_bundled_example_textract_json(filename: str) -> bool:
+    return filename.endswith("_textract.json") or filename.endswith(
+        "_ocr_results_with_words_textract.json"
+    )
+
+
+def seed_bundled_example_textract_json(
+    output_folder: str,
+    bundled_example_outputs_dir: str,
+) -> None:
+    """
+    Copy bundled example Textract JSON into the session output folder when missing.
+
+    Used when RUN_ALL_EXAMPLES_THROUGH_AWS is enabled so demo documents can reuse
+    shipped OCR results instead of calling AWS Textract on every run.
+    """
+    if not bundled_example_outputs_dir or not os.path.isdir(
+        bundled_example_outputs_dir
+    ):
+        return
+    if not output_folder:
+        return
+
+    try:
+        out_dir = os.path.normpath(str(output_folder))
+        if not validate_folder_containment(out_dir, OUTPUT_FOLDER):
+            out_dir = OUTPUT_FOLDER
+        ensure_folder_exists(out_dir)
+    except (ValueError, PermissionError, OSError) as exc:
+        print(
+            "Could not seed bundled example Textract JSON (output folder invalid):",
+            exc,
+        )
+        return
+
+    copied = 0
+    for name in os.listdir(bundled_example_outputs_dir):
+        if not _is_bundled_example_textract_json(name):
+            continue
+        src = os.path.join(bundled_example_outputs_dir, name)
+        if not os.path.isfile(src):
+            continue
+        try:
+            dest = secure_path_join(out_dir, name)
+        except (ValueError, PermissionError, OSError):
+            continue
+        if not validate_path_safety(str(dest), base_path=out_dir):
+            continue
+        if dest.exists():
+            continue
+        try:
+            shutil.copy2(src, dest)
+            copied += 1
+            print(f"Seeded bundled example Textract JSON: {name} -> {dest}")
+        except OSError as exc:
+            print(f"Could not copy bundled example Textract JSON {name}: {exc}")
+
+    if copied:
+        print(f"Seeded {copied} bundled example Textract JSON file(s) into {out_dir}")
+
+
 def add_folder_to_path(folder_path: str):
     """
     Check if a folder exists on your system. If so, get the absolute path and then add it to the system Path variable if it doesn't already exist. Function is only relevant for locally-created executable files based on this app (when using pyinstaller it creates a _internal folder that contains tesseract and poppler. These need to be added to the system path to enable the app to run)
@@ -1296,78 +1348,11 @@ async def get_connection_params(
     if isinstance(session_output_folder, str):
         session_output_folder = convert_string_to_boolean(session_output_folder)
 
-    if CUSTOM_HEADER and CUSTOM_HEADER_VALUE:
-        if CUSTOM_HEADER in request.headers:
-            supplied_custom_header_value = request.headers[CUSTOM_HEADER]
-            if supplied_custom_header_value == CUSTOM_HEADER_VALUE:
-                print("Custom header supplied and matches CUSTOM_HEADER_VALUE")
-            else:
-                print("Custom header value does not match expected value.")
-                raise ValueError("Custom header value does not match expected value.")
-        else:
-            print("Custom header value not found.")
-            raise ValueError("Custom header value not found.")
-
-    # Get output save folder from 1 - username passed in from direct Cognito login, 2 - Cognito ID header passed through a Lambda authenticator, 3 - the session hash.
-
-    if request.username:
-        out_session_hash = request.username
-        # print("Request username found:", out_session_hash)
-
-    elif "x-cognito-id" in request.headers:
-        out_session_hash = request.headers["x-cognito-id"]
-        print("Cognito ID found:", out_session_hash)
-
-    elif "x-amzn-oidc-identity" in request.headers:
-        out_session_hash = request.headers["x-amzn-oidc-identity"]
-
-        if AWS_USER_POOL_ID:
-            try:
-                # Fetch email address using Cognito client
-                cognito_client = boto3.client("cognito-idp")
-
-                response = cognito_client.admin_get_user(
-                    UserPoolId=AWS_USER_POOL_ID,  # Replace with your User Pool ID
-                    Username=out_session_hash,
-                )
-                email = next(
-                    attr["Value"]
-                    for attr in response["UserAttributes"]
-                    if attr["Name"] == "email"
-                )
-                print("Cognito email address found, will be used as session hash")
-
-                out_session_hash = email
-            except (
-                ClientError,
-                NoCredentialsError,
-                PartialCredentialsError,
-                BotoCoreError,
-            ) as e:
-                print(f"Error fetching Cognito user details: {e}")
-                print("Falling back to using AWS ID as session hash")
-                # out_session_hash already set to the AWS ID from header, so no need to change it
-            except Exception as e:
-                print(f"Unexpected error when fetching Cognito user details: {e}")
-                print("Falling back to using AWS ID as session hash")
-                # out_session_hash already set to the AWS ID from header, so no need to change it
-
-        print("AWS ID found, will be used as username for session:", out_session_hash)
-
-    else:
-        out_session_hash = request.session_hash
+    out_session_hash = resolve_session_identity(request)
 
     if session_output_folder:
         output_folder = output_folder_textbox + out_session_hash + "/"
         input_folder = input_folder_textbox + out_session_hash + "/"
-
-        # If configured, create a session-specific S3 outputs folder using the same pattern
-        if SAVE_OUTPUTS_TO_S3 and s3_outputs_folder_textbox:
-            s3_outputs_folder = (
-                s3_outputs_folder_textbox.rstrip("/") + "/" + out_session_hash + "/"
-            )
-        else:
-            s3_outputs_folder = s3_outputs_folder_textbox
 
         textract_document_upload_input_folder = (
             textract_document_upload_input_folder + "/" + out_session_hash
@@ -1386,13 +1371,12 @@ async def get_connection_params(
     else:
         output_folder = output_folder_textbox
         input_folder = input_folder_textbox
-        # Keep S3 outputs folder as configured (no per-session subfolder)
-        s3_outputs_folder = s3_outputs_folder_textbox
 
-    # Append today's date (YYYYMMDD/) to the final S3 outputs folder when enabled
-    if SAVE_OUTPUTS_TO_S3 and s3_outputs_folder:
-        today_suffix = datetime.now().strftime("%Y%m%d") + "/"
-        s3_outputs_folder = s3_outputs_folder.rstrip("/") + "/" + today_suffix
+    s3_outputs_folder = build_s3_outputs_prefix(
+        out_session_hash,
+        s3_outputs_folder_textbox,
+        session_scoped=session_output_folder,
+    )
 
     if not os.path.exists(output_folder):
         os.makedirs(output_folder, exist_ok=True)
@@ -1748,6 +1732,61 @@ def calculate_time_taken(
 
 def reset_base_dataframe(df: pd.DataFrame):
     return df
+
+
+LINE_LEVEL_OCR_DF_COLUMNS = [
+    "page",
+    "text",
+    "left",
+    "top",
+    "width",
+    "height",
+    "line",
+    "conf",
+    "model",
+]
+
+
+def model_from_ocr_boxes(boxes) -> str | None:
+    """Return a single model name, or join distinct models with '/'."""
+    models: list[str] = []
+    for box in boxes:
+        model = (
+            getattr(box, "model", None)
+            if not isinstance(box, dict)
+            else box.get("model")
+        )
+        if model and model not in models:
+            models.append(str(model))
+    if not models:
+        return None
+    return models[0] if len(models) == 1 else "/".join(models)
+
+
+def line_level_ocr_row(page, result) -> dict:
+    """Build one line-level OCR CSV row from an OCRResult-like object."""
+    return {
+        "page": page,
+        "text": getattr(result, "text", ""),
+        "left": getattr(result, "left", None),
+        "top": getattr(result, "top", None),
+        "width": getattr(result, "width", None),
+        "height": getattr(result, "height", None),
+        "line": getattr(result, "line", None),
+        "conf": getattr(result, "conf", None),
+        "model": getattr(result, "model", None),
+    }
+
+
+def normalize_line_level_ocr_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Ensure line-level OCR output has the standard columns, including model."""
+    if df is None or df.empty:
+        return pd.DataFrame(columns=LINE_LEVEL_OCR_DF_COLUMNS)
+    out = df.copy()
+    for col in LINE_LEVEL_OCR_DF_COLUMNS:
+        if col not in out.columns:
+            out[col] = None
+    return out.loc[:, LINE_LEVEL_OCR_DF_COLUMNS]
 
 
 def reset_ocr_base_dataframe(df: pd.DataFrame):

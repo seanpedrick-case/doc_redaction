@@ -16,9 +16,11 @@ poppler/*
 build/*
 dist/*
 docs/*
+.pi/*
 build_deps/*
 user_guide/*
 _extensions/*
+workspace/*
 doc_redaction.egg-info/*
 .venv_pypi_test/*
 cdk/config/*
