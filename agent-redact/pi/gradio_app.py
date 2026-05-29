@@ -23,6 +23,10 @@ if str(_REPO_ROOT) not in sys.path:
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from bootstrap_pi_config import ensure_pi_config_env
+
+ensure_pi_config_env(_REPO_ROOT)
+
 import gradio as gr
 from output_files import (
     collect_final_output_files,
@@ -32,12 +36,12 @@ from output_files import (
     workspace_files_download_fn,
 )
 from pi_agent_config import (
-    DEFAULT_PROVIDER,
     apply_session_credentials,
     configure_aws_credentials,
     credential_status_markdown,
     default_model_for_provider,
     gemini_api_key_configured,
+    get_default_provider,
     is_hf_space_profile,
     mirror_hf_token_from_env,
     models_for_provider,
@@ -77,11 +81,30 @@ configure_aws_credentials()
 from session_workspace import (
     init_session_workspace,
     session_workspace_dir,
+    workspace_base_dir,
     workspace_context_prefix,
 )
 
 from tools.aws_functions import export_outputs_to_s3
-from tools.config import HOST_NAME, RUN_FASTAPI, SAVE_OUTPUTS_TO_S3
+from tools.config import (
+    ACTIVITY_MAX_LINES,
+    EMPTY_SEND_WITH_FILE_HINT,
+    HOST_NAME,
+    PI_GRADIO_PORT,
+    PI_INTRO_TEXT,
+    PI_UI_HOST,
+    PI_UI_TITLE,
+    QUOTA_CONTINUE_PROMPT,
+    QUOTA_RETRY_ATTEMPTS,
+    QUOTA_RETRY_DELAY_S,
+    RUN_FASTAPI,
+    SAVE_OUTPUTS_TO_S3,
+    SHOW_THINKING,
+    SHOW_TOOL_OUTPUT,
+    THINKING_DISPLAY_MAX,
+    THINKING_PANEL_CSS,
+    TOOL_OUTPUT_MAX,
+)
 from tools.gradio_platform import (
     create_fastapi_app,
     log_agent_usage_event,
@@ -89,37 +112,10 @@ from tools.gradio_platform import (
     mount_or_launch,
 )
 
-PI_UI_TITLE = os.environ.get("PI_GRADIO_TITLE", "Agentic Document Redaction")
-PI_UI_PORT = int(
-    os.environ.get("GRADIO_SERVER_PORT", "7860" if is_hf_space_profile() else "7862")
-)
-PI_UI_HOST = os.environ.get("GRADIO_SERVER_NAME", "0.0.0.0")
 IS_HF_SPACE = is_hf_space_profile()
-SHOW_THINKING = os.environ.get("PI_GRADIO_SHOW_THINKING", "false").lower() in {
-    "1",
-    "true",
-    "yes",
-}
-SHOW_TOOL_OUTPUT = os.environ.get("PI_GRADIO_SHOW_TOOL_OUTPUT", "true").lower() in {
-    "1",
-    "true",
-    "yes",
-}
-TOOL_OUTPUT_MAX = int(os.environ.get("PI_GRADIO_TOOL_OUTPUT_MAX", "12000"))
-ACTIVITY_MAX_LINES = int(os.environ.get("PI_GRADIO_ACTIVITY_MAX_LINES", "50"))
-THINKING_DISPLAY_MAX = int(os.environ.get("PI_GRADIO_THINKING_MAX_CHARS", "16000"))
-THINKING_PANEL_CSS = """
-.thinking-panel textarea {
-    max-height: 280px !important;
-    overflow-y: auto !important;
-}
-"""
-QUOTA_RETRY_ATTEMPTS = int(os.environ.get("PI_QUOTA_RETRY_ATTEMPTS", "3"))
-QUOTA_RETRY_DELAY_S = int(os.environ.get("PI_QUOTA_RETRY_DELAY_S", "60"))
-QUOTA_CONTINUE_PROMPT = (
-    "Continue the redaction task from where you left off. "
-    "Do not re-read skills or repeat completed tool steps unless required."
-)
+# Use PI_GRADIO_PORT only — GRADIO_SERVER_PORT is the main app's default (7860) and is
+# written into os.environ during tools.config import, which would override 7862 here.
+PI_UI_PORT = PI_GRADIO_PORT
 
 app = None
 
@@ -267,7 +263,7 @@ def _ensure_client(client: PiRpcClient | None) -> PiRpcClient:
         return client
     client = default_client()
     client.start()
-    provider = normalize_provider(DEFAULT_PROVIDER)
+    provider = normalize_provider(get_default_provider())
     model = resolved_default_model(provider)
     try:
         client.set_model(provider, model)
@@ -423,23 +419,58 @@ def _format_tool_panel(heading: str, body: str) -> str:
     return heading + body
 
 
+def _pi_agent_model_label(client: PiRpcClient | None) -> str:
+    """Active Pi orchestration model, or configured defaults before Apply backend."""
+    if client is not None and client.running:
+        try:
+            state = client.get_state()
+            model = state.get("model") or {}
+            provider = str(model.get("provider") or state.get("provider") or "")
+            model_label = str(model.get("id") or model.get("name") or "")
+            if provider and model_label:
+                return f"{provider_label(provider)} / {model_label}"
+            return model_label or provider or "—"
+        except PiRpcError:
+            pass
+    provider = normalize_provider(get_default_provider())
+    model = resolved_default_model(provider)
+    return f"{provider_label(provider)} / {model} (default until backend applied)"
+
+
+def _agent_status_markdown(client: PiRpcClient | None = None) -> str:
+    """Redaction backend URL, Pi model, and credentials — shown at top of the UI."""
+    from redaction_prompt import doc_redaction_gradio_url
+
+    lines = [
+        f"**Redaction backend:** `{doc_redaction_gradio_url()}`",
+        f"**Pi agent model:** `{_pi_agent_model_label(client)}`",
+    ]
+    if client is None or not client.running:
+        lines.insert(0, "**Status:** Ready")
+        lines.append("")
+        lines.append(
+            "_Set `DOC_REDACTION_GRADIO_URL` in `config/pi_agent.env` if the doc_redaction "
+            "app is not at the URL above. Apply **Agent backend** to start Pi._"
+        )
+    else:
+        lines.insert(0, "**Status:** Pi agent connected")
+    lines.append("")
+    lines.append(credential_status_markdown())
+    return "  \n".join(lines)
+
+
 def _session_summary(client: PiRpcClient) -> str:
     try:
         state = client.get_state()
     except PiRpcError as exc:
-        return f"_Could not read Pi state: {exc}_"
-    model = state.get("model") or {}
-    provider = model.get("provider") or state.get("provider") or "—"
-    model_label = model.get("id") or model.get("name") or "unknown"
+        return f"{_agent_status_markdown(client)}  \n\n_Could not read Pi state: {exc}_"
     session_file = state.get("sessionFile") or "—"
     streaming = state.get("isStreaming")
     compacting = state.get("isCompacting")
     return (
-        f"**Provider:** `{provider}`  \n"
-        f"**Model:** `{model_label}`  \n"
+        f"{_agent_status_markdown(client)}  \n\n"
         f"**Streaming:** `{streaming}` · **Compacting:** `{compacting}`  \n"
-        f"**Session:** `{session_file}`  \n"
-        f"{credential_status_markdown()}"
+        f"**Session log:** `{session_file}`"
     )
 
 
@@ -493,15 +524,17 @@ def apply_backend(
         )
 
     rpc = default_client()
-    rpc.start()
     try:
+        rpc.start()
         rpc.set_model(normalized, model)
         rpc.new_session()
         summary = (
             f"**Backend applied:** `{provider_label(normalized)}` / `{model}`  \n\n"
             f"{_session_summary(rpc)}"
         )
-    except PiRpcError as exc:
+    except (PiRpcError, FileNotFoundError, OSError) as exc:
+        rpc.close()
+        rpc = None
         summary = f"**Backend error:** {exc}  \n\n{credential_status_markdown()}"
 
     return (
@@ -584,25 +617,32 @@ def _run_pi_chat(
     pii_method: str = "",
     total_page_count: int = 0,
     vlm_model_name: str | None = None,
+    redact_file: str | None = None,
 ):
     if not message or not message.strip():
         client = client if client and client.running else None
+        hint_activity = [EMPTY_SEND_WITH_FILE_HINT] if redact_file else []
         if client:
             yield _chat_yield(
                 history or [],
                 client,
-                [],
+                hint_activity,
                 "",
                 "",
                 "",
                 session_hash=session_hash,
             )
         else:
+            activity_text = (
+                _format_activity(hint_activity)
+                if hint_activity
+                else "_No activity yet._"
+            )
             yield (
                 history or [],
                 None,
                 "",
-                "_No activity yet._",
+                activity_text,
                 "",
                 "",
                 "_Ready._",
@@ -834,6 +874,7 @@ def chat_respond(
     session_hash: str,
     s3_output_folder: str,
     save_outputs_to_s3: bool,
+    redact_file: str | None,
 ):
     yield from _run_pi_chat(
         message,
@@ -842,6 +883,7 @@ def chat_respond(
         session_hash=session_hash,
         s3_output_folder=s3_output_folder,
         save_outputs_to_s3=save_outputs_to_s3,
+        redact_file=redact_file,
     )
 
 
@@ -903,7 +945,11 @@ def submit_redaction_task(
             _format_activity([f"**Redaction task error:** {exc}"]),
             "",
             "",
-            _session_summary(client) if client and client.running else "_Ready._",
+            (
+                _session_summary(client)
+                if client and client.running
+                else _agent_status_markdown(client)
+            ),
             gr.update(interactive=True),
             gr.update(interactive=False),
             gr.update(interactive=True),
@@ -983,26 +1029,25 @@ def new_chat(
 def _startup_session_info() -> str:
     if IS_HF_SPACE:
         return (
-            "**Hugging Face Space profile** — Gemini orchestration with remote doc_redaction "
+            "**Hugging Face Space profile** — Gemini orchestration with remote Document Redaction App "
             "backend.  \n\n"
             "1. Paste your **Gemini API key** (and optional **HF token** for a private "
             "redaction Space).  \n"
             "2. Click **Apply backend**.  \n\n"
-            f"{credential_status_markdown()}"
+            f"{_agent_status_markdown(None)}"
         )
-    return "_Ready._"
+    return _agent_status_markdown(None)
 
 
 def build_ui():
     hf_redaction_blurb = (
         "Upload a document and add bullet-point requirements. Redaction runs on a **remote** "
-        "doc_redaction Hugging Face Space; Pi downloads artifacts into this Space's workspace."
+        "Redaction App Hugging Face Space.  \n"
+        "When ready, use **Start redaction task** under the chat panel."
         if IS_HF_SPACE
         else (
-            "Upload a PDF (or other supported document). Add bullet-point instructions, "
-            "then **Start redaction task**. Pi receives the full task prompt from "
-            "`skills/Example prompt partnership.txt` with your file copied to the shared "
-            "workspace (`/home/user/app/workspace/` in Docker)."
+            "Upload a PDF (or other supported document). Add bullet-point instructions for redaction below. \n"
+            "When ready, use **Start redaction task** under the chat panel."
         )
     )
     backend_blurb = (
@@ -1029,78 +1074,17 @@ def build_ui():
         title=PI_UI_TITLE,
         fill_height=True,
     ) as demo:
-        gr.Markdown(
-            f"# {PI_UI_TITLE}\n"
-            "Upload a document, add redaction requirements, and start a task."
-        )
+        gr.Markdown(PI_INTRO_TEXT)
         client_state = gr.State(None)
         session_hash_state = gr.State("")
         s3_output_folder_state = gr.State("")
         save_outputs_to_s3_state = gr.State(SAVE_OUTPUTS_TO_S3)
 
-        session_info = gr.Markdown(_startup_session_info())
+        with gr.Accordion("View session info", open=False):
+            session_info = gr.Markdown(_startup_session_info())
 
         with gr.Row(equal_height=False):
             with gr.Column(scale=2):
-
-                with gr.Accordion("Agent backend/API keys", open=IS_HF_SPACE):
-                    gr.Markdown(backend_blurb)
-                    backend_provider = gr.Radio(
-                        label="Provider",
-                        choices=[
-                            (provider_label(key), key) for key in provider_choices()
-                        ],
-                        value=DEFAULT_PROVIDER,
-                    )
-                    backend_model = gr.Dropdown(
-                        label="Model",
-                        choices=models_for_provider(DEFAULT_PROVIDER),
-                        value=default_model_for_provider(DEFAULT_PROVIDER),
-                        allow_custom_value=True,
-                    )
-                    gemini_api_key = gr.Textbox(
-                        label=(
-                            "Gemini API key (required on HF Space)"
-                            if IS_HF_SPACE
-                            else "Gemini API key (session override)"
-                        ),
-                        type="password",
-                        placeholder=(
-                            "Required — get a key from Google AI Studio"
-                            if IS_HF_SPACE
-                            else "Uses GEMINI_API_KEY / GOOGLE_API_KEY from env if empty"
-                        ),
-                    )
-                    hf_token = gr.Textbox(
-                        label="HF token for redaction Space (session override)",
-                        type="password",
-                        placeholder="Uses HF_TOKEN Space secret if empty",
-                        visible=IS_HF_SPACE,
-                    )
-                    aws_region = gr.Textbox(
-                        label="AWS region (session override)",
-                        placeholder="e.g. eu-west-2",
-                        visible=not IS_HF_SPACE,
-                    )
-                    aws_access_key_id = gr.Textbox(
-                        label="AWS access key ID (session override)",
-                        type="password",
-                        visible=not IS_HF_SPACE,
-                    )
-                    aws_secret_access_key = gr.Textbox(
-                        label="AWS secret access key (session override)",
-                        type="password",
-                        visible=not IS_HF_SPACE,
-                    )
-                    aws_session_token = gr.Textbox(
-                        label="AWS session token (optional)",
-                        type="password",
-                        visible=not IS_HF_SPACE,
-                    )
-                    apply_backend_btn = gr.Button(
-                        "Apply backend",
-                        variant="primary",
-                    )
 
                 with gr.Accordion("Redaction task", open=True):
                     gr.Markdown(hf_redaction_blurb)
@@ -1183,7 +1167,7 @@ def build_ui():
                         gr.Markdown(
                             "### Try an example\n"
                             "Click a row to load the sample PDF and redaction instructions, "
-                            "then **Start redaction task**."
+                            "then **Start redaction task** under the chat panel."
                         )
                         gr.Examples(
                             examples=pi_example_rows,
@@ -1211,25 +1195,86 @@ def build_ui():
                     elif settings_accordion is not None:
                         settings_accordion.render()
 
-                    start_redact_btn = gr.Button(
-                        "Start redaction task",
+                with gr.Accordion("Agent backend/API keys", open=IS_HF_SPACE):
+                    gr.Markdown(backend_blurb)
+                    backend_provider = gr.Radio(
+                        label="Provider",
+                        choices=[
+                            (provider_label(key), key) for key in provider_choices()
+                        ],
+                        value=get_default_provider(),
+                    )
+                    backend_model = gr.Dropdown(
+                        label="Model",
+                        choices=models_for_provider(get_default_provider()),
+                        value=default_model_for_provider(get_default_provider()),
+                        allow_custom_value=True,
+                    )
+                    gemini_api_key = gr.Textbox(
+                        label=(
+                            "Gemini API key (required on HF Space)"
+                            if IS_HF_SPACE
+                            else "Gemini API key (session override)"
+                        ),
+                        type="password",
+                        placeholder=(
+                            "Required — get a key from Google AI Studio"
+                            if IS_HF_SPACE
+                            else "Uses GEMINI_API_KEY / GOOGLE_API_KEY from env if empty"
+                        ),
+                    )
+                    hf_token = gr.Textbox(
+                        label="HF token for redaction Space (session override)",
+                        type="password",
+                        placeholder="Uses HF_TOKEN Space secret if empty",
+                        visible=IS_HF_SPACE,
+                    )
+                    with gr.Accordion("AWS credentials (optional)", open=False):
+                        aws_region = gr.Textbox(
+                            label="AWS region (session override)",
+                            placeholder="e.g. eu-west-2",
+                            visible=not IS_HF_SPACE,
+                        )
+                        aws_access_key_id = gr.Textbox(
+                            label="AWS access key ID (session override)",
+                            type="password",
+                            visible=not IS_HF_SPACE,
+                        )
+                        aws_secret_access_key = gr.Textbox(
+                            label="AWS secret access key (session override)",
+                            type="password",
+                            visible=not IS_HF_SPACE,
+                        )
+                        aws_session_token = gr.Textbox(
+                            label="AWS session token (optional)",
+                            type="password",
+                            visible=False,  # not IS_HF_SPACE,
+                        )
+                    apply_backend_btn = gr.Button(
+                        "Apply backend",
                         variant="primary",
                     )
 
             with gr.Column(scale=3):
-                chatbot = gr.Chatbot(label="Chat", height=480)
-                msg = gr.Textbox(
-                    label="Message",
-                    placeholder="Optional follow-up message to Pi",
-                    lines=3,
-                )
+                chatbot = gr.Chatbot(label="Task progress", height=480)
                 with gr.Row():
-                    send = gr.Button("Send", variant="secondary")
+                    start_redact_btn = gr.Button(
+                        "Start redaction task",
+                        variant="primary",
+                    )
                     abort_btn = gr.Button("Abort", variant="stop", interactive=False)
-                    clear = gr.Button("New session")
+                clear = gr.Button("New session")
+                with gr.Accordion("Follow-up chat (optional)", open=False):
+                    msg = gr.Textbox(
+                        label="Message",
+                        placeholder=(
+                            "Optional message after a redaction task (e.g. fix page 3)"
+                        ),
+                        lines=3,
+                    )
+                    send = gr.Button("Send follow-up", variant="secondary")
 
-            with gr.Column(scale=2):
-                with gr.Accordion("Thinking log", open=True):
+                with gr.Accordion("Thinking log", open=False):
                     activity_log = gr.Markdown(
                         value="_No activity yet._", max_height=480, height=480
                     )
@@ -1251,7 +1296,7 @@ def build_ui():
             gr.Markdown(
                 "**Final deliverables** appear automatically when the agent saves to "
                 "`review/output_review_final/` (or `review/output_final/`). "
-                "Downloads below are copied to `output_final_download/`, Gradio cache "
+                "Downloads below are copied to your session's `output_final_download/` "
                 "prefixes removed, and duplicate filenames collapsed to the newest file. "
                 "Use the file explorer below to browse or download other workspace files."
             )
@@ -1280,9 +1325,7 @@ def build_ui():
                 variant="secondary",
             )
             workspace_output_explorer = gr.FileExplorer(
-                root_dir=str(
-                    os.environ.get("PI_WORKSPACE_DIR", "/home/user/app/workspace")
-                ),
+                root_dir=str(workspace_base_dir()),
                 label="Browse session workspace",
                 file_count="multiple",
                 interactive=True,
@@ -1326,6 +1369,7 @@ def build_ui():
                 session_hash_state,
                 s3_output_folder_state,
                 save_outputs_to_s3_state,
+                redact_file,
             ],
             outputs=chat_outputs,
         )
@@ -1338,6 +1382,7 @@ def build_ui():
                 session_hash_state,
                 s3_output_folder_state,
                 save_outputs_to_s3_state,
+                redact_file,
             ],
             outputs=chat_outputs,
         )

@@ -11,12 +11,35 @@ from pathlib import Path
 from pi_agent_config import is_hf_space_profile
 from session_workspace import WORKSPACE_BASE_DIR
 
-UPLOAD_ROOT = Path(os.environ.get("PI_UPLOAD_ROOT", "/tmp/gradio")).resolve()
+
+def upload_root() -> Path:
+    """Gradio upload directory (created by ``bootstrap_pi_config.ensure_pi_upload_root``)."""
+    raw = (os.environ.get("PI_UPLOAD_ROOT") or "").strip()
+    if not raw:
+        from bootstrap_pi_config import ensure_pi_upload_root
+
+        raw = ensure_pi_upload_root(pi_repo_root())
+    path = Path(raw)
+    path.mkdir(parents=True, exist_ok=True)
+    return path.resolve()
+
+
 _SAFE_UPLOAD_FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$")
 
-REPO_ROOT = Path(os.environ.get("PI_WORKDIR", "/workspace/doc_redaction"))
-TEMPLATE_PATH = REPO_ROOT / "skills" / "Example prompt partnership.txt"
+_PARTNERSHIP_TEMPLATE = Path("skills") / "Example prompt partnership.txt"
 WORKSPACE_DIR = WORKSPACE_BASE_DIR
+
+
+def pi_repo_root() -> Path:
+    """Monorepo checkout root (skills/, config/). Set via :func:`bootstrap_pi_config.ensure_pi_workdir`."""
+    from bootstrap_pi_config import pi_repo_root_path
+
+    return pi_repo_root_path()
+
+
+def partnership_template_path() -> Path:
+    return pi_repo_root() / _PARTNERSHIP_TEMPLATE
+
 
 HF_DEFAULT_OCR = "Local model - selectable text"
 HF_DEFAULT_PII = "Local"
@@ -198,10 +221,21 @@ class RedactionTaskSettings:
         )
 
 
+def doc_redaction_gradio_url() -> str:
+    """
+    Base URL of the doc_redaction Gradio app used for ``/doc_redact`` and review APIs.
+
+    Set ``DOC_REDACTION_GRADIO_URL`` in ``config/pi_agent.env`` (or the process environment).
+    Loaded via ``tools.config`` when the Pi app starts (default local: ``http://127.0.0.1:7860``).
+    """
+    from tools.config import DOC_REDACTION_GRADIO_URL
+
+    return str(DOC_REDACTION_GRADIO_URL).strip().rstrip("/")
+
+
 def _default_gradio_url() -> str:
-    if is_hf_space_profile():
-        return os.environ.get("DOC_REDACTION_GRADIO_URL", HF_DEFAULT_GRADIO_URL)
-    return os.environ.get("DOC_REDACTION_GRADIO_URL", "http://redaction-app-llama:7860")
+    """Back-compat alias for prompt template substitution."""
+    return doc_redaction_gradio_url()
 
 
 def _default_vlm_base_url() -> str:
@@ -213,7 +247,7 @@ def _default_vlm_model() -> str:
 
 
 def load_template(path: Path | None = None) -> str:
-    template_file = path or TEMPLATE_PATH
+    template_file = path or partnership_template_path()
     if not template_file.is_file():
         raise FileNotFoundError(f"Prompt template not found: {template_file}")
     return template_file.read_text(encoding="utf-8")
@@ -327,7 +361,7 @@ def _resolve_and_validate_upload_path(upload_path: str | Path) -> Path:
     if not str(upload_path).strip():
         raise ValueError("Uploaded file path is empty.")
 
-    root = UPLOAD_ROOT.resolve(strict=True)
+    root = upload_root()
     raw_path = Path(upload_path).expanduser()
     try:
         source = raw_path.resolve(strict=True)

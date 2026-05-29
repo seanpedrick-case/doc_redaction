@@ -8,6 +8,9 @@ export PYTHONPATH="${PI_WORKDIR}:${PI_WORKDIR}/agent-redact/pi:${PYTHONPATH:-}"
 
 cd "$PI_WORKDIR"
 
+export APP_TYPE="${APP_TYPE:-pi}"
+export APP_CONFIG_PATH="${APP_CONFIG_PATH:-$PI_WORKDIR/config/pi_agent.env}"
+
 mkdir -p "${PI_WORKSPACE_DIR:-/home/user/app/workspace}"
 python3 agent-redact/pi/pi_agent_config.py
 
@@ -15,7 +18,7 @@ if [ "${RUN_FASTAPI:-False}" = "True" ]; then
   exec uvicorn gradio_app:app \
     --app-dir agent-redact/pi \
     --host "${GRADIO_SERVER_NAME:-0.0.0.0}" \
-    --port "${GRADIO_SERVER_PORT:-7862}"
+    --port "${PI_GRADIO_PORT:-${GRADIO_SERVER_PORT:-7862}}"
 else
   python3 agent-redact/pi/gradio_app.py &
 fi

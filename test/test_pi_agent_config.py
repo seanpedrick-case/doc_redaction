@@ -38,7 +38,19 @@ def test_hf_profile_defaults_session_dir_to_tmp(tmp_path, monkeypatch):
     assert Path(settings["sessionDir"]).resolve() == Path("/tmp/pi-sessions").resolve()
     assert Path(settings["sessionDir"]).is_dir()
     assert settings["retry"]["baseDelayMs"] == 60000
-    assert settings["retry"]["maxRetries"] == 3
+    assert settings["retry"]["maxRetries"] == 5
+    assert settings["retry"]["provider"]["maxRetries"] == 5
+
+
+def test_gemini_provider_applies_retry_settings(tmp_path, monkeypatch):
+    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "local-docker")
+    monkeypatch.setenv("PI_DEFAULT_PROVIDER", "google-gemini")
+    monkeypatch.setenv("PI_MAX_RETRIES", "7")
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
+
+    settings = pac.build_settings_config(default_provider="google-gemini")
+    assert settings["retry"]["maxRetries"] == 7
+    assert settings["retry"]["provider"]["maxRetries"] == 7
 
 
 def test_pi_session_dir_override(tmp_path, monkeypatch):

@@ -297,9 +297,15 @@ def sanitize_markdown_text(text: str) -> str:
 CONFIG_FOLDER = get_or_create_env_var("CONFIG_FOLDER", "config/")
 CONFIG_FOLDER = ensure_folder_within_app_directory(CONFIG_FOLDER)
 
+APP_TYPE = get_or_create_env_var("APP_TYPE", "redaction-app")
+if APP_TYPE == "pi":
+    APP_CONFIG_FILE = "pi_agent.env"
+else:
+    APP_CONFIG_FILE = "app_config.env"
+
 # If you have an aws_config env file in the config folder, you can load in app variables this way, e.g. 'config/app_config.env'
 APP_CONFIG_PATH = get_or_create_env_var(
-    "APP_CONFIG_PATH", CONFIG_FOLDER + "app_config.env"
+    "APP_CONFIG_PATH", CONFIG_FOLDER + APP_CONFIG_FILE
 )  # e.g. config/app_config.env
 
 if APP_CONFIG_PATH:
@@ -397,23 +403,6 @@ S3_OUTPUTS_BUCKET = get_or_create_env_var(
     "S3_OUTPUTS_BUCKET", DOCUMENT_REDACTION_BUCKET
 )
 
-# Allow for files to be saved in a temporary folder for increased security in some instances - deprecated
-# if OUTPUT_FOLDER == "TEMP" or INPUT_FOLDER == "TEMP":
-#     # Use mkdtemp so the directory persists for the lifetime of the process.
-#     # TemporaryDirectory() as a context manager deletes the directory immediately on exit.
-#     import atexit
-#     import shutil
-
-#     temp_dir = tempfile.mkdtemp()
-#     print(f"Temporary directory created at: {temp_dir}")
-#     atexit.register(shutil.rmtree, temp_dir, ignore_errors=True)
-
-#     if OUTPUT_FOLDER == "TEMP":
-#         OUTPUT_FOLDER = temp_dir + "/"
-#     if INPUT_FOLDER == "TEMP":
-#         INPUT_FOLDER = temp_dir + "/"
-# else:
-#     # Ensure folders are within app directory (skip validation for TEMP as it's handled above)
 
 OUTPUT_FOLDER = ensure_folder_within_app_directory(OUTPUT_FOLDER)
 INPUT_FOLDER = ensure_folder_within_app_directory(INPUT_FOLDER)
@@ -2427,35 +2416,45 @@ To start, upload a document below (or click on an example), then click 'Extract 
 
 NOTE: The app is not 100% accurate, and it will miss some personal information. It is essential that all outputs are reviewed **by a human** before using the final outputs."""
 
-INTRO_TEXT = get_or_create_env_var("INTRO_TEXT", DEFAULT_INTRO_TEXT)
 
-# Read in intro text from a text file if it is a path to a text file
-if INTRO_TEXT.endswith(".txt"):
-    # Validate the path is safe (with base path for relative paths)
-    if validate_path_safety(INTRO_TEXT, base_path="."):
-        try:
-            # Use secure file read with explicit encoding
-            INTRO_TEXT = secure_file_read(".", INTRO_TEXT, encoding="utf-8")
-            # Format the text to replace {USER_GUIDE_URL} with the actual value
-            INTRO_TEXT = INTRO_TEXT.format(USER_GUIDE_URL=USER_GUIDE_URL)
-        except FileNotFoundError:
-            print(f"Warning: Intro text file not found: {INTRO_TEXT}")
-            INTRO_TEXT = DEFAULT_INTRO_TEXT
-        except Exception as e:
-            print(f"Error reading intro text file: {e}")
-            # Fallback to default
-            INTRO_TEXT = DEFAULT_INTRO_TEXT
-    else:
-        print(f"Warning: Unsafe file path detected for INTRO_TEXT: {INTRO_TEXT}")
-        INTRO_TEXT = DEFAULT_INTRO_TEXT
+def _load_intro_text(
+    env_var_name: str,
+    default_text: str,
+    *,
+    format_kwargs: dict | None = None,
+) -> str:
+    """Load intro markdown from env or a ``.txt`` file (same rules as ``INTRO_TEXT``)."""
+    format_kwargs = format_kwargs or {}
+    text = get_or_create_env_var(env_var_name, default_text)
+    if text.endswith(".txt"):
+        if validate_path_safety(text, base_path="."):
+            try:
+                text = secure_file_read(".", text, encoding="utf-8")
+                text = text.format(**format_kwargs)
+            except FileNotFoundError:
+                print(f"Warning: Intro text file not found for {env_var_name}: {text}")
+                text = default_text
+            except Exception as e:
+                print(f"Error reading intro text file for {env_var_name}: {e}")
+                text = default_text
+        else:
+            print(f"Warning: Unsafe file path detected for {env_var_name}: {text}")
+            text = default_text
+    text = sanitize_markdown_text(text.strip('"').strip("'"))
+    if not text or not text.strip():
+        print(
+            f"Warning: {env_var_name} is empty after sanitisation, using default intro text"
+        )
+        text = sanitize_markdown_text(default_text)
+    return text
 
-# Sanitize the text
-INTRO_TEXT = sanitize_markdown_text(INTRO_TEXT.strip('"').strip("'"))
 
-# Ensure we have valid content after sanitization
-if not INTRO_TEXT or not INTRO_TEXT.strip():
-    print("Warning: Intro text is empty after sanitisation, using default intro text")
-    INTRO_TEXT = sanitize_markdown_text(DEFAULT_INTRO_TEXT)
+INTRO_TEXT = _load_intro_text(
+    "INTRO_TEXT",
+    DEFAULT_INTRO_TEXT,
+    format_kwargs={"USER_GUIDE_URL": USER_GUIDE_URL},
+)
+
 
 # App fills screen width or not
 FILL_SCREEN_WIDTH = convert_string_to_boolean(
@@ -2792,6 +2791,82 @@ DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS = int(
     get_or_create_env_var("DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS", "7")
 )  # How many days into the past should whole document Textract jobs be displayed? After that, the data is not deleted from the Textract jobs csv, but it is just filtered out. Included to align with S3 buckets where the file outputs will be automatically deleted after X days.
 
+###
+# Pi agent options
+###
+PI_GRADIO_TITLE = get_or_create_env_var("PI_GRADIO_TITLE", "Agentic Document Redaction")
+
+DEFAULT_PI_INTRO_TEXT = f"""# {PI_GRADIO_TITLE}
+
+Upload a document, add redaction requirements, and start a task. The Pi agent orchestrates redaction using skills in this repository. See the [User Guide]({USER_GUIDE_URL}) for the further information about the underlyingDocument Redaction App.
+
+NOTE: Outputs are not guaranteed complete — review all redacted material **by a human** before use."""
+
+PI_INTRO_TEXT = _load_intro_text(
+    "PI_INTRO_TEXT",
+    DEFAULT_PI_INTRO_TEXT,
+    format_kwargs={
+        "USER_GUIDE_URL": USER_GUIDE_URL,
+        "PI_GRADIO_TITLE": PI_GRADIO_TITLE,
+    },
+)
+
+
+PI_WORKSPACE_DIR = get_or_create_env_var("PI_WORKSPACE_DIR", "/home/user/app/workspace")
+PI_DEFAULT_PROVIDER = get_or_create_env_var(
+    "PI_DEFAULT_PROVIDER", "google-gemini"
+)  # Default Pi orchestration backend: llama-cpp | google-gemini | amazon-bedrock
+PI_DEFAULT_MODEL = get_or_create_env_var("PI_DEFAULT_MODEL", "gemini-flash-lite-latest")
+PI_VLM_MODEL = get_or_create_env_var("PI_VLM_MODEL", "gemini-flash-lite-latest")
+PI_DEFAULT_OCR_METHOD = get_or_create_env_var("PI_DEFAULT_OCR_METHOD", "tesseract")
+PI_DEFAULT_PII_METHOD = get_or_create_env_var("PI_DEFAULT_PII_METHOD", "Local")
+DOC_REDACTION_GRADIO_URL = get_or_create_env_var(
+    "DOC_REDACTION_GRADIO_URL", "http://127.0.0.1:7860"
+)
+PI_UI_TITLE = PI_GRADIO_TITLE
+_pi_port_default = (
+    "7860"
+    if os.environ.get("PI_DEPLOYMENT_PROFILE", "local-docker").strip().lower()
+    == "hf-space"
+    else "7862"
+)
+PI_GRADIO_PORT = int(os.environ.get("PI_GRADIO_PORT", _pi_port_default))
+
+PI_UI_HOST = os.environ.get("GRADIO_SERVER_NAME", "0.0.0.0")
+
+SHOW_THINKING = os.environ.get("PI_GRADIO_SHOW_THINKING", "false").lower() in {
+    "1",
+    "true",
+    "yes",
+}
+SHOW_TOOL_OUTPUT = os.environ.get("PI_GRADIO_SHOW_TOOL_OUTPUT", "true").lower() in {
+    "1",
+    "true",
+    "yes",
+}
+TOOL_OUTPUT_MAX = int(os.environ.get("PI_GRADIO_TOOL_OUTPUT_MAX", "12000"))
+ACTIVITY_MAX_LINES = int(os.environ.get("PI_GRADIO_ACTIVITY_MAX_LINES", "50"))
+THINKING_DISPLAY_MAX = int(os.environ.get("PI_GRADIO_THINKING_MAX_CHARS", "16000"))
+THINKING_PANEL_CSS = """
+.thinking-panel textarea {
+    max-height: 280px !important;
+    overflow-y: auto !important;
+}
+"""
+# Pi agent: Gemini quota / rate-limit retries (Gradio loop + Pi settings.json).
+# PI_MAX_RETRIES is the preferred name; PI_QUOTA_RETRY_ATTEMPTS is a legacy alias.
+if os.environ.get("PI_QUOTA_RETRY_ATTEMPTS") is not None:
+    QUOTA_RETRY_ATTEMPTS = int(os.environ["PI_QUOTA_RETRY_ATTEMPTS"])
+else:
+    QUOTA_RETRY_ATTEMPTS = int(get_or_create_env_var("PI_MAX_RETRIES", "5"))
+QUOTA_RETRY_DELAY_S = int(get_or_create_env_var("PI_QUOTA_RETRY_DELAY_S", "60"))
+QUOTA_CONTINUE_PROMPT = (
+    "Continue the redaction task from where you left off. "
+    "Do not re-read skills or repeat completed tool steps unless required."
+)
+EMPTY_SEND_WITH_FILE_HINT = (
+    "To start redaction, click **Start redaction task** below the chat."
+)
 
 ###
 # Config vars output format

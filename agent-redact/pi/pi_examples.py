@@ -41,19 +41,16 @@ class PiRedactionExample:
 
 def resolve_example_data_dir() -> Path | None:
     """Locate bundled example PDFs (repo checkout, PyPI package, or Docker layout)."""
-    workdir = Path(os.environ.get("PI_WORKDIR", "/workspace/doc_redaction"))
+    from bootstrap_pi_config import pi_repo_root_path
+
+    workdir = pi_repo_root_path()
+    repo_root = Path(__file__).resolve().parents[2]
     candidates = [
         workdir / "doc_redaction" / "example_data",
         workdir / "example_data",
-        Path(__file__).resolve().parents[2] / "doc_redaction" / "example_data",
-        Path(__file__).resolve().parents[2] / "example_data",
+        repo_root / "doc_redaction" / "example_data",
+        repo_root / "example_data",
     ]
-    try:
-        import doc_redaction as pkg
-
-        candidates.append(Path(pkg.__file__).resolve().parent / "example_data")
-    except ImportError:
-        pass
 
     for candidate in candidates:
         if candidate.is_dir():

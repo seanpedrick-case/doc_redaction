@@ -14,11 +14,11 @@
   },
   "retry": {
     "enabled": true,
-    "maxRetries": 3,
+    "maxRetries": 5,
     "baseDelayMs": 2000,
     "provider": {
       "timeoutMs": 3600000,
-      "maxRetries": 2,
+      "maxRetries": 5,
       "maxRetryDelayMs": 60000
     }
   },

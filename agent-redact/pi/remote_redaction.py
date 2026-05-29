@@ -10,13 +10,14 @@ from urllib.parse import quote
 import httpx
 from gradio_client import Client
 
-DEFAULT_BASE_URL = "https://seanpedrickcase-document-redaction.hf.space"
 DEFAULT_CONNECT_TIMEOUT = 120.0
 DEFAULT_READ_TIMEOUT = 1800.0
 
 
 def redaction_base_url() -> str:
-    return os.environ.get("DOC_REDACTION_GRADIO_URL", DEFAULT_BASE_URL).rstrip("/")
+    from redaction_prompt import doc_redaction_gradio_url
+
+    return doc_redaction_gradio_url()
 
 
 def redaction_hf_token() -> str | None:

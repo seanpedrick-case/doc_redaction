@@ -58,12 +58,15 @@ x-pi-agent-common: &pi-agent-common
     - redaction-net-llama
 
 x-pi-agent-env: &pi-agent-env
+  APP_TYPE: pi
+  APP_CONFIG_PATH: /workspace/doc_redaction/config/pi_agent.env
   HOME: /home/node
   PI_SKIP_VERSION_CHECK: "1"
   PI_OFFLINE: "1"
-  DOC_REDACTION_GRADIO_URL: http://redaction-app-llama:7860
-  GRADIO_SERVER_NAME: 0.0.0.0
-  GRADIO_SERVER_PORT: "7862"
+  DOC_REDACTION_GRADIO_URL: ${DOC_REDACTION_GRADIO_URL:-http://redaction-app-llama:7860}
+  GRADIO_SERVER_NAME: ${GRADIO_SERVER_NAME:-0.0.0.0}
+  PI_GRADIO_PORT: ${PI_GRADIO_PORT:-7862}
+  GRADIO_SERVER_PORT: ${GRADIO_SERVER_PORT:-7862}
   PYTHONPATH: /workspace/doc_redaction:/workspace/doc_redaction/agent-redact/pi
   PI_WORKSPACE_DIR: /home/user/app/workspace
   # PI_DEFAULT_PROVIDER: ${PI_DEFAULT_PROVIDER:-llama-cpp}

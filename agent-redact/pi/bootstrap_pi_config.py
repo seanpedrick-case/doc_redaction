@@ -1,0 +1,134 @@
+"""Pi agent process bootstrap (env file + workspace) before ``tools.config`` import."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+_DOCKER_WORKSPACE = Path("/home/user/app/workspace")
+_DOCKER_UPLOAD_ROOT = Path("/tmp/gradio")
+_DOCKER_PI_WORKDIR = Path("/workspace/doc_redaction")
+_PARTNERSHIP_TEMPLATE = Path("skills") / "Example prompt partnership.txt"
+
+
+def ensure_pi_workspace_dir(repo_root: Path | None = None) -> str:
+    """
+    Resolve ``PI_WORKSPACE_DIR``, create it, and sync ``os.environ``.
+
+    - Explicit ``PI_WORKSPACE_DIR`` wins.
+    - Else use the Docker mount when that path already exists.
+    - Else ``{repo_root}/workspace`` (local Windows/macOS/Linux dev).
+    """
+    root = (repo_root or Path(__file__).resolve().parents[2]).resolve()
+    raw = (os.environ.get("PI_WORKSPACE_DIR") or "").strip()
+    if raw:
+        path = Path(raw)
+    elif _DOCKER_WORKSPACE.is_dir():
+        path = _DOCKER_WORKSPACE
+    else:
+        path = root / "workspace"
+    path.mkdir(parents=True, exist_ok=True)
+    resolved = str(path.resolve())
+    os.environ["PI_WORKSPACE_DIR"] = resolved
+    return resolved
+
+
+def ensure_pi_upload_root(repo_root: Path | None = None) -> str:
+    """
+    Resolve where Gradio stores ``gr.File`` uploads and sync ``os.environ``.
+
+    Must run before ``import gradio`` so ``GRADIO_TEMP_DIR`` matches validation
+    in ``redaction_prompt._resolve_and_validate_upload_path``.
+
+    - Explicit ``PI_UPLOAD_ROOT`` wins.
+    - Else ``GRADIO_TEMP_DIR`` if already set.
+    - Else Docker ``/tmp/gradio`` when that directory exists.
+    - Else ``{repo}/workspace/.gradio_uploads`` (local dev; stays inside the app tree
+      so ``tools.config.ensure_folder_within_app_directory`` accepts ``GRADIO_TEMP_DIR``).
+    """
+    root = (repo_root or Path(__file__).resolve().parents[2]).resolve()
+    raw = (os.environ.get("PI_UPLOAD_ROOT") or "").strip()
+    if raw:
+        path = Path(raw)
+    else:
+        gradio_temp = (os.environ.get("GRADIO_TEMP_DIR") or "").strip()
+        if gradio_temp:
+            path = Path(gradio_temp)
+        elif _DOCKER_UPLOAD_ROOT.is_dir():
+            path = _DOCKER_UPLOAD_ROOT
+        else:
+            path = root / "workspace" / ".gradio_uploads"
+    path.mkdir(parents=True, exist_ok=True)
+    resolved = str(path.resolve())
+    os.environ["PI_UPLOAD_ROOT"] = resolved
+    if not (os.environ.get("GRADIO_TEMP_DIR") or "").strip():
+        os.environ["GRADIO_TEMP_DIR"] = resolved
+    return resolved
+
+
+def _partnership_template_exists(repo: Path) -> bool:
+    return (repo / _PARTNERSHIP_TEMPLATE).is_file()
+
+
+def ensure_pi_workdir(repo_root: Path | None = None) -> str:
+    """
+    Resolve ``PI_WORKDIR`` (monorepo root for skills/ and Pi RPC cwd).
+
+    - Explicit ``PI_WORKDIR`` wins when the partnership prompt template exists there.
+    - Else use the checkout root (``agent-redact/pi`` → parents[2]).
+    - Docker images set ``PI_WORKDIR=/workspace/doc_redaction`` via env or ``start.sh``.
+    """
+    root = (repo_root or Path(__file__).resolve().parents[2]).resolve()
+    raw = (os.environ.get("PI_WORKDIR") or "").strip()
+    if raw:
+        candidate = Path(raw)
+        if _partnership_template_exists(candidate):
+            resolved = str(candidate.resolve())
+            os.environ["PI_WORKDIR"] = resolved
+            return resolved
+    if _DOCKER_PI_WORKDIR.is_dir() and _partnership_template_exists(_DOCKER_PI_WORKDIR):
+        resolved = str(_DOCKER_PI_WORKDIR.resolve())
+        os.environ["PI_WORKDIR"] = resolved
+        return resolved
+    resolved = str(root)
+    os.environ["PI_WORKDIR"] = resolved
+    return resolved
+
+
+def pi_repo_root_path(repo_root: Path | None = None) -> Path:
+    """Return ``PI_WORKDIR`` as a :class:`~pathlib.Path` (calls :func:`ensure_pi_workdir`)."""
+    return Path(ensure_pi_workdir(repo_root))
+
+
+def load_pi_agent_env_file(config_path: str | Path | None = None) -> bool:
+    """
+    Load ``config/pi_agent.env`` into ``os.environ`` (does not override existing vars).
+
+    Must run before ``import pi_agent_config`` so module-level defaults see the file.
+    """
+    path = Path(config_path or os.environ.get("APP_CONFIG_PATH", "")).expanduser()
+    if not path.is_file():
+        return False
+    load_dotenv(path, override=False)
+    return True
+
+
+def ensure_pi_config_env(repo_root: Path | None = None) -> str:
+    """
+    Set process env so ``tools.config`` loads the Pi agent env file.
+
+    Must run before any ``from pi_agent_config import ...`` or ``tools.config`` import
+    that depends on Pi env vars. Safe to call multiple times; does not override
+    existing environment variables.
+    """
+    root = (repo_root or Path(__file__).resolve().parents[2]).resolve()
+    os.environ.setdefault("APP_TYPE", "pi")
+    if not os.environ.get("APP_CONFIG_PATH", "").strip():
+        os.environ["APP_CONFIG_PATH"] = str(root / "config" / "pi_agent.env")
+    load_pi_agent_env_file()
+    ensure_pi_workdir(root)
+    ensure_pi_workspace_dir(root)
+    ensure_pi_upload_root(root)
+    return os.environ["APP_CONFIG_PATH"]

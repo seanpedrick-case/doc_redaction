@@ -190,6 +190,39 @@ def test_collect_final_output_files_deduplicates_and_strips_prefix(
     assert (download_dir / "notes.txt").read_text() == "notes"
 
 
+def test_final_download_dir_isolated_per_session_when_workspace_shared(
+    tmp_path, monkeypatch
+):
+    base = tmp_path / "workspace"
+    base.mkdir()
+    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("PI_SESSION_WORKSPACE", "false")
+
+    assert (
+        of.final_download_dir("user_a")
+        == (base / "user_a" / "output_final_download").resolve()
+    )
+    assert (
+        of.final_download_dir("user_b")
+        == (base / "user_b" / "output_final_download").resolve()
+    )
+
+
+def test_reset_download_dir_clears_without_removing_root(tmp_path):
+    download_dir = tmp_path / "session" / "output_final_download"
+    download_dir.mkdir(parents=True)
+    stale = download_dir / "old.pdf"
+    stale.write_bytes(b"%PDF")
+    nested = download_dir / "nested"
+    nested.mkdir()
+    (nested / "x.txt").write_text("x")
+
+    of._reset_download_dir(download_dir)
+
+    assert download_dir.is_dir()
+    assert list(download_dir.iterdir()) == []
+
+
 def test_workspace_root_from_uses_session_hash_only(tmp_path, monkeypatch):
     base = tmp_path / "workspace"
     base.mkdir()

@@ -23,6 +23,42 @@ DEPLOYMENT_PROFILE = (
     os.environ.get("PI_DEPLOYMENT_PROFILE", DEPLOYMENT_LOCAL).strip().lower()
 )
 
+
+def pi_max_retries() -> int:
+    """Max retries for Pi auto-retry and Gradio quota backoff (env: PI_MAX_RETRIES, default 5)."""
+    raw = (
+        os.environ.get("PI_QUOTA_RETRY_ATTEMPTS")
+        or os.environ.get("PI_MAX_RETRIES")
+        or "5"
+    ).strip()
+    return int(raw)
+
+
+def _apply_retry_settings(
+    settings: dict[str, Any],
+    *,
+    provider: str,
+) -> None:
+    """Write Pi ``settings.json`` retry block (Gemini uses longer delays)."""
+    max_retries = pi_max_retries()
+    gemini_delays = provider == PROVIDER_GEMINI or is_hf_space_profile()
+    base_delay_ms = 2000
+    max_delay_ms = 60000
+    if gemini_delays:
+        base_delay_ms = int(os.environ.get("PI_GEMINI_RETRY_BASE_DELAY_MS", "60000"))
+        max_delay_ms = int(os.environ.get("PI_GEMINI_RETRY_MAX_DELAY_MS", "90000"))
+    settings["retry"] = {
+        "enabled": True,
+        "maxRetries": max_retries,
+        "baseDelayMs": base_delay_ms,
+        "provider": {
+            "timeoutMs": 3600000,
+            "maxRetries": max_retries,
+            "maxRetryDelayMs": max_delay_ms,
+        },
+    }
+
+
 PROVIDER_LLAMA = "llama-cpp"
 PROVIDER_GEMINI = "google-gemini"
 PROVIDER_BEDROCK = "amazon-bedrock"
@@ -38,14 +74,6 @@ def is_hf_space_profile() -> bool:
     profile = os.environ.get("PI_DEPLOYMENT_PROFILE", DEPLOYMENT_LOCAL).strip().lower()
     return profile == DEPLOYMENT_HF_SPACE
 
-
-def _default_provider() -> str:
-    if is_hf_space_profile():
-        return PROVIDER_GEMINI
-    return os.environ.get("PI_DEFAULT_PROVIDER", PROVIDER_LLAMA)
-
-
-DEFAULT_PROVIDER = _default_provider()
 
 LLAMA_BASE_URL = os.environ.get("PI_LLAMA_BASE_URL", "http://llama-inference:8080/v1")
 LLAMA_MODEL_ID = os.environ.get("PI_LLAMA_MODEL_ID", "unsloth/Qwen3.6-27B-MTP-GGUF")
@@ -95,6 +123,19 @@ DEFAULT_MODEL_BY_PROVIDER: dict[str, str] = {
     PROVIDER_BEDROCK: "anthropic.claude-sonnet-4-6",
 }
 
+
+def get_default_provider() -> str:
+    """Current default Pi provider (reads ``PI_DEFAULT_PROVIDER`` from env each call)."""
+    if is_hf_space_profile():
+        return PROVIDER_GEMINI
+    raw = (os.environ.get("PI_DEFAULT_PROVIDER") or PROVIDER_LLAMA).strip()
+    if raw in PROVIDER_MODELS:
+        return raw
+    return PROVIDER_LLAMA
+
+
+DEFAULT_PROVIDER = get_default_provider()
+
 _env_default_model = (os.environ.get("PI_DEFAULT_MODEL") or "").strip()
 DEFAULT_MODEL = _env_default_model or DEFAULT_MODEL_BY_PROVIDER.get(
     DEFAULT_PROVIDER, LLAMA_MODEL_ID
@@ -111,7 +152,7 @@ def resolved_default_model(provider: str, *, override: str | None = None) -> str
     models = PROVIDER_MODELS.get(provider, [])
     if override and override in models:
         return override
-    env_model = (DEFAULT_MODEL or "").strip()
+    env_model = (os.environ.get("PI_DEFAULT_MODEL") or DEFAULT_MODEL or "").strip()
     if env_model and env_model in models:
         return env_model
     return DEFAULT_MODEL_BY_PROVIDER.get(provider, LLAMA_MODEL_ID)
@@ -495,7 +536,7 @@ def build_settings_config(
     default_provider: str | None = None,
     default_model: str | None = None,
 ) -> dict[str, Any]:
-    provider = default_provider or DEFAULT_PROVIDER
+    provider = default_provider or get_default_provider()
     if provider not in PROVIDER_MODELS:
         provider = PROVIDER_GEMINI if is_hf_space_profile() else PROVIDER_LLAMA
     model = resolved_default_model(provider, override=default_model)
@@ -505,20 +546,8 @@ def build_settings_config(
     settings["defaultModel"] = model
     session_path = ensure_session_dir(resolve_session_dir())
     settings["sessionDir"] = session_path.as_posix()
-    if is_hf_space_profile():
-        # Gemini free tier is often 5 req/min — wait ~1 min between Pi retries.
-        base_delay_ms = int(os.environ.get("PI_GEMINI_RETRY_BASE_DELAY_MS", "60000"))
-        max_delay_ms = int(os.environ.get("PI_GEMINI_RETRY_MAX_DELAY_MS", "90000"))
-        settings["retry"] = {
-            "enabled": True,
-            "maxRetries": 3,
-            "baseDelayMs": base_delay_ms,
-            "provider": {
-                "timeoutMs": 3600000,
-                "maxRetries": 3,
-                "maxRetryDelayMs": max_delay_ms,
-            },
-        }
+    if is_hf_space_profile() or provider == PROVIDER_GEMINI:
+        _apply_retry_settings(settings, provider=provider)
     return settings
 
 

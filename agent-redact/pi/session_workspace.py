@@ -20,7 +20,16 @@ _SESSION_ID_RE = re.compile(r"[^a-zA-Z0-9_@.+-]+")
 
 
 def workspace_base_dir() -> Path:
-    return Path(os.environ.get("PI_WORKSPACE_DIR", "/home/user/app/workspace"))
+    """Shared Pi workspace root (see ``bootstrap_pi_config.ensure_pi_workspace_dir``)."""
+    raw = (os.environ.get("PI_WORKSPACE_DIR") or "").strip()
+    if raw:
+        path = Path(raw)
+    else:
+        from bootstrap_pi_config import ensure_pi_workspace_dir
+
+        return Path(ensure_pi_workspace_dir(_REPO_ROOT))
+    path.mkdir(parents=True, exist_ok=True)
+    return path.resolve()
 
 
 # Back-compat alias used by output_files / redaction_prompt.

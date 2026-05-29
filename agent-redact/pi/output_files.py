@@ -9,10 +9,12 @@ from pathlib import Path
 from typing import Any
 
 import gradio as gr
+from bootstrap_pi_config import pi_repo_root_path
 from pi_examples import gradio_example_allowed_paths
 from session_logs import gradio_session_log_allowed_paths
 from session_workspace import (
     WORKSPACE_BASE_DIR,
+    sanitize_session_id,
     session_workspace_dir,
     workspace_base_dir,
 )
@@ -50,6 +52,48 @@ def final_download_folder_name() -> str:
     raw = os.environ.get("PI_FINAL_DOWNLOAD_FOLDER", _DEFAULT_FINAL_DOWNLOAD_FOLDER)
     stripped = raw.strip() if raw else ""
     return stripped or _DEFAULT_FINAL_DOWNLOAD_FOLDER
+
+
+def final_download_dir(session_hash: str | None = None) -> Path:
+    """
+    Per-session staging folder for ``gr.File`` downloads.
+
+    Always ``{PI_WORKSPACE_DIR}/{session_id}/output_final_download/`` when a session
+    id is known, even if the broader workspace is shared (``PI_SESSION_WORKSPACE=false``).
+    """
+    base = workspace_base_dir().resolve()
+    folder = final_download_folder_name()
+    if not session_hash or not str(session_hash).strip():
+        return base / folder
+    safe_id = sanitize_session_id(str(session_hash))
+    return base / safe_id / folder
+
+
+def _remove_path(path: Path) -> None:
+    """Best-effort delete (handles read-only / OneDrive locks on Windows)."""
+    try:
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            path.unlink(missing_ok=True)
+    except OSError:
+        if not path.exists():
+            return
+        try:
+            os.chmod(path, 0o666)
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _reset_download_dir(download_dir: Path) -> None:
+    """Clear staged downloads without removing the directory inode (safer on Windows)."""
+    download_dir.mkdir(parents=True, exist_ok=True)
+    for child in download_dir.iterdir():
+        _remove_path(child)
 
 
 def _gradio_prefix_min_len() -> int:
@@ -127,20 +171,17 @@ def build_final_download_files(
     session_hash: str | None = None,
 ) -> list[str] | None:
     """
-    Stage cleaned deliverables under ``output_final_download/``.
+    Stage cleaned deliverables under ``{session_id}/output_final_download/``.
 
     Copies files from agent final-output folders, strips Gradio cache prefixes,
     deduplicates by basename (newest file wins), and returns paths for ``gr.File``.
     """
-    root = workspace_root_from(session_hash)
     raw_files = _collect_raw_final_output_files(session_hash)
     if not raw_files:
         return None
 
-    download_dir = root / final_download_folder_name()
-    if download_dir.exists():
-        shutil.rmtree(download_dir)
-    download_dir.mkdir(parents=True, exist_ok=True)
+    download_dir = final_download_dir(session_hash)
+    _reset_download_dir(download_dir)
 
     ordered = sorted(raw_files, key=_file_created_timestamp)
     latest_by_name: dict[str, Path] = {}
@@ -231,7 +272,7 @@ def gradio_allowed_paths() -> list[str]:
     paths: list[str] = []
     for raw in (
         workspace_base_dir(),
-        os.environ.get("PI_WORKDIR", "/workspace/doc_redaction"),
+        str(pi_repo_root_path()),
         REFRESH_STUB_DIR,
         "/tmp",
     ):

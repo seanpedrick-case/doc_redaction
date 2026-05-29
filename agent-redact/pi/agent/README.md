@@ -34,6 +34,8 @@ Copy [`config/pi_agent.env.example`](../../../config/pi_agent.env.example) to `c
 | `RUN_AWS_FUNCTIONS` | When `True`, use the AWS default credential chain (SSO, profile, role) |
 | `PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS` | When `True` with `RUN_AWS_FUNCTIONS`, prefer SSO/chain over static env keys (default `True`, same as main app) |
 | `PI_MAX_PAGES` | Maximum PDF pages allowed per redaction upload (falls back to `MAX_PAGES` / `MAX_DOC_PAGES`, default `3000`) |
+| `PI_MAX_RETRIES` | Gemini quota / rate-limit retries for Pi auto-retry and Gradio backoff (default `5`; alias `PI_QUOTA_RETRY_ATTEMPTS`) |
+| `PI_QUOTA_RETRY_DELAY_S` | Seconds between Gradio quota retries (default `60`) |
 
 ### Usage logging (CSV / DynamoDB / S3)
 
@@ -119,9 +121,13 @@ Run the UI locally (outside Docker):
 ```powershell
 cd agent-redact/pi
 pip install -r ../requirements_pi_agent.txt
+# Pi orchestration subprocess (required for Apply backend / chat):
+npm install -g @earendil-works/pi-coding-agent
 python pi_agent_config.py
 python gradio_app.py
 ```
+
+**Apply backend** starts `pi --mode rpc`. If you see `FileNotFoundError` / “Pi CLI not found”, install Node.js, run the `npm install` line above, and ensure `pi` (or `pi.cmd` on Windows) is on `PATH`. Optional: `PI_EXECUTABLE=C:\Users\you\AppData\Roaming\npm\pi.cmd` in `config/pi_agent.env`.
 
 RPC mode (automation, no Gradio):
 

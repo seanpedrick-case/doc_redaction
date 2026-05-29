@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import threading
 import uuid
@@ -14,6 +15,36 @@ from typing import Any
 
 class PiRpcError(RuntimeError):
     pass
+
+
+# Pi RPC is JSONL over pipes; always UTF-8 (Windows default locale is cp1252).
+_PI_SUBPROCESS_ENCODING = "utf-8"
+_PI_SUBPROCESS_ENCODING_ERRORS = "replace"
+
+_PI_INSTALL_HINT = (
+    "Install the Pi coding agent CLI, then restart the Gradio app:  \n"
+    "`npm install -g @earendil-works/pi-coding-agent`  \n"
+    "On Windows, ensure Node.js/npm are on PATH (or set `PI_EXECUTABLE` to the "
+    "full path to `pi.cmd`, e.g. `%APPDATA%\\npm\\pi.cmd`).  \n"
+    "Docker users: run the Pi UI via `docker compose` (`pi-agent` service) instead "
+    "of `python gradio_app.py` on the host."
+)
+
+
+def resolve_pi_executable() -> str:
+    """Return a path to the ``pi`` RPC executable (raises ``PiRpcError`` if missing)."""
+    override = os.environ.get("PI_EXECUTABLE", "").strip()
+    if override:
+        if os.path.isfile(override) or shutil.which(override):
+            return override
+        raise PiRpcError(
+            f"PI_EXECUTABLE is set but not found: `{override}`  \n\n{_PI_INSTALL_HINT}"
+        )
+    for name in ("pi", "pi.cmd"):
+        found = shutil.which(name)
+        if found:
+            return found
+    raise PiRpcError(f"Pi CLI (`pi`) not found on PATH.  \n\n{_PI_INSTALL_HINT}")
 
 
 @dataclass
@@ -240,13 +271,14 @@ class PiRpcClient:
     def start(self) -> None:
         if self.running:
             return
-        command = ["pi", "--mode", "rpc", *self._pi_args]
+        command = [resolve_pi_executable(), "--mode", "rpc", *self._pi_args]
         self._proc = subprocess.Popen(
             command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            encoding=_PI_SUBPROCESS_ENCODING,
+            errors=_PI_SUBPROCESS_ENCODING_ERRORS,
             bufsize=1,
             cwd=self._cwd,
             env=self._env,
@@ -588,12 +620,16 @@ class PiRpcClient:
 
 
 def default_client() -> PiRpcClient:
-    repo_root = os.environ.get("PI_WORKDIR", "/workspace/doc_redaction")
+    from bootstrap_pi_config import pi_repo_root_path
+
+    repo_root = str(pi_repo_root_path())
     from pi_agent_config import configure_aws_credentials
 
     configure_aws_credentials()
     env = os.environ.copy()
     env.setdefault("HOME", os.path.expanduser("~"))
+    env.setdefault("PYTHONUTF8", "1")
+    env.setdefault("PYTHONIOENCODING", "utf-8")
     if not env.get("GEMINI_API_KEY") and env.get("GOOGLE_API_KEY"):
         env["GEMINI_API_KEY"] = env["GOOGLE_API_KEY"]
     if not env.get("HF_TOKEN") and env.get("DOC_REDACTION_HF_TOKEN"):

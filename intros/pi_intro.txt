@@ -1,0 +1,7 @@
+# {PI_GRADIO_TITLE}
+
+Upload a document and redaction requirements on the left, then click **Start redaction task** under the chat panel. The Pi agent runs the partnership redaction workflow (Pass 1 by default) and returns deliverables for download. Use **Follow-up chat** only after a task has started.
+
+See the [User Guide]({USER_GUIDE_URL}) for the underlying doc_redaction toolchain and review workflow.
+
+NOTE: Outputs are not guaranteed complete — review all redacted material **by a human** before use.

@@ -858,8 +858,17 @@ def create_nlp_analyser(
     return nlp_analyser
 
 
-# Create the default nlp_analyser using the new function
-nlp_analyser, nlp = create_nlp_analyser(DEFAULT_LANGUAGE, return_also_model=True)
+def _init_default_analyser() -> None:
+    """Eager-load Presidio/spaCy for the main app; skip for Pi agent UI (``APP_TYPE=pi``)."""
+    global nlp_analyser, nlp
+    if os.environ.get("APP_TYPE", "").strip().lower() == "pi":
+        nlp_analyser = None
+        nlp = None
+        return
+    nlp_analyser, nlp = create_nlp_analyser(DEFAULT_LANGUAGE, return_also_model=True)
+
+
+_init_default_analyser()
 
 
 def spacy_fuzzy_search(
@@ -867,10 +876,12 @@ def spacy_fuzzy_search(
     custom_query_list: List[str] = list(),
     spelling_mistakes_max: int = 1,
     search_whole_phrase: bool = True,
-    nlp=nlp,
+    nlp=None,
     progress=gr.Progress(track_tqdm=True),
 ):
     """Conduct fuzzy match on a list of text data."""
+    if nlp is None:
+        _, nlp = create_nlp_analyser(DEFAULT_LANGUAGE, return_also_model=True)
 
     all_matches = list()
     all_start_positions = list()
