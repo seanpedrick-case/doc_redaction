@@ -9,7 +9,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV NPM_CONFIG_LOGLEVEL=warn
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONPATH=/workspace/doc_redaction/agent-redact/pi
+ENV PYTHONPATH=/workspace/doc_redaction:/workspace/doc_redaction/agent-redact/pi
 ENV PI_DEPLOYMENT_PROFILE=hf-space
 ENV PI_DEFAULT_PROVIDER=google-gemini
 ENV PI_DEFAULT_MODEL=gemini-flash-lite-latest
@@ -47,6 +47,9 @@ WORKDIR /workspace/doc_redaction
 
 COPY agent-redact/pi agent-redact/pi
 COPY skills skills
+COPY tools tools
+COPY config config
+COPY intros intros
 COPY AGENTS.md AGENTS.md
 COPY doc_redaction/example_data doc_redaction/example_data
 

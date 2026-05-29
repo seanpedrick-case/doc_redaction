@@ -2,7 +2,9 @@
 agent-redact/requirements_pi_agent.txt
 agent-redact/pi
 skills
-AGENTS.md
+tools
 config/pi_agent.env.example
+intros/pi_intro.txt
+AGENTS.md
 doc_redaction/example_data/example_of_emails_sent_to_a_professor_before_applying.pdf
 doc_redaction/example_data/graduate-job-example-cover-letter.pdf

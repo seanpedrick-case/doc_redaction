@@ -6,9 +6,11 @@ on:
     paths:
       - "agent-redact/**"
       - "skills/**"
+      - "tools/**"
+      - "intros/**"
       - "doc_redaction/example_data/**"
       - "AGENTS.md"
-      - "config/pi_agent.env.example"
+      - "config/**"
       - ".github/workflows/sync-pi-agent-space.yml"
   workflow_dispatch:
 
