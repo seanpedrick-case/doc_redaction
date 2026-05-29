@@ -67,6 +67,7 @@ from redaction_prompt import (
     pdf_page_count,
     prepare_redaction_task,
 )
+from session_logs import collect_session_log_download, persist_session_log
 
 # Before any ``tools.config`` import (e.g. session_workspace): compose may inject
 # empty AWS_REGION= which would freeze a blank region in tools.config.AWS_REGION.
@@ -169,6 +170,7 @@ def _after_pi_task(
         vlm_model_name=vlm_model_name or os.environ.get("PI_VLM_MODEL", ""),
         task="agent",
     )
+    persist_session_log(client, session_hash=session_hash)
     file_paths = collect_final_output_files(session_hash)
     if file_paths and save_outputs_to_s3 and s3_output_folder:
         export_outputs_to_s3(
@@ -543,10 +545,13 @@ def _chat_yield(
     refresh_final_files: bool = False,
 ):
     final_files: list[str] | None | dict[str, Any]
+    session_log: str | None | dict[str, Any]
     if refresh_final_files:
         final_files = collect_final_output_files(session_hash)
+        session_log = collect_session_log_download(client)
     else:
         final_files = gr.update()
+        session_log = gr.update()
 
     return (
         _clone_history(history),
@@ -560,6 +565,7 @@ def _chat_yield(
         gr.update(interactive=abort_enabled),
         gr.update(interactive=redact_enabled),
         final_files,
+        session_log,
     )
 
 
@@ -603,6 +609,7 @@ def _run_pi_chat(
                 gr.update(interactive=True),
                 gr.update(interactive=False),
                 gr.update(interactive=True),
+                gr.update(),
                 gr.update(),
             )
         return
@@ -900,6 +907,7 @@ def submit_redaction_task(
             gr.update(interactive=True),
             gr.update(interactive=False),
             gr.update(interactive=True),
+            gr.update(),
             gr.update(),
         )
         return
@@ -1222,7 +1230,9 @@ def build_ui():
 
             with gr.Column(scale=2):
                 with gr.Accordion("Thinking log", open=True):
-                    activity_log = gr.Markdown(value="_No activity yet._", max_height=480, height=480)
+                    activity_log = gr.Markdown(
+                        value="_No activity yet._", max_height=480, height=480
+                    )
                     tool_panel = gr.Markdown(value="", max_height=480, height=480)
                     thinking_panel = gr.Textbox(
                         label="Thinking (stream)",
@@ -1279,6 +1289,19 @@ def build_ui():
                 max_height=400,
             )
 
+        with gr.Accordion("Session log outputs", open=False):
+            gr.Markdown(
+                "Pi writes a **JSONL** transcript for the active agent session under "
+                "its `sessions/` directory. The file refreshes after each chat message "
+                "or redaction task completes."
+            )
+            session_log_download = gr.File(
+                label="Pi session log (JSONL)",
+                file_count="single",
+                file_types=[".jsonl"],
+                interactive=False,
+            )
+
         chat_outputs = [
             chatbot,
             client_state,
@@ -1291,6 +1314,7 @@ def build_ui():
             abort_btn,
             start_redact_btn,
             workspace_output_download,
+            session_log_download,
         ]
 
         run_event = send.click(

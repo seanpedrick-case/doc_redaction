@@ -10,6 +10,7 @@ from typing import Any
 
 import gradio as gr
 from pi_examples import gradio_example_allowed_paths
+from session_logs import gradio_session_log_allowed_paths
 from session_workspace import (
     WORKSPACE_BASE_DIR,
     session_workspace_dir,
@@ -241,6 +242,9 @@ def gradio_allowed_paths() -> list[str]:
         if resolved not in paths:
             paths.append(resolved)
     for raw in gradio_example_allowed_paths():
+        if raw not in paths:
+            paths.append(raw)
+    for raw in gradio_session_log_allowed_paths():
         if raw not in paths:
             paths.append(raw)
     return paths
