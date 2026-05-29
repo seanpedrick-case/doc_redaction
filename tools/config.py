@@ -2812,9 +2812,8 @@ PI_INTRO_TEXT = _load_intro_text(
 )
 
 
-# Pi Gradio bootstrap sets PI_WORKSPACE_DIR before import when APP_TYPE=pi; empty default here.
-_pi_workspace_default = "/home/user/app/workspace" if APP_TYPE != "pi" else ""
-PI_WORKSPACE_DIR = get_or_create_env_var("PI_WORKSPACE_DIR", _pi_workspace_default)
+# Pi workspace: set by bootstrap_pi_config, compose, or HF Dockerfile — not a global default here.
+PI_WORKSPACE_DIR = get_or_create_env_var("PI_WORKSPACE_DIR", "")
 PI_DEFAULT_PROVIDER = get_or_create_env_var(
     "PI_DEFAULT_PROVIDER", "google-gemini"
 )  # Default Pi orchestration backend: llama-cpp | google-gemini | amazon-bedrock

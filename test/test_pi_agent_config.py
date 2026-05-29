@@ -4,6 +4,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 _PI_SRC = Path(__file__).resolve().parents[1] / "agent-redact" / "pi"
 if str(_PI_SRC) not in sys.path:
     sys.path.insert(0, str(_PI_SRC))
@@ -11,7 +13,18 @@ if str(_PI_SRC) not in sys.path:
 import pi_agent_config as pac
 
 
-def test_build_settings_config_uses_pi_default_model_for_bedrock(tmp_path, monkeypatch):
+@pytest.fixture
+def pi_workspace(tmp_path, monkeypatch):
+    """Writable workspace for build_settings_config (skills sync, session dir)."""
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    monkeypatch.setenv("PI_WORKSPACE_DIR", str(ws))
+    return ws
+
+
+def test_build_settings_config_uses_pi_default_model_for_bedrock(
+    tmp_path, monkeypatch, pi_workspace
+):
     monkeypatch.setenv("PI_DEFAULT_PROVIDER", "amazon-bedrock")
     monkeypatch.setenv("PI_DEFAULT_MODEL", "amazon.nova-lite-v1:0")
     monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
@@ -29,7 +42,7 @@ def test_build_settings_config_uses_pi_default_model_for_bedrock(tmp_path, monke
     assert pac.resolved_default_model(pac.PROVIDER_LLAMA) == pac.LLAMA_MODEL_ID
 
 
-def test_hf_profile_defaults_session_dir_to_tmp(tmp_path, monkeypatch):
+def test_hf_profile_defaults_session_dir_to_tmp(tmp_path, monkeypatch, pi_workspace):
     monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "hf-space")
     monkeypatch.delenv("PI_SESSION_DIR", raising=False)
     monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
@@ -42,7 +55,7 @@ def test_hf_profile_defaults_session_dir_to_tmp(tmp_path, monkeypatch):
     assert settings["retry"]["provider"]["maxRetries"] == 5
 
 
-def test_gemini_provider_applies_retry_settings(tmp_path, monkeypatch):
+def test_gemini_provider_applies_retry_settings(tmp_path, monkeypatch, pi_workspace):
     monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "local-docker")
     monkeypatch.setenv("PI_DEFAULT_PROVIDER", "google-gemini")
     monkeypatch.setenv("PI_MAX_RETRIES", "7")
@@ -53,7 +66,7 @@ def test_gemini_provider_applies_retry_settings(tmp_path, monkeypatch):
     assert settings["retry"]["provider"]["maxRetries"] == 7
 
 
-def test_pi_session_dir_override(tmp_path, monkeypatch):
+def test_pi_session_dir_override(tmp_path, monkeypatch, pi_workspace):
     custom = tmp_path / "custom-sessions"
     monkeypatch.setenv("PI_SESSION_DIR", str(custom))
     monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))

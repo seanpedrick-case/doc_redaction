@@ -13,6 +13,7 @@ from tools.config import (
     RUN_AWS_FUNCTIONS,
     S3_OUTPUTS_BUCKET,
     SAVE_LOGS_TO_CSV,
+    SAVE_OUTPUTS_TO_S3,
 )
 from tools.secure_path_utils import secure_join
 
@@ -382,6 +383,17 @@ def upload_log_file_to_s3(
     return final_out_message_str
 
 
+def s3_outputs_upload_ready(
+    *,
+    save_outputs_to_s3: bool | None = None,
+    s3_bucket: str | None = None,
+) -> bool:
+    """True when automatic redaction output upload to S3 should run."""
+    flag = SAVE_OUTPUTS_TO_S3 if save_outputs_to_s3 is None else save_outputs_to_s3
+    bucket = (s3_bucket if s3_bucket is not None else S3_OUTPUTS_BUCKET) or ""
+    return bool(flag and RUN_AWS_FUNCTIONS and bucket.strip())
+
+
 # Helper to upload outputs to S3 when enabled in config.
 def export_outputs_to_s3(
     file_list_state,
@@ -401,8 +413,10 @@ def export_outputs_to_s3(
     """
     try:
 
-        # Respect the runtime toggle as well as environment configuration
-        if not save_outputs_to_s3_flag:
+        if not s3_outputs_upload_ready(
+            save_outputs_to_s3=save_outputs_to_s3_flag,
+            s3_bucket=s3_bucket,
+        ):
             return
 
         if not s3_output_folder_state_value:
@@ -457,6 +471,7 @@ def export_outputs_to_s3(
         #   <session_output_folder>/<date>/<base_file_stem>/<file_name>
         # or, if base_file_stem is not available:
         #   <session_output_folder>/<date>/<output_file_stem>/<file_name>
+        upload_failed = False
         for file in file_paths:
             file_name = os.path.basename(file)
 
@@ -478,9 +493,11 @@ def export_outputs_to_s3(
                 "Error uploading file" in out_message
                 or "could not upload" in out_message.lower()
             ):
+                upload_failed = True
                 print("export_outputs_to_s3 encountered issues:", out_message)
 
-        print("Successfully uploaded outputs to S3")
+        if not upload_failed:
+            print("Successfully uploaded outputs to S3")
 
     except Exception as e:
         # Do not break the app flow if S3 upload fails – just report to console

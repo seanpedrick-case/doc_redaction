@@ -382,6 +382,12 @@ class PiRpcClient:
         messages = data.get("messages") if isinstance(data, dict) else []
         return messages if isinstance(messages, list) else []
 
+    def get_session_stats(self) -> dict[str, Any]:
+        """Token usage and cost totals for the active session (Pi RPC ``get_session_stats``)."""
+        response = self._send_command({"type": "get_session_stats"})
+        data = response.get("data") if response else {}
+        return data if isinstance(data, dict) else {}
+
     def set_model(self, provider: str, model_id: str) -> dict[str, Any]:
         response = self._send_command(
             {

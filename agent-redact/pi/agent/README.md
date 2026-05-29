@@ -48,6 +48,7 @@ Each completed Pi agent run (chat message or redaction task) writes **one row** 
 | `text_extraction_method` / `pii_detection_method` | From redaction task settings when applicable |
 | `actual_time_taken_number` | Wall-clock seconds for the Pi RPC turn |
 | `total_page_count` | Pages in scope for PDF redaction tasks |
+| `llm_total_input_tokens` / `llm_total_output_tokens` | Pi orchestration LLM usage for that turn (from Pi `get_session_stats` delta, or assistant `usage` in session JSONL). Includes cache read/write in the input column. **VLM/tokens from doc_redaction Pass 1 are not included** (those stay on the main app usage log when you run redaction there directly). |
 
 Toggle with `SAVE_LOGS_TO_CSV`, `SAVE_LOGS_TO_DYNAMODB`, and `RUN_AWS_FUNCTIONS` (required for S3 log upload). Access logs on session load use the main app access log paths separately.
 

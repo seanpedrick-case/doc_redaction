@@ -78,6 +78,7 @@ from session_logs import collect_session_log_download, persist_session_log
 mirror_hf_token_from_env()
 configure_aws_credentials()
 
+from pi_session_usage import resolve_session_token_usage, usage_for_completed_turn
 from session_workspace import (
     init_session_workspace,
     prepare_session_workspace,
@@ -86,7 +87,7 @@ from session_workspace import (
     workspace_context_prefix,
 )
 
-from tools.aws_functions import export_outputs_to_s3
+from tools.aws_functions import export_outputs_to_s3, s3_outputs_upload_ready
 from tools.config import (
     ACTIVITY_MAX_LINES,
     EMPTY_SEND_WITH_FILE_HINT,
@@ -154,6 +155,8 @@ def _after_pi_task(
     pii_method: str = "",
     total_page_count: int = 0,
     vlm_model_name: str | None = None,
+    llm_input_tokens: int = 0,
+    llm_output_tokens: int = 0,
 ) -> None:
     duration = round(time.time() - started_at, 2) if started_at else ""
     log_agent_usage_event(
@@ -165,11 +168,17 @@ def _after_pi_task(
         pii_method=pii_method,
         llm_model_name=_llm_model_label(client),
         vlm_model_name=vlm_model_name or os.environ.get("PI_VLM_MODEL", ""),
+        llm_input_tokens=llm_input_tokens,
+        llm_output_tokens=llm_output_tokens,
         task="agent",
     )
     persist_session_log(client, session_hash=session_hash)
     file_paths = collect_final_output_files(session_hash)
-    if file_paths and save_outputs_to_s3 and s3_output_folder:
+    if (
+        file_paths
+        and s3_output_folder
+        and s3_outputs_upload_ready(save_outputs_to_s3=save_outputs_to_s3)
+    ):
         export_outputs_to_s3(
             file_paths,
             s3_output_folder,
@@ -185,7 +194,11 @@ def _export_workspace_outputs(
     base_file: str | None = None,
 ) -> None:
     file_paths = collect_final_output_files(session_hash)
-    if file_paths and save_outputs_to_s3 and s3_output_folder:
+    if (
+        file_paths
+        and s3_output_folder
+        and s3_outputs_upload_ready(save_outputs_to_s3=save_outputs_to_s3)
+    ):
         export_outputs_to_s3(
             file_paths,
             s3_output_folder,
@@ -669,8 +682,10 @@ def _run_pi_chat(
     completed_segments: list[str] = []
     streaming_text = ""
     task_started_at = time.time()
+    usage_baseline = resolve_session_token_usage(client)
 
     def _complete_pi_task() -> None:
+        usage = usage_for_completed_turn(client, usage_baseline)
         _after_pi_task(
             session_hash=session_hash,
             client=client,
@@ -683,6 +698,8 @@ def _run_pi_chat(
             pii_method=pii_method,
             total_page_count=total_page_count,
             vlm_model_name=vlm_model_name,
+            llm_input_tokens=usage.llm_input_tokens,
+            llm_output_tokens=usage.llm_output_tokens,
         )
 
     history.append({"role": "user", "content": chat_user_message or message.strip()})

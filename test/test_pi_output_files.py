@@ -31,8 +31,6 @@ def test_resolve_under_workspace_accepts_absolute_paths(tmp_path, monkeypatch):
     pdf = doc / "output_redact.pdf"
     pdf.write_bytes(b"%PDF-1.4")
 
-    monkeypatch.setattr(of, "WORKSPACE_DIR", workspace)
-
     resolved = of._resolve_under_workspace(str(pdf), workspace_root=workspace)
     assert resolved == pdf.resolve()
 
@@ -42,8 +40,6 @@ def test_resolve_under_workspace_accepts_relative_paths(tmp_path, monkeypatch):
     workspace.mkdir()
     pdf = workspace / "report.csv"
     pdf.write_text("a,b\n1,2\n")
-
-    monkeypatch.setattr(of, "WORKSPACE_DIR", workspace)
 
     resolved = of._resolve_under_workspace("report.csv", workspace_root=workspace)
     assert resolved == pdf.resolve()
@@ -55,8 +51,6 @@ def test_resolve_under_workspace_rejects_outside_workspace(tmp_path, monkeypatch
     outside = tmp_path / "secret.pdf"
     outside.write_bytes(b"%PDF")
 
-    monkeypatch.setattr(of, "WORKSPACE_DIR", workspace)
-
     assert of._resolve_under_workspace(str(outside), workspace_root=workspace) is None
 
 
@@ -65,8 +59,6 @@ def test_resolve_under_workspace_rejects_path_traversal(tmp_path, monkeypatch):
     workspace.mkdir()
     outside = tmp_path / "secret.pdf"
     outside.write_bytes(b"%PDF")
-
-    monkeypatch.setattr(of, "WORKSPACE_DIR", workspace)
 
     assert (
         of._resolve_under_workspace("../secret.pdf", workspace_root=workspace) is None
