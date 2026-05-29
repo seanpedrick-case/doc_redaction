@@ -17,6 +17,7 @@ This guide gives an overview of how to install the app in an AWS environment usi
 *   Install git on your computer from: [https://git-scm.com](https://git-scm.com)
 *   Install nodejs and npm: [https://docs.npmjs.com/downloading-and-installing-node-js-and-npm](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm). If using Windows, it may be easiest to install from the .msi installer at the bottom of the page [here](https://nodejs.org/en/download/).
 *   Install AWS CDK v2: [https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
+*   Ensure you have the latest version of the AWS CDK CLI installed: npm install -g aws-cdk
 *   Bootstrap the environment with CDK in both your primary region, and `us-east-1` if installing CloudFront and associated WAF.
     ```bash
     # Bootstrap your primary region
@@ -29,6 +30,7 @@ This guide gives an overview of how to install the app in an AWS environment usi
     ```bash
     git clone https://github.com/seanpedrick-case/doc_redaction.git
     ```
+*   If you have previously installed the Redaction stack in the same AWS environment, many issues in re-installation using the following steps can be resolved by deleting the stack and starting again. Go to CloudFormation in the AWS console, and delete the stack (you may need to manually delete some components).
 
 ## Note on ACM Certificates
 
@@ -40,9 +42,13 @@ Update your DNS records to include the CNAME record given by AWS. After your sta
 
 ## Steps to install the app using CDK
 
-### 1.  Create a python environment, load in packages from `requirements.txt`.
+### 1.a  Create a python environment, load in packages from `requirements.txt`.
 
-You need a `cdk.json` in the `cdk` folder. It should contain the following:
+You will need to install into a python environment with the requirements detailed in cdk/requirements.txt. In your Python environment, cd to this folder and run pip install -r requirements.txt
+
+### 1.b Create a cdk.json file
+
+After this, you need a `cdk.json` in the `cdk` folder. It should contain the following:
 
 ```json
 {
@@ -130,7 +136,20 @@ If you try to create subnets in invalid CIDR blocks / availability zones, the co
 
 In command line in console, go to your `cdk` folder in the redaction app folder. Run `cdk deploy --all`. This should try to deploy the first stack in the `app.py` file.
 
-Hopefully everything will deploy successfully and you will be able to see your new stack in CloudFormation in the AWS console.
+Hopefully everything will deploy successfully and you will be able to see your new stacks in CloudFormation in the AWS console. There should be one called `RedactionStack` and one called `RedactionStackCloudfront` if you set `RUN_USEAST_STACK` to 'True' in `config/cdk_config.env`. You will also see a stack called `AppRegistryStack` if you set `ENABLE_APPREGISTRY` to 'True' in the same config file.
+
+#### AWS Console myApplications (optional, enabled by default)
+
+When `ENABLE_APPREGISTRY=True` in `config/cdk_config.env` (the default), CDK also registers the regional stack with **AWS Service Catalog AppRegistry**, which powers the **Applications** widget on the AWS console home page and **Application Manager**.
+
+After deploy you should see an application named `{CDK_PREFIX}doc-redaction` (or your `APPREGISTRY_APPLICATION_NAME`) listing **RedactionStack** resources and their live AWS status—for example the application load balancer, ECS cluster and service, Cognito user pool, S3 buckets, and CodeBuild project.
+
+* Console path: **Application Manager** (or the home page **Applications** section).
+* The associator stack (default name `{CDK_PREFIX}AppRegistryStack`) outputs a deep link to the application in Application Manager.
+* **CloudFront (phase 1):** If you deploy `RedactionStackCloudfront` in **us-east-1**, it is **not** included in this myApplications entry (AppRegistry does not support cross-region stack association via CDK). View CloudFront and WAF in the **us-east-1** CloudFormation console (`RedactionStackCloudfront`) or the CloudFront console.
+* To disable: set `ENABLE_APPREGISTRY=False` in `config/cdk_config.env` and redeploy.
+
+Optional variables (see `cdk/cdk_config.py`): `APPREGISTRY_APPLICATION_NAME`, `APPREGISTRY_DESCRIPTION`, `APPREGISTRY_STACK_NAME`, `APPREGISTRY_ATTRIBUTE_GROUP_NAME`, `APPREGISTRY_REPOSITORY_URL`.
 
 ### 4.  Tasks for after CDK deployment
 
@@ -155,8 +174,8 @@ if you want to do this manually:
 Create a `config.env` file to upload to the S3 bucket that has at least the following variables:
 
 ```ini
-COGNITO_AUTH=0 # If you are using an SSL certificate with your application load balancer, you will be logging in there. Set this to 0 to turn off the default login screen.
-RUN_AWS_FUNCTIONS=1 # This will enable the app to communicate with AWS services.
+COGNITO_AUTH=False # If you are using an SSL certificate with your application load balancer, you will be logging in there. Set this to 0 to turn off the default login screen.
+RUN_AWS_FUNCTIONS=True # This will enable the app to communicate with AWS services.
 SESSION_OUTPUT_FOLDER=True # This will put outputs for each user in separate output folders.
 ```
 
@@ -231,7 +250,6 @@ Ensure that the callback URL is:
 *   If using an SSL certificate, you should have three:
     *   `https://<CloudFront domain name>`
     *   `https://<CloudFront domain name>/oauth2/idpresponse`
-    *   `https://<CloudFront domain name>/oauth/idpresponse`
 
 ### Force traffic to come from specific CloudFront distribution (optional)
 
@@ -242,7 +260,7 @@ Go to EC2 - Load Balancers -> Your load balancer -> Listeners -> Your listener -
 *   Add Condition -> Host header.
 *   Change Host header value to your CloudFront distribution without the `https://` or `http://` at the front.
 *   Forward to redaction target group.
-*   Turn on group stickiness for 12 hours.
+*   Turn on group stickiness for 8 hours.
 *   Next.
 *   Choose priority 1.
 
