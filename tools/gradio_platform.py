@@ -19,7 +19,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from tools.auth import authenticate_user
-from tools.aws_functions import s3_outputs_upload_ready, upload_log_file_to_s3
+from tools.aws_functions import upload_log_file_to_s3
 from tools.config import (
     ACCESS_LOG_DYNAMODB_TABLE_NAME,
     ACCESS_LOGS_FOLDER,
@@ -128,8 +128,6 @@ def build_s3_outputs_prefix(
     session_scoped: bool = True,
 ) -> str:
     """Build the S3 key prefix for output uploads (optional session + date suffix)."""
-    if not s3_outputs_upload_ready():
-        return ""
     s3_outputs_folder = base_folder or ""
 
     if session_scoped and session_hash and s3_outputs_folder:
