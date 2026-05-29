@@ -131,4 +131,7 @@ def ensure_pi_config_env(repo_root: Path | None = None) -> str:
     ensure_pi_workdir(root)
     ensure_pi_workspace_dir(root)
     ensure_pi_upload_root(root)
+    from pi_workspace_skills import ensure_workspace_skills
+
+    ensure_workspace_skills()
     return os.environ["APP_CONFIG_PATH"]

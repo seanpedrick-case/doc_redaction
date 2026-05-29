@@ -619,19 +619,25 @@ class PiRpcClient:
                 yield f"\n\n**Error:** {event.text}\n"
 
 
-def default_client() -> PiRpcClient:
-    from bootstrap_pi_config import pi_repo_root_path
-
-    repo_root = str(pi_repo_root_path())
+def default_client(session_hash: str | None = None) -> PiRpcClient:
     from pi_agent_config import configure_aws_credentials
+    from pi_workspace_skills import ensure_workspace_skills, pi_rpc_args, pi_rpc_cwd
 
     configure_aws_credentials()
+    ensure_workspace_skills()
     env = os.environ.copy()
     env.setdefault("HOME", os.path.expanduser("~"))
     env.setdefault("PYTHONUTF8", "1")
     env.setdefault("PYTHONIOENCODING", "utf-8")
+    from session_workspace import workspace_base_dir
+
+    env.setdefault("PI_WORKSPACE_DIR", str(workspace_base_dir()))
     if not env.get("GEMINI_API_KEY") and env.get("GOOGLE_API_KEY"):
         env["GEMINI_API_KEY"] = env["GOOGLE_API_KEY"]
     if not env.get("HF_TOKEN") and env.get("DOC_REDACTION_HF_TOKEN"):
         env["HF_TOKEN"] = env["DOC_REDACTION_HF_TOKEN"]
-    return PiRpcClient(cwd=repo_root, env=env)
+    return PiRpcClient(
+        cwd=pi_rpc_cwd(session_hash),
+        env=env,
+        pi_args=pi_rpc_args(),
+    )

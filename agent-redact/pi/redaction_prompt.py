@@ -38,6 +38,11 @@ def pi_repo_root() -> Path:
 
 
 def partnership_template_path() -> Path:
+    from pi_workspace_skills import partnership_template_in_workspace
+
+    synced = partnership_template_in_workspace()
+    if synced is not None:
+        return synced
     return pi_repo_root() / _PARTNERSHIP_TEMPLATE
 
 

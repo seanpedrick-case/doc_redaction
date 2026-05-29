@@ -255,13 +255,16 @@ def _gemini_key_error() -> str | None:
     return None
 
 
-def _ensure_client(client: PiRpcClient | None) -> PiRpcClient:
+def _ensure_client(
+    client: PiRpcClient | None,
+    session_hash: str = "",
+) -> PiRpcClient:
     key_error = _gemini_key_error()
     if key_error:
         raise PiRpcError(key_error)
     if isinstance(client, PiRpcClient) and client.running:
         return client
-    client = default_client()
+    client = default_client(session_hash or None)
     client.start()
     provider = normalize_provider(get_default_provider())
     model = resolved_default_model(provider)
@@ -490,6 +493,7 @@ def apply_backend(
     aws_secret_access_key: str,
     aws_session_token: str,
     client: PiRpcClient | None,
+    session_hash: str,
 ):
     normalized = normalize_provider(provider)
     model = (model_id or default_model_for_provider(normalized)).strip()
@@ -523,7 +527,7 @@ def apply_backend(
             gr.update(value=""),
         )
 
-    rpc = default_client()
+    rpc = default_client(session_hash or None)
     try:
         rpc.start()
         rpc.set_model(normalized, model)
@@ -655,7 +659,7 @@ def _run_pi_chat(
         return
 
     history = list(history or [])
-    client = _ensure_client(client)
+    client = _ensure_client(client, session_hash)
     activity: list[str] = []
     thinking = ""
     tool_output = ""
@@ -698,7 +702,13 @@ def _run_pi_chat(
         session_hash=session_hash,
     )
 
-    pi_message = workspace_context_prefix(session_hash) + message.strip()
+    from pi_workspace_skills import workspace_boundary_prefix
+
+    pi_message = (
+        workspace_boundary_prefix(session_hash)
+        + workspace_context_prefix(session_hash)
+        + message.strip()
+    )
     prompt_to_send = pi_message
     quota_failures = 0
 
@@ -937,7 +947,11 @@ def submit_redaction_task(
         history.append(
             {"role": "user", "content": f"_Redaction task not started: {exc}_"}
         )
-        client = _ensure_client(client) if client and client.running else client
+        client = (
+            _ensure_client(client, session_hash)
+            if client and client.running
+            else client
+        )
         yield (
             _clone_history(history),
             client,
@@ -1009,10 +1023,10 @@ def new_chat(
             client.new_session()
         except PiRpcError:
             client.close()
-            client = default_client()
+            client = default_client(session_hash or None)
             client.start()
     else:
-        client = default_client()
+        client = default_client(session_hash or None)
         client.start()
     return _chat_yield(
         [],
@@ -1435,6 +1449,7 @@ def build_ui():
                 aws_secret_access_key,
                 aws_session_token,
                 client_state,
+                session_hash_state,
             ],
             outputs=[
                 client_state,

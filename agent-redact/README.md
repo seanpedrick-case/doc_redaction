@@ -8,7 +8,7 @@ Pi-based agentic document redaction: local Docker orchestration and Hugging Face
 | [`pi-agent/`](pi-agent/) | HF Space Dockerfile, sync script, and manifest |
 | [`requirements_pi_agent.txt`](requirements_pi_agent.txt) | Python deps for the Pi agent image |
 
-Per-user output isolation on HF Spaces uses Gradio `session_hash` subfolders under `PI_WORKSPACE_DIR` (see `agent-redact/pi/session_workspace.py`). Set `PI_SESSION_WORKSPACE=false` to use a single shared workspace (local dev only).
+Per-user output isolation uses Gradio `session_hash` subfolders under `PI_WORKSPACE_DIR` (see `agent-redact/pi/session_workspace.py`). Enabled by default locally and on HF Spaces. Set `PI_SESSION_WORKSPACE=false` only if you want one shared workspace tree for all sessions.
 
 ## Local Docker
 

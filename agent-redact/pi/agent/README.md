@@ -135,7 +135,7 @@ RPC mode (automation, no Gradio):
 docker compose -f docker-compose_llama_agentic.yml exec -T pi-agent pi --mode rpc
 ```
 
-Skills are discovered from the repo mount at `/workspace/doc_redaction/skills/` (project skills). Use `/skill:doc-redaction-app` etc., or read paths under `skills/` relative to the working directory.
+Skills are synced from the repo `skills/` tree into **`{PI_WORKSPACE_DIR}/.pi/skills/`** on startup (read-only). Pi runs with `cwd` in the user’s session subfolder and `--no-skills` so it does not load skills from the git checkout. Use `/skill:doc-redaction-app` etc. Set `PI_SKILLS_RESYNC=true` to refresh copies from the repo.
 
 Sessions persist in the **`pi-agent-sessions`** Docker volume at **`~/.pi/agent/sessions/`** (Pi’s default session location inside the container). Override with `PI_SESSION_DIR` if needed.
 

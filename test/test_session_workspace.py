@@ -38,6 +38,32 @@ def workspace_base(tmp_path, monkeypatch):
     return base
 
 
+def test_session_workspace_enabled_by_default_local(tmp_path, monkeypatch):
+    """Local-docker profile: session subfolders unless PI_SESSION_WORKSPACE=false."""
+    base = tmp_path / "workspace"
+    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
+    monkeypatch.delenv("PI_SESSION_WORKSPACE", raising=False)
+    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "local-docker")
+    import session_workspace as sw
+
+    monkeypatch.setattr(sw, "SESSION_OUTPUT_FOLDER", False)
+    assert sw.session_workspace_enabled() is True
+    assert sw.session_workspace_dir("sess1") == base / "sess1"
+    assert sw.workspace_context_prefix("sess1") != ""
+
+
+def test_session_workspace_disabled_when_env_false(tmp_path, monkeypatch):
+    base = tmp_path / "workspace"
+    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("PI_SESSION_WORKSPACE", "false")
+    import session_workspace as sw
+
+    monkeypatch.setattr(sw, "SESSION_OUTPUT_FOLDER", False)
+    assert sw.session_workspace_enabled() is False
+    assert sw.session_workspace_dir("sess1") == base.resolve()
+    assert sw.workspace_context_prefix("sess1") == ""
+
+
 def test_session_workspace_dir_uses_hash(workspace_base):
     path = session_workspace_dir("abc123session")
     assert path == workspace_base / "abc123session"

@@ -548,6 +548,10 @@ def build_settings_config(
     settings["sessionDir"] = session_path.as_posix()
     if is_hf_space_profile() or provider == PROVIDER_GEMINI:
         _apply_retry_settings(settings, provider=provider)
+    from pi_workspace_skills import ensure_workspace_skills, workspace_skills_dir
+
+    ensure_workspace_skills()
+    settings["skills"] = [workspace_skills_dir().as_posix()]
     return settings
 
 

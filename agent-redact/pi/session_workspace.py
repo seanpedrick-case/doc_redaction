@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 
 import gradio as gr
-from pi_agent_config import is_hf_space_profile
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
@@ -37,15 +36,21 @@ WORKSPACE_BASE_DIR = workspace_base_dir()
 
 
 def session_workspace_enabled() -> bool:
-    """When true, each Gradio session gets `{PI_WORKSPACE_DIR}/{session_hash}/`."""
+    """
+    When true, each Gradio session uses ``{PI_WORKSPACE_DIR}/{session_hash}/``.
+
+    Default **on** (local Windows/macOS and HF Space). Set ``PI_SESSION_WORKSPACE=false``
+    for a single shared workspace root (legacy local-dev behaviour).
+    ``SESSION_OUTPUT_FOLDER`` from the main app config also enables session folders.
+    """
     raw = os.environ.get("PI_SESSION_WORKSPACE", "").strip().lower()
-    if raw in {"1", "true", "yes", "on"}:
-        return True
     if raw in {"0", "false", "no", "off"}:
         return False
+    if raw in {"1", "true", "yes", "on"}:
+        return True
     if SESSION_OUTPUT_FOLDER:
         return True
-    return is_hf_space_profile()
+    return True
 
 
 def sanitize_session_id(raw: str) -> str:
