@@ -13,14 +13,11 @@ from bootstrap_pi_config import pi_repo_root_path
 from pi_examples import gradio_example_allowed_paths
 from session_logs import gradio_session_log_allowed_paths
 from session_workspace import (
-    WORKSPACE_BASE_DIR,
     sanitize_session_id,
     session_workspace_dir,
     workspace_base_dir,
 )
 
-# Back-compat alias for modules that import WORKSPACE_DIR.
-WORKSPACE_DIR = WORKSPACE_BASE_DIR
 REFRESH_STUB_DIR = Path(os.environ.get("PI_FILEEXPLORER_STUB_DIR", "/tmp"))
 
 # Folder names under ``.../review/`` where Pass 1 deliverables are saved (see partnership prompt).

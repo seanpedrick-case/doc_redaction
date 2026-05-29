@@ -80,6 +80,7 @@ configure_aws_credentials()
 
 from session_workspace import (
     init_session_workspace,
+    prepare_session_workspace,
     session_workspace_dir,
     workspace_base_dir,
     workspace_context_prefix,
@@ -613,6 +614,7 @@ def _run_pi_chat(
     *,
     chat_user_message: str | None = None,
     session_hash: str = "",
+    initial_session_info: str | None = None,
     s3_output_folder: str = "",
     save_outputs_to_s3: bool = False,
     document_name: str = "",
@@ -686,7 +688,14 @@ def _run_pi_chat(
     history.append({"role": "user", "content": chat_user_message or message.strip()})
     history.append({"role": "assistant", "content": ""})
     activity = _append_activity(activity, "Prompt sent.")
+    if initial_session_info:
+        activity = _append_activity(
+            activity,
+            f"Using workspace `{session_workspace_dir(session_hash).as_posix()}/`.",
+        )
     session_info = _session_summary(client)
+    if initial_session_info:
+        session_info = f"{initial_session_info}\n\n{session_info}"
 
     yield _chat_yield(
         history,
@@ -907,6 +916,15 @@ def _redaction_page_count(upload_file: str | None, page_range: str) -> int:
         return 0
 
 
+def prepare_redaction_session_ui(
+    session_hash: str,
+    request: gr.Request,
+) -> tuple[str, str]:
+    """Create session workspace folder before redaction runs (updates UI immediately)."""
+    effective, _workspace, status = prepare_session_workspace(session_hash, request)
+    return effective, status
+
+
 def submit_redaction_task(
     upload_file: str | None,
     user_instructions: str,
@@ -920,7 +938,11 @@ def submit_redaction_task(
     session_hash: str,
     s3_output_folder: str,
     save_outputs_to_s3: bool,
+    request: gr.Request,
 ):
+    session_hash, _workspace_path, workspace_status = prepare_session_workspace(
+        session_hash, request
+    )
     settings = (
         RedactionTaskSettings.hf_space_defaults()
         if IS_HF_SPACE
@@ -931,16 +953,13 @@ def submit_redaction_task(
             encourage_vlm_signatures,
         )
     )
-    workspace_path = (
-        session_workspace_dir(session_hash) if session_hash.strip() else None
-    )
     try:
         _file_name, prompt = prepare_redaction_task(
             upload_file,
             user_instructions,
             page_range=page_range or "all",
             settings=settings,
-            workspace_dir=workspace_path,
+            workspace_dir=_workspace_path,
         )
     except (ValueError, FileNotFoundError, OSError) as exc:
         history = list(history or [])
@@ -988,6 +1007,7 @@ def submit_redaction_task(
         client,
         chat_user_message=chat_summary,
         session_hash=session_hash,
+        initial_session_info=workspace_status,
         s3_output_folder=s3_output_folder,
         save_outputs_to_s3=save_outputs_to_s3,
         document_name=_file_name,
@@ -1209,65 +1229,65 @@ def build_ui():
                     elif settings_accordion is not None:
                         settings_accordion.render()
 
-                with gr.Accordion("Agent backend/API keys", open=IS_HF_SPACE):
-                    gr.Markdown(backend_blurb)
-                    backend_provider = gr.Radio(
-                        label="Provider",
-                        choices=[
-                            (provider_label(key), key) for key in provider_choices()
-                        ],
-                        value=get_default_provider(),
-                    )
-                    backend_model = gr.Dropdown(
-                        label="Model",
-                        choices=models_for_provider(get_default_provider()),
-                        value=default_model_for_provider(get_default_provider()),
-                        allow_custom_value=True,
-                    )
-                    gemini_api_key = gr.Textbox(
-                        label=(
-                            "Gemini API key (required on HF Space)"
-                            if IS_HF_SPACE
-                            else "Gemini API key (session override)"
-                        ),
-                        type="password",
-                        placeholder=(
-                            "Required — get a key from Google AI Studio"
-                            if IS_HF_SPACE
-                            else "Uses GEMINI_API_KEY / GOOGLE_API_KEY from env if empty"
-                        ),
-                    )
-                    hf_token = gr.Textbox(
-                        label="HF token for redaction Space (session override)",
-                        type="password",
-                        placeholder="Uses HF_TOKEN Space secret if empty",
-                        visible=IS_HF_SPACE,
-                    )
-                    with gr.Accordion("AWS credentials (optional)", open=False):
-                        aws_region = gr.Textbox(
-                            label="AWS region (session override)",
-                            placeholder="e.g. eu-west-2",
-                            visible=not IS_HF_SPACE,
+                    with gr.Accordion("Agent backend/API keys", open=IS_HF_SPACE):
+                        gr.Markdown(backend_blurb)
+                        backend_provider = gr.Radio(
+                            label="Provider",
+                            choices=[
+                                (provider_label(key), key) for key in provider_choices()
+                            ],
+                            value=get_default_provider(),
                         )
-                        aws_access_key_id = gr.Textbox(
-                            label="AWS access key ID (session override)",
+                        backend_model = gr.Dropdown(
+                            label="Model",
+                            choices=models_for_provider(get_default_provider()),
+                            value=default_model_for_provider(get_default_provider()),
+                            allow_custom_value=True,
+                        )
+                        gemini_api_key = gr.Textbox(
+                            label=(
+                                "Gemini API key (required on HF Space)"
+                                if IS_HF_SPACE
+                                else "Gemini API key (session override)"
+                            ),
                             type="password",
-                            visible=not IS_HF_SPACE,
+                            placeholder=(
+                                "Required — get a key from Google AI Studio"
+                                if IS_HF_SPACE
+                                else "Uses GEMINI_API_KEY / GOOGLE_API_KEY from env if empty"
+                            ),
                         )
-                        aws_secret_access_key = gr.Textbox(
-                            label="AWS secret access key (session override)",
+                        hf_token = gr.Textbox(
+                            label="HF token for redaction Space (session override)",
                             type="password",
-                            visible=not IS_HF_SPACE,
+                            placeholder="Uses HF_TOKEN Space secret if empty",
+                            visible=IS_HF_SPACE,
                         )
-                        aws_session_token = gr.Textbox(
-                            label="AWS session token (optional)",
-                            type="password",
-                            visible=False,  # not IS_HF_SPACE,
+                        with gr.Accordion("AWS credentials (optional)", open=False):
+                            aws_region = gr.Textbox(
+                                label="AWS region (session override)",
+                                placeholder="e.g. eu-west-2",
+                                visible=not IS_HF_SPACE,
+                            )
+                            aws_access_key_id = gr.Textbox(
+                                label="AWS access key ID (session override)",
+                                type="password",
+                                visible=not IS_HF_SPACE,
+                            )
+                            aws_secret_access_key = gr.Textbox(
+                                label="AWS secret access key (session override)",
+                                type="password",
+                                visible=not IS_HF_SPACE,
+                            )
+                            aws_session_token = gr.Textbox(
+                                label="AWS session token (optional)",
+                                type="password",
+                                visible=False,  # not IS_HF_SPACE,
+                            )
+                        apply_backend_btn = gr.Button(
+                            "Apply backend",
+                            variant="primary",
                         )
-                    apply_backend_btn = gr.Button(
-                        "Apply backend",
-                        variant="primary",
-                    )
 
             with gr.Column(scale=3):
                 chatbot = gr.Chatbot(label="Task progress", height=480)
@@ -1401,6 +1421,10 @@ def build_ui():
             outputs=chat_outputs,
         )
         run_redact_event = start_redact_btn.click(
+            prepare_redaction_session_ui,
+            inputs=[session_hash_state],
+            outputs=[session_hash_state, workspace_session_info],
+        ).then(
             submit_redaction_task,
             inputs=[
                 redact_file,

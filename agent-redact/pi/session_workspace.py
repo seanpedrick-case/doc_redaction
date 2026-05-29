@@ -13,8 +13,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from tools.config import SESSION_OUTPUT_FOLDER  # noqa: E402
-
 _SESSION_ID_RE = re.compile(r"[^a-zA-Z0-9_@.+-]+")
 
 
@@ -31,26 +29,32 @@ def workspace_base_dir() -> Path:
     return path.resolve()
 
 
-# Back-compat alias used by output_files / redaction_prompt.
-WORKSPACE_BASE_DIR = workspace_base_dir()
+def _session_output_folder_enabled() -> bool:
+    """Read at call time so ``pi_agent.env`` / dotenv apply before first use."""
+    raw = (os.environ.get("SESSION_OUTPUT_FOLDER") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
 
 
 def session_workspace_enabled() -> bool:
     """
     When true, each Gradio session uses ``{PI_WORKSPACE_DIR}/{session_hash}/``.
 
-    Default **on** (local Windows/macOS and HF Space). Set ``PI_SESSION_WORKSPACE=false``
-    for a single shared workspace root (legacy local-dev behaviour).
-    ``SESSION_OUTPUT_FOLDER`` from the main app config also enables session folders.
+    Controlled by ``PI_SESSION_WORKSPACE`` in ``config/pi_agent.env`` (default on when unset).
+    Set ``PI_SESSION_WORKSPACE=false`` for a single shared workspace root.
     """
     raw = os.environ.get("PI_SESSION_WORKSPACE", "").strip().lower()
     if raw in {"0", "false", "no", "off"}:
         return False
     if raw in {"1", "true", "yes", "on"}:
         return True
-    if SESSION_OUTPUT_FOLDER:
+    if _session_output_folder_enabled():
         return True
     return True
+
+
+def workspace_base_dir_resolved() -> Path:
+    """Current workspace root (never cached at import)."""
+    return workspace_base_dir()
 
 
 def sanitize_session_id(raw: str) -> str:
@@ -59,13 +63,73 @@ def sanitize_session_id(raw: str) -> str:
 
 
 def resolve_session_hash(request: gr.Request | None) -> str:
-    """Resolve session id using the same rules as the main app."""
+    """
+    Resolve Gradio session id for per-user workspace folders.
+
+    Prefers ``request.session_hash`` (local Pi UI). Falls back to the main app's
+    Cognito/OIDC resolver when a deployment header is configured.
+    """
     if request is None:
         return "default"
+    gradio_hash = getattr(request, "session_hash", None)
+    if gradio_hash is not None and str(gradio_hash).strip():
+        return sanitize_session_id(str(gradio_hash))
     from tools.gradio_platform import resolve_session_identity
 
-    identity = resolve_session_identity(request)
+    try:
+        identity = resolve_session_identity(request)
+    except ValueError:
+        return "default"
     return sanitize_session_id(str(identity))
+
+
+def effective_session_hash(
+    session_hash: str,
+    request: gr.Request | None = None,
+) -> str:
+    """
+    Use ``session_hash_state`` when set; otherwise resolve from the active request.
+
+    Gradio ``demo.load`` may run before ``request.session_hash`` exists, so handlers
+    should pass ``request`` and call this on each event.
+    """
+    stored = (session_hash or "").strip()
+    if stored and stored != "default":
+        return sanitize_session_id(stored)
+    if request is not None:
+        resolved = resolve_session_hash(request)
+        if resolved and resolved != "default":
+            return resolved
+    if stored:
+        return sanitize_session_id(stored)
+    return "default"
+
+
+def session_workspace_status_markdown(session_hash: str) -> str:
+    """Markdown for the workspace panel."""
+    workspace = ensure_session_workspace(session_hash)
+    path = workspace.as_posix()
+    if session_workspace_enabled():
+        return (
+            f"**Session id:** `{session_hash}`  \n"
+            f"**Your workspace:** `{path}/`  \n"
+            "_Save all redaction outputs under this folder only._"
+        )
+    return f"**Workspace:** `{path}/`"
+
+
+def prepare_session_workspace(
+    session_hash: str,
+    request: gr.Request | None = None,
+) -> tuple[str, Path, str]:
+    """
+    Resolve session id, create ``{PI_WORKSPACE_DIR}/{hash}/``, return status text.
+
+    Call at the start of redaction (and on page load) so the folder always exists.
+    """
+    effective = effective_session_hash(session_hash, request)
+    workspace = ensure_session_workspace(effective)
+    return effective, workspace, session_workspace_status_markdown(effective)
 
 
 def session_s3_outputs_prefix(session_hash: str) -> str:
@@ -105,23 +169,12 @@ def init_session_workspace(
 
     Returns ``(session_hash, file_explorer_update, status_markdown, s3_output_prefix)``.
     """
-    session_hash = resolve_session_hash(request)
-    workspace = ensure_session_workspace(session_hash)
-    workspace_posix = workspace.as_posix()
+    session_hash, workspace, status = prepare_session_workspace("", request)
     s3_prefix = session_s3_outputs_prefix(session_hash)
-
-    if session_workspace_enabled():
-        status = (
-            f"**Session id:** `{session_hash}`  \n"
-            f"**Your workspace:** `{workspace_posix}/`  \n"
-            "_Save all redaction outputs under this folder only._"
-        )
-    else:
-        status = f"**Workspace:** `{workspace_posix}/`"
 
     return (
         session_hash,
-        gr.FileExplorer(root_dir=workspace_posix),
+        gr.FileExplorer(root_dir=workspace.as_posix()),
         status,
         s3_prefix,
     )

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from pi_agent_config import is_hf_space_profile
-from session_workspace import WORKSPACE_BASE_DIR
+from session_workspace import workspace_base_dir
 
 
 def upload_root() -> Path:
@@ -27,7 +27,10 @@ def upload_root() -> Path:
 _SAFE_UPLOAD_FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$")
 
 _PARTNERSHIP_TEMPLATE = Path("skills") / "Example prompt partnership.txt"
-WORKSPACE_DIR = WORKSPACE_BASE_DIR
+
+
+def _workspace_root() -> Path:
+    return workspace_base_dir()
 
 
 def pi_repo_root() -> Path:
@@ -389,9 +392,9 @@ def _resolve_and_validate_upload_path(upload_path: str | Path) -> Path:
 def _resolve_and_validate_workspace_dir(workspace_dir: Path | None) -> Path:
     if workspace_dir is not None and not isinstance(workspace_dir, Path):
         raise ValueError("Workspace path has an invalid type.")
-    base_root = WORKSPACE_DIR.resolve()
+    base_root = _workspace_root().resolve()
     candidate = (
-        workspace_dir if workspace_dir is not None else WORKSPACE_DIR
+        workspace_dir if workspace_dir is not None else _workspace_root()
     ).resolve()
     try:
         candidate.relative_to(base_root)
@@ -440,7 +443,7 @@ def build_redaction_prompt(
         raise ValueError("Redaction requirements are required (use bullet points).")
 
     task_settings = settings or RedactionTaskSettings()
-    workspace_root = (workspace_dir or WORKSPACE_DIR).resolve()
+    workspace_root = (workspace_dir or _workspace_root()).resolve()
     file_name = Path(file_name).name
     input_path = f"{workspace_root.as_posix().rstrip('/')}/{file_name}"
     output_base = f"{workspace_root.as_posix().rstrip('/')}/redact/{file_name}/"

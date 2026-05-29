@@ -2798,7 +2798,7 @@ PI_GRADIO_TITLE = get_or_create_env_var("PI_GRADIO_TITLE", "Agentic Document Red
 
 DEFAULT_PI_INTRO_TEXT = f"""# {PI_GRADIO_TITLE}
 
-Upload a document, add redaction requirements, and start a task. The Pi agent orchestrates redaction using skills in this repository. See the [User Guide]({USER_GUIDE_URL}) for the further information about the underlyingDocument Redaction App.
+Upload a document, add redaction requirements, and start a task. The Pi agent orchestrates redaction using skills in this repository. See the [User Guide]({USER_GUIDE_URL}) for the further information about the underlying Document Redaction App.
 
 NOTE: Outputs are not guaranteed complete — review all redacted material **by a human** before use."""
 
@@ -2812,7 +2812,9 @@ PI_INTRO_TEXT = _load_intro_text(
 )
 
 
-PI_WORKSPACE_DIR = get_or_create_env_var("PI_WORKSPACE_DIR", "/home/user/app/workspace")
+# Pi Gradio bootstrap sets PI_WORKSPACE_DIR before import when APP_TYPE=pi; empty default here.
+_pi_workspace_default = "/home/user/app/workspace" if APP_TYPE != "pi" else ""
+PI_WORKSPACE_DIR = get_or_create_env_var("PI_WORKSPACE_DIR", _pi_workspace_default)
 PI_DEFAULT_PROVIDER = get_or_create_env_var(
     "PI_DEFAULT_PROVIDER", "google-gemini"
 )  # Default Pi orchestration backend: llama-cpp | google-gemini | amazon-bedrock

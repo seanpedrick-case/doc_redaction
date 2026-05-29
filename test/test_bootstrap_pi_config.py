@@ -81,6 +81,36 @@ def test_ensure_pi_workdir_defaults_to_repo_when_unset(monkeypatch, tmp_path):
     assert os.environ["PI_WORKDIR"] == resolved
 
 
+def test_ensure_pi_workspace_dir_ignores_docker_path_outside_container(
+    monkeypatch, tmp_path
+):
+    bootstrap = _import_bootstrap(monkeypatch, tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    fake_docker_ws = tmp_path / "home" / "user" / "app" / "workspace"
+    fake_docker_ws.mkdir(parents=True)
+    monkeypatch.setattr(bootstrap, "_DOCKER_WORKSPACE", fake_docker_ws)
+    monkeypatch.setattr(bootstrap, "_pi_running_in_container", lambda: False)
+
+    resolved = bootstrap.ensure_pi_workspace_dir(repo)
+
+    assert resolved == str((repo / "workspace").resolve())
+
+
+def test_ensure_pi_workspace_dir_uses_docker_mount_in_container(monkeypatch, tmp_path):
+    bootstrap = _import_bootstrap(monkeypatch, tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    docker_ws = tmp_path / "container_workspace"
+    docker_ws.mkdir()
+    monkeypatch.setattr(bootstrap, "_DOCKER_WORKSPACE", docker_ws)
+    monkeypatch.setattr(bootstrap, "_pi_running_in_container", lambda: True)
+
+    resolved = bootstrap.ensure_pi_workspace_dir(repo)
+
+    assert resolved == str(docker_ws.resolve())
+
+
 def test_ensure_pi_workspace_dir_honours_explicit_env(monkeypatch, tmp_path):
     bootstrap = _import_bootstrap(monkeypatch, tmp_path)
     custom = tmp_path / "custom_ws"

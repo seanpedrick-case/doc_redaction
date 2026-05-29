@@ -13,19 +13,33 @@ _DOCKER_PI_WORKDIR = Path("/workspace/doc_redaction")
 _PARTNERSHIP_TEMPLATE = Path("skills") / "Example prompt partnership.txt"
 
 
+def _pi_running_in_container() -> bool:
+    """
+    True when the Pi process is inside Docker / HF Space, not local Windows dev.
+
+    Avoids treating ``C:\\home\\user\\app\\workspace`` (created by mistake on Windows)
+    as the compose mount.
+    """
+    if Path("/.dockerenv").is_file():
+        return True
+    return _DOCKER_PI_WORKDIR.is_dir() and _partnership_template_exists(
+        _DOCKER_PI_WORKDIR
+    )
+
+
 def ensure_pi_workspace_dir(repo_root: Path | None = None) -> str:
     """
     Resolve ``PI_WORKSPACE_DIR``, create it, and sync ``os.environ``.
 
     - Explicit ``PI_WORKSPACE_DIR`` wins.
-    - Else use the Docker mount when that path already exists.
+    - Else use the Docker mount only when running in a container.
     - Else ``{repo_root}/workspace`` (local Windows/macOS/Linux dev).
     """
     root = (repo_root or Path(__file__).resolve().parents[2]).resolve()
     raw = (os.environ.get("PI_WORKSPACE_DIR") or "").strip()
     if raw:
         path = Path(raw)
-    elif _DOCKER_WORKSPACE.is_dir():
+    elif _pi_running_in_container() and _DOCKER_WORKSPACE.is_dir():
         path = _DOCKER_WORKSPACE
     else:
         path = root / "workspace"
@@ -56,7 +70,7 @@ def ensure_pi_upload_root(repo_root: Path | None = None) -> str:
         gradio_temp = (os.environ.get("GRADIO_TEMP_DIR") or "").strip()
         if gradio_temp:
             path = Path(gradio_temp)
-        elif _DOCKER_UPLOAD_ROOT.is_dir():
+        elif _pi_running_in_container() and _DOCKER_UPLOAD_ROOT.is_dir():
             path = _DOCKER_UPLOAD_ROOT
         else:
             path = root / "workspace" / ".gradio_uploads"
@@ -88,7 +102,7 @@ def ensure_pi_workdir(repo_root: Path | None = None) -> str:
             resolved = str(candidate.resolve())
             os.environ["PI_WORKDIR"] = resolved
             return resolved
-    if _DOCKER_PI_WORKDIR.is_dir() and _partnership_template_exists(_DOCKER_PI_WORKDIR):
+    if _pi_running_in_container() and _partnership_template_exists(_DOCKER_PI_WORKDIR):
         resolved = str(_DOCKER_PI_WORKDIR.resolve())
         os.environ["PI_WORKDIR"] = resolved
         return resolved

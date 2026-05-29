@@ -61,9 +61,8 @@ def test_sync_repo_skills_to_workspace(workspace_layout):
 
 def test_pi_rpc_cwd_uses_session_subfolder(workspace_layout, monkeypatch):
     _repo, ws, pws = workspace_layout
-    import session_workspace as sw
 
-    monkeypatch.setattr(sw, "SESSION_OUTPUT_FOLDER", False)
+    monkeypatch.delenv("SESSION_OUTPUT_FOLDER", raising=False)
     session = ws / "abc123"
     session.mkdir()
     cwd = pws.pi_rpc_cwd("abc123")
