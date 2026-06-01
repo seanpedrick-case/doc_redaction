@@ -119,7 +119,137 @@ IS_HF_SPACE = is_hf_space_profile()
 # written into os.environ during tools.config import, which would override 7862 here.
 PI_UI_PORT = PI_GRADIO_PORT
 
+AGENT_FINISH_SIGNAL_NONE = ""
+AGENT_FINISH_SIGNAL_FINISHED = "finished"
+AGENT_FINISH_SIGNAL_ABORTED = "aborted"
+AGENT_FINISH_SIGNAL_ERROR = "error"
+
+PI_AGENT_FINISH_HEAD_HTML = """
+<script>
+(function () {
+  function requestNotificationPermissionOnce() {
+    if (typeof Notification === "undefined") return;
+    if (Notification.permission !== "default") return;
+    try { Notification.requestPermission(); } catch (e) {}
+  }
+  document.addEventListener("click", requestNotificationPermissionOnce, { once: true });
+  document.addEventListener("keydown", requestNotificationPermissionOnce, { once: true });
+})();
+</script>
+"""
+
+PI_AGENT_FINISH_NOTIFY_JS = """
+async (...outputs) => {
+  const finishSignal = outputs[outputs.length - 1];
+  if (!finishSignal) {
+    return outputs;
+  }
+  const isAborted = finishSignal === "aborted";
+  const isError = finishSignal === "error";
+  const title = isAborted ? "Agent stopped" : (isError ? "Agent error" : "Agent finished");
+  const body = isAborted
+    ? "The Pi agent run was aborted."
+    : (isError
+      ? "The Pi agent run ended with an error."
+      : "The Pi agent has finished its task. Review the chat for results.");
+  const originalTitle = document.title;
+  let flashOn = true;
+  const flashInterval = setInterval(() => {
+    document.title = flashOn ? ("✓ " + title) : originalTitle;
+    flashOn = !flashOn;
+  }, 1000);
+  setTimeout(() => {
+    clearInterval(flashInterval);
+    document.title = originalTitle;
+  }, 15000);
+  if (typeof Notification !== "undefined") {
+    try {
+      if (Notification.permission === "granted") {
+        new Notification(title, { body: body, tag: "pi-agent-finish" });
+      } else if (Notification.permission === "default") {
+        const perm = await Notification.requestPermission();
+        if (perm === "granted") {
+          new Notification(title, { body: body, tag: "pi-agent-finish" });
+        }
+      }
+    } catch (e) {}
+  }
+  outputs[outputs.length - 1] = "";
+  return outputs;
+}
+"""
+
 app = None
+
+
+def _agent_finish_chat_notice(*, aborted: bool = False, error: bool = False) -> str:
+    if aborted:
+        return (
+            "---\n\n"
+            "**Agent stopped** — the run was aborted. You can send a follow-up message "
+            "or start a new task."
+        )
+    if error:
+        return (
+            "---\n\n"
+            "**Agent stopped** — the run ended with an error. Review the activity log "
+            "and send a follow-up if needed."
+        )
+    return (
+        "---\n\n"
+        "**Agent finished** — the task is complete. Review the outputs below or send "
+        "a follow-up message if you need changes."
+    )
+
+
+def _show_agent_finish_toast(*, aborted: bool = False, error: bool = False) -> None:
+    try:
+        if aborted:
+            gr.Info("Agent stopped (aborted).", duration=8)
+        elif error:
+            gr.Info("Agent stopped with an error.", duration=8)
+        else:
+            gr.Info("Agent finished — task complete.", duration=8)
+    except Exception:
+        pass
+
+
+def _agent_finish_signal_value(*, aborted: bool = False, error: bool = False) -> str:
+    if error:
+        return AGENT_FINISH_SIGNAL_ERROR
+    if aborted:
+        return AGENT_FINISH_SIGNAL_ABORTED
+    return AGENT_FINISH_SIGNAL_FINISHED
+
+
+def _notify_agent_finished(*, aborted: bool = False, error: bool = False) -> str:
+    """Show Gradio toast and return browser-notify signal for the finish handler."""
+    _show_agent_finish_toast(aborted=aborted, error=error)
+    return _agent_finish_signal_value(aborted=aborted, error=error)
+
+
+def _append_agent_finish_notice(
+    history: list[dict[str, Any]],
+    completed_segments: list[str],
+    streaming_text: str,
+    *,
+    aborted: bool = False,
+    error: bool = False,
+) -> tuple[list[dict[str, Any]], list[str], str]:
+    note = _agent_finish_chat_notice(aborted=aborted, error=error)
+    completed_segments, streaming_text = _append_chat_segment(
+        completed_segments, streaming_text, note
+    )
+    if history and history[-1].get("role") == "assistant":
+        history[-1]["content"] = _assistant_display_text(
+            completed_segments, streaming_text
+        )
+    return history, completed_segments, streaming_text
+
+
+def _passthrough_chat_outputs(*outputs: Any) -> tuple[Any, ...]:
+    """Passthrough for ``.then(js=...)`` — Gradio forces ``queue=False`` when ``fn is None``."""
+    return outputs
 
 
 def _client_provider_model(client: PiRpcClient | None) -> tuple[str, str]:
@@ -410,9 +540,13 @@ def _apply_event(
         if streaming_text.strip():
             completed_segments.append(streaming_text)
             streaming_text = ""
-            history[-1]["content"] = _assistant_display_text(
-                completed_segments, streaming_text
-            )
+        aborted = event.text.strip().lower().startswith("agent aborted")
+        history, completed_segments, streaming_text = _append_agent_finish_notice(
+            history,
+            completed_segments,
+            streaming_text,
+            aborted=aborted,
+        )
         activity = _append_activity(activity, event.text)
 
     return (
@@ -594,6 +728,7 @@ def _chat_yield(
     session_info: str | None = None,
     session_hash: str = "",
     refresh_final_files: bool = False,
+    agent_finish_signal: str = AGENT_FINISH_SIGNAL_NONE,
 ):
     final_files: list[str] | None | dict[str, Any]
     session_log: str | None | dict[str, Any]
@@ -617,6 +752,7 @@ def _chat_yield(
         gr.update(interactive=redact_enabled),
         final_files,
         session_log,
+        agent_finish_signal,
     )
 
 
@@ -670,6 +806,7 @@ def _run_pi_chat(
                 gr.update(interactive=True),
                 gr.update(),
                 gr.update(),
+                AGENT_FINISH_SIGNAL_NONE,
             )
         return
 
@@ -737,12 +874,17 @@ def _run_pi_chat(
     )
     prompt_to_send = pi_message
     quota_failures = 0
+    finish_aborted = False
 
     try:
         while True:
             turn_error: str | None = None
             try:
                 for event in client.prompt_events(prompt_to_send):
+                    if event.kind == "done":
+                        finish_aborted = (
+                            event.text.strip().lower().startswith("agent aborted")
+                        )
                     (
                         history,
                         activity,
@@ -793,7 +935,16 @@ def _run_pi_chat(
                         activity,
                         f"**Quota retries exhausted** ({QUOTA_RETRY_ATTEMPTS} attempts).",
                     )
+                    history, completed_segments, streaming_text = (
+                        _append_agent_finish_notice(
+                            history,
+                            completed_segments,
+                            streaming_text,
+                            error=True,
+                        )
+                    )
                     _complete_pi_task()
+                    finish_signal = _notify_agent_finished(error=True)
                     yield _chat_yield(
                         history,
                         client,
@@ -807,6 +958,7 @@ def _run_pi_chat(
                         session_info=_session_summary(client),
                         session_hash=session_hash,
                         refresh_final_files=True,
+                        agent_finish_signal=finish_signal,
                     )
                     return
 
@@ -841,7 +993,14 @@ def _run_pi_chat(
     except PiRpcError as exc:
         history[-1]["content"] = f"**Pi error:** {exc}"
         activity = _append_activity(activity, f"**Pi error:** {exc}")
+        history, completed_segments, streaming_text = _append_agent_finish_notice(
+            history,
+            completed_segments,
+            streaming_text,
+            error=True,
+        )
         _complete_pi_task()
+        finish_signal = _notify_agent_finished(error=True)
         yield _chat_yield(
             history,
             client,
@@ -855,12 +1014,20 @@ def _run_pi_chat(
             session_info=_session_summary(client),
             session_hash=session_hash,
             refresh_final_files=True,
+            agent_finish_signal=finish_signal,
         )
         return
     except Exception:
         if client.abort_requested:
             activity = _append_activity(activity, "**Aborted.**")
+            history, completed_segments, streaming_text = _append_agent_finish_notice(
+                history,
+                completed_segments,
+                streaming_text,
+                aborted=True,
+            )
             _complete_pi_task()
+            finish_signal = _notify_agent_finished(aborted=True)
             yield _chat_yield(
                 history,
                 client,
@@ -874,6 +1041,7 @@ def _run_pi_chat(
                 session_info=_session_summary(client),
                 session_hash=session_hash,
                 refresh_final_files=True,
+                agent_finish_signal=finish_signal,
             )
             return
         raise
@@ -887,6 +1055,7 @@ def _run_pi_chat(
     )
 
     _complete_pi_task()
+    finish_signal = _notify_agent_finished(aborted=finish_aborted)
     yield _chat_yield(
         history,
         client,
@@ -900,6 +1069,7 @@ def _run_pi_chat(
         session_info=_session_summary(client),
         session_hash=session_hash,
         refresh_final_files=True,
+        agent_finish_signal=finish_signal,
     )
 
 
@@ -971,7 +1141,7 @@ def submit_redaction_task(
         )
     )
     try:
-        _file_name, prompt = prepare_redaction_task(
+        _file_name, prompt, renamed_from = prepare_redaction_task(
             upload_file,
             user_instructions,
             page_range=page_range or "all",
@@ -1005,6 +1175,7 @@ def submit_redaction_task(
             gr.update(interactive=True),
             gr.update(),
             gr.update(),
+            AGENT_FINISH_SIGNAL_NONE,
         )
         return
 
@@ -1018,6 +1189,12 @@ def submit_redaction_task(
         f"**VLM signature guidance:** {'on' if settings.encourage_vlm_signatures else 'off'}\n\n"
         f"{user_instructions.strip()}"
     )
+    if renamed_from:
+        chat_summary = (
+            f"_Your uploaded file `{renamed_from}` was saved as `{_file_name}` for this "
+            f"task because the original name contained characters that are unsafe for "
+            f"file paths._\n\n{chat_summary}"
+        )
     yield from _run_pi_chat(
         prompt,
         history,
@@ -1094,11 +1271,11 @@ def build_ui():
     hf_redaction_blurb = (
         "Upload a document and add bullet-point requirements. Redaction runs on a **remote** "
         "Redaction App Hugging Face Space.  \n"
-        "When ready, use **Start redaction task** under the chat panel."
+        "When ready, use **Start redaction task** under the chat panel to the right."
         if IS_HF_SPACE
         else (
             "Upload a PDF (or other supported document). Add bullet-point instructions for redaction below. \n"
-            "When ready, use **Start redaction task** under the chat panel."
+            "When ready, use **Start redaction task** under the chat panel to the right."
         )
     )
     backend_blurb = (
@@ -1218,7 +1395,7 @@ def build_ui():
                         gr.Markdown(
                             "### Try an example\n"
                             "Click a row to load the sample PDF and redaction instructions, "
-                            "then **Start redaction task** under the chat panel."
+                            "then **Start redaction task** under the chat panel to the right."
                         )
                         gr.Examples(
                             examples=pi_example_rows,
@@ -1345,10 +1522,8 @@ def build_ui():
                 "_Loading your session workspace…_",
             )
             gr.Markdown(
-                "**Final deliverables** appear automatically when the agent saves to "
-                "`review/output_review_final/` (or `review/output_final/`). "
-                "Downloads below are copied to your session's `output_final_download/` "
-                "prefixes removed, and duplicate filenames collapsed to the newest file. "
+                "**Final outputs** will appear below. "
+                "Downloads below are available in your session's `output_final_download/` folder."
                 "Use the file explorer below to browse or download other workspace files."
             )
             workspace_output_download = gr.File(
@@ -1395,6 +1570,7 @@ def build_ui():
                 file_types=[".jsonl"],
                 interactive=False,
             )
+            agent_finish_signal = gr.State(AGENT_FINISH_SIGNAL_NONE)
 
         chat_outputs = [
             chatbot,
@@ -1409,9 +1585,10 @@ def build_ui():
             start_redact_btn,
             workspace_output_download,
             session_log_download,
+            agent_finish_signal,
         ]
 
-        run_event = send.click(
+        run_chat_send = send.click(
             chat_respond,
             inputs=[
                 msg,
@@ -1424,7 +1601,12 @@ def build_ui():
             ],
             outputs=chat_outputs,
         )
-        msg.submit(
+        run_chat_send.then(
+            _passthrough_chat_outputs,
+            outputs=chat_outputs,
+            js=PI_AGENT_FINISH_NOTIFY_JS,
+        )
+        run_chat_msg = msg.submit(
             chat_respond,
             inputs=[
                 msg,
@@ -1437,11 +1619,17 @@ def build_ui():
             ],
             outputs=chat_outputs,
         )
-        run_redact_event = start_redact_btn.click(
+        run_chat_msg.then(
+            _passthrough_chat_outputs,
+            outputs=chat_outputs,
+            js=PI_AGENT_FINISH_NOTIFY_JS,
+        )
+        run_redact_prepare = start_redact_btn.click(
             prepare_redaction_session_ui,
             inputs=[session_hash_state],
             outputs=[session_hash_state, workspace_session_info],
-        ).then(
+        )
+        run_redact_task = run_redact_prepare.then(
             submit_redaction_task,
             inputs=[
                 redact_file,
@@ -1459,11 +1647,16 @@ def build_ui():
             ],
             outputs=chat_outputs,
         )
+        run_redact_task.then(
+            _passthrough_chat_outputs,
+            outputs=chat_outputs,
+            js=PI_AGENT_FINISH_NOTIFY_JS,
+        )
         abort_btn.click(
             abort_agent,
             inputs=[client_state],
             outputs=[send, abort_btn, start_redact_btn],
-            cancels=[run_event, run_redact_event],
+            cancels=[run_chat_send, run_chat_msg, run_redact_task],
             queue=False,
         )
         clear.click(
@@ -1550,6 +1743,7 @@ def launch_pi_ui() -> FastAPI | None:
         fastapi_app=create_fastapi_app() if RUN_FASTAPI else None,
         allowed_paths=gradio_allowed_paths(),
         css=THINKING_PANEL_CSS,
+        head_extra=PI_AGENT_FINISH_HEAD_HTML,
         server_name=PI_UI_HOST,
         server_port=PI_UI_PORT,
     )

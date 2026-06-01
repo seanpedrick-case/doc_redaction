@@ -111,9 +111,7 @@ def session_workspace_status_markdown(session_hash: str) -> str:
     path = workspace.as_posix()
     if session_workspace_enabled():
         return (
-            f"**Session id:** `{session_hash}`  \n"
-            f"**Your workspace:** `{path}/`  \n"
-            "_Save all redaction outputs under this folder only._"
+            f"**Session id:** `{session_hash}`  \n" f"**Your workspace:** `{path}/`  \n"
         )
     return f"**Workspace:** `{path}/`"
 

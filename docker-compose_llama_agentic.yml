@@ -152,8 +152,8 @@ services:
       # - "cuda0,cuda1"
       # - -sm
       # - "row"
-      # - --tensor-split
-      # - "24,15"
+      - --tensor-split
+      - "24,14"
       - --ctx-size
       - "114688"
       - -ub
@@ -301,16 +301,16 @@ services:
       - -hf
       - unsloth/gemma-4-31B-it-GGUF
       - --hf-file
-      - gemma-4-31B-it-IQ4_NL.gguf
-      - --mmproj-url
-      - https://huggingface.co/unsloth/gemma-4-31B-it-GGUF/resolve/main/mmproj-BF16.gguf
-      # - --no-mmproj
+      - gemma-4-31B-it-UD-Q4_K_XL.gguf
+      #- --mmproj-url
+      #- https://huggingface.co/unsloth/gemma-4-31B-it-GGUF/resolve/main/mmproj-BF16.gguf
+      - --no-mmproj
       - --n-gpu-layers
       - "-1"
       # - --tensor-split
       # - "24,16"
       - --ctx-size
-      - "65536"
+      - "114688"
       - -ub
       - "1024"
       - --fit
@@ -334,8 +334,10 @@ services:
       - "q8_0"
       - --cache-type-v
       - "q8_0"
-      - --chat-template-kwargs
-      - "{\"enable_thinking\": false}"
+      #- --chat-template-kwargs
+      #- "{\"enable_thinking\": false}"
+      - --reasoning
+      - "off"
       - --image_min_tokens
       - "300"
       #- --image_max_tokens
@@ -381,7 +383,7 @@ services:
       - -hf
       - unsloth/gemma-4-26B-A4B-it-GGUF
       - --hf-file
-      - gemma-4-26B-A4B-it-UD-IQ4_NL.gguf
+      - gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf
       - --mmproj-url
       - https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/main/mmproj-F16.gguf
       - --n-gpu-layers
@@ -418,8 +420,9 @@ services:
       - "42"
       - --parallel
       - "1"
-      - --chat-template-kwargs
-      - "{\"enable_thinking\": false}"
+      #- --chat-template-kwargs
+      #- "{\"enable_thinking\": false}"
+      #- reasoning off
       - --cache-type-k
       - "q8_0"
       - --cache-type-v
