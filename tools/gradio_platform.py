@@ -455,6 +455,7 @@ def mount_or_launch(
     fastapi_app: FastAPI | None = None,
     allowed_paths: list[str] | None = None,
     css: str | None = None,
+    head_extra: str = "",
     theme: gr.themes.Base | None = None,
     server_name: str | None = None,
     server_port: int | None = None,
@@ -475,7 +476,7 @@ def mount_or_launch(
     if queue_kwargs:
         demo.queue(**queue_kwargs)
 
-    head = gradio_head_html(ROOT_PATH)
+    head = gradio_head_html(ROOT_PATH) + (head_extra or "")
     auth = _cognito_auth()
     allowed = allowed_paths or []
 

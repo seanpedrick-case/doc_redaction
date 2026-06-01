@@ -24,7 +24,56 @@ def upload_root() -> Path:
     return path.resolve()
 
 
-_SAFE_UPLOAD_FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$")
+_SAFE_UPLOAD_FILENAME_MAX_BYTES = 255
+# Path separators, nulls, and characters unsafe on common filesystems — not general punctuation.
+_UNSAFE_UPLOAD_FILENAME_CHARS_RE = re.compile(r'[\x00-\x1f<>:"|?*\\/]')
+
+
+def _truncate_upload_filename(
+    name: str, *, max_bytes: int = _SAFE_UPLOAD_FILENAME_MAX_BYTES
+) -> str:
+    encoded = name.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return name
+    stem, suffix = os.path.splitext(name)
+    suffix_bytes = suffix.encode("utf-8")
+    max_stem_bytes = max(1, max_bytes - len(suffix_bytes))
+    while stem and len(stem.encode("utf-8")) > max_stem_bytes:
+        stem = stem[:-1]
+    if not stem:
+        stem = "file"
+    return stem + suffix
+
+
+def _split_upload_basename(name: str) -> tuple[str, str]:
+    """Split an upload basename into stem and extension (handles ``.pdf`` on Windows)."""
+    if re.fullmatch(r"\.[^./\\]+", name):
+        return "", name
+    path = Path(name)
+    return path.stem, path.suffix
+
+
+def _workspace_filename_from_upload(name: str) -> tuple[str, str, bool]:
+    """
+    Derive a workspace-safe basename, changing the name only when required for security.
+
+    Returns ``(original_basename, workspace_basename, renamed)``.
+    """
+    original = Path(name).name.strip()
+    if not original or original in {".", ".."}:
+        raise ValueError("Uploaded file has an invalid name.")
+    if "\x00" in original or "/" in original or "\\" in original:
+        raise ValueError("Uploaded file has an invalid name.")
+
+    stem, suffix = _split_upload_basename(original)
+    safe_stem = _UNSAFE_UPLOAD_FILENAME_CHARS_RE.sub("_", stem)
+    safe_suffix = _UNSAFE_UPLOAD_FILENAME_CHARS_RE.sub("_", suffix)
+    safe_stem = safe_stem.strip(". ")
+    if not safe_stem:
+        safe_stem = "file"
+    safe_name = _truncate_upload_filename(safe_stem + safe_suffix)
+    return original, safe_name, safe_name != original
+
 
 _PARTNERSHIP_TEMPLATE = Path("skills") / "Example prompt partnership.txt"
 
@@ -354,15 +403,6 @@ def build_remote_backend_guidance(
     ).format(output_base=output_base.rstrip("/") + "/")
 
 
-def _sanitize_upload_filename(name: str) -> str:
-    safe = Path(name).name.strip()
-    if not safe or safe in {".", ".."}:
-        raise ValueError("Uploaded file has an invalid name.")
-    if not _SAFE_UPLOAD_FILENAME_RE.fullmatch(safe):
-        raise ValueError("Uploaded file has an invalid name.")
-    return safe
-
-
 def _resolve_and_validate_upload_path(upload_path: str | Path) -> Path:
     if not isinstance(upload_path, (str, Path)):
         raise ValueError("Uploaded file path has an invalid type.")
@@ -409,23 +449,28 @@ def copy_upload_to_workspace(
     upload_path: str | Path,
     *,
     workspace_dir: Path | None = None,
-) -> Path:
+) -> tuple[Path, str | None]:
+    """
+    Copy upload into the session workspace.
+
+    Returns ``(destination_path, original_basename)`` where ``original_basename`` is
+    set only when the file was renamed for path safety.
+    """
     source = _resolve_and_validate_upload_path(upload_path)
     if not source.is_file():
         raise FileNotFoundError(f"Uploaded file not found: {source}")
     workspace_root = _resolve_and_validate_workspace_dir(workspace_dir)
     workspace_root.mkdir(parents=True, exist_ok=True)
-    safe_name = _sanitize_upload_filename(source.name)
+    _original_name, safe_name, renamed = _workspace_filename_from_upload(source.name)
     dest = (workspace_root / safe_name).resolve()
     try:
         dest.relative_to(workspace_root)
     except ValueError as exc:
         raise ValueError(f"Destination path is outside workspace: {dest}") from exc
-    if source == dest:
-        return dest
-    # copyfile only: copy2/copystat raises EPERM when overwriting on Docker Desktop bind mounts.
-    shutil.copyfile(source, dest)
-    return dest
+    if source != dest:
+        # copyfile only: copy2/copystat raises EPERM when overwriting on Docker Desktop bind mounts.
+        shutil.copyfile(source, dest)
+    return dest, (_original_name if renamed else None)
 
 
 def build_redaction_prompt(
@@ -489,15 +534,18 @@ def prepare_redaction_task(
     page_range: str = "all",
     settings: RedactionTaskSettings | None = None,
     workspace_dir: Path | None = None,
-) -> tuple[str, str]:
+) -> tuple[str, str, str | None]:
     """
-    Copy upload into workspace and return (file_name, full_prompt).
+    Copy upload into workspace and return ``(file_name, full_prompt, renamed_from)``.
+
+    ``renamed_from`` is the original upload basename when it was adjusted for path
+    safety; otherwise ``None``.
     """
     if upload_path is None:
         raise ValueError("Please upload a document.")
     root = _resolve_and_validate_workspace_dir(workspace_dir)
     validate_pdf_page_limit(upload_path, page_range=page_range)
-    dest = copy_upload_to_workspace(upload_path, workspace_dir=root)
+    dest, renamed_from = copy_upload_to_workspace(upload_path, workspace_dir=root)
     prompt = build_redaction_prompt(
         dest.name,
         user_instructions,
@@ -505,4 +553,4 @@ def prepare_redaction_task(
         settings=settings,
         workspace_dir=root,
     )
-    return dest.name, prompt
+    return dest.name, prompt, renamed_from

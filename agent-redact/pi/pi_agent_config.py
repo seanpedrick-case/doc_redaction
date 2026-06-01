@@ -509,6 +509,34 @@ def _load_settings_template() -> dict[str, Any]:
     }
 
 
+def _apply_compaction_settings(settings: dict[str, Any]) -> None:
+    """
+    Merge Pi session auto-compaction from env into ``settings.json``.
+
+    ``PI_COMPACTION_ENABLED`` — when set, overrides the template ``compaction.enabled``
+    flag (``true`` / ``false``). When unset, the template default applies (enabled).
+
+    Optional tuning: ``PI_COMPACTION_RESERVE_TOKENS``, ``PI_COMPACTION_KEEP_RECENT_TOKENS``.
+    """
+    compaction = dict(
+        settings.get("compaction")
+        or {
+            "enabled": True,
+            "reserveTokens": 32768,
+            "keepRecentTokens": 20000,
+        }
+    )
+    if os.environ.get("PI_COMPACTION_ENABLED") is not None:
+        compaction["enabled"] = _env_flag("PI_COMPACTION_ENABLED")
+    reserve = (os.environ.get("PI_COMPACTION_RESERVE_TOKENS") or "").strip()
+    if reserve:
+        compaction["reserveTokens"] = int(reserve)
+    keep = (os.environ.get("PI_COMPACTION_KEEP_RECENT_TOKENS") or "").strip()
+    if keep:
+        compaction["keepRecentTokens"] = int(keep)
+    settings["compaction"] = compaction
+
+
 def resolve_session_dir() -> str:
     """Pi session JSONL directory (absolute path or relative to ``AGENT_DIR``)."""
     explicit = os.environ.get("PI_SESSION_DIR", "").strip()
@@ -544,6 +572,7 @@ def build_settings_config(
     settings = _load_settings_template()
     settings["defaultProvider"] = provider
     settings["defaultModel"] = model
+    _apply_compaction_settings(settings)
     session_path = ensure_session_dir(resolve_session_dir())
     settings["sessionDir"] = session_path.as_posix()
     if is_hf_space_profile() or provider == PROVIDER_GEMINI:

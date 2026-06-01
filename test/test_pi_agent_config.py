@@ -189,3 +189,44 @@ def test_configure_aws_credentials_session_ui_keys_win(monkeypatch):
     assert os.environ["AWS_ACCESS_KEY_ID"] == "AKIAUI"
     assert os.environ["AWS_SECRET_ACCESS_KEY"] == "ui-secret"
     assert os.environ["AWS_SESSION_TOKEN"] == "token"
+
+
+def test_build_settings_config_compaction_enabled_from_env(
+    tmp_path, monkeypatch, pi_workspace
+):
+    monkeypatch.setenv("PI_COMPACTION_ENABLED", "true")
+    monkeypatch.setenv("PI_COMPACTION_RESERVE_TOKENS", "4096")
+    monkeypatch.setenv("PI_COMPACTION_KEEP_RECENT_TOKENS", "2048")
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
+
+    settings = pac.build_settings_config()
+
+    assert settings["compaction"]["enabled"] is True
+    assert settings["compaction"]["reserveTokens"] == 4096
+    assert settings["compaction"]["keepRecentTokens"] == 2048
+
+
+def test_build_settings_config_compaction_disabled_from_env(
+    tmp_path, monkeypatch, pi_workspace
+):
+    monkeypatch.setenv("PI_COMPACTION_ENABLED", "false")
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
+
+    settings = pac.build_settings_config()
+
+    assert settings["compaction"]["enabled"] is False
+
+
+def test_build_settings_config_compaction_uses_template_when_env_unset(
+    tmp_path, monkeypatch, pi_workspace
+):
+    monkeypatch.delenv("PI_COMPACTION_ENABLED", raising=False)
+    monkeypatch.delenv("PI_COMPACTION_RESERVE_TOKENS", raising=False)
+    monkeypatch.delenv("PI_COMPACTION_KEEP_RECENT_TOKENS", raising=False)
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
+
+    settings = pac.build_settings_config()
+
+    assert settings["compaction"]["enabled"] is True
+    assert settings["compaction"]["reserveTokens"] == 32768
+    assert settings["compaction"]["keepRecentTokens"] == 20000

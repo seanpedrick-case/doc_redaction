@@ -36,6 +36,9 @@ Copy [`config/pi_agent.env.example`](../../../config/pi_agent.env.example) to `c
 | `PI_MAX_PAGES` | Maximum PDF pages allowed per redaction upload (falls back to `MAX_PAGES` / `MAX_DOC_PAGES`, default `3000`) |
 | `PI_MAX_RETRIES` | Gemini quota / rate-limit retries for Pi auto-retry and Gradio backoff (default `5`; alias `PI_QUOTA_RETRY_ATTEMPTS`) |
 | `PI_QUOTA_RETRY_DELAY_S` | Seconds between Gradio quota retries (default `60`) |
+| `PI_COMPACTION_ENABLED` | Pi session auto-compaction in `settings.json` (`true` / `false`; unset uses template default, enabled) |
+| `PI_COMPACTION_RESERVE_TOKENS` | Optional compaction `reserveTokens` (default `32768` from template) |
+| `PI_COMPACTION_KEEP_RECENT_TOKENS` | Optional compaction `keepRecentTokens` (default `20000` from template) |
 
 ### Usage logging (CSV / DynamoDB / S3)
 
@@ -116,6 +119,8 @@ The UI also shows:
 - **Workspace output files** — browse and download redaction artifacts
 
 Optional env vars on `pi-agent`: `PI_GRADIO_SHOW_THINKING`, `PI_GRADIO_SHOW_TOOL_OUTPUT`, `PI_GRADIO_TOOL_OUTPUT_MAX`, `PI_GRADIO_ACTIVITY_MAX_LINES`.
+
+When a Pi run completes, the chat shows an **Agent finished** (or **Agent stopped**) line, a Gradio info toast appears, and the browser tab title flashes for ~15 seconds. Desktop notifications are shown when the browser has granted notification permission (requested on first click/keypress in the Pi UI).
 
 Run the UI locally (outside Docker):
 
