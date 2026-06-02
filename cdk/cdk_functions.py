@@ -1,18 +1,24 @@
 import ipaddress
 import json
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Tuple, Union
 
 import boto3
 import pandas as pd
-from aws_cdk import App, CfnOutput, CfnTag, Tags
+from aws_cdk import App, CfnOutput, CfnTag, Duration, Fn, RemovalPolicy, Tags
 from aws_cdk import aws_cognito as cognito
 from aws_cdk import aws_ec2 as ec2
+from aws_cdk import aws_ecs as ecs
 from aws_cdk import aws_elasticloadbalancingv2 as elb
 from aws_cdk import aws_elasticloadbalancingv2_actions as elb_act
 from aws_cdk import aws_iam as iam
+from aws_cdk import aws_lambda as lambda_
+from aws_cdk import aws_logs as logs
 from aws_cdk import aws_s3 as s3
+from aws_cdk import aws_s3_notifications as s3n
+from aws_cdk import aws_secretsmanager as secretsmanager
 from aws_cdk import aws_wafv2 as wafv2
+from aws_cdk import custom_resources as cr
 from botocore.exceptions import ClientError, NoCredentialsError
 from cdk_config import (
     ACCESS_LOG_DYNAMODB_TABLE_NAME,
@@ -31,7 +37,7 @@ from cdk_config import (
     USAGE_LOG_DYNAMODB_TABLE_NAME,
 )
 from constructs import Construct
-from dotenv import set_key
+from dotenv import dotenv_values, set_key
 
 # CDK CLI stores lookup-provider results under these key prefixes in cdk.context.json.
 _CDK_LOOKUP_CONTEXT_PREFIXES = (
@@ -1064,6 +1070,71 @@ def check_for_secret(secret_name: str, secret_value: dict = ""):
         return False, {}
 
 
+def get_security_group_id_by_name(
+    group_name: str,
+    vpc_id: str,
+    region_name: str = AWS_REGION,
+) -> Tuple[bool, str]:
+    """Look up a security group ID by name within a VPC."""
+    if not group_name or not vpc_id:
+        return False, ""
+    try:
+        ec2_client = boto3.client("ec2", region_name=region_name)
+        response = ec2_client.describe_security_groups(
+            Filters=[
+                {"Name": "group-name", "Values": [group_name]},
+                {"Name": "vpc-id", "Values": [vpc_id]},
+            ]
+        )
+        groups = response.get("SecurityGroups") or []
+        if groups:
+            return True, groups[0]["GroupId"]
+        return False, ""
+    except ClientError as e:
+        print(f"Error looking up security group '{group_name}': {e}")
+        return False, ""
+
+
+def resolve_service_connect_client_security_group_ids(
+    explicit_ids: List[str],
+    security_group_names: List[str],
+    get_context_str,
+) -> List[str]:
+    """
+    Merge explicit sg- IDs with IDs resolved from pre-check context (security_group_id:{name}).
+    """
+    resolved: List[str] = []
+    for sg_id in explicit_ids:
+        if not sg_id.startswith("sg-"):
+            raise ValueError(
+                f"ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_IDS entry '{sg_id}' "
+                "must be a security group ID (sg-...)."
+            )
+        if sg_id not in resolved:
+            resolved.append(sg_id)
+
+    missing_names: List[str] = []
+    for sg_name in security_group_names:
+        sg_id = get_context_str(f"security_group_id:{sg_name}")
+        if sg_id:
+            if sg_id not in resolved:
+                resolved.append(sg_id)
+        else:
+            missing_names.append(sg_name)
+
+    if missing_names:
+        raise ValueError(
+            "Could not resolve Service Connect client security group(s) in VPC "
+            f"{get_context_str('vpc_id') or '(unknown)'}: "
+            + ", ".join(missing_names)
+            + ". Set ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_IDS, fix "
+            "ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_NAMES / "
+            "ECS_SERVICE_CONNECT_CLIENT_CDK_PREFIXES, and re-run check_resources.py."
+        )
+
+    return resolved
+
+
 def check_alb_exists(
     load_balancer_name: str, region_name: str = None
 ) -> tuple[bool, dict]:
@@ -1507,6 +1578,704 @@ def add_alb_https_listener_with_cert(
         print("ACM_CERTIFICATE_ARN is not provided. Skipping HTTPS listener creation.")
 
     return https_listener
+
+
+def create_ecs_express_infrastructure_role(
+    scope: Construct,
+    logical_id: str,
+    role_name: str,
+) -> iam.Role:
+    """IAM role for ECS Express Mode to provision ALB, ACM cert, and autoscaling."""
+    role = iam.Role(
+        scope,
+        logical_id,
+        role_name=role_name,
+        assumed_by=iam.ServicePrincipal("ecs.amazonaws.com"),
+    )
+    role.add_managed_policy(
+        iam.ManagedPolicy.from_aws_managed_policy_name(
+            "AmazonECSInfrastructureRoleforExpressGatewayServices"
+        )
+    )
+    return role
+
+
+def _secret_value_from_arn(secret_arn: str, json_key: str) -> str:
+    return f"{secret_arn}:{json_key}::"
+
+
+# Injected via Express `secrets`, not plain environment (avoid duplication/leakage).
+_EXPRESS_SECRET_ENV_NAMES = frozenset(
+    {"AWS_USER_POOL_ID", "AWS_CLIENT_ID", "AWS_CLIENT_SECRET"}
+)
+
+
+def load_app_config_env_for_express(
+    config_env_path: str,
+    *,
+    exclude_names: Optional[FrozenSet[str]] = None,
+) -> List[ecs.CfnExpressGatewayService.KeyValuePairProperty]:
+    """
+    Load KEY=VALUE pairs from config/config.env for Express PrimaryContainer.environment.
+
+    Uses the same file written by create_basic_config_env() and uploaded to S3 on the
+    legacy Fargate path (environmentFiles).
+    """
+    exclude = exclude_names or _EXPRESS_SECRET_ENV_NAMES
+    path = os.path.abspath(config_env_path)
+    if not os.path.isfile(path):
+        print(
+            f"Warning: app config env file not found at {path}; "
+            "Express container will not receive app config environment variables."
+        )
+        return []
+
+    raw = dotenv_values(path)
+    environment: List[ecs.CfnExpressGatewayService.KeyValuePairProperty] = []
+    for name, value in sorted(raw.items()):
+        if not name or value is None or name in exclude:
+            continue
+        environment.append(
+            ecs.CfnExpressGatewayService.KeyValuePairProperty(
+                name=name,
+                value=str(value),
+            )
+        )
+    print(
+        f"Loaded {len(environment)} environment variables from {path} for ECS Express Mode."
+    )
+    return environment
+
+
+def build_express_gateway_primary_container(
+    *,
+    image_uri: str,
+    container_port: int,
+    log_group_name: str,
+    aws_region: str,
+    secret: secretsmanager.ISecret,
+    environment: Optional[
+        List[ecs.CfnExpressGatewayService.KeyValuePairProperty]
+    ] = None,
+) -> ecs.CfnExpressGatewayService.ExpressGatewayContainerProperty:
+    secret_arn = secret.secret_arn
+    return ecs.CfnExpressGatewayService.ExpressGatewayContainerProperty(
+        image=image_uri,
+        container_port=container_port,
+        aws_logs_configuration=ecs.CfnExpressGatewayService.ExpressGatewayServiceAwsLogsConfigurationProperty(
+            log_group_name=log_group_name,
+            log_stream_prefix="ecs",
+            region=aws_region,
+        ),
+        environment=environment or None,
+        secrets=[
+            ecs.CfnExpressGatewayService.SecretProperty(
+                name="AWS_USER_POOL_ID",
+                value_from=_secret_value_from_arn(secret_arn, "REDACTION_USER_POOL_ID"),
+            ),
+            ecs.CfnExpressGatewayService.SecretProperty(
+                name="AWS_CLIENT_ID",
+                value_from=_secret_value_from_arn(secret_arn, "REDACTION_CLIENT_ID"),
+            ),
+            ecs.CfnExpressGatewayService.SecretProperty(
+                name="AWS_CLIENT_SECRET",
+                value_from=_secret_value_from_arn(
+                    secret_arn, "REDACTION_CLIENT_SECRET"
+                ),
+            ),
+        ],
+    )
+
+
+def create_express_gateway_service(
+    scope: Construct,
+    logical_id: str,
+    *,
+    service_name: str,
+    cluster_name: str,
+    execution_role_arn: str,
+    infrastructure_role_arn: str,
+    task_role_arn: str,
+    cpu: str,
+    memory: str,
+    health_check_path: str,
+    primary_container: ecs.CfnExpressGatewayService.ExpressGatewayContainerProperty,
+    subnet_ids: List[str],
+    security_group_ids: List[str],
+) -> ecs.CfnExpressGatewayService:
+    network = None
+    if subnet_ids or security_group_ids:
+        network = ecs.CfnExpressGatewayService.ExpressGatewayServiceNetworkConfigurationProperty(
+            subnets=subnet_ids or None,
+            security_groups=security_group_ids or None,
+        )
+    express_service = ecs.CfnExpressGatewayService(
+        scope,
+        logical_id,
+        service_name=service_name,
+        cluster=cluster_name,
+        execution_role_arn=execution_role_arn,
+        infrastructure_role_arn=infrastructure_role_arn,
+        task_role_arn=task_role_arn,
+        cpu=cpu,
+        memory=memory,
+        health_check_path=health_check_path,
+        primary_container=primary_container,
+        network_configuration=network,
+    )
+    return express_service
+
+
+def _forward_target_group_action(
+    target_group_arn: str,
+    stickiness_seconds: int,
+) -> Dict[str, Any]:
+    action: Dict[str, Any] = {
+        "Type": "forward",
+        "Order": 2,
+        "ForwardConfig": {
+            "TargetGroups": [{"TargetGroupArn": target_group_arn}],
+        },
+    }
+    if stickiness_seconds > 0:
+        action["ForwardConfig"]["TargetGroupStickinessConfig"] = {
+            "Enabled": True,
+            "DurationSeconds": stickiness_seconds,
+        }
+    return action
+
+
+def build_cognito_default_listener_actions(
+    *,
+    user_pool_arn: str,
+    user_pool_client_id: str,
+    user_pool_domain_prefix: str,
+    target_group_arn: str,
+    stickiness_seconds: int = 28800,
+    scope: str = "openid email profile",
+) -> List[Dict[str, Any]]:
+    """Default actions for ELBv2 ModifyListener (authenticate-cognito + forward)."""
+    return [
+        {
+            "Type": "authenticate-cognito",
+            "Order": 1,
+            "AuthenticateCognitoConfig": {
+                "UserPoolArn": user_pool_arn,
+                "UserPoolClientId": user_pool_client_id,
+                "UserPoolDomain": user_pool_domain_prefix,
+                "Scope": scope,
+                "OnUnauthenticatedRequest": "authenticate",
+                "SessionTimeout": stickiness_seconds,
+            },
+        },
+        _forward_target_group_action(target_group_arn, stickiness_seconds),
+    ]
+
+
+def configure_express_listener_cognito_and_cloudfront(
+    scope: Construct,
+    logical_id_prefix: str,
+    *,
+    express_service: ecs.CfnExpressGatewayService,
+    user_pool_arn: str,
+    user_pool_client_id: str,
+    user_pool_domain_prefix: str,
+    use_cloudfront: bool,
+    cloudfront_host_header: str,
+    stickiness_seconds: int = 28800,
+) -> None:
+    """
+    Attach Cognito auth to the Express-managed HTTPS listener and optionally add a
+    CloudFront host-header rule (same pattern as the legacy HTTP listener path).
+    """
+    listener_arn = express_service.get_att(
+        "ECSManagedResourceArns.IngressPath.ListenerArn"
+    ).to_string()
+    target_group_arn = Fn.select(
+        0,
+        express_service.get_att("ECSManagedResourceArns.IngressPath.TargetGroupArns"),
+    )
+    default_actions = build_cognito_default_listener_actions(
+        user_pool_arn=user_pool_arn,
+        user_pool_client_id=user_pool_client_id,
+        user_pool_domain_prefix=user_pool_domain_prefix,
+        target_group_arn=target_group_arn,
+        stickiness_seconds=stickiness_seconds,
+    )
+    modify_listener = cr.AwsCustomResource(
+        scope,
+        f"{logical_id_prefix}ModifyExpressListener",
+        on_create=cr.AwsSdkCall(
+            service="ELBv2",
+            action="modifyListener",
+            parameters={
+                "ListenerArn": listener_arn,
+                "DefaultActions": default_actions,
+            },
+            physical_resource_id=cr.PhysicalResourceId.of(
+                f"express-listener-cognito-{logical_id_prefix}"
+            ),
+        ),
+        on_update=cr.AwsSdkCall(
+            service="ELBv2",
+            action="modifyListener",
+            parameters={
+                "ListenerArn": listener_arn,
+                "DefaultActions": default_actions,
+            },
+            physical_resource_id=cr.PhysicalResourceId.of(
+                f"express-listener-cognito-{logical_id_prefix}"
+            ),
+        ),
+        policy=cr.AwsCustomResourcePolicy.from_sdk_calls(
+            resources=cr.AwsCustomResourcePolicy.ANY_RESOURCE
+        ),
+    )
+    modify_listener.node.add_dependency(express_service)
+
+    if use_cloudfront and cloudfront_host_header:
+        forward_only = [
+            {
+                "Type": "forward",
+                "Order": 1,
+                "ForwardConfig": {
+                    "TargetGroups": [{"TargetGroupArn": target_group_arn}],
+                    "TargetGroupStickinessConfig": {
+                        "Enabled": True,
+                        "DurationSeconds": stickiness_seconds,
+                    },
+                },
+            }
+        ]
+        cf_rule = cr.AwsCustomResource(
+            scope,
+            f"{logical_id_prefix}ExpressCloudFrontHostRule",
+            on_create=cr.AwsSdkCall(
+                service="ELBv2",
+                action="createRule",
+                parameters={
+                    "ListenerArn": listener_arn,
+                    "Priority": 1,
+                    "Conditions": [
+                        {
+                            "Field": "host-header",
+                            "HostHeaderConfig": {"Values": [cloudfront_host_header]},
+                        }
+                    ],
+                    "Actions": forward_only,
+                },
+                physical_resource_id=cr.PhysicalResourceId.from_response(
+                    "Rules[0].RuleArn"
+                ),
+            ),
+            on_delete=cr.AwsSdkCall(
+                service="ELBv2",
+                action="deleteRule",
+                parameters={"RuleArn": cr.PhysicalResourceId.reference()},
+            ),
+            policy=cr.AwsCustomResourcePolicy.from_sdk_calls(
+                resources=cr.AwsCustomResourcePolicy.ANY_RESOURCE
+            ),
+        )
+        cf_rule.node.add_dependency(modify_listener)
+
+
+def allow_express_load_balancer_to_ecs_security_group(
+    scope: Construct,
+    logical_id: str,
+    *,
+    express_service: ecs.CfnExpressGatewayService,
+    ecs_security_group: ec2.ISecurityGroup,
+    container_port: int,
+) -> None:
+    """Allow traffic from the Express-managed ALB security group to the task SG."""
+    lb_sg_arn = Fn.select(
+        0,
+        express_service.get_att(
+            "ECSManagedResourceArns.IngressPath.LoadBalancerSecurityGroups"
+        ),
+    )
+    ec2.CfnSecurityGroupIngress(
+        scope,
+        logical_id,
+        group_id=ecs_security_group.security_group_id,
+        ip_protocol="tcp",
+        from_port=container_port,
+        to_port=container_port,
+        source_security_group_id=lb_sg_arn,
+        description="Express Mode ALB to ECS tasks",
+    )
+
+
+def create_s3_batch_ecs_trigger_lambda(
+    scope: Construct,
+    logical_id: str,
+    *,
+    function_name: Optional[str],
+    lambda_asset_path: str,
+    output_bucket: s3.IBucket,
+    config_bucket: s3.IBucket,
+    cluster_name: str,
+    task_definition_arn: str,
+    container_name: str,
+    subnet_ids: List[str],
+    security_group_id: str,
+    execution_role: iam.IRole,
+    task_role: iam.IRole,
+    env_prefix: str,
+    env_suffix: str,
+    input_prefix: str,
+    config_prefix: str,
+    default_params_key: str,
+    default_direct_mode_task: str = "redact",
+) -> lambda_.Function:
+    """
+    Lambda triggered by job .env uploads on the output bucket; runs one-shot Fargate tasks.
+    """
+    lambda_role = iam.Role(
+        scope,
+        f"{logical_id}Role",
+        assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
+        managed_policies=[
+            iam.ManagedPolicy.from_aws_managed_policy_name(
+                "service-role/AWSLambdaBasicExecutionRole"
+            )
+        ],
+    )
+
+    lambda_role.add_to_policy(
+        iam.PolicyStatement(
+            actions=["ecs:RunTask"],
+            resources=[task_definition_arn],
+        )
+    )
+    lambda_role.add_to_policy(
+        iam.PolicyStatement(
+            actions=["ecs:RunTask"],
+            resources=[
+                f"arn:aws:ecs:*:*:cluster/{cluster_name}",
+            ],
+        )
+    )
+    lambda_role.add_to_policy(
+        iam.PolicyStatement(
+            actions=["iam:PassRole"],
+            resources=[execution_role.role_arn, task_role.role_arn],
+            conditions={
+                "StringEquals": {"iam:PassedToService": "ecs-tasks.amazonaws.com"}
+            },
+        )
+    )
+    output_bucket.grant_read(lambda_role, f"{env_prefix}*")
+    config_bucket.grant_read(lambda_role)
+    if default_params_key:
+        output_bucket.grant_read(lambda_role, default_params_key)
+
+    fn_kwargs: Dict[str, Any] = {
+        "runtime": lambda_.Runtime.PYTHON_3_12,
+        "handler": "lambda_function.lambda_handler",
+        "code": lambda_.Code.from_asset(lambda_asset_path),
+        "role": lambda_role,
+        "timeout": Duration.seconds(60),
+        "memory_size": 256,
+        "environment": {
+            "OUTPUT_BUCKET": output_bucket.bucket_name,
+            "CONFIG_BUCKET": config_bucket.bucket_name,
+            "INPUT_PREFIX": input_prefix,
+            "CONFIG_PREFIX": config_prefix,
+            "ENV_PREFIX": env_prefix,
+            "ENV_SUFFIX": env_suffix,
+            "DEFAULT_PARAMS_KEY": default_params_key,
+            "ECS_CLUSTER": cluster_name,
+            "ECS_TASK_DEF": task_definition_arn,
+            "SUBNETS": ",".join(subnet_ids),
+            "SECURITY_GROUPS": security_group_id,
+            "CONTAINER_NAME": container_name,
+            "DEFAULT_DIRECT_MODE_TASK": default_direct_mode_task,
+        },
+    }
+    if function_name:
+        fn_kwargs["function_name"] = function_name
+
+    batch_fn = lambda_.Function(scope, logical_id, **fn_kwargs)
+
+    output_bucket.add_event_notification(
+        s3.EventType.OBJECT_CREATED,
+        s3n.LambdaDestination(batch_fn),
+        s3.NotificationKeyFilter(prefix=env_prefix, suffix=env_suffix),
+    )
+
+    return batch_fn
+
+
+def build_pi_agent_container_environment(
+    *,
+    service_connect_discovery_name: str,
+    main_app_port: Union[str, int],
+    pi_gradio_port: Union[str, int],
+) -> Dict[str, str]:
+    """Inline env for Pi agent tasks (overrides image defaults; SC URL for main app)."""
+    port = int(main_app_port)
+    pi_port = int(pi_gradio_port)
+    return {
+        "APP_TYPE": "pi",
+        "APP_CONFIG_PATH": "/workspace/doc_redaction/config/pi_agent.env",
+        "PI_DEPLOYMENT_PROFILE": "aws-ecs",
+        "PI_DEFAULT_PROVIDER": "amazon-bedrock",
+        "DOC_REDACTION_GRADIO_URL": f"http://{service_connect_discovery_name}:{port}",
+        "PI_GRADIO_PORT": str(pi_port),
+        "GRADIO_SERVER_PORT": str(pi_port),
+        "GRADIO_SERVER_NAME": "0.0.0.0",
+        "PI_WORKSPACE_DIR": "/home/user/app/workspace",
+        "PI_WORKDIR": "/workspace/doc_redaction",
+        "PI_UPLOAD_ROOT": "/tmp/gradio",
+        "PI_SESSION_DIR": "/tmp/pi-sessions",
+        "RUN_FASTAPI": "False",
+        "COGNITO_AUTH": "False",
+    }
+
+
+def create_pi_agent_ecs_resources(
+    scope: Construct,
+    logical_id_prefix: str,
+    *,
+    vpc: ec2.IVpc,
+    cluster: ecs.ICluster,
+    private_subnets: List[ec2.ISubnet],
+    pi_ecr_image_uri: str,
+    container_name: str,
+    task_role: iam.IRole,
+    execution_role: iam.IRole,
+    config_bucket: s3.IBucket,
+    pi_agent_env_s3_key: str,
+    service_name: str,
+    task_family: str,
+    security_group_name: str,
+    log_group_name: str,
+    cpu: int,
+    memory_mib: int,
+    pi_gradio_port: int,
+    service_connect_namespace: str,
+    service_connect_discovery_name: str,
+    main_app_port: int,
+    use_fargate_spot: str,
+) -> Tuple[ecs.FargateService, ec2.SecurityGroup, ecs.FargateTaskDefinition]:
+    """Second Fargate service for the Pi agent (joins Service Connect namespace as a client)."""
+    pi_security_group = ec2.SecurityGroup(
+        scope,
+        f"{logical_id_prefix}SecurityGroup",
+        vpc=vpc,
+        security_group_name=security_group_name,
+        description="Pi agent ECS tasks",
+    )
+
+    pi_log_group = logs.LogGroup(
+        scope,
+        f"{logical_id_prefix}LogGroup",
+        log_group_name=log_group_name,
+        retention=logs.RetentionDays.ONE_MONTH,
+        removal_policy=RemovalPolicy.DESTROY,
+    )
+
+    pi_volume = ecs.Volume(name="piEphemeralVolume")
+    pi_task_definition = ecs.FargateTaskDefinition(
+        scope,
+        f"{logical_id_prefix}TaskDefinition",
+        family=task_family,
+        cpu=cpu,
+        memory_limit_mib=memory_mib,
+        task_role=task_role,
+        execution_role=execution_role,
+        runtime_platform=ecs.RuntimePlatform(
+            cpu_architecture=ecs.CpuArchitecture.X86_64,
+            operating_system_family=ecs.OperatingSystemFamily.LINUX,
+        ),
+        ephemeral_storage_gib=21,
+        volumes=[pi_volume],
+    )
+
+    env_files: List[ecs.EnvironmentFile] = []
+    if pi_agent_env_s3_key:
+        env_files.append(
+            ecs.EnvironmentFile.from_bucket(config_bucket, pi_agent_env_s3_key)
+        )
+
+    pi_container = pi_task_definition.add_container(
+        container_name,
+        image=ecs.ContainerImage.from_registry(f"{pi_ecr_image_uri}:latest"),
+        logging=ecs.LogDriver.aws_logs(
+            stream_prefix="ecs-pi",
+            log_group=pi_log_group,
+        ),
+        environment_files=env_files if env_files else None,
+        environment=build_pi_agent_container_environment(
+            service_connect_discovery_name=service_connect_discovery_name,
+            main_app_port=main_app_port,
+            pi_gradio_port=pi_gradio_port,
+        ),
+        command=[
+            "bash",
+            "-c",
+            "python3 agent-redact/pi/pi_agent_config.py && "
+            "exec python3 agent-redact/pi/gradio_app.py",
+        ],
+        essential=True,
+    )
+
+    pi_container.add_mount_points(
+        ecs.MountPoint(
+            source_volume=pi_volume.name,
+            container_path="/home/user/app/workspace",
+            read_only=False,
+        ),
+        ecs.MountPoint(
+            source_volume=pi_volume.name,
+            container_path="/tmp/gradio",
+            read_only=False,
+        ),
+        ecs.MountPoint(
+            source_volume=pi_volume.name,
+            container_path="/tmp/pi-sessions",
+            read_only=False,
+        ),
+    )
+
+    pi_container.add_port_mappings(
+        ecs.PortMapping(
+            container_port=pi_gradio_port,
+            host_port=pi_gradio_port,
+            name=f"port-{pi_gradio_port}",
+            protocol=ecs.Protocol.TCP,
+            app_protocol=ecs.AppProtocol.http,
+        )
+    )
+
+    pi_service = ecs.FargateService(
+        scope,
+        f"{logical_id_prefix}Service",
+        service_name=service_name,
+        cluster=cluster,
+        task_definition=pi_task_definition,
+        security_groups=[pi_security_group],
+        vpc_subnets=ec2.SubnetSelection(subnets=private_subnets),
+        platform_version=ecs.FargatePlatformVersion.LATEST,
+        capacity_provider_strategies=[
+            ecs.CapacityProviderStrategy(
+                capacity_provider=use_fargate_spot,
+                base=0,
+                weight=1,
+            )
+        ],
+        min_healthy_percent=0,
+        max_healthy_percent=100,
+        desired_count=0,
+        service_connect_configuration=ecs.ServiceConnectProps(
+            namespace=service_connect_namespace,
+        ),
+    )
+
+    return pi_service, pi_security_group, pi_task_definition
+
+
+def attach_pi_agent_to_shared_alb(
+    scope: Construct,
+    logical_id_prefix: str,
+    *,
+    vpc: ec2.IVpc,
+    alb_security_group: ec2.ISecurityGroup,
+    pi_security_group: ec2.SecurityGroup,
+    pi_service: ecs.FargateService,
+    pi_port: int,
+    pi_host_header: str,
+    listener_rule_priority: int,
+    target_group_name: str,
+    stickiness_cookie_duration: Duration,
+    https_listener: Optional[elb.IApplicationListener],
+    http_listener: Optional[elb.IApplicationListener],
+    acm_certificate_arn: str,
+    enable_cognito_auth: bool,
+    cognito_user_pool: Optional[cognito.IUserPool],
+    cognito_user_pool_client: Optional[cognito.IUserPoolClient],
+    cognito_user_pool_domain: Optional[cognito.IUserPoolDomain],
+) -> elb.ApplicationTargetGroup:
+    """Register Pi on the shared legacy ALB (second target group + host-header rules)."""
+    pi_security_group.add_ingress_rule(
+        peer=alb_security_group,
+        connection=ec2.Port.tcp(pi_port),
+        description="Shared ALB to Pi agent",
+    )
+
+    pi_target_group = elb.ApplicationTargetGroup(
+        scope,
+        f"{logical_id_prefix}TargetGroup",
+        target_group_name=target_group_name,
+        port=pi_port,
+        protocol=elb.ApplicationProtocol.HTTP,
+        targets=[pi_service],
+        stickiness_cookie_duration=stickiness_cookie_duration,
+        vpc=vpc,
+        health_check=elb.HealthCheck(
+            path="/",
+            healthy_http_codes="200-399",
+        ),
+    )
+
+    if (
+        enable_cognito_auth
+        and acm_certificate_arn
+        and cognito_user_pool
+        and cognito_user_pool_client
+        and cognito_user_pool_domain
+        and https_listener
+    ):
+        forward_action = elb_act.AuthenticateCognitoAction(
+            next=elb.ListenerAction.forward(
+                [pi_target_group],
+                stickiness_duration=stickiness_cookie_duration,
+            ),
+            user_pool=cognito_user_pool,
+            user_pool_client=cognito_user_pool_client,
+            user_pool_domain=cognito_user_pool_domain,
+            scope="openid profile email",
+            on_unauthenticated_request=elb.UnauthenticatedAction.AUTHENTICATE,
+            session_timeout=stickiness_cookie_duration,
+        )
+    else:
+        forward_action = elb.ListenerAction.forward(
+            [pi_target_group],
+            stickiness_duration=stickiness_cookie_duration,
+        )
+
+    if https_listener:
+        https_listener.add_action(
+            f"{logical_id_prefix}HttpsHostRule",
+            priority=listener_rule_priority,
+            conditions=[elb.ListenerCondition.host_headers([pi_host_header])],
+            action=forward_action,
+        )
+    elif http_listener:
+        http_listener.add_action(
+            f"{logical_id_prefix}HttpHostRule",
+            priority=listener_rule_priority,
+            conditions=[elb.ListenerCondition.host_headers([pi_host_header])],
+            action=forward_action,
+        )
+
+    if http_listener and acm_certificate_arn:
+        http_listener.add_action(
+            f"{logical_id_prefix}HttpRedirectRule",
+            priority=listener_rule_priority,
+            conditions=[elb.ListenerCondition.host_headers([pi_host_header])],
+            action=elb.ListenerAction.redirect(
+                protocol="HTTPS",
+                port="443",
+                host="#{host}",
+                path="/#{path}",
+                query="#{query}",
+            ),
+        )
+
+    return pi_target_group
 
 
 def ensure_folder_exists(output_folder: str):
