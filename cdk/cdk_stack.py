@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 from aws_cdk import (
     CfnOutput,  # <-- Import CfnOutput directly
     Duration,
-    RemovalPolicy,
+    Fn,
     SecretValue,
     Stack,
 )
@@ -30,13 +30,17 @@ from cdk_config import (
     ALB_NAME,
     ALB_NAME_SECURITY_GROUP_NAME,
     ALB_TARGET_GROUP_NAME,
+    APP_CONFIG_ENV_FILE,
     AWS_ACCOUNT_ID,
     AWS_MANAGED_TASK_ROLES_LIST,
     AWS_REGION,
     CDK_PREFIX,
     CLOUDFRONT_DISTRIBUTION_NAME,
+    CLOUDFRONT_DOMAIN,
     CLOUDFRONT_GEO_RESTRICTION,
+    CLOUDFRONT_PREFIX_LIST_ID,
     CLUSTER_NAME,
+    CODEBUILD_PI_PROJECT_NAME,
     CODEBUILD_PROJECT_NAME,
     CODEBUILD_ROLE_NAME,
     COGNITO_ACCESS_TOKEN_VALIDITY,
@@ -52,15 +56,35 @@ from cdk_config import (
     CUSTOM_KMS_KEY_NAME,
     DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS,
     ECR_CDK_REPO_NAME,
+    ECR_PI_REPO_NAME,
+    ECS_EXPRESS_HEALTH_CHECK_PATH,
+    ECS_EXPRESS_INFRASTRUCTURE_ROLE_NAME,
+    ECS_EXPRESS_SERVICE_NAME,
     ECS_LOG_GROUP_NAME,
+    ECS_PI_LOG_GROUP_NAME,
+    ECS_PI_SECURITY_GROUP_NAME,
+    ECS_PI_SERVICE_NAME,
+    ECS_PI_TASK_CPU_SIZE,
+    ECS_PI_TASK_DEFINITION_NAME,
+    ECS_PI_TASK_MEMORY_SIZE,
     ECS_READ_ONLY_FILE_SYSTEM,
     ECS_SECURITY_GROUP_NAME,
+    ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_IDS_LIST,
+    ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_NAMES_TO_LOOKUP,
+    ECS_SERVICE_CONNECT_CLIENT_SG_NAME_SUFFIX,
+    ECS_SERVICE_CONNECT_DISCOVERY_NAME,
+    ECS_SERVICE_CONNECT_DNS_NAME,
+    ECS_SERVICE_CONNECT_NAMESPACE,
+    ECS_SERVICE_CONNECT_PORT_MAPPING_NAME,
     ECS_SERVICE_NAME,
     ECS_TASK_CPU_SIZE,
     ECS_TASK_EXECUTION_ROLE_NAME,
     ECS_TASK_MEMORY_SIZE,
     ECS_TASK_ROLE_NAME,
     ECS_USE_FARGATE_SPOT,
+    ENABLE_ECS_SERVICE_CONNECT,
+    ENABLE_PI_AGENT_ECS_SERVICE,
+    ENABLE_S3_BATCH_ECS_TRIGGER,
     EXISTING_IGW_ID,
     EXISTING_LOAD_BALANCER_ARN,
     EXISTING_LOAD_BALANCER_DNS,
@@ -74,12 +98,23 @@ from cdk_config import (
     NAT_GATEWAY_NAME,
     NEW_VPC_CIDR,
     NEW_VPC_DEFAULT_NAME,
+    PI_AGENT_ENV_S3_KEY,
+    PI_ALB_HOST_HEADER,
+    PI_ALB_LISTENER_RULE_PRIORITY,
+    PI_ALB_TARGET_GROUP_NAME,
+    PI_GRADIO_PORT,
     PRIVATE_SUBNET_AVAILABILITY_ZONES,
     PRIVATE_SUBNET_CIDR_BLOCKS,
     PRIVATE_SUBNETS_TO_USE,
     PUBLIC_SUBNET_AVAILABILITY_ZONES,
     PUBLIC_SUBNET_CIDR_BLOCKS,
     PUBLIC_SUBNETS_TO_USE,
+    S3_BATCH_CONFIG_PREFIX,
+    S3_BATCH_DEFAULT_PARAMS_KEY,
+    S3_BATCH_ENV_PREFIX,
+    S3_BATCH_ENV_SUFFIX,
+    S3_BATCH_INPUT_PREFIX,
+    S3_BATCH_LAMBDA_FUNCTION_NAME,
     S3_LOG_CONFIG_BUCKET_NAME,
     S3_OUTPUT_BUCKET_NAME,
     SAVE_LOGS_TO_DYNAMODB,
@@ -88,6 +123,7 @@ from cdk_config import (
     USAGE_LOG_DYNAMODB_TABLE_NAME,
     USE_CLOUDFRONT,
     USE_CUSTOM_KMS_KEY,
+    USE_ECS_EXPRESS_MODE,
     VPC_NAME,
     WEB_ACL_NAME,
 )
@@ -95,9 +131,22 @@ from cdk_functions import (  # Only keep CDK-native functions
     add_alb_https_listener_with_cert,
     add_custom_policies,
     add_s3_enforce_ssl_policy,
+    allow_express_load_balancer_to_ecs_security_group,
+    attach_pi_agent_to_shared_alb,
+    build_express_gateway_primary_container,
+    configure_express_listener_cognito_and_cloudfront,
+    create_ecs_express_infrastructure_role,
+    create_express_gateway_service,
     create_nat_gateway,
+    create_pi_agent_ecs_resources,
+    create_s3_batch_ecs_trigger_lambda,
     create_subnets,
     create_web_acl_with_common_rules,
+    load_app_config_env_for_express,
+    managed_resource_removal_policy,
+    resolve_service_connect_client_security_group_ids,
+    resource_deletion_protection_flag,
+    s3_auto_delete_objects_on_stack_destroy,
 )
 from constructs import Construct
 
@@ -164,7 +213,54 @@ class CdkStack(Stack):
             # Optional: Add validation that all items in the list are dicts
             return ctx_value
 
+        resource_removal_policy = managed_resource_removal_policy()
+        resource_delete_protection = resource_deletion_protection_flag()
+        s3_auto_delete_objects = s3_auto_delete_objects_on_stack_destroy()
+
         self.template_options.description = "Deployment of the 'doc_redaction' PDF, image, and XLSX/CSV redaction app. Git repo available at: https://github.com/seanpedrick-case/doc_redaction."
+
+        use_express_ingress = (
+            not ACM_SSL_CERTIFICATE_ARN and USE_ECS_EXPRESS_MODE == "True"
+        )
+        enable_service_connect = (
+            ENABLE_ECS_SERVICE_CONNECT == "True" and not use_express_ingress
+        )
+        enable_pi_agent = (
+            ENABLE_PI_AGENT_ECS_SERVICE == "True" and not use_express_ingress
+        )
+        if use_express_ingress:
+            print(
+                "USE_ECS_EXPRESS_MODE=True: using ECS Express Mode for HTTPS ingress "
+                "(no manual ALB/Fargate service)."
+            )
+        service_connect_client_sg_ids: List[str] = []
+
+        if enable_service_connect:
+            if (
+                not ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_IDS_LIST
+                and not ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_NAMES_TO_LOOKUP
+                and not enable_pi_agent
+            ):
+                raise ValueError(
+                    "ENABLE_ECS_SERVICE_CONNECT=True requires at least one of "
+                    "ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_IDS, "
+                    "ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_NAMES, or "
+                    "ECS_SERVICE_CONNECT_CLIENT_CDK_PREFIXES (other apps' CDK_PREFIX "
+                    f"values, resolved to {{prefix}}{ECS_SERVICE_CONNECT_CLIENT_SG_NAME_SUFFIX} "
+                    "in this VPC), unless ENABLE_PI_AGENT_ECS_SERVICE=True (Pi SG is wired in-stack)."
+                )
+            service_connect_client_sg_ids = (
+                resolve_service_connect_client_security_group_ids(
+                    ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_IDS_LIST,
+                    ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_NAMES_TO_LOOKUP,
+                    get_context_str,
+                )
+            )
+            print(
+                "ENABLE_ECS_SERVICE_CONNECT=True: advertising Fargate service on "
+                f"Service Connect as {ECS_SERVICE_CONNECT_DISCOVERY_NAME}; "
+                f"client SGs: {', '.join(service_connect_client_sg_ids)}"
+            )
 
         # --- VPC and Subnets (Assuming VPC is always lookup, Subnets are created/returned by create_subnets) ---
         new_vpc_created = False
@@ -730,7 +826,7 @@ class CdkStack(Stack):
                 self,
                 "RedactionSharedKmsKey",
                 alias=CUSTOM_KMS_KEY_NAME,
-                removal_policy=RemovalPolicy.DESTROY,
+                removal_policy=resource_removal_policy,
             )
 
             custom_sts_kms_policy_dict = {
@@ -878,8 +974,8 @@ class CdkStack(Stack):
                         bucket_name=log_bucket_name,
                         lifecycle_rules=log_bucket_lifecycle,
                         versioned=False,
-                        removal_policy=RemovalPolicy.DESTROY,
-                        auto_delete_objects=True,
+                        removal_policy=resource_removal_policy,
+                        auto_delete_objects=s3_auto_delete_objects,
                         encryption=s3.BucketEncryption.KMS,
                         encryption_key=kms_key,
                     )
@@ -890,8 +986,8 @@ class CdkStack(Stack):
                         bucket_name=log_bucket_name,
                         lifecycle_rules=log_bucket_lifecycle,
                         versioned=False,
-                        removal_policy=RemovalPolicy.DESTROY,
-                        auto_delete_objects=True,
+                        removal_policy=resource_removal_policy,
+                        auto_delete_objects=s3_auto_delete_objects,
                     )
 
                 print("Created S3 bucket", log_bucket_name)
@@ -935,8 +1031,8 @@ class CdkStack(Stack):
                             )
                         ],
                         versioned=False,
-                        removal_policy=RemovalPolicy.DESTROY,
-                        auto_delete_objects=True,
+                        removal_policy=resource_removal_policy,
+                        auto_delete_objects=s3_auto_delete_objects,
                         encryption=s3.BucketEncryption.KMS,
                         encryption_key=kms_key,
                     )
@@ -953,8 +1049,8 @@ class CdkStack(Stack):
                             )
                         ],
                         versioned=False,
-                        removal_policy=RemovalPolicy.DESTROY,
-                        auto_delete_objects=True,
+                        removal_policy=resource_removal_policy,
+                        auto_delete_objects=s3_auto_delete_objects,
                     )
 
                 print("Created Output bucket:", output_bucket_name)
@@ -993,13 +1089,18 @@ class CdkStack(Stack):
                 print("Using existing ECR repository")
             else:
                 ecr_repo = ecr.Repository(
-                    self, "ECRRepo", repository_name=full_ecr_repo_name
+                    self,
+                    "ECRRepo",
+                    repository_name=full_ecr_repo_name,
+                    removal_policy=resource_removal_policy,
                 )  # Explicitly set repository_name
                 print("Created ECR repository", full_ecr_repo_name)
 
             ecr_image_loc = ecr_repo.repository_uri
         except Exception as e:
             raise Exception("Could not handle ECR repo due to:", e)
+
+        pi_ecr_image_loc = ecr_image_loc
 
         # --- CODEBUILD ---
         try:
@@ -1092,8 +1193,91 @@ class CdkStack(Stack):
                 ecr_grantee = codebuild_role
             ecr_repo.grant_pull_push(ecr_grantee)
 
+            if enable_pi_agent:
+                pi_codebuild_name = CODEBUILD_PI_PROJECT_NAME
+                if get_context_bool(f"exists:{pi_codebuild_name}"):
+                    project_arn = get_context_str(f"arn:{pi_codebuild_name}")
+                    if project_arn:
+                        codebuild.Project.from_project_arn(
+                            self, "CodeBuildPiProject", project_arn=project_arn
+                        )
+                    print("Using existing Pi agent CodeBuild project")
+                else:
+                    codebuild.Project(
+                        self,
+                        "CodeBuildPiProject",
+                        project_name=pi_codebuild_name,
+                        role=codebuild_role,
+                        source=codebuild.Source.git_hub(
+                            owner=GITHUB_REPO_USERNAME,
+                            repo=GITHUB_REPO_NAME,
+                            branch_or_ref=GITHUB_REPO_BRANCH,
+                        ),
+                        environment=codebuild.BuildEnvironment(
+                            build_image=codebuild.LinuxBuildImage.STANDARD_7_0,
+                            privileged=True,
+                            environment_variables={
+                                "ECR_REPO_NAME": codebuild.BuildEnvironmentVariable(
+                                    value=ECR_PI_REPO_NAME
+                                ),
+                                "AWS_DEFAULT_REGION": codebuild.BuildEnvironmentVariable(
+                                    value=AWS_REGION
+                                ),
+                                "AWS_ACCOUNT_ID": codebuild.BuildEnvironmentVariable(
+                                    value=AWS_ACCOUNT_ID
+                                ),
+                            },
+                        ),
+                        build_spec=codebuild.BuildSpec.from_object(
+                            {
+                                "version": "0.2",
+                                "phases": {
+                                    "pre_build": {
+                                        "commands": [
+                                            "echo Logging in to Amazon ECR",
+                                            "aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com",
+                                            "test -f config/pi_agent.env.example",
+                                            "test -f agent-redact/pi-agent/Dockerfile",
+                                        ]
+                                    },
+                                    "build": {
+                                        "commands": [
+                                            "docker build -f agent-redact/pi-agent/Dockerfile -t $ECR_REPO_NAME:latest .",
+                                            "docker tag $ECR_REPO_NAME:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPO_NAME:latest",
+                                        ]
+                                    },
+                                    "post_build": {
+                                        "commands": [
+                                            "docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPO_NAME:latest",
+                                        ]
+                                    },
+                                },
+                            }
+                        ),
+                    )
+                    print("Created Pi agent CodeBuild project", pi_codebuild_name)
+
+                pi_ecr_repo_name = ECR_PI_REPO_NAME
+                if get_context_bool(f"exists:{pi_ecr_repo_name}"):
+                    pi_ecr_repo = ecr.Repository.from_repository_name(
+                        self, "ECRPiRepo", repository_name=pi_ecr_repo_name
+                    )
+                else:
+                    pi_ecr_repo = ecr.Repository(
+                        self,
+                        "ECRPiRepo",
+                        repository_name=pi_ecr_repo_name,
+                        removal_policy=resource_removal_policy,
+                    )
+                pi_ecr_image_loc = pi_ecr_repo.repository_uri
+                pi_ecr_repo.grant_pull_push(ecr_grantee)
+                CfnOutput(self, "ECRPiRepoUri", value=pi_ecr_repo.repository_uri)
+
         except Exception as e:
             raise Exception("Could not handle Codebuild project due to:", e)
+
+        pi_ecs_service = None
+        pi_ecs_security_group = None
 
         # --- Security Groups ---
         try:
@@ -1110,34 +1294,59 @@ class CdkStack(Stack):
             except Exception as e:  # If lookup fails, create
                 print("Failed to create ECS security group due to:", e)
 
-            alb_security_group_name = ALB_NAME_SECURITY_GROUP_NAME
+            ec2_port_gradio_server_port = ec2.Port.tcp(int(GRADIO_SERVER_PORT))
 
-            try:
-                alb_security_group = ec2.SecurityGroup(
-                    self,
-                    "ALBSecurityGroup",  # Logical ID
-                    security_group_name=alb_security_group_name,  # Explicit resource name
-                    vpc=vpc,
+            if not use_express_ingress:
+                alb_security_group_name = ALB_NAME_SECURITY_GROUP_NAME
+
+                try:
+                    alb_security_group = ec2.SecurityGroup(
+                        self,
+                        "ALBSecurityGroup",  # Logical ID
+                        security_group_name=alb_security_group_name,
+                        vpc=vpc,
+                    )
+                    print(f"Created Security Group: {alb_security_group_name}")
+                except Exception as e:
+                    print("Failed to create ALB security group due to:", e)
+
+                ecs_security_group.add_ingress_rule(
+                    peer=alb_security_group,
+                    connection=ec2_port_gradio_server_port,
+                    description="ALB traffic",
                 )
-                print(f"Created Security Group: {alb_security_group_name}")
-            except Exception as e:  # If lookup fails, create
-                print("Failed to create ALB security group due to:", e)
 
-            # Define Ingress Rules - CDK will manage adding/removing these as needed
-            ec2_port_gradio_server_port = ec2.Port.tcp(
-                int(GRADIO_SERVER_PORT)
-            )  # Ensure port is int
-            ecs_security_group.add_ingress_rule(
-                peer=alb_security_group,
-                connection=ec2_port_gradio_server_port,
-                description="ALB traffic",
-            )
-
-            alb_security_group.add_ingress_rule(
-                peer=ec2.Peer.prefix_list("pl-93a247fa"),
-                connection=ec2.Port.all_traffic(),
-                description="CloudFront traffic",
-            )
+                alb_security_group.add_ingress_rule(
+                    peer=ec2.Peer.prefix_list(CLOUDFRONT_PREFIX_LIST_ID),
+                    connection=ec2.Port.all_traffic(),
+                    description="CloudFront traffic",
+                )
+            else:
+                alb_security_group = None
+                if USE_CLOUDFRONT == "True":
+                    ecs_security_group.add_ingress_rule(
+                        peer=ec2.Peer.prefix_list(CLOUDFRONT_PREFIX_LIST_ID),
+                        connection=ec2_port_gradio_server_port,
+                        description="CloudFront to ECS (Express Mode)",
+                    )
+            if enable_service_connect:
+                for index, client_sg_id in enumerate(service_connect_client_sg_ids):
+                    client_sg = ec2.SecurityGroup.from_security_group_id(
+                        self,
+                        f"ServiceConnectClientSg{index}",
+                        security_group_id=client_sg_id,
+                    )
+                    ecs_security_group.add_ingress_rule(
+                        peer=client_sg,
+                        connection=ec2_port_gradio_server_port,
+                        description=(
+                            f"Service Connect client {client_sg_id} to app port"
+                        ),
+                    )
+                print(
+                    "Service Connect ingress allowed from security groups: "
+                    + ", ".join(service_connect_client_sg_ids)
+                )
 
         except Exception as e:
             raise Exception("Could not handle security groups due to:", e)
@@ -1156,8 +1365,8 @@ class CdkStack(Stack):
                         name="id", type=dynamodb.AttributeType.STRING
                     ),
                     billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-                    deletion_protection=True,
-                    removal_policy=RemovalPolicy.DESTROY,
+                    deletion_protection=resource_delete_protection,
+                    removal_policy=resource_removal_policy,
                 )
 
                 dynamodb.Table(
@@ -1168,8 +1377,8 @@ class CdkStack(Stack):
                         name="id", type=dynamodb.AttributeType.STRING
                     ),
                     billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-                    deletion_protection=True,
-                    removal_policy=RemovalPolicy.DESTROY,
+                    deletion_protection=resource_delete_protection,
+                    removal_policy=resource_removal_policy,
                 )
 
                 dynamodb.Table(
@@ -1180,63 +1389,68 @@ class CdkStack(Stack):
                         name="id", type=dynamodb.AttributeType.STRING
                     ),
                     billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-                    deletion_protection=True,
-                    removal_policy=RemovalPolicy.DESTROY,
+                    deletion_protection=resource_delete_protection,
+                    removal_policy=resource_removal_policy,
                 )
 
             except Exception as e:
                 raise Exception("Could not create DynamoDB tables due to:", e)
 
-        # --- ALB ---
-        try:
-            load_balancer_name = ALB_NAME
-            if len(load_balancer_name) > 32:
-                load_balancer_name = load_balancer_name[-32:]
-            alb_arn = get_context_str(f"arn:{load_balancer_name}") or (
-                EXISTING_LOAD_BALANCER_ARN or None
-            )
-            alb_dns_name = get_context_str(f"dns:{load_balancer_name}") or (
-                EXISTING_LOAD_BALANCER_DNS or None
-            )
-            if alb_arn and alb_dns_name:
-                alb_security_group_id = (
-                    get_context_str(f"security_group_id:{load_balancer_name}")
-                    or alb_security_group.security_group_id
+        alb = None
+        load_balancer_name = ALB_NAME
+        if len(load_balancer_name) > 32:
+            load_balancer_name = load_balancer_name[-32:]
+
+        if not use_express_ingress:
+            # --- ALB (legacy path) ---
+            try:
+                alb_arn = get_context_str(f"arn:{load_balancer_name}") or (
+                    EXISTING_LOAD_BALANCER_ARN or None
                 )
-                alb_attrs = {
-                    "load_balancer_arn": alb_arn,
-                    "load_balancer_dns_name": alb_dns_name,
-                    "security_group_id": alb_security_group_id,
-                    "vpc": vpc,
-                }
-                alb_canonical_zone_id = get_context_str(
-                    f"canonical_hosted_zone_id:{load_balancer_name}"
+                alb_dns_name = get_context_str(f"dns:{load_balancer_name}") or (
+                    EXISTING_LOAD_BALANCER_DNS or None
                 )
-                if alb_canonical_zone_id:
-                    alb_attrs["load_balancer_canonical_hosted_zone_id"] = (
-                        alb_canonical_zone_id
+                if alb_arn and alb_dns_name:
+                    alb_security_group_id = (
+                        get_context_str(f"security_group_id:{load_balancer_name}")
+                        or alb_security_group.security_group_id
                     )
-                alb = elbv2.ApplicationLoadBalancer.from_application_load_balancer_attributes(
-                    self,
-                    "ALB",
-                    **alb_attrs,
-                )
-                print(f"Using existing Application Load Balancer {load_balancer_name}.")
-            else:
-                alb = elbv2.ApplicationLoadBalancer(
-                    self,
-                    "ALB",  # Logical ID
-                    load_balancer_name=load_balancer_name,  # Explicit resource name
-                    vpc=vpc,
-                    internet_facing=True,
-                    security_group=alb_security_group,  # Link to SG
-                    vpc_subnets=public_subnet_selection,  # Link to subnets
-                    drop_invalid_header_fields=True,
-                    deletion_protection=True,
-                )
-                print("Successfully created new Application Load Balancer")
-        except Exception as e:
-            raise Exception("Could not handle application load balancer due to:", e)
+                    alb_attrs = {
+                        "load_balancer_arn": alb_arn,
+                        "load_balancer_dns_name": alb_dns_name,
+                        "security_group_id": alb_security_group_id,
+                        "vpc": vpc,
+                    }
+                    alb_canonical_zone_id = get_context_str(
+                        f"canonical_hosted_zone_id:{load_balancer_name}"
+                    )
+                    if alb_canonical_zone_id:
+                        alb_attrs["load_balancer_canonical_hosted_zone_id"] = (
+                            alb_canonical_zone_id
+                        )
+                    alb = elbv2.ApplicationLoadBalancer.from_application_load_balancer_attributes(
+                        self,
+                        "ALB",
+                        **alb_attrs,
+                    )
+                    print(
+                        f"Using existing Application Load Balancer {load_balancer_name}."
+                    )
+                else:
+                    alb = elbv2.ApplicationLoadBalancer(
+                        self,
+                        "ALB",
+                        load_balancer_name=load_balancer_name,
+                        vpc=vpc,
+                        internet_facing=True,
+                        security_group=alb_security_group,
+                        vpc_subnets=public_subnet_selection,
+                        drop_invalid_header_fields=True,
+                        deletion_protection=resource_delete_protection,
+                    )
+                    print("Successfully created new Application Load Balancer")
+            except Exception as e:
+                raise Exception("Could not handle application load balancer due to:", e)
 
         # --- Cognito User Pool ---
         try:
@@ -1258,13 +1472,13 @@ class CdkStack(Stack):
                     user_pool_name=COGNITO_USER_POOL_NAME,
                     mfa=cognito.Mfa.OFF,  # Adjust as needed
                     sign_in_aliases=cognito.SignInAliases(email=True),
-                    deletion_protection=True,
-                    removal_policy=RemovalPolicy.DESTROY,
+                    deletion_protection=resource_delete_protection,
+                    removal_policy=resource_removal_policy,
                 )  # Adjust as needed
                 print(f"Created new user pool {user_pool.user_pool_id}.")
 
-            # If you're using a certificate, assume that you will be using the ALB Cognito login features. You need different redirect URLs to accept the token that comes from Cognito authentication.
-            if ACM_SSL_CERTIFICATE_ARN:
+            # HTTPS ALB (ACM cert or Express Mode) needs oauth2/idpresponse callback URLs.
+            if ACM_SSL_CERTIFICATE_ARN or use_express_ingress:
                 redirect_uris = [
                     COGNITO_REDIRECTION_URL,
                     COGNITO_REDIRECTION_URL + "/oauth2/idpresponse",
@@ -1332,7 +1546,7 @@ class CdkStack(Stack):
             )
 
             # Apply removal_policy to the created UserPoolDomain construct
-            user_pool_domain.apply_removal_policy(policy=RemovalPolicy.DESTROY)
+            user_pool_domain.apply_removal_policy(policy=resource_removal_policy)
 
             CfnOutput(
                 self, "CognitoUserPoolLoginUrl", value=user_pool_domain.base_url()
@@ -1366,6 +1580,7 @@ class CdkStack(Stack):
                             "REDACTION_CLIENT_SECRET": user_pool_client.user_pool_client_secret,  # Use the CDK attribute
                         },
                         encryption_key=kms_key,
+                        removal_policy=resource_removal_policy,
                     )
                 else:
                     secret = secretsmanager.Secret(
@@ -1381,6 +1596,7 @@ class CdkStack(Stack):
                             ),  # Use the CDK attribute
                             "REDACTION_CLIENT_SECRET": user_pool_client.user_pool_client_secret,  # Use the CDK attribute
                         },
+                        removal_policy=resource_removal_policy,
                     )
 
                 print(
@@ -1390,458 +1606,739 @@ class CdkStack(Stack):
         except Exception as e:
             raise Exception("Could not handle Secrets Manager secret due to:", e)
 
-        # --- Fargate Task Definition ---
-        try:
-            fargate_task_definition_name = FARGATE_TASK_DEFINITION_NAME
-
-            read_only_file_system = ECS_READ_ONLY_FILE_SYSTEM == "True"
-
-            if os.path.exists(TASK_DEFINITION_FILE_LOCATION):
-                with open(TASK_DEFINITION_FILE_LOCATION) as f:  # Use correct path
-                    task_def_params = json.load(f)
-                # Need to ensure taskRoleArn and executionRoleArn in JSON are correct ARN strings
-            else:
-                epheremal_storage_volume_name = "appEphemeralVolume"
-
-                task_def_params = {}
-                task_def_params["taskRoleArn"] = (
-                    task_role.role_arn
-                )  # Use CDK role object ARN
-                task_def_params["executionRoleArn"] = (
-                    execution_role.role_arn
-                )  # Use CDK role object ARN
-                task_def_params["memory"] = ECS_TASK_MEMORY_SIZE
-                task_def_params["cpu"] = ECS_TASK_CPU_SIZE
-                container_def = {
-                    "name": full_ecr_repo_name,
-                    "image": ecr_image_loc + ":latest",
-                    "essential": True,
-                    "portMappings": [
-                        {
-                            "containerPort": int(GRADIO_SERVER_PORT),
-                            "hostPort": int(GRADIO_SERVER_PORT),
-                            "protocol": "tcp",
-                            "appProtocol": "http",
-                        }
-                    ],
-                    "logConfiguration": {
-                        "logDriver": "awslogs",
-                        "options": {
-                            "awslogs-group": ECS_LOG_GROUP_NAME,
-                            "awslogs-region": AWS_REGION,
-                            "awslogs-stream-prefix": "ecs",
-                        },
-                    },
-                    "environmentFiles": [
-                        {"value": bucket.bucket_arn + "/config.env", "type": "s3"}
-                    ],
-                    "memoryReservation": int(task_def_params["memory"])
-                    - 512,  # Reserve some memory for the container
-                    "mountPoints": [
-                        {
-                            "sourceVolume": epheremal_storage_volume_name,
-                            "containerPath": "/home/user/app/logs",
-                            "readOnly": False,
-                        },
-                        {
-                            "sourceVolume": epheremal_storage_volume_name,
-                            "containerPath": "/home/user/app/feedback",
-                            "readOnly": False,
-                        },
-                        {
-                            "sourceVolume": epheremal_storage_volume_name,
-                            "containerPath": "/home/user/app/usage",
-                            "readOnly": False,
-                        },
-                        {
-                            "sourceVolume": epheremal_storage_volume_name,
-                            "containerPath": "/home/user/app/input",
-                            "readOnly": False,
-                        },
-                        {
-                            "sourceVolume": epheremal_storage_volume_name,
-                            "containerPath": "/home/user/app/output",
-                            "readOnly": False,
-                        },
-                        {
-                            "sourceVolume": epheremal_storage_volume_name,
-                            "containerPath": "/home/user/app/tmp",
-                            "readOnly": False,
-                        },
-                        {
-                            "sourceVolume": epheremal_storage_volume_name,
-                            "containerPath": "/home/user/app/config",
-                            "readOnly": False,
-                        },
-                        {
-                            "sourceVolume": epheremal_storage_volume_name,
-                            "containerPath": "/tmp/matplotlib_cache",
-                            "readOnly": False,
-                        },
-                        {
-                            "sourceVolume": epheremal_storage_volume_name,
-                            "containerPath": "/tmp",
-                            "readOnly": False,
-                        },
-                        {
-                            "sourceVolume": epheremal_storage_volume_name,
-                            "containerPath": "/var/tmp",
-                            "readOnly": False,
-                        },
-                        {
-                            "sourceVolume": epheremal_storage_volume_name,
-                            "containerPath": "/tmp/tld",
-                            "readOnly": False,
-                        },
-                        {
-                            "sourceVolume": epheremal_storage_volume_name,
-                            "containerPath": "/tmp/gradio_tmp",
-                            "readOnly": False,
-                        },
-                        {
-                            "sourceVolume": epheremal_storage_volume_name,
-                            "containerPath": "/home/user/.paddlex",
-                            "readOnly": False,
-                        },
-                        {
-                            "sourceVolume": epheremal_storage_volume_name,
-                            "containerPath": "/home/user/.local/share/spacy/data",
-                            "readOnly": False,
-                        },
-                        {
-                            "sourceVolume": epheremal_storage_volume_name,
-                            "containerPath": "/usr/share/tessdata",
-                            "readOnly": False,
-                        },
-                    ],
-                    "readonlyRootFilesystem": read_only_file_system,
-                    "user": "1000",
-                }
-                task_def_params["containerDefinitions"] = [container_def]
-
-            log_group_name_from_config = task_def_params["containerDefinitions"][0][
-                "logConfiguration"
-            ]["options"]["awslogs-group"]
-
-            cdk_managed_log_group = logs.LogGroup(
-                self,
-                "MyTaskLogGroup",  # CDK Logical ID
-                log_group_name=log_group_name_from_config,
-                retention=logs.RetentionDays.ONE_MONTH,
-                removal_policy=RemovalPolicy.DESTROY,
-            )
-
-            epheremal_storage_volume_cdk_obj = ecs.Volume(
-                name=epheremal_storage_volume_name
-            )
-
-            fargate_task_definition = ecs.FargateTaskDefinition(
-                self,
-                "FargateTaskDefinition",  # Logical ID
-                family=fargate_task_definition_name,
-                cpu=int(task_def_params["cpu"]),
-                memory_limit_mib=int(task_def_params["memory"]),
-                task_role=task_role,
-                execution_role=execution_role,
-                runtime_platform=ecs.RuntimePlatform(
-                    cpu_architecture=ecs.CpuArchitecture.X86_64,
-                    operating_system_family=ecs.OperatingSystemFamily.LINUX,
-                ),
-                ephemeral_storage_gib=21,  # Minimum is 21 GiB
-                volumes=[epheremal_storage_volume_cdk_obj],
-            )
-            print("Fargate task definition defined.")
-
-            # Add container definitions to the task definition object
-            if task_def_params["containerDefinitions"]:
-                container_def_params = task_def_params["containerDefinitions"][0]
-
-                if container_def_params.get("environmentFiles"):
-                    env_files = []
-                    for env_file_param in container_def_params["environmentFiles"]:
-                        # Need to parse the ARN to get the bucket object and key
-                        env_file_arn_parts = env_file_param["value"].split(":::")
-                        bucket_name_and_key = env_file_arn_parts[-1]
-                        env_bucket_name, env_key = bucket_name_and_key.split("/", 1)
-
-                        env_file = ecs.EnvironmentFile.from_bucket(bucket, env_key)
-
-                        env_files.append(env_file)
-
-                container = fargate_task_definition.add_container(
-                    container_def_params["name"],
-                    image=ecs.ContainerImage.from_registry(
-                        container_def_params["image"]
-                    ),
-                    logging=ecs.LogDriver.aws_logs(
-                        stream_prefix=container_def_params["logConfiguration"][
-                            "options"
-                        ]["awslogs-stream-prefix"],
-                        log_group=cdk_managed_log_group,
-                    ),
-                    secrets={
-                        "AWS_USER_POOL_ID": ecs.Secret.from_secrets_manager(
-                            secret, "REDACTION_USER_POOL_ID"
-                        ),
-                        "AWS_CLIENT_ID": ecs.Secret.from_secrets_manager(
-                            secret, "REDACTION_CLIENT_ID"
-                        ),
-                        "AWS_CLIENT_SECRET": ecs.Secret.from_secrets_manager(
-                            secret, "REDACTION_CLIENT_SECRET"
-                        ),
-                    },
-                    environment_files=env_files,
-                    readonly_root_filesystem=read_only_file_system,
-                    user=container_def_params.get("user", "1000"),
-                )
-
-                for port_mapping in container_def_params["portMappings"]:
-                    container.add_port_mappings(
-                        ecs.PortMapping(
-                            container_port=int(port_mapping["containerPort"]),
-                            host_port=int(port_mapping["hostPort"]),
-                            name="port-" + str(port_mapping["containerPort"]),
-                            app_protocol=ecs.AppProtocol.http,
-                            protocol=ecs.Protocol.TCP,
-                        )
-                    )
-
-                container.add_port_mappings(
-                    ecs.PortMapping(
-                        container_port=80,
-                        host_port=80,
-                        name="port-80",
-                        app_protocol=ecs.AppProtocol.http,
-                        protocol=ecs.Protocol.TCP,
-                    )
-                )
-
-                if container_def_params.get("mountPoints"):
-                    mount_points = []
-                    for mount_point in container_def_params["mountPoints"]:
-                        mount_points.append(
-                            ecs.MountPoint(
-                                container_path=mount_point["containerPath"],
-                                read_only=mount_point["readOnly"],
-                                source_volume=epheremal_storage_volume_name,
-                            )
-                        )
-                    container.add_mount_points(*mount_points)
-
-        except Exception as e:
-            raise Exception("Could not handle Fargate task definition due to:", e)
-
-        # --- ECS Cluster ---
-        try:
-            cluster = ecs.Cluster(
-                self,
-                "ECSCluster",  # Logical ID
-                cluster_name=CLUSTER_NAME,  # Explicit resource name
-                enable_fargate_capacity_providers=True,
-                vpc=vpc,
-            )
-            print("Successfully created new ECS cluster")
-        except Exception as e:
-            raise Exception("Could not handle ECS cluster due to:", e)
-
-        # --- ECS Service ---
-        try:
-            ecs_service_name = ECS_SERVICE_NAME
-
-            if ECS_USE_FARGATE_SPOT == "True":
-                use_fargate_spot = "FARGATE_SPOT"
-            if ECS_USE_FARGATE_SPOT == "False":
-                use_fargate_spot = "FARGATE"
-
-            # Check if service exists - from_service_arn or from_service_name (needs cluster)
-            try:
-                # from_service_name is useful if you have the cluster object
-                ecs_service = ecs.FargateService.from_service_attributes(
-                    self,
-                    "ECSService",  # Logical ID
-                    cluster=cluster,  # Requires the cluster object
-                    service_name=ecs_service_name,
-                )
-                print(f"Using existing ECS service {ecs_service_name}.")
-            except Exception:
-                # Service will be created with a count of 0, because you haven't yet actually built the initial Docker container with CodeBuild
-                ecs_service = ecs.FargateService(
-                    self,
-                    "ECSService",  # Logical ID
-                    service_name=ecs_service_name,  # Explicit resource name
-                    platform_version=ecs.FargatePlatformVersion.LATEST,
-                    capacity_provider_strategies=[
-                        ecs.CapacityProviderStrategy(
-                            capacity_provider=use_fargate_spot, base=0, weight=1
-                        )
-                    ],
-                    cluster=cluster,
-                    task_definition=fargate_task_definition,  # Link to TD
-                    security_groups=[ecs_security_group],  # Link to SG
-                    vpc_subnets=ec2.SubnetSelection(
-                        subnets=self.private_subnets
-                    ),  # Link to subnets
-                    min_healthy_percent=0,
-                    max_healthy_percent=100,
-                    desired_count=0,
-                )
-                print("Successfully created new ECS service")
-
-            # Note: Auto-scaling setup would typically go here if needed for the service
-
-        except Exception as e:
-            raise Exception("Could not handle ECS service due to:", e)
-
-        # --- Grant Secret Read Access (Applies to both created and imported roles) ---
         try:
             secret.grant_read(task_role)
             secret.grant_read(execution_role)
         except Exception as e:
             raise Exception("Could not grant access to Secrets Manager due to:", e)
 
-        # --- ALB TARGET GROUPS AND LISTENERS ---
-        # This section should primarily define the resources if they are managed by this stack.
-        # CDK handles adding/removing targets and actions on updates.
-        # If they might pre-exist outside the stack, you need lookups.
-        cookie_duration = Duration.hours(8)
-        target_group_name = ALB_TARGET_GROUP_NAME  # Explicit resource name
-        cloudfront_distribution_url = "cloudfront_placeholder.net"  # Need to replace this afterwards with the actual cloudfront_distribution.domain_name
-
+        # --- ECS Cluster (shared by legacy Fargate and Express paths) ---
         try:
-            # --- CREATING TARGET GROUPS AND ADDING THE CLOUDFRONT LISTENER RULE ---
+            cluster_kwargs = {
+                "cluster_name": CLUSTER_NAME,
+                "enable_fargate_capacity_providers": True,
+                "vpc": vpc,
+            }
+            if enable_service_connect:
+                cluster_kwargs["default_cloud_map_namespace"] = (
+                    ecs.CloudMapNamespaceOptions(
+                        name=ECS_SERVICE_CONNECT_NAMESPACE,
+                        vpc=vpc,
+                    )
+                )
+            cluster = ecs.Cluster(self, "ECSCluster", **cluster_kwargs)
+            print("Successfully created new ECS cluster")
+        except Exception as e:
+            raise Exception("Could not handle ECS cluster due to:", e)
 
-            target_group = elbv2.ApplicationTargetGroup(
-                self,
-                "AppTargetGroup",  # Logical ID
-                target_group_name=target_group_name,  # Explicit resource name
-                port=int(GRADIO_SERVER_PORT),  # Ensure port is int
-                protocol=elbv2.ApplicationProtocol.HTTP,
-                targets=[ecs_service],  # Link to ECS Service
-                stickiness_cookie_duration=cookie_duration,
-                vpc=vpc,  # Target Groups need VPC
-            )
-            print(f"ALB target group {target_group_name} defined.")
+        express_service = None
+        express_alb_security_group_id = None
 
-            # First HTTP
-            listener_port = 80
-            # Check if Listener exists - from_listener_arn or lookup by port/ALB
+        if use_express_ingress:
+            try:
+                express_log_group = logs.LogGroup(
+                    self,
+                    "ExpressTaskLogGroup",
+                    log_group_name=f"/ecs/{ECS_EXPRESS_SERVICE_NAME}-logs".lower(),
+                    retention=logs.RetentionDays.ONE_MONTH,
+                    removal_policy=resource_removal_policy,
+                )
+                express_log_group.grant_write(execution_role)
 
-            http_listener = alb.add_listener(
-                "HttpListener",  # Logical ID
-                port=listener_port,
-                open=False,  # Be cautious with open=True, usually restrict source SG
-            )
-            print(f"ALB listener on port {listener_port} defined.")
+                express_infra_role = create_ecs_express_infrastructure_role(
+                    self,
+                    "ExpressInfrastructureRole",
+                    ECS_EXPRESS_INFRASTRUCTURE_ROLE_NAME,
+                )
 
-            if ACM_SSL_CERTIFICATE_ARN:
-                http_listener.add_action(
-                    "DefaultAction",  # Logical ID for the default action
-                    action=elbv2.ListenerAction.redirect(
-                        protocol="HTTPS",
-                        host="#{host}",
-                        port="443",
-                        path="/#{path}",
-                        query="#{query}",
+                express_app_environment = load_app_config_env_for_express(
+                    APP_CONFIG_ENV_FILE
+                )
+                primary_container = build_express_gateway_primary_container(
+                    image_uri=ecr_image_loc + ":latest",
+                    container_port=int(GRADIO_SERVER_PORT),
+                    log_group_name=express_log_group.log_group_name,
+                    aws_region=AWS_REGION,
+                    secret=secret,
+                    environment=express_app_environment,
+                )
+
+                private_subnet_ids = [s.subnet_id for s in self.private_subnets]
+
+                express_service = create_express_gateway_service(
+                    self,
+                    "ExpressGatewayService",
+                    service_name=ECS_EXPRESS_SERVICE_NAME,
+                    cluster_name=CLUSTER_NAME,
+                    execution_role_arn=execution_role.role_arn,
+                    infrastructure_role_arn=express_infra_role.role_arn,
+                    task_role_arn=task_role.role_arn,
+                    cpu=str(ECS_TASK_CPU_SIZE),
+                    memory=str(ECS_TASK_MEMORY_SIZE),
+                    health_check_path=ECS_EXPRESS_HEALTH_CHECK_PATH,
+                    primary_container=primary_container,
+                    subnet_ids=private_subnet_ids,
+                    security_group_ids=[ecs_security_group.security_group_id],
+                )
+                express_service.node.add_dependency(cluster)
+
+                allow_express_load_balancer_to_ecs_security_group(
+                    self,
+                    "ExpressAlbToEcsIngress",
+                    express_service=express_service,
+                    ecs_security_group=ecs_security_group,
+                    container_port=int(GRADIO_SERVER_PORT),
+                )
+
+                express_alb_arn = express_service.get_att(
+                    "ECSManagedResourceArns.IngressPath.LoadBalancerArn"
+                ).to_string()
+                express_alb_dns = express_service.get_att("Endpoint").to_string()
+                express_alb_security_group_id = Fn.select(
+                    0,
+                    express_service.get_att(
+                        "ECSManagedResourceArns.IngressPath.LoadBalancerSecurityGroups"
                     ),
                 )
-            else:
-                if USE_CLOUDFRONT == "True":
 
-                    # The following default action can be added for the listener after a host header rule is added to the listener manually in the Console as suggested in the above comments.
-                    http_listener.add_action(
-                        "DefaultAction",  # Logical ID for the default action
-                        action=elbv2.ListenerAction.fixed_response(
-                            status_code=403,
-                            content_type="text/plain",
-                            message_body="Access denied",
-                        ),
-                    )
-
-                    # Add the Listener Rule for the specific CloudFront Host Header
-                    http_listener.add_action(
-                        "CloudFrontHostHeaderRule",
-                        action=elbv2.ListenerAction.forward(
-                            target_groups=[target_group],
-                            stickiness_duration=cookie_duration,
-                        ),
-                        priority=1,  # Example priority. Adjust as needed. Lower is evaluated first.
-                        conditions=[
-                            elbv2.ListenerCondition.host_headers(
-                                [cloudfront_distribution_url]
-                            )  # May have to redefine url in console afterwards if not specified in config file
-                        ],
-                    )
-
-                else:
-                    # Add the Listener Rule for the specific CloudFront Host Header
-                    http_listener.add_action(
-                        "CloudFrontHostHeaderRule",
-                        action=elbv2.ListenerAction.forward(
-                            target_groups=[target_group],
-                            stickiness_duration=cookie_duration,
-                        ),
-                    )
-
-                print("Added targets and actions to ALB HTTP listener.")
-
-            # Now the same for HTTPS if you have an ACM certificate
-            if ACM_SSL_CERTIFICATE_ARN:
-                listener_port_https = 443
-                # Check if Listener exists - from_listener_arn or lookup by port/ALB
-
-                https_listener = add_alb_https_listener_with_cert(
+                alb = elbv2.ApplicationLoadBalancer.from_application_load_balancer_attributes(
                     self,
-                    "MyHttpsListener",  # Logical ID for the HTTPS listener
-                    alb,
-                    acm_certificate_arn=ACM_SSL_CERTIFICATE_ARN,
-                    default_target_group=target_group,
-                    enable_cognito_auth=True,
-                    cognito_user_pool=user_pool,
-                    cognito_user_pool_client=user_pool_client,
-                    cognito_user_pool_domain=user_pool_domain,
-                    listener_open_to_internet=True,
-                    stickiness_cookie_duration=cookie_duration,
+                    "ALB",
+                    load_balancer_arn=express_alb_arn,
+                    load_balancer_dns_name=express_alb_dns,
+                    security_group_id=express_alb_security_group_id,
+                    vpc=vpc,
                 )
 
-                if https_listener:
-                    CfnOutput(
-                        self, "HttpsListenerArn", value=https_listener.listener_arn
+                configure_express_listener_cognito_and_cloudfront(
+                    self,
+                    "Express",
+                    express_service=express_service,
+                    user_pool_arn=user_pool.user_pool_arn,
+                    user_pool_client_id=user_pool_client.user_pool_client_id,
+                    user_pool_domain_prefix=COGNITO_USER_POOL_DOMAIN_PREFIX,
+                    use_cloudfront=USE_CLOUDFRONT == "True",
+                    cloudfront_host_header=CLOUDFRONT_DOMAIN,
+                    stickiness_seconds=int(Duration.hours(8).to_seconds()),
+                )
+
+                CfnOutput(
+                    self,
+                    "ExpressServiceEndpoint",
+                    value=express_service.get_att("Endpoint").to_string(),
+                    description="HTTPS URL for the ECS Express Mode service",
+                )
+                CfnOutput(
+                    self,
+                    "ExpressServiceArn",
+                    value=express_service.get_att("ServiceArn").to_string(),
+                )
+                CfnOutput(
+                    self,
+                    "ExpressManagedCertificateArn",
+                    value=express_service.get_att(
+                        "ECSManagedResourceArns.IngressPath.CertificateArn"
+                    ).to_string(),
+                )
+
+                print("ECS Express Gateway service defined.")
+            except Exception as e:
+                raise Exception("Could not handle ECS Express Mode due to:", e)
+
+        if not use_express_ingress:
+            # --- Fargate Task Definition ---
+            try:
+                fargate_task_definition_name = FARGATE_TASK_DEFINITION_NAME
+
+                read_only_file_system = ECS_READ_ONLY_FILE_SYSTEM == "True"
+
+                if os.path.exists(TASK_DEFINITION_FILE_LOCATION):
+                    with open(TASK_DEFINITION_FILE_LOCATION) as f:  # Use correct path
+                        task_def_params = json.load(f)
+                    # Need to ensure taskRoleArn and executionRoleArn in JSON are correct ARN strings
+                else:
+                    epheremal_storage_volume_name = "appEphemeralVolume"
+
+                    task_def_params = {}
+                    task_def_params["taskRoleArn"] = (
+                        task_role.role_arn
+                    )  # Use CDK role object ARN
+                    task_def_params["executionRoleArn"] = (
+                        execution_role.role_arn
+                    )  # Use CDK role object ARN
+                    task_def_params["memory"] = ECS_TASK_MEMORY_SIZE
+                    task_def_params["cpu"] = ECS_TASK_CPU_SIZE
+                    container_def = {
+                        "name": full_ecr_repo_name,
+                        "image": ecr_image_loc + ":latest",
+                        "essential": True,
+                        "portMappings": [
+                            {
+                                "containerPort": int(GRADIO_SERVER_PORT),
+                                "hostPort": int(GRADIO_SERVER_PORT),
+                                "protocol": "tcp",
+                                "appProtocol": "http",
+                            }
+                        ],
+                        "logConfiguration": {
+                            "logDriver": "awslogs",
+                            "options": {
+                                "awslogs-group": ECS_LOG_GROUP_NAME,
+                                "awslogs-region": AWS_REGION,
+                                "awslogs-stream-prefix": "ecs",
+                            },
+                        },
+                        "environmentFiles": [
+                            {"value": bucket.bucket_arn + "/config.env", "type": "s3"}
+                        ],
+                        "memoryReservation": int(task_def_params["memory"])
+                        - 512,  # Reserve some memory for the container
+                        "mountPoints": [
+                            {
+                                "sourceVolume": epheremal_storage_volume_name,
+                                "containerPath": "/home/user/app/logs",
+                                "readOnly": False,
+                            },
+                            {
+                                "sourceVolume": epheremal_storage_volume_name,
+                                "containerPath": "/home/user/app/feedback",
+                                "readOnly": False,
+                            },
+                            {
+                                "sourceVolume": epheremal_storage_volume_name,
+                                "containerPath": "/home/user/app/usage",
+                                "readOnly": False,
+                            },
+                            {
+                                "sourceVolume": epheremal_storage_volume_name,
+                                "containerPath": "/home/user/app/input",
+                                "readOnly": False,
+                            },
+                            {
+                                "sourceVolume": epheremal_storage_volume_name,
+                                "containerPath": "/home/user/app/output",
+                                "readOnly": False,
+                            },
+                            {
+                                "sourceVolume": epheremal_storage_volume_name,
+                                "containerPath": "/home/user/app/tmp",
+                                "readOnly": False,
+                            },
+                            {
+                                "sourceVolume": epheremal_storage_volume_name,
+                                "containerPath": "/home/user/app/config",
+                                "readOnly": False,
+                            },
+                            {
+                                "sourceVolume": epheremal_storage_volume_name,
+                                "containerPath": "/tmp/matplotlib_cache",
+                                "readOnly": False,
+                            },
+                            {
+                                "sourceVolume": epheremal_storage_volume_name,
+                                "containerPath": "/tmp",
+                                "readOnly": False,
+                            },
+                            {
+                                "sourceVolume": epheremal_storage_volume_name,
+                                "containerPath": "/var/tmp",
+                                "readOnly": False,
+                            },
+                            {
+                                "sourceVolume": epheremal_storage_volume_name,
+                                "containerPath": "/tmp/tld",
+                                "readOnly": False,
+                            },
+                            {
+                                "sourceVolume": epheremal_storage_volume_name,
+                                "containerPath": "/tmp/gradio_tmp",
+                                "readOnly": False,
+                            },
+                            {
+                                "sourceVolume": epheremal_storage_volume_name,
+                                "containerPath": "/home/user/.paddlex",
+                                "readOnly": False,
+                            },
+                            {
+                                "sourceVolume": epheremal_storage_volume_name,
+                                "containerPath": "/home/user/.local/share/spacy/data",
+                                "readOnly": False,
+                            },
+                            {
+                                "sourceVolume": epheremal_storage_volume_name,
+                                "containerPath": "/usr/share/tessdata",
+                                "readOnly": False,
+                            },
+                        ],
+                        "readonlyRootFilesystem": read_only_file_system,
+                        "user": "1000",
+                    }
+                    task_def_params["containerDefinitions"] = [container_def]
+
+                log_group_name_from_config = task_def_params["containerDefinitions"][0][
+                    "logConfiguration"
+                ]["options"]["awslogs-group"]
+
+                cdk_managed_log_group = logs.LogGroup(
+                    self,
+                    "MyTaskLogGroup",  # CDK Logical ID
+                    log_group_name=log_group_name_from_config,
+                    retention=logs.RetentionDays.ONE_MONTH,
+                    removal_policy=resource_removal_policy,
+                )
+
+                epheremal_storage_volume_cdk_obj = ecs.Volume(
+                    name=epheremal_storage_volume_name
+                )
+
+                fargate_task_definition = ecs.FargateTaskDefinition(
+                    self,
+                    "FargateTaskDefinition",  # Logical ID
+                    family=fargate_task_definition_name,
+                    cpu=int(task_def_params["cpu"]),
+                    memory_limit_mib=int(task_def_params["memory"]),
+                    task_role=task_role,
+                    execution_role=execution_role,
+                    runtime_platform=ecs.RuntimePlatform(
+                        cpu_architecture=ecs.CpuArchitecture.X86_64,
+                        operating_system_family=ecs.OperatingSystemFamily.LINUX,
+                    ),
+                    ephemeral_storage_gib=21,  # Minimum is 21 GiB
+                    volumes=[epheremal_storage_volume_cdk_obj],
+                )
+                print("Fargate task definition defined.")
+
+                # Add container definitions to the task definition object
+                if task_def_params["containerDefinitions"]:
+                    container_def_params = task_def_params["containerDefinitions"][0]
+
+                    if container_def_params.get("environmentFiles"):
+                        env_files = []
+                        for env_file_param in container_def_params["environmentFiles"]:
+                            # Need to parse the ARN to get the bucket object and key
+                            env_file_arn_parts = env_file_param["value"].split(":::")
+                            bucket_name_and_key = env_file_arn_parts[-1]
+                            env_bucket_name, env_key = bucket_name_and_key.split("/", 1)
+
+                            env_file = ecs.EnvironmentFile.from_bucket(bucket, env_key)
+
+                            env_files.append(env_file)
+
+                    container = fargate_task_definition.add_container(
+                        container_def_params["name"],
+                        image=ecs.ContainerImage.from_registry(
+                            container_def_params["image"]
+                        ),
+                        logging=ecs.LogDriver.aws_logs(
+                            stream_prefix=container_def_params["logConfiguration"][
+                                "options"
+                            ]["awslogs-stream-prefix"],
+                            log_group=cdk_managed_log_group,
+                        ),
+                        secrets={
+                            "AWS_USER_POOL_ID": ecs.Secret.from_secrets_manager(
+                                secret, "REDACTION_USER_POOL_ID"
+                            ),
+                            "AWS_CLIENT_ID": ecs.Secret.from_secrets_manager(
+                                secret, "REDACTION_CLIENT_ID"
+                            ),
+                            "AWS_CLIENT_SECRET": ecs.Secret.from_secrets_manager(
+                                secret, "REDACTION_CLIENT_SECRET"
+                            ),
+                        },
+                        environment_files=env_files,
+                        readonly_root_filesystem=read_only_file_system,
+                        user=container_def_params.get("user", "1000"),
                     )
 
-                print(f"ALB listener on port {listener_port_https} defined.")
+                    for port_mapping in container_def_params["portMappings"]:
+                        container.add_port_mappings(
+                            ecs.PortMapping(
+                                container_port=int(port_mapping["containerPort"]),
+                                host_port=int(port_mapping["hostPort"]),
+                                name="port-" + str(port_mapping["containerPort"]),
+                                app_protocol=ecs.AppProtocol.http,
+                                protocol=ecs.Protocol.TCP,
+                            )
+                        )
 
-                # if USE_CLOUDFRONT == 'True':
-                #     # Add default action to the listener
-                #     https_listener.add_action(
-                #         "DefaultAction", # Logical ID for the default action
-                #         action=elbv2.ListenerAction.fixed_response(
-                #             status_code=403,
-                #             content_type="text/plain",
-                #             message_body="Access denied",
-                #         ),
-                #     )
+                    container.add_port_mappings(
+                        ecs.PortMapping(
+                            container_port=80,
+                            host_port=80,
+                            name="port-80",
+                            app_protocol=ecs.AppProtocol.http,
+                            protocol=ecs.Protocol.TCP,
+                        )
+                    )
 
-                #     # Add the Listener Rule for the specific CloudFront Host Header
-                #     https_listener.add_action(
-                #         "CloudFrontHostHeaderRuleHTTPS",
-                #         action=elbv2.ListenerAction.forward(target_groups=[target_group],stickiness_duration=cookie_duration),
-                #         priority=1, # Example priority. Adjust as needed. Lower is evaluated first.
-                #         conditions=[
-                #             elbv2.ListenerCondition.host_headers([cloudfront_distribution_url])
-                #         ]
-                #     )
-                # else:
-                #     https_listener.add_action(
-                #         "CloudFrontHostHeaderRuleHTTPS",
-                #         action=elbv2.ListenerAction.forward(target_groups=[target_group],stickiness_duration=cookie_duration))
+                    if container_def_params.get("mountPoints"):
+                        mount_points = []
+                        for mount_point in container_def_params["mountPoints"]:
+                            mount_points.append(
+                                ecs.MountPoint(
+                                    container_path=mount_point["containerPath"],
+                                    read_only=mount_point["readOnly"],
+                                    source_volume=epheremal_storage_volume_name,
+                                )
+                            )
+                        container.add_mount_points(*mount_points)
 
-                print("Added targets and actions to ALB HTTPS listener.")
+            except Exception as e:
+                raise Exception("Could not handle Fargate task definition due to:", e)
+            # --- ECS Service ---
+            try:
+                ecs_service_name = ECS_SERVICE_NAME
 
-        except Exception as e:
-            raise Exception(
-                "Could not handle ALB target groups and listeners due to:", e
+                if ECS_USE_FARGATE_SPOT == "True":
+                    use_fargate_spot = "FARGATE_SPOT"
+                if ECS_USE_FARGATE_SPOT == "False":
+                    use_fargate_spot = "FARGATE"
+
+                # Check if service exists - from_service_arn or from_service_name (needs cluster)
+                try:
+                    # from_service_name is useful if you have the cluster object
+                    ecs_service = ecs.FargateService.from_service_attributes(
+                        self,
+                        "ECSService",  # Logical ID
+                        cluster=cluster,  # Requires the cluster object
+                        service_name=ecs_service_name,
+                    )
+                    print(f"Using existing ECS service {ecs_service_name}.")
+                    if enable_service_connect:
+                        print(
+                            "Warning: ENABLE_ECS_SERVICE_CONNECT=True but an existing "
+                            "ECS service was imported; enable Service Connect on that "
+                            "service in the ECS console or replace the service via CDK."
+                        )
+                except Exception:
+                    service_connect_configuration = None
+                    if enable_service_connect:
+                        sc_dns_name = (
+                            ECS_SERVICE_CONNECT_DNS_NAME
+                            or ECS_SERVICE_CONNECT_DISCOVERY_NAME
+                        )
+                        service_connect_configuration = ecs.ServiceConnectProps(
+                            namespace=ECS_SERVICE_CONNECT_NAMESPACE,
+                            services=[
+                                ecs.ServiceConnectService(
+                                    port_mapping_name=ECS_SERVICE_CONNECT_PORT_MAPPING_NAME,
+                                    discovery_name=ECS_SERVICE_CONNECT_DISCOVERY_NAME,
+                                    dns_name=sc_dns_name,
+                                    port=int(GRADIO_SERVER_PORT),
+                                )
+                            ],
+                        )
+                    # Service will be created with a count of 0, because you haven't yet actually built the initial Docker container with CodeBuild
+                    ecs_service = ecs.FargateService(
+                        self,
+                        "ECSService",  # Logical ID
+                        service_name=ecs_service_name,  # Explicit resource name
+                        platform_version=ecs.FargatePlatformVersion.LATEST,
+                        capacity_provider_strategies=[
+                            ecs.CapacityProviderStrategy(
+                                capacity_provider=use_fargate_spot, base=0, weight=1
+                            )
+                        ],
+                        cluster=cluster,
+                        task_definition=fargate_task_definition,  # Link to TD
+                        security_groups=[ecs_security_group],  # Link to SG
+                        vpc_subnets=ec2.SubnetSelection(
+                            subnets=self.private_subnets
+                        ),  # Link to subnets
+                        min_healthy_percent=0,
+                        max_healthy_percent=100,
+                        desired_count=0,
+                        service_connect_configuration=service_connect_configuration,
+                    )
+                    print("Successfully created new ECS service")
+
+                # Note: Auto-scaling setup would typically go here if needed for the service
+
+            except Exception as e:
+                raise Exception("Could not handle ECS service due to:", e)
+
+            if enable_pi_agent:
+                try:
+                    pi_ecs_service, pi_ecs_security_group, _pi_task_def = (
+                        create_pi_agent_ecs_resources(
+                            self,
+                            "PiAgent",
+                            vpc=vpc,
+                            cluster=cluster,
+                            private_subnets=self.private_subnets,
+                            pi_ecr_image_uri=pi_ecr_image_loc,
+                            container_name=ECR_PI_REPO_NAME,
+                            task_role=task_role,
+                            execution_role=execution_role,
+                            config_bucket=bucket,
+                            pi_agent_env_s3_key=PI_AGENT_ENV_S3_KEY,
+                            service_name=ECS_PI_SERVICE_NAME,
+                            task_family=ECS_PI_TASK_DEFINITION_NAME,
+                            security_group_name=ECS_PI_SECURITY_GROUP_NAME,
+                            log_group_name=ECS_PI_LOG_GROUP_NAME,
+                            cpu=int(ECS_PI_TASK_CPU_SIZE),
+                            memory_mib=int(ECS_PI_TASK_MEMORY_SIZE),
+                            pi_gradio_port=int(PI_GRADIO_PORT),
+                            service_connect_namespace=ECS_SERVICE_CONNECT_NAMESPACE,
+                            service_connect_discovery_name=ECS_SERVICE_CONNECT_DISCOVERY_NAME,
+                            main_app_port=int(GRADIO_SERVER_PORT),
+                            use_fargate_spot=use_fargate_spot,
+                        )
+                    )
+                    ecs_security_group.add_ingress_rule(
+                        peer=pi_ecs_security_group,
+                        connection=ec2_port_gradio_server_port,
+                        description="Pi agent (Service Connect) to main redaction app",
+                    )
+                    print("Pi agent ECS service defined.")
+                except Exception as e:
+                    raise Exception("Could not handle Pi agent ECS service due to:", e)
+
+            if ENABLE_S3_BATCH_ECS_TRIGGER == "True":
+                try:
+                    lambda_asset_dir = os.path.join(
+                        os.path.dirname(__file__), "config", "lambda"
+                    )
+                    batch_lambda = create_s3_batch_ecs_trigger_lambda(
+                        self,
+                        "S3BatchEcsTrigger",
+                        function_name=S3_BATCH_LAMBDA_FUNCTION_NAME or None,
+                        lambda_asset_path=lambda_asset_dir,
+                        output_bucket=output_bucket,
+                        config_bucket=bucket,
+                        cluster_name=CLUSTER_NAME,
+                        task_definition_arn=fargate_task_definition.task_definition_arn,
+                        container_name=full_ecr_repo_name,
+                        subnet_ids=[s.subnet_id for s in self.private_subnets],
+                        security_group_id=ecs_security_group.security_group_id,
+                        execution_role=execution_role,
+                        task_role=task_role,
+                        env_prefix=S3_BATCH_ENV_PREFIX,
+                        env_suffix=S3_BATCH_ENV_SUFFIX,
+                        input_prefix=S3_BATCH_INPUT_PREFIX,
+                        config_prefix=S3_BATCH_CONFIG_PREFIX,
+                        default_params_key=S3_BATCH_DEFAULT_PARAMS_KEY,
+                    )
+                    CfnOutput(
+                        self,
+                        "BatchEcsTriggerLambdaArn",
+                        value=batch_lambda.function_arn,
+                        description="Lambda ARN for S3-triggered batch ECS tasks",
+                    )
+                    CfnOutput(
+                        self,
+                        "BatchJobEnvPrefix",
+                        value=f"s3://{output_bucket.bucket_name}/{S3_BATCH_ENV_PREFIX}",
+                        description="Upload job .env files here to start batch redaction tasks",
+                    )
+                    print("S3 batch ECS trigger Lambda defined.")
+                except Exception as e:
+                    raise Exception("Could not handle S3 batch ECS trigger due to:", e)
+
+            # --- ALB TARGET GROUPS AND LISTENERS ---
+            # This section should primarily define the resources if they are managed by this stack.
+            # CDK handles adding/removing targets and actions on updates.
+            # If they might pre-exist outside the stack, you need lookups.
+            cookie_duration = Duration.hours(8)
+            target_group_name = ALB_TARGET_GROUP_NAME  # Explicit resource name
+            cloudfront_distribution_url = "cloudfront_placeholder.net"  # Need to replace this afterwards with the actual cloudfront_distribution.domain_name
+            cloudfront_http_rule_priority = (
+                PI_ALB_LISTENER_RULE_PRIORITY + 1 if enable_pi_agent else 1
             )
+            https_listener = None
 
+            try:
+                # --- CREATING TARGET GROUPS AND ADDING THE CLOUDFRONT LISTENER RULE ---
+
+                target_group = elbv2.ApplicationTargetGroup(
+                    self,
+                    "AppTargetGroup",  # Logical ID
+                    target_group_name=target_group_name,  # Explicit resource name
+                    port=int(GRADIO_SERVER_PORT),  # Ensure port is int
+                    protocol=elbv2.ApplicationProtocol.HTTP,
+                    targets=[ecs_service],  # Link to ECS Service
+                    stickiness_cookie_duration=cookie_duration,
+                    vpc=vpc,  # Target Groups need VPC
+                )
+                print(f"ALB target group {target_group_name} defined.")
+
+                # First HTTP
+                listener_port = 80
+                # Check if Listener exists - from_listener_arn or lookup by port/ALB
+
+                http_listener = alb.add_listener(
+                    "HttpListener",  # Logical ID
+                    port=listener_port,
+                    open=False,  # Be cautious with open=True, usually restrict source SG
+                )
+                print(f"ALB listener on port {listener_port} defined.")
+
+                if ACM_SSL_CERTIFICATE_ARN:
+                    http_listener.add_action(
+                        "DefaultAction",  # Logical ID for the default action
+                        action=elbv2.ListenerAction.redirect(
+                            protocol="HTTPS",
+                            host="#{host}",
+                            port="443",
+                            path="/#{path}",
+                            query="#{query}",
+                        ),
+                    )
+                else:
+                    if USE_CLOUDFRONT == "True":
+
+                        # The following default action can be added for the listener after a host header rule is added to the listener manually in the Console as suggested in the above comments.
+                        http_listener.add_action(
+                            "DefaultAction",  # Logical ID for the default action
+                            action=elbv2.ListenerAction.fixed_response(
+                                status_code=403,
+                                content_type="text/plain",
+                                message_body="Access denied",
+                            ),
+                        )
+
+                        # Add the Listener Rule for the specific CloudFront Host Header
+                        http_listener.add_action(
+                            "CloudFrontHostHeaderRule",
+                            action=elbv2.ListenerAction.forward(
+                                target_groups=[target_group],
+                                stickiness_duration=cookie_duration,
+                            ),
+                            priority=cloudfront_http_rule_priority,
+                            conditions=[
+                                elbv2.ListenerCondition.host_headers(
+                                    [cloudfront_distribution_url]
+                                )  # May have to redefine url in console afterwards if not specified in config file
+                            ],
+                        )
+
+                    else:
+                        # Add the Listener Rule for the specific CloudFront Host Header
+                        http_listener.add_action(
+                            "CloudFrontHostHeaderRule",
+                            action=elbv2.ListenerAction.forward(
+                                target_groups=[target_group],
+                                stickiness_duration=cookie_duration,
+                            ),
+                            priority=cloudfront_http_rule_priority,
+                        )
+
+                    print("Added targets and actions to ALB HTTP listener.")
+
+                # Now the same for HTTPS if you have an ACM certificate
+                if ACM_SSL_CERTIFICATE_ARN:
+                    listener_port_https = 443
+                    # Check if Listener exists - from_listener_arn or lookup by port/ALB
+
+                    https_listener = add_alb_https_listener_with_cert(
+                        self,
+                        "MyHttpsListener",  # Logical ID for the HTTPS listener
+                        alb,
+                        acm_certificate_arn=ACM_SSL_CERTIFICATE_ARN,
+                        default_target_group=target_group,
+                        enable_cognito_auth=True,
+                        cognito_user_pool=user_pool,
+                        cognito_user_pool_client=user_pool_client,
+                        cognito_user_pool_domain=user_pool_domain,
+                        listener_open_to_internet=True,
+                        stickiness_cookie_duration=cookie_duration,
+                    )
+
+                    if https_listener:
+                        CfnOutput(
+                            self, "HttpsListenerArn", value=https_listener.listener_arn
+                        )
+
+                    print(f"ALB listener on port {listener_port_https} defined.")
+
+                    # if USE_CLOUDFRONT == 'True':
+                    #     # Add default action to the listener
+                    #     https_listener.add_action(
+                    #         "DefaultAction", # Logical ID for the default action
+                    #         action=elbv2.ListenerAction.fixed_response(
+                    #             status_code=403,
+                    #             content_type="text/plain",
+                    #             message_body="Access denied",
+                    #         ),
+                    #     )
+
+                    #     # Add the Listener Rule for the specific CloudFront Host Header
+                    #     https_listener.add_action(
+                    #         "CloudFrontHostHeaderRuleHTTPS",
+                    #         action=elbv2.ListenerAction.forward(target_groups=[target_group],stickiness_duration=cookie_duration),
+                    #         priority=1, # Example priority. Adjust as needed. Lower is evaluated first.
+                    #         conditions=[
+                    #             elbv2.ListenerCondition.host_headers([cloudfront_distribution_url])
+                    #         ]
+                    #     )
+                    # else:
+                    #     https_listener.add_action(
+                    #         "CloudFrontHostHeaderRuleHTTPS",
+                    #         action=elbv2.ListenerAction.forward(target_groups=[target_group],stickiness_duration=cookie_duration))
+
+                    print("Added targets and actions to ALB HTTPS listener.")
+
+                if enable_pi_agent and pi_ecs_service and alb_security_group:
+                    pi_tg_name = PI_ALB_TARGET_GROUP_NAME
+                    if len(pi_tg_name) > 32:
+                        pi_tg_name = pi_tg_name[-32:]
+
+                    attach_pi_agent_to_shared_alb(
+                        self,
+                        "PiAgent",
+                        vpc=vpc,
+                        alb_security_group=alb_security_group,
+                        pi_security_group=pi_ecs_security_group,
+                        pi_service=pi_ecs_service,
+                        pi_port=int(PI_GRADIO_PORT),
+                        pi_host_header=PI_ALB_HOST_HEADER.strip(),
+                        listener_rule_priority=PI_ALB_LISTENER_RULE_PRIORITY,
+                        target_group_name=pi_tg_name,
+                        stickiness_cookie_duration=cookie_duration,
+                        https_listener=https_listener,
+                        http_listener=http_listener,
+                        acm_certificate_arn=ACM_SSL_CERTIFICATE_ARN or "",
+                        enable_cognito_auth=bool(ACM_SSL_CERTIFICATE_ARN),
+                        cognito_user_pool=user_pool,
+                        cognito_user_pool_client=user_pool_client,
+                        cognito_user_pool_domain=user_pool_domain,
+                    )
+                    pi_public_url = (
+                        f"https://{PI_ALB_HOST_HEADER.strip()}"
+                        if ACM_SSL_CERTIFICATE_ARN
+                        else f"http://{PI_ALB_HOST_HEADER.strip()}"
+                    )
+                    CfnOutput(
+                        self,
+                        "PiPublicUrl",
+                        value=pi_public_url,
+                        description="Public URL for Pi agent UI (shared ALB, host-header rule)",
+                    )
+                    CfnOutput(
+                        self,
+                        "PiAgentServiceName",
+                        value=ECS_PI_SERVICE_NAME,
+                    )
+                    sc_backend = (
+                        f"http://{ECS_SERVICE_CONNECT_DISCOVERY_NAME}:"
+                        f"{GRADIO_SERVER_PORT}"
+                    )
+                    CfnOutput(
+                        self,
+                        "PiDocRedactionBackendUrl",
+                        value=sc_backend,
+                        description="DOC_REDACTION_GRADIO_URL set on Pi tasks (Service Connect)",
+                    )
+                    print(
+                        "Pi agent attached to shared ALB with host header "
+                        f"{PI_ALB_HOST_HEADER.strip()}."
+                    )
+
+            except Exception as e:
+                raise Exception(
+                    "Could not handle ALB target groups and listeners due to:", e
+                )
         # Create WAF to attach to load balancer
         try:
             web_acl_name = LOAD_BALANCER_WEB_ACL_NAME
@@ -1877,7 +2374,10 @@ class CdkStack(Stack):
 
         self.params = dict()
         self.params["alb_arn_output"] = alb.load_balancer_arn
-        self.params["alb_security_group_id"] = alb_security_group.security_group_id
+        if use_express_ingress:
+            self.params["alb_security_group_id"] = express_alb_security_group_id
+        else:
+            self.params["alb_security_group_id"] = alb_security_group.security_group_id
         self.params["alb_dns_name"] = alb.load_balancer_dns_name
 
         CfnOutput(
@@ -1891,7 +2391,11 @@ class CdkStack(Stack):
         CfnOutput(
             self,
             "AlbSecurityGroupIdOutput",
-            value=alb_security_group.security_group_id,
+            value=(
+                express_alb_security_group_id
+                if use_express_ingress
+                else alb_security_group.security_group_id
+            ),
             description="ID of the ALB's Security Group",
             export_name=f"{self.stack_name}-AlbSgId",
         )
@@ -1903,6 +2407,27 @@ class CdkStack(Stack):
         # Add other outputs if needed
 
         CfnOutput(self, "ECRRepoUri", value=ecr_repo.repository_uri)
+
+        if enable_service_connect:
+            sc_host = ECS_SERVICE_CONNECT_DNS_NAME or ECS_SERVICE_CONNECT_DISCOVERY_NAME
+            sc_base = f"http://{sc_host}:{GRADIO_SERVER_PORT}"
+            CfnOutput(
+                self,
+                "ServiceConnectHttpBaseUrl",
+                value=sc_base,
+                description="Base URL for other ECS services in this cluster (Service Connect)",
+            )
+            CfnOutput(
+                self,
+                "ServiceConnectAgentApiUrl",
+                value=f"{sc_base}/agent",
+                description="FastAPI Agent API prefix (when RUN_FASTAPI=True in config.env)",
+            )
+            CfnOutput(
+                self,
+                "ServiceConnectNamespace",
+                value=ECS_SERVICE_CONNECT_NAMESPACE,
+            )
 
 
 # --- CLOUDFRONT DISTRIBUTION in separate stack (us-east-1 required) ---
@@ -1928,6 +2453,8 @@ class CdkStackCloudfront(Stack):
 
         def get_context_dict(scope: Construct, key: str, default: dict = None) -> dict:
             return scope.node.try_get_context(key) or default
+
+        resource_removal_policy = managed_resource_removal_policy()
 
         print(f"CloudFront Stack: Received ALB ARN: {alb_arn}")
         print(f"CloudFront Stack: Received ALB Security Group ID: {alb_sec_group_id}")
@@ -1999,6 +2526,7 @@ class CdkStackCloudfront(Stack):
                 ),
                 web_acl_id=web_acl.attr_arn,
             )
+            cloudfront_distribution.apply_removal_policy(resource_removal_policy)
             print(f"Cloudfront distribution {CLOUDFRONT_DISTRIBUTION_NAME} defined.")
 
         except Exception as e:

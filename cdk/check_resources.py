@@ -14,8 +14,12 @@ from cdk_config import (  # Import necessary config
     COGNITO_USER_POOL_NAME,
     CONTEXT_FILE,
     ECR_CDK_REPO_NAME,
+    ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_NAMES_TO_LOOKUP,
     ECS_TASK_EXECUTION_ROLE_NAME,
     ECS_TASK_ROLE_NAME,
+    ENABLE_ECS_SERVICE_CONNECT,
+    ENABLE_PI_AGENT_ECS_SERVICE,
+    ENABLE_S3_BATCH_ECS_TRIGGER,
     PRIVATE_SUBNET_AVAILABILITY_ZONES,
     PRIVATE_SUBNET_CIDR_BLOCKS,
     PRIVATE_SUBNETS_TO_USE,
@@ -24,6 +28,7 @@ from cdk_config import (  # Import necessary config
     PUBLIC_SUBNETS_TO_USE,
     S3_LOG_CONFIG_BUCKET_NAME,
     S3_OUTPUT_BUCKET_NAME,
+    USE_ECS_EXPRESS_MODE,
     VPC_NAME,
     WEB_ACL_NAME,
 )
@@ -39,6 +44,7 @@ from cdk_functions import (  # Import your check functions (assuming they use Bo
     check_s3_bucket_exists,
     check_subnet_exists_by_name,
     check_web_acl_exists,
+    get_security_group_id_by_name,
     get_vpc_id_by_name,
     validate_subnet_creation_parameters,
     # Add other check functions as needed
@@ -345,21 +351,36 @@ def check_and_set_context():
         if service_role_arn:
             context_data[f"service_role_arn:{project_name}"] = service_role_arn
 
-    # ALB (by name lookup) — context keys use the same 32-char name the stack uses
+    # ALB (by name lookup) — skipped when Express Mode will provision its own ALB
     alb_name = ALB_NAME[-32:] if len(ALB_NAME) > 32 else ALB_NAME
-    exists, alb_object = check_alb_exists(alb_name, region_name=AWS_REGION)
-    context_data[f"exists:{alb_name}"] = exists
-    if exists:
-        print("alb_object:", alb_object)
-        context_data[f"arn:{alb_name}"] = alb_object["LoadBalancerArn"]
-        context_data[f"dns:{alb_name}"] = alb_object["DNSName"]
-        context_data[f"canonical_hosted_zone_id:{alb_name}"] = alb_object[
-            "CanonicalHostedZoneId"
-        ]
-        if alb_object.get("SecurityGroups"):
-            context_data[f"security_group_id:{alb_name}"] = alb_object[
-                "SecurityGroups"
-            ][0]
+    if USE_ECS_EXPRESS_MODE == "True":
+        context_data[f"exists:{alb_name}"] = False
+        print(
+            "USE_ECS_EXPRESS_MODE=True: skipping ALB pre-check (Express provisions ALB)."
+        )
+    if ENABLE_S3_BATCH_ECS_TRIGGER == "True":
+        print(
+            "ENABLE_S3_BATCH_ECS_TRIGGER=True: requires legacy Fargate (USE_ECS_EXPRESS_MODE=False)."
+        )
+    if ENABLE_PI_AGENT_ECS_SERVICE == "True":
+        print(
+            "ENABLE_PI_AGENT_ECS_SERVICE=True: requires legacy Fargate, Service Connect, "
+            "and PI_ALB_HOST_HEADER (Pi UI on shared ALB)."
+        )
+    else:
+        exists, alb_object = check_alb_exists(alb_name, region_name=AWS_REGION)
+        context_data[f"exists:{alb_name}"] = exists
+        if exists:
+            print("alb_object:", alb_object)
+            context_data[f"arn:{alb_name}"] = alb_object["LoadBalancerArn"]
+            context_data[f"dns:{alb_name}"] = alb_object["DNSName"]
+            context_data[f"canonical_hosted_zone_id:{alb_name}"] = alb_object[
+                "CanonicalHostedZoneId"
+            ]
+            if alb_object.get("SecurityGroups"):
+                context_data[f"security_group_id:{alb_name}"] = alb_object[
+                    "SecurityGroups"
+                ][0]
 
     # Cognito User Pool (by name)
     user_pool_name = COGNITO_USER_POOL_NAME
@@ -379,12 +400,40 @@ def check_and_set_context():
             context_data[f"exists:{user_pool_client_name}"] = exists
             if exists:
                 context_data[f"id:{user_pool_client_name}"] = client_id
+            else:
+                print(
+                    f"User pool '{user_pool_name}' exists but app client "
+                    f"'{user_pool_client_name}' does not; CDK will create a new client."
+                )
 
     # Secrets Manager Secret (by name)
     secret_name = COGNITO_USER_POOL_CLIENT_SECRET_NAME
     exists, _ = check_for_secret(secret_name)
     context_data[f"exists:{secret_name}"] = exists
     # You might not need the ARN if using from_secret_name_v2
+
+    # Service Connect client security groups (by name in VPC)
+    if ENABLE_ECS_SERVICE_CONNECT == "True":
+        vpc_id_for_sg = context_data.get("vpc_id")
+        if vpc_id_for_sg:
+            for sg_name in ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_NAMES_TO_LOOKUP:
+                exists, sg_id = get_security_group_id_by_name(
+                    sg_name, vpc_id_for_sg, region_name=AWS_REGION
+                )
+                context_data[f"exists:sg:{sg_name}"] = exists
+                if exists:
+                    context_data[f"security_group_id:{sg_name}"] = sg_id
+                    print(f"Service Connect client SG '{sg_name}' -> {sg_id}")
+                else:
+                    print(
+                        f"Warning: Service Connect client SG '{sg_name}' "
+                        f"not found in VPC {vpc_id_for_sg}"
+                    )
+        else:
+            print(
+                "Warning: vpc_id missing from context; cannot resolve Service "
+                "Connect client security group names."
+            )
 
     # WAF Web ACL (by name and scope)
     web_acl_name = WEB_ACL_NAME

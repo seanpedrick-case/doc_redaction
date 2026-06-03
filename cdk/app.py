@@ -19,6 +19,7 @@ from cdk_config import (
 )
 from cdk_functions import (
     create_basic_config_env,
+    is_resource_delete_protection_enabled,
     load_context_from_file,
     log_aws_credential_context,
     purge_cdk_lookup_context,
@@ -71,10 +72,12 @@ create_basic_config_env("config")
 
 aws_env_regional = Environment(account=AWS_ACCOUNT_ID, region=AWS_REGION)
 
+_stack_delete_protection = is_resource_delete_protection_enabled()
+
 regional_stack = CdkStack(
     app, "RedactionStack", env=aws_env_regional, cross_region_references=True
 )
-regional_stack.termination_protection = True
+regional_stack.termination_protection = _stack_delete_protection
 
 if ENABLE_APPREGISTRY == "True":
     # Use pre-check context only — not regional_stack.params (avoids AppRegistry
@@ -98,7 +101,7 @@ if ENABLE_APPREGISTRY == "True":
         use_cloudfront=USE_CLOUDFRONT,
         alb_dns_name=_alb_dns_name,
     )
-    appregistry_stack.termination_protection = True
+    appregistry_stack.termination_protection = _stack_delete_protection
 
 if USE_CLOUDFRONT == "True" and RUN_USEAST_STACK == "True":
     aws_env_us_east_1 = Environment(account=AWS_ACCOUNT_ID, region="us-east-1")
@@ -112,6 +115,7 @@ if USE_CLOUDFRONT == "True" and RUN_USEAST_STACK == "True":
         alb_dns_name=regional_stack.params["alb_dns_name"],
         cross_region_references=True,
     )
+    cloudfront_stack.termination_protection = _stack_delete_protection
 
 # CDK CLI invokes this script and expects a cloud assembly in cdk.out.
 # Without app.synth(), Python defines constructs but never writes manifest.json
