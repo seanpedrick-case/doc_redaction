@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 # Pi agent Gradio UI for Hugging Face Docker Space (remote doc_redaction backend).
 # Build from monorepo root: docker build -f agent-redact/pi-agent/Dockerfile .
+# Root .dockerignore must allow config/*.example into the context (secrets stay gitignored).
 
 FROM node:22-bookworm-slim
 
@@ -48,7 +49,8 @@ WORKDIR /workspace/doc_redaction
 COPY agent-redact/pi agent-redact/pi
 COPY skills skills
 COPY tools tools
-COPY config config
+# Committed template only (see sync-manifest.txt); runtime secrets come from S3/env on ECS.
+COPY config/pi_agent.env.example config/pi_agent.env.example
 COPY intros intros
 COPY AGENTS.md AGENTS.md
 COPY doc_redaction/example_data doc_redaction/example_data

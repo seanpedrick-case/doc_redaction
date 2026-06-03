@@ -112,6 +112,14 @@ AWS_ACCOUNT_ID = get_or_create_env_var("AWS_ACCOUNT_ID", "")
 ###
 CDK_PREFIX = get_or_create_env_var("CDK_PREFIX", "")
 
+# When True (default): CloudFormation stack termination protection, AWS
+# deletion_protection on ALB/DynamoDB/Cognito, RemovalPolicy.RETAIN, and no S3
+# auto-delete on stack-created resources. Set False for dev sandboxes where
+# cdk destroy should remove resources cleanly.
+ENABLE_RESOURCE_DELETE_PROTECTION = get_or_create_env_var(
+    "ENABLE_RESOURCE_DELETE_PROTECTION", "True"
+)
+
 # AWS Console myApplications (Service Catalog AppRegistry)
 ENABLE_APPREGISTRY = get_or_create_env_var("ENABLE_APPREGISTRY", "True")
 APPREGISTRY_APPLICATION_NAME = get_or_create_env_var(
@@ -254,6 +262,10 @@ TASK_DEFINITION_FILE_LOCATION = get_or_create_env_var(
 
 CLUSTER_NAME = get_or_create_env_var("CLUSTER_NAME", f"{CDK_PREFIX}Cluster")
 ECS_SERVICE_NAME = get_or_create_env_var("ECS_SERVICE_NAME", f"{CDK_PREFIX}ECSService")
+# Second Fargate service when ENABLE_PI_AGENT_ECS_SERVICE=True (legacy path only).
+ECS_PI_SERVICE_NAME = get_or_create_env_var(
+    "ECS_PI_SERVICE_NAME", f"{CDK_PREFIX}PiAgentService"
+)
 ECS_TASK_ROLE_NAME = get_or_create_env_var(
     "ECS_TASK_ROLE_NAME", f"{CDK_PREFIX}TaskRole"
 )
@@ -541,9 +553,6 @@ ECR_PI_REPO_NAME = get_or_create_env_var(
 )
 CODEBUILD_PI_PROJECT_NAME = get_or_create_env_var(
     "CODEBUILD_PI_PROJECT_NAME", f"{CDK_PREFIX}CodeBuildPiAgent"
-)
-ECS_PI_SERVICE_NAME = get_or_create_env_var(
-    "ECS_PI_SERVICE_NAME", f"{CDK_PREFIX}PiAgentService"
 )
 ECS_PI_TASK_DEFINITION_NAME = get_or_create_env_var(
     "ECS_PI_TASK_DEFINITION_NAME", f"{CDK_PREFIX}PiAgentTaskDefinition"

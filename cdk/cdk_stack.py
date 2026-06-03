@@ -6,7 +6,6 @@ from aws_cdk import (
     CfnOutput,  # <-- Import CfnOutput directly
     Duration,
     Fn,
-    RemovalPolicy,
     SecretValue,
     Stack,
 )
@@ -144,7 +143,10 @@ from cdk_functions import (  # Only keep CDK-native functions
     create_subnets,
     create_web_acl_with_common_rules,
     load_app_config_env_for_express,
+    managed_resource_removal_policy,
     resolve_service_connect_client_security_group_ids,
+    resource_deletion_protection_flag,
+    s3_auto_delete_objects_on_stack_destroy,
 )
 from constructs import Construct
 
@@ -210,6 +212,10 @@ class CdkStack(Stack):
                 return []
             # Optional: Add validation that all items in the list are dicts
             return ctx_value
+
+        resource_removal_policy = managed_resource_removal_policy()
+        resource_delete_protection = resource_deletion_protection_flag()
+        s3_auto_delete_objects = s3_auto_delete_objects_on_stack_destroy()
 
         self.template_options.description = "Deployment of the 'doc_redaction' PDF, image, and XLSX/CSV redaction app. Git repo available at: https://github.com/seanpedrick-case/doc_redaction."
 
@@ -820,7 +826,7 @@ class CdkStack(Stack):
                 self,
                 "RedactionSharedKmsKey",
                 alias=CUSTOM_KMS_KEY_NAME,
-                removal_policy=RemovalPolicy.DESTROY,
+                removal_policy=resource_removal_policy,
             )
 
             custom_sts_kms_policy_dict = {
@@ -968,8 +974,8 @@ class CdkStack(Stack):
                         bucket_name=log_bucket_name,
                         lifecycle_rules=log_bucket_lifecycle,
                         versioned=False,
-                        removal_policy=RemovalPolicy.DESTROY,
-                        auto_delete_objects=True,
+                        removal_policy=resource_removal_policy,
+                        auto_delete_objects=s3_auto_delete_objects,
                         encryption=s3.BucketEncryption.KMS,
                         encryption_key=kms_key,
                     )
@@ -980,8 +986,8 @@ class CdkStack(Stack):
                         bucket_name=log_bucket_name,
                         lifecycle_rules=log_bucket_lifecycle,
                         versioned=False,
-                        removal_policy=RemovalPolicy.DESTROY,
-                        auto_delete_objects=True,
+                        removal_policy=resource_removal_policy,
+                        auto_delete_objects=s3_auto_delete_objects,
                     )
 
                 print("Created S3 bucket", log_bucket_name)
@@ -1025,8 +1031,8 @@ class CdkStack(Stack):
                             )
                         ],
                         versioned=False,
-                        removal_policy=RemovalPolicy.DESTROY,
-                        auto_delete_objects=True,
+                        removal_policy=resource_removal_policy,
+                        auto_delete_objects=s3_auto_delete_objects,
                         encryption=s3.BucketEncryption.KMS,
                         encryption_key=kms_key,
                     )
@@ -1043,8 +1049,8 @@ class CdkStack(Stack):
                             )
                         ],
                         versioned=False,
-                        removal_policy=RemovalPolicy.DESTROY,
-                        auto_delete_objects=True,
+                        removal_policy=resource_removal_policy,
+                        auto_delete_objects=s3_auto_delete_objects,
                     )
 
                 print("Created Output bucket:", output_bucket_name)
@@ -1083,7 +1089,10 @@ class CdkStack(Stack):
                 print("Using existing ECR repository")
             else:
                 ecr_repo = ecr.Repository(
-                    self, "ECRRepo", repository_name=full_ecr_repo_name
+                    self,
+                    "ECRRepo",
+                    repository_name=full_ecr_repo_name,
+                    removal_policy=resource_removal_policy,
                 )  # Explicitly set repository_name
                 print("Created ECR repository", full_ecr_repo_name)
 
@@ -1227,6 +1236,8 @@ class CdkStack(Stack):
                                         "commands": [
                                             "echo Logging in to Amazon ECR",
                                             "aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com",
+                                            "test -f config/pi_agent.env.example",
+                                            "test -f agent-redact/pi-agent/Dockerfile",
                                         ]
                                     },
                                     "build": {
@@ -1253,7 +1264,10 @@ class CdkStack(Stack):
                     )
                 else:
                     pi_ecr_repo = ecr.Repository(
-                        self, "ECRPiRepo", repository_name=pi_ecr_repo_name
+                        self,
+                        "ECRPiRepo",
+                        repository_name=pi_ecr_repo_name,
+                        removal_policy=resource_removal_policy,
                     )
                 pi_ecr_image_loc = pi_ecr_repo.repository_uri
                 pi_ecr_repo.grant_pull_push(ecr_grantee)
@@ -1351,8 +1365,8 @@ class CdkStack(Stack):
                         name="id", type=dynamodb.AttributeType.STRING
                     ),
                     billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-                    deletion_protection=True,
-                    removal_policy=RemovalPolicy.DESTROY,
+                    deletion_protection=resource_delete_protection,
+                    removal_policy=resource_removal_policy,
                 )
 
                 dynamodb.Table(
@@ -1363,8 +1377,8 @@ class CdkStack(Stack):
                         name="id", type=dynamodb.AttributeType.STRING
                     ),
                     billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-                    deletion_protection=True,
-                    removal_policy=RemovalPolicy.DESTROY,
+                    deletion_protection=resource_delete_protection,
+                    removal_policy=resource_removal_policy,
                 )
 
                 dynamodb.Table(
@@ -1375,8 +1389,8 @@ class CdkStack(Stack):
                         name="id", type=dynamodb.AttributeType.STRING
                     ),
                     billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-                    deletion_protection=True,
-                    removal_policy=RemovalPolicy.DESTROY,
+                    deletion_protection=resource_delete_protection,
+                    removal_policy=resource_removal_policy,
                 )
 
             except Exception as e:
@@ -1432,7 +1446,7 @@ class CdkStack(Stack):
                         security_group=alb_security_group,
                         vpc_subnets=public_subnet_selection,
                         drop_invalid_header_fields=True,
-                        deletion_protection=True,
+                        deletion_protection=resource_delete_protection,
                     )
                     print("Successfully created new Application Load Balancer")
             except Exception as e:
@@ -1458,8 +1472,8 @@ class CdkStack(Stack):
                     user_pool_name=COGNITO_USER_POOL_NAME,
                     mfa=cognito.Mfa.OFF,  # Adjust as needed
                     sign_in_aliases=cognito.SignInAliases(email=True),
-                    deletion_protection=True,
-                    removal_policy=RemovalPolicy.DESTROY,
+                    deletion_protection=resource_delete_protection,
+                    removal_policy=resource_removal_policy,
                 )  # Adjust as needed
                 print(f"Created new user pool {user_pool.user_pool_id}.")
 
@@ -1532,7 +1546,7 @@ class CdkStack(Stack):
             )
 
             # Apply removal_policy to the created UserPoolDomain construct
-            user_pool_domain.apply_removal_policy(policy=RemovalPolicy.DESTROY)
+            user_pool_domain.apply_removal_policy(policy=resource_removal_policy)
 
             CfnOutput(
                 self, "CognitoUserPoolLoginUrl", value=user_pool_domain.base_url()
@@ -1566,6 +1580,7 @@ class CdkStack(Stack):
                             "REDACTION_CLIENT_SECRET": user_pool_client.user_pool_client_secret,  # Use the CDK attribute
                         },
                         encryption_key=kms_key,
+                        removal_policy=resource_removal_policy,
                     )
                 else:
                     secret = secretsmanager.Secret(
@@ -1581,6 +1596,7 @@ class CdkStack(Stack):
                             ),  # Use the CDK attribute
                             "REDACTION_CLIENT_SECRET": user_pool_client.user_pool_client_secret,  # Use the CDK attribute
                         },
+                        removal_policy=resource_removal_policy,
                     )
 
                 print(
@@ -1625,7 +1641,7 @@ class CdkStack(Stack):
                     "ExpressTaskLogGroup",
                     log_group_name=f"/ecs/{ECS_EXPRESS_SERVICE_NAME}-logs".lower(),
                     retention=logs.RetentionDays.ONE_MONTH,
-                    removal_policy=RemovalPolicy.DESTROY,
+                    removal_policy=resource_removal_policy,
                 )
                 express_log_group.grant_write(execution_role)
 
@@ -1868,7 +1884,7 @@ class CdkStack(Stack):
                     "MyTaskLogGroup",  # CDK Logical ID
                     log_group_name=log_group_name_from_config,
                     retention=logs.RetentionDays.ONE_MONTH,
-                    removal_policy=RemovalPolicy.DESTROY,
+                    removal_policy=resource_removal_policy,
                 )
 
                 epheremal_storage_volume_cdk_obj = ecs.Volume(
@@ -2438,6 +2454,8 @@ class CdkStackCloudfront(Stack):
         def get_context_dict(scope: Construct, key: str, default: dict = None) -> dict:
             return scope.node.try_get_context(key) or default
 
+        resource_removal_policy = managed_resource_removal_policy()
+
         print(f"CloudFront Stack: Received ALB ARN: {alb_arn}")
         print(f"CloudFront Stack: Received ALB Security Group ID: {alb_sec_group_id}")
 
@@ -2508,6 +2526,7 @@ class CdkStackCloudfront(Stack):
                 ),
                 web_acl_id=web_acl.attr_arn,
             )
+            cloudfront_distribution.apply_removal_policy(resource_removal_policy)
             print(f"Cloudfront distribution {CLOUDFRONT_DISTRIBUTION_NAME} defined.")
 
         except Exception as e:

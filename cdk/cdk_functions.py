@@ -23,6 +23,7 @@ from botocore.exceptions import ClientError, NoCredentialsError
 from cdk_config import (
     ACCESS_LOG_DYNAMODB_TABLE_NAME,
     AWS_REGION,
+    ENABLE_RESOURCE_DELETE_PROTECTION,
     FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
     NAT_GATEWAY_EIP_NAME,
     POLICY_FILE_LOCATIONS,
@@ -49,6 +50,34 @@ _CDK_LOOKUP_CONTEXT_PREFIXES = (
     "key-provider:",
     "ami:",
 )
+
+
+def is_resource_delete_protection_enabled() -> bool:
+    """Whether stack and resource delete protection is enabled (see ENABLE_RESOURCE_DELETE_PROTECTION)."""
+    return str(ENABLE_RESOURCE_DELETE_PROTECTION).strip().lower() in (
+        "true",
+        "1",
+        "yes",
+    )
+
+
+def resource_deletion_protection_flag() -> bool:
+    """AWS deletion_protection attribute (ALB, DynamoDB tables, Cognito user pools)."""
+    return is_resource_delete_protection_enabled()
+
+
+def managed_resource_removal_policy() -> RemovalPolicy:
+    """Removal policy for CDK-managed resources without a native deletion_protection flag."""
+    return (
+        RemovalPolicy.RETAIN
+        if is_resource_delete_protection_enabled()
+        else RemovalPolicy.DESTROY
+    )
+
+
+def s3_auto_delete_objects_on_stack_destroy() -> bool:
+    """Empty S3 buckets automatically when the stack is destroyed (dev/teardown only)."""
+    return not is_resource_delete_protection_enabled()
 
 
 def purge_cdk_lookup_context(file_path: str) -> int:
@@ -205,12 +234,25 @@ def log_aws_credential_context(
 
 
 # --- Function to load context from file ---
+
+
+def _context_value_for_cdk(value):
+    """CDK/JSII context cannot use JSON null; normalize for Windows synth."""
+    if value is None:
+        return ""
+    if isinstance(value, dict):
+        return {k: _context_value_for_cdk(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_context_value_for_cdk(v) for v in value]
+    return value
+
+
 def load_context_from_file(app: App, file_path: str):
     if os.path.exists(file_path):
         with open(file_path, "r", encoding="utf-8") as f:
             context_data = json.load(f)
             for key, value in context_data.items():
-                app.node.set_context(key, value)
+                app.node.set_context(key, _context_value_for_cdk(value))
             print(f"Loaded context from {file_path}")
     else:
         print(f"Context file not found: {file_path}")
@@ -1010,23 +1052,24 @@ def check_for_existing_user_pool_client(user_pool_id: str, user_pool_client_name
         - False, "", {} otherwise.
     """
     cognito_client = boto3.client("cognito-idp")
-    next_token = "string"
+    next_token = None
 
     while True:
         try:
-            response = cognito_client.list_user_pool_clients(
-                UserPoolId=user_pool_id, MaxResults=60, NextToken=next_token
-            )
+            kwargs = {"UserPoolId": user_pool_id, "MaxResults": 60}
+            if next_token:
+                kwargs["NextToken"] = next_token
+            response = cognito_client.list_user_pool_clients(**kwargs)
         except cognito_client.exceptions.ResourceNotFoundException:
             print(f"Error: User pool with ID '{user_pool_id}' not found.")
             return False, "", {}
 
-        except cognito_client.exceptions.InvalidParameterException:
-            print(f"Error: No app clients for '{user_pool_id}' found.")
-            return False, "", {}
-
         except Exception as e:
-            print("Could not check User Pool clients due to:", e)
+            print(
+                f"Could not list app clients for pool '{user_pool_id}' "
+                f"(client name '{user_pool_client_name}'): {e}"
+            )
+            return False, "", {}
 
         for client in response.get("UserPoolClients", []):
             if client.get("ClientName") == user_pool_client_name:
@@ -1039,6 +1082,9 @@ def check_for_existing_user_pool_client(user_pool_id: str, user_pool_client_name
         if not next_token:
             break
 
+    print(
+        f"No app client named '{user_pool_client_name}' in user pool '{user_pool_id}'."
+    )
     return False, "", {}
 
 
@@ -1415,6 +1461,7 @@ def create_web_acl_with_common_rules(
     )
 
     CfnOutput(scope, "WebACLArn", value=web_acl.attr_arn)
+    web_acl.apply_removal_policy(managed_resource_removal_policy())
 
     return web_acl
 
@@ -2074,7 +2121,7 @@ def create_pi_agent_ecs_resources(
         f"{logical_id_prefix}LogGroup",
         log_group_name=log_group_name,
         retention=logs.RetentionDays.ONE_MONTH,
-        removal_policy=RemovalPolicy.DESTROY,
+        removal_policy=managed_resource_removal_policy(),
     )
 
     pi_volume = ecs.Volume(name="piEphemeralVolume")
@@ -2289,160 +2336,10 @@ def ensure_folder_exists(output_folder: str):
         print(f"The {output_folder} folder already exists.")
 
 
-def create_basic_config_env(
-    out_dir: str = "config",
-    S3_LOG_CONFIG_BUCKET_NAME=S3_LOG_CONFIG_BUCKET_NAME,
-    S3_OUTPUT_BUCKET_NAME=S3_OUTPUT_BUCKET_NAME,
-    ACCESS_LOG_DYNAMODB_TABLE_NAME=ACCESS_LOG_DYNAMODB_TABLE_NAME,
-    FEEDBACK_LOG_DYNAMODB_TABLE_NAME=FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
-    USAGE_LOG_DYNAMODB_TABLE_NAME=USAGE_LOG_DYNAMODB_TABLE_NAME,
-):
-    """
-    Create a basic config.env file for the user to use with their newly deployed redaction app.
-    """
-    variables = {
-        "COGNITO_AUTH": "True",
-        "RUN_AWS_FUNCTIONS": "True",
-        "DISPLAY_FILE_NAMES_IN_LOGS": "False",
-        "SESSION_OUTPUT_FOLDER": "True",
-        "SAVE_LOGS_TO_DYNAMODB": "True",
-        "SHOW_COSTS": "True",
-        "SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS": "True",
-        "LOAD_PREVIOUS_TEXTRACT_JOBS_S3": "True",
-        "DOCUMENT_REDACTION_BUCKET": S3_LOG_CONFIG_BUCKET_NAME,
-        "TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET": S3_OUTPUT_BUCKET_NAME,
-        "ACCESS_LOG_DYNAMODB_TABLE_NAME": ACCESS_LOG_DYNAMODB_TABLE_NAME,
-        "FEEDBACK_LOG_DYNAMODB_TABLE_NAME": FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
-        "USAGE_LOG_DYNAMODB_TABLE_NAME": USAGE_LOG_DYNAMODB_TABLE_NAME,
-    }
-
-    # Write variables to .env file
-    ensure_folder_exists(out_dir + "/")
-    env_file_path = os.path.abspath(os.path.join(out_dir, "config.env"))
-
-    # It's good practice to ensure the file exists before calling set_key repeatedly.
-    # set_key will create it, but for a loop, it might be cleaner to ensure it's empty/exists once.
-    if not os.path.exists(env_file_path):
-        with open(env_file_path, "w"):
-            pass  # Create empty file
-
-    for key, value in variables.items():
-        set_key(env_file_path, key, str(value), quote_mode="never")
-
-    return variables
-
-
-def start_codebuild_build(PROJECT_NAME: str, AWS_REGION: str = AWS_REGION):
-    """
-    Start an existing Codebuild project build
-    """
-
-    # --- Initialize CodeBuild client ---
-    client = boto3.client("codebuild", region_name=AWS_REGION)
-
-    try:
-        print(f"Attempting to start build for project: {PROJECT_NAME}")
-
-        response = client.start_build(projectName=PROJECT_NAME)
-
-        build_id = response["build"]["id"]
-        print(f"Successfully started build with ID: {build_id}")
-        print(f"Build ARN: {response['build']['arn']}")
-        print("Build URL (approximate - construct based on region and ID):")
-        print(
-            f"https://{AWS_REGION}.console.aws.amazon.com/codesuite/codebuild/projects/{PROJECT_NAME}/build/{build_id.split(':')[-1]}/detail"
-        )
-
-        # You can inspect the full response if needed
-        # print("\nFull response:")
-        # import json
-        # print(json.dumps(response, indent=2))
-
-    except client.exceptions.ResourceNotFoundException:
-        print(f"Error: Project '{PROJECT_NAME}' not found in region '{AWS_REGION}'.")
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-
-
-def upload_file_to_s3(
-    local_file_paths: List[str],
-    s3_key: str,
-    s3_bucket: str,
-    RUN_AWS_FUNCTIONS: str = "1",
-):
-    """
-    Uploads a file from local machine to Amazon S3.
-
-    Args:
-    - local_file_path: Local file path(s) of the file(s) to upload.
-    - s3_key: Key (path) to the file in the S3 bucket.
-    - s3_bucket: Name of the S3 bucket.
-
-    Returns:
-    - Message as variable/printed to console
-    """
-    final_out_message = []
-    final_out_message_str = ""
-
-    if RUN_AWS_FUNCTIONS == "1":
-        try:
-            if s3_bucket and local_file_paths:
-
-                s3_client = boto3.client("s3", region_name=AWS_REGION)
-
-                if isinstance(local_file_paths, str):
-                    local_file_paths = [local_file_paths]
-
-                for file in local_file_paths:
-                    if s3_client:
-                        # print(s3_client)
-                        try:
-                            # Get file name off file path
-                            file_name = os.path.basename(file)
-
-                            s3_key_full = s3_key + file_name
-                            print("S3 key: ", s3_key_full)
-
-                            s3_client.upload_file(file, s3_bucket, s3_key_full)
-                            out_message = (
-                                "File " + file_name + " uploaded successfully!"
-                            )
-                            print(out_message)
-
-                        except Exception as e:
-                            out_message = f"Error uploading file(s): {e}"
-                            print(out_message)
-
-                        final_out_message.append(out_message)
-                        final_out_message_str = "\n".join(final_out_message)
-
-                    else:
-                        final_out_message_str = "Could not connect to AWS."
-            else:
-                final_out_message_str = (
-                    "At least one essential variable is empty, could not upload to S3"
-                )
-        except Exception as e:
-            final_out_message_str = "Could not upload files to S3 due to: " + str(e)
-            print(final_out_message_str)
-    else:
-        final_out_message_str = "App not set to run AWS functions"
-
-    return final_out_message_str
-
-
-# Initialize ECS client
-def start_ecs_task(cluster_name, service_name):
-    ecs_client = boto3.client("ecs")
-
-    try:
-        # Update the service to set the desired count to 1
-        ecs_client.update_service(
-            cluster=cluster_name, service=service_name, desiredCount=1
-        )
-        return {
-            "statusCode": 200,
-            "body": f"Service {service_name} in cluster {cluster_name} has been updated to 1 task.",
-        }
-    except Exception as e:
-        return {"statusCode": 500, "body": f"Error updating service: {str(e)}"}
+# Re-export for app.py and other CDK entrypoints (implementation is boto3-only).
+from cdk_post_deploy import (  # noqa: E402
+    create_basic_config_env,
+    start_codebuild_build,
+    start_ecs_task,
+    upload_file_to_s3,
+)

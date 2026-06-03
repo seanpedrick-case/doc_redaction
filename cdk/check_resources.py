@@ -400,6 +400,11 @@ def check_and_set_context():
             context_data[f"exists:{user_pool_client_name}"] = exists
             if exists:
                 context_data[f"id:{user_pool_client_name}"] = client_id
+            else:
+                print(
+                    f"User pool '{user_pool_name}' exists but app client "
+                    f"'{user_pool_client_name}' does not; CDK will create a new client."
+                )
 
     # Secrets Manager Secret (by name)
     secret_name = COGNITO_USER_POOL_CLIENT_SECRET_NAME

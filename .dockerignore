@@ -35,7 +35,11 @@ logs/
 output/
 input/
 feedback/
-config/
+# Exclude local secrets; allow committed *.example templates (Pi agent + main app images).
+config/*
+!config/pi_agent.env.example
+!config/app_config.env.example
+!config/docker_app_config.env.example
 usage/
 test/config/*
 test/feedback/*
