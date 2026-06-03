@@ -21,10 +21,8 @@ from aws_cdk import aws_wafv2 as wafv2
 from aws_cdk import custom_resources as cr
 from botocore.exceptions import ClientError, NoCredentialsError
 from cdk_config import (
-    ACCESS_LOG_DYNAMODB_TABLE_NAME,
     AWS_REGION,
     ENABLE_RESOURCE_DELETE_PROTECTION,
-    FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
     NAT_GATEWAY_EIP_NAME,
     POLICY_FILE_LOCATIONS,
     PRIVATE_SUBNET_AVAILABILITY_ZONES,
@@ -33,12 +31,9 @@ from cdk_config import (
     PUBLIC_SUBNET_AVAILABILITY_ZONES,
     PUBLIC_SUBNET_CIDR_BLOCKS,
     PUBLIC_SUBNETS_TO_USE,
-    S3_LOG_CONFIG_BUCKET_NAME,
-    S3_OUTPUT_BUCKET_NAME,
-    USAGE_LOG_DYNAMODB_TABLE_NAME,
 )
 from constructs import Construct
-from dotenv import dotenv_values, set_key
+from dotenv import dotenv_values
 
 # CDK CLI stores lookup-provider results under these key prefixes in cdk.context.json.
 _CDK_LOOKUP_CONTEXT_PREFIXES = (
@@ -2337,9 +2332,3 @@ def ensure_folder_exists(output_folder: str):
 
 
 # Re-export for app.py and other CDK entrypoints (implementation is boto3-only).
-from cdk_post_deploy import (  # noqa: E402
-    create_basic_config_env,
-    start_codebuild_build,
-    start_ecs_task,
-    upload_file_to_s3,
-)
