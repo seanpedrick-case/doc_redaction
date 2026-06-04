@@ -55,7 +55,7 @@ if ENABLE_PI_AGENT_ECS_SERVICE == "True":
             f"s3://{S3_LOG_CONFIG_BUCKET_NAME}/{PI_AGENT_ENV_S3_KEY} before scaling the Pi service."
         )
 
-total_seconds = 660  # 11 minutes
+total_seconds = 480  # 8 minutes
 update_interval = 1  # Update every second
 
 print("Waiting 11 minutes for CodeBuild container image(s) to build.")
