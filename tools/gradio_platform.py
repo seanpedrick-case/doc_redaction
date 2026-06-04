@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -53,6 +54,8 @@ from tools.config import (
     USAGE_LOGS_FOLDER,
 )
 from tools.custom_csvlogger import CSVLogger_custom
+
+logger = logging.getLogger(__name__)
 
 
 def validate_custom_header(request: gr.Request) -> None:
@@ -352,7 +355,15 @@ def get_agent_usage_logger() -> PlatformAgentUsageLogger:
 def log_platform_access(session_hash: str, host_name: str = HOST_NAME) -> None:
     if not SAVE_LOGS_TO_CSV and not SAVE_LOGS_TO_DYNAMODB:
         return
-    get_access_logger().log(session_hash, host_name)
+    try:
+        get_access_logger().log(session_hash, host_name)
+    except OSError as exc:
+        logger.warning(
+            "Access log write failed (%s); session UI continues. "
+            "On ECS/HF Pi images set ACCESS_LOGS_FOLDER=/tmp/pi-logs/ "
+            "(see agent-redact/pi/bootstrap_pi_config.py).",
+            exc,
+        )
 
 
 def log_agent_usage_event(

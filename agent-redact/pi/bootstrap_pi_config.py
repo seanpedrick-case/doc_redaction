@@ -53,6 +53,14 @@ def ensure_pi_workspace_dir(repo_root: Path | None = None) -> str:
     return resolved
 
 
+def _pi_runtime_needs_tmp_log_dirs() -> bool:
+    """True when CSV logs must not live under read-only ``PI_WORKDIR`` (ECS/HF images)."""
+    profile = os.environ.get("PI_DEPLOYMENT_PROFILE", "").strip().lower()
+    if profile in ("aws-ecs", "hf-space"):
+        return True
+    return _pi_running_in_container()
+
+
 def ensure_pi_writable_log_dirs() -> None:
     """
     Point access/usage/feedback CSV logs at ``/tmp`` when running in Docker/ECS.
@@ -60,16 +68,25 @@ def ensure_pi_writable_log_dirs() -> None:
     ``tools.config`` resolves relative ``logs/`` under ``PI_WORKDIR``, which is
     read-only in the Pi runtime image; ``/tmp`` is allowed by
     ``ensure_folder_within_app_directory`` for absolute paths.
+
+    For ``aws-ecs`` / ``hf-space``, always override (S3/task env files often set
+    ``logs/`` from the main app template).
     """
     if not _pi_running_in_container():
         return
     for path in (_DOCKER_ACCESS_LOGS, _DOCKER_USAGE_LOGS, _DOCKER_FEEDBACK_LOGS):
         path.mkdir(parents=True, exist_ok=True)
-    os.environ.setdefault("ACCESS_LOGS_FOLDER", _DOCKER_ACCESS_LOGS.as_posix() + "/")
-    os.environ.setdefault("USAGE_LOGS_FOLDER", _DOCKER_USAGE_LOGS.as_posix() + "/")
-    os.environ.setdefault(
-        "FEEDBACK_LOGS_FOLDER", _DOCKER_FEEDBACK_LOGS.as_posix() + "/"
-    )
+    access = _DOCKER_ACCESS_LOGS.as_posix() + "/"
+    usage = _DOCKER_USAGE_LOGS.as_posix() + "/"
+    feedback = _DOCKER_FEEDBACK_LOGS.as_posix() + "/"
+    if _pi_runtime_needs_tmp_log_dirs():
+        os.environ["ACCESS_LOGS_FOLDER"] = access
+        os.environ["USAGE_LOGS_FOLDER"] = usage
+        os.environ["FEEDBACK_LOGS_FOLDER"] = feedback
+    else:
+        os.environ.setdefault("ACCESS_LOGS_FOLDER", access)
+        os.environ.setdefault("USAGE_LOGS_FOLDER", usage)
+        os.environ.setdefault("FEEDBACK_LOGS_FOLDER", feedback)
 
 
 def ensure_pi_upload_root(repo_root: Path | None = None) -> str:

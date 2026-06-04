@@ -111,6 +111,21 @@ def test_ensure_pi_workspace_dir_uses_docker_mount_in_container(monkeypatch, tmp
     assert resolved == str(docker_ws.resolve())
 
 
+def test_ensure_pi_writable_log_dirs_overrides_logs_on_aws_ecs(monkeypatch, tmp_path):
+    bootstrap = _import_bootstrap(monkeypatch, tmp_path)
+    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "aws-ecs")
+    monkeypatch.setenv("ACCESS_LOGS_FOLDER", "logs/")
+    monkeypatch.setattr(bootstrap, "_pi_running_in_container", lambda: True)
+    access = tmp_path / "pi-logs"
+    monkeypatch.setattr(bootstrap, "_DOCKER_ACCESS_LOGS", access)
+    monkeypatch.setattr(bootstrap, "_DOCKER_USAGE_LOGS", tmp_path / "pi-usage")
+    monkeypatch.setattr(bootstrap, "_DOCKER_FEEDBACK_LOGS", tmp_path / "pi-feedback")
+
+    bootstrap.ensure_pi_writable_log_dirs()
+
+    assert os.environ["ACCESS_LOGS_FOLDER"] == access.as_posix() + "/"
+
+
 def test_ensure_pi_writable_log_dirs_uses_tmp_in_container(monkeypatch, tmp_path):
     bootstrap = _import_bootstrap(monkeypatch, tmp_path)
     monkeypatch.delenv("ACCESS_LOGS_FOLDER", raising=False)
