@@ -1128,6 +1128,10 @@ class CdkStack(Stack):
                     resources=[output_bucket.bucket_arn],
                 )
             )
+            # Identity-based grants (Pi agent + main app share task_role; required when the
+            # output bucket is imported and bucket policies were not updated).
+            bucket.grant_read_write(task_role)
+            output_bucket.grant_read_write(task_role)
 
         except Exception as e:
             raise Exception("Could not handle S3 buckets due to:", e)

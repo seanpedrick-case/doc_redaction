@@ -480,7 +480,7 @@ USAGE_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var(
 ###
 
 # Get some environment variables and Launch the Gradio app
-COGNITO_AUTH = get_or_create_env_var("COGNITO_AUTH", "0")
+COGNITO_AUTH = get_or_create_env_var("COGNITO_AUTH", "False")
 
 GRADIO_SERVER_PORT = int(get_or_create_env_var("GRADIO_SERVER_PORT", "7860"))
 

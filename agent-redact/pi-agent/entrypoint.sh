@@ -22,4 +22,13 @@ done
 cd "${PI_WORKDIR:-/workspace/doc_redaction}"
 
 python3 agent-redact/pi/pi_agent_config.py
-exec python3 agent-redact/pi/gradio_app.py
+if [ "${RUN_FASTAPI:-False}" = "True" ]; then
+  exec uvicorn gradio_app:app \
+    --app-dir agent-redact/pi \
+    --host "${GRADIO_SERVER_NAME:-0.0.0.0}" \
+    --port "${PI_GRADIO_PORT:-${GRADIO_SERVER_PORT:-7862}}" \
+    --proxy-headers \
+    --forwarded-allow-ips "*"
+else
+  exec python3 agent-redact/pi/gradio_app.py
+fi

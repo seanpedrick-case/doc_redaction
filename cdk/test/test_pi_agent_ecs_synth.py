@@ -33,6 +33,10 @@ def test_build_pi_agent_container_environment():
     assert env["PI_GRADIO_PORT"] == "7862"
     assert env["PI_CODING_AGENT_DIR"] == "/tmp/pi-agent"
     assert env["ACCESS_LOGS_FOLDER"] == "/tmp/pi-logs/"
+    assert env["RUN_FASTAPI"] == "True"
+    assert env["RUN_AWS_FUNCTIONS"] == "True"
+    assert env["SAVE_OUTPUTS_TO_S3"] == "True"
+    assert env["S3_OUTPUTS_BUCKET"]
 
 
 def test_pi_agent_alb_attachment_synth():

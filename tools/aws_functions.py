@@ -401,7 +401,7 @@ def export_outputs_to_s3(
     save_outputs_to_s3_flag: bool,
     base_file_state=None,
     s3_bucket: str = S3_OUTPUTS_BUCKET,
-):
+) -> str | None:
     """
     Upload a list of local output files to the configured S3 outputs folder.
 
@@ -410,6 +410,8 @@ def export_outputs_to_s3(
     - s3_output_folder_state_value: Final S3 key prefix (including any session hash)
         to use as the destination folder for uploads.
     - s3_bucket: Name of the S3 bucket.
+
+    Returns a short user-facing warning when any upload fails, else ``None``.
     """
     try:
 
@@ -417,16 +419,16 @@ def export_outputs_to_s3(
             save_outputs_to_s3=save_outputs_to_s3_flag,
             s3_bucket=s3_bucket,
         ):
-            return
+            return None
 
         if not s3_output_folder_state_value:
             # No configured S3 outputs folder – nothing to do
-            return
+            return None
 
         # Normalise input to a Python list of strings
         file_paths = file_list_state
         if not file_paths:
-            return
+            return None
 
         # Gradio dropdown may return a single string or a list
         if isinstance(file_paths, str):
@@ -435,7 +437,7 @@ def export_outputs_to_s3(
         # Filter out any non-truthy values
         file_paths = [p for p in file_paths if p]
         if not file_paths:
-            return
+            return None
 
         # Derive a base file stem (name without extension) from the original
         # file(s) being analysed, if provided. This is used to create an
@@ -472,6 +474,7 @@ def export_outputs_to_s3(
         # or, if base_file_stem is not available:
         #   <session_output_folder>/<date>/<output_file_stem>/<file_name>
         upload_failed = False
+        last_error = ""
         for file in file_paths:
             file_name = os.path.basename(file)
 
@@ -494,14 +497,23 @@ def export_outputs_to_s3(
                 or "could not upload" in out_message.lower()
             ):
                 upload_failed = True
+                last_error = out_message
                 print("export_outputs_to_s3 encountered issues:", out_message)
 
         if not upload_failed:
             print("Successfully uploaded outputs to S3")
+            return None
+        summary = last_error or "One or more files could not be uploaded to S3."
+        if "AccessDenied" in summary:
+            return (
+                "Could not upload outputs to S3 (AccessDenied). "
+                "Check ECS task role permissions on the outputs bucket."
+            )
+        return f"Could not upload all outputs to S3. {summary[:400]}"
 
     except Exception as e:
         # Do not break the app flow if S3 upload fails – just report to console
         print(f"export_outputs_to_s3 failed with error: {e}")
+        return f"S3 upload failed: {e}"
 
-    # No GUI outputs to update
-    return
+    return None

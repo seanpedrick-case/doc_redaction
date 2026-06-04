@@ -31,6 +31,7 @@ from cdk_config import (
     PUBLIC_SUBNET_AVAILABILITY_ZONES,
     PUBLIC_SUBNET_CIDR_BLOCKS,
     PUBLIC_SUBNETS_TO_USE,
+    S3_OUTPUT_BUCKET_NAME,
 )
 from constructs import Construct
 from dotenv import dotenv_values
@@ -2647,19 +2648,29 @@ def build_pi_agent_container_environment(
         "ACCESS_LOGS_FOLDER": "/tmp/pi-logs/",
         "USAGE_LOGS_FOLDER": "/tmp/pi-usage/",
         "FEEDBACK_LOGS_FOLDER": "/tmp/pi-feedback/",
-        "RUN_FASTAPI": "False",
+        "RUN_FASTAPI": "True",
+        "RUN_AWS_FUNCTIONS": "True",
+        "SAVE_OUTPUTS_TO_S3": "True",
+        "S3_OUTPUTS_BUCKET": S3_OUTPUT_BUCKET_NAME,
         "COGNITO_AUTH": "False",
     }
     _apply_pi_root_path_env(env, pi_root_path)
     return env
 
 
+# Gradio mounted on FastAPI (tools.gradio_platform.mount_or_launch); matches agent-redact/pi/start.sh.
+PI_ECS_APP_START_CMD = (
+    "python3 agent-redact/pi/pi_agent_config.py && "
+    "exec uvicorn gradio_app:app --app-dir agent-redact/pi "
+    "--host 0.0.0.0 --port ${PI_GRADIO_PORT:-7862} "
+    '--proxy-headers --forwarded-allow-ips "*"'
+)
+
 # Fargate volume mounts are root-owned; chown as root, then run the app as user (see entrypoint-ecs.sh).
 PI_ECS_CONTAINER_USER = "root"
 PI_ECS_CONTAINER_COMMAND = [
     "/usr/local/bin/entrypoint-ecs.sh",
-    "python3 agent-redact/pi/pi_agent_config.py && "
-    "exec python3 agent-redact/pi/gradio_app.py",
+    PI_ECS_APP_START_CMD,
 ]
 # Inline fallback when the image predates entrypoint-ecs.sh (same behaviour via bash).
 PI_ECS_CONTAINER_COMMAND_FALLBACK = [
@@ -2670,9 +2681,7 @@ PI_ECS_CONTAINER_COMMAND_FALLBACK = [
     "chown -R user:user /tmp/pi-agent /tmp/pi-logs /tmp/pi-usage /tmp/pi-feedback "
     "/home/user/app/workspace /tmp/gradio /tmp/pi-sessions && "
     "cd /workspace/doc_redaction && "
-    "exec su -s /bin/bash user -c "
-    "'python3 agent-redact/pi/pi_agent_config.py && "
-    "exec python3 agent-redact/pi/gradio_app.py'",
+    f"exec su -s /bin/bash user -c '{PI_ECS_APP_START_CMD}'",
 ]
 
 
