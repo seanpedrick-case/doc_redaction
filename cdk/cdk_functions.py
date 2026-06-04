@@ -2072,6 +2072,7 @@ def build_pi_agent_container_environment(
         "PI_WORKDIR": "/workspace/doc_redaction",
         "PI_UPLOAD_ROOT": "/tmp/gradio",
         "PI_SESSION_DIR": "/tmp/pi-sessions",
+        "PI_CODING_AGENT_DIR": "/tmp/pi-agent",
         "RUN_FASTAPI": "False",
         "COGNITO_AUTH": "False",
     }
@@ -2088,8 +2089,8 @@ PI_ECS_CONTAINER_COMMAND = [
 PI_ECS_CONTAINER_COMMAND_FALLBACK = [
     "bash",
     "-c",
-    "mkdir -p /home/user/app/workspace /tmp/gradio /tmp/pi-sessions && "
-    "chown -R user:user /home/user/app/workspace /tmp/gradio /tmp/pi-sessions && "
+    "mkdir -p /tmp/pi-agent /home/user/app/workspace /tmp/gradio /tmp/pi-sessions && "
+    "chown -R user:user /tmp/pi-agent /home/user/app/workspace /tmp/gradio /tmp/pi-sessions && "
     "cd /workspace/doc_redaction && "
     "exec su -s /bin/bash user -c "
     "'python3 agent-redact/pi/pi_agent_config.py && "

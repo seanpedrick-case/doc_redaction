@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -123,6 +124,28 @@ def test_pass_strict_not_blocked_by_suspicious_rows(tmp_path: Path) -> None:
     assert report.pass_with_cleanup is False
     assert report.pages_needing_csv_cleanup == [1]
     assert report.pages_flagged_for_vlm == []
+
+
+def test_verify_rejects_path_outside_allowed_roots(tmp_path: Path) -> None:
+    words = tmp_path / "words.csv"
+    words.write_text(
+        "page,word_text,word_x0,word_y0,word_x1,word_y1\n1,x,0,0,1,1\n",
+        encoding="utf-8-sig",
+    )
+    hosts = (
+        Path(os.environ.get("SystemRoot", "C:/Windows"))
+        / "System32"
+        / "drivers"
+        / "etc"
+        / "hosts"
+    )
+    if not hosts.is_file():
+        pytest.skip("hosts fixture not available")
+
+    from tools.verify_redaction_coverage import verify_redaction_coverage
+
+    with pytest.raises(ValueError, match="Path must be under"):
+        verify_redaction_coverage(hosts, words, total_pages=1)
 
 
 def test_prune_suspicious_review_csv(tmp_path: Path) -> None:

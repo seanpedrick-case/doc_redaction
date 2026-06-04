@@ -31,6 +31,7 @@ def test_build_pi_agent_container_environment():
     assert env["DOC_REDACTION_GRADIO_URL"] == "http://redaction:7860"
     assert env["PI_DEFAULT_PROVIDER"] == "amazon-bedrock"
     assert env["PI_GRADIO_PORT"] == "7862"
+    assert env["PI_CODING_AGENT_DIR"] == "/tmp/pi-agent"
 
 
 def test_pi_agent_alb_attachment_synth():
