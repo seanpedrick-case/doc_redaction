@@ -39,7 +39,8 @@ x-redaction-app-env: &redaction-app-env
 x-pi-agent-common: &pi-agent-common
   build:
     context: .
-    dockerfile: Dockerfile.pi
+    dockerfile: agent-redact/pi-agent/Dockerfile
+    target: dev
   image: pi-agent-doc-redaction
   env_file:
     - path: config/pi_agent.env
@@ -49,7 +50,7 @@ x-pi-agent-common: &pi-agent-common
   volumes:
     - .:/workspace/doc_redaction:rw
     - ./workspace:/home/user/app/workspace:rw
-    - pi-agent-sessions:/home/node/.pi/agent/sessions
+    - pi-agent-sessions:/home/user/.pi/agent/sessions
   working_dir: /workspace/doc_redaction
   stdin_open: true
   tty: true
@@ -60,7 +61,7 @@ x-pi-agent-common: &pi-agent-common
 x-pi-agent-env: &pi-agent-env
   APP_TYPE: pi
   APP_CONFIG_PATH: /workspace/doc_redaction/config/pi_agent.env
-  HOME: /home/node
+  HOME: /home/user
   PI_SKIP_VERSION_CHECK: "1"
   PI_OFFLINE: "1"
   DOC_REDACTION_GRADIO_URL: ${DOC_REDACTION_GRADIO_URL:-http://redaction-app-llama:7860}
@@ -733,8 +734,8 @@ services:
     volumes:
       - .:/workspace/doc_redaction:rw
       - ./workspace:/home/user/app/workspace:rw
-      - pi-agent-sessions:/home/node/.pi/agent/sessions
-      - ${USERPROFILE}/.aws:/home/node/.aws:rw
+      - pi-agent-sessions:/home/user/.pi/agent/sessions
+      - ${USERPROFILE}/.aws:/home/user/.aws:rw
     depends_on:
       redaction-app-llama-bedrock:
         condition: service_started

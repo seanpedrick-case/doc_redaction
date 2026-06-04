@@ -2077,6 +2077,26 @@ def build_pi_agent_container_environment(
     }
 
 
+# Fargate volume mounts are root-owned; chown as root, then run the app as user (see entrypoint-ecs.sh).
+PI_ECS_CONTAINER_USER = "root"
+PI_ECS_CONTAINER_COMMAND = [
+    "/usr/local/bin/entrypoint-ecs.sh",
+    "python3 agent-redact/pi/pi_agent_config.py && "
+    "exec python3 agent-redact/pi/gradio_app.py",
+]
+# Inline fallback when the image predates entrypoint-ecs.sh (same behaviour via bash).
+PI_ECS_CONTAINER_COMMAND_FALLBACK = [
+    "bash",
+    "-c",
+    "mkdir -p /home/user/app/workspace /tmp/gradio /tmp/pi-sessions && "
+    "chown -R user:user /home/user/app/workspace /tmp/gradio /tmp/pi-sessions && "
+    "cd /workspace/doc_redaction && "
+    "exec su -s /bin/bash user -c "
+    "'python3 agent-redact/pi/pi_agent_config.py && "
+    "exec python3 agent-redact/pi/gradio_app.py'",
+]
+
+
 def create_pi_agent_ecs_resources(
     scope: Construct,
     logical_id_prefix: str,
@@ -2155,12 +2175,8 @@ def create_pi_agent_ecs_resources(
             main_app_port=main_app_port,
             pi_gradio_port=pi_gradio_port,
         ),
-        command=[
-            "bash",
-            "-c",
-            "python3 agent-redact/pi/pi_agent_config.py && "
-            "exec python3 agent-redact/pi/gradio_app.py",
-        ],
+        command=PI_ECS_CONTAINER_COMMAND_FALLBACK,
+        user=PI_ECS_CONTAINER_USER,
         essential=True,
     )
 

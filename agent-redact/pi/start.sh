@@ -2,7 +2,7 @@
 # Start Gradio Pi chat UI in the background; keep container alive for `docker compose exec pi-agent pi`.
 set -euo pipefail
 
-export HOME="${HOME:-/home/node}"
+export HOME="${HOME:-/home/user}"
 export PI_WORKDIR="${PI_WORKDIR:-/workspace/doc_redaction}"
 export PYTHONPATH="${PI_WORKDIR}:${PI_WORKDIR}/agent-redact/pi:${PYTHONPATH:-}"
 

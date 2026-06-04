@@ -279,7 +279,7 @@ def _aws_config_path() -> Path | None:
     if explicit:
         path = Path(explicit).expanduser()
         return path if path.is_file() else None
-    home = Path(os.environ.get("HOME", "/home/node"))
+    home = Path(os.environ.get("HOME", "/home/user"))
     path = home / ".aws" / "config"
     return path if path.is_file() else None
 

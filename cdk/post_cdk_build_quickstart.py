@@ -58,7 +58,7 @@ if ENABLE_PI_AGENT_ECS_SERVICE == "True":
 total_seconds = 480  # 8 minutes
 update_interval = 1  # Update every second
 
-print("Waiting 11 minutes for CodeBuild container image(s) to build.")
+print("Waiting 8 minutes for CodeBuild container image(s) to build.")
 
 # tqdm iterates over a range, and you perform a small sleep in each iteration
 for i in tqdm(range(total_seconds), desc="Building container"):
