@@ -735,6 +735,218 @@ def _get_existing_subnets_in_vpc(vpc_id: str) -> Dict[str, Any]:
     return existing_subnets_data
 
 
+def get_internet_gateways_attached_to_vpc(vpc_id: str) -> List[str]:
+    """Return Internet Gateway IDs currently attached to the VPC."""
+    ec2_client = boto3.client("ec2")
+    response = ec2_client.describe_internet_gateways(
+        Filters=[{"Name": "attachment.vpc-id", "Values": [vpc_id]}]
+    )
+    return [
+        igw["InternetGatewayId"]
+        for igw in response.get("InternetGateways", [])
+        if igw.get("InternetGatewayId")
+    ]
+
+
+def internet_gateway_exists(igw_id: str) -> bool:
+    ec2_client = boto3.client("ec2")
+    response = ec2_client.describe_internet_gateways(InternetGatewayIds=[igw_id])
+    return bool(response.get("InternetGateways"))
+
+
+def route_table_default_internet_gateway(route_table_id: str) -> Optional[str]:
+    """
+    Return the Internet Gateway ID for 0.0.0.0/0 on this route table, if any.
+    """
+    ec2_client = boto3.client("ec2")
+    response = ec2_client.describe_route_tables(RouteTableIds=[route_table_id])
+    tables = response.get("RouteTables", [])
+    if not tables:
+        return None
+    for route in tables[0].get("Routes", []):
+        if route.get("DestinationCidrBlock") != "0.0.0.0/0":
+            continue
+        gateway_id = route.get("GatewayId") or ""
+        if gateway_id.startswith("igw-"):
+            return gateway_id
+    return None
+
+
+def route_table_has_non_igw_default_route(route_table_id: str) -> bool:
+    """True if 0.0.0.0/0 exists but does not target an Internet Gateway."""
+    ec2_client = boto3.client("ec2")
+    response = ec2_client.describe_route_tables(RouteTableIds=[route_table_id])
+    tables = response.get("RouteTables", [])
+    if not tables:
+        return False
+    for route in tables[0].get("Routes", []):
+        if route.get("DestinationCidrBlock") != "0.0.0.0/0":
+            continue
+        gateway_id = route.get("GatewayId") or ""
+        if gateway_id.startswith("igw-"):
+            return False
+        # Active default route via NAT instance, TGW, etc.
+        if (
+            route.get("NatGatewayId")
+            or route.get("TransitGatewayId")
+            or route.get("GatewayId")
+        ):
+            return True
+    return False
+
+
+def audit_public_subnet_internet_connectivity(
+    vpc_id: str,
+    configured_igw_id: str,
+    public_subnet_entries: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Validate / discover Internet Gateway usage for legacy public subnets.
+
+    Returns context fields for CDK:
+      internet_gateway_id, internet_gateway_needs_vpc_attachment,
+      public_subnets_needing_igw_route (list of {name, subnet_id, route_table_id}).
+    """
+    configured_igw_id = (configured_igw_id or "").strip()
+    attached_igws = get_internet_gateways_attached_to_vpc(vpc_id)
+
+    resolved_igw_id = configured_igw_id
+    needs_attachment = False
+
+    if configured_igw_id:
+        if not internet_gateway_exists(configured_igw_id):
+            raise ValueError(
+                f"EXISTING_IGW_ID '{configured_igw_id}' was not found in this account/region."
+            )
+        if configured_igw_id not in attached_igws:
+            # Ensure it is not attached to another VPC
+            ec2_client = boto3.client("ec2")
+            detail = ec2_client.describe_internet_gateways(
+                InternetGatewayIds=[configured_igw_id]
+            )
+            for attachment in detail.get("InternetGateways", [{}])[0].get(
+                "Attachments", []
+            ):
+                other_vpc = attachment.get("VpcId")
+                if other_vpc and other_vpc != vpc_id:
+                    raise ValueError(
+                        f"EXISTING_IGW_ID '{configured_igw_id}' is attached to VPC "
+                        f"'{other_vpc}', not target VPC '{vpc_id}'. Detach it or choose "
+                        "the IGW attached to this VPC."
+                    )
+            needs_attachment = True
+    elif attached_igws:
+        if len(attached_igws) > 1:
+            raise ValueError(
+                f"VPC '{vpc_id}' has multiple attached Internet Gateways "
+                f"({', '.join(attached_igws)}). Set EXISTING_IGW_ID to the one to use."
+            )
+        resolved_igw_id = attached_igws[0]
+        print(
+            f"EXISTING_IGW_ID not set; using Internet Gateway attached to VPC: "
+            f"{resolved_igw_id}"
+        )
+    elif public_subnet_entries:
+        raise ValueError(
+            f"VPC '{vpc_id}' has no Internet Gateway attached and EXISTING_IGW_ID is "
+            "empty. Set EXISTING_IGW_ID to an existing IGW for this VPC (CDK will "
+            "attach it if detached)."
+        )
+
+    subnets_needing_route: List[Dict[str, str]] = []
+    for entry in public_subnet_entries:
+        name = entry.get("name") or "unknown"
+        route_table_id = entry.get("route_table_id")
+        subnet_id = entry.get("subnet_id") or entry.get("id") or ""
+        if not route_table_id:
+            print(
+                f"Warning: public subnet '{name}' has no route table association in "
+                "pre-check; skipping IGW route audit (CDK may still add routes after create)."
+            )
+            continue
+        existing_igw = route_table_default_internet_gateway(route_table_id)
+        if existing_igw:
+            if resolved_igw_id and existing_igw != resolved_igw_id:
+                raise ValueError(
+                    f"Public subnet '{name}' route table '{route_table_id}' has "
+                    f"0.0.0.0/0 -> {existing_igw}, but EXISTING_IGW_ID / resolved IGW "
+                    f"is '{resolved_igw_id}'. Fix the route table manually or align "
+                    "EXISTING_IGW_ID."
+                )
+            continue
+        if route_table_has_non_igw_default_route(route_table_id):
+            raise ValueError(
+                f"Public subnet '{name}' route table '{route_table_id}' has a default "
+                "route that does not use an Internet Gateway (e.g. NAT/TGW). Remove "
+                "or change it before adding 0.0.0.0/0 -> IGW for an internet-facing ALB."
+            )
+        subnets_needing_route.append(
+            {
+                "name": name,
+                "subnet_id": subnet_id,
+                "route_table_id": route_table_id,
+            }
+        )
+
+    return {
+        "internet_gateway_id": resolved_igw_id,
+        "internet_gateway_needs_vpc_attachment": needs_attachment,
+        "public_subnets_needing_igw_route": subnets_needing_route,
+    }
+
+
+def wire_public_subnet_internet_access(
+    scope: Construct,
+    logical_id_prefix: str,
+    *,
+    vpc_id: str,
+    internet_gateway_id: str,
+    needs_igw_vpc_attachment: bool,
+    subnets_needing_route: List[Dict[str, str]],
+) -> Optional[ec2.CfnVPCGatewayAttachment]:
+    """
+    Attach the Internet Gateway to the VPC (if needed) and add 0.0.0.0/0 routes on
+    imported public subnet route tables that lack an IGW default route.
+    """
+    if not internet_gateway_id:
+        return None
+
+    attachment = None
+    if needs_igw_vpc_attachment:
+        attachment = ec2.CfnVPCGatewayAttachment(
+            scope,
+            f"{logical_id_prefix}IgwVpcAttachment",
+            vpc_id=vpc_id,
+            internet_gateway_id=internet_gateway_id,
+        )
+        print(
+            f"CDK: will attach Internet Gateway '{internet_gateway_id}' to VPC '{vpc_id}'."
+        )
+
+    seen_route_tables: set[str] = set()
+    for i, entry in enumerate(subnets_needing_route):
+        route_table_id = entry.get("route_table_id")
+        if not route_table_id or route_table_id in seen_route_tables:
+            continue
+        seen_route_tables.add(route_table_id)
+        safe_name = (entry.get("name") or f"rt{i}").replace("-", "")[:40]
+        route = ec2.CfnRoute(
+            scope,
+            f"{logical_id_prefix}IgwRoute{safe_name}{i}",
+            route_table_id=route_table_id,
+            destination_cidr_block="0.0.0.0/0",
+            gateway_id=internet_gateway_id,
+        )
+        if attachment is not None:
+            route.add_dependency(attachment)
+        print(
+            f"CDK: will add 0.0.0.0/0 -> {internet_gateway_id} on route table "
+            f"'{route_table_id}' (subnet '{entry.get('name', '')}')."
+        )
+
+    return attachment
+
+
 # --- Modified validate_subnet_creation_parameters to take pre-fetched data ---
 def validate_subnet_creation_parameters(
     vpc_id: str,
@@ -925,6 +1137,7 @@ def create_subnets(
     is_public: bool,
     internet_gateway_id: Optional[str] = None,
     single_nat_gateway_id: Optional[str] = None,
+    internet_gateway_attachment: Optional[ec2.CfnVPCGatewayAttachment] = None,
 ) -> Tuple[List[ec2.CfnSubnet], List[ec2.CfnRouteTable]]:
     """
     Creates subnets using L2 constructs but returns the underlying L1 Cfn objects
@@ -963,28 +1176,35 @@ def create_subnets(
         Tags.of(subnet).add("Name", subnet_name)
         Tags.of(subnet).add("Type", subnet_type_tag)
 
+        if is_public and internet_gateway_attachment is not None:
+            subnet.node.add_dependency(internet_gateway_attachment)
+
         if is_public:
-            # The subnet's route_table is automatically created by the L2 Subnet construct
             try:
                 subnet.add_route(
-                    "DefaultInternetRoute",  # A logical ID for the CfnRoute resource
+                    "DefaultInternetRoute",
                     router_id=internet_gateway_id,
                     router_type=ec2.RouterType.GATEWAY,
-                    # destination_cidr_block="0.0.0.0/0" is the default for this method
                 )
             except Exception as e:
-                print("Could not create IGW route for public subnet due to:", e)
+                raise RuntimeError(
+                    f"Could not create 0.0.0.0/0 -> Internet Gateway route for public "
+                    f"subnet '{subnet_name}'. Ensure EXISTING_IGW_ID is attached to this "
+                    f"VPC ({internet_gateway_id}): {e}"
+                ) from e
             print(f"CDK: Defined public L2 subnet '{subnet_name}' and added IGW route.")
         else:
             try:
-                # Using .add_route() for private subnets as well for consistency
                 subnet.add_route(
-                    "DefaultNatRoute",  # A logical ID for the CfnRoute resource
+                    "DefaultNatRoute",
                     router_id=single_nat_gateway_id,
                     router_type=ec2.RouterType.NAT_GATEWAY,
                 )
             except Exception as e:
-                print("Could not create NAT gateway route for public subnet due to:", e)
+                raise RuntimeError(
+                    f"Could not create 0.0.0.0/0 -> NAT Gateway route for private "
+                    f"subnet '{subnet_name}': {e}"
+                ) from e
             print(
                 f"CDK: Defined private L2 subnet '{subnet_name}' and added NAT GW route."
             )
@@ -1947,6 +2167,225 @@ def allow_express_load_balancer_to_ecs_security_group(
         source_security_group_id=lb_sg_arn,
         description="Express Mode ALB to ECS tasks",
     )
+
+
+def _dict_env_to_express_key_value_pairs(
+    environment: Dict[str, str],
+) -> List[ecs.CfnExpressGatewayService.KeyValuePairProperty]:
+    return [
+        ecs.CfnExpressGatewayService.KeyValuePairProperty(name=k, value=str(v))
+        for k, v in environment.items()
+        if v is not None and str(v) != ""
+    ]
+
+
+def build_pi_express_container_environment(
+    *,
+    service_connect_discovery_name: str,
+    main_app_port: Union[str, int],
+    pi_gradio_port: Union[str, int],
+) -> Dict[str, str]:
+    """Inline env for Pi on Express (no volume mounts; workspace under /tmp)."""
+    port = int(main_app_port)
+    pi_port = int(pi_gradio_port)
+    return {
+        "APP_TYPE": "pi",
+        "APP_CONFIG_PATH": "/workspace/doc_redaction/config/pi_agent.env.example",
+        "PI_DEPLOYMENT_PROFILE": "aws-ecs",
+        "PI_DEFAULT_PROVIDER": "amazon-bedrock",
+        "DOC_REDACTION_GRADIO_URL": f"http://{service_connect_discovery_name}:{port}",
+        "PI_GRADIO_PORT": str(pi_port),
+        "GRADIO_SERVER_PORT": str(pi_port),
+        "GRADIO_SERVER_NAME": "0.0.0.0",
+        "PI_WORKSPACE_DIR": "/tmp/pi-workspace",
+        "PI_WORKDIR": "/workspace/doc_redaction",
+        "PI_UPLOAD_ROOT": "/tmp/gradio",
+        "PI_SESSION_DIR": "/tmp/pi-sessions",
+        "PI_CODING_AGENT_DIR": "/tmp/pi-agent",
+        "RUN_FASTAPI": "False",
+        "COGNITO_AUTH": "False",
+    }
+
+
+def build_express_pi_primary_container(
+    *,
+    image_uri: str,
+    container_port: int,
+    log_group_name: str,
+    aws_region: str,
+    environment: Optional[Dict[str, str]] = None,
+) -> ecs.CfnExpressGatewayService.ExpressGatewayContainerProperty:
+    """Express PrimaryContainer for Pi (no Secrets Manager; inline env only)."""
+    env_pairs = (
+        _dict_env_to_express_key_value_pairs(environment) if environment else None
+    )
+    return ecs.CfnExpressGatewayService.ExpressGatewayContainerProperty(
+        image=image_uri,
+        container_port=container_port,
+        aws_logs_configuration=ecs.CfnExpressGatewayService.ExpressGatewayServiceAwsLogsConfigurationProperty(
+            log_group_name=log_group_name,
+            log_stream_prefix="ecs-pi",
+            region=aws_region,
+        ),
+        environment=env_pairs,
+    )
+
+
+def configure_express_pi_listener_host_rule(
+    scope: Construct,
+    logical_id_prefix: str,
+    *,
+    express_main_service: ecs.CfnExpressGatewayService,
+    express_pi_service: ecs.CfnExpressGatewayService,
+    pi_host_header: str,
+    rule_priority: int,
+    user_pool_arn: str,
+    user_pool_client_id: str,
+    user_pool_domain_prefix: str,
+    stickiness_seconds: int = 28800,
+) -> None:
+    """Host-header rule on the shared Express HTTPS listener → Pi target group (with Cognito)."""
+    listener_arn = express_main_service.get_att(
+        "ECSManagedResourceArns.IngressPath.ListenerArn"
+    ).to_string()
+    pi_target_group_arn = Fn.select(
+        0,
+        express_pi_service.get_att(
+            "ECSManagedResourceArns.IngressPath.TargetGroupArns"
+        ),
+    )
+    rule_actions = build_cognito_default_listener_actions(
+        user_pool_arn=user_pool_arn,
+        user_pool_client_id=user_pool_client_id,
+        user_pool_domain_prefix=user_pool_domain_prefix,
+        target_group_arn=pi_target_group_arn,
+        stickiness_seconds=stickiness_seconds,
+    )
+    pi_rule = cr.AwsCustomResource(
+        scope,
+        f"{logical_id_prefix}ExpressPiHostRule",
+        on_create=cr.AwsSdkCall(
+            service="ELBv2",
+            action="createRule",
+            parameters={
+                "ListenerArn": listener_arn,
+                "Priority": rule_priority,
+                "Conditions": [
+                    {
+                        "Field": "host-header",
+                        "HostHeaderConfig": {"Values": [pi_host_header]},
+                    }
+                ],
+                "Actions": rule_actions,
+            },
+            physical_resource_id=cr.PhysicalResourceId.from_response(
+                "Rules[0].RuleArn"
+            ),
+        ),
+        on_update=cr.AwsSdkCall(
+            service="ELBv2",
+            action="modifyRule",
+            parameters={
+                "RuleArn": cr.PhysicalResourceId.reference(),
+                "Conditions": [
+                    {
+                        "Field": "host-header",
+                        "HostHeaderConfig": {"Values": [pi_host_header]},
+                    }
+                ],
+                "Actions": rule_actions,
+            },
+        ),
+        on_delete=cr.AwsSdkCall(
+            service="ELBv2",
+            action="deleteRule",
+            parameters={"RuleArn": cr.PhysicalResourceId.reference()},
+        ),
+        policy=cr.AwsCustomResourcePolicy.from_sdk_calls(
+            resources=cr.AwsCustomResourcePolicy.ANY_RESOURCE
+        ),
+    )
+    pi_rule.node.add_dependency(express_pi_service)
+    pi_rule.node.add_dependency(express_main_service)
+
+
+def _express_service_connect_configuration(
+    *,
+    namespace: str,
+    port_name: Optional[str] = None,
+    discovery_name: Optional[str] = None,
+    port: Optional[int] = None,
+) -> Dict[str, Any]:
+    """ECS API serviceConnectConfiguration payload for updateService."""
+    cfg: Dict[str, Any] = {"enabled": True, "namespace": namespace}
+    if port_name and discovery_name and port is not None:
+        cfg["services"] = [
+            {
+                "portName": port_name,
+                "discoveryName": discovery_name,
+                "clientAliases": [
+                    {"port": int(port), "dnsName": discovery_name},
+                ],
+            }
+        ]
+    return cfg
+
+
+def apply_service_connect_to_express_service(
+    scope: Construct,
+    logical_id: str,
+    *,
+    cluster_name: str,
+    service_name: str,
+    namespace: str,
+    express_service: ecs.CfnExpressGatewayService,
+    port_name: Optional[str] = None,
+    discovery_name: Optional[str] = None,
+    port: Optional[int] = None,
+) -> cr.AwsCustomResource:
+    """
+    Enable Service Connect on an Express gateway service after create (AWS does not
+    support SC at Express create time). Server config when port_name/discovery_name/port
+    are set; client-only when they are omitted.
+    """
+    sc_cfg = _express_service_connect_configuration(
+        namespace=namespace,
+        port_name=port_name,
+        discovery_name=discovery_name,
+        port=port,
+    )
+    physical_id = f"{cluster_name}/{service_name}/service-connect"
+    custom = cr.AwsCustomResource(
+        scope,
+        logical_id,
+        on_create=cr.AwsSdkCall(
+            service="ECS",
+            action="updateService",
+            parameters={
+                "cluster": cluster_name,
+                "service": service_name,
+                "serviceConnectConfiguration": sc_cfg,
+                "forceNewDeployment": True,
+            },
+            physical_resource_id=cr.PhysicalResourceId.of(physical_id),
+        ),
+        on_update=cr.AwsSdkCall(
+            service="ECS",
+            action="updateService",
+            parameters={
+                "cluster": cluster_name,
+                "service": service_name,
+                "serviceConnectConfiguration": sc_cfg,
+                "forceNewDeployment": True,
+            },
+            physical_resource_id=cr.PhysicalResourceId.of(physical_id),
+        ),
+        policy=cr.AwsCustomResourcePolicy.from_sdk_calls(
+            resources=cr.AwsCustomResourcePolicy.ANY_RESOURCE
+        ),
+    )
+    custom.node.add_dependency(express_service)
+    return custom
 
 
 def create_s3_batch_ecs_trigger_lambda(

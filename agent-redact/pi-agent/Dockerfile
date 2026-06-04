@@ -93,8 +93,10 @@ ENV PI_DEFAULT_MODEL=gemini-flash-lite-latest
 ENV DOC_REDACTION_GRADIO_URL=https://seanpedrickcase-document-redaction.hf.space
 ENV GRADIO_SERVER_PORT=7860
 ENV HOME=${APP_HOME}
-ENV PI_WORKSPACE_DIR=${APP_HOME}/app/workspace
 ENV PI_WORKDIR=/workspace/doc_redaction
+# Fargate uses volume mounts under ${APP_HOME}/app/workspace (CDK chown entrypoint).
+# ECS Express has no mounts — CDK sets PI_WORKSPACE_DIR=/tmp/pi-workspace at deploy.
+ENV PI_WORKSPACE_DIR=${APP_HOME}/app/workspace
 ENV PI_UPLOAD_ROOT=/tmp/gradio
 ENV PI_SESSION_DIR=/tmp/pi-sessions
 ENV PI_CODING_AGENT_DIR=/tmp/pi-agent

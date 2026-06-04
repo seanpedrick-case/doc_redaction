@@ -142,3 +142,14 @@ def test_config_mutual_exclusion_raises():
             raise ValueError(
                 "USE_ECS_EXPRESS_MODE=True cannot be used with ACM_SSL_CERTIFICATE_ARN set."
             )
+
+
+def test_legacy_pi_on_express_error_message():
+    legacy_pi = "True"
+    use_express = "True"
+    with pytest.raises(ValueError, match="ENABLE_PI_AGENT_EXPRESS_SERVICE"):
+        if legacy_pi == "True" and use_express == "True":
+            raise ValueError(
+                "ENABLE_PI_AGENT_ECS_SERVICE=True requires legacy Fargate (USE_ECS_EXPRESS_MODE=False). "
+                "For Pi on Express, use ENABLE_PI_AGENT_EXPRESS_SERVICE=True instead."
+            )

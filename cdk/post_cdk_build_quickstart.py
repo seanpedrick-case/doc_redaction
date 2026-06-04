@@ -5,9 +5,11 @@ from cdk_config import (
     CLUSTER_NAME,
     CODEBUILD_PI_PROJECT_NAME,
     CODEBUILD_PROJECT_NAME,
+    ECS_PI_EXPRESS_SERVICE_NAME,
     ECS_PI_SERVICE_NAME,
     ECS_SERVICE_NAME,
     ENABLE_PI_AGENT_ECS_SERVICE,
+    ENABLE_PI_AGENT_EXPRESS_SERVICE,
     PI_AGENT_ENV_S3_KEY,
     S3_LOG_CONFIG_BUCKET_NAME,
 )
@@ -28,7 +30,10 @@ create_basic_config_env("config")
 print("Starting main app CodeBuild project.")
 start_codebuild_build(project_name=CODEBUILD_PROJECT_NAME)
 
-if ENABLE_PI_AGENT_ECS_SERVICE == "True":
+_enable_pi_image_build = (
+    ENABLE_PI_AGENT_ECS_SERVICE == "True" or ENABLE_PI_AGENT_EXPRESS_SERVICE == "True"
+)
+if _enable_pi_image_build:
     print("Starting Pi agent CodeBuild project.")
     start_codebuild_build(project_name=CODEBUILD_PI_PROJECT_NAME)
 
@@ -37,7 +42,7 @@ upload_file_to_s3(
     local_file_paths="config/config.env", s3_key="", s3_bucket=S3_LOG_CONFIG_BUCKET_NAME
 )
 
-if ENABLE_PI_AGENT_ECS_SERVICE == "True":
+if _enable_pi_image_build:
     pi_env_local = os.path.join("config", "pi_agent.env")
     if os.path.isfile(pi_env_local):
         print(
@@ -71,3 +76,7 @@ start_ecs_task(cluster_name=CLUSTER_NAME, service_name=ECS_SERVICE_NAME)
 if ENABLE_PI_AGENT_ECS_SERVICE == "True":
     print(f"Starting Pi agent ECS service {ECS_PI_SERVICE_NAME}")
     start_ecs_task(cluster_name=CLUSTER_NAME, service_name=ECS_PI_SERVICE_NAME)
+
+if ENABLE_PI_AGENT_EXPRESS_SERVICE == "True":
+    print(f"Starting Pi Express ECS service {ECS_PI_EXPRESS_SERVICE_NAME}")
+    start_ecs_task(cluster_name=CLUSTER_NAME, service_name=ECS_PI_EXPRESS_SERVICE_NAME)

@@ -175,6 +175,7 @@ NEW_VPC_DEFAULT_NAME = get_or_create_env_var("NEW_VPC_DEFAULT_NAME", f"{CDK_PREF
 NEW_VPC_CIDR = get_or_create_env_var("NEW_VPC_CIDR", "")  # "10.0.0.0/24"
 
 
+# Internet Gateway for legacy VPC public subnets (attach + 0.0.0.0/0 routes via CDK when missing).
 EXISTING_IGW_ID = get_or_create_env_var("EXISTING_IGW_ID", "")
 SINGLE_NAT_GATEWAY_ID = get_or_create_env_var("SINGLE_NAT_GATEWAY_ID", "")
 
@@ -575,9 +576,46 @@ PI_ALB_LISTENER_RULE_PRIORITY = int(
 )
 PI_AGENT_ENV_S3_KEY = get_or_create_env_var("PI_AGENT_ENV_S3_KEY", "pi_agent.env")
 
+# Pi on ECS Express Mode (second Express service on shared ALB; SC via ecs:UpdateService).
+ENABLE_PI_AGENT_EXPRESS_SERVICE = get_or_create_env_var(
+    "ENABLE_PI_AGENT_EXPRESS_SERVICE", "False"
+)
+ECS_PI_EXPRESS_SERVICE_NAME = get_or_create_env_var(
+    "ECS_PI_EXPRESS_SERVICE_NAME", f"{CDK_PREFIX}PiExpressService"
+)
+ECS_PI_EXPRESS_HEALTH_CHECK_PATH = get_or_create_env_var(
+    "ECS_PI_EXPRESS_HEALTH_CHECK_PATH", "/"
+)
+ECS_PI_EXPRESS_SECURITY_GROUP_NAME = get_or_create_env_var(
+    "ECS_PI_EXPRESS_SECURITY_GROUP_NAME", f"{CDK_PREFIX}SecurityGroupPiExpress"
+)
+# Service Connect port names for Express services (applied via ecs:UpdateService after create).
+ECS_EXPRESS_SC_PORT_NAME = get_or_create_env_var(
+    "ECS_EXPRESS_SC_PORT_NAME", ECS_SERVICE_CONNECT_PORT_MAPPING_NAME
+)
+ECS_PI_EXPRESS_SC_PORT_NAME = get_or_create_env_var(
+    "ECS_PI_EXPRESS_SC_PORT_NAME", f"port-{PI_GRADIO_PORT}"
+)
+
+if ENABLE_PI_AGENT_ECS_SERVICE == "True" and ENABLE_PI_AGENT_EXPRESS_SERVICE == "True":
+    raise ValueError(
+        "Enable at most one Pi deployment mode: ENABLE_PI_AGENT_ECS_SERVICE (legacy Fargate) "
+        "or ENABLE_PI_AGENT_EXPRESS_SERVICE (Express), not both."
+    )
+if ENABLE_PI_AGENT_EXPRESS_SERVICE == "True" and USE_ECS_EXPRESS_MODE != "True":
+    raise ValueError(
+        "ENABLE_PI_AGENT_EXPRESS_SERVICE=True requires USE_ECS_EXPRESS_MODE=True "
+        "(no ACM_SSL_CERTIFICATE_ARN)."
+    )
+if ENABLE_PI_AGENT_EXPRESS_SERVICE == "True" and not PI_ALB_HOST_HEADER.strip():
+    raise ValueError(
+        "ENABLE_PI_AGENT_EXPRESS_SERVICE=True requires PI_ALB_HOST_HEADER "
+        "(host-header rule on the shared Express ALB, e.g. pi.redaction.example.com)."
+    )
 if ENABLE_PI_AGENT_ECS_SERVICE == "True" and USE_ECS_EXPRESS_MODE == "True":
     raise ValueError(
-        "ENABLE_PI_AGENT_ECS_SERVICE=True requires legacy Fargate (USE_ECS_EXPRESS_MODE=False)."
+        "ENABLE_PI_AGENT_ECS_SERVICE=True requires legacy Fargate (USE_ECS_EXPRESS_MODE=False). "
+        "For Pi on Express, use ENABLE_PI_AGENT_EXPRESS_SERVICE=True instead."
     )
 if ENABLE_PI_AGENT_ECS_SERVICE == "True" and ENABLE_ECS_SERVICE_CONNECT != "True":
     raise ValueError(

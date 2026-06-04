@@ -20,6 +20,7 @@ from cdk_config import (  # Import necessary config
     ENABLE_ECS_SERVICE_CONNECT,
     ENABLE_PI_AGENT_ECS_SERVICE,
     ENABLE_S3_BATCH_ECS_TRIGGER,
+    EXISTING_IGW_ID,
     PRIVATE_SUBNET_AVAILABILITY_ZONES,
     PRIVATE_SUBNET_CIDR_BLOCKS,
     PRIVATE_SUBNETS_TO_USE,
@@ -34,6 +35,7 @@ from cdk_config import (  # Import necessary config
 )
 from cdk_functions import (  # Import your check functions (assuming they use Boto3)
     _get_existing_subnets_in_vpc,
+    audit_public_subnet_internet_connectivity,
     check_alb_exists,
     check_codebuild_project_exists,
     check_ecr_repo_exists,
@@ -255,6 +257,58 @@ def check_and_set_context():
                     ]
 
         context_data["checked_private_subnets"] = checked_private_subnets
+
+        # Internet Gateway + public subnet default routes (legacy ALB / NAT public subnets)
+        if PUBLIC_SUBNETS_TO_USE and vpc_id:
+            public_entries_for_igw_audit = []
+            for subnet_name in PUBLIC_SUBNETS_TO_USE:
+                info = checked_public_subnets.get(subnet_name, {})
+                if not info.get("exists"):
+                    continue
+                public_entries_for_igw_audit.append(
+                    {
+                        "name": subnet_name,
+                        "subnet_id": info.get("id"),
+                        "route_table_id": info.get("route_table_id"),
+                    }
+                )
+            if public_entries_for_igw_audit or EXISTING_IGW_ID:
+                print("\n--- Auditing Internet Gateway and public subnet routes ---")
+                try:
+                    igw_audit = audit_public_subnet_internet_connectivity(
+                        vpc_id,
+                        EXISTING_IGW_ID,
+                        public_entries_for_igw_audit,
+                    )
+                    context_data["internet_gateway_id"] = igw_audit[
+                        "internet_gateway_id"
+                    ]
+                    context_data["internet_gateway_needs_vpc_attachment"] = igw_audit[
+                        "internet_gateway_needs_vpc_attachment"
+                    ]
+                    context_data["public_subnets_needing_igw_route"] = igw_audit[
+                        "public_subnets_needing_igw_route"
+                    ]
+                    needing = igw_audit["public_subnets_needing_igw_route"]
+                    if igw_audit["internet_gateway_needs_vpc_attachment"]:
+                        print(
+                            f"CDK will attach IGW '{igw_audit['internet_gateway_id']}' "
+                            f"to VPC '{vpc_id}' on deploy."
+                        )
+                    if needing:
+                        print(
+                            f"CDK will add default internet routes on deploy for: "
+                            f"{', '.join(n['name'] for n in needing)}"
+                        )
+                    else:
+                        print(
+                            "All audited public subnets already have 0.0.0.0/0 -> IGW routes."
+                        )
+                except ValueError as e:
+                    print(
+                        f"\nFATAL ERROR: Internet Gateway / public route audit failed: {e}\n"
+                    )
+                    raise SystemExit(1) from e
 
         print("\nName-only existence subnet check complete.\n")
 
