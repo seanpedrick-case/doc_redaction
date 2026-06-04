@@ -419,7 +419,7 @@ def check_and_set_context():
     if ENABLE_PI_AGENT_ECS_SERVICE == "True":
         print(
             "ENABLE_PI_AGENT_ECS_SERVICE=True: requires legacy Fargate, Service Connect, "
-            "and PI_ALB_HOST_HEADER (Pi UI on shared ALB)."
+            "and PI_ALB_ROUTING (default path=/pi on shared ALB; host mode needs PI_ALB_HOST_HEADER)."
         )
     else:
         exists, alb_object = check_alb_exists(alb_name, region_name=AWS_REGION)

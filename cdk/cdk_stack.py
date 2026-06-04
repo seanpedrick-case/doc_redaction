@@ -106,6 +106,8 @@ from cdk_config import (
     PI_AGENT_ENV_S3_KEY,
     PI_ALB_HOST_HEADER,
     PI_ALB_LISTENER_RULE_PRIORITY,
+    PI_ALB_PATH_PREFIX_NORMALIZED,
+    PI_ALB_ROUTING,
     PI_ALB_TARGET_GROUP_NAME,
     PI_GRADIO_PORT,
     PRIVATE_SUBNET_AVAILABILITY_ZONES,
@@ -143,7 +145,7 @@ from cdk_functions import (  # Only keep CDK-native functions
     build_express_pi_primary_container,
     build_pi_express_container_environment,
     configure_express_listener_cognito_and_cloudfront,
-    configure_express_pi_listener_host_rule,
+    configure_express_pi_listener_rules,
     create_ecs_express_infrastructure_role,
     create_express_gateway_service,
     create_nat_gateway,
@@ -151,8 +153,11 @@ from cdk_functions import (  # Only keep CDK-native functions
     create_s3_batch_ecs_trigger_lambda,
     create_subnets,
     create_web_acl_with_common_rules,
+    format_pi_public_urls,
     load_app_config_env_for_express,
     managed_resource_removal_policy,
+    pi_alb_root_path_for_container,
+    pi_listener_rule_count,
     resolve_service_connect_client_security_group_ids,
     resource_deletion_protection_flag,
     s3_auto_delete_objects_on_stack_destroy,
@@ -1801,10 +1806,14 @@ class CdkStack(Stack):
                             description="Pi agent ECS Express tasks",
                         )
 
+                        _pi_root_path = pi_alb_root_path_for_container(
+                            PI_ALB_PATH_PREFIX_NORMALIZED, PI_ALB_ROUTING
+                        )
                         pi_express_environment = build_pi_express_container_environment(
                             service_connect_discovery_name=ECS_SERVICE_CONNECT_DISCOVERY_NAME,
                             main_app_port=int(GRADIO_SERVER_PORT),
                             pi_gradio_port=int(PI_GRADIO_PORT),
+                            pi_root_path=_pi_root_path,
                         )
                         pi_primary_container = build_express_pi_primary_container(
                             image_uri=pi_ecr_image_loc + ":latest",
@@ -1854,11 +1863,13 @@ class CdkStack(Stack):
                         )
 
                         stickiness_seconds = int(Duration.hours(8).to_seconds())
-                        configure_express_pi_listener_host_rule(
+                        configure_express_pi_listener_rules(
                             self,
                             "ExpressPi",
                             express_main_service=express_service,
                             express_pi_service=express_pi_service,
+                            routing_mode=PI_ALB_ROUTING,
+                            path_prefix=PI_ALB_PATH_PREFIX_NORMALIZED,
                             pi_host_header=PI_ALB_HOST_HEADER.strip(),
                             rule_priority=PI_ALB_LISTENER_RULE_PRIORITY,
                             user_pool_arn=user_pool.user_pool_arn,
@@ -1888,7 +1899,16 @@ class CdkStack(Stack):
                         )
                         sc_pi.node.add_dependency(sc_main)
 
-                        pi_public_url = f"https://{PI_ALB_HOST_HEADER.strip()}"
+                        _pi_public_urls = format_pi_public_urls(
+                            routing_mode=PI_ALB_ROUTING,
+                            path_prefix=PI_ALB_PATH_PREFIX_NORMALIZED,
+                            host_header=PI_ALB_HOST_HEADER,
+                            cloudfront_domain=(
+                                CLOUDFRONT_DOMAIN if USE_CLOUDFRONT == "True" else ""
+                            ),
+                            use_https=True,
+                        )
+                        pi_public_url = _pi_public_urls[0] if _pi_public_urls else ""
                         sc_backend = (
                             f"http://{ECS_SERVICE_CONNECT_DISCOVERY_NAME}:"
                             f"{GRADIO_SERVER_PORT}"
@@ -1903,7 +1923,20 @@ class CdkStack(Stack):
                             self,
                             "PiPublicUrl",
                             value=pi_public_url,
-                            description="Public URL for Pi UI (shared Express ALB, host-header rule)",
+                            description="Primary public URL for Pi UI (path and/or host ALB rules)",
+                        )
+                        if len(_pi_public_urls) > 1:
+                            CfnOutput(
+                                self,
+                                "PiPublicUrls",
+                                value=", ".join(_pi_public_urls),
+                                description="All configured Pi UI entry URLs",
+                            )
+                        CfnOutput(
+                            self,
+                            "PiAlbPathPrefix",
+                            value=PI_ALB_PATH_PREFIX_NORMALIZED,
+                            description="ALB path prefix for Pi when PI_ALB_ROUTING includes path",
                         )
                         CfnOutput(
                             self,
@@ -1924,7 +1957,7 @@ class CdkStack(Stack):
                         )
                         print(
                             "ECS Express Pi gateway service defined with Service Connect "
-                            f"backend {sc_backend}."
+                            f"backend {sc_backend}; public URLs: {', '.join(_pi_public_urls)}."
                         )
                     except Exception as e:
                         raise Exception(
@@ -2274,6 +2307,9 @@ class CdkStack(Stack):
                             service_connect_discovery_name=ECS_SERVICE_CONNECT_DISCOVERY_NAME,
                             main_app_port=int(GRADIO_SERVER_PORT),
                             use_fargate_spot=use_fargate_spot,
+                            pi_root_path=pi_alb_root_path_for_container(
+                                PI_ALB_PATH_PREFIX_NORMALIZED, PI_ALB_ROUTING
+                            ),
                         )
                     )
                     ecs_security_group.add_ingress_rule(
@@ -2334,7 +2370,10 @@ class CdkStack(Stack):
             target_group_name = ALB_TARGET_GROUP_NAME  # Explicit resource name
             cloudfront_distribution_url = "cloudfront_placeholder.net"  # Need to replace this afterwards with the actual cloudfront_distribution.domain_name
             cloudfront_http_rule_priority = (
-                PI_ALB_LISTENER_RULE_PRIORITY + 1 if enable_pi_agent else 1
+                PI_ALB_LISTENER_RULE_PRIORITY
+                + (pi_listener_rule_count(PI_ALB_ROUTING) if enable_pi_agent else 0)
+                if enable_pi_agent
+                else 1
             )
             https_listener = None
 
@@ -2474,6 +2513,15 @@ class CdkStack(Stack):
                     if len(pi_tg_name) > 32:
                         pi_tg_name = pi_tg_name[-32:]
 
+                    _pi_public_urls = format_pi_public_urls(
+                        routing_mode=PI_ALB_ROUTING,
+                        path_prefix=PI_ALB_PATH_PREFIX_NORMALIZED,
+                        host_header=PI_ALB_HOST_HEADER,
+                        cloudfront_domain=(
+                            CLOUDFRONT_DOMAIN if USE_CLOUDFRONT == "True" else ""
+                        ),
+                        use_https=bool(ACM_SSL_CERTIFICATE_ARN),
+                    )
                     attach_pi_agent_to_shared_alb(
                         self,
                         "PiAgent",
@@ -2482,6 +2530,8 @@ class CdkStack(Stack):
                         pi_security_group=pi_ecs_security_group,
                         pi_service=pi_ecs_service,
                         pi_port=int(PI_GRADIO_PORT),
+                        routing_mode=PI_ALB_ROUTING,
+                        path_prefix=PI_ALB_PATH_PREFIX_NORMALIZED,
                         pi_host_header=PI_ALB_HOST_HEADER.strip(),
                         listener_rule_priority=PI_ALB_LISTENER_RULE_PRIORITY,
                         target_group_name=pi_tg_name,
@@ -2494,16 +2544,25 @@ class CdkStack(Stack):
                         cognito_user_pool_client=user_pool_client,
                         cognito_user_pool_domain=user_pool_domain,
                     )
-                    pi_public_url = (
-                        f"https://{PI_ALB_HOST_HEADER.strip()}"
-                        if ACM_SSL_CERTIFICATE_ARN
-                        else f"http://{PI_ALB_HOST_HEADER.strip()}"
-                    )
+                    pi_public_url = _pi_public_urls[0] if _pi_public_urls else ""
                     CfnOutput(
                         self,
                         "PiPublicUrl",
                         value=pi_public_url,
-                        description="Public URL for Pi agent UI (shared ALB, host-header rule)",
+                        description="Primary public URL for Pi agent UI (path and/or host ALB rules)",
+                    )
+                    if len(_pi_public_urls) > 1:
+                        CfnOutput(
+                            self,
+                            "PiPublicUrls",
+                            value=", ".join(_pi_public_urls),
+                            description="All configured Pi UI entry URLs",
+                        )
+                    CfnOutput(
+                        self,
+                        "PiAlbPathPrefix",
+                        value=PI_ALB_PATH_PREFIX_NORMALIZED,
+                        description="ALB path prefix for Pi when PI_ALB_ROUTING includes path",
                     )
                     CfnOutput(
                         self,
@@ -2521,8 +2580,8 @@ class CdkStack(Stack):
                         description="DOC_REDACTION_GRADIO_URL set on Pi tasks (Service Connect)",
                     )
                     print(
-                        "Pi agent attached to shared ALB with host header "
-                        f"{PI_ALB_HOST_HEADER.strip()}."
+                        "Pi agent attached to shared ALB "
+                        f"(routing={PI_ALB_ROUTING}, urls={', '.join(_pi_public_urls)})."
                     )
 
             except Exception as e:

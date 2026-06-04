@@ -91,9 +91,11 @@ from tools.aws_functions import export_outputs_to_s3, s3_outputs_upload_ready
 from tools.config import (
     ACTIVITY_MAX_LINES,
     EMPTY_SEND_WITH_FILE_HINT,
+    FASTAPI_ROOT_PATH,
     HOST_NAME,
     PI_GRADIO_PORT,
     PI_INTRO_TEXT,
+    PI_ROOT_PATH,
     PI_UI_HOST,
     PI_UI_TITLE,
     QUOTA_CONTINUE_PROMPT,
@@ -1738,14 +1740,18 @@ def launch_pi_ui() -> FastAPI | None:
     """Build UI and mount on FastAPI or launch Gradio directly."""
     demo = build_ui()
     demo.queue(default_concurrency_limit=1)
+    pi_root = (PI_ROOT_PATH or "").strip()
+    fastapi_root = pi_root or FASTAPI_ROOT_PATH
     return mount_or_launch(
         demo,
-        fastapi_app=create_fastapi_app() if RUN_FASTAPI else None,
+        fastapi_app=create_fastapi_app(root_path=fastapi_root) if RUN_FASTAPI else None,
         allowed_paths=gradio_allowed_paths(),
         css=THINKING_PANEL_CSS,
         head_extra=PI_AGENT_FINISH_HEAD_HTML,
         server_name=PI_UI_HOST,
         server_port=PI_UI_PORT,
+        root_path=pi_root,
+        fastapi_root_path=fastapi_root,
     )
 
 

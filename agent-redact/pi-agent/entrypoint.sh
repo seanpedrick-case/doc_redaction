@@ -8,6 +8,9 @@ for dir in \
     "${PI_WORKSPACE_DIR:-/home/user/app/workspace}" \
     "${PI_UPLOAD_ROOT:-/tmp/gradio}" \
     "${PI_SESSION_DIR:-/tmp/pi-sessions}" \
+    "${ACCESS_LOGS_FOLDER:-/tmp/pi-logs}" \
+    "${USAGE_LOGS_FOLDER:-/tmp/pi-usage}" \
+    "${FEEDBACK_LOGS_FOLDER:-/tmp/pi-feedback}" \
     "${MPLCONFIGDIR:-/tmp/matplotlib_cache}" \
     "${XDG_CACHE_HOME:-/tmp/xdg_cache/user_1000}"; do
     mkdir -p "$dir" 2>/dev/null || true

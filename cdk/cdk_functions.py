@@ -2179,16 +2179,92 @@ def _dict_env_to_express_key_value_pairs(
     ]
 
 
+def normalize_pi_alb_path_prefix(raw: str, *, default: str = "pi") -> str:
+    """Return a leading-slash path prefix (no trailing slash), e.g. '/pi'."""
+    segment = (raw or default).strip().strip("/")
+    return f"/{segment}" if segment else f"/{default}"
+
+
+def normalize_pi_alb_routing_mode(raw: str) -> str:
+    mode = (raw or "path").strip().lower()
+    allowed = frozenset({"path", "host", "both"})
+    if mode not in allowed:
+        raise ValueError(
+            f"PI_ALB_ROUTING must be one of {sorted(allowed)}; got '{raw}'."
+        )
+    return mode
+
+
+def pi_alb_path_patterns(path_prefix: str) -> List[str]:
+    """ALB path-pattern values for a Pi path prefix (exact + subtree)."""
+    prefix = normalize_pi_alb_path_prefix(path_prefix)
+    return [prefix, f"{prefix}/*"]
+
+
+def pi_alb_health_check_path(path_prefix: str, routing_mode: str) -> str:
+    if normalize_pi_alb_routing_mode(routing_mode) in ("path", "both"):
+        return f"{normalize_pi_alb_path_prefix(path_prefix)}/"
+    return "/"
+
+
+def pi_alb_root_path_for_container(path_prefix: str, routing_mode: str) -> str:
+    """Gradio/FastAPI ROOT_PATH to set on Pi tasks when path routing is enabled."""
+    if normalize_pi_alb_routing_mode(routing_mode) in ("path", "both"):
+        return normalize_pi_alb_path_prefix(path_prefix)
+    return ""
+
+
+def pi_listener_rule_count(routing_mode: str) -> int:
+    mode = normalize_pi_alb_routing_mode(routing_mode)
+    count = 0
+    if mode in ("path", "both"):
+        count += 1
+    if mode in ("host", "both"):
+        count += 1
+    return count
+
+
+def format_pi_public_urls(
+    *,
+    routing_mode: str,
+    path_prefix: str,
+    host_header: str,
+    cloudfront_domain: str = "",
+    use_https: bool = True,
+) -> List[str]:
+    """Human-facing Pi UI URLs for stack outputs."""
+    scheme = "https" if use_https else "http"
+    urls: List[str] = []
+    mode = normalize_pi_alb_routing_mode(routing_mode)
+    prefix = normalize_pi_alb_path_prefix(path_prefix)
+    if mode in ("path", "both"):
+        if cloudfront_domain.strip():
+            urls.append(f"{scheme}://{cloudfront_domain.strip()}{prefix}/")
+        else:
+            urls.append(f"{scheme}://<cloudfront-or-alb-host>{prefix}/")
+    if mode in ("host", "both") and host_header.strip():
+        urls.append(f"{scheme}://{host_header.strip()}/")
+    return urls
+
+
+def _apply_pi_root_path_env(env: Dict[str, str], pi_root_path: str) -> None:
+    if pi_root_path:
+        env["PI_ROOT_PATH"] = pi_root_path
+        env["ROOT_PATH"] = pi_root_path
+        env["FASTAPI_ROOT_PATH"] = pi_root_path
+
+
 def build_pi_express_container_environment(
     *,
     service_connect_discovery_name: str,
     main_app_port: Union[str, int],
     pi_gradio_port: Union[str, int],
+    pi_root_path: str = "",
 ) -> Dict[str, str]:
     """Inline env for Pi on Express (no volume mounts; workspace under /tmp)."""
     port = int(main_app_port)
     pi_port = int(pi_gradio_port)
-    return {
+    env = {
         "APP_TYPE": "pi",
         "APP_CONFIG_PATH": "/workspace/doc_redaction/config/pi_agent.env.example",
         "PI_DEPLOYMENT_PROFILE": "aws-ecs",
@@ -2202,9 +2278,14 @@ def build_pi_express_container_environment(
         "PI_UPLOAD_ROOT": "/tmp/gradio",
         "PI_SESSION_DIR": "/tmp/pi-sessions",
         "PI_CODING_AGENT_DIR": "/tmp/pi-agent",
+        "ACCESS_LOGS_FOLDER": "/tmp/pi-logs/",
+        "USAGE_LOGS_FOLDER": "/tmp/pi-usage/",
+        "FEEDBACK_LOGS_FOLDER": "/tmp/pi-feedback/",
         "RUN_FASTAPI": "False",
         "COGNITO_AUTH": "False",
     }
+    _apply_pi_root_path_env(env, pi_root_path)
+    return env
 
 
 def build_express_pi_primary_container(
@@ -2231,20 +2312,76 @@ def build_express_pi_primary_container(
     )
 
 
-def configure_express_pi_listener_host_rule(
+def _express_pi_listener_rule_custom_resource(
+    scope: Construct,
+    logical_id: str,
+    *,
+    listener_arn: str,
+    priority: int,
+    conditions: List[Dict[str, Any]],
+    rule_actions: List[Dict[str, Any]],
+    express_main_service: ecs.CfnExpressGatewayService,
+    express_pi_service: ecs.CfnExpressGatewayService,
+) -> cr.AwsCustomResource:
+    pi_rule = cr.AwsCustomResource(
+        scope,
+        logical_id,
+        on_create=cr.AwsSdkCall(
+            service="ELBv2",
+            action="createRule",
+            parameters={
+                "ListenerArn": listener_arn,
+                "Priority": priority,
+                "Conditions": conditions,
+                "Actions": rule_actions,
+            },
+            physical_resource_id=cr.PhysicalResourceId.from_response(
+                "Rules[0].RuleArn"
+            ),
+        ),
+        on_update=cr.AwsSdkCall(
+            service="ELBv2",
+            action="modifyRule",
+            parameters={
+                "RuleArn": cr.PhysicalResourceId.reference(),
+                "Conditions": conditions,
+                "Actions": rule_actions,
+            },
+        ),
+        on_delete=cr.AwsSdkCall(
+            service="ELBv2",
+            action="deleteRule",
+            parameters={"RuleArn": cr.PhysicalResourceId.reference()},
+        ),
+        policy=cr.AwsCustomResourcePolicy.from_sdk_calls(
+            resources=cr.AwsCustomResourcePolicy.ANY_RESOURCE
+        ),
+    )
+    pi_rule.node.add_dependency(express_pi_service)
+    pi_rule.node.add_dependency(express_main_service)
+    return pi_rule
+
+
+def configure_express_pi_listener_rules(
     scope: Construct,
     logical_id_prefix: str,
     *,
     express_main_service: ecs.CfnExpressGatewayService,
     express_pi_service: ecs.CfnExpressGatewayService,
+    routing_mode: str,
+    path_prefix: str,
     pi_host_header: str,
     rule_priority: int,
     user_pool_arn: str,
     user_pool_client_id: str,
     user_pool_domain_prefix: str,
     stickiness_seconds: int = 28800,
-) -> None:
-    """Host-header rule on the shared Express HTTPS listener → Pi target group (with Cognito)."""
+) -> int:
+    """
+    Path and/or host-header rules on the shared Express HTTPS listener → Pi TG.
+    Returns the next free listener rule priority after Pi rules.
+    """
+    mode = normalize_pi_alb_routing_mode(routing_mode)
     listener_arn = express_main_service.get_att(
         "ECSManagedResourceArns.IngressPath.ListenerArn"
     ).to_string()
@@ -2261,52 +2398,46 @@ def configure_express_pi_listener_host_rule(
         target_group_arn=pi_target_group_arn,
         stickiness_seconds=stickiness_seconds,
     )
-    pi_rule = cr.AwsCustomResource(
-        scope,
-        f"{logical_id_prefix}ExpressPiHostRule",
-        on_create=cr.AwsSdkCall(
-            service="ELBv2",
-            action="createRule",
-            parameters={
-                "ListenerArn": listener_arn,
-                "Priority": rule_priority,
-                "Conditions": [
-                    {
-                        "Field": "host-header",
-                        "HostHeaderConfig": {"Values": [pi_host_header]},
-                    }
-                ],
-                "Actions": rule_actions,
-            },
-            physical_resource_id=cr.PhysicalResourceId.from_response(
-                "Rules[0].RuleArn"
-            ),
-        ),
-        on_update=cr.AwsSdkCall(
-            service="ELBv2",
-            action="modifyRule",
-            parameters={
-                "RuleArn": cr.PhysicalResourceId.reference(),
-                "Conditions": [
-                    {
-                        "Field": "host-header",
-                        "HostHeaderConfig": {"Values": [pi_host_header]},
-                    }
-                ],
-                "Actions": rule_actions,
-            },
-        ),
-        on_delete=cr.AwsSdkCall(
-            service="ELBv2",
-            action="deleteRule",
-            parameters={"RuleArn": cr.PhysicalResourceId.reference()},
-        ),
-        policy=cr.AwsCustomResourcePolicy.from_sdk_calls(
-            resources=cr.AwsCustomResourcePolicy.ANY_RESOURCE
-        ),
-    )
-    pi_rule.node.add_dependency(express_pi_service)
-    pi_rule.node.add_dependency(express_main_service)
+    priority = rule_priority
+
+    if mode in ("path", "both"):
+        path_patterns = pi_alb_path_patterns(path_prefix)
+        _express_pi_listener_rule_custom_resource(
+            scope,
+            f"{logical_id_prefix}ExpressPiPathRule",
+            listener_arn=listener_arn,
+            priority=priority,
+            conditions=[
+                {
+                    "Field": "path-pattern",
+                    "PathPatternConfig": {"Values": path_patterns},
+                }
+            ],
+            rule_actions=rule_actions,
+            express_main_service=express_main_service,
+            express_pi_service=express_pi_service,
+        )
+        priority += 1
+
+    if mode in ("host", "both") and pi_host_header.strip():
+        _express_pi_listener_rule_custom_resource(
+            scope,
+            f"{logical_id_prefix}ExpressPiHostRule",
+            listener_arn=listener_arn,
+            priority=priority,
+            conditions=[
+                {
+                    "Field": "host-header",
+                    "HostHeaderConfig": {"Values": [pi_host_header.strip()]},
+                }
+            ],
+            rule_actions=rule_actions,
+            express_main_service=express_main_service,
+            express_pi_service=express_pi_service,
+        )
+        priority += 1
+
+    return priority
 
 
 def _express_service_connect_configuration(
@@ -2494,11 +2625,12 @@ def build_pi_agent_container_environment(
     service_connect_discovery_name: str,
     main_app_port: Union[str, int],
     pi_gradio_port: Union[str, int],
+    pi_root_path: str = "",
 ) -> Dict[str, str]:
     """Inline env for Pi agent tasks (overrides image defaults; SC URL for main app)."""
     port = int(main_app_port)
     pi_port = int(pi_gradio_port)
-    return {
+    env = {
         "APP_TYPE": "pi",
         "APP_CONFIG_PATH": "/workspace/doc_redaction/config/pi_agent.env",
         "PI_DEPLOYMENT_PROFILE": "aws-ecs",
@@ -2512,9 +2644,14 @@ def build_pi_agent_container_environment(
         "PI_UPLOAD_ROOT": "/tmp/gradio",
         "PI_SESSION_DIR": "/tmp/pi-sessions",
         "PI_CODING_AGENT_DIR": "/tmp/pi-agent",
+        "ACCESS_LOGS_FOLDER": "/tmp/pi-logs/",
+        "USAGE_LOGS_FOLDER": "/tmp/pi-usage/",
+        "FEEDBACK_LOGS_FOLDER": "/tmp/pi-feedback/",
         "RUN_FASTAPI": "False",
         "COGNITO_AUTH": "False",
     }
+    _apply_pi_root_path_env(env, pi_root_path)
+    return env
 
 
 # Fargate volume mounts are root-owned; chown as root, then run the app as user (see entrypoint-ecs.sh).
@@ -2528,8 +2665,10 @@ PI_ECS_CONTAINER_COMMAND = [
 PI_ECS_CONTAINER_COMMAND_FALLBACK = [
     "bash",
     "-c",
-    "mkdir -p /tmp/pi-agent /home/user/app/workspace /tmp/gradio /tmp/pi-sessions && "
-    "chown -R user:user /tmp/pi-agent /home/user/app/workspace /tmp/gradio /tmp/pi-sessions && "
+    "mkdir -p /tmp/pi-agent /tmp/pi-logs /tmp/pi-usage /tmp/pi-feedback "
+    "/home/user/app/workspace /tmp/gradio /tmp/pi-sessions && "
+    "chown -R user:user /tmp/pi-agent /tmp/pi-logs /tmp/pi-usage /tmp/pi-feedback "
+    "/home/user/app/workspace /tmp/gradio /tmp/pi-sessions && "
     "cd /workspace/doc_redaction && "
     "exec su -s /bin/bash user -c "
     "'python3 agent-redact/pi/pi_agent_config.py && "
@@ -2561,6 +2700,7 @@ def create_pi_agent_ecs_resources(
     service_connect_discovery_name: str,
     main_app_port: int,
     use_fargate_spot: str,
+    pi_root_path: str = "",
 ) -> Tuple[ecs.FargateService, ec2.SecurityGroup, ecs.FargateTaskDefinition]:
     """Second Fargate service for the Pi agent (joins Service Connect namespace as a client)."""
     pi_security_group = ec2.SecurityGroup(
@@ -2614,6 +2754,7 @@ def create_pi_agent_ecs_resources(
             service_connect_discovery_name=service_connect_discovery_name,
             main_app_port=main_app_port,
             pi_gradio_port=pi_gradio_port,
+            pi_root_path=pi_root_path,
         ),
         command=PI_ECS_CONTAINER_COMMAND_FALLBACK,
         user=PI_ECS_CONTAINER_USER,
@@ -2684,6 +2825,8 @@ def attach_pi_agent_to_shared_alb(
     pi_security_group: ec2.SecurityGroup,
     pi_service: ecs.FargateService,
     pi_port: int,
+    routing_mode: str,
+    path_prefix: str,
     pi_host_header: str,
     listener_rule_priority: int,
     target_group_name: str,
@@ -2695,8 +2838,8 @@ def attach_pi_agent_to_shared_alb(
     cognito_user_pool: Optional[cognito.IUserPool],
     cognito_user_pool_client: Optional[cognito.IUserPoolClient],
     cognito_user_pool_domain: Optional[cognito.IUserPoolDomain],
-) -> elb.ApplicationTargetGroup:
-    """Register Pi on the shared legacy ALB (second target group + host-header rules)."""
+) -> Tuple[elb.ApplicationTargetGroup, int]:
+    """Register Pi on the shared legacy ALB (path and/or host-header listener rules)."""
     pi_security_group.add_ingress_rule(
         peer=alb_security_group,
         connection=ec2.Port.tcp(pi_port),
@@ -2713,7 +2856,7 @@ def attach_pi_agent_to_shared_alb(
         stickiness_cookie_duration=stickiness_cookie_duration,
         vpc=vpc,
         health_check=elb.HealthCheck(
-            path="/",
+            path=pi_alb_health_check_path(path_prefix, routing_mode),
             healthy_http_codes="200-399",
         ),
     )
@@ -2744,26 +2887,52 @@ def attach_pi_agent_to_shared_alb(
             stickiness_duration=stickiness_cookie_duration,
         )
 
-    if https_listener:
-        https_listener.add_action(
-            f"{logical_id_prefix}HttpsHostRule",
-            priority=listener_rule_priority,
-            conditions=[elb.ListenerCondition.host_headers([pi_host_header])],
-            action=forward_action,
-        )
-    elif http_listener:
-        http_listener.add_action(
-            f"{logical_id_prefix}HttpHostRule",
-            priority=listener_rule_priority,
-            conditions=[elb.ListenerCondition.host_headers([pi_host_header])],
-            action=forward_action,
-        )
+    mode = normalize_pi_alb_routing_mode(routing_mode)
+    priority = listener_rule_priority
 
-    if http_listener and acm_certificate_arn:
+    def _add_rules(listener: elb.IApplicationListener, id_prefix: str) -> None:
+        nonlocal priority
+        if mode in ("path", "both"):
+            listener.add_action(
+                f"{id_prefix}PathRule",
+                priority=priority,
+                conditions=[
+                    elb.ListenerCondition.path_patterns(
+                        pi_alb_path_patterns(path_prefix)
+                    )
+                ],
+                action=forward_action,
+            )
+            priority += 1
+        if mode in ("host", "both") and pi_host_header.strip():
+            listener.add_action(
+                f"{id_prefix}HostRule",
+                priority=priority,
+                conditions=[
+                    elb.ListenerCondition.host_headers([pi_host_header.strip()])
+                ],
+                action=forward_action,
+            )
+            priority += 1
+
+    if https_listener:
+        _add_rules(https_listener, f"{logical_id_prefix}Https")
+    elif http_listener:
+        _add_rules(http_listener, f"{logical_id_prefix}Http")
+
+    if (
+        http_listener
+        and acm_certificate_arn
+        and pi_host_header.strip()
+        and mode in ("host", "both")
+    ):
+        redirect_priority = listener_rule_priority
+        if mode in ("path", "both"):
+            redirect_priority += 1
         http_listener.add_action(
             f"{logical_id_prefix}HttpRedirectRule",
-            priority=listener_rule_priority,
-            conditions=[elb.ListenerCondition.host_headers([pi_host_header])],
+            priority=redirect_priority,
+            conditions=[elb.ListenerCondition.host_headers([pi_host_header.strip()])],
             action=elb.ListenerAction.redirect(
                 protocol="HTTPS",
                 port="443",
@@ -2773,7 +2942,7 @@ def attach_pi_agent_to_shared_alb(
             ),
         )
 
-    return pi_target_group
+    return pi_target_group, priority
 
 
 def ensure_folder_exists(output_folder: str):

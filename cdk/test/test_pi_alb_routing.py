@@ -1,4 +1,4 @@
-"""Synth assertions for optional Pi agent ECS service on shared ALB."""
+"""Tests for Pi ALB path/host routing helpers."""
 
 import sys
 from pathlib import Path
@@ -9,34 +9,56 @@ CDK_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(CDK_DIR))
 
 
-def test_pi_agent_requires_service_connect():
-    enable_pi = "True"
-    enable_sc = "False"
-    with pytest.raises(ValueError, match="ENABLE_PI_AGENT_ECS_SERVICE"):
-        if enable_pi == "True" and enable_sc != "True":
-            raise ValueError(
-                "ENABLE_PI_AGENT_ECS_SERVICE=True requires ENABLE_ECS_SERVICE_CONNECT=True "
-                "so the Pi task can reach the main app at http://<discovery>:7860."
-            )
+@pytest.fixture(autouse=True)
+def _minimal_cdk_config_env(monkeypatch):
+    monkeypatch.setenv("USE_ECS_EXPRESS_MODE", "False")
+    monkeypatch.setenv("ACM_SSL_CERTIFICATE_ARN", "")
+    monkeypatch.setenv("ENABLE_S3_BATCH_ECS_TRIGGER", "False")
+    monkeypatch.setenv("ENABLE_PI_AGENT_ECS_SERVICE", "False")
+    monkeypatch.setenv("ENABLE_PI_AGENT_EXPRESS_SERVICE", "False")
+    monkeypatch.setenv("ENABLE_ECS_SERVICE_CONNECT", "False")
+    for mod_name in list(sys.modules):
+        if mod_name in ("cdk_config", "cdk_functions") or mod_name.startswith("cdk_"):
+            del sys.modules[mod_name]
 
 
-def test_build_pi_agent_container_environment():
-    from cdk_functions import build_pi_agent_container_environment
+def test_normalize_pi_alb_path_prefix():
+    from cdk_functions import normalize_pi_alb_path_prefix
 
-    env = build_pi_agent_container_environment(
-        service_connect_discovery_name="redaction",
-        main_app_port=7860,
-        pi_gradio_port=7862,
+    assert normalize_pi_alb_path_prefix("/pi") == "/pi"
+    assert normalize_pi_alb_path_prefix("pi") == "/pi"
+    assert normalize_pi_alb_path_prefix("") == "/pi"
+
+
+def test_pi_alb_path_patterns():
+    from cdk_functions import pi_alb_path_patterns
+
+    assert pi_alb_path_patterns("/pi") == ["/pi", "/pi/*"]
+
+
+def test_format_pi_public_urls_path_on_cloudfront():
+    from cdk_functions import format_pi_public_urls
+
+    urls = format_pi_public_urls(
+        routing_mode="path",
+        path_prefix="/pi",
+        host_header="",
+        cloudfront_domain="d123.cloudfront.net",
+        use_https=True,
     )
-    assert env["DOC_REDACTION_GRADIO_URL"] == "http://redaction:7860"
-    assert env["PI_DEFAULT_PROVIDER"] == "amazon-bedrock"
-    assert env["PI_GRADIO_PORT"] == "7862"
-    assert env["PI_CODING_AGENT_DIR"] == "/tmp/pi-agent"
-    assert env["ACCESS_LOGS_FOLDER"] == "/tmp/pi-logs/"
+    assert urls == ["https://d123.cloudfront.net/pi/"]
 
 
-def test_pi_agent_alb_attachment_synth():
-    from aws_cdk import App, Duration, Environment, Stack
+def test_pi_listener_rule_count():
+    from cdk_functions import pi_listener_rule_count
+
+    assert pi_listener_rule_count("path") == 1
+    assert pi_listener_rule_count("host") == 1
+    assert pi_listener_rule_count("both") == 2
+
+
+def test_attach_pi_path_rule_synth():
+    from aws_cdk import App, Duration, Environment, Stack, assertions
     from aws_cdk import aws_ec2 as ec2
     from aws_cdk import aws_ecs as ecs
     from aws_cdk import aws_elasticloadbalancingv2 as elbv2
@@ -50,7 +72,7 @@ def test_pi_agent_alb_attachment_synth():
     app = App()
     stack = Stack(
         app,
-        "PiAgentAlbTest",
+        "PiPathAlbTest",
         env=Environment(account="123456789012", region="eu-west-2"),
     )
     vpc = ec2.Vpc(stack, "Vpc", max_azs=2)
@@ -97,6 +119,7 @@ def test_pi_agent_alb_attachment_synth():
         service_connect_namespace="test-ns",
         service_connect_discovery_name="redaction",
         main_app_port=7860,
+        pi_root_path="/pi",
         use_fargate_spot="FARGATE",
     )
 
@@ -117,9 +140,9 @@ def test_pi_agent_alb_attachment_synth():
         pi_security_group=pi_sg,
         pi_service=pi_service,
         pi_port=7862,
-        routing_mode="host",
+        routing_mode="path",
         path_prefix="/pi",
-        pi_host_header="pi.example.com",
+        pi_host_header="",
         listener_rule_priority=1,
         target_group_name="test-pi-tg",
         stickiness_cookie_duration=Duration.hours(8),
@@ -132,17 +155,10 @@ def test_pi_agent_alb_attachment_synth():
         cognito_user_pool_domain=None,
     )
 
-    template = app.synth().get_stack_by_name("PiAgentAlbTest").template
-    resources = template["Resources"]
-    lb_count = sum(
-        1
-        for r in resources.values()
-        if r["Type"] == "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    template = assertions.Template.from_stack(stack)
+    template.has_resource_properties(
+        "AWS::ElasticLoadBalancingV2::TargetGroup",
+        {
+            "HealthCheckPath": "/pi/",
+        },
     )
-    tg_count = sum(
-        1
-        for r in resources.values()
-        if r["Type"] == "AWS::ElasticLoadBalancingV2::TargetGroup"
-    )
-    assert lb_count == 1
-    assert tg_count == 1

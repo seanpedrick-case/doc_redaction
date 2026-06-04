@@ -111,6 +111,29 @@ def test_ensure_pi_workspace_dir_uses_docker_mount_in_container(monkeypatch, tmp
     assert resolved == str(docker_ws.resolve())
 
 
+def test_ensure_pi_writable_log_dirs_uses_tmp_in_container(monkeypatch, tmp_path):
+    bootstrap = _import_bootstrap(monkeypatch, tmp_path)
+    monkeypatch.delenv("ACCESS_LOGS_FOLDER", raising=False)
+    monkeypatch.delenv("USAGE_LOGS_FOLDER", raising=False)
+    monkeypatch.delenv("FEEDBACK_LOGS_FOLDER", raising=False)
+    monkeypatch.setattr(bootstrap, "_pi_running_in_container", lambda: True)
+    access = tmp_path / "pi-logs"
+    usage = tmp_path / "pi-usage"
+    feedback = tmp_path / "pi-feedback"
+    monkeypatch.setattr(bootstrap, "_DOCKER_ACCESS_LOGS", access)
+    monkeypatch.setattr(bootstrap, "_DOCKER_USAGE_LOGS", usage)
+    monkeypatch.setattr(bootstrap, "_DOCKER_FEEDBACK_LOGS", feedback)
+
+    bootstrap.ensure_pi_writable_log_dirs()
+
+    assert access.is_dir()
+    assert usage.is_dir()
+    assert feedback.is_dir()
+    assert os.environ["ACCESS_LOGS_FOLDER"] == access.as_posix() + "/"
+    assert os.environ["USAGE_LOGS_FOLDER"] == usage.as_posix() + "/"
+    assert os.environ["FEEDBACK_LOGS_FOLDER"] == feedback.as_posix() + "/"
+
+
 def test_ensure_pi_workspace_dir_honours_explicit_env(monkeypatch, tmp_path):
     bootstrap = _import_bootstrap(monkeypatch, tmp_path)
     custom = tmp_path / "custom_ws"

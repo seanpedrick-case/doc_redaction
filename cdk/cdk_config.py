@@ -567,6 +567,9 @@ ECS_PI_LOG_GROUP_NAME = get_or_create_env_var(
 ECS_PI_TASK_CPU_SIZE = get_or_create_env_var("ECS_PI_TASK_CPU_SIZE", "1024")
 ECS_PI_TASK_MEMORY_SIZE = get_or_create_env_var("ECS_PI_TASK_MEMORY_SIZE", "2048")
 PI_GRADIO_PORT = get_or_create_env_var("PI_GRADIO_PORT", "7862")
+# Pi ALB routing: path (default /pi on shared host e.g. CloudFront), host, or both.
+PI_ALB_ROUTING = get_or_create_env_var("PI_ALB_ROUTING", "path").strip().lower()
+PI_ALB_PATH_PREFIX = get_or_create_env_var("PI_ALB_PATH_PREFIX", "/pi")
 PI_ALB_HOST_HEADER = get_or_create_env_var("PI_ALB_HOST_HEADER", "")
 PI_ALB_TARGET_GROUP_NAME = get_or_create_env_var(
     "PI_ALB_TARGET_GROUP_NAME", f"{CDK_PREFIX}PiAgentTG"[-32:]
@@ -576,6 +579,30 @@ PI_ALB_LISTENER_RULE_PRIORITY = int(
 )
 PI_AGENT_ENV_S3_KEY = get_or_create_env_var("PI_AGENT_ENV_S3_KEY", "pi_agent.env")
 
+
+def _normalize_pi_alb_path_prefix(raw: str) -> str:
+    segment = (raw or "pi").strip().strip("/")
+    return f"/{segment}" if segment else "/pi"
+
+
+PI_ALB_PATH_PREFIX_NORMALIZED = _normalize_pi_alb_path_prefix(PI_ALB_PATH_PREFIX)
+_PI_ALB_ROUTING_MODES = frozenset({"path", "host", "both"})
+
+
+def _validate_pi_alb_routing_for_enabled_pi() -> None:
+    if PI_ALB_ROUTING not in _PI_ALB_ROUTING_MODES:
+        raise ValueError(
+            f"PI_ALB_ROUTING must be one of {sorted(_PI_ALB_ROUTING_MODES)}; got '{PI_ALB_ROUTING}'."
+        )
+    if PI_ALB_ROUTING in ("host", "both") and not PI_ALB_HOST_HEADER.strip():
+        raise ValueError(
+            "PI_ALB_HOST_HEADER is required when PI_ALB_ROUTING is 'host' or 'both' "
+            "(dedicated hostname on the shared ALB)."
+        )
+    if PI_ALB_ROUTING in ("path", "both") and not PI_ALB_PATH_PREFIX_NORMALIZED:
+        raise ValueError("PI_ALB_PATH_PREFIX must resolve to a non-empty path segment.")
+
+
 # Pi on ECS Express Mode (second Express service on shared ALB; SC via ecs:UpdateService).
 ENABLE_PI_AGENT_EXPRESS_SERVICE = get_or_create_env_var(
     "ENABLE_PI_AGENT_EXPRESS_SERVICE", "False"
@@ -583,8 +610,11 @@ ENABLE_PI_AGENT_EXPRESS_SERVICE = get_or_create_env_var(
 ECS_PI_EXPRESS_SERVICE_NAME = get_or_create_env_var(
     "ECS_PI_EXPRESS_SERVICE_NAME", f"{CDK_PREFIX}PiExpressService"
 )
+_default_pi_express_health = (
+    f"{PI_ALB_PATH_PREFIX_NORMALIZED}/" if PI_ALB_ROUTING in ("path", "both") else "/"
+)
 ECS_PI_EXPRESS_HEALTH_CHECK_PATH = get_or_create_env_var(
-    "ECS_PI_EXPRESS_HEALTH_CHECK_PATH", "/"
+    "ECS_PI_EXPRESS_HEALTH_CHECK_PATH", _default_pi_express_health
 )
 ECS_PI_EXPRESS_SECURITY_GROUP_NAME = get_or_create_env_var(
     "ECS_PI_EXPRESS_SECURITY_GROUP_NAME", f"{CDK_PREFIX}SecurityGroupPiExpress"
@@ -607,11 +637,8 @@ if ENABLE_PI_AGENT_EXPRESS_SERVICE == "True" and USE_ECS_EXPRESS_MODE != "True":
         "ENABLE_PI_AGENT_EXPRESS_SERVICE=True requires USE_ECS_EXPRESS_MODE=True "
         "(no ACM_SSL_CERTIFICATE_ARN)."
     )
-if ENABLE_PI_AGENT_EXPRESS_SERVICE == "True" and not PI_ALB_HOST_HEADER.strip():
-    raise ValueError(
-        "ENABLE_PI_AGENT_EXPRESS_SERVICE=True requires PI_ALB_HOST_HEADER "
-        "(host-header rule on the shared Express ALB, e.g. pi.redaction.example.com)."
-    )
+if ENABLE_PI_AGENT_EXPRESS_SERVICE == "True":
+    _validate_pi_alb_routing_for_enabled_pi()
 if ENABLE_PI_AGENT_ECS_SERVICE == "True" and USE_ECS_EXPRESS_MODE == "True":
     raise ValueError(
         "ENABLE_PI_AGENT_ECS_SERVICE=True requires legacy Fargate (USE_ECS_EXPRESS_MODE=False). "
@@ -622,11 +649,8 @@ if ENABLE_PI_AGENT_ECS_SERVICE == "True" and ENABLE_ECS_SERVICE_CONNECT != "True
         "ENABLE_PI_AGENT_ECS_SERVICE=True requires ENABLE_ECS_SERVICE_CONNECT=True "
         "so the Pi task can reach the main app at http://<discovery>:7860."
     )
-if ENABLE_PI_AGENT_ECS_SERVICE == "True" and not PI_ALB_HOST_HEADER.strip():
-    raise ValueError(
-        "ENABLE_PI_AGENT_ECS_SERVICE=True requires PI_ALB_HOST_HEADER "
-        "(host-header rule on the shared ALB, e.g. pi.redaction.example.com)."
-    )
+if ENABLE_PI_AGENT_ECS_SERVICE == "True":
+    _validate_pi_alb_routing_for_enabled_pi()
 
 ###
 # WHOLE DOCUMENT API OPTIONS

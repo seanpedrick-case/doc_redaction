@@ -10,6 +10,10 @@ from dotenv import load_dotenv
 _DOCKER_WORKSPACE = Path("/home/user/app/workspace")
 _DOCKER_UPLOAD_ROOT = Path("/tmp/gradio")
 _DOCKER_PI_WORKDIR = Path("/workspace/doc_redaction")
+# CSV log dirs must not live under read-only PI_WORKDIR (ECS/HF runtime images).
+_DOCKER_ACCESS_LOGS = Path("/tmp/pi-logs")
+_DOCKER_USAGE_LOGS = Path("/tmp/pi-usage")
+_DOCKER_FEEDBACK_LOGS = Path("/tmp/pi-feedback")
 _PARTNERSHIP_TEMPLATE = Path("skills") / "Example prompt partnership.txt"
 
 
@@ -47,6 +51,25 @@ def ensure_pi_workspace_dir(repo_root: Path | None = None) -> str:
     resolved = str(path.resolve())
     os.environ["PI_WORKSPACE_DIR"] = resolved
     return resolved
+
+
+def ensure_pi_writable_log_dirs() -> None:
+    """
+    Point access/usage/feedback CSV logs at ``/tmp`` when running in Docker/ECS.
+
+    ``tools.config`` resolves relative ``logs/`` under ``PI_WORKDIR``, which is
+    read-only in the Pi runtime image; ``/tmp`` is allowed by
+    ``ensure_folder_within_app_directory`` for absolute paths.
+    """
+    if not _pi_running_in_container():
+        return
+    for path in (_DOCKER_ACCESS_LOGS, _DOCKER_USAGE_LOGS, _DOCKER_FEEDBACK_LOGS):
+        path.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("ACCESS_LOGS_FOLDER", _DOCKER_ACCESS_LOGS.as_posix() + "/")
+    os.environ.setdefault("USAGE_LOGS_FOLDER", _DOCKER_USAGE_LOGS.as_posix() + "/")
+    os.environ.setdefault(
+        "FEEDBACK_LOGS_FOLDER", _DOCKER_FEEDBACK_LOGS.as_posix() + "/"
+    )
 
 
 def ensure_pi_upload_root(repo_root: Path | None = None) -> str:
@@ -145,6 +168,7 @@ def ensure_pi_config_env(repo_root: Path | None = None) -> str:
     ensure_pi_workdir(root)
     ensure_pi_workspace_dir(root)
     ensure_pi_upload_root(root)
+    ensure_pi_writable_log_dirs()
     from pi_workspace_skills import ensure_workspace_skills
 
     ensure_workspace_skills()
