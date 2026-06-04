@@ -444,6 +444,44 @@ def _append_activity(lines: list[str], text: str) -> list[str]:
     return lines
 
 
+def _chat_segment_tool_label(segment: str) -> str | None:
+    """Tool name from a chat line like ``**bash:** ...`` or bare ``**tool**``."""
+    line = segment.strip().split("\n", 1)[0]
+    if not line.startswith("**"):
+        return None
+    if ":**" in line:
+        return line[2:].split(":**", 1)[0].strip().lower() or None
+    if line.endswith("**") and line.count("**") == 2:
+        return line[2:-2].strip().lower() or None
+    return None
+
+
+def _is_empty_tool_chat_segment(segment: str) -> bool:
+    """Skip ephemeral Pi snapshots before tool arguments are populated."""
+    label = _chat_segment_tool_label(segment)
+    if label is None:
+        return False
+    if ":**" not in segment.split("\n", 1)[0]:
+        return True
+    detail = segment.split(":**", 1)[1].strip()
+    if not detail:
+        return True
+    return '{"command": ""}' in detail or detail in ("`{}`", "{}")
+
+
+def _should_replace_tool_chat_segment(previous: str, segment: str) -> bool:
+    """True when *segment* updates the same in-flight tool line as *previous*."""
+    prev_label = _chat_segment_tool_label(previous)
+    new_label = _chat_segment_tool_label(segment)
+    if prev_label and new_label and prev_label == new_label:
+        return True
+    if prev_label == "tool" and new_label:
+        return True
+    if previous.strip() == "**tool**" and new_label:
+        return True
+    return False
+
+
 def _append_chat_segment(
     completed_segments: list[str],
     streaming_text: str,
@@ -453,10 +491,21 @@ def _append_chat_segment(
     segment = segment.strip()
     if not segment:
         return completed_segments, streaming_text
+    if _is_empty_tool_chat_segment(segment):
+        if completed_segments and _should_replace_tool_chat_segment(
+            completed_segments[-1], segment
+        ):
+            return completed_segments, streaming_text
+        if not completed_segments:
+            return completed_segments, streaming_text
     if streaming_text.strip():
         completed_segments = completed_segments + [streaming_text.strip()]
         streaming_text = ""
-    if not completed_segments or completed_segments[-1] != segment:
+    if completed_segments and _should_replace_tool_chat_segment(
+        completed_segments[-1], segment
+    ):
+        completed_segments = completed_segments[:-1] + [segment]
+    elif not completed_segments or completed_segments[-1] != segment:
         completed_segments = completed_segments + [segment]
     return completed_segments, streaming_text
 
