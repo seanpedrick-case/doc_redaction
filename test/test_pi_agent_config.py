@@ -42,6 +42,28 @@ def test_build_settings_config_uses_pi_default_model_for_bedrock(
     assert pac.resolved_default_model(pac.PROVIDER_LLAMA) == pac.LLAMA_MODEL_ID
 
 
+def test_aws_ecs_profile_agent_dir_under_tmp(monkeypatch):
+    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "aws-ecs")
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+
+    import importlib
+
+    importlib.reload(pac)
+
+    assert pac.resolve_agent_dir() == Path("/tmp/pi-agent")
+
+
+def test_hf_profile_agent_dir_under_tmp(monkeypatch):
+    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "hf-space")
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+
+    import importlib
+
+    importlib.reload(pac)
+
+    assert pac.resolve_agent_dir() == Path("/tmp/pi-agent")
+
+
 def test_hf_profile_defaults_session_dir_to_tmp(tmp_path, monkeypatch, pi_workspace):
     monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "hf-space")
     monkeypatch.delenv("PI_SESSION_DIR", raising=False)

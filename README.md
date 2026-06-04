@@ -122,6 +122,31 @@ You will need ~40 GB of disk space to run everything depending on the model chos
 
 If you want a working Docker installation without GPU support, you can install from the [Dockerfile](https://github.com/seanpedrick-case/doc_redaction/blob/main/Dockerfile) in the repo. A working example of this, with the CPU version of PaddleOCR, can be found on [Hugging Face](https://huggingface.co/spaces/seanpedrickcase/document_redaction). You can adjust the INSTALL_PADDLEOCR, PADDLE_GPU_ENABLED, INSTALL_VLM, and TORCH_GPU_ENABLED config variables to adjust for PaddleOCR and Transformers packages for local VLM support. Note that GPU-enabled PaddleOCR, and GPU-enabled Transformers/Torch often don't work well together, which is one reason why a Llama.cpp/vLLM inference server Docker installation option is provided below.
 
+The main [Dockerfile](https://github.com/seanpedrick-case/doc_redaction/blob/main/Dockerfile) produces two final images via build targets: **`gradio`** (default web UI, non-root user, named volumes for writable paths) and **`lambda`** (AWS Lambda handler). Build examples:
+
+```bash
+docker build -f Dockerfile --target gradio -t doc-redaction-gradio .
+docker build -f Dockerfile --target lambda -t doc-redaction-lambda .
+```
+
+##### Pi agent (agentic redaction)
+
+The [Pi](https://github.com/earendil-works/pi) orchestration UI uses a separate multi-stage image at [agent-redact/pi-agent/Dockerfile](https://github.com/seanpedrick-case/doc_redaction/blob/main/agent-redact/pi-agent/Dockerfile). It shares the same Python 3.12 slim base as the main app; a small Node stage installs the `pi` CLI, which is copied into the runtime image.
+
+| Build target | Typical use |
+|--------------|-------------|
+| **`dev`** | Local development with [docker-compose_llama_agentic.yml](https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_llama_agentic.yml) — the repo is bind-mounted; only Pi CLI + Python deps are in the image. |
+| **`runtime`** | [Hugging Face Space](https://huggingface.co/spaces/seanpedrickcase/agentic_document_redaction) and AWS ECS — agent code is baked in; runs as non-root `user` with **named volumes** for workspace, uploads, and session dirs (read-only root filesystem friendly). |
+
+Build from the repository root:
+
+```bash
+docker build -f agent-redact/pi-agent/Dockerfile --target dev -t pi-agent-dev .
+docker build -f agent-redact/pi-agent/Dockerfile --target runtime -t pi-agent-runtime .
+```
+
+For llama.cpp + Pi together, see the compose examples at the top of [docker-compose_llama_agentic.yml](https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_llama_agentic.yml). Further detail: [agent-redact/README.md](https://github.com/seanpedrick-case/doc_redaction/blob/main/agent-redact/README.md).
+
 ### 2. Install prerequisites: Tesseract and Poppler
 
 This application relies on two external tools for OCR (Tesseract) and PDF processing (Poppler). Please install them on your system before proceeding. To run the Document Redaction app successfully, these tools need to be installed and either 1. added to PATH, or 2. be in a folder that is directly referenced in the config/app_config.env file with the variables TESSERACT_FOLDER and POPPLER_FOLDER (defined [here](https://github.com/seanpedrick-case/doc_redaction/blob/main/tools/config.py) if you want to see the code). The instructions below will guide you through diffferent ways to install these dependencies.

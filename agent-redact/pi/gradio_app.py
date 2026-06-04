@@ -91,9 +91,11 @@ from tools.aws_functions import export_outputs_to_s3, s3_outputs_upload_ready
 from tools.config import (
     ACTIVITY_MAX_LINES,
     EMPTY_SEND_WITH_FILE_HINT,
+    FASTAPI_ROOT_PATH,
     HOST_NAME,
     PI_GRADIO_PORT,
     PI_INTRO_TEXT,
+    PI_ROOT_PATH,
     PI_UI_HOST,
     PI_UI_TITLE,
     QUOTA_CONTINUE_PROMPT,
@@ -247,9 +249,23 @@ def _append_agent_finish_notice(
     return history, completed_segments, streaming_text
 
 
+# Must match ``chat_outputs`` in :func:`build_ui` (Gradio validates return count).
+_CHAT_OUTPUT_COMPONENT_COUNT = 13
+
+
 def _passthrough_chat_outputs(*outputs: Any) -> tuple[Any, ...]:
-    """Passthrough for ``.then(js=...)`` — Gradio forces ``queue=False`` when ``fn is None``."""
-    return outputs
+    """
+    Passthrough for ``.then(js=...)`` — Gradio forces ``queue=False`` when ``fn is None``.
+
+    When the parent generator is cancelled or input resolution fails, Gradio may invoke
+    this with fewer than ``_CHAT_OUTPUT_COMPONENT_COUNT`` values. Pad with ``gr.skip()``
+    so validation always receives the expected number of outputs.
+    """
+    n = _CHAT_OUTPUT_COMPONENT_COUNT
+    if len(outputs) >= n:
+        return tuple(outputs[:n])
+    padded = list(outputs) + [gr.skip()] * (n - len(outputs))
+    return tuple(padded)
 
 
 def _client_provider_model(client: PiRpcClient | None) -> tuple[str, str]:
@@ -287,7 +303,8 @@ def _after_pi_task(
     vlm_model_name: str | None = None,
     llm_input_tokens: int = 0,
     llm_output_tokens: int = 0,
-) -> None:
+) -> str | None:
+    """Run post-task logging/upload. Returns a user-visible warning when S3 upload fails."""
     duration = round(time.time() - started_at, 2) if started_at else ""
     log_agent_usage_event(
         session_hash=session_hash,
@@ -309,12 +326,13 @@ def _after_pi_task(
         and s3_output_folder
         and s3_outputs_upload_ready(save_outputs_to_s3=save_outputs_to_s3)
     ):
-        export_outputs_to_s3(
+        return export_outputs_to_s3(
             file_paths,
             s3_output_folder,
             save_outputs_to_s3,
             base_file,
         )
+    return None
 
 
 def _export_workspace_outputs(
@@ -442,6 +460,44 @@ def _append_activity(lines: list[str], text: str) -> list[str]:
     return lines
 
 
+def _chat_segment_tool_label(segment: str) -> str | None:
+    """Tool name from a chat line like ``**bash:** ...`` or bare ``**tool**``."""
+    line = segment.strip().split("\n", 1)[0]
+    if not line.startswith("**"):
+        return None
+    if ":**" in line:
+        return line[2:].split(":**", 1)[0].strip().lower() or None
+    if line.endswith("**") and line.count("**") == 2:
+        return line[2:-2].strip().lower() or None
+    return None
+
+
+def _is_empty_tool_chat_segment(segment: str) -> bool:
+    """Skip ephemeral Pi snapshots before tool arguments are populated."""
+    label = _chat_segment_tool_label(segment)
+    if label is None:
+        return False
+    if ":**" not in segment.split("\n", 1)[0]:
+        return True
+    detail = segment.split(":**", 1)[1].strip()
+    if not detail:
+        return True
+    return '{"command": ""}' in detail or detail in ("`{}`", "{}")
+
+
+def _should_replace_tool_chat_segment(previous: str, segment: str) -> bool:
+    """True when *segment* updates the same in-flight tool line as *previous*."""
+    prev_label = _chat_segment_tool_label(previous)
+    new_label = _chat_segment_tool_label(segment)
+    if prev_label and new_label and prev_label == new_label:
+        return True
+    if prev_label == "tool" and new_label:
+        return True
+    if previous.strip() == "**tool**" and new_label:
+        return True
+    return False
+
+
 def _append_chat_segment(
     completed_segments: list[str],
     streaming_text: str,
@@ -451,10 +507,21 @@ def _append_chat_segment(
     segment = segment.strip()
     if not segment:
         return completed_segments, streaming_text
+    if _is_empty_tool_chat_segment(segment):
+        if completed_segments and _should_replace_tool_chat_segment(
+            completed_segments[-1], segment
+        ):
+            return completed_segments, streaming_text
+        if not completed_segments:
+            return completed_segments, streaming_text
     if streaming_text.strip():
         completed_segments = completed_segments + [streaming_text.strip()]
         streaming_text = ""
-    if not completed_segments or completed_segments[-1] != segment:
+    if completed_segments and _should_replace_tool_chat_segment(
+        completed_segments[-1], segment
+    ):
+        completed_segments = completed_segments[:-1] + [segment]
+    elif not completed_segments or completed_segments[-1] != segment:
         completed_segments = completed_segments + [segment]
     return completed_segments, streaming_text
 
@@ -821,9 +888,9 @@ def _run_pi_chat(
     task_started_at = time.time()
     usage_baseline = resolve_session_token_usage(client)
 
-    def _complete_pi_task() -> None:
+    def _complete_pi_task() -> str | None:
         usage = usage_for_completed_turn(client, usage_baseline)
-        _after_pi_task(
+        return _after_pi_task(
             session_hash=session_hash,
             client=client,
             s3_output_folder=s3_output_folder,
@@ -838,6 +905,12 @@ def _run_pi_chat(
             llm_input_tokens=usage.llm_input_tokens,
             llm_output_tokens=usage.llm_output_tokens,
         )
+
+    def _activity_with_s3_warning(act: list[str]) -> list[str]:
+        warning = _complete_pi_task()
+        if warning:
+            return _append_activity(act, f"**S3 upload:** {warning}")
+        return act
 
     history.append({"role": "user", "content": chat_user_message or message.strip()})
     history.append({"role": "assistant", "content": ""})
@@ -943,7 +1016,7 @@ def _run_pi_chat(
                             error=True,
                         )
                     )
-                    _complete_pi_task()
+                    activity = _activity_with_s3_warning(activity)
                     finish_signal = _notify_agent_finished(error=True)
                     yield _chat_yield(
                         history,
@@ -999,7 +1072,7 @@ def _run_pi_chat(
             streaming_text,
             error=True,
         )
-        _complete_pi_task()
+        activity = _activity_with_s3_warning(activity)
         finish_signal = _notify_agent_finished(error=True)
         yield _chat_yield(
             history,
@@ -1026,7 +1099,7 @@ def _run_pi_chat(
                 streaming_text,
                 aborted=True,
             )
-            _complete_pi_task()
+            activity = _activity_with_s3_warning(activity)
             finish_signal = _notify_agent_finished(aborted=True)
             yield _chat_yield(
                 history,
@@ -1054,7 +1127,7 @@ def _run_pi_chat(
         activity=activity,
     )
 
-    _complete_pi_task()
+    activity = _activity_with_s3_warning(activity)
     finish_signal = _notify_agent_finished(aborted=finish_aborted)
     yield _chat_yield(
         history,
@@ -1601,8 +1674,9 @@ def build_ui():
             ],
             outputs=chat_outputs,
         )
-        run_chat_send.then(
+        notify_after_chat_send = run_chat_send.then(
             _passthrough_chat_outputs,
+            inputs=chat_outputs,
             outputs=chat_outputs,
             js=PI_AGENT_FINISH_NOTIFY_JS,
         )
@@ -1619,8 +1693,9 @@ def build_ui():
             ],
             outputs=chat_outputs,
         )
-        run_chat_msg.then(
+        notify_after_chat_msg = run_chat_msg.then(
             _passthrough_chat_outputs,
+            inputs=chat_outputs,
             outputs=chat_outputs,
             js=PI_AGENT_FINISH_NOTIFY_JS,
         )
@@ -1647,8 +1722,9 @@ def build_ui():
             ],
             outputs=chat_outputs,
         )
-        run_redact_task.then(
+        notify_after_redact_task = run_redact_task.then(
             _passthrough_chat_outputs,
+            inputs=chat_outputs,
             outputs=chat_outputs,
             js=PI_AGENT_FINISH_NOTIFY_JS,
         )
@@ -1656,7 +1732,15 @@ def build_ui():
             abort_agent,
             inputs=[client_state],
             outputs=[send, abort_btn, start_redact_btn],
-            cancels=[run_chat_send, run_chat_msg, run_redact_task],
+            cancels=[
+                run_chat_send,
+                run_chat_msg,
+                run_redact_prepare,
+                run_redact_task,
+                notify_after_chat_send,
+                notify_after_chat_msg,
+                notify_after_redact_task,
+            ],
             queue=False,
         )
         clear.click(
@@ -1738,14 +1822,18 @@ def launch_pi_ui() -> FastAPI | None:
     """Build UI and mount on FastAPI or launch Gradio directly."""
     demo = build_ui()
     demo.queue(default_concurrency_limit=1)
+    pi_root = (PI_ROOT_PATH or "").strip()
+    fastapi_root = pi_root or FASTAPI_ROOT_PATH
     return mount_or_launch(
         demo,
-        fastapi_app=create_fastapi_app() if RUN_FASTAPI else None,
+        fastapi_app=create_fastapi_app(root_path=fastapi_root) if RUN_FASTAPI else None,
         allowed_paths=gradio_allowed_paths(),
         css=THINKING_PANEL_CSS,
         head_extra=PI_AGENT_FINISH_HEAD_HTML,
         server_name=PI_UI_HOST,
         server_port=PI_UI_PORT,
+        root_path=pi_root,
+        fastapi_root_path=fastapi_root,
     )
 
 

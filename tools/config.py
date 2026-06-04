@@ -2832,6 +2832,8 @@ _pi_port_default = (
     else "7862"
 )
 PI_GRADIO_PORT = int(os.environ.get("PI_GRADIO_PORT", _pi_port_default))
+# Subpath when Pi sits behind ALB path routing (e.g. /pi on CloudFront). CDK sets on ECS.
+PI_ROOT_PATH = get_or_create_env_var("PI_ROOT_PATH", "")
 
 PI_UI_HOST = os.environ.get("GRADIO_SERVER_NAME", "0.0.0.0")
 

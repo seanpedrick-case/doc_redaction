@@ -184,62 +184,17 @@ def _filter_files_within_root(paths: Iterable[Any], root_dir: str) -> list[str]:
     return kept
 
 
-_REDACTION_REPO_ROOT = Path(__file__).resolve().parent.parent
-
-
-def _allowed_io_roots() -> list[str]:
-    roots: list[str] = [str(_REDACTION_REPO_ROOT)]
-    for folder in (INPUT_FOLDER, OUTPUT_FOLDER):
-        if folder:
-            roots.append(str(folder))
-    return roots
+from tools.secure_path_utils import resolve_existing_io_path, resolve_writable_io_path
 
 
 def _resolve_existing_io_path(path: str) -> str:
-    """Resolve a readable file path under repo root, INPUT_FOLDER, or OUTPUT_FOLDER."""
-    raw = str(path or "").strip()
-    if not raw:
-        raise ValueError("Path must not be empty.")
-    expanded = os.path.expanduser(raw)
-    if os.path.isabs(expanded):
-        candidate = os.path.realpath(os.path.abspath(expanded))
-    else:
-        candidate = os.path.realpath(
-            os.path.abspath(os.path.join(str(_REDACTION_REPO_ROOT), expanded))
-        )
-    if not os.path.isfile(candidate):
-        raise ValueError(f"Not a file or missing: {candidate}")
-    for root in _allowed_io_roots():
-        root_real = os.path.realpath(str(root))
-        try:
-            if os.path.commonpath([candidate, root_real]) == root_real:
-                return candidate
-        except ValueError:
-            continue
-    raise ValueError("Path must be under the app repo, INPUT_FOLDER, or OUTPUT_FOLDER")
+    """Resolve a readable file path under allowed redaction IO roots."""
+    return resolve_existing_io_path(path)
 
 
 def _resolve_writable_io_path(path: str) -> str:
-    """Resolve an output path that may be created under allowed roots."""
-    raw = str(path or "").strip()
-    if not raw:
-        raise ValueError("Path must not be empty.")
-    expanded = os.path.expanduser(raw)
-    if os.path.isabs(expanded):
-        candidate = os.path.realpath(os.path.abspath(expanded))
-    else:
-        candidate = os.path.realpath(
-            os.path.abspath(os.path.join(str(_REDACTION_REPO_ROOT), expanded))
-        )
-    parent = os.path.realpath(os.path.dirname(candidate))
-    for root in _allowed_io_roots():
-        root_real = os.path.realpath(str(root))
-        try:
-            if os.path.commonpath([parent, root_real]) == root_real:
-                return candidate
-        except ValueError:
-            continue
-    raise ValueError("Path must be under the app repo, INPUT_FOLDER, or OUTPUT_FOLDER")
+    """Resolve an output path that may be created under allowed redaction IO roots."""
+    return resolve_writable_io_path(path)
 
 
 def _validate_review_csv_path(path: str) -> None:

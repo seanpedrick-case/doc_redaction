@@ -27,10 +27,22 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from tools.secure_path_utils import resolve_existing_io_path, resolve_writable_io_path
+
 try:
     import pymupdf
 except ImportError:  # pragma: no cover
     pymupdf = None  # type: ignore
+
+
+def _safe_existing_path(path: str | Path) -> Path:
+    """Validated readable path for CSV/PDF IO (CodeQL py/path-injection)."""
+    return Path(resolve_existing_io_path(path))
+
+
+def _safe_writable_path(path: str | Path) -> Path:
+    """Validated output path (parent under allowed IO roots)."""
+    return Path(resolve_writable_io_path(path))
 
 
 @dataclass
@@ -295,8 +307,8 @@ def prune_suspicious_review_csv(
     min_word_length: int = 3,
 ) -> dict[str, Any]:
     """Load review CSV, prune suspicious rows, write ``output_csv_path``."""
-    path = Path(review_csv_path)
-    out = Path(output_csv_path)
+    path = _safe_existing_path(review_csv_path)
+    out = _safe_writable_path(output_csv_path)
     with path.open(newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         fieldnames = list(reader.fieldnames or [])
@@ -367,15 +379,17 @@ def verify_redaction_coverage(
     and be covered by a review box. ``must_not_redact`` terms should not appear
     in review rows (unless also matched by must_redact on the same row text).
     """
-    review_rows = load_csv_rows(Path(review_csv_path))
-    ocr_rows = load_csv_rows(Path(ocr_words_csv_path))
+    safe_review = _safe_existing_path(review_csv_path)
+    safe_ocr = _safe_existing_path(ocr_words_csv_path)
+    review_rows = load_csv_rows(safe_review)
+    ocr_rows = load_csv_rows(safe_ocr)
 
     must_redact_re = compile_patterns(must_redact or [])
     must_not_re = compile_patterns(must_not_redact or [])
 
     pages_in_review = {page_int(r) for r in review_rows}
     pages_in_ocr = {page_int(r) for r in ocr_rows}
-    redacted_pdf = Path(redacted_pdf_path) if redacted_pdf_path else None
+    redacted_pdf = _safe_existing_path(redacted_pdf_path) if redacted_pdf_path else None
     if total_pages is None:
         total_pages = max(pages_in_review | pages_in_ocr | {0})
     if total_pages <= 0 and redacted_pdf is not None and pymupdf is not None:
@@ -485,15 +499,13 @@ def verify_redaction_coverage(
                 page_report, page_review
             )
 
-        if sample_pixels and redacted_pdf_path and page_review:
+        if sample_pixels and redacted_pdf is not None and page_review:
             boxes: list[tuple[float, float, float, float]] = []
             for r in page_review[:pixel_sample_max_boxes_per_page]:
                 rb = review_box(r)
                 if rb:
                     boxes.append(rb)
-            page_report.pixel_failures = sample_pixels_dark(
-                Path(redacted_pdf_path), page, boxes
-            )
+            page_report.pixel_failures = sample_pixels_dark(redacted_pdf, page, boxes)
             if page_report.pixel_failures:
                 page_report.pass_strict = False
 
@@ -569,8 +581,9 @@ def search_words_in_ocr_csv(
     else:
         pat = re.compile(re.escape(cleaned_search_text), flags)
 
+    safe_ocr = _safe_existing_path(ocr_words_csv_path)
     hits: list[dict] = []
-    for row in load_csv_rows(Path(ocr_words_csv_path)):
+    for row in load_csv_rows(safe_ocr):
         wt = (row.get("word_text") or row.get("text") or "").strip()
         if wt and pat.search(wt):
             hits.append(row)
@@ -602,7 +615,7 @@ def run_word_level_ocr_text_search(
 
     review_rows: list[dict] = []
     if review_csv_path:
-        review_rows = load_csv_rows(Path(review_csv_path))
+        review_rows = load_csv_rows(_safe_existing_path(review_csv_path))
 
     raw_hits = search_words_in_ocr_csv(
         ocr_words_csv_path, search_text, use_regex=use_regex
@@ -668,34 +681,43 @@ def main() -> None:
     parser.add_argument("--output-json", type=Path, default=None)
     args = parser.parse_args()
 
+    review_csv = _safe_existing_path(args.review_csv)
+    ocr_words_csv = _safe_existing_path(args.ocr_words_csv)
+    redacted_pdf = _safe_existing_path(args.redacted_pdf) if args.redacted_pdf else None
+    output_json = _safe_writable_path(args.output_json) if args.output_json else None
+
     if args.prune_suspicious:
-        out = args.pruned_output or args.review_csv.with_name(
-            f"{args.review_csv.stem}_pruned.csv"
+        out = (
+            _safe_writable_path(args.pruned_output)
+            if args.pruned_output
+            else _safe_writable_path(
+                review_csv.with_name(f"{review_csv.stem}_pruned.csv")
+            )
         )
         prune_log = prune_suspicious_review_csv(
-            args.review_csv,
+            review_csv,
             out,
             must_redact=args.must_redact,
             min_word_length=args.min_word_length,
         )
         print(json.dumps(prune_log, indent=2))
-        args.review_csv = out
+        review_csv = out
 
     report = verify_redaction_coverage(
-        args.review_csv,
-        args.ocr_words_csv,
+        review_csv,
+        ocr_words_csv,
         must_redact=args.must_redact,
         must_not_redact=args.must_not_redact,
-        redacted_pdf_path=args.redacted_pdf,
+        redacted_pdf_path=redacted_pdf,
         total_pages=args.pages,
         min_word_length=args.min_word_length,
         sample_pixels=args.sample_pixels,
     )
     payload = report.to_dict()
     text = json.dumps(payload, indent=2)
-    if args.output_json:
-        args.output_json.write_text(text, encoding="utf-8")
-        print(f"Wrote {args.output_json}")
+    if output_json:
+        output_json.write_text(text, encoding="utf-8")
+        print(f"Wrote {output_json}")
     else:
         print(text)
     raise SystemExit(0 if report.pass_strict else 1)

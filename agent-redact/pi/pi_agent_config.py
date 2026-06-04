@@ -7,9 +7,21 @@ import os
 from pathlib import Path
 from typing import Any
 
+DEPLOYMENT_LOCAL = "local-docker"
+DEPLOYMENT_HF_SPACE = "hf-space"
+DEPLOYMENT_AWS_ECS = "aws-ecs"
+
 
 def resolve_agent_dir() -> Path:
-    return Path(os.environ.get("PI_CODING_AGENT_DIR", Path.home() / ".pi" / "agent"))
+    """Directory for Pi ``models.json`` / ``settings.json`` (must be writable at runtime)."""
+    explicit = (os.environ.get("PI_CODING_AGENT_DIR") or "").strip()
+    if explicit:
+        return Path(explicit)
+    profile = os.environ.get("PI_DEPLOYMENT_PROFILE", DEPLOYMENT_LOCAL).strip().lower()
+    # HF Space and ECS often use a read-only root FS; only mounted paths (or /tmp) are writable.
+    if profile in (DEPLOYMENT_HF_SPACE, DEPLOYMENT_AWS_ECS):
+        return Path("/tmp/pi-agent")
+    return Path.home() / ".pi" / "agent"
 
 
 # Back-compat alias; prefer resolve_agent_dir() when env may change after import.
@@ -17,8 +29,6 @@ AGENT_DIR = resolve_agent_dir()
 TEMPLATE_DIR = Path(__file__).resolve().parent / "agent"
 SETTINGS_TEMPLATE = TEMPLATE_DIR / "settings.json"
 
-DEPLOYMENT_LOCAL = "local-docker"
-DEPLOYMENT_HF_SPACE = "hf-space"
 DEPLOYMENT_PROFILE = (
     os.environ.get("PI_DEPLOYMENT_PROFILE", DEPLOYMENT_LOCAL).strip().lower()
 )
@@ -279,7 +289,7 @@ def _aws_config_path() -> Path | None:
     if explicit:
         path = Path(explicit).expanduser()
         return path if path.is_file() else None
-    home = Path(os.environ.get("HOME", "/home/node"))
+    home = Path(os.environ.get("HOME", "/home/user"))
     path = home / ".aws" / "config"
     return path if path.is_file() else None
 

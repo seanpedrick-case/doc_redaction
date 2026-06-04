@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -53,6 +54,8 @@ from tools.config import (
     USAGE_LOGS_FOLDER,
 )
 from tools.custom_csvlogger import CSVLogger_custom
+
+logger = logging.getLogger(__name__)
 
 
 def validate_custom_header(request: gr.Request) -> None:
@@ -160,12 +163,13 @@ def gradio_head_html(root_path: str = ROOT_PATH) -> str:
     )
 
 
-def create_fastapi_app() -> FastAPI:
+def create_fastapi_app(*, root_path: str | None = None) -> FastAPI:
     """Create FastAPI app with lifespan, optional CORS/trusted-host middleware, and /health."""
     from tools.helper_functions import lifespan
 
+    effective_root = root_path if root_path is not None else FASTAPI_ROOT_PATH
     clean_root = (
-        f"/{FASTAPI_ROOT_PATH.strip('/')}" if FASTAPI_ROOT_PATH.strip("/") else ""
+        f"/{effective_root.strip('/')}" if str(effective_root).strip("/") else ""
     )
     fastapi_app = FastAPI(lifespan=lifespan, root_path=clean_root)
 
@@ -351,7 +355,15 @@ def get_agent_usage_logger() -> PlatformAgentUsageLogger:
 def log_platform_access(session_hash: str, host_name: str = HOST_NAME) -> None:
     if not SAVE_LOGS_TO_CSV and not SAVE_LOGS_TO_DYNAMODB:
         return
-    get_access_logger().log(session_hash, host_name)
+    try:
+        get_access_logger().log(session_hash, host_name)
+    except OSError as exc:
+        logger.warning(
+            "Access log write failed (%s); session UI continues. "
+            "On ECS/HF Pi images set ACCESS_LOGS_FOLDER=/tmp/pi-logs/ "
+            "(see agent-redact/pi/bootstrap_pi_config.py).",
+            exc,
+        )
 
 
 def log_agent_usage_event(
@@ -461,6 +473,8 @@ def mount_or_launch(
     server_port: int | None = None,
     show_error: bool = True,
     queue_kwargs: dict[str, Any] | None = None,
+    root_path: str | None = None,
+    fastapi_root_path: str | None = None,
 ) -> FastAPI | None:
     """
     Mount Gradio on FastAPI when RUN_FASTAPI else launch directly.
@@ -476,17 +490,19 @@ def mount_or_launch(
     if queue_kwargs:
         demo.queue(**queue_kwargs)
 
-    head = gradio_head_html(ROOT_PATH) + (head_extra or "")
+    ui_root = root_path if root_path is not None else ROOT_PATH
+    head = gradio_head_html(ui_root) + (head_extra or "")
     auth = _cognito_auth()
     allowed = allowed_paths or []
+    mount_path = f"/{ui_root.strip('/')}" if str(ui_root).strip("/") else ""
 
     if RUN_FASTAPI:
         if fastapi_app is None:
-            fastapi_app = create_fastapi_app()
+            fastapi_app = create_fastapi_app(root_path=fastapi_root_path)
         return gr.mount_gradio_app(
             fastapi_app,
             demo,
-            path="",
+            path=mount_path,
             head=head,
             css=css,
             theme=theme,
@@ -502,7 +518,7 @@ def mount_or_launch(
         show_error=show_error,
         server_name=server_name,
         server_port=server_port,
-        root_path=ROOT_PATH,
+        root_path=ui_root,
         auth=auth,
         allowed_paths=allowed,
     )

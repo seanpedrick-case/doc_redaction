@@ -31,6 +31,7 @@ from cdk_config import (
     PUBLIC_SUBNET_AVAILABILITY_ZONES,
     PUBLIC_SUBNET_CIDR_BLOCKS,
     PUBLIC_SUBNETS_TO_USE,
+    S3_OUTPUT_BUCKET_NAME,
 )
 from constructs import Construct
 from dotenv import dotenv_values
@@ -735,6 +736,218 @@ def _get_existing_subnets_in_vpc(vpc_id: str) -> Dict[str, Any]:
     return existing_subnets_data
 
 
+def get_internet_gateways_attached_to_vpc(vpc_id: str) -> List[str]:
+    """Return Internet Gateway IDs currently attached to the VPC."""
+    ec2_client = boto3.client("ec2")
+    response = ec2_client.describe_internet_gateways(
+        Filters=[{"Name": "attachment.vpc-id", "Values": [vpc_id]}]
+    )
+    return [
+        igw["InternetGatewayId"]
+        for igw in response.get("InternetGateways", [])
+        if igw.get("InternetGatewayId")
+    ]
+
+
+def internet_gateway_exists(igw_id: str) -> bool:
+    ec2_client = boto3.client("ec2")
+    response = ec2_client.describe_internet_gateways(InternetGatewayIds=[igw_id])
+    return bool(response.get("InternetGateways"))
+
+
+def route_table_default_internet_gateway(route_table_id: str) -> Optional[str]:
+    """
+    Return the Internet Gateway ID for 0.0.0.0/0 on this route table, if any.
+    """
+    ec2_client = boto3.client("ec2")
+    response = ec2_client.describe_route_tables(RouteTableIds=[route_table_id])
+    tables = response.get("RouteTables", [])
+    if not tables:
+        return None
+    for route in tables[0].get("Routes", []):
+        if route.get("DestinationCidrBlock") != "0.0.0.0/0":
+            continue
+        gateway_id = route.get("GatewayId") or ""
+        if gateway_id.startswith("igw-"):
+            return gateway_id
+    return None
+
+
+def route_table_has_non_igw_default_route(route_table_id: str) -> bool:
+    """True if 0.0.0.0/0 exists but does not target an Internet Gateway."""
+    ec2_client = boto3.client("ec2")
+    response = ec2_client.describe_route_tables(RouteTableIds=[route_table_id])
+    tables = response.get("RouteTables", [])
+    if not tables:
+        return False
+    for route in tables[0].get("Routes", []):
+        if route.get("DestinationCidrBlock") != "0.0.0.0/0":
+            continue
+        gateway_id = route.get("GatewayId") or ""
+        if gateway_id.startswith("igw-"):
+            return False
+        # Active default route via NAT instance, TGW, etc.
+        if (
+            route.get("NatGatewayId")
+            or route.get("TransitGatewayId")
+            or route.get("GatewayId")
+        ):
+            return True
+    return False
+
+
+def audit_public_subnet_internet_connectivity(
+    vpc_id: str,
+    configured_igw_id: str,
+    public_subnet_entries: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Validate / discover Internet Gateway usage for legacy public subnets.
+
+    Returns context fields for CDK:
+      internet_gateway_id, internet_gateway_needs_vpc_attachment,
+      public_subnets_needing_igw_route (list of {name, subnet_id, route_table_id}).
+    """
+    configured_igw_id = (configured_igw_id or "").strip()
+    attached_igws = get_internet_gateways_attached_to_vpc(vpc_id)
+
+    resolved_igw_id = configured_igw_id
+    needs_attachment = False
+
+    if configured_igw_id:
+        if not internet_gateway_exists(configured_igw_id):
+            raise ValueError(
+                f"EXISTING_IGW_ID '{configured_igw_id}' was not found in this account/region."
+            )
+        if configured_igw_id not in attached_igws:
+            # Ensure it is not attached to another VPC
+            ec2_client = boto3.client("ec2")
+            detail = ec2_client.describe_internet_gateways(
+                InternetGatewayIds=[configured_igw_id]
+            )
+            for attachment in detail.get("InternetGateways", [{}])[0].get(
+                "Attachments", []
+            ):
+                other_vpc = attachment.get("VpcId")
+                if other_vpc and other_vpc != vpc_id:
+                    raise ValueError(
+                        f"EXISTING_IGW_ID '{configured_igw_id}' is attached to VPC "
+                        f"'{other_vpc}', not target VPC '{vpc_id}'. Detach it or choose "
+                        "the IGW attached to this VPC."
+                    )
+            needs_attachment = True
+    elif attached_igws:
+        if len(attached_igws) > 1:
+            raise ValueError(
+                f"VPC '{vpc_id}' has multiple attached Internet Gateways "
+                f"({', '.join(attached_igws)}). Set EXISTING_IGW_ID to the one to use."
+            )
+        resolved_igw_id = attached_igws[0]
+        print(
+            f"EXISTING_IGW_ID not set; using Internet Gateway attached to VPC: "
+            f"{resolved_igw_id}"
+        )
+    elif public_subnet_entries:
+        raise ValueError(
+            f"VPC '{vpc_id}' has no Internet Gateway attached and EXISTING_IGW_ID is "
+            "empty. Set EXISTING_IGW_ID to an existing IGW for this VPC (CDK will "
+            "attach it if detached)."
+        )
+
+    subnets_needing_route: List[Dict[str, str]] = []
+    for entry in public_subnet_entries:
+        name = entry.get("name") or "unknown"
+        route_table_id = entry.get("route_table_id")
+        subnet_id = entry.get("subnet_id") or entry.get("id") or ""
+        if not route_table_id:
+            print(
+                f"Warning: public subnet '{name}' has no route table association in "
+                "pre-check; skipping IGW route audit (CDK may still add routes after create)."
+            )
+            continue
+        existing_igw = route_table_default_internet_gateway(route_table_id)
+        if existing_igw:
+            if resolved_igw_id and existing_igw != resolved_igw_id:
+                raise ValueError(
+                    f"Public subnet '{name}' route table '{route_table_id}' has "
+                    f"0.0.0.0/0 -> {existing_igw}, but EXISTING_IGW_ID / resolved IGW "
+                    f"is '{resolved_igw_id}'. Fix the route table manually or align "
+                    "EXISTING_IGW_ID."
+                )
+            continue
+        if route_table_has_non_igw_default_route(route_table_id):
+            raise ValueError(
+                f"Public subnet '{name}' route table '{route_table_id}' has a default "
+                "route that does not use an Internet Gateway (e.g. NAT/TGW). Remove "
+                "or change it before adding 0.0.0.0/0 -> IGW for an internet-facing ALB."
+            )
+        subnets_needing_route.append(
+            {
+                "name": name,
+                "subnet_id": subnet_id,
+                "route_table_id": route_table_id,
+            }
+        )
+
+    return {
+        "internet_gateway_id": resolved_igw_id,
+        "internet_gateway_needs_vpc_attachment": needs_attachment,
+        "public_subnets_needing_igw_route": subnets_needing_route,
+    }
+
+
+def wire_public_subnet_internet_access(
+    scope: Construct,
+    logical_id_prefix: str,
+    *,
+    vpc_id: str,
+    internet_gateway_id: str,
+    needs_igw_vpc_attachment: bool,
+    subnets_needing_route: List[Dict[str, str]],
+) -> Optional[ec2.CfnVPCGatewayAttachment]:
+    """
+    Attach the Internet Gateway to the VPC (if needed) and add 0.0.0.0/0 routes on
+    imported public subnet route tables that lack an IGW default route.
+    """
+    if not internet_gateway_id:
+        return None
+
+    attachment = None
+    if needs_igw_vpc_attachment:
+        attachment = ec2.CfnVPCGatewayAttachment(
+            scope,
+            f"{logical_id_prefix}IgwVpcAttachment",
+            vpc_id=vpc_id,
+            internet_gateway_id=internet_gateway_id,
+        )
+        print(
+            f"CDK: will attach Internet Gateway '{internet_gateway_id}' to VPC '{vpc_id}'."
+        )
+
+    seen_route_tables: set[str] = set()
+    for i, entry in enumerate(subnets_needing_route):
+        route_table_id = entry.get("route_table_id")
+        if not route_table_id or route_table_id in seen_route_tables:
+            continue
+        seen_route_tables.add(route_table_id)
+        safe_name = (entry.get("name") or f"rt{i}").replace("-", "")[:40]
+        route = ec2.CfnRoute(
+            scope,
+            f"{logical_id_prefix}IgwRoute{safe_name}{i}",
+            route_table_id=route_table_id,
+            destination_cidr_block="0.0.0.0/0",
+            gateway_id=internet_gateway_id,
+        )
+        if attachment is not None:
+            route.add_dependency(attachment)
+        print(
+            f"CDK: will add 0.0.0.0/0 -> {internet_gateway_id} on route table "
+            f"'{route_table_id}' (subnet '{entry.get('name', '')}')."
+        )
+
+    return attachment
+
+
 # --- Modified validate_subnet_creation_parameters to take pre-fetched data ---
 def validate_subnet_creation_parameters(
     vpc_id: str,
@@ -925,6 +1138,7 @@ def create_subnets(
     is_public: bool,
     internet_gateway_id: Optional[str] = None,
     single_nat_gateway_id: Optional[str] = None,
+    internet_gateway_attachment: Optional[ec2.CfnVPCGatewayAttachment] = None,
 ) -> Tuple[List[ec2.CfnSubnet], List[ec2.CfnRouteTable]]:
     """
     Creates subnets using L2 constructs but returns the underlying L1 Cfn objects
@@ -963,28 +1177,35 @@ def create_subnets(
         Tags.of(subnet).add("Name", subnet_name)
         Tags.of(subnet).add("Type", subnet_type_tag)
 
+        if is_public and internet_gateway_attachment is not None:
+            subnet.node.add_dependency(internet_gateway_attachment)
+
         if is_public:
-            # The subnet's route_table is automatically created by the L2 Subnet construct
             try:
                 subnet.add_route(
-                    "DefaultInternetRoute",  # A logical ID for the CfnRoute resource
+                    "DefaultInternetRoute",
                     router_id=internet_gateway_id,
                     router_type=ec2.RouterType.GATEWAY,
-                    # destination_cidr_block="0.0.0.0/0" is the default for this method
                 )
             except Exception as e:
-                print("Could not create IGW route for public subnet due to:", e)
+                raise RuntimeError(
+                    f"Could not create 0.0.0.0/0 -> Internet Gateway route for public "
+                    f"subnet '{subnet_name}'. Ensure EXISTING_IGW_ID is attached to this "
+                    f"VPC ({internet_gateway_id}): {e}"
+                ) from e
             print(f"CDK: Defined public L2 subnet '{subnet_name}' and added IGW route.")
         else:
             try:
-                # Using .add_route() for private subnets as well for consistency
                 subnet.add_route(
-                    "DefaultNatRoute",  # A logical ID for the CfnRoute resource
+                    "DefaultNatRoute",
                     router_id=single_nat_gateway_id,
                     router_type=ec2.RouterType.NAT_GATEWAY,
                 )
             except Exception as e:
-                print("Could not create NAT gateway route for public subnet due to:", e)
+                raise RuntimeError(
+                    f"Could not create 0.0.0.0/0 -> NAT Gateway route for private "
+                    f"subnet '{subnet_name}': {e}"
+                ) from e
             print(
                 f"CDK: Defined private L2 subnet '{subnet_name}' and added NAT GW route."
             )
@@ -1949,6 +2170,356 @@ def allow_express_load_balancer_to_ecs_security_group(
     )
 
 
+def _dict_env_to_express_key_value_pairs(
+    environment: Dict[str, str],
+) -> List[ecs.CfnExpressGatewayService.KeyValuePairProperty]:
+    return [
+        ecs.CfnExpressGatewayService.KeyValuePairProperty(name=k, value=str(v))
+        for k, v in environment.items()
+        if v is not None and str(v) != ""
+    ]
+
+
+def normalize_pi_alb_path_prefix(raw: str, *, default: str = "pi") -> str:
+    """Return a leading-slash path prefix (no trailing slash), e.g. '/pi'."""
+    segment = (raw or default).strip().strip("/")
+    return f"/{segment}" if segment else f"/{default}"
+
+
+def normalize_pi_alb_routing_mode(raw: str) -> str:
+    mode = (raw or "path").strip().lower()
+    allowed = frozenset({"path", "host", "both"})
+    if mode not in allowed:
+        raise ValueError(
+            f"PI_ALB_ROUTING must be one of {sorted(allowed)}; got '{raw}'."
+        )
+    return mode
+
+
+def pi_alb_path_patterns(path_prefix: str) -> List[str]:
+    """ALB path-pattern values for a Pi path prefix (exact + subtree)."""
+    prefix = normalize_pi_alb_path_prefix(path_prefix)
+    return [prefix, f"{prefix}/*"]
+
+
+def pi_alb_health_check_path(path_prefix: str, routing_mode: str) -> str:
+    if normalize_pi_alb_routing_mode(routing_mode) in ("path", "both"):
+        return f"{normalize_pi_alb_path_prefix(path_prefix)}/"
+    return "/"
+
+
+def pi_alb_root_path_for_container(path_prefix: str, routing_mode: str) -> str:
+    """Gradio/FastAPI ROOT_PATH to set on Pi tasks when path routing is enabled."""
+    if normalize_pi_alb_routing_mode(routing_mode) in ("path", "both"):
+        return normalize_pi_alb_path_prefix(path_prefix)
+    return ""
+
+
+def pi_listener_rule_count(routing_mode: str) -> int:
+    mode = normalize_pi_alb_routing_mode(routing_mode)
+    count = 0
+    if mode in ("path", "both"):
+        count += 1
+    if mode in ("host", "both"):
+        count += 1
+    return count
+
+
+def format_pi_public_urls(
+    *,
+    routing_mode: str,
+    path_prefix: str,
+    host_header: str,
+    cloudfront_domain: str = "",
+    use_https: bool = True,
+) -> List[str]:
+    """Human-facing Pi UI URLs for stack outputs."""
+    scheme = "https" if use_https else "http"
+    urls: List[str] = []
+    mode = normalize_pi_alb_routing_mode(routing_mode)
+    prefix = normalize_pi_alb_path_prefix(path_prefix)
+    if mode in ("path", "both"):
+        if cloudfront_domain.strip():
+            urls.append(f"{scheme}://{cloudfront_domain.strip()}{prefix}/")
+        else:
+            urls.append(f"{scheme}://<cloudfront-or-alb-host>{prefix}/")
+    if mode in ("host", "both") and host_header.strip():
+        urls.append(f"{scheme}://{host_header.strip()}/")
+    return urls
+
+
+def _apply_pi_root_path_env(env: Dict[str, str], pi_root_path: str) -> None:
+    if pi_root_path:
+        env["PI_ROOT_PATH"] = pi_root_path
+        env["ROOT_PATH"] = pi_root_path
+        env["FASTAPI_ROOT_PATH"] = pi_root_path
+
+
+def build_pi_express_container_environment(
+    *,
+    service_connect_discovery_name: str,
+    main_app_port: Union[str, int],
+    pi_gradio_port: Union[str, int],
+    pi_root_path: str = "",
+) -> Dict[str, str]:
+    """Inline env for Pi on Express (no volume mounts; workspace under /tmp)."""
+    port = int(main_app_port)
+    pi_port = int(pi_gradio_port)
+    env = {
+        "APP_TYPE": "pi",
+        "APP_CONFIG_PATH": "/workspace/doc_redaction/config/pi_agent.env.example",
+        "PI_DEPLOYMENT_PROFILE": "aws-ecs",
+        "PI_DEFAULT_PROVIDER": "amazon-bedrock",
+        "DOC_REDACTION_GRADIO_URL": f"http://{service_connect_discovery_name}:{port}",
+        "PI_GRADIO_PORT": str(pi_port),
+        "GRADIO_SERVER_PORT": str(pi_port),
+        "GRADIO_SERVER_NAME": "0.0.0.0",
+        "PI_WORKSPACE_DIR": "/tmp/pi-workspace",
+        "PI_WORKDIR": "/workspace/doc_redaction",
+        "PI_UPLOAD_ROOT": "/tmp/gradio",
+        "PI_SESSION_DIR": "/tmp/pi-sessions",
+        "PI_CODING_AGENT_DIR": "/tmp/pi-agent",
+        "ACCESS_LOGS_FOLDER": "/tmp/pi-logs/",
+        "USAGE_LOGS_FOLDER": "/tmp/pi-usage/",
+        "FEEDBACK_LOGS_FOLDER": "/tmp/pi-feedback/",
+        "RUN_FASTAPI": "False",
+        "COGNITO_AUTH": "False",
+    }
+    _apply_pi_root_path_env(env, pi_root_path)
+    return env
+
+
+def build_express_pi_primary_container(
+    *,
+    image_uri: str,
+    container_port: int,
+    log_group_name: str,
+    aws_region: str,
+    environment: Optional[Dict[str, str]] = None,
+) -> ecs.CfnExpressGatewayService.ExpressGatewayContainerProperty:
+    """Express PrimaryContainer for Pi (no Secrets Manager; inline env only)."""
+    env_pairs = (
+        _dict_env_to_express_key_value_pairs(environment) if environment else None
+    )
+    return ecs.CfnExpressGatewayService.ExpressGatewayContainerProperty(
+        image=image_uri,
+        container_port=container_port,
+        aws_logs_configuration=ecs.CfnExpressGatewayService.ExpressGatewayServiceAwsLogsConfigurationProperty(
+            log_group_name=log_group_name,
+            log_stream_prefix="ecs-pi",
+            region=aws_region,
+        ),
+        environment=env_pairs,
+    )
+
+
+def _express_pi_listener_rule_custom_resource(
+    scope: Construct,
+    logical_id: str,
+    *,
+    listener_arn: str,
+    priority: int,
+    conditions: List[Dict[str, Any]],
+    rule_actions: List[Dict[str, Any]],
+    express_main_service: ecs.CfnExpressGatewayService,
+    express_pi_service: ecs.CfnExpressGatewayService,
+) -> cr.AwsCustomResource:
+    pi_rule = cr.AwsCustomResource(
+        scope,
+        logical_id,
+        on_create=cr.AwsSdkCall(
+            service="ELBv2",
+            action="createRule",
+            parameters={
+                "ListenerArn": listener_arn,
+                "Priority": priority,
+                "Conditions": conditions,
+                "Actions": rule_actions,
+            },
+            physical_resource_id=cr.PhysicalResourceId.from_response(
+                "Rules[0].RuleArn"
+            ),
+        ),
+        on_update=cr.AwsSdkCall(
+            service="ELBv2",
+            action="modifyRule",
+            parameters={
+                "RuleArn": cr.PhysicalResourceId.reference(),
+                "Conditions": conditions,
+                "Actions": rule_actions,
+            },
+        ),
+        on_delete=cr.AwsSdkCall(
+            service="ELBv2",
+            action="deleteRule",
+            parameters={"RuleArn": cr.PhysicalResourceId.reference()},
+        ),
+        policy=cr.AwsCustomResourcePolicy.from_sdk_calls(
+            resources=cr.AwsCustomResourcePolicy.ANY_RESOURCE
+        ),
+    )
+    pi_rule.node.add_dependency(express_pi_service)
+    pi_rule.node.add_dependency(express_main_service)
+    return pi_rule
+
+
+def configure_express_pi_listener_rules(
+    scope: Construct,
+    logical_id_prefix: str,
+    *,
+    express_main_service: ecs.CfnExpressGatewayService,
+    express_pi_service: ecs.CfnExpressGatewayService,
+    routing_mode: str,
+    path_prefix: str,
+    pi_host_header: str,
+    rule_priority: int,
+    user_pool_arn: str,
+    user_pool_client_id: str,
+    user_pool_domain_prefix: str,
+    stickiness_seconds: int = 28800,
+) -> int:
+    """
+    Path and/or host-header rules on the shared Express HTTPS listener → Pi TG.
+    Returns the next free listener rule priority after Pi rules.
+    """
+    mode = normalize_pi_alb_routing_mode(routing_mode)
+    listener_arn = express_main_service.get_att(
+        "ECSManagedResourceArns.IngressPath.ListenerArn"
+    ).to_string()
+    pi_target_group_arn = Fn.select(
+        0,
+        express_pi_service.get_att(
+            "ECSManagedResourceArns.IngressPath.TargetGroupArns"
+        ),
+    )
+    rule_actions = build_cognito_default_listener_actions(
+        user_pool_arn=user_pool_arn,
+        user_pool_client_id=user_pool_client_id,
+        user_pool_domain_prefix=user_pool_domain_prefix,
+        target_group_arn=pi_target_group_arn,
+        stickiness_seconds=stickiness_seconds,
+    )
+    priority = rule_priority
+
+    if mode in ("path", "both"):
+        path_patterns = pi_alb_path_patterns(path_prefix)
+        _express_pi_listener_rule_custom_resource(
+            scope,
+            f"{logical_id_prefix}ExpressPiPathRule",
+            listener_arn=listener_arn,
+            priority=priority,
+            conditions=[
+                {
+                    "Field": "path-pattern",
+                    "PathPatternConfig": {"Values": path_patterns},
+                }
+            ],
+            rule_actions=rule_actions,
+            express_main_service=express_main_service,
+            express_pi_service=express_pi_service,
+        )
+        priority += 1
+
+    if mode in ("host", "both") and pi_host_header.strip():
+        _express_pi_listener_rule_custom_resource(
+            scope,
+            f"{logical_id_prefix}ExpressPiHostRule",
+            listener_arn=listener_arn,
+            priority=priority,
+            conditions=[
+                {
+                    "Field": "host-header",
+                    "HostHeaderConfig": {"Values": [pi_host_header.strip()]},
+                }
+            ],
+            rule_actions=rule_actions,
+            express_main_service=express_main_service,
+            express_pi_service=express_pi_service,
+        )
+        priority += 1
+
+    return priority
+
+
+def _express_service_connect_configuration(
+    *,
+    namespace: str,
+    port_name: Optional[str] = None,
+    discovery_name: Optional[str] = None,
+    port: Optional[int] = None,
+) -> Dict[str, Any]:
+    """ECS API serviceConnectConfiguration payload for updateService."""
+    cfg: Dict[str, Any] = {"enabled": True, "namespace": namespace}
+    if port_name and discovery_name and port is not None:
+        cfg["services"] = [
+            {
+                "portName": port_name,
+                "discoveryName": discovery_name,
+                "clientAliases": [
+                    {"port": int(port), "dnsName": discovery_name},
+                ],
+            }
+        ]
+    return cfg
+
+
+def apply_service_connect_to_express_service(
+    scope: Construct,
+    logical_id: str,
+    *,
+    cluster_name: str,
+    service_name: str,
+    namespace: str,
+    express_service: ecs.CfnExpressGatewayService,
+    port_name: Optional[str] = None,
+    discovery_name: Optional[str] = None,
+    port: Optional[int] = None,
+) -> cr.AwsCustomResource:
+    """
+    Enable Service Connect on an Express gateway service after create (AWS does not
+    support SC at Express create time). Server config when port_name/discovery_name/port
+    are set; client-only when they are omitted.
+    """
+    sc_cfg = _express_service_connect_configuration(
+        namespace=namespace,
+        port_name=port_name,
+        discovery_name=discovery_name,
+        port=port,
+    )
+    physical_id = f"{cluster_name}/{service_name}/service-connect"
+    custom = cr.AwsCustomResource(
+        scope,
+        logical_id,
+        on_create=cr.AwsSdkCall(
+            service="ECS",
+            action="updateService",
+            parameters={
+                "cluster": cluster_name,
+                "service": service_name,
+                "serviceConnectConfiguration": sc_cfg,
+                "forceNewDeployment": True,
+            },
+            physical_resource_id=cr.PhysicalResourceId.of(physical_id),
+        ),
+        on_update=cr.AwsSdkCall(
+            service="ECS",
+            action="updateService",
+            parameters={
+                "cluster": cluster_name,
+                "service": service_name,
+                "serviceConnectConfiguration": sc_cfg,
+                "forceNewDeployment": True,
+            },
+            physical_resource_id=cr.PhysicalResourceId.of(physical_id),
+        ),
+        policy=cr.AwsCustomResourcePolicy.from_sdk_calls(
+            resources=cr.AwsCustomResourcePolicy.ANY_RESOURCE
+        ),
+    )
+    custom.node.add_dependency(express_service)
+    return custom
+
+
 def create_s3_batch_ecs_trigger_lambda(
     scope: Construct,
     logical_id: str,
@@ -2055,11 +2626,12 @@ def build_pi_agent_container_environment(
     service_connect_discovery_name: str,
     main_app_port: Union[str, int],
     pi_gradio_port: Union[str, int],
+    pi_root_path: str = "",
 ) -> Dict[str, str]:
     """Inline env for Pi agent tasks (overrides image defaults; SC URL for main app)."""
     port = int(main_app_port)
     pi_port = int(pi_gradio_port)
-    return {
+    env = {
         "APP_TYPE": "pi",
         "APP_CONFIG_PATH": "/workspace/doc_redaction/config/pi_agent.env",
         "PI_DEPLOYMENT_PROFILE": "aws-ecs",
@@ -2072,9 +2644,45 @@ def build_pi_agent_container_environment(
         "PI_WORKDIR": "/workspace/doc_redaction",
         "PI_UPLOAD_ROOT": "/tmp/gradio",
         "PI_SESSION_DIR": "/tmp/pi-sessions",
-        "RUN_FASTAPI": "False",
+        "PI_CODING_AGENT_DIR": "/tmp/pi-agent",
+        "ACCESS_LOGS_FOLDER": "/tmp/pi-logs/",
+        "USAGE_LOGS_FOLDER": "/tmp/pi-usage/",
+        "FEEDBACK_LOGS_FOLDER": "/tmp/pi-feedback/",
+        "RUN_FASTAPI": "True",
+        "RUN_AWS_FUNCTIONS": "True",
+        "SAVE_OUTPUTS_TO_S3": "True",
+        "S3_OUTPUTS_BUCKET": S3_OUTPUT_BUCKET_NAME,
         "COGNITO_AUTH": "False",
     }
+    _apply_pi_root_path_env(env, pi_root_path)
+    return env
+
+
+# Gradio mounted on FastAPI (tools.gradio_platform.mount_or_launch); matches agent-redact/pi/start.sh.
+PI_ECS_APP_START_CMD = (
+    "python3 agent-redact/pi/pi_agent_config.py && "
+    "exec uvicorn gradio_app:app --app-dir agent-redact/pi "
+    "--host 0.0.0.0 --port ${PI_GRADIO_PORT:-7862} "
+    '--proxy-headers --forwarded-allow-ips "*"'
+)
+
+# Fargate volume mounts are root-owned; chown as root, then run the app as user (see entrypoint-ecs.sh).
+PI_ECS_CONTAINER_USER = "root"
+PI_ECS_CONTAINER_COMMAND = [
+    "/usr/local/bin/entrypoint-ecs.sh",
+    PI_ECS_APP_START_CMD,
+]
+# Inline fallback when the image predates entrypoint-ecs.sh (same behaviour via bash).
+PI_ECS_CONTAINER_COMMAND_FALLBACK = [
+    "bash",
+    "-c",
+    "mkdir -p /tmp/pi-agent /tmp/pi-logs /tmp/pi-usage /tmp/pi-feedback "
+    "/home/user/app/workspace /tmp/gradio /tmp/pi-sessions && "
+    "chown -R user:user /tmp/pi-agent /tmp/pi-logs /tmp/pi-usage /tmp/pi-feedback "
+    "/home/user/app/workspace /tmp/gradio /tmp/pi-sessions && "
+    "cd /workspace/doc_redaction && "
+    f"exec su -s /bin/bash user -c '{PI_ECS_APP_START_CMD}'",
+]
 
 
 def create_pi_agent_ecs_resources(
@@ -2101,6 +2709,7 @@ def create_pi_agent_ecs_resources(
     service_connect_discovery_name: str,
     main_app_port: int,
     use_fargate_spot: str,
+    pi_root_path: str = "",
 ) -> Tuple[ecs.FargateService, ec2.SecurityGroup, ecs.FargateTaskDefinition]:
     """Second Fargate service for the Pi agent (joins Service Connect namespace as a client)."""
     pi_security_group = ec2.SecurityGroup(
@@ -2154,13 +2763,10 @@ def create_pi_agent_ecs_resources(
             service_connect_discovery_name=service_connect_discovery_name,
             main_app_port=main_app_port,
             pi_gradio_port=pi_gradio_port,
+            pi_root_path=pi_root_path,
         ),
-        command=[
-            "bash",
-            "-c",
-            "python3 agent-redact/pi/pi_agent_config.py && "
-            "exec python3 agent-redact/pi/gradio_app.py",
-        ],
+        command=PI_ECS_CONTAINER_COMMAND_FALLBACK,
+        user=PI_ECS_CONTAINER_USER,
         essential=True,
     )
 
@@ -2228,6 +2834,8 @@ def attach_pi_agent_to_shared_alb(
     pi_security_group: ec2.SecurityGroup,
     pi_service: ecs.FargateService,
     pi_port: int,
+    routing_mode: str,
+    path_prefix: str,
     pi_host_header: str,
     listener_rule_priority: int,
     target_group_name: str,
@@ -2239,8 +2847,8 @@ def attach_pi_agent_to_shared_alb(
     cognito_user_pool: Optional[cognito.IUserPool],
     cognito_user_pool_client: Optional[cognito.IUserPoolClient],
     cognito_user_pool_domain: Optional[cognito.IUserPoolDomain],
-) -> elb.ApplicationTargetGroup:
-    """Register Pi on the shared legacy ALB (second target group + host-header rules)."""
+) -> Tuple[elb.ApplicationTargetGroup, int]:
+    """Register Pi on the shared legacy ALB (path and/or host-header listener rules)."""
     pi_security_group.add_ingress_rule(
         peer=alb_security_group,
         connection=ec2.Port.tcp(pi_port),
@@ -2257,7 +2865,7 @@ def attach_pi_agent_to_shared_alb(
         stickiness_cookie_duration=stickiness_cookie_duration,
         vpc=vpc,
         health_check=elb.HealthCheck(
-            path="/",
+            path=pi_alb_health_check_path(path_prefix, routing_mode),
             healthy_http_codes="200-399",
         ),
     )
@@ -2288,26 +2896,52 @@ def attach_pi_agent_to_shared_alb(
             stickiness_duration=stickiness_cookie_duration,
         )
 
-    if https_listener:
-        https_listener.add_action(
-            f"{logical_id_prefix}HttpsHostRule",
-            priority=listener_rule_priority,
-            conditions=[elb.ListenerCondition.host_headers([pi_host_header])],
-            action=forward_action,
-        )
-    elif http_listener:
-        http_listener.add_action(
-            f"{logical_id_prefix}HttpHostRule",
-            priority=listener_rule_priority,
-            conditions=[elb.ListenerCondition.host_headers([pi_host_header])],
-            action=forward_action,
-        )
+    mode = normalize_pi_alb_routing_mode(routing_mode)
+    priority = listener_rule_priority
 
-    if http_listener and acm_certificate_arn:
+    def _add_rules(listener: elb.IApplicationListener, id_prefix: str) -> None:
+        nonlocal priority
+        if mode in ("path", "both"):
+            listener.add_action(
+                f"{id_prefix}PathRule",
+                priority=priority,
+                conditions=[
+                    elb.ListenerCondition.path_patterns(
+                        pi_alb_path_patterns(path_prefix)
+                    )
+                ],
+                action=forward_action,
+            )
+            priority += 1
+        if mode in ("host", "both") and pi_host_header.strip():
+            listener.add_action(
+                f"{id_prefix}HostRule",
+                priority=priority,
+                conditions=[
+                    elb.ListenerCondition.host_headers([pi_host_header.strip()])
+                ],
+                action=forward_action,
+            )
+            priority += 1
+
+    if https_listener:
+        _add_rules(https_listener, f"{logical_id_prefix}Https")
+    elif http_listener:
+        _add_rules(http_listener, f"{logical_id_prefix}Http")
+
+    if (
+        http_listener
+        and acm_certificate_arn
+        and pi_host_header.strip()
+        and mode in ("host", "both")
+    ):
+        redirect_priority = listener_rule_priority
+        if mode in ("path", "both"):
+            redirect_priority += 1
         http_listener.add_action(
             f"{logical_id_prefix}HttpRedirectRule",
-            priority=listener_rule_priority,
-            conditions=[elb.ListenerCondition.host_headers([pi_host_header])],
+            priority=redirect_priority,
+            conditions=[elb.ListenerCondition.host_headers([pi_host_header.strip()])],
             action=elb.ListenerAction.redirect(
                 protocol="HTTPS",
                 port="443",
@@ -2317,7 +2951,7 @@ def attach_pi_agent_to_shared_alb(
             ),
         )
 
-    return pi_target_group
+    return pi_target_group, priority
 
 
 def ensure_folder_exists(output_folder: str):

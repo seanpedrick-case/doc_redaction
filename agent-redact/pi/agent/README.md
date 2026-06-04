@@ -176,7 +176,7 @@ Package and Dockerfile: [`agent-redact/pi-agent/`](../../pi-agent/). Pushes to [
 Local build test from monorepo root:
 
 ```powershell
-docker build -f agent-redact/pi-agent/Dockerfile -t pi-agent-hf-space .
+docker build -f agent-redact/pi-agent/Dockerfile --target runtime -t pi-agent-hf-space .
 docker run --rm -p 7860:7860 -e GEMINI_API_KEY=... -e HF_TOKEN=... pi-agent-hf-space
 ```
 

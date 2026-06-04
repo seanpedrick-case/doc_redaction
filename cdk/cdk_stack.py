@@ -24,6 +24,10 @@ from aws_cdk import aws_logs as logs
 from aws_cdk import aws_s3 as s3
 from aws_cdk import aws_secretsmanager as secretsmanager
 from aws_cdk import aws_wafv2 as wafv2
+from cdk_cloudfront_headers import (
+    create_secure_cloudfront_response_headers_policy,
+    resolve_cloudfront_csp_urls,
+)
 from cdk_config import (
     ACCESS_LOG_DYNAMODB_TABLE_NAME,
     ACM_SSL_CERTIFICATE_ARN,
@@ -37,6 +41,7 @@ from cdk_config import (
     CDK_PREFIX,
     CLOUDFRONT_DISTRIBUTION_NAME,
     CLOUDFRONT_DOMAIN,
+    CLOUDFRONT_ENABLE_SECURE_RESPONSE_HEADERS,
     CLOUDFRONT_GEO_RESTRICTION,
     CLOUDFRONT_PREFIX_LIST_ID,
     CLUSTER_NAME,
@@ -50,6 +55,7 @@ from cdk_config import (
     COGNITO_USER_POOL_CLIENT_NAME,
     COGNITO_USER_POOL_CLIENT_SECRET_NAME,
     COGNITO_USER_POOL_DOMAIN_PREFIX,
+    COGNITO_USER_POOL_LOGIN_URL,
     COGNITO_USER_POOL_NAME,
     CUSTOM_HEADER,
     CUSTOM_HEADER_VALUE,
@@ -59,8 +65,12 @@ from cdk_config import (
     ECR_PI_REPO_NAME,
     ECS_EXPRESS_HEALTH_CHECK_PATH,
     ECS_EXPRESS_INFRASTRUCTURE_ROLE_NAME,
+    ECS_EXPRESS_SC_PORT_NAME,
     ECS_EXPRESS_SERVICE_NAME,
     ECS_LOG_GROUP_NAME,
+    ECS_PI_EXPRESS_HEALTH_CHECK_PATH,
+    ECS_PI_EXPRESS_SECURITY_GROUP_NAME,
+    ECS_PI_EXPRESS_SERVICE_NAME,
     ECS_PI_LOG_GROUP_NAME,
     ECS_PI_SECURITY_GROUP_NAME,
     ECS_PI_SERVICE_NAME,
@@ -84,6 +94,7 @@ from cdk_config import (
     ECS_USE_FARGATE_SPOT,
     ENABLE_ECS_SERVICE_CONNECT,
     ENABLE_PI_AGENT_ECS_SERVICE,
+    ENABLE_PI_AGENT_EXPRESS_SERVICE,
     ENABLE_S3_BATCH_ECS_TRIGGER,
     EXISTING_IGW_ID,
     EXISTING_LOAD_BALANCER_ARN,
@@ -101,6 +112,8 @@ from cdk_config import (
     PI_AGENT_ENV_S3_KEY,
     PI_ALB_HOST_HEADER,
     PI_ALB_LISTENER_RULE_PRIORITY,
+    PI_ALB_PATH_PREFIX_NORMALIZED,
+    PI_ALB_ROUTING,
     PI_ALB_TARGET_GROUP_NAME,
     PI_GRADIO_PORT,
     PRIVATE_SUBNET_AVAILABILITY_ZONES,
@@ -119,6 +132,7 @@ from cdk_config import (
     S3_OUTPUT_BUCKET_NAME,
     SAVE_LOGS_TO_DYNAMODB,
     SINGLE_NAT_GATEWAY_ID,
+    SSL_CERTIFICATE_DOMAIN,
     TASK_DEFINITION_FILE_LOCATION,
     USAGE_LOG_DYNAMODB_TABLE_NAME,
     USE_CLOUDFRONT,
@@ -132,9 +146,13 @@ from cdk_functions import (  # Only keep CDK-native functions
     add_custom_policies,
     add_s3_enforce_ssl_policy,
     allow_express_load_balancer_to_ecs_security_group,
+    apply_service_connect_to_express_service,
     attach_pi_agent_to_shared_alb,
     build_express_gateway_primary_container,
+    build_express_pi_primary_container,
+    build_pi_express_container_environment,
     configure_express_listener_cognito_and_cloudfront,
+    configure_express_pi_listener_rules,
     create_ecs_express_infrastructure_role,
     create_express_gateway_service,
     create_nat_gateway,
@@ -142,11 +160,15 @@ from cdk_functions import (  # Only keep CDK-native functions
     create_s3_batch_ecs_trigger_lambda,
     create_subnets,
     create_web_acl_with_common_rules,
+    format_pi_public_urls,
     load_app_config_env_for_express,
     managed_resource_removal_policy,
+    pi_alb_root_path_for_container,
+    pi_listener_rule_count,
     resolve_service_connect_client_security_group_ids,
     resource_deletion_protection_flag,
     s3_auto_delete_objects_on_stack_destroy,
+    wire_public_subnet_internet_access,
 )
 from constructs import Construct
 
@@ -228,6 +250,10 @@ class CdkStack(Stack):
         enable_pi_agent = (
             ENABLE_PI_AGENT_ECS_SERVICE == "True" and not use_express_ingress
         )
+        enable_pi_express = (
+            ENABLE_PI_AGENT_EXPRESS_SERVICE == "True" and use_express_ingress
+        )
+        enable_pi_build = enable_pi_agent or enable_pi_express
         if use_express_ingress:
             print(
                 "USE_ECS_EXPRESS_MODE=True: using ECS Express Mode for HTTPS ingress "
@@ -513,6 +539,29 @@ class CdkStack(Stack):
 
         # --- 3. Process Public Subnets ---
         print("\n--- Processing Public Subnets ---")
+        public_internet_gateway_attachment = None
+        if not new_vpc_created:
+            resolved_igw_id = (
+                get_context_str("internet_gateway_id") or EXISTING_IGW_ID or ""
+            ).strip()
+            if resolved_igw_id and (
+                PUBLIC_SUBNETS_TO_USE
+                or public_subnets_data_for_creation_ctx
+                or get_context_list_of_dicts("public_subnets_needing_igw_route")
+            ):
+                public_internet_gateway_attachment = wire_public_subnet_internet_access(
+                    self,
+                    "PublicSubnetInternet",
+                    vpc_id=vpc.vpc_id,
+                    internet_gateway_id=resolved_igw_id,
+                    needs_igw_vpc_attachment=get_context_bool(
+                        "internet_gateway_needs_vpc_attachment", False
+                    ),
+                    subnets_needing_route=get_context_list_of_dicts(
+                        "public_subnets_needing_igw_route"
+                    ),
+                )
+
         # Import existing public subnets
         if checked_public_subnets_ctx:
             for i, subnet_name in enumerate(PUBLIC_SUBNETS_TO_USE):
@@ -572,6 +621,9 @@ class CdkStack(Stack):
                 print(
                     f"Attempting to create {len(names_to_create_public)} new public subnets: {names_to_create_public}"
                 )
+                igw_for_new_subnets = (
+                    get_context_str("internet_gateway_id") or EXISTING_IGW_ID
+                )
                 newly_created_public_subnets, newly_created_public_rts_cfn = (
                     create_subnets(
                         self,
@@ -581,7 +633,8 @@ class CdkStack(Stack):
                         cidrs_to_create_public,
                         azs_to_create_public,
                         is_public=True,
-                        internet_gateway_id=EXISTING_IGW_ID,
+                        internet_gateway_id=igw_for_new_subnets,
+                        internet_gateway_attachment=public_internet_gateway_attachment,
                     )
                 )
                 self.public_subnets.extend(newly_created_public_subnets)
@@ -1075,6 +1128,10 @@ class CdkStack(Stack):
                     resources=[output_bucket.bucket_arn],
                 )
             )
+            # Identity-based grants (Pi agent + main app share task_role; required when the
+            # output bucket is imported and bucket policies were not updated).
+            bucket.grant_read_write(task_role)
+            output_bucket.grant_read_write(task_role)
 
         except Exception as e:
             raise Exception("Could not handle S3 buckets due to:", e)
@@ -1193,7 +1250,7 @@ class CdkStack(Stack):
                 ecr_grantee = codebuild_role
             ecr_repo.grant_pull_push(ecr_grantee)
 
-            if enable_pi_agent:
+            if enable_pi_build:
                 pi_codebuild_name = CODEBUILD_PI_PROJECT_NAME
                 if get_context_bool(f"exists:{pi_codebuild_name}"):
                     project_arn = get_context_str(f"arn:{pi_codebuild_name}")
@@ -1619,7 +1676,7 @@ class CdkStack(Stack):
                 "enable_fargate_capacity_providers": True,
                 "vpc": vpc,
             }
-            if enable_service_connect:
+            if enable_service_connect or enable_pi_express:
                 cluster_kwargs["default_cloud_map_namespace"] = (
                     ecs.CloudMapNamespaceOptions(
                         name=ECS_SERVICE_CONNECT_NAMESPACE,
@@ -1740,6 +1797,183 @@ class CdkStack(Stack):
                         "ECSManagedResourceArns.IngressPath.CertificateArn"
                     ).to_string(),
                 )
+
+                if enable_pi_express:
+                    try:
+                        pi_express_log_group = logs.LogGroup(
+                            self,
+                            "ExpressPiTaskLogGroup",
+                            log_group_name=f"/ecs/{ECS_PI_EXPRESS_SERVICE_NAME}-logs".lower(),
+                            retention=logs.RetentionDays.ONE_MONTH,
+                            removal_policy=resource_removal_policy,
+                        )
+                        pi_express_log_group.grant_write(execution_role)
+
+                        pi_express_security_group = ec2.SecurityGroup(
+                            self,
+                            "ExpressPiSecurityGroup",
+                            vpc=vpc,
+                            security_group_name=ECS_PI_EXPRESS_SECURITY_GROUP_NAME,
+                            description="Pi agent ECS Express tasks",
+                        )
+
+                        _pi_root_path = pi_alb_root_path_for_container(
+                            PI_ALB_PATH_PREFIX_NORMALIZED, PI_ALB_ROUTING
+                        )
+                        pi_express_environment = build_pi_express_container_environment(
+                            service_connect_discovery_name=ECS_SERVICE_CONNECT_DISCOVERY_NAME,
+                            main_app_port=int(GRADIO_SERVER_PORT),
+                            pi_gradio_port=int(PI_GRADIO_PORT),
+                            pi_root_path=_pi_root_path,
+                        )
+                        pi_primary_container = build_express_pi_primary_container(
+                            image_uri=pi_ecr_image_loc + ":latest",
+                            container_port=int(PI_GRADIO_PORT),
+                            log_group_name=pi_express_log_group.log_group_name,
+                            aws_region=AWS_REGION,
+                            environment=pi_express_environment,
+                        )
+
+                        express_pi_service = create_express_gateway_service(
+                            self,
+                            "ExpressPiGatewayService",
+                            service_name=ECS_PI_EXPRESS_SERVICE_NAME,
+                            cluster_name=CLUSTER_NAME,
+                            execution_role_arn=execution_role.role_arn,
+                            infrastructure_role_arn=express_infra_role.role_arn,
+                            task_role_arn=task_role.role_arn,
+                            cpu=str(ECS_PI_TASK_CPU_SIZE),
+                            memory=str(ECS_PI_TASK_MEMORY_SIZE),
+                            health_check_path=ECS_PI_EXPRESS_HEALTH_CHECK_PATH,
+                            primary_container=pi_primary_container,
+                            subnet_ids=private_subnet_ids,
+                            security_group_ids=[
+                                pi_express_security_group.security_group_id
+                            ],
+                        )
+                        express_pi_service.node.add_dependency(cluster)
+                        express_pi_service.node.add_dependency(express_service)
+
+                        allow_express_load_balancer_to_ecs_security_group(
+                            self,
+                            "ExpressAlbToPiExpressIngress",
+                            express_service=express_pi_service,
+                            ecs_security_group=pi_express_security_group,
+                            container_port=int(PI_GRADIO_PORT),
+                        )
+
+                        pi_express_security_group.add_egress_rule(
+                            peer=ecs_security_group,
+                            connection=ec2.Port.tcp(int(GRADIO_SERVER_PORT)),
+                            description="Pi Express (Service Connect) to main redaction app",
+                        )
+                        ecs_security_group.add_ingress_rule(
+                            peer=pi_express_security_group,
+                            connection=ec2.Port.tcp(int(GRADIO_SERVER_PORT)),
+                            description="Pi Express (Service Connect) to main redaction app",
+                        )
+
+                        stickiness_seconds = int(Duration.hours(8).to_seconds())
+                        configure_express_pi_listener_rules(
+                            self,
+                            "ExpressPi",
+                            express_main_service=express_service,
+                            express_pi_service=express_pi_service,
+                            routing_mode=PI_ALB_ROUTING,
+                            path_prefix=PI_ALB_PATH_PREFIX_NORMALIZED,
+                            pi_host_header=PI_ALB_HOST_HEADER.strip(),
+                            rule_priority=PI_ALB_LISTENER_RULE_PRIORITY,
+                            user_pool_arn=user_pool.user_pool_arn,
+                            user_pool_client_id=user_pool_client.user_pool_client_id,
+                            user_pool_domain_prefix=COGNITO_USER_POOL_DOMAIN_PREFIX,
+                            stickiness_seconds=stickiness_seconds,
+                        )
+
+                        sc_main = apply_service_connect_to_express_service(
+                            self,
+                            "ExpressMainServiceConnect",
+                            cluster_name=CLUSTER_NAME,
+                            service_name=ECS_EXPRESS_SERVICE_NAME,
+                            namespace=ECS_SERVICE_CONNECT_NAMESPACE,
+                            express_service=express_service,
+                            port_name=ECS_EXPRESS_SC_PORT_NAME,
+                            discovery_name=ECS_SERVICE_CONNECT_DISCOVERY_NAME,
+                            port=int(GRADIO_SERVER_PORT),
+                        )
+                        sc_pi = apply_service_connect_to_express_service(
+                            self,
+                            "ExpressPiServiceConnect",
+                            cluster_name=CLUSTER_NAME,
+                            service_name=ECS_PI_EXPRESS_SERVICE_NAME,
+                            namespace=ECS_SERVICE_CONNECT_NAMESPACE,
+                            express_service=express_pi_service,
+                        )
+                        sc_pi.node.add_dependency(sc_main)
+
+                        _pi_public_urls = format_pi_public_urls(
+                            routing_mode=PI_ALB_ROUTING,
+                            path_prefix=PI_ALB_PATH_PREFIX_NORMALIZED,
+                            host_header=PI_ALB_HOST_HEADER,
+                            cloudfront_domain=(
+                                CLOUDFRONT_DOMAIN if USE_CLOUDFRONT == "True" else ""
+                            ),
+                            use_https=True,
+                        )
+                        pi_public_url = _pi_public_urls[0] if _pi_public_urls else ""
+                        sc_backend = (
+                            f"http://{ECS_SERVICE_CONNECT_DISCOVERY_NAME}:"
+                            f"{GRADIO_SERVER_PORT}"
+                        )
+                        CfnOutput(
+                            self,
+                            "PiExpressEndpoint",
+                            value=express_pi_service.get_att("Endpoint").to_string(),
+                            description="HTTPS URL for the Pi ECS Express service (AWS-managed cert)",
+                        )
+                        CfnOutput(
+                            self,
+                            "PiPublicUrl",
+                            value=pi_public_url,
+                            description="Primary public URL for Pi UI (path and/or host ALB rules)",
+                        )
+                        if len(_pi_public_urls) > 1:
+                            CfnOutput(
+                                self,
+                                "PiPublicUrls",
+                                value=", ".join(_pi_public_urls),
+                                description="All configured Pi UI entry URLs",
+                            )
+                        CfnOutput(
+                            self,
+                            "PiAlbPathPrefix",
+                            value=PI_ALB_PATH_PREFIX_NORMALIZED,
+                            description="ALB path prefix for Pi when PI_ALB_ROUTING includes path",
+                        )
+                        CfnOutput(
+                            self,
+                            "PiDocRedactionBackendUrl",
+                            value=sc_backend,
+                            description="DOC_REDACTION_GRADIO_URL on Pi Express (Service Connect, no Cognito)",
+                        )
+                        CfnOutput(
+                            self,
+                            "PiExpressServiceName",
+                            value=ECS_PI_EXPRESS_SERVICE_NAME,
+                        )
+                        CfnOutput(
+                            self,
+                            "ServiceConnectNamespace",
+                            value=ECS_SERVICE_CONNECT_NAMESPACE,
+                            description="Cloud Map namespace for Express Service Connect",
+                        )
+                        print(
+                            "ECS Express Pi gateway service defined with Service Connect "
+                            f"backend {sc_backend}; public URLs: {', '.join(_pi_public_urls)}."
+                        )
+                    except Exception as e:
+                        raise Exception(
+                            "Could not handle ECS Express Pi agent due to:", e
+                        )
 
                 print("ECS Express Gateway service defined.")
             except Exception as e:
@@ -2084,6 +2318,9 @@ class CdkStack(Stack):
                             service_connect_discovery_name=ECS_SERVICE_CONNECT_DISCOVERY_NAME,
                             main_app_port=int(GRADIO_SERVER_PORT),
                             use_fargate_spot=use_fargate_spot,
+                            pi_root_path=pi_alb_root_path_for_container(
+                                PI_ALB_PATH_PREFIX_NORMALIZED, PI_ALB_ROUTING
+                            ),
                         )
                     )
                     ecs_security_group.add_ingress_rule(
@@ -2144,7 +2381,10 @@ class CdkStack(Stack):
             target_group_name = ALB_TARGET_GROUP_NAME  # Explicit resource name
             cloudfront_distribution_url = "cloudfront_placeholder.net"  # Need to replace this afterwards with the actual cloudfront_distribution.domain_name
             cloudfront_http_rule_priority = (
-                PI_ALB_LISTENER_RULE_PRIORITY + 1 if enable_pi_agent else 1
+                PI_ALB_LISTENER_RULE_PRIORITY
+                + (pi_listener_rule_count(PI_ALB_ROUTING) if enable_pi_agent else 0)
+                if enable_pi_agent
+                else 1
             )
             https_listener = None
 
@@ -2284,6 +2524,15 @@ class CdkStack(Stack):
                     if len(pi_tg_name) > 32:
                         pi_tg_name = pi_tg_name[-32:]
 
+                    _pi_public_urls = format_pi_public_urls(
+                        routing_mode=PI_ALB_ROUTING,
+                        path_prefix=PI_ALB_PATH_PREFIX_NORMALIZED,
+                        host_header=PI_ALB_HOST_HEADER,
+                        cloudfront_domain=(
+                            CLOUDFRONT_DOMAIN if USE_CLOUDFRONT == "True" else ""
+                        ),
+                        use_https=bool(ACM_SSL_CERTIFICATE_ARN),
+                    )
                     attach_pi_agent_to_shared_alb(
                         self,
                         "PiAgent",
@@ -2292,6 +2541,8 @@ class CdkStack(Stack):
                         pi_security_group=pi_ecs_security_group,
                         pi_service=pi_ecs_service,
                         pi_port=int(PI_GRADIO_PORT),
+                        routing_mode=PI_ALB_ROUTING,
+                        path_prefix=PI_ALB_PATH_PREFIX_NORMALIZED,
                         pi_host_header=PI_ALB_HOST_HEADER.strip(),
                         listener_rule_priority=PI_ALB_LISTENER_RULE_PRIORITY,
                         target_group_name=pi_tg_name,
@@ -2304,16 +2555,25 @@ class CdkStack(Stack):
                         cognito_user_pool_client=user_pool_client,
                         cognito_user_pool_domain=user_pool_domain,
                     )
-                    pi_public_url = (
-                        f"https://{PI_ALB_HOST_HEADER.strip()}"
-                        if ACM_SSL_CERTIFICATE_ARN
-                        else f"http://{PI_ALB_HOST_HEADER.strip()}"
-                    )
+                    pi_public_url = _pi_public_urls[0] if _pi_public_urls else ""
                     CfnOutput(
                         self,
                         "PiPublicUrl",
                         value=pi_public_url,
-                        description="Public URL for Pi agent UI (shared ALB, host-header rule)",
+                        description="Primary public URL for Pi agent UI (path and/or host ALB rules)",
+                    )
+                    if len(_pi_public_urls) > 1:
+                        CfnOutput(
+                            self,
+                            "PiPublicUrls",
+                            value=", ".join(_pi_public_urls),
+                            description="All configured Pi UI entry URLs",
+                        )
+                    CfnOutput(
+                        self,
+                        "PiAlbPathPrefix",
+                        value=PI_ALB_PATH_PREFIX_NORMALIZED,
+                        description="ALB path prefix for Pi when PI_ALB_ROUTING includes path",
                     )
                     CfnOutput(
                         self,
@@ -2331,8 +2591,8 @@ class CdkStack(Stack):
                         description="DOC_REDACTION_GRADIO_URL set on Pi tasks (Service Connect)",
                     )
                     print(
-                        "Pi agent attached to shared ALB with host header "
-                        f"{PI_ALB_HOST_HEADER.strip()}."
+                        "Pi agent attached to shared ALB "
+                        f"(routing={PI_ALB_ROUTING}, urls={', '.join(_pi_public_urls)})."
                     )
 
             except Exception as e:
@@ -2512,18 +2772,46 @@ class CdkStackCloudfront(Stack):
             else:
                 geo_restrict = None
 
+            response_headers_policy = None
+            if CLOUDFRONT_ENABLE_SECURE_RESPONSE_HEADERS == "True":
+                app_origin, cognito_login_url = resolve_cloudfront_csp_urls(
+                    cognito_redirection_url=COGNITO_REDIRECTION_URL,
+                    cloudfront_domain=CLOUDFRONT_DOMAIN,
+                    cognito_user_pool_domain_prefix=COGNITO_USER_POOL_DOMAIN_PREFIX,
+                    aws_region=AWS_REGION,
+                    cognito_user_pool_login_url=COGNITO_USER_POOL_LOGIN_URL,
+                    ssl_certificate_domain=SSL_CERTIFICATE_DOMAIN,
+                )
+                policy_name = f"{CDK_PREFIX}SecureResponseHeaders"[:128]
+                response_headers_policy = (
+                    create_secure_cloudfront_response_headers_policy(
+                        self,
+                        "SecureResponseHeadersPolicy",
+                        policy_name=policy_name,
+                        app_origin=app_origin,
+                        cognito_login_url=cognito_login_url,
+                    )
+                )
+                print(
+                    "CloudFront secure response headers: "
+                    f"app_origin={app_origin}, cognito_login_url={cognito_login_url}"
+                )
+
+            default_behavior = cloudfront.BehaviorOptions(
+                origin=origin,
+                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
+                cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
+                origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER,
+                response_headers_policy=response_headers_policy,
+            )
+
             cloudfront_distribution = cloudfront.Distribution(
                 self,
                 "CloudFrontDistribution",  # Logical ID
                 comment=CLOUDFRONT_DISTRIBUTION_NAME,  # Use name as comment for easier identification
                 geo_restriction=geo_restrict,
-                default_behavior=cloudfront.BehaviorOptions(
-                    origin=origin,
-                    viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-                    allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
-                    cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
-                    origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER,
-                ),
+                default_behavior=default_behavior,
                 web_acl_id=web_acl.attr_arn,
             )
             cloudfront_distribution.apply_removal_policy(resource_removal_policy)
