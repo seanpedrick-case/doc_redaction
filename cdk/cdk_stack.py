@@ -24,6 +24,10 @@ from aws_cdk import aws_logs as logs
 from aws_cdk import aws_s3 as s3
 from aws_cdk import aws_secretsmanager as secretsmanager
 from aws_cdk import aws_wafv2 as wafv2
+from cdk_cloudfront_headers import (
+    create_secure_cloudfront_response_headers_policy,
+    resolve_cloudfront_csp_urls,
+)
 from cdk_config import (
     ACCESS_LOG_DYNAMODB_TABLE_NAME,
     ACM_SSL_CERTIFICATE_ARN,
@@ -37,6 +41,7 @@ from cdk_config import (
     CDK_PREFIX,
     CLOUDFRONT_DISTRIBUTION_NAME,
     CLOUDFRONT_DOMAIN,
+    CLOUDFRONT_ENABLE_SECURE_RESPONSE_HEADERS,
     CLOUDFRONT_GEO_RESTRICTION,
     CLOUDFRONT_PREFIX_LIST_ID,
     CLUSTER_NAME,
@@ -50,6 +55,7 @@ from cdk_config import (
     COGNITO_USER_POOL_CLIENT_NAME,
     COGNITO_USER_POOL_CLIENT_SECRET_NAME,
     COGNITO_USER_POOL_DOMAIN_PREFIX,
+    COGNITO_USER_POOL_LOGIN_URL,
     COGNITO_USER_POOL_NAME,
     CUSTOM_HEADER,
     CUSTOM_HEADER_VALUE,
@@ -126,6 +132,7 @@ from cdk_config import (
     S3_OUTPUT_BUCKET_NAME,
     SAVE_LOGS_TO_DYNAMODB,
     SINGLE_NAT_GATEWAY_ID,
+    SSL_CERTIFICATE_DOMAIN,
     TASK_DEFINITION_FILE_LOCATION,
     USAGE_LOG_DYNAMODB_TABLE_NAME,
     USE_CLOUDFRONT,
@@ -2761,18 +2768,46 @@ class CdkStackCloudfront(Stack):
             else:
                 geo_restrict = None
 
+            response_headers_policy = None
+            if CLOUDFRONT_ENABLE_SECURE_RESPONSE_HEADERS == "True":
+                app_origin, cognito_login_url = resolve_cloudfront_csp_urls(
+                    cognito_redirection_url=COGNITO_REDIRECTION_URL,
+                    cloudfront_domain=CLOUDFRONT_DOMAIN,
+                    cognito_user_pool_domain_prefix=COGNITO_USER_POOL_DOMAIN_PREFIX,
+                    aws_region=AWS_REGION,
+                    cognito_user_pool_login_url=COGNITO_USER_POOL_LOGIN_URL,
+                    ssl_certificate_domain=SSL_CERTIFICATE_DOMAIN,
+                )
+                policy_name = f"{CDK_PREFIX}SecureResponseHeaders"[:128]
+                response_headers_policy = (
+                    create_secure_cloudfront_response_headers_policy(
+                        self,
+                        "SecureResponseHeadersPolicy",
+                        policy_name=policy_name,
+                        app_origin=app_origin,
+                        cognito_login_url=cognito_login_url,
+                    )
+                )
+                print(
+                    "CloudFront secure response headers: "
+                    f"app_origin={app_origin}, cognito_login_url={cognito_login_url}"
+                )
+
+            default_behavior = cloudfront.BehaviorOptions(
+                origin=origin,
+                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
+                cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
+                origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER,
+                response_headers_policy=response_headers_policy,
+            )
+
             cloudfront_distribution = cloudfront.Distribution(
                 self,
                 "CloudFrontDistribution",  # Logical ID
                 comment=CLOUDFRONT_DISTRIBUTION_NAME,  # Use name as comment for easier identification
                 geo_restriction=geo_restrict,
-                default_behavior=cloudfront.BehaviorOptions(
-                    origin=origin,
-                    viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-                    allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
-                    cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
-                    origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER,
-                ),
+                default_behavior=default_behavior,
                 web_acl_id=web_acl.attr_arn,
             )
             cloudfront_distribution.apply_removal_policy(resource_removal_policy)

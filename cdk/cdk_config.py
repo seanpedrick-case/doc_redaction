@@ -338,6 +338,12 @@ CLOUDFRONT_DISTRIBUTION_NAME = get_or_create_env_var(
 CLOUDFRONT_DOMAIN = get_or_create_env_var(
     "CLOUDFRONT_DOMAIN", "cloudfront_placeholder.net"
 )
+# Attach CSP / security response headers to the CDK CloudFront distribution (us-east-1 stack).
+CLOUDFRONT_ENABLE_SECURE_RESPONSE_HEADERS = get_or_create_env_var(
+    "CLOUDFRONT_ENABLE_SECURE_RESPONSE_HEADERS", "True"
+)
+# Optional override for manifest-src (Cognito hosted UI). Default: https://{COGNITO_USER_POOL_DOMAIN_PREFIX}.auth.{AWS_REGION}.amazoncognito.com
+COGNITO_USER_POOL_LOGIN_URL = get_or_create_env_var("COGNITO_USER_POOL_LOGIN_URL", "")
 
 
 # Certificate for Application load balancer (optional, for HTTPS and logins through the ALB)
