@@ -1,0 +1,1635 @@
+#!/usr/bin/env python3
+"""
+Interactive CDK installer for doc_redaction.
+
+Walks through demo vs production deployment profiles, writes config/cdk_config.env
+and cdk.json, optionally runs cdk deploy, post-deploy URL fixups, and
+post_cdk_build_quickstart.py.
+
+Usage examples::
+
+    # Full interactive install + deploy + quickstart
+    python cdk_install.py
+
+    # Demo sandbox, config only
+    python cdk_install.py --profile demo --config-only --yes
+
+    # Production with flags (partial non-interactive)
+    python cdk_install.py --profile production --vpc-name my-vpc \\
+        --cert-arn arn:aws:acm:eu-west-2:123:certificate/abc \\
+        --domain redaction.example.com --yes
+
+    # Redeploy using existing config, skip quickstart
+    python cdk_install.py --deploy-only --skip-quickstart
+
+    # Demo with Pi agent (Express) at /pi/
+    python cdk_install.py --profile demo --enable-pi --yes --config-only
+
+    # Production with Pi on dedicated hostname
+    python cdk_install.py --profile production --enable-pi-legacy \\
+        --pi-alb-routing host --pi-host-header agent.example.com --yes
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+CDK_DIR = Path(__file__).resolve().parent
+REPO_ROOT = CDK_DIR.parent
+CONFIG_DIR = CDK_DIR / "config"
+ENV_PATH = CONFIG_DIR / "cdk_config.env"
+PI_AGENT_ENV_PATH = CONFIG_DIR / "pi_agent.env"
+PI_AGENT_ENV_EXAMPLE = REPO_ROOT / "config" / "pi_agent.env.example"
+PI_ALB_ROUTING_MODES = ("path", "host", "both")
+CDK_JSON_PATH = CDK_DIR / "cdk.json"
+CDK_JSON_EXAMPLE = CDK_DIR / "cdk.json.example"
+QUICKSTART_SCRIPT = CDK_DIR / "post_cdk_build_quickstart.py"
+
+REGIONAL_STACK = "RedactionStack"
+CLOUDFRONT_STACK = "RedactionStackCloudfront"
+
+DEMO_PRESET: Dict[str, str] = {
+    "USE_ECS_EXPRESS_MODE": "True",
+    "USE_CLOUDFRONT": "False",
+    "RUN_USEAST_STACK": "False",
+    "ENABLE_RESOURCE_DELETE_PROTECTION": "False",
+    "ENABLE_APPREGISTRY": "False",
+    "ACM_SSL_CERTIFICATE_ARN": "",
+    "SSL_CERTIFICATE_DOMAIN": "",
+}
+
+PRODUCTION_PRESET: Dict[str, str] = {
+    "USE_ECS_EXPRESS_MODE": "False",
+    "USE_CLOUDFRONT": "True",
+    "RUN_USEAST_STACK": "True",
+    "ENABLE_RESOURCE_DELETE_PROTECTION": "True",
+    "ENABLE_APPREGISTRY": "True",
+}
+
+DEFAULT_CDK_JSON_CONTEXT: Dict[str, Any] = {
+    "@aws-cdk/aws-ec2:restrictDefaultSecurityGroup": False,
+}
+
+
+# ---------------------------------------------------------------------------
+# Wizard helpers
+# ---------------------------------------------------------------------------
+
+
+def ask(prompt: str, default: str = "") -> str:
+    suffix = f" [{default}]" if default else ""
+    value = input(f"{prompt}{suffix}: ").strip()
+    return value or default
+
+
+def ask_yes_no(prompt: str, default: bool = True) -> bool:
+    default_label = "Y/n" if default else "y/N"
+    while True:
+        raw = input(f"{prompt} ({default_label}): ").strip().lower()
+        if not raw:
+            return default
+        if raw in ("y", "yes"):
+            return True
+        if raw in ("n", "no"):
+            return False
+        print("Please enter y or n.")
+
+
+def ask_choice(prompt: str, options: Sequence[str], default_index: int = 0) -> int:
+    print(prompt)
+    for i, opt in enumerate(options):
+        marker = "*" if i == default_index else " "
+        print(f"  {marker} {i + 1}) {opt}")
+    while True:
+        raw = input(
+            f"Choice [1-{len(options)}] (default {default_index + 1}): "
+        ).strip()
+        if not raw:
+            return default_index
+        try:
+            idx = int(raw) - 1
+            if 0 <= idx < len(options):
+                return idx
+        except ValueError:
+            pass
+        print("Invalid choice.")
+
+
+def timestamp() -> str:
+    return datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
+def backup_file(path: Path) -> Optional[Path]:
+    if not path.is_file():
+        return None
+    backup = path.with_suffix(path.suffix + f".bak.{timestamp()}")
+    shutil.copy2(path, backup)
+    print(f"Backed up {path.name} -> {backup.name}")
+    return backup
+
+
+# ---------------------------------------------------------------------------
+# Python / cdk.json
+# ---------------------------------------------------------------------------
+
+
+def _venv_python_paths() -> List[Path]:
+    candidates: List[Path] = []
+    virtual_env = os.environ.get("VIRTUAL_ENV", "").strip()
+    if virtual_env:
+        root = Path(virtual_env)
+        if os.name == "nt":
+            candidates.append(root / "Scripts" / "python.exe")
+        else:
+            candidates.append(root / "bin" / "python")
+
+    rel_venvs = [
+        CDK_DIR / ".venv",
+        REPO_ROOT / ".venv",
+        REPO_ROOT.parent / ".venv",
+    ]
+    for venv_root in rel_venvs:
+        if os.name == "nt":
+            candidates.append(venv_root / "Scripts" / "python.exe")
+        else:
+            candidates.append(venv_root / "bin" / "python")
+
+    for name in ("python3", "python"):
+        found = shutil.which(name)
+        if found:
+            candidates.append(Path(found))
+
+    seen: set[str] = set()
+    unique: List[Path] = []
+    for p in [Path(sys.executable)] + candidates:
+        key = str(p.resolve()) if p.exists() else str(p)
+        if key not in seen:
+            seen.add(key)
+            unique.append(p)
+    return unique
+
+
+def _python_has_aws_cdk(python_exe: Path) -> Tuple[bool, str]:
+    if not python_exe.is_file():
+        return False, "not found"
+    cmd = [
+        str(python_exe),
+        "-c",
+        "import aws_cdk; print(getattr(aws_cdk, '__version__', 'unknown'))",
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=str(CDK_DIR),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        if result.returncode == 0:
+            version = (result.stdout or "").strip().splitlines()[-1]
+            return True, version
+        return False, (result.stderr or result.stdout or "import failed").strip()[:200]
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, str(exc)
+
+
+def discover_python_candidates() -> List[Tuple[Path, str]]:
+    found: List[Tuple[Path, str]] = []
+    for candidate in _venv_python_paths():
+        ok, detail = _python_has_aws_cdk(candidate)
+        if ok:
+            found.append((candidate.resolve(), detail))
+    return found
+
+
+def resolve_python_executable(
+    override: Optional[str] = None,
+    interactive: bool = True,
+    assume_yes: bool = False,
+) -> Path:
+    if override:
+        path = Path(override).resolve()
+        ok, detail = _python_has_aws_cdk(path)
+        if not ok:
+            raise SystemExit(
+                f"Python at {path} cannot import aws-cdk-lib: {detail}\n"
+                "Install CDK deps: pip install -r requirements.txt"
+            )
+        print(f"Using Python: {path} (aws-cdk-lib {detail})")
+        return path
+
+    candidates = discover_python_candidates()
+    if not candidates:
+        raise SystemExit(
+            "No Python interpreter with aws-cdk-lib found.\n"
+            "Activate your venv and run: pip install -r requirements.txt\n"
+            "Or pass --python /path/to/python"
+        )
+
+    if len(candidates) == 1 or assume_yes or not interactive:
+        path, version = candidates[0]
+        print(f"Using Python: {path} (aws-cdk-lib {version})")
+        return path
+
+    print("Python interpreters with aws-cdk-lib:")
+    labels = [f"{p} (aws-cdk-lib {v})" for p, v in candidates]
+    idx = ask_choice("Select Python for cdk.json", labels, default_index=0)
+    path, version = candidates[idx]
+    print(f"Selected: {path} (aws-cdk-lib {version})")
+    return path
+
+
+def format_cdk_app_command(python_exe: Path) -> str:
+    """Format the cdk.json ``app`` command for the current OS."""
+    py = str(python_exe)
+    if os.name == "nt":
+        py = py.replace("/", "\\")
+    return f"{py} app.py"
+
+
+def load_cdk_json_context(existing_path: Path) -> Dict[str, Any]:
+    if existing_path.is_file():
+        try:
+            data = json.loads(existing_path.read_text(encoding="utf-8"))
+            ctx = data.get("context")
+            if isinstance(ctx, dict):
+                return dict(ctx)
+        except json.JSONDecodeError:
+            pass
+    if CDK_JSON_EXAMPLE.is_file():
+        try:
+            data = json.loads(CDK_JSON_EXAMPLE.read_text(encoding="utf-8"))
+            ctx = data.get("context")
+            if isinstance(ctx, dict):
+                return dict(ctx)
+        except json.JSONDecodeError:
+            pass
+    return dict(DEFAULT_CDK_JSON_CONTEXT)
+
+
+def write_cdk_json(
+    python_exe: Path,
+    *,
+    force: bool = False,
+    skip: bool = False,
+) -> Optional[Path]:
+    if skip:
+        if not CDK_JSON_PATH.is_file():
+            raise SystemExit(
+                f"{CDK_JSON_PATH.name} not found; cannot use --skip-cdk-json."
+            )
+        print(f"Keeping existing {CDK_JSON_PATH.name} (--skip-cdk-json)")
+        return CDK_JSON_PATH
+
+    if CDK_JSON_PATH.is_file() and force:
+        backup_file(CDK_JSON_PATH)
+    elif not CDK_JSON_PATH.is_file():
+        pass
+    else:
+        # Update app only — backup first
+        backup_file(CDK_JSON_PATH)
+
+    context = load_cdk_json_context(CDK_JSON_PATH)
+    payload = {
+        "app": format_cdk_app_command(python_exe),
+        "output": "cdk.out",
+        "context": context,
+    }
+    CDK_JSON_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    print(f"Wrote {CDK_JSON_PATH}")
+    return CDK_JSON_PATH
+
+
+def smoke_test_python_app(python_exe: Path) -> None:
+    cmd = [str(python_exe), "-c", "import aws_cdk; import app"]
+    print("Smoke test: import aws_cdk and app ...")
+    result = subprocess.run(cmd, cwd=str(CDK_DIR), check=False)
+    if result.returncode != 0:
+        raise SystemExit("Python smoke test failed. Fix dependencies before deploying.")
+
+
+# ---------------------------------------------------------------------------
+# AWS discovery
+# ---------------------------------------------------------------------------
+
+
+def get_aws_identity(region: Optional[str] = None) -> Tuple[str, str]:
+    import boto3
+
+    session = boto3.Session(region_name=region)
+    sts = session.client("sts")
+    ident = sts.get_caller_identity()
+    account = ident["Account"]
+    resolved_region = (
+        region
+        or session.region_name
+        or os.environ.get("AWS_REGION")
+        or os.environ.get("AWS_DEFAULT_REGION")
+        or "eu-west-2"
+    )
+    return account, resolved_region
+
+
+def check_cdk_cli() -> str:
+    result = subprocess.run(
+        ["cdk", "--version"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise SystemExit(
+            "AWS CDK CLI not found on PATH.\n"
+            "Install: npm install -g aws-cdk  (or use npx aws-cdk)"
+        )
+    return (result.stdout or result.stderr or "").strip()
+
+
+def cdk_bootstrap_needed(account: str, region: str) -> bool:
+    import boto3
+    from botocore.exceptions import ClientError
+
+    cfn = boto3.client("cloudformation", region_name=region)
+    try:
+        cfn.describe_stacks(StackName="CDKToolkit")
+        return False
+    except ClientError as exc:
+        if "does not exist" in str(exc):
+            return True
+        raise
+
+
+def list_vpcs(region: str) -> List[Dict[str, str]]:
+    import boto3
+
+    ec2 = boto3.client("ec2", region_name=region)
+    response = ec2.describe_vpcs()
+    vpcs: List[Dict[str, str]] = []
+    for vpc in response.get("Vpcs", []):
+        name = ""
+        for tag in vpc.get("Tags", []):
+            if tag.get("Key") == "Name":
+                name = tag.get("Value", "")
+                break
+        vpcs.append(
+            {
+                "id": vpc["VpcId"],
+                "name": name or vpc["VpcId"],
+                "cidr": vpc.get("CidrBlock", ""),
+            }
+        )
+    return sorted(vpcs, key=lambda x: x["name"])
+
+
+def list_availability_zones(region: str) -> List[str]:
+    import boto3
+
+    ec2 = boto3.client("ec2", region_name=region)
+    zones = ec2.describe_availability_zones(
+        Filters=[{"Name": "state", "Values": ["available"]}]
+    )
+    return [z["ZoneName"] for z in zones.get("AvailabilityZones", [])]
+
+
+def list_subnets_in_vpc(vpc_id: str, region: str) -> List[Dict[str, str]]:
+    sys.path.insert(0, str(CDK_DIR))
+    from cdk_functions import _get_existing_subnets_in_vpc
+
+    data = _get_existing_subnets_in_vpc(vpc_id)
+    subnets: List[Dict[str, str]] = []
+    for name, info in data.get("by_name", {}).items():
+        subnets.append(
+            {
+                "name": name,
+                "id": info.get("id", ""),
+                "cidr": info.get("cidr", ""),
+                "az": info.get("az", ""),
+            }
+        )
+    return sorted(subnets, key=lambda x: x["name"])
+
+
+def list_acm_certificates(region: str) -> List[Dict[str, str]]:
+    import boto3
+
+    acm = boto3.client("acm", region_name=region)
+    certs: List[Dict[str, str]] = []
+    paginator = acm.get_paginator("list_certificates")
+    for page in paginator.paginate(CertificateStatuses=["ISSUED"]):
+        for summary in page.get("CertificateSummaryList", []):
+            arn = summary["CertificateArn"]
+            detail = acm.describe_certificate(CertificateArn=arn)["Certificate"]
+            domain = detail.get("DomainName", "")
+            sans = detail.get("SubjectAlternativeNames", [])
+            label = domain
+            if sans and sans[0] != domain:
+                label = f"{domain} (+{len(sans) - 1} SANs)"
+            certs.append({"arn": arn, "domain": domain, "label": label})
+    return certs
+
+
+def list_igws_for_vpc(vpc_id: str, region: str) -> List[Dict[str, str]]:
+    import boto3
+
+    ec2 = boto3.client("ec2", region_name=region)
+    response = ec2.describe_internet_gateways(
+        Filters=[{"Name": "attachment.vpc-id", "Values": [vpc_id]}]
+    )
+    return [
+        {"id": igw["InternetGatewayId"]} for igw in response.get("InternetGateways", [])
+    ]
+
+
+def list_albs_in_vpc(vpc_id: str, region: str) -> List[Dict[str, str]]:
+    import boto3
+
+    elbv2 = boto3.client("elbv2", region_name=region)
+    response = elbv2.describe_load_balancers()
+    albs: List[Dict[str, str]] = []
+    for lb in response.get("LoadBalancers", []):
+        if lb.get("VpcId") == vpc_id:
+            albs.append(
+                {
+                    "arn": lb["LoadBalancerArn"],
+                    "dns": lb["DNSName"],
+                    "name": lb["LoadBalancerName"],
+                }
+            )
+    return albs
+
+
+# ---------------------------------------------------------------------------
+# Env builder / writer
+# ---------------------------------------------------------------------------
+
+
+def format_list_env(values: Sequence[str], *, use_single_quotes: bool = False) -> str:
+    if not values:
+        return "[]"
+    if use_single_quotes:
+        inner = ", ".join(f"'{v}'" for v in values)
+    else:
+        inner = ", ".join(f'"{v}"' for v in values)
+    return f"[{inner}]"
+
+
+@dataclass
+class InstallAnswers:
+    profile: str = "demo"
+    aws_account_id: str = ""
+    aws_region: str = ""
+    cdk_prefix: str = ""
+    cognito_domain_prefix: str = ""
+    github_branch: str = "main"
+    vpc_mode: str = "existing"  # new | existing
+    vpc_name: str = ""
+    new_vpc_cidr: str = ""
+    subnet_mode: str = "auto"  # create | existing | auto
+    public_subnet_names: List[str] = field(default_factory=list)
+    private_subnet_names: List[str] = field(default_factory=list)
+    public_subnet_cidrs: List[str] = field(default_factory=list)
+    private_subnet_cidrs: List[str] = field(default_factory=list)
+    public_subnet_azs: List[str] = field(default_factory=list)
+    private_subnet_azs: List[str] = field(default_factory=list)
+    existing_igw_id: str = ""
+    existing_alb_arn: str = ""
+    existing_alb_dns: str = ""
+    acm_cert_arn: str = ""
+    ssl_domain: str = ""
+    cloudfront_geo: str = ""
+    enable_pi_express: bool = False
+    enable_pi_legacy: bool = False
+    enable_service_connect: bool = False
+    enable_s3_batch: bool = False
+    ecs_memory: str = "4096"
+    pi_alb_routing: str = "path"
+    pi_alb_path_prefix: str = "/pi"
+    pi_alb_host_header: str = ""
+    pi_alb_listener_rule_priority: str = ""
+    pi_gradio_port: str = "7862"
+    sc_discovery_name: str = "redaction"
+    pi_default_provider: str = "amazon-bedrock"
+    write_pi_agent_env: bool = True
+    overwrite_pi_agent_env: bool = False
+    custom_overrides: Dict[str, str] = field(default_factory=dict)
+    python_path: Optional[str] = None
+
+    @property
+    def pi_enabled(self) -> bool:
+        return self.enable_pi_express or self.enable_pi_legacy
+
+
+def normalize_pi_path_prefix(raw: str) -> str:
+    segment = (raw or "pi").strip().strip("/")
+    return f"/{segment}" if segment else "/pi"
+
+
+def default_pi_listener_priority(use_cloudfront: bool) -> str:
+    return "2" if use_cloudfront else "1"
+
+
+def merge_preset(
+    profile: str, overrides: Optional[Dict[str, str]] = None
+) -> Dict[str, str]:
+    base: Dict[str, str] = {}
+    if profile == "demo":
+        base.update(DEMO_PRESET)
+    elif profile == "production":
+        base.update(PRODUCTION_PRESET)
+    if overrides:
+        base.update(overrides)
+    return base
+
+
+def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
+    cdk_folder = str(CDK_DIR).replace("\\", "/")
+    if not cdk_folder.endswith("/"):
+        cdk_folder += "/"
+
+    values: Dict[str, str] = merge_preset(answers.profile, answers.custom_overrides)
+    values.update(
+        {
+            "CDK_PREFIX": answers.cdk_prefix,
+            "AWS_REGION": answers.aws_region,
+            "AWS_ACCOUNT_ID": answers.aws_account_id,
+            "CDK_FOLDER": cdk_folder,
+            "CONTEXT_FILE": "precheck.context.json",
+            "COGNITO_USER_POOL_DOMAIN_PREFIX": answers.cognito_domain_prefix,
+            "GITHUB_REPO_BRANCH": answers.github_branch,
+            "ECS_TASK_MEMORY_SIZE": answers.ecs_memory,
+            "EXISTING_IGW_ID": answers.existing_igw_id,
+            "EXISTING_LOAD_BALANCER_ARN": answers.existing_alb_arn,
+            "EXISTING_LOAD_BALANCER_DNS": answers.existing_alb_dns
+            or "placeholder_load_balancer_dns.net",
+            "ENABLE_PI_AGENT_EXPRESS_SERVICE": (
+                "True" if answers.enable_pi_express else "False"
+            ),
+            "ENABLE_PI_AGENT_ECS_SERVICE": (
+                "True" if answers.enable_pi_legacy else "False"
+            ),
+            "ENABLE_ECS_SERVICE_CONNECT": (
+                "True" if answers.enable_service_connect else "False"
+            ),
+            "ENABLE_S3_BATCH_ECS_TRIGGER": (
+                "True" if answers.enable_s3_batch else "False"
+            ),
+        }
+    )
+
+    use_cloudfront = values.get("USE_CLOUDFRONT") == "True"
+    if answers.pi_enabled:
+        routing = answers.pi_alb_routing.strip().lower()
+        path_prefix = normalize_pi_path_prefix(answers.pi_alb_path_prefix)
+        priority = (
+            answers.pi_alb_listener_rule_priority.strip()
+            or default_pi_listener_priority(use_cloudfront)
+        )
+        values.update(
+            {
+                "PI_ALB_ROUTING": routing,
+                "PI_ALB_PATH_PREFIX": path_prefix,
+                "PI_ALB_LISTENER_RULE_PRIORITY": priority,
+                "PI_GRADIO_PORT": answers.pi_gradio_port,
+                "ECS_SERVICE_CONNECT_DISCOVERY_NAME": answers.sc_discovery_name,
+            }
+        )
+        if routing in ("host", "both"):
+            values["PI_ALB_HOST_HEADER"] = answers.pi_alb_host_header.strip()
+        if answers.enable_pi_express:
+            values["ECS_EXPRESS_SC_PORT_NAME"] = "port-7860"
+            values["ECS_PI_EXPRESS_SC_PORT_NAME"] = f"port-{answers.pi_gradio_port}"
+
+    if answers.profile == "production":
+        values["ACM_SSL_CERTIFICATE_ARN"] = answers.acm_cert_arn
+        values["SSL_CERTIFICATE_DOMAIN"] = answers.ssl_domain
+        values["CLOUDFRONT_DOMAIN"] = "cloudfront_placeholder.net"
+        if answers.cloudfront_geo:
+            values["CLOUDFRONT_GEO_RESTRICTION"] = answers.cloudfront_geo
+
+    if answers.vpc_mode == "new":
+        values["VPC_NAME"] = ""
+        values["NEW_VPC_CIDR"] = answers.new_vpc_cidr
+        values["NEW_VPC_DEFAULT_NAME"] = f"{answers.cdk_prefix}vpc"
+        values["PUBLIC_SUBNETS_TO_USE"] = ""
+        values["PRIVATE_SUBNETS_TO_USE"] = ""
+        values["PUBLIC_SUBNET_CIDR_BLOCKS"] = ""
+        values["PRIVATE_SUBNET_CIDR_BLOCKS"] = ""
+        values["PUBLIC_SUBNET_AVAILABILITY_ZONES"] = ""
+        values["PRIVATE_SUBNET_AVAILABILITY_ZONES"] = ""
+    else:
+        values["VPC_NAME"] = answers.vpc_name
+        values["NEW_VPC_CIDR"] = ""
+        if answers.subnet_mode == "auto":
+            values["PUBLIC_SUBNETS_TO_USE"] = ""
+            values["PRIVATE_SUBNETS_TO_USE"] = ""
+            values["PUBLIC_SUBNET_CIDR_BLOCKS"] = ""
+            values["PRIVATE_SUBNET_CIDR_BLOCKS"] = ""
+            values["PUBLIC_SUBNET_AVAILABILITY_ZONES"] = ""
+            values["PRIVATE_SUBNET_AVAILABILITY_ZONES"] = ""
+        elif answers.subnet_mode == "existing":
+            values["PUBLIC_SUBNETS_TO_USE"] = format_list_env(
+                answers.public_subnet_names
+            )
+            values["PRIVATE_SUBNETS_TO_USE"] = format_list_env(
+                answers.private_subnet_names
+            )
+            values["PUBLIC_SUBNET_CIDR_BLOCKS"] = ""
+            values["PRIVATE_SUBNET_CIDR_BLOCKS"] = ""
+            values["PUBLIC_SUBNET_AVAILABILITY_ZONES"] = ""
+            values["PRIVATE_SUBNET_AVAILABILITY_ZONES"] = ""
+        else:  # create
+            values["PUBLIC_SUBNETS_TO_USE"] = format_list_env(
+                answers.public_subnet_names
+            )
+            values["PRIVATE_SUBNETS_TO_USE"] = format_list_env(
+                answers.private_subnet_names
+            )
+            values["PUBLIC_SUBNET_CIDR_BLOCKS"] = format_list_env(
+                answers.public_subnet_cidrs, use_single_quotes=True
+            )
+            values["PRIVATE_SUBNET_CIDR_BLOCKS"] = format_list_env(
+                answers.private_subnet_cidrs, use_single_quotes=True
+            )
+            values["PUBLIC_SUBNET_AVAILABILITY_ZONES"] = format_list_env(
+                answers.public_subnet_azs, use_single_quotes=True
+            )
+            values["PRIVATE_SUBNET_AVAILABILITY_ZONES"] = format_list_env(
+                answers.private_subnet_azs, use_single_quotes=True
+            )
+
+    return values
+
+
+def validate_env_values(values: Dict[str, str]) -> List[str]:
+    errors: List[str] = []
+
+    express = values.get("USE_ECS_EXPRESS_MODE") == "True"
+    acm = (values.get("ACM_SSL_CERTIFICATE_ARN") or "").strip()
+    if express and acm:
+        errors.append(
+            "USE_ECS_EXPRESS_MODE=True cannot be used with ACM_SSL_CERTIFICATE_ARN."
+        )
+
+    if values.get("ENABLE_ECS_SERVICE_CONNECT") == "True" and express:
+        errors.append(
+            "ENABLE_ECS_SERVICE_CONNECT requires legacy Fargate (not Express)."
+        )
+
+    if values.get("ENABLE_S3_BATCH_ECS_TRIGGER") == "True" and express:
+        errors.append(
+            "ENABLE_S3_BATCH_ECS_TRIGGER requires legacy Fargate (not Express)."
+        )
+
+    pi_ecs = values.get("ENABLE_PI_AGENT_ECS_SERVICE") == "True"
+    pi_express = values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True"
+    if pi_ecs and pi_express:
+        errors.append("Enable at most one Pi mode (ECS or Express).")
+    if pi_express and not express:
+        errors.append(
+            "ENABLE_PI_AGENT_EXPRESS_SERVICE requires USE_ECS_EXPRESS_MODE=True."
+        )
+    if pi_ecs and express:
+        errors.append(
+            "ENABLE_PI_AGENT_ECS_SERVICE requires USE_ECS_EXPRESS_MODE=False."
+        )
+
+    vpc_name = (values.get("VPC_NAME") or "").strip()
+    new_cidr = (values.get("NEW_VPC_CIDR") or "").strip()
+    if not vpc_name and not new_cidr:
+        errors.append("Set VPC_NAME (existing VPC) or NEW_VPC_CIDR (new VPC).")
+
+    if values.get("USE_CLOUDFRONT") == "True" and not express:
+        if not acm:
+            errors.append(
+                "Production CloudFront path requires ACM_SSL_CERTIFICATE_ARN."
+            )
+        if not (values.get("SSL_CERTIFICATE_DOMAIN") or "").strip():
+            errors.append("Production CloudFront path requires SSL_CERTIFICATE_DOMAIN.")
+
+    if not (values.get("CDK_PREFIX") or "").strip():
+        errors.append("CDK_PREFIX is required.")
+    if not (values.get("COGNITO_USER_POOL_DOMAIN_PREFIX") or "").strip():
+        errors.append("COGNITO_USER_POOL_DOMAIN_PREFIX is required.")
+
+    if pi_ecs and values.get("ENABLE_ECS_SERVICE_CONNECT") != "True":
+        errors.append(
+            "ENABLE_PI_AGENT_ECS_SERVICE=True requires ENABLE_ECS_SERVICE_CONNECT=True."
+        )
+
+    pi_routing = (values.get("PI_ALB_ROUTING") or "").strip().lower()
+    if pi_ecs or pi_express:
+        if pi_routing not in PI_ALB_ROUTING_MODES:
+            errors.append(
+                f"PI_ALB_ROUTING must be one of {list(PI_ALB_ROUTING_MODES)}; got '{pi_routing}'."
+            )
+        elif (
+            pi_routing in ("host", "both")
+            and not (values.get("PI_ALB_HOST_HEADER") or "").strip()
+        ):
+            errors.append(
+                "PI_ALB_HOST_HEADER is required when PI_ALB_ROUTING is 'host' or 'both'."
+            )
+
+    return errors
+
+
+def build_pi_agent_env_values(answers: InstallAnswers) -> Dict[str, str]:
+    """Runtime settings for the Pi Gradio app (uploaded to S3 as pi_agent.env)."""
+    path_prefix = normalize_pi_path_prefix(answers.pi_alb_path_prefix)
+    values = {
+        "PI_DEPLOYMENT_PROFILE": "aws-ecs",
+        "PI_DEFAULT_PROVIDER": answers.pi_default_provider,
+        "DOC_REDACTION_GRADIO_URL": f"http://{answers.sc_discovery_name}:7860",
+        "RUN_AWS_FUNCTIONS": "True",
+        "AWS_REGION": answers.aws_region,
+        "PI_GRADIO_PORT": answers.pi_gradio_port,
+        "PI_DEFAULT_OCR_METHOD": "AWS Textract service - all PDF types",
+        "PI_DEFAULT_PII_METHOD": "AWS Comprehend",
+    }
+    if answers.pi_alb_routing.strip().lower() in ("path", "both"):
+        values["PI_ROOT_PATH"] = path_prefix
+        values["ROOT_PATH"] = path_prefix
+        values["FASTAPI_ROOT_PATH"] = path_prefix
+    return values
+
+
+def write_pi_agent_env_file(
+    answers: InstallAnswers,
+    *,
+    overwrite: bool = False,
+) -> Optional[Path]:
+    if not answers.pi_enabled or not answers.write_pi_agent_env:
+        return None
+
+    updates = build_pi_agent_env_values(answers)
+    PI_AGENT_ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    if PI_AGENT_ENV_PATH.is_file() and not overwrite:
+        existing = read_env_file(PI_AGENT_ENV_PATH)
+        existing.update(updates)
+        backup_file(PI_AGENT_ENV_PATH)
+        lines = [f"{k}={v}" for k, v in existing.items()]
+        PI_AGENT_ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print(f"Updated {PI_AGENT_ENV_PATH} (AWS/Pi keys merged)")
+        return PI_AGENT_ENV_PATH
+
+    if PI_AGENT_ENV_EXAMPLE.is_file() and not overwrite:
+        backup_file(PI_AGENT_ENV_PATH) if PI_AGENT_ENV_PATH.is_file() else None
+        shutil.copy2(PI_AGENT_ENV_EXAMPLE, PI_AGENT_ENV_PATH)
+        existing = read_env_file(PI_AGENT_ENV_PATH)
+        existing.update(updates)
+        lines = [f"{k}={v}" for k, v in existing.items()]
+        PI_AGENT_ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print(f"Created {PI_AGENT_ENV_PATH} from example + AWS defaults")
+        return PI_AGENT_ENV_PATH
+
+    backup_file(PI_AGENT_ENV_PATH) if PI_AGENT_ENV_PATH.is_file() else None
+    lines = [
+        "# Generated by cdk_install.py — Pi agent runtime config for AWS ECS",
+        *[f"{k}={v}" for k, v in updates.items()],
+    ]
+    PI_AGENT_ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"Wrote {PI_AGENT_ENV_PATH}")
+    return PI_AGENT_ENV_PATH
+
+
+def write_env_file(path: Path, values: Dict[str, str]) -> Path:
+    backup_file(path)
+    lines = [f"{key}={val}" for key, val in values.items()]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"Wrote {path}")
+    return path
+
+
+def read_env_file(path: Path) -> Dict[str, str]:
+    values: Dict[str, str] = {}
+    if not path.is_file():
+        return values
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            key, _, val = line.partition("=")
+            values[key.strip()] = val.strip()
+    return values
+
+
+def patch_env_file(path: Path, updates: Dict[str, str]) -> None:
+    values = read_env_file(path)
+    values.update(updates)
+    write_env_file(path, values)
+
+
+def print_summary(values: Dict[str, str], python_exe: Optional[Path] = None) -> None:
+    keys = [
+        "CDK_PREFIX",
+        "AWS_REGION",
+        "AWS_ACCOUNT_ID",
+        "USE_ECS_EXPRESS_MODE",
+        "USE_CLOUDFRONT",
+        "ENABLE_RESOURCE_DELETE_PROTECTION",
+        "VPC_NAME",
+        "NEW_VPC_CIDR",
+        "ACM_SSL_CERTIFICATE_ARN",
+        "SSL_CERTIFICATE_DOMAIN",
+        "ENABLE_PI_AGENT_EXPRESS_SERVICE",
+        "ENABLE_PI_AGENT_ECS_SERVICE",
+        "PI_ALB_ROUTING",
+        "PI_ALB_PATH_PREFIX",
+        "PI_ALB_HOST_HEADER",
+    ]
+    print("\n--- Configuration summary ---")
+    for key in keys:
+        if key in values:
+            print(f"  {key}={values[key]}")
+    if python_exe:
+        print(f"  cdk.json app={format_cdk_app_command(python_exe)}")
+    print("----------------------------\n")
+
+
+# ---------------------------------------------------------------------------
+# Deploy runner
+# ---------------------------------------------------------------------------
+
+
+def _deploy_env() -> Dict[str, str]:
+    env = os.environ.copy()
+    env["CDK_CONFIG_PATH"] = str(ENV_PATH)
+    env["CDK_FOLDER"] = str(CDK_DIR).replace("\\", "/") + "/"
+    return env
+
+
+def run_cdk_command(
+    args: List[str], *, check: bool = True
+) -> subprocess.CompletedProcess:
+    cmd = ["cdk", *args]
+    print(f"Running: {' '.join(cmd)}")
+    return subprocess.run(
+        cmd,
+        cwd=str(CDK_DIR),
+        env=_deploy_env(),
+        check=check,
+    )
+
+
+def fetch_stack_output(
+    stack_name: str,
+    output_key: str,
+    region: str,
+) -> Optional[str]:
+    import boto3
+    from botocore.exceptions import ClientError
+
+    cfn = boto3.client("cloudformation", region_name=region)
+    try:
+        response = cfn.describe_stacks(StackName=stack_name)
+    except ClientError:
+        return None
+    for stack in response.get("Stacks", []):
+        for output in stack.get("Outputs", []):
+            if output.get("OutputKey") == output_key:
+                return output.get("OutputValue")
+    return None
+
+
+def apply_post_deploy_fixup(values: Dict[str, str], assume_yes: bool) -> bool:
+    """Return True if a redeploy was performed."""
+    region = values.get("AWS_REGION", "")
+    express = values.get("USE_ECS_EXPRESS_MODE") == "True"
+    cloudfront = values.get("USE_CLOUDFRONT") == "True"
+    redeployed = False
+
+    if express and not cloudfront:
+        endpoint = fetch_stack_output(REGIONAL_STACK, "ExpressServiceEndpoint", region)
+        if not endpoint:
+            print("No ExpressServiceEndpoint output found; skipping Cognito URL fixup.")
+            return False
+        endpoint = endpoint.rstrip("/")
+        current = (values.get("ECS_EXPRESS_COGNITO_REDIRECT_BASE") or "").strip()
+        if current == endpoint:
+            print("Express Cognito redirect base already set.")
+            return False
+        print(f"Setting ECS_EXPRESS_COGNITO_REDIRECT_BASE={endpoint}")
+        patch_env_file(
+            ENV_PATH,
+            {
+                "ECS_EXPRESS_COGNITO_REDIRECT_BASE": endpoint,
+                "COGNITO_REDIRECTION_URL": endpoint,
+            },
+        )
+        if assume_yes or ask_yes_no(
+            "Redeploy RedactionStack with Express Cognito URLs?", True
+        ):
+            run_cdk_command(
+                ["deploy", REGIONAL_STACK, "--require-approval", "broadening"]
+            )
+            redeployed = True
+
+    elif cloudfront:
+        cf_domain = fetch_stack_output(
+            CLOUDFRONT_STACK, "CloudFrontDistributionURL", "us-east-1"
+        )
+        if not cf_domain:
+            print(
+                "No CloudFrontDistributionURL output found; skipping CloudFront fixup."
+            )
+            return False
+        current = (values.get("CLOUDFRONT_DOMAIN") or "").strip()
+        if current == cf_domain:
+            print("CLOUDFRONT_DOMAIN already set.")
+            return False
+        print(f"Setting CLOUDFRONT_DOMAIN={cf_domain}")
+        patch_env_file(
+            ENV_PATH,
+            {
+                "CLOUDFRONT_DOMAIN": cf_domain,
+                "COGNITO_REDIRECTION_URL": f"https://{cf_domain}",
+            },
+        )
+        if assume_yes or ask_yes_no(
+            "Redeploy stacks with real CloudFront domain?", True
+        ):
+            run_cdk_command(
+                [
+                    "deploy",
+                    REGIONAL_STACK,
+                    CLOUDFRONT_STACK,
+                    "--require-approval",
+                    "broadening",
+                ]
+            )
+            redeployed = True
+
+    return redeployed
+
+
+def run_quickstart(python_exe: Path) -> None:
+    if not QUICKSTART_SCRIPT.is_file():
+        raise SystemExit(f"Quickstart script not found: {QUICKSTART_SCRIPT}")
+    cmd = [str(python_exe), str(QUICKSTART_SCRIPT)]
+    print(f"Running: {' '.join(cmd)}")
+    subprocess.run(cmd, cwd=str(CDK_DIR), env=_deploy_env(), check=True)
+
+
+# ---------------------------------------------------------------------------
+# Pi agent configuration
+# ---------------------------------------------------------------------------
+
+
+def apply_pi_cli_flags(args: argparse.Namespace, answers: InstallAnswers) -> None:
+    if getattr(args, "enable_pi", False):
+        preset = merge_preset(answers.profile, answers.custom_overrides)
+        if preset.get("USE_ECS_EXPRESS_MODE") == "True":
+            answers.enable_pi_express = True
+        else:
+            answers.enable_pi_legacy = True
+            answers.enable_service_connect = True
+    if getattr(args, "enable_pi_express", False):
+        answers.enable_pi_express = True
+    if getattr(args, "enable_pi_legacy", False):
+        answers.enable_pi_legacy = True
+        answers.enable_service_connect = True
+    if args.pi_alb_routing:
+        answers.pi_alb_routing = args.pi_alb_routing
+    if args.pi_path_prefix:
+        answers.pi_alb_path_prefix = args.pi_path_prefix
+    if args.pi_host_header:
+        answers.pi_alb_host_header = args.pi_host_header
+    if args.pi_listener_priority:
+        answers.pi_alb_listener_rule_priority = args.pi_listener_priority
+    if args.pi_gradio_port:
+        answers.pi_gradio_port = args.pi_gradio_port
+    if args.sc_discovery_name:
+        answers.sc_discovery_name = args.sc_discovery_name
+    if args.pi_provider:
+        answers.pi_default_provider = args.pi_provider
+    if args.skip_pi_agent_env:
+        answers.write_pi_agent_env = False
+
+
+def configure_pi_options(
+    answers: InstallAnswers,
+    args: argparse.Namespace,
+    *,
+    interactive: bool,
+    assume_yes: bool,
+) -> None:
+    preset = merge_preset(answers.profile, answers.custom_overrides)
+    use_express = preset.get("USE_ECS_EXPRESS_MODE") == "True"
+    use_cloudfront = preset.get("USE_CLOUDFRONT") == "True"
+
+    apply_pi_cli_flags(args, answers)
+
+    if not answers.pi_enabled and interactive:
+        if use_express:
+            label = "Deploy Pi agent (second Gradio app on Express, shared ALB)?"
+            answers.enable_pi_express = ask_yes_no(label, default=False)
+        else:
+            label = "Deploy Pi agent (second Gradio app on legacy Fargate + Service Connect)?"
+            if ask_yes_no(label, default=False):
+                answers.enable_pi_legacy = True
+                answers.enable_service_connect = True
+
+    if not answers.pi_enabled:
+        return
+
+    if not answers.pi_alb_listener_rule_priority:
+        answers.pi_alb_listener_rule_priority = default_pi_listener_priority(
+            use_cloudfront
+        )
+
+    if interactive and not (
+        args.pi_alb_routing or args.pi_path_prefix or args.pi_host_header or assume_yes
+    ):
+        print("\n--- Pi agent ALB routing ---")
+        ridx = ask_choice(
+            "How should the shared ALB route traffic to the Pi UI?",
+            [
+                "Path prefix (default /pi/ — e.g. https://host/pi/)",
+                "Dedicated hostname (PI_ALB_HOST_HEADER)",
+                "Both path prefix and hostname",
+            ],
+            default_index=0,
+        )
+        answers.pi_alb_routing = PI_ALB_ROUTING_MODES[ridx]
+
+        if answers.pi_alb_routing in ("path", "both"):
+            answers.pi_alb_path_prefix = ask(
+                "Pi path prefix",
+                answers.pi_alb_path_prefix,
+            )
+        if answers.pi_alb_routing in ("host", "both"):
+            default_host = ""
+            if answers.ssl_domain:
+                default_host = f"agent.{answers.ssl_domain}"
+            answers.pi_alb_host_header = ask(
+                "Pi ALB host header (DNS CNAME to CloudFront/ALB)",
+                default_host,
+            )
+
+        if use_cloudfront:
+            default_pri = default_pi_listener_priority(True)
+            answers.pi_alb_listener_rule_priority = ask(
+                "Pi ALB listener rule priority (use 2+ if CloudFront uses priority 1)",
+                default_pri,
+            )
+
+        answers.sc_discovery_name = ask(
+            "Service Connect discovery name for main app",
+            answers.sc_discovery_name,
+        )
+        answers.pi_gradio_port = ask("Pi Gradio port", answers.pi_gradio_port)
+
+        if ask_yes_no(
+            f"Write/update {PI_AGENT_ENV_PATH.name} for AWS ECS (DOC_REDACTION_GRADIO_URL, etc.)?",
+            default=True,
+        ):
+            answers.write_pi_agent_env = True
+            if PI_AGENT_ENV_PATH.is_file():
+                answers.overwrite_pi_agent_env = ask_yes_no(
+                    "pi_agent.env exists — replace file from example template?",
+                    default=False,
+                )
+        else:
+            answers.write_pi_agent_env = False
+
+    print(
+        f"Pi agent: "
+        f"{'Express' if answers.enable_pi_express else 'legacy Fargate'}, "
+        f"routing={answers.pi_alb_routing}, "
+        f"prefix={normalize_pi_path_prefix(answers.pi_alb_path_prefix)}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Interactive wizard
+# ---------------------------------------------------------------------------
+
+
+def run_wizard(args: argparse.Namespace) -> InstallAnswers:
+    answers = InstallAnswers()
+    interactive = not args.yes
+    assume_yes = args.yes
+
+    if args.profile:
+        answers.profile = args.profile
+    elif interactive:
+        idx = ask_choice(
+            "Deployment profile",
+            [
+                "Demonstration (Express, no CloudFront, no delete protection)",
+                "Production (ACM cert, CloudFront, delete protection)",
+                "Custom (configure individual toggles)",
+            ],
+        )
+        answers.profile = ("demo", "production", "custom")[idx]
+    else:
+        answers.profile = "demo"
+
+    if answers.profile == "custom" and interactive:
+        answers.custom_overrides["USE_ECS_EXPRESS_MODE"] = (
+            "True" if ask_yes_no("Use ECS Express Mode?", False) else "False"
+        )
+        answers.custom_overrides["USE_CLOUDFRONT"] = (
+            "True" if ask_yes_no("Use CloudFront?", True) else "False"
+        )
+        answers.custom_overrides["RUN_USEAST_STACK"] = (
+            "True"
+            if answers.custom_overrides.get("USE_CLOUDFRONT") == "True"
+            and ask_yes_no(
+                "Deploy us-east-1 CloudFront stack (RUN_USEAST_STACK)?", True
+            )
+            else "False"
+        )
+        answers.custom_overrides["ENABLE_RESOURCE_DELETE_PROTECTION"] = (
+            "True" if ask_yes_no("Enable delete protection?", True) else "False"
+        )
+        answers.custom_overrides["ENABLE_APPREGISTRY"] = (
+            "True" if ask_yes_no("Enable AppRegistry?", True) else "False"
+        )
+
+    try:
+        account, region = get_aws_identity(args.region)
+    except Exception as exc:
+        raise SystemExit(f"AWS credentials error: {exc}") from exc
+
+    answers.aws_account_id = args.account or account
+    answers.aws_region = args.region or region
+
+    if interactive and not args.account:
+        answers.aws_account_id = ask("AWS account ID", answers.aws_account_id)
+    if interactive and not args.region:
+        answers.aws_region = ask("AWS region", answers.aws_region)
+
+    default_prefix = f"{answers.profile.capitalize()}-Redaction-"
+    answers.cdk_prefix = args.cdk_prefix or (
+        ask("CDK resource prefix (e.g. MyOrg-Redaction-)", default_prefix)
+        if interactive
+        else default_prefix
+    )
+    if not answers.cdk_prefix.endswith("-"):
+        answers.cdk_prefix += "-"
+
+    default_cognito = re.sub(r"[^a-z0-9-]", "-", answers.cdk_prefix.lower())[:20]
+    default_cognito = default_cognito.strip("-") or "redaction-app"
+    answers.cognito_domain_prefix = args.cognito_prefix or (
+        ask(
+            "Cognito hosted UI domain prefix (must be globally unique)", default_cognito
+        )
+        if interactive
+        else default_cognito
+    )
+
+    # VPC
+    if args.new_vpc_cidr:
+        answers.vpc_mode = "new"
+        answers.new_vpc_cidr = args.new_vpc_cidr
+    elif args.vpc_name:
+        answers.vpc_mode = "existing"
+        answers.vpc_name = args.vpc_name
+    elif interactive:
+        vpc_idx = ask_choice(
+            "VPC",
+            ["Create new VPC", "Use existing VPC"],
+        )
+        answers.vpc_mode = "new" if vpc_idx == 0 else "existing"
+    else:
+        answers.vpc_mode = "existing"
+
+    if answers.vpc_mode == "new":
+        answers.new_vpc_cidr = answers.new_vpc_cidr or ask(
+            "New VPC CIDR", "10.0.0.0/24"
+        )
+    else:
+        if not answers.vpc_name:
+            vpcs = list_vpcs(answers.aws_region)
+            if not vpcs:
+                raise SystemExit("No VPCs found in region.")
+            if interactive:
+                labels = [f"{v['name']} ({v['cidr']})" for v in vpcs]
+                vidx = ask_choice("Select VPC", labels)
+                answers.vpc_name = vpcs[vidx]["name"]
+            else:
+                raise SystemExit(
+                    "--vpc-name required for existing VPC in non-interactive mode."
+                )
+        vpc_list = list_vpcs(answers.aws_region)
+        vpc_id = next(
+            (v["id"] for v in vpc_list if v["name"] == answers.vpc_name),
+            None,
+        )
+
+        # Subnets
+        if interactive:
+            sub_idx = ask_choice(
+                "Subnets in existing VPC",
+                [
+                    "Auto-discover suitable subnets (leave subnet lists empty)",
+                    "Use existing named subnets",
+                    "Create new stack-specific subnets (names + CIDR + AZ)",
+                ],
+                default_index=0,
+            )
+            answers.subnet_mode = ("auto", "existing", "create")[sub_idx]
+        else:
+            answers.subnet_mode = args.subnet_mode or "auto"
+
+        azs = list_availability_zones(answers.aws_region)[:3]
+        if answers.subnet_mode in ("existing", "create") and vpc_id:
+            subnets = list_subnets_in_vpc(vpc_id, answers.aws_region)
+            if answers.subnet_mode == "existing" and interactive:
+                print("Enter public subnet names (comma-separated), or pick from:")
+                for s in subnets:
+                    print(f"  - {s['name']} ({s['cidr']}, {s['az']})")
+                pub = ask("Public subnet names", "")
+                priv = ask("Private subnet names", "")
+                answers.public_subnet_names = [
+                    x.strip() for x in pub.split(",") if x.strip()
+                ]
+                answers.private_subnet_names = [
+                    x.strip() for x in priv.split(",") if x.strip()
+                ]
+            elif answers.subnet_mode == "create":
+                n_az = len(azs)
+                answers.public_subnet_names = [
+                    f"{answers.cdk_prefix}PublicSubnet{i + 1}" for i in range(n_az)
+                ]
+                answers.private_subnet_names = [
+                    f"{answers.cdk_prefix}PrivateSubnet{i + 1}" for i in range(n_az)
+                ]
+                if interactive:
+                    print(f"Suggested AZs: {', '.join(azs)}")
+                    for i, name in enumerate(answers.public_subnet_names):
+                        cidr = ask(f"CIDR for public {name}", f"10.0.{i}.0/28")
+                        answers.public_subnet_cidrs.append(cidr)
+                        answers.public_subnet_azs.append(azs[i % len(azs)])
+                    for i, name in enumerate(answers.private_subnet_names):
+                        cidr = ask(f"CIDR for private {name}", f"10.0.{10 + i}.0/28")
+                        answers.private_subnet_cidrs.append(cidr)
+                        answers.private_subnet_azs.append(azs[i % len(azs)])
+                else:
+                    answers.public_subnet_azs = azs[:n_az]
+                    answers.private_subnet_azs = azs[:n_az]
+
+        # Optional infra reuse
+        if (
+            vpc_id
+            and interactive
+            and ask_yes_no("Configure optional existing infra (IGW/ALB)?", False)
+        ):
+            igws = list_igws_for_vpc(vpc_id, answers.aws_region)
+            if igws:
+                print("Internet gateways:", ", ".join(g["id"] for g in igws))
+                answers.existing_igw_id = ask("EXISTING_IGW_ID (blank=auto)", "")
+            albs = list_albs_in_vpc(vpc_id, answers.aws_region)
+            if albs:
+                labels = [f"{a['name']} ({a['dns']})" for a in albs]
+                if ask_yes_no("Reuse an existing ALB?", False):
+                    aidx = ask_choice("Select ALB", labels)
+                    answers.existing_alb_arn = albs[aidx]["arn"]
+                    answers.existing_alb_dns = albs[aidx]["dns"]
+
+    # Production TLS
+    preset = merge_preset(answers.profile, answers.custom_overrides)
+    if (
+        preset.get("USE_CLOUDFRONT") == "True"
+        and preset.get("USE_ECS_EXPRESS_MODE") != "True"
+    ):
+        if args.cert_arn:
+            answers.acm_cert_arn = args.cert_arn
+            answers.ssl_domain = args.domain or ""
+        elif interactive:
+            certs = list_acm_certificates(answers.aws_region)
+            if not certs:
+                raise SystemExit(f"No ISSUED ACM certificates in {answers.aws_region}.")
+            labels = [f"{c['label']} — {c['arn']}" for c in certs]
+            cidx = ask_choice("Select ACM certificate", labels)
+            answers.acm_cert_arn = certs[cidx]["arn"]
+            answers.ssl_domain = ask(
+                "SSL certificate domain (Cognito/CloudFront URL)",
+                certs[cidx]["domain"],
+            )
+        else:
+            raise SystemExit(
+                "--cert-arn and --domain required for production in non-interactive mode."
+            )
+        if interactive:
+            answers.cloudfront_geo = ask(
+                "CloudFront geo restriction (e.g. GB, blank=none)", ""
+            )
+
+    configure_pi_options(
+        answers,
+        args,
+        interactive=interactive,
+        assume_yes=assume_yes,
+    )
+
+    # Advanced add-ons (non-Pi)
+    is_express = (
+        merge_preset(answers.profile, answers.custom_overrides).get(
+            "USE_ECS_EXPRESS_MODE"
+        )
+        == "True"
+    )
+    if interactive and ask_yes_no("Configure other optional add-ons?", False):
+        if not is_express:
+            if not answers.enable_service_connect:
+                answers.enable_service_connect = ask_yes_no(
+                    "Enable ECS Service Connect (without Pi)?", False
+                )
+            answers.enable_s3_batch = ask_yes_no("Enable S3 batch ECS trigger?", False)
+        mem = ask("ECS task memory (MB)", answers.ecs_memory)
+        if mem:
+            answers.ecs_memory = mem
+
+    answers.python_path = args.python
+    return answers
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        description="Interactive CDK installer for doc_redaction",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    p.add_argument("--profile", choices=("demo", "production", "custom"))
+    p.add_argument(
+        "--yes", action="store_true", help="Accept defaults / skip confirmations"
+    )
+    p.add_argument("--config-only", action="store_true", help="Write config files only")
+    p.add_argument(
+        "--deploy-only",
+        action="store_true",
+        help="Skip wizard; use existing cdk_config.env",
+    )
+    p.add_argument(
+        "--synth-only", action="store_true", help="Run cdk synth only (no deploy)"
+    )
+    p.add_argument("--skip-deploy", action="store_true", help="Skip cdk deploy")
+    p.add_argument(
+        "--skip-quickstart",
+        action="store_true",
+        help="Skip post_cdk_build_quickstart.py",
+    )
+    p.add_argument(
+        "--skip-cdk-json", action="store_true", help="Do not update cdk.json"
+    )
+    p.add_argument(
+        "--refresh-cdk-json", action="store_true", help="Force rewrite cdk.json app key"
+    )
+    p.add_argument("--python", help="Python executable for cdk.json")
+    p.add_argument("--region", help="AWS region")
+    p.add_argument("--account", help="AWS account ID")
+    p.add_argument("--cdk-prefix", help="CDK resource prefix")
+    p.add_argument("--cognito-prefix", help="Cognito user pool domain prefix")
+    p.add_argument("--vpc-name", help="Existing VPC Name tag")
+    p.add_argument("--new-vpc-cidr", help="CIDR for new VPC")
+    p.add_argument("--subnet-mode", choices=("auto", "existing", "create"))
+    p.add_argument("--cert-arn", help="ACM certificate ARN (production)")
+    p.add_argument("--domain", help="SSL certificate domain (production)")
+    pi = p.add_argument_group("Pi agent (second Gradio app)")
+    pi.add_argument(
+        "--enable-pi",
+        action="store_true",
+        help="Enable Pi for current profile (Express on demo, legacy on production)",
+    )
+    pi.add_argument(
+        "--enable-pi-express",
+        action="store_true",
+        help="Enable Pi on ECS Express Mode (demo)",
+    )
+    pi.add_argument(
+        "--enable-pi-legacy",
+        action="store_true",
+        help="Enable Pi on legacy Fargate (implies Service Connect)",
+    )
+    pi.add_argument(
+        "--pi-alb-routing",
+        choices=PI_ALB_ROUTING_MODES,
+        help="ALB routing mode for Pi UI (default: path)",
+    )
+    pi.add_argument(
+        "--pi-path-prefix", default="", help="Pi path prefix (default: /pi)"
+    )
+    pi.add_argument(
+        "--pi-host-header",
+        default="",
+        help="Dedicated hostname for Pi when routing is host or both",
+    )
+    pi.add_argument(
+        "--pi-listener-priority",
+        default="",
+        help="ALB listener rule priority for Pi (default 2 with CloudFront, else 1)",
+    )
+    pi.add_argument(
+        "--pi-gradio-port", default="", help="Pi Gradio listen port (default 7862)"
+    )
+    pi.add_argument(
+        "--sc-discovery-name",
+        default="",
+        help="Service Connect name for main app (default redaction)",
+    )
+    pi.add_argument(
+        "--pi-provider",
+        default="",
+        help="PI_DEFAULT_PROVIDER for pi_agent.env (default amazon-bedrock)",
+    )
+    pi.add_argument(
+        "--skip-pi-agent-env",
+        action="store_true",
+        help="Do not write config/pi_agent.env",
+    )
+    return p
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    args = build_arg_parser().parse_args(argv)
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
+    print("doc_redaction CDK installer\n")
+
+    # Prerequisites
+    try:
+        cdk_version = check_cdk_cli()
+        print(f"CDK CLI: {cdk_version}")
+    except SystemExit:
+        if not args.config_only:
+            raise
+        print("Warning: CDK CLI not found; config-only mode continuing.")
+
+    python_exe: Optional[Path] = None
+    if not args.skip_cdk_json:
+        python_exe = resolve_python_executable(
+            override=args.python,
+            interactive=not args.yes and not args.deploy_only,
+            assume_yes=args.yes or args.deploy_only,
+        )
+        write_cdk_json(
+            python_exe,
+            force=args.refresh_cdk_json or not CDK_JSON_PATH.is_file(),
+            skip=args.skip_cdk_json,
+        )
+        if not args.config_only and not args.deploy_only:
+            smoke_test_python_app(python_exe)
+    elif CDK_JSON_PATH.is_file():
+        # Best-effort parse python from existing cdk.json
+        try:
+            data = json.loads(CDK_JSON_PATH.read_text(encoding="utf-8"))
+            app_cmd = data.get("app", "")
+            if app_cmd:
+                python_exe = Path(app_cmd.split()[0])
+        except (json.JSONDecodeError, IndexError):
+            pass
+
+    values: Dict[str, str]
+    if args.deploy_only:
+        if not ENV_PATH.is_file():
+            raise SystemExit(
+                f"No config at {ENV_PATH}. Run without --deploy-only first."
+            )
+        values = read_env_file(ENV_PATH)
+        if not python_exe or not python_exe.is_file():
+            python_exe = resolve_python_executable(
+                override=args.python, interactive=False, assume_yes=True
+            )
+    else:
+        answers = run_wizard(args)
+        values = build_env_values(answers)
+        errors = validate_env_values(values)
+        if errors:
+            print("Configuration errors:")
+            for err in errors:
+                print(f"  - {err}")
+            return 1
+
+        if not python_exe:
+            python_exe = resolve_python_executable(
+                override=answers.python_path or args.python,
+                interactive=not args.yes,
+                assume_yes=args.yes,
+            )
+            if not args.skip_cdk_json:
+                write_cdk_json(python_exe, force=args.refresh_cdk_json)
+
+        print_summary(values, python_exe)
+        if not args.yes and not ask_yes_no("Write config/cdk_config.env?", True):
+            print("Aborted.")
+            return 0
+
+        write_env_file(ENV_PATH, values)
+        if answers.pi_enabled:
+            write_pi_agent_env_file(
+                answers,
+                overwrite=answers.overwrite_pi_agent_env,
+            )
+
+    os.environ["CDK_CONFIG_PATH"] = str(ENV_PATH)
+    os.environ["CDK_FOLDER"] = str(CDK_DIR).replace("\\", "/") + "/"
+
+    if args.config_only:
+        print("Config written. Exiting (--config-only).")
+        return 0
+
+    # Bootstrap prompt
+    account = values.get("AWS_ACCOUNT_ID", "")
+    region = values.get("AWS_REGION", "")
+    if account and region:
+        try:
+            if cdk_bootstrap_needed(account, region):
+                print(f"CDK bootstrap not found in {region}.")
+                if args.yes or ask_yes_no(
+                    f"Run cdk bootstrap aws://{account}/{region}?", True
+                ):
+                    run_cdk_command(
+                        ["bootstrap", f"aws://{account}/{region}"],
+                        check=True,
+                    )
+        except Exception as exc:
+            print(f"Bootstrap check skipped: {exc}")
+
+    run_cdk_command(["synth"], check=True)
+
+    if args.synth_only or args.skip_deploy:
+        print("Synth complete. Skipping deploy.")
+        return 0
+
+    if not args.yes and not ask_yes_no("Run cdk deploy --all?", True):
+        print("Deploy skipped.")
+        return 0
+
+    run_cdk_command(["deploy", "--all", "--require-approval", "broadening"], check=True)
+
+    values = read_env_file(ENV_PATH)
+    apply_post_deploy_fixup(values, assume_yes=args.yes)
+
+    if args.skip_quickstart:
+        print("Skipping post-deploy quickstart.")
+    else:
+        is_demo = values.get("USE_ECS_EXPRESS_MODE") == "True"
+        run_qs = (
+            args.yes
+            if is_demo
+            else ask_yes_no(
+                "Run post_cdk_build_quickstart.py (CodeBuild + scale ECS)?",
+                default=is_demo,
+            )
+        )
+        if run_qs:
+            if not python_exe:
+                python_exe = resolve_python_executable(
+                    assume_yes=True, interactive=False
+                )
+            run_quickstart(python_exe)
+
+    print("\nDone. Next steps:")
+    if (
+        values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True"
+        or values.get("ENABLE_PI_AGENT_ECS_SERVICE") == "True"
+    ):
+        routing = values.get("PI_ALB_ROUTING", "path")
+        if routing in ("path", "both"):
+            prefix = values.get("PI_ALB_PATH_PREFIX", "/pi")
+            print(f"  - Pi UI path: {prefix}/ on your app URL")
+        if routing in ("host", "both") and values.get("PI_ALB_HOST_HEADER"):
+            print(
+                f"  - Pi DNS: CNAME {values['PI_ALB_HOST_HEADER']} -> "
+                f"{values.get('CLOUDFRONT_DOMAIN') or 'ALB/Express endpoint'}"
+            )
+        if PI_AGENT_ENV_PATH.is_file():
+            print(
+                f"  - Pi runtime config: {PI_AGENT_ENV_PATH} (uploaded by quickstart)"
+            )
+    if values.get("USE_CLOUDFRONT") == "True":
+        domain = values.get("SSL_CERTIFICATE_DOMAIN", "")
+        cf = values.get("CLOUDFRONT_DOMAIN", "")
+        if domain and cf and cf != "cloudfront_placeholder.net":
+            print(f"  - Point DNS CNAME {domain} -> {cf}")
+    elif values.get("USE_ECS_EXPRESS_MODE") == "True":
+        ep = values.get("ECS_EXPRESS_COGNITO_REDIRECT_BASE", "")
+        if ep:
+            print(f"  - Express endpoint: {ep}")
+    print(f"  - Config: {ENV_PATH}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
