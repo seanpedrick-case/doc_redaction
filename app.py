@@ -337,7 +337,10 @@ from tools.config import (
     WHOLE_PAGE_REDACTION_LIST_PATH,
 )
 from tools.custom_csvlogger import CSVLogger_custom
-from tools.data_anonymise import anonymise_files_with_open_text
+from tools.data_anonymise import (
+    REDACTION_EXAMPLE_PLACEHOLDER,
+    anonymise_files_with_open_text,
+)
 from tools.file_conversion import (
     combine_review_pdf_files,
     get_document_file_names,
@@ -1121,6 +1124,14 @@ nav button[role="tab"],
 div[class*="tab-nav"] button {
     font-size: 1.1em !important;
     padding: 0.75em 1.2em !important;
+}
+
+/* Tabular redaction example: wrap long lines instead of horizontal scroll */
+#text-redaction-example-markdown pre,
+#text-redaction-example-markdown code {
+    white-space: pre-wrap !important;
+    word-break: break-word;
+    overflow-wrap: anywhere;
 }
 """
 
@@ -3493,10 +3504,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ###
         # WORD / TABULAR DATA TAB
         ###
-        with gr.Tab(label="Word or Excel/CSV files", id=5):
+        with gr.Tab(label="Open text, Word or Excel/CSV files", id=5):
 
             gr.Markdown(
-                """Choose a Word or tabular data file (xlsx or csv) to redact. Note that when redacting complex Word files with e.g. images, some content/formatting will be removed, and it may not attempt to redact headers. You may prefer to convert the document file to PDF in Word, and then run it through the first tab of this app (Redact PDFs/images)."""
+                """Enter open text, or choose a Word/tabular data file (XLSX or CSV) to redact. Note that when redacting complex Word files with e.g. images, some content/formatting will be removed, and it may not attempt to redact headers. You may prefer to convert the document file to PDF in Word, and then run it through the first tab of this app (Redact PDFs/images)."""
             )
 
             # Examples for Word/Excel/csv redaction and tabular duplicate detection
@@ -3597,17 +3608,17 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                     )
 
             with gr.Accordion(
-                "Redact Word or Excel/CSV files options. Further settings such as entity types and custom allow/deny lists can be set in the first tab (Redact PDFs/images).",
+                "Redact open text, Word or Excel/CSV files. Further settings such as entity types and custom allow/deny lists can be set in the first tab (Redact PDFs/images).",
                 open=show_main_redaction_accordion,
             ):
-                with gr.Accordion("Upload docx, xlsx, or csv files", open=True):
-                    in_data_files.render()
                 with gr.Accordion("Redact open text", open=False):
                     in_text = gr.Textbox(
                         label="Enter open text",
                         lines=10,
                         max_length=MAX_OPEN_TEXT_CHARACTERS,
                     )
+                with gr.Accordion("Upload docx, xlsx, or csv files", open=True):
+                    in_data_files.render()
 
                 in_excel_sheets.render()
 
@@ -3639,6 +3650,12 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                         interactive=False,
                         visible=False,
                     )
+                text_redaction_example_markdown = gr.Markdown(
+                    value=REDACTION_EXAMPLE_PLACEHOLDER,
+                    label="Example redacted output",
+                    elem_id="text-redaction-example-markdown",
+                    buttons=["copy"],
+                )
 
             ###
             # TABULAR DUPLICATE DETECTION
@@ -8529,6 +8546,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     # Redact tabular data
 
+    def reset_tabular_redact_session():
+        actual_time, logs, comprehend_q = reset_data_vars()
+        return actual_time, logs, comprehend_q, REDACTION_EXAMPLE_PLACEHOLDER
+
     ## From walkthrough tab button – use walkthrough_ components so step 1–3 choices are used
     step_4_next_tabular_redact_btn.click(
         change_tab_to_tabular_or_document_redactions,
@@ -8536,11 +8557,12 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         outputs=tabs,
         api_visibility="undocumented",
     ).success(
-        fn=reset_data_vars,
+        fn=reset_tabular_redact_session,
         outputs=[
             actual_time_taken_number,
             log_files_output_list_state,
             comprehend_query_number,
+            text_redaction_example_markdown,
         ],
         api_visibility="undocumented",
     ).success(
@@ -8584,6 +8606,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             llm_total_input_tokens_number,
             llm_total_output_tokens_number,
             llm_model_name_textbox,
+            text_redaction_example_markdown,
         ],
         api_visibility="undocumented",
         show_progress_on=[text_output_summary],
@@ -8665,11 +8688,12 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     ## From tabular data redaction tab button
     tabular_data_redact_btn.click(
-        reset_data_vars,
+        reset_tabular_redact_session,
         outputs=[
             actual_time_taken_number,
             log_files_output_list_state,
             comprehend_query_number,
+            text_redaction_example_markdown,
         ],
         api_visibility="undocumented",
     ).success(
@@ -8713,6 +8737,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             llm_total_input_tokens_number,
             llm_total_output_tokens_number,
             llm_model_name_textbox,
+            text_redaction_example_markdown,
         ],
         api_name="redact_data",
         show_progress_on=[text_output_summary],

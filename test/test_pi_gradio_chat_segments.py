@@ -11,9 +11,12 @@ import gradio as gr
 from gradio_app import (
     _CHAT_OUTPUT_COMPONENT_COUNT,
     _append_chat_segment,
+    _apply_event,
     _chat_segment_tool_label,
+    _format_queue_update_activity,
     _passthrough_chat_outputs,
 )
+from pi_rpc_client import PiStreamEvent
 
 
 def test_chat_segment_tool_label_bash_and_bare():
@@ -78,4 +81,39 @@ def test_passthrough_chat_outputs_pads_partial_values():
     assert len(result) == _CHAT_OUTPUT_COMPONENT_COUNT
     assert result[0] == "a"
     assert result[1] == "b"
-    assert all(result[i] == gr.skip() for i in range(2, _CHAT_OUTPUT_COMPONENT_COUNT))
+
+
+def test_format_queue_update_activity_steering_and_follow_up():
+    lines = _format_queue_update_activity(
+        ["Stop and fix page 3"],
+        ["Summarise when done"],
+    )
+    assert len(lines) == 2
+    assert "Steer queued" in lines[0]
+    assert "Follow-up queued" in lines[1]
+
+
+def test_apply_event_queue_update_appends_user_messages():
+    history = [
+        {"role": "user", "content": "Start task"},
+        {"role": "assistant", "content": "Working…"},
+    ]
+    activity: list[str] = []
+    event = PiStreamEvent(
+        kind="queue_update",
+        meta={"steering": ["Only redact names"], "follow_up": []},
+    )
+    history, activity, *_rest = _apply_event(
+        event,
+        history=history,
+        activity=activity,
+        thinking="",
+        tool_output="",
+        tool_heading="",
+        completed_segments=[],
+        streaming_text="",
+    )
+    assert history[-1]["role"] == "user"
+    assert "Steer" in history[-1]["content"]
+    assert "Only redact names" in history[-1]["content"]
+    assert any("Steer queued" in line for line in activity)

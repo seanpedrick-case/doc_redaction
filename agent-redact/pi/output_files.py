@@ -202,6 +202,42 @@ def collect_final_output_files(
     return build_final_download_files(session_hash)
 
 
+_REDACTED_PDF_SUFFIX = "_redacted.pdf"
+
+
+def latest_redacted_pdf_path(session_hash: str | None = None) -> str | None:
+    """
+    Return the newest ``*_redacted.pdf`` anywhere under the session workspace.
+
+    Used by the Gradio ``gradio_pdf.PDF`` preview (expects an absolute file path).
+    Interim drafts and final post-apply deliverables both match.
+    """
+    root = workspace_root_from(session_hash)
+    if not root.is_dir():
+        return None
+
+    newest: tuple[float, Path] | None = None
+    try:
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            if not path.name.lower().endswith(_REDACTED_PDF_SUFFIX):
+                continue
+            try:
+                path.resolve(strict=False).relative_to(root.resolve())
+            except ValueError:
+                continue
+            timestamp = _file_created_timestamp(path)
+            if newest is None or timestamp > newest[0]:
+                newest = (timestamp, path)
+    except OSError:
+        return None
+
+    if newest is None:
+        return None
+    return str(newest[1].resolve())
+
+
 def workspace_root_from(session_hash: str | None = None) -> Path:
     """Resolve the session workspace from a sanitized Gradio session hash only."""
     if not session_hash or not str(session_hash).strip():

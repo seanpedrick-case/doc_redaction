@@ -13,6 +13,9 @@ import gradio as gr
 import pandas as pd
 import polars as pl
 from botocore.client import BaseClient
+from docx.oxml.ns import qn
+from docx.table import Table
+from docx.text.paragraph import Paragraph
 from faker import Faker
 from gradio import Progress
 from openpyxl import Workbook
@@ -75,6 +78,82 @@ COMPREHEND_CHARACTERS_PER_UNIT = 100
 # Max concurrent API calls for Bedrock/LLM (avoid rate limits; Comprehend uses MAX_WORKERS)
 LLM_PII_MAX_CONCURRENT_REQUESTS = min(MAX_WORKERS, 10)
 
+_COMPREHEND_CONNECTIVITY_PROBE_TEXT = "connectivity check"
+
+
+def _is_non_retryable_aws_error(exc: Exception) -> bool:
+    """Return True for credential/auth failures that should not be retried."""
+    if isinstance(
+        exc,
+        (
+            botocore.exceptions.NoCredentialsError,
+            botocore.exceptions.TokenRetrievalError,
+        ),
+    ):
+        return True
+    if isinstance(exc, botocore.exceptions.ClientError):
+        code = exc.response.get("Error", {}).get("Code", "")
+        return code in (
+            "UnrecognizedClientException",
+            "InvalidSignatureException",
+            "AccessDeniedException",
+            "ExpiredTokenException",
+            "InvalidClientTokenId",
+        )
+    err = str(exc).lower()
+    return "token has expired" in err or (
+        "sso" in err and "token" in err and "retriev" in err
+    )
+
+
+def _comprehend_connectivity_error_message(exc: Exception) -> str:
+    """User-facing message when Comprehend credentials or connectivity fail."""
+    if isinstance(exc, botocore.exceptions.NoCredentialsError):
+        return (
+            "Cannot connect to AWS Comprehend service. Please provide access keys "
+            "under Textract settings on the Redaction settings tab, or choose another "
+            "PII identification method."
+        )
+    if isinstance(exc, botocore.exceptions.TokenRetrievalError) or (
+        "token has expired" in str(exc).lower()
+    ):
+        return (
+            "Cannot connect to AWS Comprehend service. AWS SSO token has expired — "
+            "please run `aws sso login` or provide access keys under Textract settings, "
+            "or choose another PII identification method."
+        )
+    if isinstance(exc, botocore.exceptions.ClientError):
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code in (
+            "UnrecognizedClientException",
+            "InvalidSignatureException",
+            "AccessDeniedException",
+            "ExpiredTokenException",
+            "InvalidClientTokenId",
+        ):
+            return (
+                "Cannot connect to AWS Comprehend service. Please check your AWS "
+                "credentials (SSO login or access keys under Textract settings), "
+                "or choose another PII identification method."
+            )
+    return (
+        f"Cannot connect to AWS Comprehend service: {exc}. Please check your AWS "
+        "credentials or choose another PII identification method."
+    )
+
+
+def verify_comprehend_connectivity(
+    comprehend_client: BaseClient, language: str
+) -> None:
+    """Fail fast if Comprehend credentials are missing, expired, or otherwise invalid."""
+    try:
+        comprehend_client.detect_pii_entities(
+            Text=_COMPREHEND_CONNECTIVITY_PROBE_TEXT,
+            LanguageCode=language,
+        )
+    except Exception as exc:
+        raise Exception(_comprehend_connectivity_error_message(exc)) from exc
+
 
 def _comprehend_one_cell(
     comprehend_client: BaseClient,
@@ -122,8 +201,8 @@ def _comprehend_one_cell(
                     )
                 )
             return (results, query_units)
-        except Exception:
-            if attempt == max_retries - 1:
+        except Exception as exc:
+            if _is_non_retryable_aws_error(exc) or attempt == max_retries - 1:
                 raise
             time.sleep(retry_delay)
     return ([], query_units)
@@ -385,6 +464,162 @@ def anon_consistent_names(df: pd.DataFrame) -> pd.DataFrame:
     return scrubbed_df_consistent_names
 
 
+REDACTION_EXAMPLE_PLACEHOLDER = (
+    "_Run redaction to see an example of the redacted output._"
+)
+
+
+def _first_non_empty_cell_text(
+    df: pd.DataFrame, cols: Optional[List[str]] = None
+) -> str:
+    """Return text from the first non-empty cell (row-major within chosen columns)."""
+    if df is None or df.empty:
+        return ""
+    check_cols = [c for c in (cols if cols else list(df.columns)) if c in df.columns]
+    if not check_cols:
+        return ""
+    for _, row in df[check_cols].iterrows():
+        for col in check_cols:
+            val = row[col]
+            if pd.notna(val) and str(val).strip():
+                return str(val).strip()
+    return ""
+
+
+def format_redaction_example_markdown(text: str, source_label: str) -> str:
+    """Format a sample redacted string for display in a Gradio Markdown component."""
+    if not text or not str(text).strip():
+        return REDACTION_EXAMPLE_PLACEHOLDER
+    display = str(text).strip()
+    max_len = 3000
+    if len(display) > max_len:
+        display = display[:max_len] + "…"
+    display = display.replace("```", "'''")
+    return f"### Example redacted output\n\n_{source_label}_\n\n```\n{display}\n```"
+
+
+def _iter_docx_block_items(document: docx.Document):
+    """Yield paragraphs and tables in document body order."""
+    for child in document.element.body.iterchildren():
+        if child.tag == qn("w:p"):
+            yield Paragraph(child, document)
+        elif child.tag == qn("w:tbl"):
+            yield Table(child, document)
+
+
+def _docx_paragraph_page_break_before(paragraph: Paragraph) -> bool:
+    p_pr = paragraph._element.find(qn("w:pPr"))
+    if p_pr is not None and p_pr.find(qn("w:pageBreakBefore")) is not None:
+        return True
+    return False
+
+
+def _docx_paragraph_has_inline_page_break(paragraph: Paragraph) -> bool:
+    for br in paragraph._element.iter(qn("w:br")):
+        if br.get(qn("w:type")) == "page":
+            return True
+    if paragraph._element.find(f".//{qn('w:lastRenderedPageBreak')}") is not None:
+        return True
+    return False
+
+
+def _docx_paragraph_section_starts_new_page(paragraph: Paragraph) -> bool:
+    p_pr = paragraph._element.find(qn("w:pPr"))
+    if p_pr is None:
+        return False
+    sect_pr = p_pr.find(qn("w:sectPr"))
+    if sect_pr is None:
+        return False
+    type_el = sect_pr.find(qn("w:type"))
+    if type_el is None:
+        return True
+    val = type_el.get(qn("w:val"))
+    return val in (None, "nextPage", "oddPage", "evenPage")
+
+
+def _iter_docx_table_unique_cells(table: Table):
+    """Yield each physical table cell once (merged cells repeat in row.cells)."""
+    seen_tc_ids: set[int] = set()
+    for row in table.rows:
+        for cell in row.cells:
+            tc_id = id(cell._tc)
+            if tc_id in seen_tc_ids:
+                continue
+            seen_tc_ids.add(tc_id)
+            yield cell
+
+
+def _extract_docx_text_blocks_with_pages(
+    document: docx.Document,
+) -> List[Tuple[Any, str, int]]:
+    """Return (element, text, page_num) tuples in document order."""
+    blocks: List[Tuple[Any, str, int]] = []
+    current_page = 1
+    saw_content = False
+
+    for block in _iter_docx_block_items(document):
+        if isinstance(block, Paragraph):
+            text = block.text.strip()
+            if not text:
+                continue
+            if saw_content and _docx_paragraph_page_break_before(block):
+                current_page += 1
+            blocks.append((block, text, current_page))
+            saw_content = True
+            if _docx_paragraph_has_inline_page_break(block) or (
+                _docx_paragraph_section_starts_new_page(block)
+            ):
+                current_page += 1
+        else:
+            for cell in _iter_docx_table_unique_cells(block):
+                text = cell.text.strip()
+                if not text:
+                    continue
+                blocks.append((cell, text, current_page))
+                saw_content = True
+
+    return blocks
+
+
+def _accumulate_text_blocks_up_to_chars(texts: List[str], max_chars: int) -> List[str]:
+    selected: List[str] = []
+    total = 0
+    for text in texts:
+        cleaned = str(text).strip()
+        if not cleaned:
+            continue
+        if selected and total + len(cleaned) > max_chars:
+            break
+        selected.append(cleaned)
+        total += len(cleaned) + 7
+    return selected
+
+
+def _docx_first_page_redacted_preview(
+    block_pages: List[int], anonymised_texts: List[str]
+) -> str:
+    """Join redacted text blocks from page 1 for the UI preview."""
+    if not anonymised_texts:
+        return ""
+
+    paired = list(zip(block_pages, anonymised_texts))
+    first_page_texts = [
+        str(text).strip() for page, text in paired if page == 1 and str(text).strip()
+    ]
+    if not first_page_texts:
+        first_page_texts = [str(anonymised_texts[0]).strip()]
+
+    # Without page-break markers every block stays on page 1; cap the preview size.
+    if set(block_pages) == {1} and len(paired) > 15:
+        first_page_texts = _accumulate_text_blocks_up_to_chars(
+            [str(text) for _, text in paired],
+            2500,
+        )
+
+    # return "\n\n---\n\n".join(first_page_texts)
+    return "\n\n\n".join(first_page_texts)
+
+
 def handle_docx_anonymisation(
     file_path: str,
     output_folder: str,
@@ -408,12 +643,9 @@ def handle_docx_anonymisation(
         A tuple containing the output file path and the log file path.
     """
 
-    # 1. Load the document and extract text elements
+    # 1. Load the document and extract text elements (document order, with page numbers)
     doc = docx.Document(file_path)
-    text_elements = (
-        list()
-    )  # This will store the actual docx objects (paragraphs, cells)
-    original_texts = list()  # This will store the text from those objects
+    blocks_with_pages = _extract_docx_text_blocks_with_pages(doc)
 
     paragraph_count = len(doc.paragraphs)
 
@@ -422,24 +654,13 @@ def handle_docx_anonymisation(
         print(out_message)
         raise Exception(out_message)
 
-    # Extract from paragraphs
-    for para in doc.paragraphs:
-        if para.text.strip():  # Only process non-empty paragraphs
-            text_elements.append(para)
-            original_texts.append(para.text)
-
-    # Extract from tables
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                if cell.text.strip():  # Only process non-empty cells
-                    text_elements.append(cell)
-                    original_texts.append(cell.text)
-
-    # If there's no text to process, return early
-    if not original_texts:
+    if not blocks_with_pages:
         print(f"No text found in {file_path}. Skipping.")
-        return None, None, 0
+        return out_file_paths, comprehend_query_number, 0, 0, "", ""
+
+    text_elements = [block[0] for block in blocks_with_pages]
+    original_texts = [block[1] for block in blocks_with_pages]
+    block_pages = [block[2] for block in blocks_with_pages]
 
     # 2. Convert to a DataFrame for the existing anonymisation script
     df_to_anonymise = pd.DataFrame({"text_to_redact": original_texts})
@@ -510,12 +731,17 @@ def handle_docx_anonymisation(
 
     out_file_paths.append(log_file_path)
 
+    first_redacted_text = _docx_first_page_redacted_preview(
+        block_pages, anonymised_texts
+    )
+
     return (
         out_file_paths,
         comprehend_query_number,
         llm_total_input_tokens,
         llm_total_output_tokens,
         llm_model_name,
+        first_redacted_text,
     )
 
 
@@ -586,6 +812,7 @@ def anonymise_files_with_open_text(
     llm_total_input_tokens = 0
     llm_total_output_tokens = 0
     llm_model_name = ""
+    redaction_example_markdown = REDACTION_EXAMPLE_PLACEHOLDER
 
     # Normalise LLM params (Gradio may send None or single value)
     if custom_llm_instructions is None:
@@ -610,6 +837,7 @@ def anonymise_files_with_open_text(
         latest_file_completed = 0
         out_message = list()
         out_file_paths = list()
+        redaction_example_markdown = REDACTION_EXAMPLE_PLACEHOLDER
 
     # Load file
     # If out message or out_file_paths are blank, change to a list so it can be appended to
@@ -668,6 +896,8 @@ def anonymise_files_with_open_text(
             out_message = "Cannot connect to AWS Comprehend service. Please provide access keys under Textract settings on the Redaction settings tab, or choose another PII identification method."
             raise (out_message)
 
+        verify_comprehend_connectivity(comprehend_client, language)
+
     # Create Bedrock runtime client when using LLM-based PII detection with AWS Bedrock
     bedrock_runtime = None
     if pii_identification_method == AWS_LLM_PII_OPTION:
@@ -711,6 +941,16 @@ def anonymise_files_with_open_text(
     if not isinstance(file_paths, list):
         file_paths = [file_paths]
 
+    def _maybe_set_redaction_example(first_redacted_text: str, source_label: str):
+        nonlocal redaction_example_markdown
+        if (
+            redaction_example_markdown == REDACTION_EXAMPLE_PLACEHOLDER
+            and first_redacted_text
+        ):
+            redaction_example_markdown = format_redaction_example_markdown(
+                first_redacted_text, source_label
+            )
+
     if len(file_paths) > MAX_SIMULTANEOUS_FILES:
         out_message = f"Number of files to anonymise is greater than {MAX_SIMULTANEOUS_FILES}. Please submit a smaller number of files."
         print(out_message)
@@ -737,6 +977,7 @@ def anonymise_files_with_open_text(
             llm_total_input_tokens,
             llm_total_output_tokens,
             llm_model_name,
+            redaction_example_markdown,
         )
 
     file_path_loop = [file_paths[int(latest_file_completed)]]
@@ -767,6 +1008,7 @@ def anonymise_files_with_open_text(
                 tbl_llm_in,
                 tbl_llm_out,
                 tbl_llm_model,
+                first_redacted_text,
             ) = tabular_anonymise_wrapper_func(
                 file_path,
                 anon_df,
@@ -799,6 +1041,7 @@ def anonymise_files_with_open_text(
             llm_total_output_tokens += tbl_llm_out
             if tbl_llm_model and not llm_model_name:
                 llm_model_name = tbl_llm_model
+            _maybe_set_redaction_example(first_redacted_text, "open text input")
         else:
             # If file is an xlsx, we are going to run through all the Excel sheets to anonymise them separately.
             file_type = detect_file_type(file_path)
@@ -813,6 +1056,7 @@ def anonymise_files_with_open_text(
                     docx_llm_in,
                     docx_llm_out,
                     docx_llm_model,
+                    first_redacted_text,
                 ) = handle_docx_anonymisation(
                     file_path=file_path,
                     output_folder=output_folder,
@@ -832,6 +1076,9 @@ def anonymise_files_with_open_text(
                 llm_total_output_tokens += docx_llm_out
                 if docx_llm_model and not llm_model_name:
                     llm_model_name = docx_llm_model
+                _maybe_set_redaction_example(
+                    first_redacted_text, "first page of Word document"
+                )
 
             elif file_type == "xlsx":
                 # print("Running through all xlsx sheets")
@@ -866,6 +1113,7 @@ def anonymise_files_with_open_text(
                         tbl_llm_in,
                         tbl_llm_out,
                         tbl_llm_model,
+                        first_redacted_text,
                     ) = tabular_anonymise_wrapper_func(
                         anon_file,
                         anon_df,
@@ -898,6 +1146,12 @@ def anonymise_files_with_open_text(
                     llm_total_output_tokens += tbl_llm_out
                     if tbl_llm_model and not llm_model_name:
                         llm_model_name = tbl_llm_model
+                    sheet_label = (
+                        f"first processed cell (sheet: {sheet_name})"
+                        if sheet_name
+                        else "first processed cell"
+                    )
+                    _maybe_set_redaction_example(first_redacted_text, sheet_label)
 
             else:
                 sheet_name = ""
@@ -913,6 +1167,7 @@ def anonymise_files_with_open_text(
                     tbl_llm_in,
                     tbl_llm_out,
                     tbl_llm_model,
+                    first_redacted_text,
                 ) = tabular_anonymise_wrapper_func(
                     anon_file,
                     anon_df,
@@ -945,6 +1200,9 @@ def anonymise_files_with_open_text(
                 llm_total_output_tokens += tbl_llm_out
                 if tbl_llm_model and not llm_model_name:
                     llm_model_name = tbl_llm_model
+                _maybe_set_redaction_example(
+                    first_redacted_text, "first processed cell"
+                )
 
         out_message_out = ""
 
@@ -974,11 +1232,6 @@ def anonymise_files_with_open_text(
         if anon_strategy == "encrypt":
             out_message_out.append(". Your decryption key is " + key_string)
 
-        out_message_out = (
-            out_message_out
-            + "\n\nPlease give feedback on the results below to help improve this app."
-        )
-
         from tools.secure_regex_utils import safe_remove_leading_newlines
 
         out_message_out = safe_remove_leading_newlines(out_message_out)
@@ -996,6 +1249,7 @@ def anonymise_files_with_open_text(
         llm_total_input_tokens,
         llm_total_output_tokens,
         llm_model_name,
+        redaction_example_markdown,
     )
 
 
@@ -1101,6 +1355,7 @@ def tabular_anonymise_wrapper_func(
             comprehend_query_number,
             0,
             0,
+            "",
             "",
         )
     else:
@@ -1237,6 +1492,13 @@ def tabular_anonymise_wrapper_func(
     if anon_file == "open_text":
         out_message = ["'" + anon_df_out["text"][0] + "'"]
 
+    if anon_file == "open_text" and "text" in anon_df_out.columns:
+        first_redacted_text = _first_non_empty_cell_text(anon_df_out, ["text"])
+    else:
+        first_redacted_text = _first_non_empty_cell_text(
+            anon_df_part_out, chosen_cols_in_anon_df
+        )
+
     return (
         out_file_paths,
         out_message,
@@ -1246,6 +1508,7 @@ def tabular_anonymise_wrapper_func(
         llm_total_input_tokens,
         llm_total_output_tokens,
         llm_model_name,
+        first_redacted_text,
     )
 
 

@@ -31,6 +31,7 @@ import gradio as gr
 from output_files import (
     collect_final_output_files,
     gradio_allowed_paths,
+    latest_redacted_pdf_path,
     refresh_workspace_output_files_stub,
     refresh_workspace_panel,
     workspace_files_download_fn,
@@ -250,7 +251,7 @@ def _append_agent_finish_notice(
 
 
 # Must match ``chat_outputs`` in :func:`build_ui` (Gradio validates return count).
-_CHAT_OUTPUT_COMPONENT_COUNT = 13
+_CHAT_OUTPUT_COMPONENT_COUNT = 15
 
 
 def _passthrough_chat_outputs(*outputs: Any) -> tuple[Any, ...]:
@@ -498,6 +499,39 @@ def _should_replace_tool_chat_segment(previous: str, segment: str) -> bool:
     return False
 
 
+def _queue_user_notice(
+    history: list[dict[str, Any]],
+    *,
+    label: str,
+    message: str,
+) -> list[dict[str, Any]]:
+    """Append a user chat line for a queued steer or follow-up message."""
+    text = message.strip()
+    if not text:
+        return history
+    history = _clone_history(history)
+    history.append({"role": "user", "content": f"_**{label}:**_ {text}"})
+    return history
+
+
+def _format_queue_update_activity(
+    steering: list[Any],
+    follow_up: list[Any],
+) -> list[str]:
+    lines: list[str] = []
+    for message in steering:
+        text = str(message).strip()
+        if text:
+            preview = text if len(text) <= 200 else text[:197] + "…"
+            lines.append(f"**Steer queued:** {preview}")
+    for message in follow_up:
+        text = str(message).strip()
+        if text:
+            preview = text if len(text) <= 200 else text[:197] + "…"
+            lines.append(f"**Follow-up queued:** {preview}")
+    return lines
+
+
 def _append_chat_segment(
     completed_segments: list[str],
     streaming_text: str,
@@ -602,6 +636,18 @@ def _apply_event(
             streaming_text,
         )
         history[-1]["content"] += f"\n\n**Error:** {event.text}"
+
+    elif event.kind == "queue_update":
+        steering = event.meta.get("steering") or []
+        follow_up = event.meta.get("follow_up") or []
+        for message in steering:
+            history = _queue_user_notice(history, label="Steer", message=str(message))
+        for message in follow_up:
+            history = _queue_user_notice(
+                history, label="Follow-up", message=str(message)
+            )
+        for line in _format_queue_update_activity(steering, follow_up):
+            activity = _append_activity(activity, line)
 
     elif event.kind == "done":
         if streaming_text.strip():
@@ -768,7 +814,7 @@ def apply_backend(
 
 def _init_session_ui(
     request: gr.Request,
-) -> tuple[str, Any, str, list[str] | None, str]:
+) -> tuple[str, Any, str, list[str] | None, str, str | None]:
     session_hash, explorer, status, s3_prefix = init_session_workspace(request)
     log_platform_access(session_hash, HOST_NAME)
     return (
@@ -777,6 +823,7 @@ def _init_session_ui(
         status,
         collect_final_output_files(session_hash),
         s3_prefix,
+        latest_redacted_pdf_path(session_hash),
     )
 
 
@@ -792,9 +839,11 @@ def _chat_yield(
     send_enabled: bool = True,
     abort_enabled: bool = False,
     redact_enabled: bool = True,
+    agent_running: bool = False,
     session_info: str | None = None,
     session_hash: str = "",
     refresh_final_files: bool = False,
+    refresh_pdf_preview: bool = False,
     agent_finish_signal: str = AGENT_FINISH_SIGNAL_NONE,
 ):
     final_files: list[str] | None | dict[str, Any]
@@ -805,6 +854,11 @@ def _chat_yield(
     else:
         final_files = gr.update()
         session_log = gr.update()
+
+    if refresh_pdf_preview or refresh_final_files:
+        pdf_preview = latest_redacted_pdf_path(session_hash)
+    else:
+        pdf_preview = gr.update()
 
     return (
         _clone_history(history),
@@ -819,8 +873,67 @@ def _chat_yield(
         gr.update(interactive=redact_enabled),
         final_files,
         session_log,
+        pdf_preview,
         agent_finish_signal,
+        agent_running,
     )
+
+
+def _steer_yield_clear_message():
+    """Single-yield passthrough while a steer/follow-up RPC is sent during a live run."""
+    return (
+        gr.update(),
+        gr.update(),
+        "",
+        gr.update(),
+        gr.update(),
+        gr.update(),
+        gr.update(),
+        gr.update(),
+        gr.update(),
+        gr.update(),
+        gr.update(),
+        gr.update(),
+        gr.update(),
+        gr.update(),
+        gr.update(),
+    )
+
+
+def _queue_agent_message(
+    message: str,
+    client: PiRpcClient | None,
+    *,
+    agent_running: bool,
+    message_mode: str,
+    session_hash: str,
+):
+    """Send steer or follow-up to Pi without starting a new prompt stream."""
+    if not agent_running or not message or not message.strip():
+        yield _steer_yield_clear_message()
+        return
+
+    rpc = _coerce_client(client)
+    if rpc is None or not rpc.running:
+        yield _steer_yield_clear_message()
+        return
+
+    from pi_workspace_skills import workspace_boundary_prefix
+
+    pi_message = (
+        workspace_boundary_prefix(session_hash)
+        + workspace_context_prefix(session_hash)
+        + message.strip()
+    )
+    mode = (message_mode or "steer").strip().lower()
+    try:
+        if mode == "follow_up":
+            rpc.follow_up(pi_message)
+        else:
+            rpc.steer(pi_message)
+    except (PiRpcError, OSError, ValueError):
+        pass
+    yield _steer_yield_clear_message()
 
 
 def _run_pi_chat(
@@ -873,7 +986,9 @@ def _run_pi_chat(
                 gr.update(interactive=True),
                 gr.update(),
                 gr.update(),
+                gr.update(),
                 AGENT_FINISH_SIGNAL_NONE,
+                False,
             )
         return
 
@@ -931,11 +1046,13 @@ def _run_pi_chat(
         thinking,
         tool_heading,
         tool_output,
-        send_enabled=False,
+        send_enabled=True,
         abort_enabled=True,
         redact_enabled=False,
+        agent_running=True,
         session_info=session_info,
         session_hash=session_hash,
+        refresh_pdf_preview=True,
     )
 
     from pi_workspace_skills import workspace_boundary_prefix
@@ -983,11 +1100,14 @@ def _run_pi_chat(
                         thinking,
                         tool_heading,
                         tool_output,
-                        send_enabled=False,
+                        send_enabled=True,
                         abort_enabled=True,
                         redact_enabled=False,
+                        agent_running=True,
                         session_info=session_info,
                         session_hash=session_hash,
+                        refresh_pdf_preview=event.kind
+                        in {"tool_end", "done", "turn_end"},
                     )
                 turn_error = last_assistant_turn_error(client.get_messages())
             except PiRpcError as exc:
@@ -1049,9 +1169,10 @@ def _run_pi_chat(
                     thinking,
                     tool_heading,
                     tool_output,
-                    send_enabled=False,
+                    send_enabled=True,
                     abort_enabled=True,
                     redact_enabled=False,
+                    agent_running=True,
                     session_info=session_info,
                     session_hash=session_hash,
                 )
@@ -1150,11 +1271,22 @@ def chat_respond(
     message: str,
     history: list[dict[str, Any]] | None,
     client: PiRpcClient | None,
+    agent_running: bool,
+    message_mode: str,
     session_hash: str,
     s3_output_folder: str,
     save_outputs_to_s3: bool,
     redact_file: str | None,
 ):
+    if agent_running:
+        yield from _queue_agent_message(
+            message,
+            client,
+            agent_running=agent_running,
+            message_mode=message_mode,
+            session_hash=session_hash,
+        )
+        return
     yield from _run_pi_chat(
         message,
         history,
@@ -1248,7 +1380,9 @@ def submit_redaction_task(
             gr.update(interactive=True),
             gr.update(),
             gr.update(),
+            gr.update(),
             AGENT_FINISH_SIGNAL_NONE,
+            False,
         )
         return
 
@@ -1341,6 +1475,8 @@ def _startup_session_info() -> str:
 
 
 def build_ui():
+    from gradio_pdf import PDF
+
     hf_redaction_blurb = (
         "Upload a document and add bullet-point requirements. Redaction runs on a **remote** "
         "Redaction App Hugging Face Space.  \n"
@@ -1565,15 +1701,42 @@ def build_ui():
                     )
                     abort_btn = gr.Button("Abort", variant="stop", interactive=False)
                 clear = gr.Button("New session")
-                with gr.Accordion("Follow-up chat (optional)", open=False):
+                with gr.Accordion("Follow-up / steer chat (optional)", open=False):
+                    gr.Markdown(
+                        "While the agent is **running**, messages **steer** it after the "
+                        "current step (or queue as **follow-up** if you prefer not to "
+                        "interrupt). When idle, **Send** starts a new follow-up turn."
+                    )
                     msg = gr.Textbox(
                         label="Message",
                         placeholder=(
-                            "Optional message after a redaction task (e.g. fix page 3)"
+                            "e.g. Stop — only redact names on page 3, not addresses"
                         ),
                         lines=3,
                     )
-                    send = gr.Button("Send follow-up", variant="secondary")
+                    message_mode = gr.Radio(
+                        label="While agent is running",
+                        choices=[
+                            (
+                                "Steer (redirect after current step)",
+                                "steer",
+                            ),
+                            (
+                                "Follow up when agent finishes",
+                                "follow_up",
+                            ),
+                        ],
+                        value="steer",
+                    )
+                    send = gr.Button("Send", variant="secondary")
+
+                with gr.Accordion("Preview latest redacted PDF", open=False):
+                    pdf_preview = PDF(
+                        label="Preview latest redacted PDF",
+                        interactive=True,
+                        height=480,
+                        visible=True,
+                    )
 
                 with gr.Accordion("Thinking log", open=False):
                     activity_log = gr.Markdown(
@@ -1614,6 +1777,7 @@ def build_ui():
                     ".doc",
                     ".docx",
                     ".json",
+                    ".jsonl",
                     ".zip",
                 ],
                 interactive=False,
@@ -1623,13 +1787,35 @@ def build_ui():
                 "Refresh workspace files",
                 variant="secondary",
             )
-            workspace_output_explorer = gr.FileExplorer(
-                root_dir=str(workspace_base_dir()),
-                label="Browse session workspace",
-                file_count="multiple",
-                interactive=True,
-                max_height=400,
-            )
+            with gr.Accordion("Download other files from workspace", open=False):
+                workspace_output_explorer = gr.FileExplorer(
+                    root_dir=str(workspace_base_dir()),
+                    label="Browse session workspace",
+                    file_count="multiple",
+                    interactive=True,
+                    max_height=400,
+                )
+                workspace_output_explorer_download = gr.File(
+                    label="Download selected files",
+                    file_count="multiple",
+                    file_types=[
+                        ".pdf",
+                        ".jpg",
+                        ".jpeg",
+                        ".png",
+                        ".csv",
+                        ".xlsx",
+                        ".xls",
+                        ".txt",
+                        ".doc",
+                        ".docx",
+                        ".json",
+                        ".jsonl",
+                        ".zip",
+                    ],
+                    interactive=False,
+                    height=200,
+                )
 
         with gr.Accordion("Session log outputs", open=False):
             gr.Markdown(
@@ -1644,6 +1830,7 @@ def build_ui():
                 interactive=False,
             )
             agent_finish_signal = gr.State(AGENT_FINISH_SIGNAL_NONE)
+            agent_running_state = gr.State(False)
 
         chat_outputs = [
             chatbot,
@@ -1658,7 +1845,9 @@ def build_ui():
             start_redact_btn,
             workspace_output_download,
             session_log_download,
+            pdf_preview,
             agent_finish_signal,
+            agent_running_state,
         ]
 
         run_chat_send = send.click(
@@ -1667,12 +1856,16 @@ def build_ui():
                 msg,
                 chatbot,
                 client_state,
+                agent_running_state,
+                message_mode,
                 session_hash_state,
                 s3_output_folder_state,
                 save_outputs_to_s3_state,
                 redact_file,
             ],
             outputs=chat_outputs,
+            # Steer/follow-up must reach Pi while the main prompt stream is active.
+            queue=False,
         )
         notify_after_chat_send = run_chat_send.then(
             _passthrough_chat_outputs,
@@ -1686,12 +1879,15 @@ def build_ui():
                 msg,
                 chatbot,
                 client_state,
+                agent_running_state,
+                message_mode,
                 session_hash_state,
                 s3_output_folder_state,
                 save_outputs_to_s3_state,
                 redact_file,
             ],
             outputs=chat_outputs,
+            queue=False,
         )
         notify_after_chat_msg = run_chat_msg.then(
             _passthrough_chat_outputs,
@@ -1732,9 +1928,10 @@ def build_ui():
             abort_agent,
             inputs=[client_state],
             outputs=[send, abort_btn, start_redact_btn],
+            # Gradio 6.16+ rejects ``cancels`` on ``queue=False`` generators. Chat
+            # send/submit stay ``queue=False`` so steer/follow-up can run during a
+            # live stream; abort still reaches Pi via ``abort_agent`` → RPC ``abort``.
             cancels=[
-                run_chat_send,
-                run_chat_msg,
                 run_redact_prepare,
                 run_redact_task,
                 notify_after_chat_send,
@@ -1786,7 +1983,11 @@ def build_ui():
         ).success(
             fn=refresh_workspace_panel,
             inputs=[session_hash_state],
-            outputs=[workspace_output_explorer, workspace_output_download],
+            outputs=[workspace_output_explorer, workspace_output_explorer_download],
+        ).success(
+            fn=latest_redacted_pdf_path,
+            inputs=[session_hash_state],
+            outputs=pdf_preview,
         ).success(
             fn=_export_workspace_outputs,
             inputs=[
@@ -1812,6 +2013,7 @@ def build_ui():
                 workspace_session_info,
                 workspace_output_download,
                 s3_output_folder_state,
+                pdf_preview,
             ],
         )
 

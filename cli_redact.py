@@ -1668,6 +1668,7 @@ def main(direct_mode_args={}):
                     _,
                     _,
                     _,
+                    _,
                 ) = anonymise_files_with_open_text(
                     file_paths=args.input_file,
                     in_text="",  # Not used for file-based operations

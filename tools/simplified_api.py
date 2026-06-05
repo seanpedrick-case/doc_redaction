@@ -672,6 +672,7 @@ def redact_data_from_upload_for_gradio_api(
         _lt_in,
         _lt_out,
         _lm,
+        _example_md,
     ) = anonymise_files_with_open_text(
         file_paths=[data_path],
         in_text="",

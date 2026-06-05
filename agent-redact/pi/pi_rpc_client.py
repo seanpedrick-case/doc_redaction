@@ -361,6 +361,24 @@ class PiRpcClient:
         except OSError:
             pass
 
+    def steer(self, message: str) -> None:
+        """Queue a steering message (delivered after the current tool step completes)."""
+        if not message.strip():
+            return
+        self._send_command(
+            {"type": "steer", "message": message},
+            wait_response=False,
+        )
+
+    def follow_up(self, message: str) -> None:
+        """Queue a follow-up message for when the agent stops."""
+        if not message.strip():
+            return
+        self._send_command(
+            {"type": "follow_up", "message": message},
+            wait_response=False,
+        )
+
     @property
     def abort_requested(self) -> bool:
         return self._abort_requested
@@ -491,8 +509,7 @@ class PiRpcClient:
                 follow_up = event.get("followUp") or []
                 if steering or follow_up:
                     yield PiStreamEvent(
-                        kind="status",
-                        text="Queue updated.",
+                        kind="queue_update",
                         meta={"steering": steering, "follow_up": follow_up},
                     )
 

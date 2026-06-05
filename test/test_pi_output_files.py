@@ -215,6 +215,41 @@ def test_reset_download_dir_clears_without_removing_root(tmp_path):
     assert list(download_dir.iterdir()) == []
 
 
+def test_latest_redacted_pdf_path_returns_newest_match(tmp_path, monkeypatch):
+    import time
+
+    base = tmp_path / "workspace"
+    session_dir = base / "session"
+    draft_dir = session_dir / "redact" / "doc.pdf" / "output_redact"
+    draft_dir.mkdir(parents=True)
+    older = draft_dir / "doc_redacted.pdf"
+    older.write_bytes(b"draft")
+    time.sleep(0.02)
+    final_dir = session_dir / "redact" / "doc.pdf" / "review" / "output_review_final"
+    final_dir.mkdir(parents=True)
+    newer = final_dir / "doc_redacted.pdf"
+    newer.write_bytes(b"final")
+    unrelated = session_dir / "notes.txt"
+    unrelated.write_text("x")
+
+    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+
+    assert of.latest_redacted_pdf_path("session") == str(newer.resolve())
+
+
+def test_latest_redacted_pdf_path_returns_none_when_missing(tmp_path, monkeypatch):
+    base = tmp_path / "workspace"
+    base.mkdir()
+    session_dir = base / "session"
+    session_dir.mkdir()
+
+    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+
+    assert of.latest_redacted_pdf_path("session") is None
+
+
 def test_workspace_root_from_uses_session_hash_only(tmp_path, monkeypatch):
     base = tmp_path / "workspace"
     base.mkdir()
