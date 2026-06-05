@@ -591,7 +591,7 @@ def _accumulate_text_blocks_up_to_chars(texts: List[str], max_chars: int) -> Lis
         if selected and total + len(cleaned) > max_chars:
             break
         selected.append(cleaned)
-        total += len(cleaned) + 7
+        total += len(cleaned) + 3
     return selected
 
 
@@ -616,7 +616,6 @@ def _docx_first_page_redacted_preview(
             2500,
         )
 
-    # return "\n\n---\n\n".join(first_page_texts)
     return "\n\n\n".join(first_page_texts)
 
 

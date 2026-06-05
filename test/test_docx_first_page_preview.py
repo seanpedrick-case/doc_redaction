@@ -13,7 +13,7 @@ def test_docx_first_page_redacted_preview_joins_page_one_blocks():
     pages = [1, 1, 2, 2]
     texts = ["Header", "Body paragraph", "Page two", "More"]
     preview = _docx_first_page_redacted_preview(pages, texts)
-    assert preview == "Header\n\n---\n\nBody paragraph"
+    assert preview == "Header\n\n\nBody paragraph"
 
 
 def test_docx_first_page_redacted_preview_caps_when_no_page_breaks():
