@@ -22,8 +22,15 @@ Usage examples::
     # Redeploy using existing config, skip quickstart
     python cdk_install.py --deploy-only --skip-quickstart
 
+    # Remove existing stacks before a clean install (non-interactive)
+    python cdk_install.py --profile headless --vpc-name my-vpc \\
+        --force-delete-stacks --yes
+
     # Demo with Pi agent (Express) at /pi/
     python cdk_install.py --profile demo --enable-pi --yes --config-only
+
+    # Headless batch (S3 job .env -> Lambda -> one-shot ECS direct mode)
+    python cdk_install.py --profile headless --vpc-name my-vpc --yes
 
     # Production with Pi on dedicated hostname
     python cdk_install.py --profile production --enable-pi-legacy \\
@@ -57,6 +64,7 @@ QUICKSTART_SCRIPT = CDK_DIR / "post_cdk_build_quickstart.py"
 
 REGIONAL_STACK = "RedactionStack"
 CLOUDFRONT_STACK = "RedactionStackCloudfront"
+CLOUDFRONT_STACK_REGION = "us-east-1"
 
 DEMO_PRESET: Dict[str, str] = {
     "USE_ECS_EXPRESS_MODE": "True",
@@ -74,6 +82,19 @@ PRODUCTION_PRESET: Dict[str, str] = {
     "RUN_USEAST_STACK": "True",
     "ENABLE_RESOURCE_DELETE_PROTECTION": "True",
     "ENABLE_APPREGISTRY": "True",
+}
+
+HEADLESS_PRESET: Dict[str, str] = {
+    "USE_ECS_EXPRESS_MODE": "False",
+    "USE_CLOUDFRONT": "False",
+    "RUN_USEAST_STACK": "False",
+    "ENABLE_RESOURCE_DELETE_PROTECTION": "False",
+    "ENABLE_APPREGISTRY": "False",
+    "ENABLE_HEADLESS_DEPLOYMENT": "True",
+    "ENABLE_S3_BATCH_ECS_TRIGGER": "True",
+    "COGNITO_AUTH": "False",
+    "ACM_SSL_CERTIFICATE_ARN": "",
+    "SSL_CERTIFICATE_DOMAIN": "",
 }
 
 DEFAULT_CDK_JSON_CONTEXT: Dict[str, Any] = {
@@ -547,6 +568,8 @@ def merge_preset(
         base.update(DEMO_PRESET)
     elif profile == "production":
         base.update(PRODUCTION_PRESET)
+    elif profile == "headless":
+        base.update(HEADLESS_PRESET)
     if overrides:
         base.update(overrides)
     return base
@@ -582,7 +605,12 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
                 "True" if answers.enable_service_connect else "False"
             ),
             "ENABLE_S3_BATCH_ECS_TRIGGER": (
-                "True" if answers.enable_s3_batch else "False"
+                "True"
+                if answers.enable_s3_batch or answers.profile == "headless"
+                else "False"
+            ),
+            "ENABLE_HEADLESS_DEPLOYMENT": (
+                "True" if answers.profile == "headless" else "False"
             ),
         }
     )
@@ -691,6 +719,21 @@ def validate_env_values(values: Dict[str, str]) -> List[str]:
             "ENABLE_S3_BATCH_ECS_TRIGGER requires legacy Fargate (not Express)."
         )
 
+    headless = values.get("ENABLE_HEADLESS_DEPLOYMENT") == "True"
+    if headless:
+        if values.get("ENABLE_S3_BATCH_ECS_TRIGGER") != "True":
+            errors.append(
+                "ENABLE_HEADLESS_DEPLOYMENT requires ENABLE_S3_BATCH_ECS_TRIGGER=True."
+            )
+        if express:
+            errors.append(
+                "ENABLE_HEADLESS_DEPLOYMENT requires USE_ECS_EXPRESS_MODE=False."
+            )
+        if values.get("USE_CLOUDFRONT") == "True":
+            errors.append(
+                "ENABLE_HEADLESS_DEPLOYMENT is incompatible with USE_CLOUDFRONT=True."
+            )
+
     pi_ecs = values.get("ENABLE_PI_AGENT_ECS_SERVICE") == "True"
     pi_express = values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True"
     if pi_ecs and pi_express:
@@ -725,6 +768,13 @@ def validate_env_values(values: Dict[str, str]) -> List[str]:
     if pi_ecs and values.get("ENABLE_ECS_SERVICE_CONNECT") != "True":
         errors.append(
             "ENABLE_PI_AGENT_ECS_SERVICE=True requires ENABLE_ECS_SERVICE_CONNECT=True."
+        )
+
+    if headless and (
+        pi_ecs or pi_express or values.get("ENABLE_ECS_SERVICE_CONNECT") == "True"
+    ):
+        errors.append(
+            "ENABLE_HEADLESS_DEPLOYMENT is incompatible with Pi agent or Service Connect."
         )
 
     pi_routing = (values.get("PI_ALB_ROUTING") or "").strip().lower()
@@ -840,6 +890,8 @@ def print_summary(values: Dict[str, str], python_exe: Optional[Path] = None) -> 
         "AWS_ACCOUNT_ID",
         "USE_ECS_EXPRESS_MODE",
         "USE_CLOUDFRONT",
+        "ENABLE_HEADLESS_DEPLOYMENT",
+        "ENABLE_S3_BATCH_ECS_TRIGGER",
         "ENABLE_RESOURCE_DELETE_PROTECTION",
         "VPC_NAME",
         "NEW_VPC_CIDR",
@@ -885,6 +937,188 @@ def run_cdk_command(
     )
 
 
+@dataclass(frozen=True)
+class ExistingStack:
+    name: str
+    region: str
+    status: str
+    termination_protection: bool = False
+
+
+def stacks_to_check(
+    regional_region: str,
+    config_values: Optional[Dict[str, str]] = None,
+) -> List[Tuple[str, str]]:
+    """Return (stack_name, region) pairs in safe deletion order."""
+    checks: List[Tuple[str, str]] = [(CLOUDFRONT_STACK, CLOUDFRONT_STACK_REGION)]
+    if config_values:
+        appregistry_name = (config_values.get("APPREGISTRY_STACK_NAME") or "").strip()
+        if appregistry_name and config_values.get("ENABLE_APPREGISTRY") == "True":
+            checks.append((appregistry_name, regional_region))
+    checks.append((REGIONAL_STACK, regional_region))
+    return checks
+
+
+def describe_existing_stack(stack_name: str, region: str) -> Optional[ExistingStack]:
+    import boto3
+    from botocore.exceptions import ClientError
+
+    cfn = boto3.client("cloudformation", region_name=region)
+    try:
+        response = cfn.describe_stacks(StackName=stack_name)
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code in ("ValidationError", "ResourceNotFoundException") or (
+            "does not exist" in str(exc)
+        ):
+            return None
+        raise
+    stack = response["Stacks"][0]
+    status = stack.get("StackStatus", "")
+    if status == "DELETE_COMPLETE":
+        return None
+    return ExistingStack(
+        name=stack_name,
+        region=region,
+        status=status,
+        termination_protection=bool(stack.get("EnableTerminationProtection", False)),
+    )
+
+
+def discover_existing_doc_redaction_stacks(
+    regional_region: str,
+    config_values: Optional[Dict[str, str]] = None,
+) -> List[ExistingStack]:
+    """Find deployed doc_redaction CloudFormation stacks in the target account."""
+    checks = stacks_to_check(regional_region, config_values)
+    ordered: List[ExistingStack] = []
+    for stack_name, region in checks:
+        info = describe_existing_stack(stack_name, region)
+        if info:
+            ordered.append(info)
+    return ordered
+
+
+def force_delete_cloudformation_stacks(
+    stacks: Sequence[ExistingStack],
+    *,
+    wait: bool = True,
+) -> None:
+    """Delete stacks via CloudFormation (disables termination protection first)."""
+    import boto3
+    from botocore.exceptions import ClientError
+
+    clients: Dict[str, Any] = {}
+
+    def cfn_for(region: str):
+        if region not in clients:
+            clients[region] = boto3.client("cloudformation", region_name=region)
+        return clients[region]
+
+    for stack in stacks:
+        cfn = cfn_for(stack.region)
+        if stack.termination_protection:
+            print(f"Disabling termination protection on {stack.name} ({stack.region})")
+            cfn.update_termination_protection(
+                EnableTerminationProtection=False,
+                StackName=stack.name,
+            )
+        if stack.status == "DELETE_IN_PROGRESS":
+            print(f"{stack.name} ({stack.region}) is already deleting.")
+        else:
+            print(f"Deleting stack {stack.name} ({stack.region}) ...")
+            try:
+                cfn.delete_stack(StackName=stack.name)
+            except ClientError as exc:
+                code = exc.response.get("Error", {}).get("Code", "")
+                if code == "ValidationError" and "DELETE_IN_PROGRESS" in str(exc):
+                    print(f"{stack.name} is already deleting.")
+                else:
+                    raise
+
+    if not wait:
+        return
+
+    for stack in stacks:
+        cfn = cfn_for(stack.region)
+        print(f"Waiting for {stack.name} ({stack.region}) to finish deleting ...")
+        try:
+            cfn.get_waiter("stack_delete_complete").wait(
+                StackName=stack.name,
+                WaiterConfig={"Delay": 15, "MaxAttempts": 120},
+            )
+        except ClientError:
+            detail = describe_existing_stack(stack.name, stack.region)
+            status = detail.status if detail else "unknown"
+            raise SystemExit(
+                f"Stack {stack.name} ({stack.region}) did not delete cleanly "
+                f"(status={status}). Resolve in the CloudFormation console and retry."
+            ) from None
+
+
+def handle_existing_stacks_at_start(
+    args: argparse.Namespace,
+    regional_region: str,
+    *,
+    config_values: Optional[Dict[str, str]] = None,
+) -> None:
+    """At wizard start: report existing stacks and optionally force-delete them."""
+    if getattr(args, "skip_stack_check", False) or args.config_only or args.synth_only:
+        return
+
+    if config_values is None and ENV_PATH.is_file():
+        config_values = read_env_file(ENV_PATH)
+
+    try:
+        existing = discover_existing_doc_redaction_stacks(
+            regional_region, config_values
+        )
+    except Exception as exc:
+        print(f"Existing stack check skipped: {exc}")
+        return
+
+    if not existing:
+        return
+
+    print("\n--- Existing doc_redaction CloudFormation stacks ---")
+    for stack in existing:
+        line = f"  {stack.name} ({stack.region}): {stack.status}"
+        if stack.termination_protection:
+            line += " [termination protection ON]"
+        print(line)
+
+    if args.force_delete_stacks:
+        should_delete = True
+    elif args.yes:
+        print(
+            "\nStacks already exist in this account/region. "
+            "Pass --force-delete-stacks to remove them before deploy, "
+            "or omit it to update in place."
+        )
+        return
+    else:
+        should_delete = ask_yes_no(
+            "Force-delete these stacks before continuing? "
+            "(disables termination protection and deletes all stack resources)",
+            default=False,
+        )
+
+    if not should_delete:
+        print("Keeping existing stacks (deploy will update them in place).\n")
+        return
+
+    if not args.force_delete_stacks and not args.yes:
+        if not ask_yes_no(
+            "This permanently deletes AWS resources in these stacks. Proceed?",
+            default=False,
+        ):
+            print("Stack deletion cancelled.\n")
+            return
+
+    force_delete_cloudformation_stacks(existing)
+    print("Existing stacks deleted.\n")
+
+
 def fetch_stack_output(
     stack_name: str,
     output_key: str,
@@ -907,6 +1141,9 @@ def fetch_stack_output(
 
 def apply_post_deploy_fixup(values: Dict[str, str], assume_yes: bool) -> bool:
     """Return True if a redeploy was performed."""
+    if values.get("ENABLE_HEADLESS_DEPLOYMENT") == "True":
+        return False
+
     region = values.get("AWS_REGION", "")
     express = values.get("USE_ECS_EXPRESS_MODE") == "True"
     cloudfront = values.get("USE_CLOUDFRONT") == "True"
@@ -1132,10 +1369,11 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
             [
                 "Demonstration (Express, no CloudFront, no delete protection)",
                 "Production (ACM cert, CloudFront, delete protection)",
+                "Headless (S3 batch / direct mode — no ALB or CloudFront)",
                 "Custom (configure individual toggles)",
             ],
         )
-        answers.profile = ("demo", "production", "custom")[idx]
+        answers.profile = ("demo", "production", "headless", "custom")[idx]
     else:
         answers.profile = "demo"
 
@@ -1331,12 +1569,15 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
                 "CloudFront geo restriction (e.g. GB, blank=none)", ""
             )
 
-    configure_pi_options(
-        answers,
-        args,
-        interactive=interactive,
-        assume_yes=assume_yes,
-    )
+    if answers.profile != "headless":
+        configure_pi_options(
+            answers,
+            args,
+            interactive=interactive,
+            assume_yes=assume_yes,
+        )
+    else:
+        answers.enable_s3_batch = True
 
     # Advanced add-ons (non-Pi)
     is_express = (
@@ -1345,7 +1586,11 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
         )
         == "True"
     )
-    if interactive and ask_yes_no("Configure other optional add-ons?", False):
+    if answers.profile == "headless" and interactive:
+        mem = ask("ECS task memory (MB)", answers.ecs_memory)
+        if mem:
+            answers.ecs_memory = mem
+    elif interactive and ask_yes_no("Configure other optional add-ons?", False):
         if not is_express:
             if not answers.enable_service_connect:
                 answers.enable_service_connect = ask_yes_no(
@@ -1371,7 +1616,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    p.add_argument("--profile", choices=("demo", "production", "custom"))
+    p.add_argument(
+        "--profile",
+        choices=("demo", "production", "headless", "custom"),
+    )
     p.add_argument(
         "--yes", action="store_true", help="Accept defaults / skip confirmations"
     )
@@ -1389,6 +1637,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--skip-quickstart",
         action="store_true",
         help="Skip post_cdk_build_quickstart.py",
+    )
+    p.add_argument(
+        "--skip-stack-check",
+        action="store_true",
+        help="Do not check for existing CloudFormation stacks at startup",
+    )
+    p.add_argument(
+        "--force-delete-stacks",
+        action="store_true",
+        help="If doc_redaction stacks already exist, delete them before continuing "
+        "(disables termination protection; implies consent in non-interactive mode)",
     )
     p.add_argument(
         "--skip-cdk-json", action="store_true", help="Do not update cdk.json"
@@ -1475,6 +1734,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if not args.config_only:
             raise
         print("Warning: CDK CLI not found; config-only mode continuing.")
+
+    if not args.config_only and not args.synth_only:
+        try:
+            _stack_account, stack_region = get_aws_identity(args.region)
+            handle_existing_stacks_at_start(args, stack_region)
+        except SystemExit:
+            raise
+        except Exception as exc:
+            print(f"Existing stack check skipped: {exc}")
 
     python_exe: Optional[Path] = None
     if not args.skip_cdk_json:
@@ -1584,15 +1852,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.skip_quickstart:
         print("Skipping post-deploy quickstart.")
     else:
+        is_headless = values.get("ENABLE_HEADLESS_DEPLOYMENT") == "True"
         is_demo = values.get("USE_ECS_EXPRESS_MODE") == "True"
-        run_qs = (
-            args.yes
-            if is_demo
-            else ask_yes_no(
+        if args.yes:
+            run_qs = True
+        elif is_headless:
+            run_qs = ask_yes_no(
+                "Run post_cdk_build_quickstart.py (CodeBuild image only; no ECS service)?",
+                default=True,
+            )
+        else:
+            run_qs = ask_yes_no(
                 "Run post_cdk_build_quickstart.py (CodeBuild + scale ECS)?",
                 default=is_demo,
             )
-        )
         if run_qs:
             if not python_exe:
                 python_exe = resolve_python_executable(
@@ -1623,6 +1896,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         cf = values.get("CLOUDFRONT_DOMAIN", "")
         if domain and cf and cf != "cloudfront_placeholder.net":
             print(f"  - Point DNS CNAME {domain} -> {cf}")
+    elif values.get("ENABLE_HEADLESS_DEPLOYMENT") == "True":
+        prefix = values.get("S3_BATCH_ENV_PREFIX", "input/config/")
+        suffix = values.get("S3_BATCH_ENV_SUFFIX", ".env")
+        print(
+            f"  - Upload job files to s3://<output-bucket>/{prefix}*{suffix} "
+            "(see BatchJobEnvPrefix stack output after deploy)"
+        )
+        print(
+            "  - Lambda starts one-shot ECS tasks with RUN_DIRECT_MODE=True "
+            "(see cdk/config/lambda/lambda_function.py)"
+        )
     elif values.get("USE_ECS_EXPRESS_MODE") == "True":
         ep = values.get("ECS_EXPRESS_COGNITO_REDIRECT_BASE", "")
         if ep:

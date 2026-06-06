@@ -37,6 +37,9 @@ from output_files import (
     workspace_files_download_fn,
 )
 from pi_agent_config import (
+    LLAMA_BASE_URL,
+    LLAMA_MODEL_ID,
+    PROVIDER_LLAMA,
     apply_session_credentials,
     configure_aws_credentials,
     credential_status_markdown,
@@ -52,6 +55,9 @@ from pi_agent_config import (
     resolved_default_model,
     write_runtime_config,
 )
+
+# Keep ~/.pi/agent/models.json in sync with pi_agent.env (Docker start.sh does this too).
+write_runtime_config()
 from pi_examples import example_rows, examples_status_markdown
 from pi_rpc_client import (
     PiRpcClient,
@@ -374,6 +380,28 @@ def _assistant_display_text(completed_segments: list[str], current: str) -> str:
     return "\n\n".join(parts)
 
 
+def _assistant_turn_has_response(messages: list[dict[str, Any]]) -> bool:
+    """True when the latest user turn includes any assistant message."""
+    last_user = -1
+    for index, message in enumerate(messages):
+        if message.get("role") == "user":
+            last_user = index
+    turn_messages = messages[last_user + 1 :] if last_user >= 0 else messages
+    return any(message.get("role") == "assistant" for message in turn_messages)
+
+
+def _silent_llama_failure_message() -> str:
+    return (
+        f"**Pi LLM:** no response from the orchestration model.  \n\n"
+        f"Configured endpoint: `{LLAMA_BASE_URL}` · model `{LLAMA_MODEL_ID}`.  \n\n"
+        f"Set **`PI_LLAMA_BASE_URL`** in `config/pi_agent.env` (OpenAI-compatible URL "
+        f"including `/v1`, e.g. `http://192.168.0.220:8080/v1`), confirm the model id "
+        f"matches your server (`GET …/v1/models`), then click **Apply backend** or "
+        f"restart this UI.  \n\n"
+        f"On llama-swap, the first request can take 30–60s while the model loads."
+    )
+
+
 def _finalize_assistant_chat(
     client: PiRpcClient,
     history: list[dict[str, Any]],
@@ -394,12 +422,28 @@ def _finalize_assistant_chat(
         return
 
     try:
-        fallback = assistant_text_since_last_user(client.get_messages())
+        messages = client.get_messages()
+        fallback = assistant_text_since_last_user(messages)
+        turn_error = last_assistant_turn_error(messages)
     except PiRpcError:
+        messages = []
         fallback = ""
+        turn_error = None
+
+    if turn_error:
+        history[-1]["content"] = f"**Pi LLM error:** {turn_error}"
+        return
 
     if fallback.strip():
         history[-1]["content"] = fallback
+        return
+
+    if (
+        messages
+        and not _assistant_turn_has_response(messages)
+        and normalize_provider(get_default_provider()) == PROVIDER_LLAMA
+    ):
+        history[-1]["content"] = _silent_llama_failure_message()
         return
 
     if activity:
@@ -709,6 +753,11 @@ def _agent_status_markdown(client: PiRpcClient | None = None) -> str:
         f"**Redaction backend:** `{doc_redaction_gradio_url()}`",
         f"**Pi agent model:** `{_pi_agent_model_label(client)}`",
     ]
+    if (
+        not is_hf_space_profile()
+        and normalize_provider(get_default_provider()) == PROVIDER_LLAMA
+    ):
+        lines.append(f"**Pi LLM endpoint:** `{LLAMA_BASE_URL}`")
     if client is None or not client.running:
         lines.insert(0, "**Status:** Ready")
         lines.append("")
@@ -1114,6 +1163,36 @@ def _run_pi_chat(
                 if not is_rate_limit_error(str(exc)):
                     raise
                 turn_error = str(exc)
+
+            if turn_error and not is_rate_limit_error(turn_error):
+                history[-1]["content"] = f"**Pi LLM error:** {turn_error}"
+                activity = _append_activity(activity, f"**Pi LLM error:** {turn_error}")
+                history, completed_segments, streaming_text = (
+                    _append_agent_finish_notice(
+                        history,
+                        completed_segments,
+                        streaming_text,
+                        error=True,
+                    )
+                )
+                activity = _activity_with_s3_warning(activity)
+                finish_signal = _notify_agent_finished(error=True)
+                yield _chat_yield(
+                    history,
+                    client,
+                    activity,
+                    thinking,
+                    tool_heading,
+                    tool_output,
+                    send_enabled=True,
+                    abort_enabled=False,
+                    redact_enabled=True,
+                    session_info=_session_summary(client),
+                    session_hash=session_hash,
+                    refresh_final_files=True,
+                    agent_finish_signal=finish_signal,
+                )
+                return
 
             if turn_error and is_rate_limit_error(turn_error):
                 quota_failures += 1

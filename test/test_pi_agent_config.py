@@ -239,6 +239,30 @@ def test_build_settings_config_compaction_disabled_from_env(
     assert settings["compaction"]["enabled"] is False
 
 
+def test_resolve_llama_base_url_prefers_pi_llama_base_url(monkeypatch):
+    monkeypatch.setenv("PI_LLAMA_BASE_URL", "http://192.168.0.220:8080/v1")
+    monkeypatch.setenv("PI_LLAMA_MODE_BASE_URL", "http://ignored:9999")
+
+    import importlib
+
+    importlib.reload(pac)
+
+    assert pac.resolve_llama_base_url() == "http://192.168.0.220:8080/v1"
+    assert pac.LLAMA_BASE_URL == "http://192.168.0.220:8080/v1"
+
+
+def test_resolve_llama_base_url_accepts_legacy_alias_and_appends_v1(monkeypatch):
+    monkeypatch.delenv("PI_LLAMA_BASE_URL", raising=False)
+    monkeypatch.setenv("PI_LLAMA_MODE_BASE_URL", "http://192.168.0.220:8080")
+
+    import importlib
+
+    importlib.reload(pac)
+
+    assert pac.resolve_llama_base_url() == "http://192.168.0.220:8080/v1"
+    assert pac.LLAMA_BASE_URL == "http://192.168.0.220:8080/v1"
+
+
 def test_build_settings_config_compaction_uses_template_when_env_unset(
     tmp_path, monkeypatch, pi_workspace
 ):

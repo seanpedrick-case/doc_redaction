@@ -85,7 +85,25 @@ def is_hf_space_profile() -> bool:
     return profile == DEPLOYMENT_HF_SPACE
 
 
-LLAMA_BASE_URL = os.environ.get("PI_LLAMA_BASE_URL", "http://llama-inference:8080/v1")
+def resolve_llama_base_url() -> str:
+    """
+    OpenAI-compatible base URL for Pi's ``llama-cpp`` provider (includes ``/v1``).
+
+    Reads ``PI_LLAMA_BASE_URL``; also accepts legacy aliases
+    ``PI_LLAMA_MODE_BASE_URL`` and ``PI_LLAMA_MODE__BASE_URL``.
+    """
+    for key in (
+        "PI_LLAMA_BASE_URL",
+        "PI_LLAMA_MODE_BASE_URL",
+        "PI_LLAMA_MODE__BASE_URL",
+    ):
+        raw = (os.environ.get(key) or "").strip().rstrip("/")
+        if raw:
+            return raw if raw.endswith("/v1") else f"{raw}/v1"
+    return "http://llama-inference:8080/v1"
+
+
+LLAMA_BASE_URL = resolve_llama_base_url()
 LLAMA_MODEL_ID = os.environ.get("PI_LLAMA_MODEL_ID", "unsloth/Qwen3.6-27B-MTP-GGUF")
 LLAMA_CONTEXT = int(os.environ.get("PI_LLAMA_CONTEXT_WINDOW", "114688"))
 LLAMA_MAX_TOKENS = int(os.environ.get("PI_LLAMA_MAX_TOKENS", "32768"))

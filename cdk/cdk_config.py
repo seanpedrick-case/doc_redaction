@@ -530,6 +530,12 @@ if ENABLE_ECS_SERVICE_CONNECT == "True" and USE_ECS_EXPRESS_MODE == "True":
         "service path. Set USE_ECS_EXPRESS_MODE=False or disable Service Connect."
     )
 
+# Headless deployment: S3 job .env -> Lambda -> one-shot ECS Fargate (RUN_DIRECT_MODE).
+# No ALB, CloudFront, or always-on ECS service.
+ENABLE_HEADLESS_DEPLOYMENT = get_or_create_env_var(
+    "ENABLE_HEADLESS_DEPLOYMENT", "False"
+)
+
 # S3-uploaded job .env files trigger one-shot ECS Fargate tasks (direct mode / cli_redact).
 ENABLE_S3_BATCH_ECS_TRIGGER = get_or_create_env_var(
     "ENABLE_S3_BATCH_ECS_TRIGGER", "False"
@@ -550,6 +556,20 @@ if ENABLE_S3_BATCH_ECS_TRIGGER == "True" and USE_ECS_EXPRESS_MODE == "True":
         "ENABLE_S3_BATCH_ECS_TRIGGER=True requires the legacy Fargate task definition "
         "for ecs.run_task. Set USE_ECS_EXPRESS_MODE=False or disable the batch trigger."
     )
+
+if ENABLE_HEADLESS_DEPLOYMENT == "True":
+    if ENABLE_S3_BATCH_ECS_TRIGGER != "True":
+        raise ValueError(
+            "ENABLE_HEADLESS_DEPLOYMENT=True requires ENABLE_S3_BATCH_ECS_TRIGGER=True."
+        )
+    if USE_ECS_EXPRESS_MODE == "True":
+        raise ValueError(
+            "ENABLE_HEADLESS_DEPLOYMENT=True requires USE_ECS_EXPRESS_MODE=False."
+        )
+    if USE_CLOUDFRONT == "True":
+        raise ValueError(
+            "ENABLE_HEADLESS_DEPLOYMENT=True is incompatible with USE_CLOUDFRONT=True."
+        )
 
 # Pi agent Gradio UI (second Fargate service; shared legacy ALB + Service Connect to main app).
 ENABLE_PI_AGENT_ECS_SERVICE = get_or_create_env_var(

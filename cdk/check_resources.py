@@ -18,6 +18,7 @@ from cdk_config import (  # Import necessary config
     ECS_TASK_EXECUTION_ROLE_NAME,
     ECS_TASK_ROLE_NAME,
     ENABLE_ECS_SERVICE_CONNECT,
+    ENABLE_HEADLESS_DEPLOYMENT,
     ENABLE_PI_AGENT_ECS_SERVICE,
     ENABLE_S3_BATCH_ECS_TRIGGER,
     EXISTING_IGW_ID,
@@ -412,7 +413,17 @@ def check_and_set_context():
         print(
             "USE_ECS_EXPRESS_MODE=True: skipping ALB pre-check (Express provisions ALB)."
         )
-    if ENABLE_S3_BATCH_ECS_TRIGGER == "True":
+    elif ENABLE_HEADLESS_DEPLOYMENT == "True":
+        context_data[f"exists:{alb_name}"] = False
+        print(
+            "ENABLE_HEADLESS_DEPLOYMENT=True: skipping ALB pre-check (no web ingress)."
+        )
+    if ENABLE_HEADLESS_DEPLOYMENT == "True":
+        print(
+            "ENABLE_HEADLESS_DEPLOYMENT=True: requires ENABLE_S3_BATCH_ECS_TRIGGER=True "
+            "and USE_ECS_EXPRESS_MODE=False."
+        )
+    elif ENABLE_S3_BATCH_ECS_TRIGGER == "True":
         print(
             "ENABLE_S3_BATCH_ECS_TRIGGER=True: requires legacy Fargate (USE_ECS_EXPRESS_MODE=False)."
         )
@@ -420,6 +431,11 @@ def check_and_set_context():
         print(
             "ENABLE_PI_AGENT_ECS_SERVICE=True: requires legacy Fargate, Service Connect, "
             "and PI_ALB_ROUTING (default path=/pi on shared ALB; host mode needs PI_ALB_HOST_HEADER)."
+        )
+    elif ENABLE_HEADLESS_DEPLOYMENT == "True":
+        print(
+            "ENABLE_HEADLESS_DEPLOYMENT=True: legacy Fargate task definition + "
+            "S3 batch Lambda only (no ALB pre-check)."
         )
     else:
         exists, alb_object = check_alb_exists(alb_name, region_name=AWS_REGION)
