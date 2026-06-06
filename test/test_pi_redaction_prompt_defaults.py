@@ -46,3 +46,26 @@ def test_hf_space_defaults_when_env_unset(monkeypatch):
     module = _reload_redaction_prompt(monkeypatch, profile="hf-space")
     assert module.DEFAULT_OCR_METHOD == module.HF_DEFAULT_OCR
     assert module.DEFAULT_PII_METHOD == module.HF_DEFAULT_PII
+
+
+def test_build_redaction_prompt_omits_long_document_rules_for_small_pdfs(monkeypatch):
+    module = _reload_redaction_prompt(monkeypatch)
+    prompt = module.build_redaction_prompt(
+        "short.pdf",
+        "- Redact names",
+        total_pages=5,
+        workspace_dir=Path("/workspace"),
+    )
+    assert "Specific rules for long documents" not in prompt
+    assert "User redaction requirements" in prompt
+
+
+def test_build_redaction_prompt_keeps_long_document_rules_at_scale(monkeypatch):
+    module = _reload_redaction_prompt(monkeypatch)
+    prompt = module.build_redaction_prompt(
+        "big.pdf",
+        "- Redact names",
+        total_pages=120,
+        workspace_dir=Path("/workspace"),
+    )
+    assert "Specific rules for long documents" in prompt

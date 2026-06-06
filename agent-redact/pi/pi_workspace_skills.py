@@ -32,6 +32,25 @@ def _env_flag(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+_SKILLS_SKIP_DIR_NAMES = frozenset({"archive_attempts"})
+_SKILLS_SKIP_SUFFIXES = (".b64.txt",)
+_SKILLS_MAX_FILE_BYTES = int(
+    os.environ.get("PI_SKILLS_MAX_FILE_BYTES", str(512 * 1024))
+)
+
+
+def _should_skip_skill_relpath(rel: Path, *, size_bytes: int | None = None) -> bool:
+    """Skip archive blobs and other non-skill artifacts during workspace sync."""
+    if any(part in _SKILLS_SKIP_DIR_NAMES for part in rel.parts):
+        return True
+    name_lower = rel.name.lower()
+    if name_lower.endswith(_SKILLS_SKIP_SUFFIXES):
+        return True
+    if size_bytes is not None and size_bytes > _SKILLS_MAX_FILE_BYTES:
+        return True
+    return False
+
+
 def _should_resync(dest: Path, src: Path) -> bool:
     if _env_flag("PI_SKILLS_RESYNC"):
         return True
@@ -46,15 +65,30 @@ def _should_resync(dest: Path, src: Path) -> bool:
 
 
 def _copy_tree_item(src: Path, dest: Path) -> None:
-    if src.is_dir():
-        if dest.exists():
-            for child in src.iterdir():
-                _copy_tree_item(child, dest / child.name)
-        else:
-            shutil.copytree(src, dest, copy_function=shutil.copy2)
+    _copy_tree_item_filtered(src, dest, src_root=src)
+
+
+def _copy_tree_item_filtered(src: Path, dest: Path, *, src_root: Path) -> None:
+    rel = src.relative_to(src_root)
+    if _should_skip_skill_relpath(rel):
         return
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src, dest)
+    if src.is_file():
+        try:
+            size = src.stat().st_size
+        except OSError:
+            size = None
+        if size is not None and size > _SKILLS_MAX_FILE_BYTES:
+            return
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+        return
+    if dest.exists():
+        for child in sorted(src.iterdir()):
+            _copy_tree_item_filtered(child, dest / child.name, src_root=src_root)
+    else:
+        dest.mkdir(parents=True, exist_ok=True)
+        for child in sorted(src.iterdir()):
+            _copy_tree_item_filtered(child, dest / child.name, src_root=src_root)
 
 
 def _make_readonly(path: Path) -> None:
@@ -124,7 +158,14 @@ def sync_repo_skills_to_workspace(*, force: bool = False) -> Path:
             shutil.rmtree(dest, ignore_errors=True)
         dest.mkdir(parents=True, exist_ok=True)
         for item in sorted(src.iterdir()):
-            _copy_tree_item(item, dest / item.name)
+            rel = item.relative_to(src)
+            try:
+                size = item.stat().st_size if item.is_file() else None
+            except OSError:
+                size = None
+            if _should_skip_skill_relpath(rel, size_bytes=size):
+                continue
+            _copy_tree_item_filtered(item, dest / item.name, src_root=src)
 
     _make_readonly(dest)
     write_workspace_pi_settings()

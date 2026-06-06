@@ -76,3 +76,17 @@ def test_pi_rpc_args_disables_discovery(workspace_layout):
     assert args[0] == "--no-skills"
     assert "--skill" in args
     assert Path(args[args.index("--skill") + 1]).name == "skills"
+
+
+def test_sync_skips_archive_attempts_and_large_blobs(workspace_layout):
+    repo, ws, pws = workspace_layout
+    archive = repo / "skills" / "example_prompts" / "archive_attempts"
+    archive.mkdir(parents=True)
+    (archive / "blob.b64.txt").write_text("x" * 2000, encoding="utf-8")
+    huge = repo / "skills" / "huge_skill.md"
+    huge.write_bytes(b"x" * (600 * 1024))
+
+    dest = pws.sync_repo_skills_to_workspace(force=True)
+    assert not (dest / "example_prompts" / "archive_attempts").exists()
+    assert not (dest / "huge_skill.md").exists()
+    assert (dest / "doc-redaction-app" / "SKILL.md").is_file()

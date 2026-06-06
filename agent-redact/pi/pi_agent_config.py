@@ -559,9 +559,14 @@ def _apply_compaction_settings(settings: dict[str, Any]) -> None:
     reserve = (os.environ.get("PI_COMPACTION_RESERVE_TOKENS") or "").strip()
     if reserve:
         compaction["reserveTokens"] = int(reserve)
+    elif LLAMA_CONTEXT < 100_000:
+        # Smaller local models (e.g. Gemma 4 31B at 65536): default reserve was 32768.
+        compaction["reserveTokens"] = min(16_384, max(8_192, LLAMA_CONTEXT // 4))
     keep = (os.environ.get("PI_COMPACTION_KEEP_RECENT_TOKENS") or "").strip()
     if keep:
         compaction["keepRecentTokens"] = int(keep)
+    elif LLAMA_CONTEXT < 100_000:
+        compaction["keepRecentTokens"] = min(12_288, max(4_096, LLAMA_CONTEXT // 5))
     settings["compaction"] = compaction
 
 

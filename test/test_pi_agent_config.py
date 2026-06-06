@@ -276,3 +276,21 @@ def test_build_settings_config_compaction_uses_template_when_env_unset(
     assert settings["compaction"]["enabled"] is True
     assert settings["compaction"]["reserveTokens"] == 32768
     assert settings["compaction"]["keepRecentTokens"] == 20000
+
+
+def test_build_settings_config_compaction_scales_for_small_llama_context(
+    tmp_path, monkeypatch, pi_workspace
+):
+    monkeypatch.setenv("PI_LLAMA_CONTEXT_WINDOW", "65536")
+    monkeypatch.delenv("PI_COMPACTION_RESERVE_TOKENS", raising=False)
+    monkeypatch.delenv("PI_COMPACTION_KEEP_RECENT_TOKENS", raising=False)
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
+
+    import importlib
+
+    importlib.reload(pac)
+
+    settings = pac.build_settings_config()
+
+    assert settings["compaction"]["reserveTokens"] == 16384
+    assert settings["compaction"]["keepRecentTokens"] == 12288

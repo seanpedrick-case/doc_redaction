@@ -13,10 +13,21 @@ from gradio_app import (
     _append_chat_segment,
     _apply_event,
     _chat_segment_tool_label,
+    _chat_yield,
+    _ensure_pi_client_for_redaction,
+    _finalize_assistant_chat,
     _format_queue_update_activity,
+    _initial_chat_outputs_on_page_load,
+    _is_agent_finish_notice_only,
     _passthrough_chat_outputs,
+    _pi_agent_is_streaming,
+    _pi_clear_stale_streaming_state,
+    _pi_wait_until_idle,
+    _reset_pi_on_page_load,
+    _reset_pi_rpc_client,
+    _should_queue_agent_message,
 )
-from pi_rpc_client import PiStreamEvent
+from pi_rpc_client import PiRpcClient, PiStreamEvent
 
 
 def test_chat_segment_tool_label_bash_and_bare():
@@ -63,6 +74,210 @@ def test_append_chat_segment_keeps_distinct_tools():
     assert len(done) == 2
     assert done[0].startswith("**read:**")
     assert done[1].startswith("**bash:**")
+
+
+class _FakePiClient:
+    def __init__(self, *, running: bool = True, streaming: bool = False):
+        self._running = running
+        self._streaming = streaming
+
+    @property
+    def running(self) -> bool:
+        return self._running
+
+    def get_state(self) -> dict:
+        return {"isStreaming": self._streaming}
+
+
+def test_chat_yield_leaves_message_box_unchanged_during_stream_updates():
+    class _Client:
+        running = True
+
+        def get_state(self) -> dict:
+            return {
+                "sessionFile": "x.jsonl",
+                "isStreaming": True,
+                "isCompacting": False,
+            }
+
+    out = _chat_yield([], _Client(), [], "", "", "")
+    # Third output is the follow-up message textbox.
+    assert out[2] == gr.update()
+
+
+def test_chat_yield_clears_message_box_when_requested():
+    class _Client:
+        running = True
+
+        def get_state(self) -> dict:
+            return {
+                "sessionFile": "x.jsonl",
+                "isStreaming": False,
+                "isCompacting": False,
+            }
+
+    out = _chat_yield([], _Client(), [], "", "", "", msg="")
+    assert out[2] == ""
+
+
+def test_reset_pi_rpc_client_restarts_running_client(monkeypatch):
+    class _Client(PiRpcClient):
+        @property
+        def running(self) -> bool:
+            return True
+
+        def get_state(self) -> dict:
+            return {"isStreaming": False}
+
+        def close(self) -> None:
+            pass
+
+    restarted = object()
+    monkeypatch.setattr("gradio_app._coerce_client", lambda c: c)
+    monkeypatch.setattr(
+        "gradio_app._restart_pi_rpc_client",
+        lambda session_hash, prior=None: restarted,
+    )
+    assert _reset_pi_rpc_client(_Client(), "sess") is restarted
+    assert _reset_pi_on_page_load(_Client(), "sess") is restarted
+
+
+def test_reset_pi_rpc_client_noop_when_client_none():
+    assert _reset_pi_rpc_client(None, "sess") is None
+
+
+def test_ensure_pi_client_for_redaction_uses_ensure_when_no_prior_client(
+    monkeypatch,
+):
+    ensured = object()
+    monkeypatch.setattr("gradio_app._reset_pi_rpc_client", lambda _c, _h: None)
+    monkeypatch.setattr("gradio_app._ensure_client", lambda _c, _h: ensured)
+    assert _ensure_pi_client_for_redaction(None, "sess") is ensured
+
+
+def test_initial_chat_outputs_on_page_load_clears_chatbot(monkeypatch):
+    class _Client:
+        running = True
+
+        def get_state(self) -> dict:
+            return {
+                "sessionFile": "x.jsonl",
+                "isStreaming": False,
+                "isCompacting": False,
+            }
+
+    monkeypatch.setattr("gradio_app._coerce_client", lambda c: c)
+    monkeypatch.setattr(
+        "gradio_app.collect_final_output_files",
+        lambda _h: [],
+    )
+    monkeypatch.setattr(
+        "gradio_app.latest_redacted_pdf_path",
+        lambda _h: None,
+    )
+    client = _Client()
+    outputs = _initial_chat_outputs_on_page_load(client, "sess")
+    assert len(outputs) == _CHAT_OUTPUT_COMPONENT_COUNT
+    assert outputs[0] == []
+    assert outputs[1] is client
+
+
+def test_is_agent_finish_notice_only():
+    assert _is_agent_finish_notice_only("**Agent finished** — the task is complete.")
+    assert not _is_agent_finish_notice_only("Here is a summary of what was redacted.")
+
+
+def test_pi_wait_until_idle_waits_for_streaming_to_clear(monkeypatch):
+    class _Client:
+        running = True
+        calls = 0
+
+        def get_state(self) -> dict:
+            self.calls += 1
+            return {"isStreaming": self.calls < 3}
+
+    client = _Client()
+    monkeypatch.setattr("gradio_app._coerce_client", lambda c: c)
+    monkeypatch.setattr("gradio_app._PI_IDLE_POLL_INTERVAL_S", 0.0)
+    assert _pi_wait_until_idle(client, max_wait_s=1.0) is True
+    assert client.calls >= 3
+
+
+def test_finalize_assistant_chat_llama_shows_failure_when_only_finish_banner(
+    monkeypatch,
+):
+    monkeypatch.setattr("gradio_app.normalize_provider", lambda _p: "llama-cpp")
+
+    class _Client:
+        def get_messages(self) -> list:
+            return [
+                {"role": "user", "content": "What was redacted?"},
+                {"role": "assistant", "content": []},
+            ]
+
+    history = [
+        {"role": "user", "content": "What was redacted?"},
+        {
+            "role": "assistant",
+            "content": "**Agent finished** — the task is complete.",
+        },
+    ]
+    _finalize_assistant_chat(
+        _Client(),
+        history,
+        completed_segments=[],
+        streaming_text="",
+        activity=["Prompt sent."],
+    )
+    assert "no response from the orchestration model" in history[-1]["content"]
+
+
+def test_should_queue_only_while_pi_streaming(monkeypatch):
+    monkeypatch.setattr(
+        "gradio_app._coerce_client",
+        lambda client: client,
+    )
+    live = _FakePiClient(streaming=True)
+    idle = _FakePiClient(streaming=False)
+    stale = _FakePiClient(streaming=True)
+    assert (
+        _should_queue_agent_message(live, message="tweak page 3", agent_running=True)
+        is True
+    )
+    assert (
+        _should_queue_agent_message(idle, message="tweak page 3", agent_running=True)
+        is False
+    )
+    assert (
+        _should_queue_agent_message(stale, message="tweak page 3", agent_running=False)
+        is False
+    )
+    assert _should_queue_agent_message(idle, message="", agent_running=True) is False
+    assert _pi_agent_is_streaming(None) is False
+    assert _pi_agent_is_streaming(_FakePiClient(running=False, streaming=True)) is False
+
+
+def test_pi_clear_stale_streaming_state_aborts_when_ui_idle(monkeypatch):
+    class _Client:
+        running = True
+        aborted = False
+        streaming_checks = 0
+
+        def get_state(self) -> dict:
+            self.streaming_checks += 1
+            return {"isStreaming": self.streaming_checks < 2}
+
+        def abort(self) -> None:
+            self.aborted = True
+
+    client = _Client()
+    monkeypatch.setattr("gradio_app._coerce_client", lambda c: c)
+    monkeypatch.setattr("gradio_app._PI_IDLE_POLL_INTERVAL_S", 0.0)
+
+    _pi_clear_stale_streaming_state(client, agent_running=False)
+    assert client.aborted is True
+    _pi_clear_stale_streaming_state(client, agent_running=True)
+    assert client.aborted is True
 
 
 def test_passthrough_chat_outputs_returns_all_values():

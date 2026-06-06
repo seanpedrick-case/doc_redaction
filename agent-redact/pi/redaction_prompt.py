@@ -473,6 +473,26 @@ def copy_upload_to_workspace(
     return dest, (_original_name if renamed else None)
 
 
+def _strip_long_document_section(template: str) -> str:
+    """Remove the 100+ page operator block (keeps user requirements)."""
+    marker = "## Specific rules for long documents"
+    start = template.find(marker)
+    if start == -1:
+        return template
+    end = template.find("## User redaction requirements", start)
+    if end == -1:
+        return template[:start].rstrip() + "\n\n"
+    return template[:start].rstrip() + "\n\n" + template[end:]
+
+
+def _include_long_document_rules(page_range: str, total_pages: int) -> bool:
+    if total_pages <= 0:
+        return False
+    if total_pages >= 100:
+        return True
+    return pages_to_process_count(page_range or "all", total_pages) >= 100
+
+
 def build_redaction_prompt(
     file_name: str,
     user_instructions: str,
@@ -481,6 +501,7 @@ def build_redaction_prompt(
     template: str | None = None,
     settings: RedactionTaskSettings | None = None,
     workspace_dir: Path | None = None,
+    total_pages: int = 0,
 ) -> str:
     if not file_name.strip():
         raise ValueError("A document file name is required.")
@@ -524,6 +545,9 @@ def build_redaction_prompt(
     for key, value in replacements.items():
         text = text.replace(key, value)
 
+    if not _include_long_document_rules(page_range, total_pages):
+        text = _strip_long_document_section(text)
+
     return replace_user_requirements_section(text, user_instructions)
 
 
@@ -546,11 +570,18 @@ def prepare_redaction_task(
     root = _resolve_and_validate_workspace_dir(workspace_dir)
     validate_pdf_page_limit(upload_path, page_range=page_range)
     dest, renamed_from = copy_upload_to_workspace(upload_path, workspace_dir=root)
+    total_pages = 0
+    if str(dest).lower().endswith(".pdf"):
+        try:
+            total_pages = pdf_page_count(dest)
+        except (ValueError, OSError):
+            total_pages = 0
     prompt = build_redaction_prompt(
         dest.name,
         user_instructions,
         page_range=page_range,
         settings=settings,
         workspace_dir=root,
+        total_pages=total_pages,
     )
     return dest.name, prompt, renamed_from
