@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -302,6 +303,52 @@ def _llm_model_label(client: PiRpcClient | None) -> str:
     if provider and model:
         return f"{provider}/{model}"
     return model or provider
+
+
+def _schedule_post_pi_task(
+    *,
+    session_hash: str,
+    client: PiRpcClient | None,
+    s3_output_folder: str,
+    save_outputs_to_s3: bool,
+    document_name: str = "",
+    started_at: float | None = None,
+    base_file: str | None = None,
+    ocr_method: str = "",
+    pii_method: str = "",
+    total_page_count: int = 0,
+    vlm_model_name: str | None = None,
+    usage_baseline: Any = None,
+) -> None:
+    """
+    Run usage logging, session-log export, and optional S3 upload off the hot path.
+
+    Keeps the Gradio generator alive only long enough to release follow-up Send
+    handlers after the agent finishes.
+    """
+    usage = usage_for_completed_turn(client, usage_baseline)
+
+    def _work() -> None:
+        try:
+            _after_pi_task(
+                session_hash=session_hash,
+                client=client,
+                s3_output_folder=s3_output_folder,
+                save_outputs_to_s3=save_outputs_to_s3,
+                document_name=document_name,
+                started_at=started_at,
+                base_file=base_file,
+                ocr_method=ocr_method,
+                pii_method=pii_method,
+                total_page_count=total_page_count,
+                vlm_model_name=vlm_model_name,
+                llm_input_tokens=usage.llm_input_tokens,
+                llm_output_tokens=usage.llm_output_tokens,
+            )
+        except Exception:
+            pass
+
+    threading.Thread(target=_work, daemon=True).start()
 
 
 def _after_pi_task(
@@ -1362,10 +1409,9 @@ def _queue_agent_message(
     history: list[dict[str, Any]] | None,
     client: PiRpcClient | None,
     *,
-    message_mode: str,
     session_hash: str,
 ):
-    """Send steer or follow-up to Pi without starting a new prompt stream."""
+    """Steer Pi during an active run without starting a new prompt stream."""
     if not message or not message.strip():
         yield _steer_yield()
         return
@@ -1376,18 +1422,13 @@ def _queue_agent_message(
         return
 
     pi_message = _build_pi_prompt_message(session_hash, message)
-    mode = (message_mode or "steer").strip().lower()
-    label = "Follow-up" if mode == "follow_up" else "Steer"
     try:
-        if mode == "follow_up":
-            rpc.follow_up(pi_message)
-        else:
-            rpc.steer(pi_message)
+        rpc.steer(pi_message)
     except (PiRpcError, OSError, ValueError) as exc:
         gr.Warning(f"Could not queue message for Pi: {exc}")
         yield _steer_yield()
         return
-    rpc.stage_ui_chat_notice(label, message.strip())
+    rpc.stage_ui_chat_notice("Steer", message.strip())
     history, _, _ = _integrate_pending_chat_notices(
         list(history or []),
         rpc,
@@ -1571,7 +1612,8 @@ def _run_pi_chat(
                             streaming_text,
                         )
                     )
-                    if event.kind == "done":
+                    is_terminal_done = event.kind == "done"
+                    if is_terminal_done:
                         finish_aborted = (
                             event.text.strip().lower().startswith("agent aborted")
                         )
@@ -1601,13 +1643,14 @@ def _run_pi_chat(
                         tool_heading,
                         tool_output,
                         send_enabled=True,
-                        abort_enabled=True,
-                        redact_enabled=False,
-                        agent_running=True,
+                        abort_enabled=not is_terminal_done,
+                        redact_enabled=is_terminal_done,
+                        agent_running=not is_terminal_done,
                         session_info=session_info,
                         session_hash=session_hash,
                         refresh_pdf_preview=event.kind
                         in {"tool_end", "done", "turn_end"},
+                        refresh_final_files=is_terminal_done,
                     )
                 turn_error = last_assistant_turn_error(client.get_messages())
             except PiRpcError as exc:
@@ -1784,7 +1827,6 @@ def _run_pi_chat(
         activity=activity,
     )
 
-    activity = _activity_with_s3_warning(activity)
     finish_signal = _notify_agent_finished(aborted=finish_aborted)
     yield _chat_yield(
         history,
@@ -1796,10 +1838,25 @@ def _run_pi_chat(
         send_enabled=True,
         abort_enabled=False,
         redact_enabled=True,
+        agent_running=False,
         session_info=_session_summary(client),
         session_hash=session_hash,
         refresh_final_files=True,
         agent_finish_signal=finish_signal,
+    )
+    _schedule_post_pi_task(
+        session_hash=session_hash,
+        client=client,
+        s3_output_folder=s3_output_folder,
+        save_outputs_to_s3=save_outputs_to_s3,
+        document_name=document_name,
+        started_at=task_started_at,
+        base_file=base_file,
+        ocr_method=ocr_method,
+        pii_method=pii_method,
+        total_page_count=total_page_count,
+        vlm_model_name=vlm_model_name,
+        usage_baseline=usage_baseline,
     )
 
 
@@ -1807,24 +1864,22 @@ def submit_followup_message(
     message: str,
     history: list[dict[str, Any]] | None,
     client: PiRpcClient | None,
-    message_mode: str,
     session_hash: str,
     s3_output_folder: str,
     save_outputs_to_s3: bool,
 ):
     """
-    Send a follow-up user message to Pi.
+    Send a user message to Pi.
 
-    Mirrors :func:`submit_redaction_task` → :func:`_run_pi_chat` (model refresh,
-    llama.cpp readiness, workspace prefixes, ``prompt_events``) but keeps the
-    existing Pi session and chat history.
+    While the agent is running, messages are steered after the current step.
+    When idle (after **Agent finished**), messages start a new follow-up turn
+    via :func:`_run_pi_chat` (same path as :func:`submit_redaction_task`).
     """
     if _should_queue_agent_message(client, message=message):
         yield from _queue_agent_message(
             message,
             history,
             client,
-            message_mode=message_mode,
             session_hash=session_hash,
         )
         return
@@ -1843,7 +1898,6 @@ def chat_respond(
     history: list[dict[str, Any]] | None,
     client: PiRpcClient | None,
     agent_running: bool,
-    message_mode: str,
     session_hash: str,
     s3_output_folder: str,
     save_outputs_to_s3: bool,
@@ -1854,7 +1908,6 @@ def chat_respond(
         message,
         history,
         client,
-        message_mode,
         session_hash,
         s3_output_folder,
         save_outputs_to_s3,
@@ -2339,30 +2392,15 @@ def build_ui():
                 clear = gr.Button("New session")
                 with gr.Accordion("Follow-up / steer chat (optional)", open=False):
                     gr.Markdown(
-                        "While the agent is **running**, messages **steer** it after the "
-                        "current step (or queue as **follow-up** if you prefer not to "
-                        "interrupt). When idle, **Send** starts a new follow-up turn."
+                        "While the agent is **running**, **Send** steers it after the "
+                        "current step. After **Agent finished**, **Send** starts a new "
+                        "follow-up turn in the same session."
                     )
                     msg = gr.Textbox(
                         label="Message",
                         placeholder=(
                             "e.g. Stop — only redact names on page 3, not addresses"
                         ),
-                        lines=3,
-                    )
-                    message_mode = gr.Radio(
-                        label="While agent is running",
-                        choices=[
-                            (
-                                "Steer (redirect after current step)",
-                                "steer",
-                            ),
-                            (
-                                "Follow up when agent finishes",
-                                "follow_up",
-                            ),
-                        ],
-                        value="steer",
                     )
                     send = gr.Button("Send", variant="secondary")
 
@@ -2492,7 +2530,6 @@ def build_ui():
                 msg,
                 chatbot,
                 client_state,
-                message_mode,
                 session_hash_state,
                 s3_output_folder_state,
                 save_outputs_to_s3_state,
@@ -2512,7 +2549,6 @@ def build_ui():
                 msg,
                 chatbot,
                 client_state,
-                message_mode,
                 session_hash_state,
                 s3_output_folder_state,
                 save_outputs_to_s3_state,

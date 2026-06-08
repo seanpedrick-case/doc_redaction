@@ -247,6 +247,43 @@ def test_finalize_assistant_chat_llama_shows_failure_when_only_finish_banner(
     assert "no response from the orchestration model" in history[-1]["content"]
 
 
+def test_schedule_post_pi_task_runs_off_hot_path(monkeypatch):
+    calls: list[dict] = []
+
+    class _ImmediateThread:
+        def __init__(self, target, daemon):
+            self._target = target
+
+        def start(self):
+            self._target()
+
+    monkeypatch.setattr("gradio_app.threading.Thread", _ImmediateThread)
+    monkeypatch.setattr(
+        "gradio_app._after_pi_task",
+        lambda **kwargs: calls.append(kwargs),
+    )
+    monkeypatch.setattr(
+        "gradio_app.usage_for_completed_turn",
+        lambda _client, _baseline: type(
+            "Usage",
+            (),
+            {"llm_input_tokens": 10, "llm_output_tokens": 5},
+        )(),
+    )
+    from gradio_app import _schedule_post_pi_task
+
+    _schedule_post_pi_task(
+        session_hash="sess",
+        client=None,
+        s3_output_folder="s3://bucket/",
+        save_outputs_to_s3=True,
+        document_name="doc.pdf",
+    )
+    assert calls
+    assert calls[0]["session_hash"] == "sess"
+    assert calls[0]["llm_input_tokens"] == 10
+
+
 def test_should_queue_only_while_pi_streaming(monkeypatch):
     monkeypatch.setattr(
         "gradio_app._coerce_client",

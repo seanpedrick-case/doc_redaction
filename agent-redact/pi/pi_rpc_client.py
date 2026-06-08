@@ -264,6 +264,7 @@ class PiRpcClient:
         self._io_lock = threading.Lock()
         self._abort_requested = False
         self._prompt_stream_depth = 0
+        self._pending_follow_ups = 0
         self._pending_ui_history: list[dict[str, Any]] = []
 
     @property
@@ -397,6 +398,7 @@ class PiRpcClient:
         """Queue a follow-up message for when the agent stops."""
         if not message.strip():
             return
+        self._pending_follow_ups += 1
         self._send_command(
             {"type": "follow_up", "message": message},
             wait_response=False,
@@ -604,6 +606,15 @@ class PiRpcClient:
                 )
 
             elif event_type == "agent_end":
+                # Pi delivers queued ``follow_up`` messages after ``agent_end`` and
+                # continues streaming; do not stop the stdout consumer until they run.
+                if self._pending_follow_ups > 0:
+                    self._pending_follow_ups -= 1
+                    yield PiStreamEvent(
+                        kind="status",
+                        text="Follow-up queued — continuing…",
+                    )
+                    continue
                 aborted = self._abort_requested
                 self.clear_abort()
                 yield PiStreamEvent(
