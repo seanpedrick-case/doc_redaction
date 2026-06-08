@@ -4137,18 +4137,18 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                     "Merge multiple review files into one", variant="primary"
                 )
 
-        if SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER:
-            with gr.Accordion(
-                "View all and download all output files from this session",
-                open=False,
-            ):
-                all_output_files_btn.render()
-                all_output_files.render()
-                all_outputs_file_download.render()
-        else:
+    if SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER:
+        with gr.Accordion(
+            "View all and download all output files from this session",
+            open=False,
+        ):
             all_output_files_btn.render()
             all_output_files.render()
             all_outputs_file_download.render()
+    else:
+        all_output_files_btn.render()
+        all_output_files.render()
+        all_outputs_file_download.render()
 
     ###
     # UI INTERACTION
@@ -10416,6 +10416,16 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             str(Path(OUTPUT_FOLDER).resolve()),
             str(Path(INPUT_FOLDER).resolve()),
         ]
+        if GRADIO_TEMP_DIR:
+            _gradio_file_allowed_paths.append(str(Path(GRADIO_TEMP_DIR).resolve()))
+        # Pi agent + local dev: /redact_document may return paths under workspace/.gradio_uploads
+        _workspace_gradio_uploads = (
+            Path(__file__).resolve().parent / "workspace" / ".gradio_uploads"
+        )
+        if _workspace_gradio_uploads.is_dir():
+            _gradio_file_allowed_paths.append(str(_workspace_gradio_uploads.resolve()))
+        # Stable order, no duplicates (Gradio rejects duplicate allowed_paths on some versions).
+        _gradio_file_allowed_paths = list(dict.fromkeys(_gradio_file_allowed_paths))
 
         # If running through command line with uvicorn
         if RUN_FASTAPI:
@@ -10450,7 +10460,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                 show_error=True,
                 auth=authenticate_user if COGNITO_AUTH else None,
                 max_file_size=MAX_FILE_SIZE,
-                path="",
+                path="/",
                 favicon_path=_resolve_optional_file_path(FAVICON_PATH),
                 mcp_server=RUN_MCP_SERVER,
                 allowed_paths=_gradio_file_allowed_paths,

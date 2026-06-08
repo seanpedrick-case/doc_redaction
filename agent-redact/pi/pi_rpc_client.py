@@ -263,10 +263,17 @@ class PiRpcClient:
         self._proc: subprocess.Popen[str] | None = None
         self._io_lock = threading.Lock()
         self._abort_requested = False
+        self._prompt_stream_depth = 0
+        self._pending_ui_history: list[dict[str, Any]] = []
 
     @property
     def running(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
+
+    @property
+    def prompt_stream_active(self) -> bool:
+        """True while :meth:`prompt_events` is consuming the RPC stdout stream."""
+        return self._prompt_stream_depth > 0
 
     def start(self) -> None:
         if self.running:
@@ -361,6 +368,22 @@ class PiRpcClient:
         except OSError:
             pass
 
+    def stage_ui_chat_notice(self, label: str, message: str) -> None:
+        """Stage user/assistant chat rows for the active prompt stream to merge on yield."""
+        text = message.strip()
+        if not text:
+            return
+        self._pending_ui_history.append(
+            {"role": "user", "content": f"_**{label}:**_ {text}"}
+        )
+        self._pending_ui_history.append({"role": "assistant", "content": ""})
+
+    def drain_pending_ui_history(self) -> list[dict[str, Any]]:
+        """Return and clear UI chat rows staged by :meth:`stage_ui_chat_notice`."""
+        pending = self._pending_ui_history[:]
+        self._pending_ui_history.clear()
+        return pending
+
     def steer(self, message: str) -> None:
         """Queue a steering message (delivered after the current tool step completes)."""
         if not message.strip():
@@ -429,6 +452,13 @@ class PiRpcClient:
 
     def prompt_events(self, message: str) -> Iterator[PiStreamEvent]:
         """Send a user message and yield structured events until ``agent_end``."""
+        self._prompt_stream_depth += 1
+        try:
+            yield from self._prompt_events_impl(message)
+        finally:
+            self._prompt_stream_depth = max(0, self._prompt_stream_depth - 1)
+
+    def _prompt_events_impl(self, message: str) -> Iterator[PiStreamEvent]:
         self.clear_abort()
         req_id = str(uuid.uuid4())
         self._send_command(

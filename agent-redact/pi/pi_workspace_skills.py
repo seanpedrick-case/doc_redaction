@@ -80,6 +80,8 @@ def _copy_tree_item_filtered(src: Path, dest: Path, *, src_root: Path) -> None:
         if size is not None and size > _SKILLS_MAX_FILE_BYTES:
             return
         dest.parent.mkdir(parents=True, exist_ok=True)
+        if dest.exists():
+            _make_writable(dest)
         shutil.copy2(src, dest)
         return
     if dest.exists():
@@ -91,9 +93,8 @@ def _copy_tree_item_filtered(src: Path, dest: Path, *, src_root: Path) -> None:
             _copy_tree_item_filtered(child, dest / child.name, src_root=src_root)
 
 
-def _make_readonly(path: Path) -> None:
-    if _env_flag("PI_SKILLS_WRITABLE"):
-        return
+def _chmod_tree(path: Path, *, writable: bool) -> None:
+    """Set or clear write bits on a file tree (needed for Windows resync)."""
     try:
         if path.is_dir():
             for root, dirs, files in os.walk(path):
@@ -102,19 +103,43 @@ def _make_readonly(path: Path) -> None:
                     file_path = root_path / name
                     mode = file_path.stat().st_mode
                     file_path.chmod(
-                        mode & ~stat.S_IWUSR & ~stat.S_IWGRP & ~stat.S_IWOTH
+                        (mode | stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH)
+                        if writable
+                        else (mode & ~stat.S_IWUSR & ~stat.S_IWGRP & ~stat.S_IWOTH)
                     )
                 for name in dirs:
                     dir_path = root_path / name
                     mode = dir_path.stat().st_mode
-                    dir_path.chmod(mode & ~stat.S_IWUSR & ~stat.S_IWGRP & ~stat.S_IWOTH)
+                    dir_path.chmod(
+                        (mode | stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH)
+                        if writable
+                        else (mode & ~stat.S_IWUSR & ~stat.S_IWGRP & ~stat.S_IWOTH)
+                    )
             mode = path.stat().st_mode
-            path.chmod(mode & ~stat.S_IWUSR & ~stat.S_IWGRP & ~stat.S_IWOTH)
+            path.chmod(
+                (mode | stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH)
+                if writable
+                else (mode & ~stat.S_IWUSR & ~stat.S_IWGRP & ~stat.S_IWOTH)
+            )
         else:
             mode = path.stat().st_mode
-            path.chmod(mode & ~stat.S_IWUSR & ~stat.S_IWGRP & ~stat.S_IWOTH)
+            path.chmod(
+                (mode | stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH)
+                if writable
+                else (mode & ~stat.S_IWUSR & ~stat.S_IWGRP & ~stat.S_IWOTH)
+            )
     except OSError:
         pass
+
+
+def _make_writable(path: Path) -> None:
+    _chmod_tree(path, writable=True)
+
+
+def _make_readonly(path: Path) -> None:
+    if _env_flag("PI_SKILLS_WRITABLE"):
+        return
+    _chmod_tree(path, writable=False)
 
 
 def write_workspace_pi_settings() -> Path:
@@ -155,7 +180,8 @@ def sync_repo_skills_to_workspace(*, force: bool = False) -> Path:
 
     if force or _should_resync(dest, src):
         if dest.exists():
-            shutil.rmtree(dest, ignore_errors=True)
+            _make_writable(dest)
+            shutil.rmtree(dest)
         dest.mkdir(parents=True, exist_ok=True)
         for item in sorted(src.iterdir()):
             rel = item.relative_to(src)

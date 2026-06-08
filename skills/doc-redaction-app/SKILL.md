@@ -24,9 +24,9 @@ This skill covers **running an initial redaction** and **getting artifacts onto 
 
 Use `/doc_redact` for a normal PDF/image first pass. Use `/redact_document` only when you need the full Gradio control surface. Note that the `/doc_redact` endpoint may not be visible when calling `client.view_api()`.
 
-### 2b) `/doc_redact` can succeed with no artifacts
+### 2b) `/doc_redact` empty path list
 
-Some deployments return a success message but **`[]`** for output paths. Treat that as **no deliverable** for automation.
+If the API returns **`[]`** with `"doc_redact completed"` but the server log shows **Generated Files**, common causes are: (1) **`SESSION_OUTPUT_FOLDER=True`** and a **re-run** overwrote the same filenames (fixed in recent builds via mtime-based path return); (2) path collectors that ignore **Windows** `C:\...` paths. Fallback: glob `OUTPUT_FOLDER` (including per-user subfolders) for `*{document_stem}*`, or use `remote_redaction.resolve_redaction_output_paths`. Do **not** pass a Pi workspace path as `output_dir` — only directories under the app `OUTPUT_FOLDER` are accepted.
 
 ### 2c) `/doc_redact` vs `/redact_document` parameter names
 
@@ -199,6 +199,7 @@ client.predict(
 - URL: `{BASE_URL}/gradio_api/file={urllib.parse.quote(path, safe="")}`. Always encode the path; spaces and special characters break naive URLs.
 - Gated HF Spaces: send **`Authorization: Bearer <HF_TOKEN>`** on download requests as well as on the client.
 - Paths may be strings or nested dicts with a `"path"` key; walk recursively if needed (see `extract_file_like_paths` in `mcp_doc_redaction/gradio_transport.py`).
+- **Windows / same-machine Pi agent:** paths look like `C:\...\output\...` or `C:\...\workspace\.gradio_uploads\...` — collectors that only accept `/` prefixes will see an **empty list**. Call **`/doc_redact`** without a custom `output_dir`, then copy into your workspace `output_redact/` with **`shutil.copy2`** when paths share a disk (`fetch_redaction_files`). HTTP `gradio_api/file=` may return **403** for `.gradio_uploads` unless the app exposes that folder in `allowed_paths`. Helpers: `agent-redact/pi/remote_redaction.py` (`resolve_redaction_output_paths`, `extract_server_paths`, `fetch_redaction_files`).
 
 ### 5) `/redact_document` gotchas (initial run)
 

@@ -278,6 +278,92 @@ def test_build_settings_config_compaction_uses_template_when_env_unset(
     assert settings["compaction"]["keepRecentTokens"] == 20000
 
 
+def test_credential_status_markdown_llama_shows_endpoint_not_aws(monkeypatch):
+    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "local-docker")
+    monkeypatch.setenv("PI_DEFAULT_PROVIDER", "llama-cpp")
+    monkeypatch.setenv("PI_LLAMA_BASE_URL", "http://192.168.0.220:8000/v1")
+    monkeypatch.setenv("PI_AWS_PROFILE", "AWSAdministratorAccess-460501890304")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+    import importlib
+
+    importlib.reload(pac)
+
+    text = pac.credential_status_markdown(provider="llama-cpp")
+    assert "local llama-cpp" in text
+    assert "192.168.0.220:8000/v1" in text
+    assert "AWSAdministratorAccess" not in text
+    assert "Gemini `" not in text
+
+
+def test_credential_status_markdown_bedrock_shows_aws_profile(monkeypatch):
+    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "local-docker")
+    monkeypatch.setenv("AWS_PROFILE", "corp-sso")
+    monkeypatch.setenv("AWS_REGION", "eu-west-2")
+
+    text = pac.credential_status_markdown(provider="amazon-bedrock")
+    assert "AWS `profile corp-sso`" in text
+    assert "region `eu-west-2`" in text
+
+
+def test_normalize_backend_model_accepts_custom_llama_id(monkeypatch):
+    monkeypatch.setenv("PI_LLAMA_MODEL_ID", "unsloth/Qwen3.6-27B-MTP-GGUF")
+    assert pac.normalize_backend_model("llama-cpp", "my-custom-swap-model") == (
+        "my-custom-swap-model"
+    )
+
+
+def test_normalize_backend_model_rejects_unknown_gemini_id(monkeypatch):
+    monkeypatch.setenv("PI_DEFAULT_PROVIDER", "google-gemini")
+    assert pac.normalize_backend_model(
+        "google-gemini", "not-a-real-gemini-model"
+    ) == pac.default_model_for_provider(pac.PROVIDER_GEMINI)
+
+
+def test_resolved_default_model_uses_runtime_pi_default_for_active_provider(
+    monkeypatch,
+):
+    monkeypatch.setenv("PI_DEFAULT_PROVIDER", "llama-cpp")
+    monkeypatch.setenv("PI_DEFAULT_MODEL", "swap-model-v2")
+    assert pac.resolved_default_model(pac.PROVIDER_LLAMA) == "swap-model-v2"
+
+
+def test_resolved_default_model_honours_override_without_catalog_entry():
+    assert (
+        pac.resolved_default_model(pac.PROVIDER_LLAMA, override="another-local-model")
+        == "another-local-model"
+    )
+
+
+def test_write_runtime_config_persists_custom_llama_model(
+    tmp_path, monkeypatch, pi_workspace
+):
+    agent_dir = tmp_path / "agent"
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(agent_dir))
+    monkeypatch.setenv("PI_DEFAULT_PROVIDER", "llama-cpp")
+    monkeypatch.setenv("PI_LLAMA_MODEL_ID", "unsloth/Qwen3.6-27B-MTP-GGUF")
+
+    pac.write_runtime_config(
+        agent_dir=agent_dir,
+        default_provider="llama-cpp",
+        default_model="custom-llama-model",
+    )
+
+    assert os.environ["PI_DEFAULT_PROVIDER"] == "llama-cpp"
+    assert os.environ["PI_DEFAULT_MODEL"] == "custom-llama-model"
+    assert os.environ["PI_LLAMA_MODEL_ID"] == "custom-llama-model"
+    assert pac.models_for_provider(pac.PROVIDER_LLAMA) == ["custom-llama-model"]
+
+    import json
+
+    models = json.loads((agent_dir / "models.json").read_text(encoding="utf-8"))
+    llama_models = models["providers"]["llama-cpp"]["models"]
+    assert llama_models[0]["id"] == "custom-llama-model"
+
+    settings = json.loads((agent_dir / "settings.json").read_text(encoding="utf-8"))
+    assert settings["defaultModel"] == "custom-llama-model"
+
+
 def test_build_settings_config_compaction_scales_for_small_llama_context(
     tmp_path, monkeypatch, pi_workspace
 ):

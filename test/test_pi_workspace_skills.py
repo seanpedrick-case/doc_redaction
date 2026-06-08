@@ -78,6 +78,21 @@ def test_pi_rpc_args_disables_discovery(workspace_layout):
     assert Path(args[args.index("--skill") + 1]).name == "skills"
 
 
+def test_resync_overwrites_readonly_skills(workspace_layout, monkeypatch):
+    repo, ws, pws = workspace_layout
+    config = repo / "skills" / "config"
+    config.mkdir(parents=True)
+    (config / "app_config.env").write_text("OLD=1\n", encoding="utf-8")
+
+    dest = pws.sync_repo_skills_to_workspace(force=True)
+    assert (dest / "config" / "app_config.env").read_text(encoding="utf-8") == "OLD=1\n"
+
+    (config / "app_config.env").write_text("NEW=2\n", encoding="utf-8")
+    monkeypatch.setenv("PI_SKILLS_RESYNC", "true")
+    dest = pws.sync_repo_skills_to_workspace()
+    assert (dest / "config" / "app_config.env").read_text(encoding="utf-8") == "NEW=2\n"
+
+
 def test_sync_skips_archive_attempts_and_large_blobs(workspace_layout):
     repo, ws, pws = workspace_layout
     archive = repo / "skills" / "example_prompts" / "archive_attempts"

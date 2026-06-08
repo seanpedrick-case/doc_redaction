@@ -21,8 +21,8 @@ from gradio_app import (
     _is_agent_finish_notice_only,
     _passthrough_chat_outputs,
     _pi_agent_is_streaming,
-    _pi_clear_stale_streaming_state,
     _pi_wait_until_idle,
+    _refresh_pi_client_model,
     _reset_pi_on_page_load,
     _reset_pi_rpc_client,
     _should_queue_agent_message,
@@ -77,13 +77,24 @@ def test_append_chat_segment_keeps_distinct_tools():
 
 
 class _FakePiClient:
-    def __init__(self, *, running: bool = True, streaming: bool = False):
+    def __init__(
+        self,
+        *,
+        running: bool = True,
+        streaming: bool = False,
+        prompt_stream_active: bool = False,
+    ):
         self._running = running
         self._streaming = streaming
+        self._prompt_stream_active = prompt_stream_active
 
     @property
     def running(self) -> bool:
         return self._running
+
+    @property
+    def prompt_stream_active(self) -> bool:
+        return self._prompt_stream_active
 
     def get_state(self) -> dict:
         return {"isStreaming": self._streaming}
@@ -192,6 +203,10 @@ def test_pi_wait_until_idle_waits_for_streaming_to_clear(monkeypatch):
         running = True
         calls = 0
 
+        @property
+        def prompt_stream_active(self) -> bool:
+            return False
+
         def get_state(self) -> dict:
             self.calls += 1
             return {"isStreaming": self.calls < 3}
@@ -237,47 +252,48 @@ def test_should_queue_only_while_pi_streaming(monkeypatch):
         "gradio_app._coerce_client",
         lambda client: client,
     )
-    live = _FakePiClient(streaming=True)
-    idle = _FakePiClient(streaming=False)
-    stale = _FakePiClient(streaming=True)
-    assert (
-        _should_queue_agent_message(live, message="tweak page 3", agent_running=True)
-        is True
-    )
-    assert (
-        _should_queue_agent_message(idle, message="tweak page 3", agent_running=True)
-        is False
-    )
-    assert (
-        _should_queue_agent_message(stale, message="tweak page 3", agent_running=False)
-        is False
-    )
-    assert _should_queue_agent_message(idle, message="", agent_running=True) is False
+    live = _FakePiClient(streaming=True, prompt_stream_active=True)
+    idle = _FakePiClient(streaming=False, prompt_stream_active=True)
+    stale = _FakePiClient(streaming=True, prompt_stream_active=False)
+    assert _should_queue_agent_message(live, message="tweak page 3") is True
+    assert _should_queue_agent_message(idle, message="tweak page 3") is False
+    assert _should_queue_agent_message(stale, message="tweak page 3") is False
+    assert _should_queue_agent_message(idle, message="") is False
     assert _pi_agent_is_streaming(None) is False
     assert _pi_agent_is_streaming(_FakePiClient(running=False, streaming=True)) is False
 
 
-def test_pi_clear_stale_streaming_state_aborts_when_ui_idle(monkeypatch):
+def test_refresh_pi_client_model_calls_set_model(monkeypatch):
+    class _Client:
+        calls: list[tuple[str, str]] = []
+
+        def set_model(self, provider: str, model: str) -> None:
+            self.calls.append((provider, model))
+
+    client = _Client()
+    monkeypatch.setattr("gradio_app.normalize_provider", lambda _p: "llama-cpp")
+    monkeypatch.setattr("gradio_app.resolved_default_model", lambda _p: "gemma_4_31b")
+    _refresh_pi_client_model(client)
+    assert client.calls == [("llama-cpp", "gemma_4_31b")]
+
+
+def test_pi_wait_until_idle_skips_during_active_prompt_stream(monkeypatch):
     class _Client:
         running = True
-        aborted = False
-        streaming_checks = 0
+        state_calls = 0
+
+        @property
+        def prompt_stream_active(self) -> bool:
+            return True
 
         def get_state(self) -> dict:
-            self.streaming_checks += 1
-            return {"isStreaming": self.streaming_checks < 2}
-
-        def abort(self) -> None:
-            self.aborted = True
+            self.state_calls += 1
+            return {"isStreaming": True}
 
     client = _Client()
     monkeypatch.setattr("gradio_app._coerce_client", lambda c: c)
-    monkeypatch.setattr("gradio_app._PI_IDLE_POLL_INTERVAL_S", 0.0)
-
-    _pi_clear_stale_streaming_state(client, agent_running=False)
-    assert client.aborted is True
-    _pi_clear_stale_streaming_state(client, agent_running=True)
-    assert client.aborted is True
+    assert _pi_wait_until_idle(client, max_wait_s=0.0) is False
+    assert client.state_calls == 0
 
 
 def test_passthrough_chat_outputs_returns_all_values():
@@ -328,7 +344,33 @@ def test_apply_event_queue_update_appends_user_messages():
         completed_segments=[],
         streaming_text="",
     )
-    assert history[-1]["role"] == "user"
-    assert "Steer" in history[-1]["content"]
-    assert "Only redact names" in history[-1]["content"]
+    assert history[-2]["role"] == "user"
+    assert "Steer" in history[-2]["content"]
+    assert "Only redact names" in history[-2]["content"]
+    assert history[-1]["role"] == "assistant"
+    assert history[-1]["content"] == ""
     assert any("Steer queued" in line for line in activity)
+
+
+def test_apply_event_text_snapshot_after_steer_updates_assistant_not_user():
+    history = [
+        {"role": "user", "content": "Start task"},
+        {"role": "assistant", "content": "Working…"},
+        {"role": "user", "content": "_**Steer:**_ Only redact names"},
+        {"role": "assistant", "content": ""},
+    ]
+    activity: list[str] = []
+    event = PiStreamEvent(kind="text_snapshot", text="Acknowledged — adjusting scope.")
+    history, activity, *_rest = _apply_event(
+        event,
+        history=history,
+        activity=activity,
+        thinking="",
+        tool_output="",
+        tool_heading="",
+        completed_segments=[],
+        streaming_text="",
+    )
+    assert history[-2]["content"].startswith("_**Steer:**_")
+    assert history[-1]["role"] == "assistant"
+    assert "Acknowledged" in history[-1]["content"]

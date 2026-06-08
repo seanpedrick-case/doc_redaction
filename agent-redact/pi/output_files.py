@@ -209,7 +209,7 @@ def latest_redacted_pdf_path(session_hash: str | None = None) -> str | None:
     """
     Return the newest ``*_redacted.pdf`` anywhere under the session workspace.
 
-    Used by the Gradio ``gradio_pdf.PDF`` preview (expects an absolute file path).
+    Used by the Gradio ``gradio_pdf_redaction.PDF`` preview (expects an absolute file path).
     Interim drafts and final post-apply deliverables both match.
     """
     root = workspace_root_from(session_hash)

@@ -378,6 +378,47 @@ def build_vlm_signature_guidance(encourage: bool, ocr_method: str) -> str:
     )
 
 
+def build_local_redaction_client_guidance(
+    *,
+    gradio_url: str,
+    output_base: str,
+) -> str:
+    """Pi agent and doc_redaction on the same host (local dev / shared Docker volumes)."""
+    output_redact = f"{output_base.rstrip('/')}/output_redact/"
+    doc_output_hint = ""
+    try:
+        from tools.config import OUTPUT_FOLDER, SESSION_OUTPUT_FOLDER
+
+        doc_output_hint = (
+            f"- **doc_redaction writes to** `{OUTPUT_FOLDER}`"
+            + (
+                " (per-user subfolders when `SESSION_OUTPUT_FOLDER=True`). "
+                if SESSION_OUTPUT_FOLDER
+                else ". "
+            )
+            + "Do **not** pass a Pi workspace path as `output_dir` — the server only "
+            "accepts directories under that folder.\n"
+        )
+    except ImportError:
+        doc_output_hint = (
+            "- Do **not** pass a Pi workspace path as `/doc_redact` `output_dir` — "
+            "the server restricts `output_dir` to its own `OUTPUT_FOLDER`.\n"
+        )
+    return (
+        f"- **Local doc_redaction backend:** `{gradio_url}` (same machine as this workspace).\n"
+        f"{doc_output_hint}"
+        f"- Call **`/doc_redact`** (omit `output_dir` or leave it empty), then copy artifacts "
+        f"into `{output_redact}` with `remote_redaction.resolve_redaction_output_paths` "
+        f"and `fetch_redaction_files`.\n"
+        "- When the API returns **Windows paths** (`C:\\\\...`) or paths under "
+        "`workspace/.gradio_uploads/`, **copy from disk** with `shutil.copy2` — do not "
+        "assume `gradio_api/file=` works (403 until allowed_paths includes that folder).\n"
+        "- Path walkers must accept Windows drive paths, not only strings starting with `/`.\n"
+        "- Use `agent-redact/pi/remote_redaction.py`: `extract_server_paths(result)` then "
+        "`fetch_redaction_files(paths, dest_dir)` (local copy, then HTTP fallback).\n"
+    )
+
+
 def build_remote_backend_guidance(
     *,
     gradio_url: str,
@@ -385,7 +426,10 @@ def build_remote_backend_guidance(
     workspace_root: str,
 ) -> str:
     if not is_hf_space_profile():
-        return ""
+        return build_local_redaction_client_guidance(
+            gradio_url=gradio_url,
+            output_base=output_base,
+        )
     return (
         f"- **Remote redaction backend:** the doc_redaction app runs at `{gradio_url}` "
         "(private Hugging Face Space). Use **`gradio_client` only** — upload local files "
