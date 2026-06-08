@@ -300,6 +300,15 @@ def test_credential_status_markdown_bedrock_shows_aws_profile(monkeypatch):
     monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "local-docker")
     monkeypatch.setenv("AWS_PROFILE", "corp-sso")
     monkeypatch.setenv("AWS_REGION", "eu-west-2")
+    # CI runners often inject AWS_ACCESS_KEY_* for deployment; profile must win in UI text.
+    for key in (
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_ACCESS_KEY",
+        "AWS_SECRET_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
 
     text = pac.credential_status_markdown(provider="amazon-bedrock")
     assert "AWS `profile corp-sso`" in text

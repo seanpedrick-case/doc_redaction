@@ -185,12 +185,12 @@ def resolved_default_model(provider: str, *, override: str | None = None) -> str
     """
     if override and override.strip():
         return override.strip()
-    if provider == PROVIDER_LLAMA:
-        return llama_model_id()
     env_model = (os.environ.get("PI_DEFAULT_MODEL") or "").strip()
     active_provider = normalize_provider(get_default_provider())
     if env_model and provider == active_provider:
         return env_model
+    if provider == PROVIDER_LLAMA:
+        return llama_model_id()
     models = PROVIDER_MODELS.get(provider, [])
     fallback_env = (os.environ.get("PI_DEFAULT_MODEL") or DEFAULT_MODEL or "").strip()
     if fallback_env and fallback_env in models:
