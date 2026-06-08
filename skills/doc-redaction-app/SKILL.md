@@ -26,7 +26,20 @@ Use `/doc_redact` for a normal PDF/image first pass. Use `/redact_document` only
 
 ### 2b) `/doc_redact` empty path list
 
-If the API returns **`[]`** with `"doc_redact completed"` but the server log shows **Generated Files**, common causes are: (1) **`SESSION_OUTPUT_FOLDER=True`** and a **re-run** overwrote the same filenames (fixed in recent builds via mtime-based path return); (2) path collectors that ignore **Windows** `C:\...` paths. Fallback: glob `OUTPUT_FOLDER` (including per-user subfolders) for `*{document_stem}*`, or use `remote_redaction.resolve_redaction_output_paths`. Do **not** pass a Pi workspace path as `output_dir` — only directories under the app `OUTPUT_FOLDER` are accepted.
+If the API returns **`[]`** with `"doc_redact completed"` but the server log shows **Generated Files**, common causes are: (1) **`SESSION_OUTPUT_FOLDER=True`** and a **re-run** overwrote the same filenames (fixed in recent builds via mtime-based path return); (2) path collectors that ignore **Windows** `C:\...` paths. Fallback on **shared-disk** deployments: glob `OUTPUT_FOLDER` (including per-user subfolders) for `*{document_stem}*`, or use `remote_redaction.resolve_redaction_output_paths`. Do **not** pass a Pi workspace path as `output_dir` — only directories under the app `OUTPUT_FOLDER` are accepted.
+
+### 2f) AWS ECS / split-container Pi (no shared disk with doc_redaction)
+
+When `PI_DEPLOYMENT_PROFILE=aws-ecs` (or `DOC_REDACTION_GRADIO_URL` points at an internal service like `http://redaction:7860`), the Pi agent and doc_redaction run in **separate containers**.
+
+| Do | Don't |
+|----|-------|
+| Save deliverables under `{session}/redact/<document>/output_redact/` | `find /workspace`, `ls /home/user/app/output`, or read `/workspace/doc_redaction/output/` on the Pi container |
+| `/doc_redact` via `gradio_client` + `handle_file()` for uploads from the session workspace | Pass Pi workspace paths as `output_dir` on `/doc_redact` |
+| `extract_server_paths(result)` then `fetch_redaction_files(paths, dest)` (HTTP only) | `shutil.copy2` from server paths (no shared filesystem) |
+| `verify_redaction_coverage` on **downloaded** CSV/PDF in your workspace | `POST /agent/verify_redaction_coverage` with Pi-container paths unless the server shares your disk |
+
+Helper (synced into the workspace): `{PI_WORKSPACE_DIR}/.pi/helpers/remote_redaction.py`. When `predict` returns `[]`, retry once and parse the status message for paths — **do not** grep the Pi container filesystem.
 
 ### 2c) `/doc_redact` vs `/redact_document` parameter names
 

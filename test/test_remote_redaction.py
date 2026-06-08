@@ -10,6 +10,7 @@ if str(_PI_SRC) not in sys.path:
     sys.path.insert(0, str(_PI_SRC))
 
 from remote_redaction import (  # noqa: E402
+    discover_redaction_outputs,
     extract_server_paths,
     fetch_redaction_files,
     is_gradio_file_path,
@@ -36,6 +37,11 @@ def test_extract_server_paths_nested_windows(tmp_path):
     paths = extract_server_paths(result)
     assert win_path in paths
     assert "/linux/only.pdf" in paths
+
+
+def test_discover_redaction_outputs_skips_split_backend(monkeypatch, tmp_path):
+    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "aws-ecs")
+    assert discover_redaction_outputs("example_doc", since=None) == []
 
 
 def test_fetch_redaction_files_local_copy(tmp_path):

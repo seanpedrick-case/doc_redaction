@@ -48,6 +48,14 @@ def workspace_layout(tmp_path, monkeypatch):
     return repo, ws, pws
 
 
+def test_sync_workspace_helpers_copies_remote_redaction(workspace_layout):
+    _repo, _ws, pws = workspace_layout
+    helpers = pws.sync_workspace_helpers()
+    helper_file = helpers / "remote_redaction.py"
+    assert helper_file.is_file()
+    assert "fetch_redaction_files" in helper_file.read_text(encoding="utf-8")
+
+
 def test_sync_repo_skills_to_workspace(workspace_layout):
     repo, ws, pws = workspace_layout
     dest = pws.sync_repo_skills_to_workspace(force=True)

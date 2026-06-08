@@ -8,7 +8,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from pi_agent_config import is_hf_space_profile
+from pi_agent_config import is_aws_ecs_profile, is_hf_space_profile
 from session_workspace import workspace_base_dir
 
 
@@ -382,9 +382,15 @@ def build_local_redaction_client_guidance(
     *,
     gradio_url: str,
     output_base: str,
+    workspace_root: str = "",
 ) -> str:
     """Pi agent and doc_redaction on the same host (local dev / shared Docker volumes)."""
     output_redact = f"{output_base.rstrip('/')}/output_redact/"
+    helpers = (
+        f"{workspace_root.rstrip('/')}/.pi/helpers/remote_redaction.py"
+        if workspace_root.strip()
+        else "`.pi/helpers/remote_redaction.py` (under `PI_WORKSPACE_DIR`)"
+    )
     doc_output_hint = ""
     try:
         from tools.config import OUTPUT_FOLDER, SESSION_OUTPUT_FOLDER
@@ -414,22 +420,17 @@ def build_local_redaction_client_guidance(
         "`workspace/.gradio_uploads/`, **copy from disk** with `shutil.copy2` — do not "
         "assume `gradio_api/file=` works (403 until allowed_paths includes that folder).\n"
         "- Path walkers must accept Windows drive paths, not only strings starting with `/`.\n"
-        "- Use `agent-redact/pi/remote_redaction.py`: `extract_server_paths(result)` then "
-        "`fetch_redaction_files(paths, dest_dir)` (local copy, then HTTP fallback).\n"
+        f"- Use `{helpers}`: `extract_server_paths(result)` "
+        "then `fetch_redaction_files(paths, dest_dir)` (local copy, then HTTP fallback).\n"
     )
 
 
-def build_remote_backend_guidance(
+def build_hf_space_backend_guidance(
     *,
     gradio_url: str,
     output_base: str,
     workspace_root: str,
 ) -> str:
-    if not is_hf_space_profile():
-        return build_local_redaction_client_guidance(
-            gradio_url=gradio_url,
-            output_base=output_base,
-        )
     return (
         f"- **Remote redaction backend:** the doc_redaction app runs at `{gradio_url}` "
         "(private Hugging Face Space). Use **`gradio_client` only** — upload local files "
@@ -442,9 +443,68 @@ def build_remote_backend_guidance(
         "workspace (pandas/PyMuPDF), not via Agent API.\n"
         "- **Pass 2 VLM is not available** — do not call a VLM endpoint or use "
         "`CUSTOM_VLM_FACES` / `CUSTOM_VLM_SIGNATURE` entities.\n"
-        "- Helper module: `agent-redact/pi/remote_redaction.py` (`make_redaction_client`, "
-        "`download_gradio_files`)."
+        "- Helper module: `{workspace_root.rstrip('/')}/.pi/helpers/remote_redaction.py` "
+        "(`make_redaction_client`, `fetch_redaction_files`)."
     ).format(output_base=output_base.rstrip("/") + "/")
+
+
+def build_split_container_redaction_guidance(
+    *,
+    gradio_url: str,
+    output_base: str,
+    workspace_root: str,
+) -> str:
+    """AWS ECS (and similar): Pi agent and doc_redaction are separate containers."""
+    output_redact = f"{output_base.rstrip('/')}/output_redact/"
+    helpers = f"{workspace_root.rstrip('/')}/.pi/helpers/remote_redaction.py"
+    return (
+        f"- **Split-container redaction backend:** doc_redaction runs at `{gradio_url}` "
+        "(separate service from this Pi agent). Use **`gradio_client` only**.\n"
+        f"- **Deliverables belong in your session workspace:** `{output_redact}` "
+        f"(and `{output_base.rstrip('/')}/review/output_review_final/` after apply). "
+        "That is the **only** output tree you should populate for this task.\n"
+        "- **Do not** search this container for redaction outputs: no `find /workspace`, "
+        "no `ls /home/user/app/output`, no `import tools.config OUTPUT_FOLDER` on the Pi "
+        "agent — those paths are on the **redaction service**, not here (or are a read-only "
+        "git checkout without live run artifacts).\n"
+        f'- **Initial redaction:** `Client("{gradio_url}")` → `/doc_redact` with '
+        f"`document_file=handle_file(\"<file under {workspace_root.rstrip('/')}/>\")`. "
+        "Omit `output_dir` (server picks its own `OUTPUT_FOLDER`).\n"
+        f"- **Collect paths:** `extract_server_paths(result)` from the predict tuple. "
+        "When the path list is `[]`, parse the status `message` for embedded paths, or retry "
+        "once — **do not** spend turns grepping the filesystem.\n"
+        f'- **Download:** `fetch_redaction_files(paths, "{output_redact}")` from '
+        f"`{helpers}` (HTTP `GET /gradio_api/file=` — no shared disk copy).\n"
+        "- **`POST /agent/*`** only accepts paths on the **redaction server**. After "
+        "download, run `verify_redaction_coverage` on CSV/PDF under your workspace, not with "
+        "bare Agent API paths from this container.\n"
+        f"- Helper module (inside workspace boundary): `{helpers}`."
+    )
+
+
+def build_remote_backend_guidance(
+    *,
+    gradio_url: str,
+    output_base: str,
+    workspace_root: str,
+) -> str:
+    if is_hf_space_profile():
+        return build_hf_space_backend_guidance(
+            gradio_url=gradio_url,
+            output_base=output_base,
+            workspace_root=workspace_root,
+        )
+    if is_aws_ecs_profile():
+        return build_split_container_redaction_guidance(
+            gradio_url=gradio_url,
+            output_base=output_base,
+            workspace_root=workspace_root,
+        )
+    return build_local_redaction_client_guidance(
+        gradio_url=gradio_url,
+        output_base=output_base,
+        workspace_root=workspace_root,
+    )
 
 
 def _resolve_and_validate_upload_path(upload_path: str | Path) -> Path:

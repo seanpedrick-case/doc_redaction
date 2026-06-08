@@ -57,9 +57,6 @@ from pi_agent_config import (
     resolved_default_model,
     write_runtime_config,
 )
-
-# Keep ~/.pi/agent/models.json in sync with pi_agent.env (Docker start.sh does this too).
-write_runtime_config()
 from pi_examples import example_rows, examples_status_markdown
 from pi_rpc_client import (
     PiRpcClient,
@@ -102,10 +99,10 @@ from tools.config import (
     EMPTY_SEND_WITH_FILE_HINT,
     FASTAPI_ROOT_PATH,
     HOST_NAME,
-    PI_GRADIO_PORT,
     PI_INTRO_TEXT,
     PI_ROOT_PATH,
     PI_UI_HOST,
+    PI_UI_PORT,
     PI_UI_TITLE,
     QUOTA_CONTINUE_PROMPT,
     QUOTA_RETRY_ATTEMPTS,
@@ -118,6 +115,11 @@ from tools.config import (
     THINKING_PANEL_CSS,
     TOOL_OUTPUT_MAX,
 )
+
+# After ``tools.config`` import: it may set ``PI_DEFAULT_PROVIDER`` / ``PI_DEFAULT_MODEL``
+# when unset (must match ``pi_agent_config.get_default_provider``, not always Gemini).
+write_runtime_config()
+
 from tools.gradio_platform import (
     create_fastapi_app,
     log_agent_usage_event,
@@ -126,9 +128,6 @@ from tools.gradio_platform import (
 )
 
 IS_HF_SPACE = is_hf_space_profile()
-# Use PI_GRADIO_PORT only — GRADIO_SERVER_PORT is the main app's default (7860) and is
-# written into os.environ during tools.config import, which would override 7862 here.
-PI_UI_PORT = PI_GRADIO_PORT
 
 AGENT_FINISH_SIGNAL_NONE = ""
 AGENT_FINISH_SIGNAL_FINISHED = "finished"

@@ -85,6 +85,26 @@ def is_hf_space_profile() -> bool:
     return profile == DEPLOYMENT_HF_SPACE
 
 
+def is_aws_ecs_profile() -> bool:
+    profile = os.environ.get("PI_DEPLOYMENT_PROFILE", DEPLOYMENT_LOCAL).strip().lower()
+    return profile == DEPLOYMENT_AWS_ECS
+
+
+def uses_split_redaction_backend() -> bool:
+    """
+    True when Pi and doc_redaction run in separate containers (no shared output disk).
+
+    HF Space and AWS ECS use Gradio HTTP download; local-docker typically shares a host
+    volume. Override with ``PI_REDACTION_SPLIT_BACKEND=true|false``.
+    """
+    explicit = (os.environ.get("PI_REDACTION_SPLIT_BACKEND") or "").strip().lower()
+    if explicit in {"1", "true", "yes", "on"}:
+        return True
+    if explicit in {"0", "false", "no", "off"}:
+        return False
+    return is_hf_space_profile() or is_aws_ecs_profile()
+
+
 def resolve_llama_base_url() -> str:
     """
     OpenAI-compatible base URL for Pi's ``llama-cpp`` provider (includes ``/v1``).

@@ -183,10 +183,29 @@ def workspace_context_prefix(session_hash: str) -> str:
     if not session_workspace_enabled() or not session_hash.strip():
         return ""
     root = session_workspace_dir(session_hash).as_posix().rstrip("/")
-    return (
+    lines = [
         f"**Session workspace (mandatory):** all uploads, downloads, and redaction "
         f"artifacts for this user must live under `{root}/`. "
-        f"Use `{root}/redact/<document>/` for per-document output trees. "
+        f"Use `{root}/redact/<document>/output_redact/` for Pass 1 downloads and "
+        f"`{root}/redact/<document>/review/output_review_final/` after `/review_apply`. "
         f"Do not write to `{root}/output_final_download/` (UI-managed download copies only). "
-        f"Do not read or write other session folders under `{workspace_base_dir().as_posix()}/`.\n\n"
-    )
+        f"Do not read or write other session folders under `{workspace_base_dir().as_posix()}/`.",
+    ]
+    try:
+        from pi_agent_config import uses_split_redaction_backend
+        from redaction_prompt import doc_redaction_gradio_url
+
+        if uses_split_redaction_backend():
+            helpers = (
+                f"{workspace_base_dir().as_posix()}/.pi/helpers/remote_redaction.py"
+            )
+            lines.append(
+                f"**Redaction outputs (split backend):** doc_redaction at "
+                f"`{doc_redaction_gradio_url()}` writes to its own container — download "
+                f"artifacts into `{root}/redact/<document>/output_redact/` via "
+                f"`{helpers}` (`fetch_redaction_files`). Do not `find` or `ls` "
+                f"`/workspace/doc_redaction/output` from this agent."
+            )
+    except ImportError:
+        pass
+    return "\n".join(lines) + "\n\n"

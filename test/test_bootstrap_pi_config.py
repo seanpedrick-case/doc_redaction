@@ -48,6 +48,31 @@ def test_ensure_pi_upload_root_defaults_to_repo_workspace_gradio(monkeypatch, tm
     assert os.environ["GRADIO_TEMP_DIR"] == resolved
 
 
+def test_tools_config_pi_default_provider_local_is_llama_not_gemini(
+    monkeypatch, tmp_path
+):
+    """tools.config must not inject google-gemini when PI_DEFAULT_PROVIDER is unset locally."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("APP_TYPE", "pi")
+    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "local-docker")
+    monkeypatch.delenv("PI_DEFAULT_PROVIDER", raising=False)
+    monkeypatch.delenv("PI_DEFAULT_MODEL", raising=False)
+    monkeypatch.delenv("APP_CONFIG_PATH", raising=False)
+
+    import importlib
+    import sys
+
+    if str(repo) not in sys.path:
+        sys.path.insert(0, str(repo))
+    tools_config = importlib.import_module("tools.config")
+    importlib.reload(tools_config)
+
+    assert os.environ.get("PI_DEFAULT_PROVIDER") == "llama-cpp"
+    assert os.environ.get("PI_DEFAULT_MODEL") in (None, "")
+
+
 def test_ensure_pi_config_env_loads_pi_agent_env_before_imports(monkeypatch, tmp_path):
     bootstrap = _import_bootstrap(monkeypatch, tmp_path)
     repo = tmp_path / "repo"

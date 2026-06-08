@@ -60,6 +60,20 @@ def test_build_redaction_prompt_omits_long_document_rules_for_small_pdfs(monkeyp
     assert "User redaction requirements" in prompt
 
 
+def test_aws_ecs_remote_guidance_forbids_workspace_output_grep(monkeypatch):
+    monkeypatch.setenv("DOC_REDACTION_GRADIO_URL", "http://redaction:7860")
+    module = _reload_redaction_prompt(monkeypatch, profile="aws-ecs")
+    guidance = module.build_remote_backend_guidance(
+        gradio_url="http://redaction:7860",
+        output_base="/home/user/app/workspace/sess/redact/doc.pdf/",
+        workspace_root="/home/user/app/workspace/sess",
+    )
+    assert "Split-container" in guidance
+    assert "Do not" in guidance and "find /workspace" in guidance
+    assert "/home/user/app/workspace/sess/redact/doc.pdf/output_redact/" in guidance
+    assert ".pi/helpers/remote_redaction.py" in guidance
+
+
 def test_build_redaction_prompt_keeps_long_document_rules_at_scale(monkeypatch):
     module = _reload_redaction_prompt(monkeypatch)
     prompt = module.build_redaction_prompt(

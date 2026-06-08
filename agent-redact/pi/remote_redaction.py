@@ -15,10 +15,26 @@ DEFAULT_CONNECT_TIMEOUT = 120.0
 DEFAULT_READ_TIMEOUT = 1800.0
 
 
-def redaction_base_url() -> str:
-    from redaction_prompt import doc_redaction_gradio_url
+def split_redaction_backend() -> bool:
+    """True when Pi and doc_redaction do not share a filesystem (ECS, HF Space, …)."""
+    try:
+        from pi_agent_config import uses_split_redaction_backend
 
-    return doc_redaction_gradio_url()
+        return uses_split_redaction_backend()
+    except ImportError:
+        return False
+
+
+def redaction_base_url() -> str:
+    raw = (os.environ.get("DOC_REDACTION_GRADIO_URL") or "").strip().rstrip("/")
+    if raw:
+        return raw
+    try:
+        from redaction_prompt import doc_redaction_gradio_url
+
+        return doc_redaction_gradio_url()
+    except ImportError:
+        return "http://127.0.0.1:7860"
 
 
 def redaction_hf_token() -> str | None:
@@ -115,6 +131,9 @@ def discover_redaction_outputs(
     stem = (document_stem or "").strip()
     if not stem:
         return []
+    if split_redaction_backend():
+        return []
+
     root = doc_redaction_output_root()
     if root is None or not root.is_dir():
         return []
@@ -206,21 +225,23 @@ def fetch_redaction_files(
     saved: list[Path] = []
     http_paths: list[str] = []
 
+    use_http_only = split_redaction_backend()
     for path in paths:
         if not is_gradio_file_path(path):
             continue
-        local = Path(path)
-        try:
-            if local.is_file():
-                out = dest / local.name
-                if local.resolve() != out.resolve():
-                    shutil.copy2(local, out)
-                else:
-                    out = local.resolve()
-                saved.append(out)
-                continue
-        except OSError:
-            pass
+        if not use_http_only:
+            local = Path(path)
+            try:
+                if local.is_file():
+                    out = dest / local.name
+                    if local.resolve() != out.resolve():
+                        shutil.copy2(local, out)
+                    else:
+                        out = local.resolve()
+                    saved.append(out)
+                    continue
+            except OSError:
+                pass
         http_paths.append(path)
 
     if http_paths:

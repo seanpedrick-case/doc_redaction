@@ -24,6 +24,10 @@ def workspace_skills_dir() -> Path:
     return workspace_pi_dir() / "skills"
 
 
+def workspace_helpers_dir() -> Path:
+    return workspace_pi_dir() / "helpers"
+
+
 def repo_skills_dir() -> Path:
     return pi_repo_root_path() / "skills"
 
@@ -199,9 +203,31 @@ def sync_repo_skills_to_workspace(*, force: bool = False) -> Path:
     return dest.resolve()
 
 
+def sync_workspace_helpers() -> Path:
+    """
+    Copy Pi redaction helper scripts into ``{workspace}/.pi/helpers/``.
+
+    Keeps ``remote_redaction.py`` inside the workspace boundary on AWS ECS so the
+    agent does not search ``/workspace/doc_redaction/agent-redact/``.
+    """
+    helpers = workspace_helpers_dir()
+    helpers.mkdir(parents=True, exist_ok=True)
+    pi_dir = Path(__file__).resolve().parent
+    for name in ("remote_redaction.py",):
+        src = pi_dir / name
+        dest = helpers / name
+        if not src.is_file():
+            continue
+        if not dest.is_file() or src.stat().st_mtime > dest.stat().st_mtime:
+            shutil.copy2(src, dest)
+    return helpers.resolve()
+
+
 def ensure_workspace_skills(*, force: bool = False) -> Path:
     """Idempotent sync used at app startup and before Pi RPC starts."""
-    return sync_repo_skills_to_workspace(force=force)
+    dest = sync_repo_skills_to_workspace(force=force)
+    sync_workspace_helpers()
+    return dest
 
 
 def partnership_template_in_workspace() -> Path | None:
