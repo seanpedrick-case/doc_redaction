@@ -79,16 +79,21 @@ def persist_session_log(
     client: PiRpcClient | None,
     *,
     session_hash: str = "",
+    source: Path | None = None,
 ) -> Path | None:
     """
     Archive the active Pi session JSONL when local usage logging is enabled.
 
     Copies into ``USAGE_LOGS_FOLDER`` when ``SAVE_LOGS_TO_CSV`` is true, then
     uploads that copy to ``S3_USAGE_LOGS_FOLDER`` when ``RUN_AWS_FUNCTIONS`` is true.
+
+    When *source* is provided (resolved synchronously by the caller), it is used
+    directly so this can run on a background thread without issuing an RPC read.
     """
     if not SAVE_LOGS_TO_CSV:
         return None
-    source = pi_session_file_from_client(client)
+    if source is None:
+        source = pi_session_file_from_client(client)
     if source is None:
         return None
     archived = copy_session_log_to_usage_folder(source, session_hash=session_hash)

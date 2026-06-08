@@ -311,7 +311,8 @@ APP_CONFIG_PATH = get_or_create_env_var(
 if APP_CONFIG_PATH:
     if os.path.exists(APP_CONFIG_PATH):
         print(f"Loading app variables from config file {APP_CONFIG_PATH}")
-        load_dotenv(APP_CONFIG_PATH)
+        # Do not override task/compose env (e.g. ECS ``PI_DEFAULT_PROVIDER``).
+        load_dotenv(APP_CONFIG_PATH, override=False)
 
 ###
 # AWS OPTIONS
@@ -2817,15 +2818,23 @@ PI_WORKSPACE_DIR = get_or_create_env_var("PI_WORKSPACE_DIR", "")
 
 
 def resolve_pi_default_provider_fallback() -> str:
-    """Fallback when ``PI_DEFAULT_PROVIDER`` is unset (local-docker / aws-ecs → llama-cpp)."""
+    """Fallback when ``PI_DEFAULT_PROVIDER`` is unset (profile-aware)."""
     profile = os.environ.get("PI_DEPLOYMENT_PROFILE", "local-docker").strip().lower()
-    return "google-gemini" if profile == "hf-space" else "llama-cpp"
+    if profile == "hf-space":
+        return "google-gemini"
+    if profile == "aws-ecs":
+        return "amazon-bedrock"
+    return "llama-cpp"
 
 
 def resolve_pi_default_model_fallback() -> str:
-    """Fallback when ``PI_DEFAULT_MODEL`` is unset (Gemini id on HF Space only)."""
+    """Fallback when ``PI_DEFAULT_MODEL`` is unset (profile-aware)."""
     profile = os.environ.get("PI_DEPLOYMENT_PROFILE", "local-docker").strip().lower()
-    return "gemini-flash-lite-latest" if profile == "hf-space" else ""
+    if profile == "hf-space":
+        return "gemini-flash-lite-latest"
+    if profile == "aws-ecs":
+        return "anthropic.claude-sonnet-4-6"
+    return ""
 
 
 PI_DEFAULT_PROVIDER = get_or_create_env_var(

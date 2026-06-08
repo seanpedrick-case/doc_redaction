@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import shutil
 import subprocess
 import threading
 import uuid
+from collections import deque
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
@@ -15,6 +17,12 @@ from typing import Any
 
 class PiRpcError(RuntimeError):
     pass
+
+
+# Sentinel pushed to every pending response slot and the events queue when the
+# Pi RPC subprocess exits, so blocked waiters unblock with a clear error instead
+# of hanging forever.
+_PI_PROCESS_EXIT = object()
 
 
 # Pi RPC is JSONL over pipes; always UTF-8 (Windows default locale is cp1252).
@@ -250,6 +258,10 @@ def format_tool_args(tool_name: str | None, args: dict[str, Any] | None) -> str:
 class PiRpcClient:
     """Drive a long-lived ``pi --mode rpc`` subprocess."""
 
+    # Extension UI dialog methods block Pi until the client replies; auto-cancel
+    # them so a missing UI layer can never wedge the RPC process.
+    _EXTENSION_UI_DIALOG_METHODS = frozenset({"select", "confirm", "input", "editor"})
+
     def __init__(
         self,
         *,
@@ -261,11 +273,22 @@ class PiRpcClient:
         self._env = env
         self._pi_args = pi_args or []
         self._proc: subprocess.Popen[str] | None = None
-        self._io_lock = threading.Lock()
+        self._write_lock = threading.Lock()
         self._abort_requested = False
         self._prompt_stream_depth = 0
         self._pending_follow_ups = 0
         self._pending_ui_history: list[dict[str, Any]] = []
+        # Single stdout reader thread demultiplexes the JSONL stream: command
+        # responses go to per-id slots, agent events go to ``_events``. This lets
+        # any thread (e.g. post-task logging) call the client safely while a
+        # prompt stream is active.
+        self._reader_thread: threading.Thread | None = None
+        self._stderr_thread: threading.Thread | None = None
+        self._events: queue.Queue[Any] = queue.Queue()
+        self._pending_lock = threading.Lock()
+        self._pending_responses: dict[str, queue.Queue[Any]] = {}
+        self._stderr_buffer: deque[str] = deque(maxlen=200)
+        self._closing = False
 
     @property
     def running(self) -> bool:
@@ -273,14 +296,16 @@ class PiRpcClient:
 
     @property
     def prompt_stream_active(self) -> bool:
-        """True while :meth:`prompt_events` is consuming the RPC stdout stream."""
+        """True while :meth:`prompt_events` is consuming the RPC event stream."""
         return self._prompt_stream_depth > 0
 
     def start(self) -> None:
         if self.running:
             return
         command = [resolve_pi_executable(), "--mode", "rpc", *self._pi_args]
-        self._proc = subprocess.Popen(
+        self._closing = False
+        self._abort_requested = False
+        proc = subprocess.Popen(
             command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -291,20 +316,55 @@ class PiRpcClient:
             cwd=self._cwd,
             env=self._env,
         )
+        self._proc = proc
+        # Fresh demux state for this process.
+        self._events = queue.Queue()
+        with self._pending_lock:
+            self._pending_responses = {}
+        self._stderr_buffer = deque(maxlen=200)
+        self._reader_thread = threading.Thread(
+            target=self._reader_loop,
+            args=(proc,),
+            name="pi-rpc-stdout",
+            daemon=True,
+        )
+        self._reader_thread.start()
+        if proc.stderr is not None:
+            self._stderr_thread = threading.Thread(
+                target=self._stderr_loop,
+                args=(proc,),
+                name="pi-rpc-stderr",
+                daemon=True,
+            )
+            self._stderr_thread.start()
 
     def close(self) -> None:
         if not self._proc:
             return
-        if self.running:
+        self._closing = True
+        proc = self._proc
+        if proc.poll() is None:
             try:
                 self.abort()
             except Exception:
                 pass
-            self._proc.terminate()
+            proc.terminate()
             try:
-                self._proc.wait(timeout=5)
+                proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                self._proc.kill()
+                proc.kill()
+        # Process exit makes ``readline`` return EOF; the reader thread then
+        # notifies waiters. Nudge waiters here too in case the threads are slow.
+        self._notify_process_exit()
+        for thread in (self._reader_thread, self._stderr_thread):
+            if (
+                thread is not None
+                and thread.is_alive()
+                and thread is not threading.current_thread()
+            ):
+                thread.join(timeout=2)
+        self._reader_thread = None
+        self._stderr_thread = None
         self._proc = None
 
     def _ensure_running(self) -> subprocess.Popen[str]:
@@ -313,29 +373,105 @@ class PiRpcClient:
         assert self._proc is not None
         return self._proc
 
-    def _read_line(self) -> dict[str, Any]:
-        proc = self._ensure_running()
-        assert proc.stdout is not None
-        with self._io_lock:
-            line = proc.stdout.readline()
-        if not line:
-            code = proc.poll()
-            err = ""
-            if proc.stderr is not None:
-                err = proc.stderr.read() or ""
-            raise PiRpcError(
-                f"Pi RPC process exited (code={code})."
-                + (f" stderr: {err[:500]}" if err else "")
+    def _recent_stderr(self) -> str:
+        return "\n".join(self._stderr_buffer)
+
+    def _process_exit_error(self) -> PiRpcError:
+        code = self._proc.poll() if self._proc else None
+        err = self._recent_stderr()
+        return PiRpcError(
+            f"Pi RPC process exited (code={code})."
+            + (f" stderr: {err[:500]}" if err else "")
+        )
+
+    def _notify_process_exit(self) -> None:
+        """Unblock every pending response slot and the events queue on exit."""
+        with self._pending_lock:
+            pending = list(self._pending_responses.values())
+            self._pending_responses.clear()
+        for slot in pending:
+            try:
+                slot.put_nowait(_PI_PROCESS_EXIT)
+            except queue.Full:
+                pass
+        try:
+            self._events.put_nowait(_PI_PROCESS_EXIT)
+        except queue.Full:
+            pass
+
+    def _stderr_loop(self, proc: subprocess.Popen[str]) -> None:
+        """Continuously drain stderr into a bounded buffer (prevents pipe deadlock)."""
+        stream = proc.stderr
+        if stream is None:
+            return
+        try:
+            for line in stream:
+                self._stderr_buffer.append(line.rstrip("\r\n"))
+        except (ValueError, OSError):
+            pass
+
+    def _reader_loop(self, proc: subprocess.Popen[str]) -> None:
+        """Read every stdout line and route responses vs. agent events."""
+        stream = proc.stdout
+        if stream is None:
+            self._notify_process_exit()
+            return
+        try:
+            while True:
+                line = stream.readline()
+                if not line:
+                    break
+                line = line.rstrip("\r\n")
+                if not line:
+                    continue
+                try:
+                    message = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                self._dispatch_message(message)
+        except (ValueError, OSError):
+            pass
+        finally:
+            self._notify_process_exit()
+
+    def _dispatch_message(self, message: Any) -> None:
+        if not isinstance(message, dict):
+            return
+        msg_type = message.get("type")
+        if msg_type == "response":
+            req_id = message.get("id")
+            slot: queue.Queue[Any] | None = None
+            if req_id is not None:
+                with self._pending_lock:
+                    slot = self._pending_responses.pop(str(req_id), None)
+            if slot is not None:
+                try:
+                    slot.put_nowait(message)
+                except queue.Full:
+                    pass
+            return
+        if msg_type == "extension_ui_request":
+            self._auto_reply_extension_ui(message)
+            return
+        # Agent event — consumed by the active ``prompt_events`` stream.
+        self._events.put(message)
+
+    def _auto_reply_extension_ui(self, message: dict[str, Any]) -> None:
+        method = message.get("method")
+        req_id = message.get("id")
+        if req_id is None or method not in self._EXTENSION_UI_DIALOG_METHODS:
+            return
+        try:
+            self._write_command(
+                {"type": "extension_ui_response", "id": req_id, "cancelled": True}
             )
-        line = line.rstrip("\r\n")
-        if not line:
-            return self._read_line()
-        return json.loads(line)
+        except (OSError, PiRpcError):
+            pass
 
     def _write_command(self, command: dict[str, Any]) -> None:
         proc = self._ensure_running()
         assert proc.stdin is not None
-        with self._io_lock:
+        with self._write_lock:
             proc.stdin.write(json.dumps(command) + "\n")
             proc.stdin.flush()
 
@@ -345,19 +481,26 @@ class PiRpcClient:
         *,
         wait_response: bool = True,
     ) -> dict[str, Any] | None:
-        req_id = command.setdefault("id", str(uuid.uuid4()))
-        self._write_command(command)
+        req_id = str(command.setdefault("id", str(uuid.uuid4())))
         if not wait_response:
+            self._write_command(command)
             return None
-        while True:
-            event = self._read_line()
-            if event.get("type") == "response" and event.get("id") == req_id:
-                if not event.get("success", False):
-                    error = (
-                        event.get("error") or event.get("message") or "command failed"
-                    )
-                    raise PiRpcError(str(error))
-                return event
+        slot: queue.Queue[Any] = queue.Queue(maxsize=1)
+        with self._pending_lock:
+            self._pending_responses[req_id] = slot
+        try:
+            self._write_command(command)
+        except Exception:
+            with self._pending_lock:
+                self._pending_responses.pop(req_id, None)
+            raise
+        result = slot.get()
+        if result is _PI_PROCESS_EXIT:
+            raise self._process_exit_error()
+        if not result.get("success", False):
+            error = result.get("error") or result.get("message") or "command failed"
+            raise PiRpcError(str(error))
+        return result
 
     def abort(self) -> None:
         """Request abort without reading stdout (the active stream consumer drains events)."""
@@ -460,30 +603,37 @@ class PiRpcClient:
         finally:
             self._prompt_stream_depth = max(0, self._prompt_stream_depth - 1)
 
+    def _drain_events(self) -> None:
+        """Discard stale events left over from a prior stream (single active prompt)."""
+        while True:
+            try:
+                item = self._events.get_nowait()
+            except queue.Empty:
+                return
+            if item is _PI_PROCESS_EXIT:
+                # Preserve the exit signal for the consumer to observe.
+                try:
+                    self._events.put_nowait(_PI_PROCESS_EXIT)
+                except queue.Full:
+                    pass
+                return
+
     def _prompt_events_impl(self, message: str) -> Iterator[PiStreamEvent]:
         self.clear_abort()
-        req_id = str(uuid.uuid4())
-        self._send_command(
-            {"id": req_id, "type": "prompt", "message": message},
-            wait_response=False,
-        )
-
-        while True:
-            event = self._read_line()
-            if event.get("type") == "response" and event.get("id") == req_id:
-                if not event.get("success", False):
-                    error = (
-                        event.get("error") or event.get("message") or "prompt rejected"
-                    )
-                    yield PiStreamEvent(kind="error", text=str(error), is_error=True)
-                    return
-                break
+        self._drain_events()
+        try:
+            self._send_command({"type": "prompt", "message": message})
+        except PiRpcError as exc:
+            yield PiStreamEvent(kind="error", text=str(exc), is_error=True)
+            return
 
         yield from self._iter_agent_events()
 
     def _iter_agent_events(self) -> Iterator[PiStreamEvent]:
         while True:
-            event = self._read_line()
+            event = self._events.get()
+            if event is _PI_PROCESS_EXIT:
+                raise self._process_exit_error()
             event_type = event.get("type")
 
             if event_type == "agent_start":

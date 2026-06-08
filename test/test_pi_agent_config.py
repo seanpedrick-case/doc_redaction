@@ -337,6 +337,30 @@ def test_resolved_default_model_uses_runtime_pi_default_for_active_provider(
     assert pac.resolved_default_model(pac.PROVIDER_LLAMA) == "swap-model-v2"
 
 
+def test_resolved_default_model_ignores_gemini_env_on_bedrock(monkeypatch):
+    """Cross-profile PI_DEFAULT_MODEL must not apply to amazon-bedrock."""
+    monkeypatch.setenv("PI_DEFAULT_PROVIDER", "amazon-bedrock")
+    monkeypatch.setenv("PI_DEFAULT_MODEL", "gemini-flash-latest")
+
+    assert pac.resolved_default_model(pac.PROVIDER_BEDROCK) == (
+        "anthropic.claude-sonnet-4-6"
+    )
+    assert pac.default_model_for_provider(pac.PROVIDER_BEDROCK) == (
+        "anthropic.claude-sonnet-4-6"
+    )
+
+
+def test_get_default_provider_aws_ecs_without_env_defaults_to_bedrock(monkeypatch):
+    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "aws-ecs")
+    monkeypatch.delenv("PI_DEFAULT_PROVIDER", raising=False)
+
+    import importlib
+
+    importlib.reload(pac)
+
+    assert pac.get_default_provider() == pac.PROVIDER_BEDROCK
+
+
 def test_resolved_default_model_honours_override_without_catalog_entry():
     assert (
         pac.resolved_default_model(pac.PROVIDER_LLAMA, override="another-local-model")

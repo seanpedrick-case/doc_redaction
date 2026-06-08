@@ -362,6 +362,13 @@ def _schedule_post_pi_task(
     handlers after the agent finishes.
     """
     usage = usage_for_completed_turn(client, usage_baseline)
+    # Resolve everything that needs an RPC read *now* (on the generator thread),
+    # so the background worker never touches the Pi stdout/stdin pipes — avoiding
+    # contention with the next follow-up prompt stream.
+    from session_logs import pi_session_file_from_client
+
+    llm_model_label = _llm_model_label(client)
+    session_log_source = pi_session_file_from_client(client)
 
     def _work() -> None:
         try:
@@ -379,6 +386,9 @@ def _schedule_post_pi_task(
                 vlm_model_name=vlm_model_name,
                 llm_input_tokens=usage.llm_input_tokens,
                 llm_output_tokens=usage.llm_output_tokens,
+                llm_model_label=llm_model_label,
+                session_log_source=session_log_source,
+                read_client=False,
             )
         except Exception:
             pass
@@ -401,9 +411,20 @@ def _after_pi_task(
     vlm_model_name: str | None = None,
     llm_input_tokens: int = 0,
     llm_output_tokens: int = 0,
+    llm_model_label: str | None = None,
+    session_log_source: Any = None,
+    read_client: bool = True,
 ) -> str | None:
-    """Run post-task logging/upload. Returns a user-visible warning when S3 upload fails."""
+    """
+    Run post-task logging/upload. Returns a user-visible warning when S3 upload fails.
+
+    When called off the hot path (background thread), the caller passes
+    *llm_model_label* / *session_log_source* (resolved synchronously) and
+    ``read_client=False`` so no RPC reads happen on the background thread.
+    """
     duration = round(time.time() - started_at, 2) if started_at else ""
+    if llm_model_label is None and read_client:
+        llm_model_label = _llm_model_label(client)
     log_agent_usage_event(
         session_hash=session_hash,
         duration_seconds=duration,
@@ -411,13 +432,17 @@ def _after_pi_task(
         total_page_count=total_page_count,
         ocr_method=ocr_method,
         pii_method=pii_method,
-        llm_model_name=_llm_model_label(client),
+        llm_model_name=llm_model_label or "",
         vlm_model_name=vlm_model_name or os.environ.get("PI_VLM_MODEL", ""),
         llm_input_tokens=llm_input_tokens,
         llm_output_tokens=llm_output_tokens,
         task="agent",
     )
-    persist_session_log(client, session_hash=session_hash)
+    persist_session_log(
+        client if read_client else None,
+        session_hash=session_hash,
+        source=session_log_source,
+    )
     file_paths = collect_final_output_files(session_hash)
     if (
         file_paths

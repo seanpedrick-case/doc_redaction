@@ -175,18 +175,30 @@ def get_default_provider() -> str:
     """Current default Pi provider (reads ``PI_DEFAULT_PROVIDER`` from env each call)."""
     if is_hf_space_profile():
         return PROVIDER_GEMINI
-    raw = (os.environ.get("PI_DEFAULT_PROVIDER") or PROVIDER_LLAMA).strip()
+    raw = (os.environ.get("PI_DEFAULT_PROVIDER") or "").strip()
     if raw in PROVIDER_MODELS:
         return raw
+    if is_aws_ecs_profile():
+        return PROVIDER_BEDROCK
     return PROVIDER_LLAMA
 
 
 DEFAULT_PROVIDER = get_default_provider()
 
+
+def _catalog_contains_model(model_id: str, provider: str) -> bool:
+    """True when *model_id* is listed for a non-llama *provider*."""
+    return model_id in PROVIDER_MODELS.get(provider, ())
+
+
 _env_default_model = (os.environ.get("PI_DEFAULT_MODEL") or "").strip()
-DEFAULT_MODEL = _env_default_model or DEFAULT_MODEL_BY_PROVIDER.get(
-    DEFAULT_PROVIDER, LLAMA_MODEL_ID
-)
+if _env_default_model and (
+    DEFAULT_PROVIDER == PROVIDER_LLAMA
+    or _catalog_contains_model(_env_default_model, DEFAULT_PROVIDER)
+):
+    DEFAULT_MODEL = _env_default_model
+else:
+    DEFAULT_MODEL = DEFAULT_MODEL_BY_PROVIDER.get(DEFAULT_PROVIDER, LLAMA_MODEL_ID)
 
 
 def llama_model_id() -> str:
@@ -200,22 +212,23 @@ def resolved_default_model(provider: str, *, override: str | None = None) -> str
     """
     Pick the default model id for a provider.
 
-    Order: explicit override → ``PI_DEFAULT_MODEL`` when it matches the active
-    provider → catalog-listed env default → built-in per-provider default.
+    Order: explicit override → ``PI_DEFAULT_MODEL`` when valid for *provider* →
+    built-in per-provider default (llama uses ``PI_LLAMA_MODEL_ID``).
     """
     if override and override.strip():
         return override.strip()
+    normalized = normalize_provider(provider)
     env_model = (os.environ.get("PI_DEFAULT_MODEL") or "").strip()
     active_provider = normalize_provider(get_default_provider())
-    if env_model and provider == active_provider:
-        return env_model
-    if provider == PROVIDER_LLAMA:
+    if env_model:
+        if normalized == PROVIDER_LLAMA:
+            if active_provider == PROVIDER_LLAMA:
+                return env_model
+        elif _catalog_contains_model(env_model, normalized):
+            return env_model
+    if normalized == PROVIDER_LLAMA:
         return llama_model_id()
-    models = PROVIDER_MODELS.get(provider, [])
-    fallback_env = (os.environ.get("PI_DEFAULT_MODEL") or DEFAULT_MODEL or "").strip()
-    if fallback_env and fallback_env in models:
-        return fallback_env
-    return DEFAULT_MODEL_BY_PROVIDER.get(provider, LLAMA_MODEL_ID)
+    return DEFAULT_MODEL_BY_PROVIDER.get(normalized, LLAMA_MODEL_ID)
 
 
 def normalize_backend_model(provider: str, model_id: str | None) -> str:

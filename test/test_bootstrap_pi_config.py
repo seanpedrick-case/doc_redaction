@@ -56,11 +56,18 @@ def test_pi_default_provider_fallback_local_is_llama_not_gemini(monkeypatch):
     assert resolve_pi_default_provider_fallback() == "llama-cpp"
 
 
-def test_pi_default_provider_fallback_aws_ecs_is_llama(monkeypatch):
+def test_pi_default_provider_fallback_aws_ecs_is_bedrock(monkeypatch):
     from tools.config import resolve_pi_default_provider_fallback
 
     monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "aws-ecs")
-    assert resolve_pi_default_provider_fallback() == "llama-cpp"
+    assert resolve_pi_default_provider_fallback() == "amazon-bedrock"
+
+
+def test_pi_default_model_fallback_aws_ecs_is_claude_sonnet(monkeypatch):
+    from tools.config import resolve_pi_default_model_fallback
+
+    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "aws-ecs")
+    assert resolve_pi_default_model_fallback() == "anthropic.claude-sonnet-4-6"
 
 
 def test_pi_default_provider_fallback_hf_space_is_gemini(monkeypatch):
