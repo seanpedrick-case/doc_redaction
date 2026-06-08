@@ -36,6 +36,56 @@ def test_snapshot_files_newer_than_includes_overwritten_files(tmp_path: Path) ->
     assert str(existing.resolve()) in found
 
 
+def test_run_cli_pins_session_hash_for_stateless_doc_redact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SESSION_OUTPUT_FOLDER + empty username must not generate two session hashes."""
+    out_base = tmp_path / "output"
+    out_base.mkdir()
+    hashes = ["abcd1234", "wxyz9876"]
+
+    monkeypatch.setattr(
+        "cli_redact._generate_session_hash",
+        lambda: hashes.pop(0),
+    )
+
+    from cli_redact import get_username_and_folders
+
+    written_dirs: list[str] = []
+    cli_usernames: list[str] = []
+
+    def _fake_cli_main(direct_mode_args: dict | None = None) -> None:
+        assert direct_mode_args is not None
+        cli_usernames.append(str(direct_mode_args.get("username") or ""))
+        _, effective_out, _, _, _, _, _, _ = get_username_and_folders(
+            username=cli_usernames[-1],
+            output_folder_textbox=str(direct_mode_args["output_dir"]),
+            input_folder_textbox=str(direct_mode_args.get("input_dir") or ""),
+            session_output_folder=bool(direct_mode_args.get("save_to_user_folders")),
+        )
+        written_dirs.append(effective_out)
+        Path(effective_out).mkdir(parents=True, exist_ok=True)
+        (Path(effective_out) / "example_redacted.pdf").write_bytes(b"%PDF")
+
+    monkeypatch.setattr("cli_redact.main", _fake_cli_main)
+
+    paths = _run_cli(
+        gradio_api_name="doc_redact",
+        overrides={
+            "task": "redact",
+            "input_file": ["example.pdf"],
+            "save_to_user_folders": True,
+        },
+        output_dir=str(out_base) + "/",
+    )
+    assert cli_usernames == ["abcd1234"]
+    assert len(written_dirs) == 1
+    assert "abcd1234" in written_dirs[0]
+    assert len(paths) == 1
+    assert paths[0].endswith("example_redacted.pdf")
+    assert "abcd1234" in paths[0]
+
+
 def test_run_cli_returns_touched_files_on_rerun(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -48,29 +48,33 @@ def test_ensure_pi_upload_root_defaults_to_repo_workspace_gradio(monkeypatch, tm
     assert os.environ["GRADIO_TEMP_DIR"] == resolved
 
 
-def test_tools_config_pi_default_provider_local_is_llama_not_gemini(
-    monkeypatch, tmp_path
-):
-    """tools.config must not inject google-gemini when PI_DEFAULT_PROVIDER is unset locally."""
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    monkeypatch.chdir(repo)
-    monkeypatch.setenv("APP_TYPE", "pi")
+def test_pi_default_provider_fallback_local_is_llama_not_gemini(monkeypatch):
+    """Unset PI_DEFAULT_PROVIDER must default to llama-cpp outside HF Space."""
+    from tools.config import resolve_pi_default_provider_fallback
+
     monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "local-docker")
-    monkeypatch.delenv("PI_DEFAULT_PROVIDER", raising=False)
-    monkeypatch.delenv("PI_DEFAULT_MODEL", raising=False)
-    monkeypatch.delenv("APP_CONFIG_PATH", raising=False)
+    assert resolve_pi_default_provider_fallback() == "llama-cpp"
 
-    import importlib
-    import sys
 
-    if str(repo) not in sys.path:
-        sys.path.insert(0, str(repo))
-    tools_config = importlib.import_module("tools.config")
-    importlib.reload(tools_config)
+def test_pi_default_provider_fallback_aws_ecs_is_llama(monkeypatch):
+    from tools.config import resolve_pi_default_provider_fallback
 
-    assert os.environ.get("PI_DEFAULT_PROVIDER") == "llama-cpp"
-    assert os.environ.get("PI_DEFAULT_MODEL") in (None, "")
+    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "aws-ecs")
+    assert resolve_pi_default_provider_fallback() == "llama-cpp"
+
+
+def test_pi_default_provider_fallback_hf_space_is_gemini(monkeypatch):
+    from tools.config import resolve_pi_default_provider_fallback
+
+    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "hf-space")
+    assert resolve_pi_default_provider_fallback() == "google-gemini"
+
+
+def test_pi_default_model_fallback_local_is_empty(monkeypatch):
+    from tools.config import resolve_pi_default_model_fallback
+
+    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "local-docker")
+    assert resolve_pi_default_model_fallback() == ""
 
 
 def test_ensure_pi_config_env_loads_pi_agent_env_before_imports(monkeypatch, tmp_path):

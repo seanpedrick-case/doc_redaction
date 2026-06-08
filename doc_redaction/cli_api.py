@@ -105,6 +105,59 @@ def _default_output_dir(prefix: str) -> str:
     return tempfile.mkdtemp(prefix=f"doc_redaction_{prefix}_")
 
 
+def _pin_session_username_if_needed(merged: dict[str, Any]) -> None:
+    """
+    Pin one session hash for stateless API/CLI runs when per-user output folders are on.
+
+    ``get_username_and_folders`` generates a random hash when ``username`` is empty.
+    ``_run_cli`` must use the same hash for output discovery and ``cli_main`` writes;
+    otherwise files land in a different subfolder and callers see ``[]`` paths.
+    """
+    if str(merged.get("username") or "").strip():
+        return
+
+    from cli_redact import get_username_and_folders
+    from tools.config import (
+        INPUT_FOLDER,
+        OUTPUT_FOLDER,
+        SESSION_OUTPUT_FOLDER,
+        TEXTRACT_JOBS_LOCAL_LOC,
+        TEXTRACT_JOBS_S3_LOC,
+        TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER,
+        TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER,
+        convert_string_to_boolean,
+    )
+
+    save = merged.get("save_to_user_folders", SESSION_OUTPUT_FOLDER)
+    if not isinstance(save, bool):
+        save = convert_string_to_boolean(str(save))
+    if not save:
+        return
+
+    session_hash, _, _, _, _, _, _, _ = get_username_and_folders(
+        username="",
+        output_folder_textbox=str(merged.get("output_dir") or OUTPUT_FOLDER),
+        input_folder_textbox=str(merged.get("input_dir") or INPUT_FOLDER),
+        session_output_folder=save,
+        textract_document_upload_input_folder=str(
+            merged.get("textract_input_prefix")
+            or TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER
+        ),
+        textract_document_upload_output_folder=str(
+            merged.get("textract_output_prefix")
+            or TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER
+        ),
+        s3_textract_document_logs_subfolder=str(
+            merged.get("s3_textract_document_logs_subfolder") or TEXTRACT_JOBS_S3_LOC
+        ),
+        local_textract_document_logs_subfolder=str(
+            merged.get("local_textract_document_logs_subfolder")
+            or TEXTRACT_JOBS_LOCAL_LOC
+        ),
+    )
+    merged["username"] = session_hash
+
+
 def _run_cli(
     *,
     gradio_api_name: str,
@@ -128,6 +181,7 @@ def _run_cli(
         output_dir = _default_output_dir(gradio_api_name)
     merged["output_dir"] = str(output_dir)
 
+    _pin_session_username_if_needed(merged)
     effective_dir = _effective_output_dir(merged)
     started_at = time.time()
     before = _snapshot_files(effective_dir)

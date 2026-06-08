@@ -20,6 +20,7 @@ from gradio_app import (
     _initial_chat_outputs_on_page_load,
     _is_agent_finish_notice_only,
     _passthrough_chat_outputs,
+    _passthrough_chat_outputs_for_notify,
     _pi_agent_is_streaming,
     _pi_wait_until_idle,
     _refresh_pi_client_model,
@@ -349,6 +350,27 @@ def test_passthrough_chat_outputs_pads_partial_values():
     assert len(result) == _CHAT_OUTPUT_COMPONENT_COUNT
     assert result[0] == "a"
     assert result[1] == "b"
+
+
+def test_passthrough_chat_outputs_for_notify_skips_file_slots():
+    non_file_count = _CHAT_OUTPUT_COMPONENT_COUNT - 3
+    values = tuple(f"v{i}" for i in range(non_file_count))
+    result = _passthrough_chat_outputs_for_notify(*values)
+    assert len(result) == _CHAT_OUTPUT_COMPONENT_COUNT
+    assert result[10] == gr.skip()
+    assert result[11] == gr.skip()
+    assert result[12] == gr.skip()
+    assert result[0] == "v0"
+    assert result[9] == "v9"
+    assert result[13] == "v10"
+
+
+def test_passthrough_chat_outputs_for_notify_pads_when_cancelled_empty():
+    result = _passthrough_chat_outputs_for_notify()
+    assert len(result) == _CHAT_OUTPUT_COMPONENT_COUNT
+    assert result[10] == gr.skip()
+    assert result[11] == gr.skip()
+    assert result[12] == gr.skip()
 
 
 def test_format_queue_update_activity_steering_and_follow_up():

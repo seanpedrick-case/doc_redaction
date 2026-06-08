@@ -138,6 +138,9 @@ AGENT_FINISH_SIGNAL_ERROR = "error"
 _CHAT_OUTPUT_COMPONENT_COUNT = 15
 # Index of ``agent_finish_signal`` in ``chat_outputs`` (for finish-notification JS).
 _CHAT_OUTPUT_AGENT_FINISH_SIGNAL_IDX = 13
+# File/PDF slots in ``chat_outputs`` — must not be ``.then()`` *inputs* (Gradio 6 stores
+# prior ``gr.skip()`` as ``{'__type__': 'update'}``, which fails FileData validation).
+_CHAT_FILE_OUTPUT_INDICES = frozenset({10, 11, 12})
 
 PI_AGENT_FINISH_HEAD_HTML = """
 <script>
@@ -269,6 +272,15 @@ def _append_agent_finish_notice(
     return history, completed_segments, streaming_text
 
 
+def _chat_outputs_notify_inputs(chat_outputs: list[Any]) -> list[Any]:
+    """``chat_outputs`` minus File/PDF components (safe as ``.then()`` inputs)."""
+    return [
+        component
+        for index, component in enumerate(chat_outputs)
+        if index not in _CHAT_FILE_OUTPUT_INDICES
+    ]
+
+
 def _passthrough_chat_outputs(*outputs: Any) -> tuple[Any, ...]:
     """
     Passthrough for ``.then(js=...)`` — Gradio forces ``queue=False`` when ``fn is None``.
@@ -282,6 +294,30 @@ def _passthrough_chat_outputs(*outputs: Any) -> tuple[Any, ...]:
         return tuple(outputs[:n])
     padded = list(outputs) + [gr.skip()] * (n - len(outputs))
     return tuple(padded)
+
+
+def _passthrough_chat_outputs_for_notify(*non_file_outputs: Any) -> tuple[Any, ...]:
+    """
+    Echo non-file ``chat_outputs`` for finish-notification ``.then(js=...)`` chains.
+
+    File/PDF components are omitted from ``.then()`` *inputs* because Gradio 6 rejects
+    their stored ``gr.skip()`` placeholder (``{'__type__': 'update'}``) during
+    ``FileData`` validation — e.g. when **Abort** cancels an in-flight chat run.
+    Outputs use ``gr.skip()`` for those slots so existing downloads/previews are kept.
+    """
+    expected_non_file = _CHAT_OUTPUT_COMPONENT_COUNT - len(_CHAT_FILE_OUTPUT_INDICES)
+    values = list(non_file_outputs)
+    if len(values) < expected_non_file:
+        values.extend([gr.skip()] * (expected_non_file - len(values)))
+    values = values[:expected_non_file]
+    non_file_iter = iter(values)
+    full: list[Any] = []
+    for index in range(_CHAT_OUTPUT_COMPONENT_COUNT):
+        if index in _CHAT_FILE_OUTPUT_INDICES:
+            full.append(gr.skip())
+        else:
+            full.append(next(non_file_iter))
+    return tuple(full)
 
 
 def _client_provider_model(client: PiRpcClient | None) -> tuple[str, str]:
@@ -2537,8 +2573,8 @@ def build_ui():
             queue=False,
         )
         notify_after_chat_send = run_chat_send.then(
-            _passthrough_chat_outputs,
-            inputs=chat_outputs,
+            _passthrough_chat_outputs_for_notify,
+            inputs=_chat_outputs_notify_inputs(chat_outputs),
             outputs=chat_outputs,
             js=PI_AGENT_FINISH_NOTIFY_JS,
         )
@@ -2556,8 +2592,8 @@ def build_ui():
             queue=False,
         )
         notify_after_chat_msg = run_chat_msg.then(
-            _passthrough_chat_outputs,
-            inputs=chat_outputs,
+            _passthrough_chat_outputs_for_notify,
+            inputs=_chat_outputs_notify_inputs(chat_outputs),
             outputs=chat_outputs,
             js=PI_AGENT_FINISH_NOTIFY_JS,
         )
@@ -2585,8 +2621,8 @@ def build_ui():
             outputs=chat_outputs,
         )
         notify_after_redact_task = run_redact_task.then(
-            _passthrough_chat_outputs,
-            inputs=chat_outputs,
+            _passthrough_chat_outputs_for_notify,
+            inputs=_chat_outputs_notify_inputs(chat_outputs),
             outputs=chat_outputs,
             js=PI_AGENT_FINISH_NOTIFY_JS,
         )

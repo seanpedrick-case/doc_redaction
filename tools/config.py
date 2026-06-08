@@ -2814,18 +2814,24 @@ PI_INTRO_TEXT = _load_intro_text(
 
 # Pi workspace: set by bootstrap_pi_config, compose, or HF Dockerfile — not a global default here.
 PI_WORKSPACE_DIR = get_or_create_env_var("PI_WORKSPACE_DIR", "")
-_pi_deployment_profile = (
-    os.environ.get("PI_DEPLOYMENT_PROFILE", "local-docker").strip().lower()
-)
-_pi_default_provider = (
-    "google-gemini" if _pi_deployment_profile == "hf-space" else "llama-cpp"
-)
+
+
+def resolve_pi_default_provider_fallback() -> str:
+    """Fallback when ``PI_DEFAULT_PROVIDER`` is unset (local-docker / aws-ecs → llama-cpp)."""
+    profile = os.environ.get("PI_DEPLOYMENT_PROFILE", "local-docker").strip().lower()
+    return "google-gemini" if profile == "hf-space" else "llama-cpp"
+
+
+def resolve_pi_default_model_fallback() -> str:
+    """Fallback when ``PI_DEFAULT_MODEL`` is unset (Gemini id on HF Space only)."""
+    profile = os.environ.get("PI_DEPLOYMENT_PROFILE", "local-docker").strip().lower()
+    return "gemini-flash-lite-latest" if profile == "hf-space" else ""
+
+
 PI_DEFAULT_PROVIDER = get_or_create_env_var(
-    "PI_DEFAULT_PROVIDER", _pi_default_provider
+    "PI_DEFAULT_PROVIDER", resolve_pi_default_provider_fallback()
 )  # Default Pi orchestration backend: llama-cpp | google-gemini | amazon-bedrock
-_pi_default_model = (
-    "gemini-flash-lite-latest" if _pi_deployment_profile == "hf-space" else ""
-)
+_pi_default_model = resolve_pi_default_model_fallback()
 if os.environ.get("PI_DEFAULT_MODEL") is None and _pi_default_model:
     os.environ["PI_DEFAULT_MODEL"] = _pi_default_model
 PI_DEFAULT_MODEL = os.environ.get("PI_DEFAULT_MODEL") or ""
