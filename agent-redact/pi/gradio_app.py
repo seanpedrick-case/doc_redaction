@@ -1494,9 +1494,8 @@ def _steer_agent_message_sync(
     if rpc is None or not rpc.running:
         return _steer_yield()
 
-    pi_message = _build_pi_prompt_message(session_hash, message)
     try:
-        rpc.steer(pi_message)
+        rpc.steer(message.strip())
         if os.environ.get("PI_RPC_DEBUG"):
             preview = (message or "").strip()[:200]
             _logger.debug(
@@ -2662,7 +2661,7 @@ def build_ui():
                         )
 
             with gr.Column(scale=3):
-                chatbot = gr.Chatbot(label="Task progress", height=480)
+                chatbot = gr.Chatbot(label="Task progress", height=480, resizable=True)
                 with gr.Row():
                     start_redact_btn = gr.Button(
                         "Start redaction task",
