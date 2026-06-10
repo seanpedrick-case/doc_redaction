@@ -8,6 +8,7 @@ if str(_PI_SRC) not in sys.path:
     sys.path.insert(0, str(_PI_SRC))
 
 from pi_rpc_client import (
+    PiRpcClient,
     assistant_chat_text,
     assistant_text_since_last_user,
     chat_text_from_assistant_message,
@@ -143,3 +144,18 @@ def test_last_assistant_turn_error_from_error_message():
         },
     ]
     assert last_assistant_turn_error(messages) == "429 Too Many Requests quota exceeded"
+
+
+def test_follow_up_increments_pending_delivery_counter(monkeypatch):
+    client = PiRpcClient()
+    commands: list[dict] = []
+    monkeypatch.setattr(
+        client,
+        "_send_command",
+        lambda command, **kwargs: commands.append(command),
+    )
+    client.follow_up("After you finish, run redaction")
+    assert client._pending_follow_ups == 1
+    assert commands[-1]["type"] == "follow_up"
+    client.follow_up("Also verify coverage")
+    assert client._pending_follow_ups == 2

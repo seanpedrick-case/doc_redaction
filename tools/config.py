@@ -311,7 +311,8 @@ APP_CONFIG_PATH = get_or_create_env_var(
 if APP_CONFIG_PATH:
     if os.path.exists(APP_CONFIG_PATH):
         print(f"Loading app variables from config file {APP_CONFIG_PATH}")
-        load_dotenv(APP_CONFIG_PATH)
+        # Do not override task/compose env (e.g. ECS ``PI_DEFAULT_PROVIDER``).
+        load_dotenv(APP_CONFIG_PATH, override=False)
 
 ###
 # AWS OPTIONS
@@ -2814,10 +2815,35 @@ PI_INTRO_TEXT = _load_intro_text(
 
 # Pi workspace: set by bootstrap_pi_config, compose, or HF Dockerfile — not a global default here.
 PI_WORKSPACE_DIR = get_or_create_env_var("PI_WORKSPACE_DIR", "")
+
+
+def resolve_pi_default_provider_fallback() -> str:
+    """Fallback when ``PI_DEFAULT_PROVIDER`` is unset (profile-aware)."""
+    profile = os.environ.get("PI_DEPLOYMENT_PROFILE", "local-docker").strip().lower()
+    if profile == "hf-space":
+        return "google-gemini"
+    if profile == "aws-ecs":
+        return "amazon-bedrock"
+    return "llama-cpp"
+
+
+def resolve_pi_default_model_fallback() -> str:
+    """Fallback when ``PI_DEFAULT_MODEL`` is unset (profile-aware)."""
+    profile = os.environ.get("PI_DEPLOYMENT_PROFILE", "local-docker").strip().lower()
+    if profile == "hf-space":
+        return "gemini-flash-lite-latest"
+    if profile == "aws-ecs":
+        return "anthropic.claude-sonnet-4-6"
+    return ""
+
+
 PI_DEFAULT_PROVIDER = get_or_create_env_var(
-    "PI_DEFAULT_PROVIDER", "google-gemini"
+    "PI_DEFAULT_PROVIDER", resolve_pi_default_provider_fallback()
 )  # Default Pi orchestration backend: llama-cpp | google-gemini | amazon-bedrock
-PI_DEFAULT_MODEL = get_or_create_env_var("PI_DEFAULT_MODEL", "gemini-flash-lite-latest")
+_pi_default_model = resolve_pi_default_model_fallback()
+if os.environ.get("PI_DEFAULT_MODEL") is None and _pi_default_model:
+    os.environ["PI_DEFAULT_MODEL"] = _pi_default_model
+PI_DEFAULT_MODEL = os.environ.get("PI_DEFAULT_MODEL") or ""
 PI_VLM_MODEL = get_or_create_env_var("PI_VLM_MODEL", "gemini-flash-lite-latest")
 PI_DEFAULT_OCR_METHOD = get_or_create_env_var("PI_DEFAULT_OCR_METHOD", "tesseract")
 PI_DEFAULT_PII_METHOD = get_or_create_env_var("PI_DEFAULT_PII_METHOD", "Local")
@@ -2831,11 +2857,11 @@ _pi_port_default = (
     == "hf-space"
     else "7862"
 )
-PI_GRADIO_PORT = int(os.environ.get("PI_GRADIO_PORT", _pi_port_default))
+PI_UI_PORT = int(os.environ.get("PI_UI_PORT", _pi_port_default))
 # Subpath when Pi sits behind ALB path routing (e.g. /pi on CloudFront). CDK sets on ECS.
 PI_ROOT_PATH = get_or_create_env_var("PI_ROOT_PATH", "")
 
-PI_UI_HOST = os.environ.get("GRADIO_SERVER_NAME", "0.0.0.0")
+PI_UI_HOST = os.environ.get("PI_UI_HOST", "0.0.0.0")
 
 SHOW_THINKING = os.environ.get("PI_GRADIO_SHOW_THINKING", "false").lower() in {
     "1",

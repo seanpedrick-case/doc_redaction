@@ -77,6 +77,17 @@ curl http://localhost:8000/v1/models
 
 If the returned `id` differs from `unsloth/Qwen3.6-27B-MTP-GGUF`, set `PI_LLAMA_MODEL_ID` in `config/pi_agent.env` or compose environment and restart `pi-agent`.
 
+### llama.cpp / llama-swap and back-to-back redaction tasks
+
+If the **first** redaction task succeeds but a **second** task in the same browser session kills the llama server (`Killed`, `saving prompt with length 69804`, `proxy error: EOF`, `502`):
+
+1. **Oversized Pi session** — the orchestration agent kept the full first run (tool logs, bash output) in context (~70k tokens). The Gradio UI **restarts the Pi RPC process** and **clears the chat panel** on **page reload** and before each **Start redaction task** (same behaviour). Workspace files are unchanged. Use **New session** before a follow-up **chat** turn if you still hit context limits.
+2. **llama.cpp OOM** — a second task that reuses the first run’s context can try to allocate multi‑GiB KV state (`total state size = 3322 MiB` in logs) and be killed by the OS. A clean Pi process keeps the orchestration prompt small.
+3. **llama-swap GPU monitor** — on newer NVIDIA drivers, older llama-swap builds fail `nvidia-smi -loop` and can log `failed reading from gpuCh`. Upgrade to [llama-swap v213+](https://github.com/mostlygeek/llama-swap) (or disable performance monitoring in your swap config).
+4. **Concurrent load** — Pi orchestration and doc_redaction VLM may share one llama endpoint; `--parallel 1` allows only one generation. Wait until the first task shows **Agent finished** before starting another.
+
+For Gemma 4 31B, `pi-agent-gemma-31b` sets lower compaction defaults (`PI_COMPACTION_RESERVE_TOKENS=16384`) to match `PI_LLAMA_CONTEXT_WINDOW=65536`.
+
 ## In-container URLs for task prompts
 
 When filling [`skills/doc-redaction-task-prompt/TASK_PROMPT_TEMPLATE.md`](../../../skills/doc-redaction-task-prompt/TASK_PROMPT_TEMPLATE.md) inside the Pi container, use:

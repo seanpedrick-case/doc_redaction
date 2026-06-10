@@ -37,10 +37,12 @@ def create_basic_config_env(
     access_log_dynamodb_table_name: str = ACCESS_LOG_DYNAMODB_TABLE_NAME,
     feedback_log_dynamodb_table_name: str = FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
     usage_log_dynamodb_table_name: str = USAGE_LOG_DYNAMODB_TABLE_NAME,
+    *,
+    headless: bool = False,
 ):
     """Create a basic config.env file for the deployed redaction app."""
     variables = {
-        "COGNITO_AUTH": "True",
+        "COGNITO_AUTH": "False" if headless else "True",
         "RUN_AWS_FUNCTIONS": "True",
         "DISPLAY_FILE_NAMES_IN_LOGS": "False",
         "SESSION_OUTPUT_FOLDER": "True",

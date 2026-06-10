@@ -93,6 +93,7 @@ from cdk_config import (
     ECS_TASK_ROLE_NAME,
     ECS_USE_FARGATE_SPOT,
     ENABLE_ECS_SERVICE_CONNECT,
+    ENABLE_HEADLESS_DEPLOYMENT,
     ENABLE_PI_AGENT_ECS_SERVICE,
     ENABLE_PI_AGENT_EXPRESS_SERVICE,
     ENABLE_S3_BATCH_ECS_TRIGGER,
@@ -244,6 +245,8 @@ class CdkStack(Stack):
         use_express_ingress = (
             not ACM_SSL_CERTIFICATE_ARN and USE_ECS_EXPRESS_MODE == "True"
         )
+        enable_headless = ENABLE_HEADLESS_DEPLOYMENT == "True"
+        deploy_web_ingress = not use_express_ingress and not enable_headless
         enable_service_connect = (
             ENABLE_ECS_SERVICE_CONNECT == "True" and not use_express_ingress
         )
@@ -254,7 +257,12 @@ class CdkStack(Stack):
             ENABLE_PI_AGENT_EXPRESS_SERVICE == "True" and use_express_ingress
         )
         enable_pi_build = enable_pi_agent or enable_pi_express
-        if use_express_ingress:
+        if enable_headless:
+            print(
+                "ENABLE_HEADLESS_DEPLOYMENT=True: S3 batch trigger + one-shot Fargate "
+                "tasks only (no ALB, CloudFront, or always-on ECS service)."
+            )
+        elif use_express_ingress:
             print(
                 "USE_ECS_EXPRESS_MODE=True: using ECS Express Mode for HTTPS ingress "
                 "(no manual ALB/Fargate service)."
@@ -1353,7 +1361,7 @@ class CdkStack(Stack):
 
             ec2_port_gradio_server_port = ec2.Port.tcp(int(GRADIO_SERVER_PORT))
 
-            if not use_express_ingress:
+            if deploy_web_ingress:
                 alb_security_group_name = ALB_NAME_SECURITY_GROUP_NAME
 
                 try:
@@ -1458,7 +1466,7 @@ class CdkStack(Stack):
         if len(load_balancer_name) > 32:
             load_balancer_name = load_balancer_name[-32:]
 
-        if not use_express_ingress:
+        if deploy_web_ingress:
             # --- ALB (legacy path) ---
             try:
                 alb_arn = get_context_str(f"arn:{load_balancer_name}") or (
@@ -2220,77 +2228,79 @@ class CdkStack(Stack):
 
             except Exception as e:
                 raise Exception("Could not handle Fargate task definition due to:", e)
-            # --- ECS Service ---
-            try:
-                ecs_service_name = ECS_SERVICE_NAME
-
-                if ECS_USE_FARGATE_SPOT == "True":
-                    use_fargate_spot = "FARGATE_SPOT"
-                if ECS_USE_FARGATE_SPOT == "False":
-                    use_fargate_spot = "FARGATE"
-
-                # Check if service exists - from_service_arn or from_service_name (needs cluster)
+            ecs_service = None
+            if deploy_web_ingress:
+                # --- ECS Service ---
                 try:
-                    # from_service_name is useful if you have the cluster object
-                    ecs_service = ecs.FargateService.from_service_attributes(
-                        self,
-                        "ECSService",  # Logical ID
-                        cluster=cluster,  # Requires the cluster object
-                        service_name=ecs_service_name,
-                    )
-                    print(f"Using existing ECS service {ecs_service_name}.")
-                    if enable_service_connect:
-                        print(
-                            "Warning: ENABLE_ECS_SERVICE_CONNECT=True but an existing "
-                            "ECS service was imported; enable Service Connect on that "
-                            "service in the ECS console or replace the service via CDK."
+                    ecs_service_name = ECS_SERVICE_NAME
+
+                    if ECS_USE_FARGATE_SPOT == "True":
+                        use_fargate_spot = "FARGATE_SPOT"
+                    if ECS_USE_FARGATE_SPOT == "False":
+                        use_fargate_spot = "FARGATE"
+
+                    # Check if service exists - from_service_arn or from_service_name (needs cluster)
+                    try:
+                        # from_service_name is useful if you have the cluster object
+                        ecs_service = ecs.FargateService.from_service_attributes(
+                            self,
+                            "ECSService",  # Logical ID
+                            cluster=cluster,  # Requires the cluster object
+                            service_name=ecs_service_name,
                         )
-                except Exception:
-                    service_connect_configuration = None
-                    if enable_service_connect:
-                        sc_dns_name = (
-                            ECS_SERVICE_CONNECT_DNS_NAME
-                            or ECS_SERVICE_CONNECT_DISCOVERY_NAME
-                        )
-                        service_connect_configuration = ecs.ServiceConnectProps(
-                            namespace=ECS_SERVICE_CONNECT_NAMESPACE,
-                            services=[
-                                ecs.ServiceConnectService(
-                                    port_mapping_name=ECS_SERVICE_CONNECT_PORT_MAPPING_NAME,
-                                    discovery_name=ECS_SERVICE_CONNECT_DISCOVERY_NAME,
-                                    dns_name=sc_dns_name,
-                                    port=int(GRADIO_SERVER_PORT),
+                        print(f"Using existing ECS service {ecs_service_name}.")
+                        if enable_service_connect:
+                            print(
+                                "Warning: ENABLE_ECS_SERVICE_CONNECT=True but an existing "
+                                "ECS service was imported; enable Service Connect on that "
+                                "service in the ECS console or replace the service via CDK."
+                            )
+                    except Exception:
+                        service_connect_configuration = None
+                        if enable_service_connect:
+                            sc_dns_name = (
+                                ECS_SERVICE_CONNECT_DNS_NAME
+                                or ECS_SERVICE_CONNECT_DISCOVERY_NAME
+                            )
+                            service_connect_configuration = ecs.ServiceConnectProps(
+                                namespace=ECS_SERVICE_CONNECT_NAMESPACE,
+                                services=[
+                                    ecs.ServiceConnectService(
+                                        port_mapping_name=ECS_SERVICE_CONNECT_PORT_MAPPING_NAME,
+                                        discovery_name=ECS_SERVICE_CONNECT_DISCOVERY_NAME,
+                                        dns_name=sc_dns_name,
+                                        port=int(GRADIO_SERVER_PORT),
+                                    )
+                                ],
+                            )
+                        # Service will be created with a count of 0, because you haven't yet actually built the initial Docker container with CodeBuild
+                        ecs_service = ecs.FargateService(
+                            self,
+                            "ECSService",  # Logical ID
+                            service_name=ecs_service_name,  # Explicit resource name
+                            platform_version=ecs.FargatePlatformVersion.LATEST,
+                            capacity_provider_strategies=[
+                                ecs.CapacityProviderStrategy(
+                                    capacity_provider=use_fargate_spot, base=0, weight=1
                                 )
                             ],
+                            cluster=cluster,
+                            task_definition=fargate_task_definition,  # Link to TD
+                            security_groups=[ecs_security_group],  # Link to SG
+                            vpc_subnets=ec2.SubnetSelection(
+                                subnets=self.private_subnets
+                            ),  # Link to subnets
+                            min_healthy_percent=0,
+                            max_healthy_percent=100,
+                            desired_count=0,
+                            service_connect_configuration=service_connect_configuration,
                         )
-                    # Service will be created with a count of 0, because you haven't yet actually built the initial Docker container with CodeBuild
-                    ecs_service = ecs.FargateService(
-                        self,
-                        "ECSService",  # Logical ID
-                        service_name=ecs_service_name,  # Explicit resource name
-                        platform_version=ecs.FargatePlatformVersion.LATEST,
-                        capacity_provider_strategies=[
-                            ecs.CapacityProviderStrategy(
-                                capacity_provider=use_fargate_spot, base=0, weight=1
-                            )
-                        ],
-                        cluster=cluster,
-                        task_definition=fargate_task_definition,  # Link to TD
-                        security_groups=[ecs_security_group],  # Link to SG
-                        vpc_subnets=ec2.SubnetSelection(
-                            subnets=self.private_subnets
-                        ),  # Link to subnets
-                        min_healthy_percent=0,
-                        max_healthy_percent=100,
-                        desired_count=0,
-                        service_connect_configuration=service_connect_configuration,
-                    )
-                    print("Successfully created new ECS service")
+                        print("Successfully created new ECS service")
 
-                # Note: Auto-scaling setup would typically go here if needed for the service
+                    # Note: Auto-scaling setup would typically go here if needed for the service
 
-            except Exception as e:
-                raise Exception("Could not handle ECS service due to:", e)
+                except Exception as e:
+                    raise Exception("Could not handle ECS service due to:", e)
 
             if enable_pi_agent:
                 try:
@@ -2373,295 +2383,315 @@ class CdkStack(Stack):
                 except Exception as e:
                     raise Exception("Could not handle S3 batch ECS trigger due to:", e)
 
-            # --- ALB TARGET GROUPS AND LISTENERS ---
-            # This section should primarily define the resources if they are managed by this stack.
-            # CDK handles adding/removing targets and actions on updates.
-            # If they might pre-exist outside the stack, you need lookups.
-            cookie_duration = Duration.hours(8)
-            target_group_name = ALB_TARGET_GROUP_NAME  # Explicit resource name
-            cloudfront_distribution_url = "cloudfront_placeholder.net"  # Need to replace this afterwards with the actual cloudfront_distribution.domain_name
-            cloudfront_http_rule_priority = (
-                PI_ALB_LISTENER_RULE_PRIORITY
-                + (pi_listener_rule_count(PI_ALB_ROUTING) if enable_pi_agent else 0)
-                if enable_pi_agent
-                else 1
-            )
-            https_listener = None
-
-            try:
-                # --- CREATING TARGET GROUPS AND ADDING THE CLOUDFRONT LISTENER RULE ---
-
-                target_group = elbv2.ApplicationTargetGroup(
-                    self,
-                    "AppTargetGroup",  # Logical ID
-                    target_group_name=target_group_name,  # Explicit resource name
-                    port=int(GRADIO_SERVER_PORT),  # Ensure port is int
-                    protocol=elbv2.ApplicationProtocol.HTTP,
-                    targets=[ecs_service],  # Link to ECS Service
-                    stickiness_cookie_duration=cookie_duration,
-                    vpc=vpc,  # Target Groups need VPC
+            if deploy_web_ingress:
+                # --- ALB TARGET GROUPS AND LISTENERS ---
+                # This section should primarily define the resources if they are managed by this stack.
+                # CDK handles adding/removing targets and actions on updates.
+                # If they might pre-exist outside the stack, you need lookups.
+                cookie_duration = Duration.hours(8)
+                target_group_name = ALB_TARGET_GROUP_NAME  # Explicit resource name
+                cloudfront_distribution_url = "cloudfront_placeholder.net"  # Need to replace this afterwards with the actual cloudfront_distribution.domain_name
+                cloudfront_http_rule_priority = (
+                    PI_ALB_LISTENER_RULE_PRIORITY
+                    + (pi_listener_rule_count(PI_ALB_ROUTING) if enable_pi_agent else 0)
+                    if enable_pi_agent
+                    else 1
                 )
-                print(f"ALB target group {target_group_name} defined.")
+                https_listener = None
 
-                # First HTTP
-                listener_port = 80
-                # Check if Listener exists - from_listener_arn or lookup by port/ALB
+                try:
+                    # --- CREATING TARGET GROUPS AND ADDING THE CLOUDFRONT LISTENER RULE ---
 
-                http_listener = alb.add_listener(
-                    "HttpListener",  # Logical ID
-                    port=listener_port,
-                    open=False,  # Be cautious with open=True, usually restrict source SG
-                )
-                print(f"ALB listener on port {listener_port} defined.")
-
-                if ACM_SSL_CERTIFICATE_ARN:
-                    http_listener.add_action(
-                        "DefaultAction",  # Logical ID for the default action
-                        action=elbv2.ListenerAction.redirect(
-                            protocol="HTTPS",
-                            host="#{host}",
-                            port="443",
-                            path="/#{path}",
-                            query="#{query}",
-                        ),
+                    target_group = elbv2.ApplicationTargetGroup(
+                        self,
+                        "AppTargetGroup",  # Logical ID
+                        target_group_name=target_group_name,  # Explicit resource name
+                        port=int(GRADIO_SERVER_PORT),  # Ensure port is int
+                        protocol=elbv2.ApplicationProtocol.HTTP,
+                        targets=[ecs_service],  # Link to ECS Service
+                        stickiness_cookie_duration=cookie_duration,
+                        vpc=vpc,  # Target Groups need VPC
                     )
-                else:
-                    if USE_CLOUDFRONT == "True":
+                    print(f"ALB target group {target_group_name} defined.")
 
-                        # The following default action can be added for the listener after a host header rule is added to the listener manually in the Console as suggested in the above comments.
-                        http_listener.add_action(
-                            "DefaultAction",  # Logical ID for the default action
-                            action=elbv2.ListenerAction.fixed_response(
-                                status_code=403,
-                                content_type="text/plain",
-                                message_body="Access denied",
-                            ),
-                        )
-
-                        # Add the Listener Rule for the specific CloudFront Host Header
-                        http_listener.add_action(
-                            "CloudFrontHostHeaderRule",
-                            action=elbv2.ListenerAction.forward(
-                                target_groups=[target_group],
-                                stickiness_duration=cookie_duration,
-                            ),
-                            priority=cloudfront_http_rule_priority,
-                            conditions=[
-                                elbv2.ListenerCondition.host_headers(
-                                    [cloudfront_distribution_url]
-                                )  # May have to redefine url in console afterwards if not specified in config file
-                            ],
-                        )
-
-                    else:
-                        # Add the Listener Rule for the specific CloudFront Host Header
-                        http_listener.add_action(
-                            "CloudFrontHostHeaderRule",
-                            action=elbv2.ListenerAction.forward(
-                                target_groups=[target_group],
-                                stickiness_duration=cookie_duration,
-                            ),
-                            priority=cloudfront_http_rule_priority,
-                        )
-
-                    print("Added targets and actions to ALB HTTP listener.")
-
-                # Now the same for HTTPS if you have an ACM certificate
-                if ACM_SSL_CERTIFICATE_ARN:
-                    listener_port_https = 443
+                    # First HTTP
+                    listener_port = 80
                     # Check if Listener exists - from_listener_arn or lookup by port/ALB
 
-                    https_listener = add_alb_https_listener_with_cert(
-                        self,
-                        "MyHttpsListener",  # Logical ID for the HTTPS listener
-                        alb,
-                        acm_certificate_arn=ACM_SSL_CERTIFICATE_ARN,
-                        default_target_group=target_group,
-                        enable_cognito_auth=True,
-                        cognito_user_pool=user_pool,
-                        cognito_user_pool_client=user_pool_client,
-                        cognito_user_pool_domain=user_pool_domain,
-                        listener_open_to_internet=True,
-                        stickiness_cookie_duration=cookie_duration,
+                    http_listener = alb.add_listener(
+                        "HttpListener",  # Logical ID
+                        port=listener_port,
+                        open=False,  # Be cautious with open=True, usually restrict source SG
                     )
+                    print(f"ALB listener on port {listener_port} defined.")
 
-                    if https_listener:
-                        CfnOutput(
-                            self, "HttpsListenerArn", value=https_listener.listener_arn
+                    if ACM_SSL_CERTIFICATE_ARN:
+                        http_listener.add_action(
+                            "DefaultAction",  # Logical ID for the default action
+                            action=elbv2.ListenerAction.redirect(
+                                protocol="HTTPS",
+                                host="#{host}",
+                                port="443",
+                                path="/#{path}",
+                                query="#{query}",
+                            ),
+                        )
+                    else:
+                        if USE_CLOUDFRONT == "True":
+
+                            # The following default action can be added for the listener after a host header rule is added to the listener manually in the Console as suggested in the above comments.
+                            http_listener.add_action(
+                                "DefaultAction",  # Logical ID for the default action
+                                action=elbv2.ListenerAction.fixed_response(
+                                    status_code=403,
+                                    content_type="text/plain",
+                                    message_body="Access denied",
+                                ),
+                            )
+
+                            # Add the Listener Rule for the specific CloudFront Host Header
+                            http_listener.add_action(
+                                "CloudFrontHostHeaderRule",
+                                action=elbv2.ListenerAction.forward(
+                                    target_groups=[target_group],
+                                    stickiness_duration=cookie_duration,
+                                ),
+                                priority=cloudfront_http_rule_priority,
+                                conditions=[
+                                    elbv2.ListenerCondition.host_headers(
+                                        [cloudfront_distribution_url]
+                                    )  # May have to redefine url in console afterwards if not specified in config file
+                                ],
+                            )
+
+                        else:
+                            # Add the Listener Rule for the specific CloudFront Host Header
+                            http_listener.add_action(
+                                "CloudFrontHostHeaderRule",
+                                action=elbv2.ListenerAction.forward(
+                                    target_groups=[target_group],
+                                    stickiness_duration=cookie_duration,
+                                ),
+                                priority=cloudfront_http_rule_priority,
+                            )
+
+                        print("Added targets and actions to ALB HTTP listener.")
+
+                    # Now the same for HTTPS if you have an ACM certificate
+                    if ACM_SSL_CERTIFICATE_ARN:
+                        listener_port_https = 443
+                        # Check if Listener exists - from_listener_arn or lookup by port/ALB
+
+                        https_listener = add_alb_https_listener_with_cert(
+                            self,
+                            "MyHttpsListener",  # Logical ID for the HTTPS listener
+                            alb,
+                            acm_certificate_arn=ACM_SSL_CERTIFICATE_ARN,
+                            default_target_group=target_group,
+                            enable_cognito_auth=True,
+                            cognito_user_pool=user_pool,
+                            cognito_user_pool_client=user_pool_client,
+                            cognito_user_pool_domain=user_pool_domain,
+                            listener_open_to_internet=True,
+                            stickiness_cookie_duration=cookie_duration,
                         )
 
-                    print(f"ALB listener on port {listener_port_https} defined.")
+                        if https_listener:
+                            CfnOutput(
+                                self,
+                                "HttpsListenerArn",
+                                value=https_listener.listener_arn,
+                            )
 
-                    # if USE_CLOUDFRONT == 'True':
-                    #     # Add default action to the listener
-                    #     https_listener.add_action(
-                    #         "DefaultAction", # Logical ID for the default action
-                    #         action=elbv2.ListenerAction.fixed_response(
-                    #             status_code=403,
-                    #             content_type="text/plain",
-                    #             message_body="Access denied",
-                    #         ),
-                    #     )
+                        print(f"ALB listener on port {listener_port_https} defined.")
 
-                    #     # Add the Listener Rule for the specific CloudFront Host Header
-                    #     https_listener.add_action(
-                    #         "CloudFrontHostHeaderRuleHTTPS",
-                    #         action=elbv2.ListenerAction.forward(target_groups=[target_group],stickiness_duration=cookie_duration),
-                    #         priority=1, # Example priority. Adjust as needed. Lower is evaluated first.
-                    #         conditions=[
-                    #             elbv2.ListenerCondition.host_headers([cloudfront_distribution_url])
-                    #         ]
-                    #     )
-                    # else:
-                    #     https_listener.add_action(
-                    #         "CloudFrontHostHeaderRuleHTTPS",
-                    #         action=elbv2.ListenerAction.forward(target_groups=[target_group],stickiness_duration=cookie_duration))
+                        # if USE_CLOUDFRONT == 'True':
+                        #     # Add default action to the listener
+                        #     https_listener.add_action(
+                        #         "DefaultAction", # Logical ID for the default action
+                        #         action=elbv2.ListenerAction.fixed_response(
+                        #             status_code=403,
+                        #             content_type="text/plain",
+                        #             message_body="Access denied",
+                        #         ),
+                        #     )
 
-                    print("Added targets and actions to ALB HTTPS listener.")
+                        #     # Add the Listener Rule for the specific CloudFront Host Header
+                        #     https_listener.add_action(
+                        #         "CloudFrontHostHeaderRuleHTTPS",
+                        #         action=elbv2.ListenerAction.forward(target_groups=[target_group],stickiness_duration=cookie_duration),
+                        #         priority=1, # Example priority. Adjust as needed. Lower is evaluated first.
+                        #         conditions=[
+                        #             elbv2.ListenerCondition.host_headers([cloudfront_distribution_url])
+                        #         ]
+                        #     )
+                        # else:
+                        #     https_listener.add_action(
+                        #         "CloudFrontHostHeaderRuleHTTPS",
+                        #         action=elbv2.ListenerAction.forward(target_groups=[target_group],stickiness_duration=cookie_duration))
 
-                if enable_pi_agent and pi_ecs_service and alb_security_group:
-                    pi_tg_name = PI_ALB_TARGET_GROUP_NAME
-                    if len(pi_tg_name) > 32:
-                        pi_tg_name = pi_tg_name[-32:]
+                        print("Added targets and actions to ALB HTTPS listener.")
 
-                    _pi_public_urls = format_pi_public_urls(
-                        routing_mode=PI_ALB_ROUTING,
-                        path_prefix=PI_ALB_PATH_PREFIX_NORMALIZED,
-                        host_header=PI_ALB_HOST_HEADER,
-                        cloudfront_domain=(
-                            CLOUDFRONT_DOMAIN if USE_CLOUDFRONT == "True" else ""
-                        ),
-                        use_https=bool(ACM_SSL_CERTIFICATE_ARN),
-                    )
-                    attach_pi_agent_to_shared_alb(
-                        self,
-                        "PiAgent",
-                        vpc=vpc,
-                        alb_security_group=alb_security_group,
-                        pi_security_group=pi_ecs_security_group,
-                        pi_service=pi_ecs_service,
-                        pi_port=int(PI_GRADIO_PORT),
-                        routing_mode=PI_ALB_ROUTING,
-                        path_prefix=PI_ALB_PATH_PREFIX_NORMALIZED,
-                        pi_host_header=PI_ALB_HOST_HEADER.strip(),
-                        listener_rule_priority=PI_ALB_LISTENER_RULE_PRIORITY,
-                        target_group_name=pi_tg_name,
-                        stickiness_cookie_duration=cookie_duration,
-                        https_listener=https_listener,
-                        http_listener=http_listener,
-                        acm_certificate_arn=ACM_SSL_CERTIFICATE_ARN or "",
-                        enable_cognito_auth=bool(ACM_SSL_CERTIFICATE_ARN),
-                        cognito_user_pool=user_pool,
-                        cognito_user_pool_client=user_pool_client,
-                        cognito_user_pool_domain=user_pool_domain,
-                    )
-                    pi_public_url = _pi_public_urls[0] if _pi_public_urls else ""
-                    CfnOutput(
-                        self,
-                        "PiPublicUrl",
-                        value=pi_public_url,
-                        description="Primary public URL for Pi agent UI (path and/or host ALB rules)",
-                    )
-                    if len(_pi_public_urls) > 1:
+                    if enable_pi_agent and pi_ecs_service and alb_security_group:
+                        pi_tg_name = PI_ALB_TARGET_GROUP_NAME
+                        if len(pi_tg_name) > 32:
+                            pi_tg_name = pi_tg_name[-32:]
+
+                        _pi_public_urls = format_pi_public_urls(
+                            routing_mode=PI_ALB_ROUTING,
+                            path_prefix=PI_ALB_PATH_PREFIX_NORMALIZED,
+                            host_header=PI_ALB_HOST_HEADER,
+                            cloudfront_domain=(
+                                CLOUDFRONT_DOMAIN if USE_CLOUDFRONT == "True" else ""
+                            ),
+                            use_https=bool(ACM_SSL_CERTIFICATE_ARN),
+                        )
+                        attach_pi_agent_to_shared_alb(
+                            self,
+                            "PiAgent",
+                            vpc=vpc,
+                            alb_security_group=alb_security_group,
+                            pi_security_group=pi_ecs_security_group,
+                            pi_service=pi_ecs_service,
+                            pi_port=int(PI_GRADIO_PORT),
+                            routing_mode=PI_ALB_ROUTING,
+                            path_prefix=PI_ALB_PATH_PREFIX_NORMALIZED,
+                            pi_host_header=PI_ALB_HOST_HEADER.strip(),
+                            listener_rule_priority=PI_ALB_LISTENER_RULE_PRIORITY,
+                            target_group_name=pi_tg_name,
+                            stickiness_cookie_duration=cookie_duration,
+                            https_listener=https_listener,
+                            http_listener=http_listener,
+                            acm_certificate_arn=ACM_SSL_CERTIFICATE_ARN or "",
+                            enable_cognito_auth=bool(ACM_SSL_CERTIFICATE_ARN),
+                            cognito_user_pool=user_pool,
+                            cognito_user_pool_client=user_pool_client,
+                            cognito_user_pool_domain=user_pool_domain,
+                        )
+                        pi_public_url = _pi_public_urls[0] if _pi_public_urls else ""
                         CfnOutput(
                             self,
-                            "PiPublicUrls",
-                            value=", ".join(_pi_public_urls),
-                            description="All configured Pi UI entry URLs",
+                            "PiPublicUrl",
+                            value=pi_public_url,
+                            description="Primary public URL for Pi agent UI (path and/or host ALB rules)",
                         )
-                    CfnOutput(
-                        self,
-                        "PiAlbPathPrefix",
-                        value=PI_ALB_PATH_PREFIX_NORMALIZED,
-                        description="ALB path prefix for Pi when PI_ALB_ROUTING includes path",
+                        if len(_pi_public_urls) > 1:
+                            CfnOutput(
+                                self,
+                                "PiPublicUrls",
+                                value=", ".join(_pi_public_urls),
+                                description="All configured Pi UI entry URLs",
+                            )
+                        CfnOutput(
+                            self,
+                            "PiAlbPathPrefix",
+                            value=PI_ALB_PATH_PREFIX_NORMALIZED,
+                            description="ALB path prefix for Pi when PI_ALB_ROUTING includes path",
+                        )
+                        CfnOutput(
+                            self,
+                            "PiAgentServiceName",
+                            value=ECS_PI_SERVICE_NAME,
+                        )
+                        sc_backend = (
+                            f"http://{ECS_SERVICE_CONNECT_DISCOVERY_NAME}:"
+                            f"{GRADIO_SERVER_PORT}"
+                        )
+                        CfnOutput(
+                            self,
+                            "PiDocRedactionBackendUrl",
+                            value=sc_backend,
+                            description="DOC_REDACTION_GRADIO_URL set on Pi tasks (Service Connect)",
+                        )
+                        print(
+                            "Pi agent attached to shared ALB "
+                            f"(routing={PI_ALB_ROUTING}, urls={', '.join(_pi_public_urls)})."
+                        )
+
+                except Exception as e:
+                    raise Exception(
+                        "Could not handle ALB target groups and listeners due to:", e
                     )
-                    CfnOutput(
-                        self,
-                        "PiAgentServiceName",
-                        value=ECS_PI_SERVICE_NAME,
-                    )
-                    sc_backend = (
-                        f"http://{ECS_SERVICE_CONNECT_DISCOVERY_NAME}:"
-                        f"{GRADIO_SERVER_PORT}"
-                    )
-                    CfnOutput(
-                        self,
-                        "PiDocRedactionBackendUrl",
-                        value=sc_backend,
-                        description="DOC_REDACTION_GRADIO_URL set on Pi tasks (Service Connect)",
-                    )
-                    print(
-                        "Pi agent attached to shared ALB "
-                        f"(routing={PI_ALB_ROUTING}, urls={', '.join(_pi_public_urls)})."
-                    )
+        if not enable_headless:
+            # Create WAF to attach to load balancer
+            try:
+                web_acl_name = LOAD_BALANCER_WEB_ACL_NAME
+                if get_context_bool(f"exists:{web_acl_name}"):
+                    # Lookup WAF ACL by ARN from context
+                    web_acl_arn = get_context_str(f"arn:{web_acl_name}")
+                    if not web_acl_arn:
+                        raise ValueError(
+                            f"Context value 'arn:{web_acl_name}' is required if Web ACL exists."
+                        )
+
+                    web_acl = create_web_acl_with_common_rules(
+                        self, web_acl_name, waf_scope="REGIONAL"
+                    )  # Assuming it takes scope and name
+                    print(f"Handled ALB WAF web ACL {web_acl_name}.")
+                else:
+                    web_acl = create_web_acl_with_common_rules(
+                        self, web_acl_name, waf_scope="REGIONAL"
+                    )  # Assuming it takes scope and name
+                    print(f"Created ALB WAF web ACL {web_acl_name}.")
+
+                wafv2.CfnWebACLAssociation(
+                    self,
+                    id="alb_waf_association",
+                    resource_arn=alb.load_balancer_arn,
+                    web_acl_arn=web_acl.attr_arn,
+                )
 
             except Exception as e:
-                raise Exception(
-                    "Could not handle ALB target groups and listeners due to:", e
-                )
-        # Create WAF to attach to load balancer
-        try:
-            web_acl_name = LOAD_BALANCER_WEB_ACL_NAME
-            if get_context_bool(f"exists:{web_acl_name}"):
-                # Lookup WAF ACL by ARN from context
-                web_acl_arn = get_context_str(f"arn:{web_acl_name}")
-                if not web_acl_arn:
-                    raise ValueError(
-                        f"Context value 'arn:{web_acl_name}' is required if Web ACL exists."
-                    )
+                raise Exception("Could not handle create ALB WAF web ACL due to:", e)
 
-                web_acl = create_web_acl_with_common_rules(
-                    self, web_acl_name, waf_scope="REGIONAL"
-                )  # Assuming it takes scope and name
-                print(f"Handled ALB WAF web ACL {web_acl_name}.")
+            # --- Outputs for other stacks/regions ---
+
+            self.params = dict()
+            self.params["alb_arn_output"] = alb.load_balancer_arn
+            if use_express_ingress:
+                self.params["alb_security_group_id"] = express_alb_security_group_id
             else:
-                web_acl = create_web_acl_with_common_rules(
-                    self, web_acl_name, waf_scope="REGIONAL"
-                )  # Assuming it takes scope and name
-                print(f"Created ALB WAF web ACL {web_acl_name}.")
+                self.params["alb_security_group_id"] = (
+                    alb_security_group.security_group_id
+                )
+            self.params["alb_dns_name"] = alb.load_balancer_dns_name
 
-            wafv2.CfnWebACLAssociation(
+            CfnOutput(
                 self,
-                id="alb_waf_association",
-                resource_arn=alb.load_balancer_arn,
-                web_acl_arn=web_acl.attr_arn,
+                "AlbArnOutput",
+                value=alb.load_balancer_arn,
+                description="ARN of the Application Load Balancer",
+                export_name=f"{self.stack_name}-AlbArn",
+            )  # Export name must be unique within the account/region
+
+            CfnOutput(
+                self,
+                "AlbSecurityGroupIdOutput",
+                value=(
+                    express_alb_security_group_id
+                    if use_express_ingress
+                    else alb_security_group.security_group_id
+                ),
+                description="ID of the ALB's Security Group",
+                export_name=f"{self.stack_name}-AlbSgId",
             )
+            CfnOutput(self, "ALBName", value=load_balancer_name)
 
-        except Exception as e:
-            raise Exception("Could not handle create ALB WAF web ACL due to:", e)
-
-        # --- Outputs for other stacks/regions ---
-
-        self.params = dict()
-        self.params["alb_arn_output"] = alb.load_balancer_arn
-        if use_express_ingress:
-            self.params["alb_security_group_id"] = express_alb_security_group_id
+            CfnOutput(self, "RegionalAlbDnsName", value=alb.load_balancer_dns_name)
         else:
-            self.params["alb_security_group_id"] = alb_security_group.security_group_id
-        self.params["alb_dns_name"] = alb.load_balancer_dns_name
-
-        CfnOutput(
-            self,
-            "AlbArnOutput",
-            value=alb.load_balancer_arn,
-            description="ARN of the Application Load Balancer",
-            export_name=f"{self.stack_name}-AlbArn",
-        )  # Export name must be unique within the account/region
-
-        CfnOutput(
-            self,
-            "AlbSecurityGroupIdOutput",
-            value=(
-                express_alb_security_group_id
-                if use_express_ingress
-                else alb_security_group.security_group_id
-            ),
-            description="ID of the ALB's Security Group",
-            export_name=f"{self.stack_name}-AlbSgId",
-        )
-        CfnOutput(self, "ALBName", value=load_balancer_name)
-
-        CfnOutput(self, "RegionalAlbDnsName", value=alb.load_balancer_dns_name)
+            self.params = dict()
+            CfnOutput(
+                self,
+                "HeadlessDeploymentMode",
+                value="True",
+                description="Stack deployed for S3-triggered direct-mode batch tasks only",
+            )
+            CfnOutput(
+                self,
+                "ECSClusterName",
+                value=CLUSTER_NAME,
+                description="ECS cluster used for one-shot Fargate batch tasks",
+            )
 
         CfnOutput(self, "CognitoPoolId", value=user_pool.user_pool_id)
         # Add other outputs if needed

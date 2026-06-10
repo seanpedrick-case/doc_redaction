@@ -24,12 +24,35 @@ def workspace_skills_dir() -> Path:
     return workspace_pi_dir() / "skills"
 
 
+def workspace_helpers_dir() -> Path:
+    return workspace_pi_dir() / "helpers"
+
+
 def repo_skills_dir() -> Path:
     return pi_repo_root_path() / "skills"
 
 
 def _env_flag(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+_SKILLS_SKIP_DIR_NAMES = frozenset({"archive_attempts"})
+_SKILLS_SKIP_SUFFIXES = (".b64.txt",)
+_SKILLS_MAX_FILE_BYTES = int(
+    os.environ.get("PI_SKILLS_MAX_FILE_BYTES", str(512 * 1024))
+)
+
+
+def _should_skip_skill_relpath(rel: Path, *, size_bytes: int | None = None) -> bool:
+    """Skip archive blobs and other non-skill artifacts during workspace sync."""
+    if any(part in _SKILLS_SKIP_DIR_NAMES for part in rel.parts):
+        return True
+    name_lower = rel.name.lower()
+    if name_lower.endswith(_SKILLS_SKIP_SUFFIXES):
+        return True
+    if size_bytes is not None and size_bytes > _SKILLS_MAX_FILE_BYTES:
+        return True
+    return False
 
 
 def _should_resync(dest: Path, src: Path) -> bool:
@@ -46,20 +69,36 @@ def _should_resync(dest: Path, src: Path) -> bool:
 
 
 def _copy_tree_item(src: Path, dest: Path) -> None:
-    if src.is_dir():
+    _copy_tree_item_filtered(src, dest, src_root=src)
+
+
+def _copy_tree_item_filtered(src: Path, dest: Path, *, src_root: Path) -> None:
+    rel = src.relative_to(src_root)
+    if _should_skip_skill_relpath(rel):
+        return
+    if src.is_file():
+        try:
+            size = src.stat().st_size
+        except OSError:
+            size = None
+        if size is not None and size > _SKILLS_MAX_FILE_BYTES:
+            return
+        dest.parent.mkdir(parents=True, exist_ok=True)
         if dest.exists():
-            for child in src.iterdir():
-                _copy_tree_item(child, dest / child.name)
-        else:
-            shutil.copytree(src, dest, copy_function=shutil.copy2)
+            _make_writable(dest)
+        shutil.copy2(src, dest)
         return
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src, dest)
+    if dest.exists():
+        for child in sorted(src.iterdir()):
+            _copy_tree_item_filtered(child, dest / child.name, src_root=src_root)
+    else:
+        dest.mkdir(parents=True, exist_ok=True)
+        for child in sorted(src.iterdir()):
+            _copy_tree_item_filtered(child, dest / child.name, src_root=src_root)
 
 
-def _make_readonly(path: Path) -> None:
-    if _env_flag("PI_SKILLS_WRITABLE"):
-        return
+def _chmod_tree(path: Path, *, writable: bool) -> None:
+    """Set or clear write bits on a file tree (needed for Windows resync)."""
     try:
         if path.is_dir():
             for root, dirs, files in os.walk(path):
@@ -68,19 +107,43 @@ def _make_readonly(path: Path) -> None:
                     file_path = root_path / name
                     mode = file_path.stat().st_mode
                     file_path.chmod(
-                        mode & ~stat.S_IWUSR & ~stat.S_IWGRP & ~stat.S_IWOTH
+                        (mode | stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH)
+                        if writable
+                        else (mode & ~stat.S_IWUSR & ~stat.S_IWGRP & ~stat.S_IWOTH)
                     )
                 for name in dirs:
                     dir_path = root_path / name
                     mode = dir_path.stat().st_mode
-                    dir_path.chmod(mode & ~stat.S_IWUSR & ~stat.S_IWGRP & ~stat.S_IWOTH)
+                    dir_path.chmod(
+                        (mode | stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH)
+                        if writable
+                        else (mode & ~stat.S_IWUSR & ~stat.S_IWGRP & ~stat.S_IWOTH)
+                    )
             mode = path.stat().st_mode
-            path.chmod(mode & ~stat.S_IWUSR & ~stat.S_IWGRP & ~stat.S_IWOTH)
+            path.chmod(
+                (mode | stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH)
+                if writable
+                else (mode & ~stat.S_IWUSR & ~stat.S_IWGRP & ~stat.S_IWOTH)
+            )
         else:
             mode = path.stat().st_mode
-            path.chmod(mode & ~stat.S_IWUSR & ~stat.S_IWGRP & ~stat.S_IWOTH)
+            path.chmod(
+                (mode | stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH)
+                if writable
+                else (mode & ~stat.S_IWUSR & ~stat.S_IWGRP & ~stat.S_IWOTH)
+            )
     except OSError:
         pass
+
+
+def _make_writable(path: Path) -> None:
+    _chmod_tree(path, writable=True)
+
+
+def _make_readonly(path: Path) -> None:
+    if _env_flag("PI_SKILLS_WRITABLE"):
+        return
+    _chmod_tree(path, writable=False)
 
 
 def write_workspace_pi_settings() -> Path:
@@ -121,10 +184,18 @@ def sync_repo_skills_to_workspace(*, force: bool = False) -> Path:
 
     if force or _should_resync(dest, src):
         if dest.exists():
-            shutil.rmtree(dest, ignore_errors=True)
+            _make_writable(dest)
+            shutil.rmtree(dest)
         dest.mkdir(parents=True, exist_ok=True)
         for item in sorted(src.iterdir()):
-            _copy_tree_item(item, dest / item.name)
+            rel = item.relative_to(src)
+            try:
+                size = item.stat().st_size if item.is_file() else None
+            except OSError:
+                size = None
+            if _should_skip_skill_relpath(rel, size_bytes=size):
+                continue
+            _copy_tree_item_filtered(item, dest / item.name, src_root=src)
 
     _make_readonly(dest)
     write_workspace_pi_settings()
@@ -132,9 +203,31 @@ def sync_repo_skills_to_workspace(*, force: bool = False) -> Path:
     return dest.resolve()
 
 
+def sync_workspace_helpers() -> Path:
+    """
+    Copy Pi redaction helper scripts into ``{workspace}/.pi/helpers/``.
+
+    Keeps ``remote_redaction.py`` inside the workspace boundary on AWS ECS so the
+    agent does not search ``/workspace/doc_redaction/agent-redact/``.
+    """
+    helpers = workspace_helpers_dir()
+    helpers.mkdir(parents=True, exist_ok=True)
+    pi_dir = Path(__file__).resolve().parent
+    for name in ("remote_redaction.py",):
+        src = pi_dir / name
+        dest = helpers / name
+        if not src.is_file():
+            continue
+        if not dest.is_file() or src.stat().st_mtime > dest.stat().st_mtime:
+            shutil.copy2(src, dest)
+    return helpers.resolve()
+
+
 def ensure_workspace_skills(*, force: bool = False) -> Path:
     """Idempotent sync used at app startup and before Pi RPC starts."""
-    return sync_repo_skills_to_workspace(force=force)
+    dest = sync_repo_skills_to_workspace(force=force)
+    sync_workspace_helpers()
+    return dest
 
 
 def partnership_template_in_workspace() -> Path | None:

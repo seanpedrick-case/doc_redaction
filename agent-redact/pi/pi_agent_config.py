@@ -85,7 +85,44 @@ def is_hf_space_profile() -> bool:
     return profile == DEPLOYMENT_HF_SPACE
 
 
-LLAMA_BASE_URL = os.environ.get("PI_LLAMA_BASE_URL", "http://llama-inference:8080/v1")
+def is_aws_ecs_profile() -> bool:
+    profile = os.environ.get("PI_DEPLOYMENT_PROFILE", DEPLOYMENT_LOCAL).strip().lower()
+    return profile == DEPLOYMENT_AWS_ECS
+
+
+def uses_split_redaction_backend() -> bool:
+    """
+    True when Pi and doc_redaction run in separate containers (no shared output disk).
+
+    HF Space and AWS ECS use Gradio HTTP download; local-docker typically shares a host
+    volume. Override with ``PI_REDACTION_SPLIT_BACKEND=true|false``.
+    """
+    explicit = (os.environ.get("PI_REDACTION_SPLIT_BACKEND") or "").strip().lower()
+    if explicit in {"1", "true", "yes", "on"}:
+        return True
+    if explicit in {"0", "false", "no", "off"}:
+        return False
+    return is_hf_space_profile() or is_aws_ecs_profile()
+
+
+def resolve_llama_base_url() -> str:
+    """
+    OpenAI-compatible base URL for Pi's ``llama-cpp`` provider (includes ``/v1``).
+
+    Reads ``PI_LLAMA_BASE_URL``; also accepts legacy aliases
+    ``PI_LLAMA_MODE_BASE_URL`` and ``PI_LLAMA_MODE__BASE_URL``.
+    """
+    for key in (
+        "PI_LLAMA_BASE_URL",
+        "PI_LLAMA_MODE_BASE_URL",
+    ):
+        raw = (os.environ.get(key) or "").strip().rstrip("/")
+        if raw:
+            return raw if raw.endswith("/v1") else f"{raw}/v1"
+    return "http://llama-inference:8080/v1"
+
+
+LLAMA_BASE_URL = resolve_llama_base_url()
 LLAMA_MODEL_ID = os.environ.get("PI_LLAMA_MODEL_ID", "unsloth/Qwen3.6-27B-MTP-GGUF")
 LLAMA_CONTEXT = int(os.environ.get("PI_LLAMA_CONTEXT_WINDOW", "114688"))
 LLAMA_MAX_TOKENS = int(os.environ.get("PI_LLAMA_MAX_TOKENS", "32768"))
@@ -138,34 +175,78 @@ def get_default_provider() -> str:
     """Current default Pi provider (reads ``PI_DEFAULT_PROVIDER`` from env each call)."""
     if is_hf_space_profile():
         return PROVIDER_GEMINI
-    raw = (os.environ.get("PI_DEFAULT_PROVIDER") or PROVIDER_LLAMA).strip()
+    raw = (os.environ.get("PI_DEFAULT_PROVIDER") or "").strip()
     if raw in PROVIDER_MODELS:
         return raw
+    if is_aws_ecs_profile():
+        return PROVIDER_BEDROCK
     return PROVIDER_LLAMA
 
 
 DEFAULT_PROVIDER = get_default_provider()
 
+
+def _catalog_contains_model(model_id: str, provider: str) -> bool:
+    """True when *model_id* is listed for a non-llama *provider*."""
+    return model_id in PROVIDER_MODELS.get(provider, ())
+
+
 _env_default_model = (os.environ.get("PI_DEFAULT_MODEL") or "").strip()
-DEFAULT_MODEL = _env_default_model or DEFAULT_MODEL_BY_PROVIDER.get(
-    DEFAULT_PROVIDER, LLAMA_MODEL_ID
-)
+if _env_default_model and (
+    DEFAULT_PROVIDER == PROVIDER_LLAMA
+    or _catalog_contains_model(_env_default_model, DEFAULT_PROVIDER)
+):
+    DEFAULT_MODEL = _env_default_model
+else:
+    DEFAULT_MODEL = DEFAULT_MODEL_BY_PROVIDER.get(DEFAULT_PROVIDER, LLAMA_MODEL_ID)
+
+
+def llama_model_id() -> str:
+    """Active llama-cpp model id (runtime ``PI_LLAMA_MODEL_ID`` or startup default)."""
+    return (
+        os.environ.get("PI_LLAMA_MODEL_ID") or LLAMA_MODEL_ID
+    ).strip() or LLAMA_MODEL_ID
 
 
 def resolved_default_model(provider: str, *, override: str | None = None) -> str:
     """
     Pick the default model id for a provider.
 
-    Order: explicit override → ``PI_DEFAULT_MODEL`` (if listed for provider) →
-    built-in per-provider default.
+    Order: explicit override → ``PI_DEFAULT_MODEL`` when valid for *provider* →
+    built-in per-provider default (llama uses ``PI_LLAMA_MODEL_ID``).
     """
-    models = PROVIDER_MODELS.get(provider, [])
-    if override and override in models:
-        return override
-    env_model = (os.environ.get("PI_DEFAULT_MODEL") or DEFAULT_MODEL or "").strip()
-    if env_model and env_model in models:
-        return env_model
-    return DEFAULT_MODEL_BY_PROVIDER.get(provider, LLAMA_MODEL_ID)
+    if override and override.strip():
+        return override.strip()
+    normalized = normalize_provider(provider)
+    env_model = (os.environ.get("PI_DEFAULT_MODEL") or "").strip()
+    active_provider = normalize_provider(get_default_provider())
+    if env_model:
+        if normalized == PROVIDER_LLAMA:
+            if active_provider == PROVIDER_LLAMA:
+                return env_model
+        elif _catalog_contains_model(env_model, normalized):
+            return env_model
+    if normalized == PROVIDER_LLAMA:
+        return llama_model_id()
+    return DEFAULT_MODEL_BY_PROVIDER.get(normalized, LLAMA_MODEL_ID)
+
+
+def normalize_backend_model(provider: str, model_id: str | None) -> str:
+    """
+    Resolve a UI/backend model selection to a concrete model id.
+
+    llama-cpp accepts any non-empty id (llama-swap / custom OpenAI model names).
+    Other providers must match the static catalog.
+    """
+    normalized = normalize_provider(provider)
+    model = (model_id or default_model_for_provider(normalized)).strip()
+    if not model:
+        return default_model_for_provider(normalized)
+    if normalized == PROVIDER_LLAMA:
+        return model
+    if model in models_for_provider(normalized):
+        return model
+    return default_model_for_provider(normalized)
 
 
 def _zero_cost() -> dict[str, int]:
@@ -194,6 +275,7 @@ def _model_entry(
 
 
 def _llama_provider() -> dict[str, Any]:
+    model_id = llama_model_id()
     return {
         "baseUrl": LLAMA_BASE_URL,
         "api": "openai-completions",
@@ -206,8 +288,8 @@ def _llama_provider() -> dict[str, Any]:
         },
         "models": [
             _model_entry(
-                LLAMA_MODEL_ID,
-                "Qwen 3.6 27B (local)",
+                model_id,
+                f"Local ({model_id})",
                 context_window=LLAMA_CONTEXT,
                 max_tokens=LLAMA_MAX_TOKENS,
                 reasoning=False,
@@ -463,7 +545,7 @@ def _aws_credential_status() -> str:
         return "access keys"
     profile = (os.environ.get("AWS_PROFILE") or "").strip()
     if profile:
-        return f"profile `{profile}`"
+        return f"profile {profile}"
     if (os.environ.get("AWS_BEARER_TOKEN_BEDROCK") or "").strip():
         return "Bedrock bearer token"
     if _aws_config_path():
@@ -541,9 +623,14 @@ def _apply_compaction_settings(settings: dict[str, Any]) -> None:
     reserve = (os.environ.get("PI_COMPACTION_RESERVE_TOKENS") or "").strip()
     if reserve:
         compaction["reserveTokens"] = int(reserve)
+    elif LLAMA_CONTEXT < 100_000:
+        # Smaller local models (e.g. Gemma 4 31B at 65536): default reserve was 32768.
+        compaction["reserveTokens"] = min(16_384, max(8_192, LLAMA_CONTEXT // 4))
     keep = (os.environ.get("PI_COMPACTION_KEEP_RECENT_TOKENS") or "").strip()
     if keep:
         compaction["keepRecentTokens"] = int(keep)
+    elif LLAMA_CONTEXT < 100_000:
+        compaction["keepRecentTokens"] = min(12_288, max(4_096, LLAMA_CONTEXT // 5))
     settings["compaction"] = compaction
 
 
@@ -601,6 +688,15 @@ def write_runtime_config(
     default_model: str | None = None,
 ) -> tuple[Path, Path]:
     """Write models.json and settings.json; return their paths."""
+    provider = normalize_provider(default_provider or get_default_provider())
+    if default_provider:
+        os.environ["PI_DEFAULT_PROVIDER"] = provider
+    if default_model and default_model.strip():
+        model = default_model.strip()
+        os.environ["PI_DEFAULT_MODEL"] = model
+        if provider == PROVIDER_LLAMA:
+            os.environ["PI_LLAMA_MODEL_ID"] = model
+
     target = Path(agent_dir or resolve_agent_dir())
     target.mkdir(parents=True, exist_ok=True)
 
@@ -628,6 +724,8 @@ def write_runtime_config(
 def models_for_provider(provider: str) -> list[str]:
     if is_hf_space_profile():
         return list(PROVIDER_MODELS[PROVIDER_GEMINI])
+    if provider == PROVIDER_LLAMA:
+        return [llama_model_id()]
     return list(PROVIDER_MODELS.get(provider, PROVIDER_MODELS[PROVIDER_LLAMA]))
 
 
@@ -689,19 +787,38 @@ def _hf_token_status() -> str:
     return "missing"
 
 
-def credential_status_markdown() -> str:
-    gemini = (
-        "set"
-        if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-        else "missing"
-    )
-    lines = [f"**Credentials:** Gemini `{gemini}`"]
+def credential_status_markdown(*, provider: str | None = None) -> str:
+    """
+    Credential summary for the active Pi provider.
+
+    ``llama-cpp`` uses the local OpenAI-compatible endpoint only (no Gemini/AWS keys).
+    Gemini and Bedrock lines appear only when that provider is selected.
+    """
+    active = normalize_provider(provider or get_default_provider())
     if is_hf_space_profile():
-        lines.append(f"HF token (redaction backend) `{_hf_token_status()}`")
-    else:
-        region = _bedrock_region()
-        lines.append(f"AWS `{_aws_credential_status()}` · region `{region}`")
-    return " · ".join(lines)
+        gemini = (
+            "set"
+            if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+            else "missing"
+        )
+        return (
+            f"**Credentials:** Gemini `{gemini}` · "
+            f"HF token (redaction backend) `{_hf_token_status()}`"
+        )
+    if active == PROVIDER_LLAMA:
+        return (
+            f"**Credentials:** local llama-cpp at `{LLAMA_BASE_URL}` "
+            f"(no API key; AWS/Gemini not used for Pi orchestration)"
+        )
+    if active == PROVIDER_GEMINI:
+        gemini = (
+            "set"
+            if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+            else "missing"
+        )
+        return f"**Credentials:** Gemini `{gemini}`"
+    region = _bedrock_region()
+    return f"**Credentials:** AWS `{_aws_credential_status()}` · region `{region}`"
 
 
 def provider_choices() -> list[str]:

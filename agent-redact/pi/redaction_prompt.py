@@ -8,7 +8,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from pi_agent_config import is_hf_space_profile
+from pi_agent_config import is_aws_ecs_profile, is_hf_space_profile
 from session_workspace import workspace_base_dir
 
 
@@ -378,14 +378,59 @@ def build_vlm_signature_guidance(encourage: bool, ocr_method: str) -> str:
     )
 
 
-def build_remote_backend_guidance(
+def build_local_redaction_client_guidance(
+    *,
+    gradio_url: str,
+    output_base: str,
+    workspace_root: str = "",
+) -> str:
+    """Pi agent and doc_redaction on the same host (local dev / shared Docker volumes)."""
+    output_redact = f"{output_base.rstrip('/')}/output_redact/"
+    helpers = (
+        f"{workspace_root.rstrip('/')}/.pi/helpers/remote_redaction.py"
+        if workspace_root.strip()
+        else "`.pi/helpers/remote_redaction.py` (under `PI_WORKSPACE_DIR`)"
+    )
+    doc_output_hint = ""
+    try:
+        from tools.config import OUTPUT_FOLDER, SESSION_OUTPUT_FOLDER
+
+        doc_output_hint = (
+            f"- **doc_redaction writes to** `{OUTPUT_FOLDER}`"
+            + (
+                " (per-user subfolders when `SESSION_OUTPUT_FOLDER=True`). "
+                if SESSION_OUTPUT_FOLDER
+                else ". "
+            )
+            + "Do **not** pass a Pi workspace path as `output_dir` — the server only "
+            "accepts directories under that folder.\n"
+        )
+    except ImportError:
+        doc_output_hint = (
+            "- Do **not** pass a Pi workspace path as `/doc_redact` `output_dir` — "
+            "the server restricts `output_dir` to its own `OUTPUT_FOLDER`.\n"
+        )
+    return (
+        f"- **Local doc_redaction backend:** `{gradio_url}` (same machine as this workspace).\n"
+        f"{doc_output_hint}"
+        f"- Call **`/doc_redact`** (omit `output_dir` or leave it empty), then copy artifacts "
+        f"into `{output_redact}` with `remote_redaction.resolve_redaction_output_paths` "
+        f"and `fetch_redaction_files`.\n"
+        "- When the API returns **Windows paths** (`C:\\\\...`) or paths under "
+        "`workspace/.gradio_uploads/`, **copy from disk** with `shutil.copy2` — do not "
+        "assume `gradio_api/file=` works (403 until allowed_paths includes that folder).\n"
+        "- Path walkers must accept Windows drive paths, not only strings starting with `/`.\n"
+        f"- Use `{helpers}`: `extract_server_paths(result)` "
+        "then `fetch_redaction_files(paths, dest_dir)` (local copy, then HTTP fallback).\n"
+    )
+
+
+def build_hf_space_backend_guidance(
     *,
     gradio_url: str,
     output_base: str,
     workspace_root: str,
 ) -> str:
-    if not is_hf_space_profile():
-        return ""
     return (
         f"- **Remote redaction backend:** the doc_redaction app runs at `{gradio_url}` "
         "(private Hugging Face Space). Use **`gradio_client` only** — upload local files "
@@ -398,9 +443,68 @@ def build_remote_backend_guidance(
         "workspace (pandas/PyMuPDF), not via Agent API.\n"
         "- **Pass 2 VLM is not available** — do not call a VLM endpoint or use "
         "`CUSTOM_VLM_FACES` / `CUSTOM_VLM_SIGNATURE` entities.\n"
-        "- Helper module: `agent-redact/pi/remote_redaction.py` (`make_redaction_client`, "
-        "`download_gradio_files`)."
+        "- Helper module: `{workspace_root.rstrip('/')}/.pi/helpers/remote_redaction.py` "
+        "(`make_redaction_client`, `fetch_redaction_files`)."
     ).format(output_base=output_base.rstrip("/") + "/")
+
+
+def build_split_container_redaction_guidance(
+    *,
+    gradio_url: str,
+    output_base: str,
+    workspace_root: str,
+) -> str:
+    """AWS ECS (and similar): Pi agent and doc_redaction are separate containers."""
+    output_redact = f"{output_base.rstrip('/')}/output_redact/"
+    helpers = f"{workspace_root.rstrip('/')}/.pi/helpers/remote_redaction.py"
+    return (
+        f"- **Split-container redaction backend:** doc_redaction runs at `{gradio_url}` "
+        "(separate service from this Pi agent). Use **`gradio_client` only**.\n"
+        f"- **Deliverables belong in your session workspace:** `{output_redact}` "
+        f"(and `{output_base.rstrip('/')}/review/output_review_final/` after apply). "
+        "That is the **only** output tree you should populate for this task.\n"
+        "- **Do not** search this container for redaction outputs: no `find /workspace`, "
+        "no `ls /home/user/app/output`, no `import tools.config OUTPUT_FOLDER` on the Pi "
+        "agent — those paths are on the **redaction service**, not here (or are a read-only "
+        "git checkout without live run artifacts).\n"
+        f'- **Initial redaction:** `Client("{gradio_url}")` → `/doc_redact` with '
+        f"`document_file=handle_file(\"<file under {workspace_root.rstrip('/')}/>\")`. "
+        "Omit `output_dir` (server picks its own `OUTPUT_FOLDER`).\n"
+        f"- **Collect paths:** `extract_server_paths(result)` from the predict tuple. "
+        "When the path list is `[]`, parse the status `message` for embedded paths, or retry "
+        "once — **do not** spend turns grepping the filesystem.\n"
+        f'- **Download:** `fetch_redaction_files(paths, "{output_redact}")` from '
+        f"`{helpers}` (HTTP `GET /gradio_api/file=` — no shared disk copy).\n"
+        "- **`POST /agent/*`** only accepts paths on the **redaction server**. After "
+        "download, run `verify_redaction_coverage` on CSV/PDF under your workspace, not with "
+        "bare Agent API paths from this container.\n"
+        f"- Helper module (inside workspace boundary): `{helpers}`."
+    )
+
+
+def build_remote_backend_guidance(
+    *,
+    gradio_url: str,
+    output_base: str,
+    workspace_root: str,
+) -> str:
+    if is_hf_space_profile():
+        return build_hf_space_backend_guidance(
+            gradio_url=gradio_url,
+            output_base=output_base,
+            workspace_root=workspace_root,
+        )
+    if is_aws_ecs_profile():
+        return build_split_container_redaction_guidance(
+            gradio_url=gradio_url,
+            output_base=output_base,
+            workspace_root=workspace_root,
+        )
+    return build_local_redaction_client_guidance(
+        gradio_url=gradio_url,
+        output_base=output_base,
+        workspace_root=workspace_root,
+    )
 
 
 def _resolve_and_validate_upload_path(upload_path: str | Path) -> Path:
@@ -473,6 +577,26 @@ def copy_upload_to_workspace(
     return dest, (_original_name if renamed else None)
 
 
+def _strip_long_document_section(template: str) -> str:
+    """Remove the 100+ page operator block (keeps user requirements)."""
+    marker = "## Specific rules for long documents"
+    start = template.find(marker)
+    if start == -1:
+        return template
+    end = template.find("## User redaction requirements", start)
+    if end == -1:
+        return template[:start].rstrip() + "\n\n"
+    return template[:start].rstrip() + "\n\n" + template[end:]
+
+
+def _include_long_document_rules(page_range: str, total_pages: int) -> bool:
+    if total_pages <= 0:
+        return False
+    if total_pages >= 100:
+        return True
+    return pages_to_process_count(page_range or "all", total_pages) >= 100
+
+
 def build_redaction_prompt(
     file_name: str,
     user_instructions: str,
@@ -481,6 +605,7 @@ def build_redaction_prompt(
     template: str | None = None,
     settings: RedactionTaskSettings | None = None,
     workspace_dir: Path | None = None,
+    total_pages: int = 0,
 ) -> str:
     if not file_name.strip():
         raise ValueError("A document file name is required.")
@@ -524,6 +649,9 @@ def build_redaction_prompt(
     for key, value in replacements.items():
         text = text.replace(key, value)
 
+    if not _include_long_document_rules(page_range, total_pages):
+        text = _strip_long_document_section(text)
+
     return replace_user_requirements_section(text, user_instructions)
 
 
@@ -546,11 +674,18 @@ def prepare_redaction_task(
     root = _resolve_and_validate_workspace_dir(workspace_dir)
     validate_pdf_page_limit(upload_path, page_range=page_range)
     dest, renamed_from = copy_upload_to_workspace(upload_path, workspace_dir=root)
+    total_pages = 0
+    if str(dest).lower().endswith(".pdf"):
+        try:
+            total_pages = pdf_page_count(dest)
+        except (ValueError, OSError):
+            total_pages = 0
     prompt = build_redaction_prompt(
         dest.name,
         user_instructions,
         page_range=page_range,
         settings=settings,
         workspace_dir=root,
+        total_pages=total_pages,
     )
     return dest.name, prompt, renamed_from

@@ -8,6 +8,7 @@ from cdk_config import (
     ECS_PI_EXPRESS_SERVICE_NAME,
     ECS_PI_SERVICE_NAME,
     ECS_SERVICE_NAME,
+    ENABLE_HEADLESS_DEPLOYMENT,
     ENABLE_PI_AGENT_ECS_SERVICE,
     ENABLE_PI_AGENT_EXPRESS_SERVICE,
     PI_AGENT_ENV_S3_KEY,
@@ -24,7 +25,7 @@ from cdk_post_deploy import (
 from tqdm import tqdm
 
 # Create basic config.env file that user can use to run the app later. Input is the folder it is saved into.
-create_basic_config_env("config")
+create_basic_config_env("config", headless=ENABLE_HEADLESS_DEPLOYMENT == "True")
 
 # Start CodeBuild for the main app image
 print("Starting main app CodeBuild project.")
@@ -69,9 +70,15 @@ print("Waiting 8 minutes for CodeBuild container image(s) to build.")
 for i in tqdm(range(total_seconds), desc="Building container"):
     time.sleep(update_interval)
 
-# Scale main ECS service to one task
-print(f"Starting ECS service {ECS_SERVICE_NAME}")
-start_ecs_task(cluster_name=CLUSTER_NAME, service_name=ECS_SERVICE_NAME)
+# Scale main ECS service to one task (skipped for headless batch-only deployments)
+if ENABLE_HEADLESS_DEPLOYMENT != "True":
+    print(f"Starting ECS service {ECS_SERVICE_NAME}")
+    start_ecs_task(cluster_name=CLUSTER_NAME, service_name=ECS_SERVICE_NAME)
+else:
+    print(
+        "Headless deployment: skipping always-on ECS service start "
+        "(tasks are started by the S3 batch Lambda)."
+    )
 
 if ENABLE_PI_AGENT_ECS_SERVICE == "True":
     print(f"Starting Pi agent ECS service {ECS_PI_SERVICE_NAME}")

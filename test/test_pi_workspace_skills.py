@@ -48,6 +48,14 @@ def workspace_layout(tmp_path, monkeypatch):
     return repo, ws, pws
 
 
+def test_sync_workspace_helpers_copies_remote_redaction(workspace_layout):
+    _repo, _ws, pws = workspace_layout
+    helpers = pws.sync_workspace_helpers()
+    helper_file = helpers / "remote_redaction.py"
+    assert helper_file.is_file()
+    assert "fetch_redaction_files" in helper_file.read_text(encoding="utf-8")
+
+
 def test_sync_repo_skills_to_workspace(workspace_layout):
     repo, ws, pws = workspace_layout
     dest = pws.sync_repo_skills_to_workspace(force=True)
@@ -76,3 +84,32 @@ def test_pi_rpc_args_disables_discovery(workspace_layout):
     assert args[0] == "--no-skills"
     assert "--skill" in args
     assert Path(args[args.index("--skill") + 1]).name == "skills"
+
+
+def test_resync_overwrites_readonly_skills(workspace_layout, monkeypatch):
+    repo, ws, pws = workspace_layout
+    config = repo / "skills" / "config"
+    config.mkdir(parents=True)
+    (config / "app_config.env").write_text("OLD=1\n", encoding="utf-8")
+
+    dest = pws.sync_repo_skills_to_workspace(force=True)
+    assert (dest / "config" / "app_config.env").read_text(encoding="utf-8") == "OLD=1\n"
+
+    (config / "app_config.env").write_text("NEW=2\n", encoding="utf-8")
+    monkeypatch.setenv("PI_SKILLS_RESYNC", "true")
+    dest = pws.sync_repo_skills_to_workspace()
+    assert (dest / "config" / "app_config.env").read_text(encoding="utf-8") == "NEW=2\n"
+
+
+def test_sync_skips_archive_attempts_and_large_blobs(workspace_layout):
+    repo, ws, pws = workspace_layout
+    archive = repo / "skills" / "example_prompts" / "archive_attempts"
+    archive.mkdir(parents=True)
+    (archive / "blob.b64.txt").write_text("x" * 2000, encoding="utf-8")
+    huge = repo / "skills" / "huge_skill.md"
+    huge.write_bytes(b"x" * (600 * 1024))
+
+    dest = pws.sync_repo_skills_to_workspace(force=True)
+    assert not (dest / "example_prompts" / "archive_attempts").exists()
+    assert not (dest / "huge_skill.md").exists()
+    assert (dest / "doc-redaction-app" / "SKILL.md").is_file()

@@ -31,7 +31,8 @@ presidio-image-redactor<=0.0.58
 python-docx<=1.2.0
 
 # --- Gradio and apps ---
-gradio[mcp]>=6.10.0
+gradio[mcp]<=6.16.0
+gradio-pdf-redaction<=0.0.25
 gradio_image_annotation_redaction==0.5.5 # Custom annotator version with rotation, zoom, labels, and box IDs
 spaces
 
