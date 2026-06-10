@@ -1,6 +1,8 @@
 # Paths copied from the monorepo root into the flattened Pi agent HF Space repo.
 agent-redact/requirements_pi_agent.txt
 agent-redact/pi
+agent-redact/pi-agent/entrypoint.sh
+agent-redact/pi-agent/entrypoint-ecs.sh
 skills
 tools
 config/pi_agent.env.example
