@@ -27,6 +27,8 @@ from gradio_app import (
     _reset_pi_on_page_load,
     _reset_pi_rpc_client,
     _should_queue_agent_message,
+    route_followup_message,
+    submit_followup_chat_queued,
 )
 from pi_rpc_client import PiRpcClient, PiStreamEvent
 
@@ -283,6 +285,94 @@ def test_schedule_post_pi_task_runs_off_hot_path(monkeypatch):
     assert calls
     assert calls[0]["session_hash"] == "sess"
     assert calls[0]["llm_input_tokens"] == 10
+
+
+def test_route_followup_message_defers_idle_message_to_queued_step(monkeypatch):
+    monkeypatch.setattr(
+        "gradio_app._should_queue_agent_message",
+        lambda *_a, **_k: False,
+    )
+    outputs = route_followup_message(
+        "yes please apply the changes",
+        [],
+        None,
+        "sess",
+        "",
+        False,
+    )
+    assert len(outputs) == _CHAT_OUTPUT_COMPONENT_COUNT + 1
+    assert outputs[-1] == "yes please apply the changes"
+    assert outputs[2] == ""
+
+
+def test_route_followup_message_steer_skips_queued_step(monkeypatch):
+    steer_calls: list[str] = []
+
+    def _fake_steer(message, history, client, *, session_hash):
+        steer_calls.append(message)
+        return tuple(gr.update() for _ in range(_CHAT_OUTPUT_COMPONENT_COUNT))
+
+    monkeypatch.setattr(
+        "gradio_app._should_queue_agent_message",
+        lambda *_a, **_k: True,
+    )
+    monkeypatch.setattr("gradio_app._steer_agent_message_sync", _fake_steer)
+    outputs = route_followup_message(
+        "only page 3",
+        [],
+        _FakePiClient(streaming=True, prompt_stream_active=True),
+        "sess",
+        "",
+        False,
+    )
+    assert steer_calls == ["only page 3"]
+    assert outputs[-1] == ""
+
+
+def test_submit_followup_chat_queued_skips_when_pending_empty():
+    outputs = list(
+        submit_followup_chat_queued("", [], None, "sess", "", False),
+    )
+    assert len(outputs) == 1
+    assert len(outputs[0]) == _CHAT_OUTPUT_COMPONENT_COUNT
+
+
+def test_submit_followup_chat_queued_runs_pi_chat(monkeypatch):
+    calls: list[str] = []
+
+    def _fake_run_pi_chat(message, history, client, **kwargs):
+        calls.append(message)
+        yield (
+            "history",
+            client,
+            "",
+            "",
+            "",
+            "",
+            "",
+            gr.update(),
+            gr.update(),
+            gr.update(),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            "",
+            False,
+        )
+
+    monkeypatch.setattr("gradio_app._run_pi_chat", _fake_run_pi_chat)
+    outputs = list(
+        submit_followup_chat_queued(
+            "apply now",
+            [],
+            None,
+            "sess",
+            "",
+            False,
+        ),
+    )
+    assert calls == ["apply now"]
+    assert len(outputs) == 1
 
 
 def test_should_queue_only_while_pi_streaming(monkeypatch):

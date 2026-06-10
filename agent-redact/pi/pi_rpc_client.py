@@ -7,6 +7,7 @@ import os
 import queue
 import shutil
 import subprocess
+import sys
 import threading
 import uuid
 from collections import deque
@@ -187,6 +188,33 @@ def is_rate_limit_error(text: str | None) -> bool:
         return False
     lowered = text.lower()
     return any(marker in lowered for marker in _RATE_LIMIT_MARKERS)
+
+
+def _strip_rpc_payload_for_debug(obj: Any) -> Any:
+    """
+    Strip large message content from RPC objects for compact debug logging.
+
+    Keeps metadata (id, type, command, success) but removes or truncates
+    actual message/data payloads.
+    """
+    if not isinstance(obj, dict):
+        return obj
+
+    kept_keys = {"type", "id", "command", "success", "error", "stopReason"}
+    result = {k: v for k, v in obj.items() if k in kept_keys}
+
+    # Keep data/result/messages structure without content
+    for key in ("data", "result", "messages", "response"):
+        if key in obj:
+            val = obj[key]
+            if isinstance(val, dict):
+                result[key] = {k: "..." for k in val.keys()}
+            elif isinstance(val, list):
+                result[key] = f"[... {len(val)} items]"
+            else:
+                result[key] = "..."
+
+    return result
 
 
 def last_assistant_turn_error(messages: list[dict[str, Any]]) -> str | None:
@@ -437,6 +465,15 @@ class PiRpcClient:
     def _dispatch_message(self, message: Any) -> None:
         if not isinstance(message, dict):
             return
+        if os.environ.get("PI_RPC_DEBUG", "").strip() == "1":
+            try:
+                stripped = _strip_rpc_payload_for_debug(message)
+                sys.stderr.write(
+                    "Pi RPC recv: " + json.dumps(stripped, ensure_ascii=False) + "\n"
+                )
+                sys.stderr.flush()
+            except Exception:
+                pass
         msg_type = message.get("type")
         if msg_type == "response":
             req_id = message.get("id")
@@ -471,6 +508,15 @@ class PiRpcClient:
     def _write_command(self, command: dict[str, Any]) -> None:
         proc = self._ensure_running()
         assert proc.stdin is not None
+        if os.environ.get("PI_RPC_DEBUG", "").strip() == "1":
+            try:
+                stripped = _strip_rpc_payload_for_debug(command)
+                sys.stderr.write(
+                    "Pi RPC send: " + json.dumps(stripped, ensure_ascii=False) + "\n"
+                )
+                sys.stderr.flush()
+            except Exception:
+                pass
         with self._write_lock:
             proc.stdin.write(json.dumps(command) + "\n")
             proc.stdin.flush()

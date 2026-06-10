@@ -9,12 +9,26 @@ partnership prompt template.
 
 from __future__ import annotations
 
+import logging
 import os
+import queue
 import sys
 import threading
 import time
 from pathlib import Path
 from typing import Any
+
+# Enable debug-level logging and stderr output from this module when PI_RPC_DEBUG is set
+if os.environ.get("PI_RPC_DEBUG"):
+    logging.basicConfig(level=logging.DEBUG)
+    logging.getLogger("matplotlib").setLevel(logging.INFO)
+    logging.getLogger("matplotlib.pyplot").setLevel(logging.INFO)
+_logger = logging.getLogger(__name__)
+
+if os.environ.get("PI_RPC_DEBUG") and not _logger.handlers:
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setLevel(logging.DEBUG)
+    _logger.addHandler(handler)
 
 from fastapi import FastAPI
 
@@ -1160,11 +1174,12 @@ def _should_queue_agent_message(
     message: str,
 ) -> bool:
     """
-    Route Send to steer/follow-up only while this UI owns an active prompt stream.
+    Route Send to steer only while this UI owns an active prompt stream.
 
     Uses :attr:`PiRpcClient.prompt_stream_active` (authoritative) plus Pi
-    ``isStreaming``. Gradio ``agent_running`` and stale ``isStreaming`` alone
-    are not reliable after llama.cpp runs.
+    ``isStreaming``. After the agent is finished, Send goes through the normal
+    chat path instead of queuing a follow-up event. Gradio ``agent_running`` and
+    stale ``isStreaming`` alone are not reliable after llama.cpp runs.
     """
     if not (message or "").strip():
         return False
@@ -1464,6 +1479,55 @@ def _steer_yield(
     )
 
 
+def _steer_agent_message_sync(
+    message: str,
+    history: list[dict[str, Any]] | None,
+    client: PiRpcClient | None,
+    *,
+    session_hash: str,
+) -> tuple[Any, ...]:
+    """Steer Pi during an active run without starting a new prompt stream."""
+    if not message or not message.strip():
+        return _steer_yield()
+
+    rpc = _coerce_client(client)
+    if rpc is None or not rpc.running:
+        return _steer_yield()
+
+    pi_message = _build_pi_prompt_message(session_hash, message)
+    try:
+        rpc.steer(pi_message)
+        if os.environ.get("PI_RPC_DEBUG"):
+            preview = (message or "").strip()[:200]
+            _logger.debug(
+                "_steer_agent_message_sync: queued steer for session_hash=%s preview=%s",
+                session_hash,
+                preview,
+            )
+            sys.stderr.write(
+                f"DEBUG-FOLLOWUP queued_steer: session_hash={session_hash} preview={preview!r}\n"
+            )
+    except (PiRpcError, OSError, ValueError) as exc:
+        gr.Warning(f"Could not queue message for Pi: {exc}")
+        if os.environ.get("PI_RPC_DEBUG"):
+            _logger.exception(
+                "_steer_agent_message_sync: could not queue steer for session_hash=%s",
+                session_hash,
+            )
+            sys.stderr.write(
+                f"DEBUG-FOLLOWUP queued_steer_failed: session_hash={session_hash} error={exc!r}\n"
+            )
+        return _steer_yield()
+    rpc.stage_ui_chat_notice("Steer", message.strip())
+    history, _, _ = _integrate_pending_chat_notices(
+        list(history or []),
+        rpc,
+        [],
+        "",
+    )
+    return _steer_yield(history, msg="")
+
+
 def _queue_agent_message(
     message: str,
     history: list[dict[str, Any]] | None,
@@ -1472,30 +1536,150 @@ def _queue_agent_message(
     session_hash: str,
 ):
     """Steer Pi during an active run without starting a new prompt stream."""
-    if not message or not message.strip():
-        yield _steer_yield()
-        return
-
-    rpc = _coerce_client(client)
-    if rpc is None or not rpc.running:
-        yield _steer_yield()
-        return
-
-    pi_message = _build_pi_prompt_message(session_hash, message)
-    try:
-        rpc.steer(pi_message)
-    except (PiRpcError, OSError, ValueError) as exc:
-        gr.Warning(f"Could not queue message for Pi: {exc}")
-        yield _steer_yield()
-        return
-    rpc.stage_ui_chat_notice("Steer", message.strip())
-    history, _, _ = _integrate_pending_chat_notices(
-        list(history or []),
-        rpc,
-        [],
-        "",
+    yield _steer_agent_message_sync(
+        message,
+        history,
+        client,
+        session_hash=session_hash,
     )
-    yield _steer_yield(history, msg="")
+
+
+def _followup_queued_skip_yield() -> tuple[Any, ...]:
+    """Passthrough while the queued follow-up step has nothing to run."""
+    return (
+        gr.update(),
+        gr.update(),
+        gr.update(),
+        gr.update(),
+        gr.update(),
+        gr.update(),
+        gr.update(),
+        gr.update(),
+        gr.update(),
+        gr.update(),
+        gr.skip(),
+        gr.skip(),
+        gr.skip(),
+        gr.update(),
+        gr.update(),
+    )
+
+
+def _log_followup_diagnostics(
+    message: str,
+    client: PiRpcClient | None,
+    *,
+    session_hash: str,
+) -> None:
+    if os.environ.get("PI_RPC_DEBUG"):
+        sys.stderr.write(
+            f"DEBUG-FOLLOWUP ENTER: session_hash={session_hash} message_len={len(message or '')}\n"
+        )
+    try:
+        rpc = _coerce_client(client)
+        client_running = bool(rpc and getattr(rpc, "running", False))
+        prompt_stream_active = bool(rpc and getattr(rpc, "prompt_stream_active", False))
+        try:
+            pi_is_streaming = _pi_agent_is_streaming(rpc)
+        except Exception:
+            pi_is_streaming = False
+        msg_present = bool(message and message.strip())
+        if os.environ.get("PI_RPC_DEBUG"):
+            preview = (message or "").strip()[:200]
+            _logger.debug(
+                "submit_followup_message diagnostics: client_running=%s prompt_stream_active=%s pi_is_streaming=%s message_present=%s",
+                client_running,
+                prompt_stream_active,
+                pi_is_streaming,
+                msg_present,
+            )
+            sys.stderr.write(
+                f"DEBUG-FOLLOWUP start: client_running={client_running} prompt_stream_active={prompt_stream_active} pi_is_streaming={pi_is_streaming} message_present={msg_present} preview={preview!r}\n"
+            )
+    except Exception:
+        _logger.exception("submit_followup_message diagnostic failure")
+
+
+def _log_followup_branch(
+    should_queue: bool,
+    message: str,
+    *,
+    session_hash: str,
+) -> None:
+    if not os.environ.get("PI_RPC_DEBUG"):
+        return
+    try:
+        preview = (message or "").strip()[:200]
+    except Exception:
+        preview = ""
+    _logger.debug(
+        "submit_followup_message branch: should_queue=%s session_hash=%s message_preview=%s",
+        should_queue,
+        session_hash,
+        preview,
+    )
+    sys.stderr.write(
+        f"DEBUG-FOLLOWUP branch: should_queue={should_queue} session_hash={session_hash} preview={preview!r}\n"
+    )
+
+
+def route_followup_message(
+    message: str,
+    history: list[dict[str, Any]] | None,
+    client: PiRpcClient | None,
+    session_hash: str,
+    s3_output_folder: str,
+    save_outputs_to_s3: bool,
+):
+    """
+    Fast ``queue=False`` router for Send / msg.submit.
+
+    Steers during a live prompt stream; otherwise clears the textbox and stashes
+    the message for :func:`submit_followup_chat_queued` (queued generator).
+    """
+    del s3_output_folder, save_outputs_to_s3
+    _log_followup_diagnostics(message, client, session_hash=session_hash)
+    try:
+        should_queue = _should_queue_agent_message(client, message=message)
+    except Exception:
+        should_queue = False
+    _log_followup_branch(should_queue, message, session_hash=session_hash)
+
+    if should_queue:
+        steer_out = _steer_agent_message_sync(
+            message,
+            history,
+            client,
+            session_hash=session_hash,
+        )
+        return (*steer_out, "")
+
+    if not message or not message.strip():
+        return (*_steer_yield(), "")
+
+    return (*_steer_yield(msg=""), message.strip())
+
+
+def submit_followup_chat_queued(
+    pending_message: str,
+    history: list[dict[str, Any]] | None,
+    client: PiRpcClient | None,
+    session_hash: str,
+    s3_output_folder: str,
+    save_outputs_to_s3: bool,
+):
+    """Queued generator for idle follow-ups (multi-yield ``_run_pi_chat``)."""
+    if not (pending_message or "").strip():
+        yield _followup_queued_skip_yield()
+        return
+    yield from _run_pi_chat(
+        pending_message,
+        history,
+        client,
+        session_hash=session_hash,
+        s3_output_folder=s3_output_folder,
+        save_outputs_to_s3=save_outputs_to_s3,
+    )
 
 
 def _run_pi_chat(
@@ -1624,10 +1808,7 @@ def _run_pi_chat(
         "Prompt sent." if chat_user_message is not None else "Follow-up prompt sent."
     )
     if normalize_provider(get_default_provider()) == PROVIDER_LLAMA:
-        prompt_activity += (
-            " Waiting for orchestration model — via llama-swap the first request "
-            "after a task can take 30–60s while the model loads."
-        )
+        prompt_activity += " Waiting for orchestration model."
     activity = _append_activity(activity, prompt_activity)
     if initial_session_info:
         activity = _append_activity(
@@ -1655,7 +1836,38 @@ def _run_pi_chat(
         refresh_pdf_preview=True,
     )
 
+    if os.environ.get("PI_RPC_DEBUG"):
+        sys.stderr.write(
+            f"DEBUG-FOLLOWUP resume: session_hash={session_hash} message_len={len(message or '')}\n"
+        )
     prompt_to_send = _build_pi_prompt_message(session_hash, message)
+    if os.environ.get("PI_RPC_DEBUG"):
+        try:
+            preview = (message or "").strip()[:400]
+        except Exception:
+            preview = ""
+        _logger.debug(
+            "_run_pi_chat: sending prompt for session_hash=%s preview=%s",
+            session_hash,
+            preview,
+        )
+        sys.stderr.write(
+            f"DEBUG-FOLLOWUP send_prompt: session_hash={session_hash} preview={preview!r}\n"
+        )
+
+    event_queue: queue.Queue[PiStreamEvent | None] = queue.Queue()
+
+    def _prompt_events_worker() -> None:
+        try:
+            for event in client.prompt_events(prompt_to_send):
+                event_queue.put(event)
+        except Exception as exc:
+            event_queue.put(PiStreamEvent(kind="error", text=str(exc), is_error=True))
+        finally:
+            event_queue.put(None)
+
+    threading.Thread(target=_prompt_events_worker, daemon=True).start()
+
     quota_failures = 0
     finish_aborted = False
 
@@ -1663,7 +1875,10 @@ def _run_pi_chat(
         while True:
             turn_error: str | None = None
             try:
-                for event in client.prompt_events(prompt_to_send):
+                while True:
+                    event = event_queue.get()
+                    if event is None:
+                        break
                     history, completed_segments, streaming_text = (
                         _integrate_pending_chat_notices(
                             history,
@@ -1929,13 +2144,18 @@ def submit_followup_message(
     save_outputs_to_s3: bool,
 ):
     """
-    Send a user message to Pi.
+    Send a user message to Pi (programmatic / legacy single-handler API).
 
-    While the agent is running, messages are steered after the current step.
-    When idle (after **Agent finished**), messages start a new follow-up turn
-    via :func:`_run_pi_chat` (same path as :func:`submit_redaction_task`).
+    The Gradio UI uses :func:`route_followup_message` (``queue=False``) plus
+    :func:`submit_followup_chat_queued` (queued generator) instead.
     """
-    if _should_queue_agent_message(client, message=message):
+    _log_followup_diagnostics(message, client, session_hash=session_hash)
+    try:
+        should_queue = _should_queue_agent_message(client, message=message)
+    except Exception:
+        should_queue = False
+    _log_followup_branch(should_queue, message, session_hash=session_hash)
+    if should_queue:
         yield from _queue_agent_message(
             message,
             history,
@@ -2454,7 +2674,7 @@ def build_ui():
                     gr.Markdown(
                         "While the agent is **running**, **Send** steers it after the "
                         "current step. After **Agent finished**, **Send** starts a new "
-                        "follow-up turn in the same session."
+                        "normal chat turn in the same session."
                     )
                     msg = gr.Textbox(
                         label="Message",
@@ -2472,7 +2692,7 @@ def build_ui():
                         visible=True,
                     )
 
-                with gr.Accordion("Thinking log", open=False):
+                with gr.Accordion("Activity log", open=False):
                     activity_log = gr.Markdown(
                         value="_No activity yet._", max_height=480, height=480
                     )
@@ -2565,6 +2785,7 @@ def build_ui():
             )
             agent_finish_signal = gr.State(AGENT_FINISH_SIGNAL_NONE)
             agent_running_state = gr.State(False)
+            pending_followup_message = gr.State("")
 
         chat_outputs = [
             chatbot,
@@ -2584,39 +2805,51 @@ def build_ui():
             agent_running_state,
         ]
 
+        _followup_route_inputs = [
+            msg,
+            chatbot,
+            client_state,
+            session_hash_state,
+            s3_output_folder_state,
+            save_outputs_to_s3_state,
+        ]
+        _followup_queued_inputs = [
+            pending_followup_message,
+            chatbot,
+            client_state,
+            session_hash_state,
+            s3_output_folder_state,
+            save_outputs_to_s3_state,
+        ]
         run_chat_send = send.click(
-            submit_followup_message,
-            inputs=[
-                msg,
-                chatbot,
-                client_state,
-                session_hash_state,
-                s3_output_folder_state,
-                save_outputs_to_s3_state,
-            ],
-            outputs=chat_outputs,
+            route_followup_message,
+            inputs=_followup_route_inputs,
+            outputs=[*chat_outputs, pending_followup_message],
             queue=False,
         )
-        notify_after_chat_send = run_chat_send.then(
+        run_chat_queued_send = run_chat_send.then(
+            submit_followup_chat_queued,
+            inputs=_followup_queued_inputs,
+            outputs=chat_outputs,
+        )
+        notify_after_chat_send = run_chat_queued_send.then(
             _passthrough_chat_outputs_for_notify,
             inputs=_chat_outputs_notify_inputs(chat_outputs),
             outputs=chat_outputs,
             js=PI_AGENT_FINISH_NOTIFY_JS,
         )
         run_chat_msg = msg.submit(
-            submit_followup_message,
-            inputs=[
-                msg,
-                chatbot,
-                client_state,
-                session_hash_state,
-                s3_output_folder_state,
-                save_outputs_to_s3_state,
-            ],
-            outputs=chat_outputs,
+            route_followup_message,
+            inputs=_followup_route_inputs,
+            outputs=[*chat_outputs, pending_followup_message],
             queue=False,
         )
-        notify_after_chat_msg = run_chat_msg.then(
+        run_chat_queued_msg = run_chat_msg.then(
+            submit_followup_chat_queued,
+            inputs=_followup_queued_inputs,
+            outputs=chat_outputs,
+        )
+        notify_after_chat_msg = run_chat_queued_msg.then(
             _passthrough_chat_outputs_for_notify,
             inputs=_chat_outputs_notify_inputs(chat_outputs),
             outputs=chat_outputs,
@@ -2655,12 +2888,14 @@ def build_ui():
             abort_agent,
             inputs=[client_state],
             outputs=[send, abort_btn, start_redact_btn],
-            # Gradio 6.16+ rejects ``cancels`` on ``queue=False`` generators. Chat
-            # send/submit stay ``queue=False`` so steer/follow-up can run during a
-            # live stream; abort still reaches Pi via ``abort_agent`` → RPC ``abort``.
+            # Steer uses ``queue=False`` on route_followup_message; idle follow-ups
+            # stream via the queued ``submit_followup_chat_queued`` step (Gradio
+            # needs the queue for multi-yield generators).
             cancels=[
                 run_redact_prepare,
                 run_redact_task,
+                run_chat_queued_send,
+                run_chat_queued_msg,
                 notify_after_chat_send,
                 notify_after_chat_msg,
                 notify_after_redact_task,
