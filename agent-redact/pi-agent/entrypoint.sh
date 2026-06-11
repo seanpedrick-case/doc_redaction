@@ -28,7 +28,7 @@ if [ "${RUN_FASTAPI:-False}" = "True" ]; then
   exec uvicorn gradio_app:app \
     --app-dir agent-redact/pi \
     --host "${GRADIO_SERVER_NAME:-0.0.0.0}" \
-    --port "${PI_GRADIO_PORT:-${GRADIO_SERVER_PORT:-7862}}" \
+    --port "${PI_GRADIO_PORT:-${GRADIO_SERVER_PORT:-7860}}" \
     --proxy-headers \
     --forwarded-allow-ips "*"
 else

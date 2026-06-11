@@ -2,11 +2,12 @@
 title: Agentic Document Redaction
 emoji: 🤖
 colorFrom: blue
-colorTo: indigo
+colorTo: green
 sdk: docker
-app_port: 7860
+app_file: agent-redact/pi/gradio_app.py
 pinned: false
 license: agpl-3.0
+short_description: Agentic interface to redact PDF documents
 ---
 
 # Pi agent — agentic document redaction
