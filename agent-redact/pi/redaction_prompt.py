@@ -283,11 +283,20 @@ def doc_redaction_gradio_url() -> str:
     Base URL of the doc_redaction Gradio app used for ``/doc_redact`` and review APIs.
 
     Set ``DOC_REDACTION_GRADIO_URL`` in ``config/pi_agent.env`` (or the process environment).
-    Loaded via ``tools.config`` when the Pi app starts (default local: ``http://127.0.0.1:7860``).
+    Reads the environment on each call so runtime overrides apply before ``tools.config``
+    is imported (e.g. HF Space Docker ``ENV``, tests, and late ``load_dotenv``).
     """
-    from tools.config import DOC_REDACTION_GRADIO_URL
+    raw = (os.environ.get("DOC_REDACTION_GRADIO_URL") or "").strip().rstrip("/")
+    if raw:
+        return raw
+    try:
+        from tools.config import DOC_REDACTION_GRADIO_URL
 
-    return str(DOC_REDACTION_GRADIO_URL).strip().rstrip("/")
+        return str(DOC_REDACTION_GRADIO_URL).strip().rstrip("/")
+    except ImportError:
+        return (
+            HF_DEFAULT_GRADIO_URL if is_hf_space_profile() else "http://127.0.0.1:7860"
+        )
 
 
 def _default_gradio_url() -> str:
