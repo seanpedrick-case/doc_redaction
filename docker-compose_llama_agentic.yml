@@ -345,12 +345,10 @@ services:
       - "1800"
       - --split-mode
       - "layer"
-      # - -hfrd # This and the following parameters are for enabling speculative decoding.
-      # - NotMe404/gemma-4-31b-it-assistant-mtp-gguf:Q4_K_M
-      # - --spec-type
-      # - "draft-mtp"
-      # - --spec-draft-n-max
-      # - "3"
+      - --spec-type
+      - "draft-mtp"
+      - --spec-draft-n-max
+      - "3"
     ports:
       - "8002:8080"
     volumes:

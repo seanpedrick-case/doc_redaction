@@ -113,3 +113,27 @@ def test_sync_skips_archive_attempts_and_large_blobs(workspace_layout):
     assert not (dest / "example_prompts" / "archive_attempts").exists()
     assert not (dest / "huge_skill.md").exists()
     assert (dest / "doc-redaction-app" / "SKILL.md").is_file()
+
+
+def test_hf_space_deployment_skill_written_before_readonly(
+    workspace_layout, monkeypatch
+):
+    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "hf-space")
+    monkeypatch.setenv("DOC_REDACTION_GRADIO_URL", "https://example-redaction.hf.space")
+
+    import importlib
+
+    import pi_agent_config
+    import pi_workspace_skills as pws
+    import redaction_prompt
+
+    importlib.reload(pi_agent_config)
+    importlib.reload(redaction_prompt)
+    importlib.reload(pws)
+
+    dest = pws.ensure_workspace_skills(force=True)
+    skill = dest / "hf-space-deployment" / "SKILL.md"
+    assert skill.is_file()
+    text = skill.read_text(encoding="utf-8")
+    assert "https://example-redaction.hf.space" in text
+    assert "host.docker.internal" in text

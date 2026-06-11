@@ -197,7 +197,6 @@ def sync_repo_skills_to_workspace(*, force: bool = False) -> Path:
                 continue
             _copy_tree_item_filtered(item, dest / item.name, src_root=src)
 
-    _make_readonly(dest)
     write_workspace_pi_settings()
     os.environ["PI_WORKSPACE_SKILLS_DIR"] = str(dest.resolve())
     return dest.resolve()
@@ -237,7 +236,12 @@ def write_hf_space_deployment_skill(*, force: bool = False) -> Path | None:
     if not is_hf_space_profile():
         return None
 
-    dest_dir = workspace_skills_dir() / "hf-space-deployment"
+    skills_root = workspace_skills_dir()
+    skills_root.mkdir(parents=True, exist_ok=True)
+    if skills_root.is_dir():
+        _make_writable(skills_root)
+
+    dest_dir = skills_root / "hf-space-deployment"
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / "SKILL.md"
     url = doc_redaction_gradio_url()
@@ -275,6 +279,8 @@ def ensure_workspace_skills(*, force: bool = False) -> Path:
     dest = sync_repo_skills_to_workspace(force=force)
     sync_workspace_helpers()
     write_hf_space_deployment_skill(force=force)
+    if dest.is_dir():
+        _make_readonly(dest)
     return dest
 
 
