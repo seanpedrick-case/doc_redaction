@@ -199,6 +199,10 @@ _RATE_LIMIT_MARKERS = (
     "rate-limit",
     "resource_exhausted",
     "too many requests",
+    "throttlingexception",
+    "throttling",
+    "toomanyrequestsexception",
+    "servicequotaexceeded",
 )
 
 

@@ -146,6 +146,12 @@ def test_is_rate_limit_error_detects_gemini_quota():
     assert is_rate_limit_error(err)
 
 
+def test_is_rate_limit_error_detects_bedrock_throttling():
+    err = "ThrottlingException: Too many requests, please wait before trying again."
+    assert is_rate_limit_error(err)
+    assert is_rate_limit_error("ServiceQuotaExceededException: Limit exceeded")
+
+
 def test_is_rate_limit_error_rejects_unrelated():
     assert not is_rate_limit_error("connection refused")
     assert not is_rate_limit_error(None)

@@ -49,14 +49,33 @@ def _apply_retry_settings(
     *,
     provider: str,
 ) -> None:
-    """Write Pi ``settings.json`` retry block (Gemini uses longer delays)."""
+    """Write Pi ``settings.json`` retry block (cloud providers use longer delays)."""
     max_retries = pi_max_retries()
-    gemini_delays = provider == PROVIDER_GEMINI or is_hf_space_profile()
+    use_long_delays = (
+        provider == PROVIDER_GEMINI
+        or provider == PROVIDER_BEDROCK
+        or is_hf_space_profile()
+        or is_aws_ecs_profile()
+    )
     base_delay_ms = 2000
     max_delay_ms = 60000
-    if gemini_delays:
-        base_delay_ms = int(os.environ.get("PI_GEMINI_RETRY_BASE_DELAY_MS", "60000"))
-        max_delay_ms = int(os.environ.get("PI_GEMINI_RETRY_MAX_DELAY_MS", "90000"))
+    if use_long_delays:
+        default_base_ms = int(os.environ.get("PI_QUOTA_RETRY_DELAY_S", "60")) * 1000
+        default_max_ms = int(default_base_ms * 1.5)
+        if provider == PROVIDER_BEDROCK or (
+            is_aws_ecs_profile() and not is_hf_space_profile()
+        ):
+            prefix = "PI_BEDROCK"
+        else:
+            prefix = "PI_GEMINI"
+        base_delay_ms = int(
+            os.environ.get(f"{prefix}_RETRY_BASE_DELAY_MS")
+            or os.environ.get("PI_GEMINI_RETRY_BASE_DELAY_MS", str(default_base_ms))
+        )
+        max_delay_ms = int(
+            os.environ.get(f"{prefix}_RETRY_MAX_DELAY_MS")
+            or os.environ.get("PI_GEMINI_RETRY_MAX_DELAY_MS", str(default_max_ms))
+        )
     settings["retry"] = {
         "enabled": True,
         "maxRetries": max_retries,
@@ -664,7 +683,11 @@ def build_settings_config(
     _apply_compaction_settings(settings)
     session_path = ensure_session_dir(resolve_session_dir())
     settings["sessionDir"] = session_path.as_posix()
-    if is_hf_space_profile() or provider == PROVIDER_GEMINI:
+    if (
+        is_hf_space_profile()
+        or is_aws_ecs_profile()
+        or provider in (PROVIDER_GEMINI, PROVIDER_BEDROCK)
+    ):
         _apply_retry_settings(settings, provider=provider)
     from pi_workspace_skills import ensure_workspace_skills, workspace_skills_dir
 
