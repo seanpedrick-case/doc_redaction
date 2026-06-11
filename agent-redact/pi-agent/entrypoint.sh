@@ -21,13 +21,7 @@ done
 
 cd "${PI_WORKDIR:-/workspace/doc_redaction}"
 
-echo "Entrypoint environment: PI_WORKSPACE_DIR=${PI_WORKSPACE_DIR:-}",
-     "PI_UI_HOST=${PI_UI_HOST:-}",
-     "PI_UI_PORT=${PI_UI_PORT:-}",
-     "PI_GRADIO_PORT=${PI_GRADIO_PORT:-}",
-     "GRADIO_SERVER_NAME=${GRADIO_SERVER_NAME:-}",
-     "GRADIO_SERVER_PORT=${GRADIO_SERVER_PORT:-}",
-     "RUN_FASTAPI=${RUN_FASTAPI:-}"
+echo "Entrypoint environment: PI_WORKSPACE_DIR=${PI_WORKSPACE_DIR:-} PI_UI_HOST=${PI_UI_HOST:-} PI_UI_PORT=${PI_UI_PORT:-} PI_GRADIO_PORT=${PI_GRADIO_PORT:-} GRADIO_SERVER_NAME=${GRADIO_SERVER_NAME:-} GRADIO_SERVER_PORT=${GRADIO_SERVER_PORT:-} RUN_FASTAPI=${RUN_FASTAPI:-}"
 
 python3 agent-redact/pi/pi_agent_config.py
 if [ "${RUN_FASTAPI:-False}" = "True" ]; then
