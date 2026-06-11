@@ -128,3 +128,28 @@ Use this file only when the standard `SKILL.md` workflow fails.
 2. Check coverage report `leak_likely_causes` per page.
 3. Validate CSV: all bbox values in **[0, 1]**; normalize any PyMuPDF absolute coords before apply.
 4. Add/widen `CUSTOM` boxes or use targeted Pass 2 VLM for image text — **do not** reimplement apply with PyMuPDF unless `/review_apply` itself errors.
+
+## 10) `verify_redaction_coverage` path rejected on Agent API
+
+### Symptoms
+- `Path must be under the app repo, INPUT_FOLDER, or OUTPUT_FOLDER`
+- Calling `verify_redaction_coverage()` from the Pi agent container fails on redaction-server paths
+- `/tmp/gradio_tmp/...` paths from `/gradio_api/upload` are rejected
+
+### Cause
+- **Split-container deployment:** Pi agent and doc_redaction have **no shared filesystem**. Agent API path validation runs on the **redaction server** only.
+- Pi workspace paths do not exist on the redaction container.
+- Gradio upload temp paths are not under `OUTPUT_FOLDER`.
+- Importing `verify_redaction_coverage` on the Pi container still applies path checks against the Pi filesystem.
+
+### Fix
+1. **Pre-apply** (CSV edited in Pi session workspace): download review CSV and OCR words CSV via `fetch_redaction_files`, then run:
+   ```bash
+   python tools/verify_redaction_coverage.py <local_review_csv> <local_ocr_words_csv> \
+     --must-redact "..." --must-not-redact "..."
+   ```
+2. **Post-apply** (after `/review_apply`): call `POST {gradio_url}/agent/verify_redaction_coverage` with **server paths** from `extract_server_paths(review_apply result)`:
+   - `review_csv_path` — post-apply review CSV on redaction server
+   - `ocr_words_csv_path` — from the same `/doc_redact` run (already on server)
+   - `redacted_pdf_path` — post-apply `*_redacted.pdf` on redaction server
+3. **Do not** pass Pi workspace paths, `/tmp/gradio_tmp/...` upload paths, or call the Python API from the Pi container with redaction-server path strings.

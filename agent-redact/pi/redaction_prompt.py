@@ -521,9 +521,18 @@ def build_split_container_redaction_guidance(
         "once — **do not** spend turns grepping the filesystem.\n"
         f'- **Download:** `fetch_redaction_files(paths, "{output_redact}")` from '
         f"`{helpers}` (HTTP `GET /gradio_api/file=` — no shared disk copy).\n"
-        "- **`POST /agent/*`** only accepts paths on the **redaction server**. After "
-        "download, run `verify_redaction_coverage` on CSV/PDF under your workspace, not with "
-        "bare Agent API paths from this container.\n"
+        "- **Coverage verify (split-container):** `/agent/*` paths must already exist on "
+        "the **redaction server** under its `OUTPUT_FOLDER` (e.g. `/home/user/app/output/...`) "
+        "— not on this Pi container. **Pre-apply** (CSV edited here): download artifacts via "
+        "`fetch_redaction_files`, then run `python tools/verify_redaction_coverage.py` on "
+        "those local copies (the edited review CSV is not on the redaction server). "
+        "**Post-apply** (after `/review_apply`): call "
+        f"`POST {gradio_url.rstrip('/')}/agent/verify_redaction_coverage` with "
+        "**server paths** from `extract_server_paths(review_apply result)` for "
+        "`review_csv_path`, `ocr_words_csv_path` (from `/doc_redact`), and "
+        "`redacted_pdf_path`. **Do not** pass Pi workspace paths, `/tmp/gradio_tmp/...` "
+        "upload paths, or import `verify_redaction_coverage()` expecting redaction-server "
+        "paths to resolve from this container.\n"
         f"- Helper module (inside workspace boundary): `{helpers}`."
     )
 

@@ -72,6 +72,10 @@ def test_aws_ecs_remote_guidance_forbids_workspace_output_grep(monkeypatch):
     assert "Do not" in guidance and "find /workspace" in guidance
     assert "/home/user/app/workspace/sess/redact/doc.pdf/output_redact/" in guidance
     assert ".pi/helpers/remote_redaction.py" in guidance
+    assert "Pre-apply" in guidance
+    assert "Post-apply" in guidance
+    assert "/agent/verify_redaction_coverage" in guidance
+    assert "gradio_tmp" in guidance
 
 
 def test_hf_space_remote_guidance_uses_workspace_base_helpers(tmp_path, monkeypatch):

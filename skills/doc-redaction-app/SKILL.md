@@ -1,7 +1,7 @@
 ---
 name: doc-redaction-app
 description: "Initial document redaction and downloading server outputs: gradio_client, `/doc_redact` first, path/download traps, and `/redact_document` when needed. Not for CSV review or reapply (see doc-redaction-modifications); parallel multi-page review orchestration → doc-redact-page-review."
-version: 2.3.2
+version: 2.3.3
 author: repo-maintained
 license: AGPL-3.0-only
 ---
@@ -37,7 +37,11 @@ When `PI_DEPLOYMENT_PROFILE=aws-ecs` (or `DOC_REDACTION_GRADIO_URL` points at an
 | Save deliverables under `{session}/redact/<document>/output_redact/` | `find /workspace`, `ls /home/user/app/output`, or read `/workspace/doc_redaction/output/` on the Pi container |
 | `/doc_redact` via `gradio_client` + `handle_file()` for uploads from the session workspace | Pass Pi workspace paths as `output_dir` on `/doc_redact` |
 | `extract_server_paths(result)` then `fetch_redaction_files(paths, dest)` (HTTP only) | `shutil.copy2` from server paths (no shared filesystem) |
-| `verify_redaction_coverage` on **downloaded** CSV/PDF in your workspace | `POST /agent/verify_redaction_coverage` with Pi-container paths unless the server shares your disk |
+| **Pre-apply verify:** `python tools/verify_redaction_coverage.py` on **downloaded** CSV/PDF in your session workspace | Pass Pi workspace paths to `POST /agent/verify_redaction_coverage` |
+| **Post-apply verify:** `POST {gradio_url}/agent/verify_redaction_coverage` with **server paths** from `/review_apply` (`extract_server_paths`) plus OCR words path from `/doc_redact` | Import/call `verify_redaction_coverage()` on the Pi container with redaction-server path strings |
+| Keep server paths from `extract_server_paths` for Agent API calls | Use `/tmp/gradio_tmp/...` paths from `/gradio_api/upload` on Agent API (not under `OUTPUT_FOLDER`) |
+
+**Split-container verify playbook:** pre-apply checks run on **local copies** of the edited review CSV (it only exists in your session workspace until `/review_apply`). Post-apply checks use the **Agent API on the redaction service** with paths that already exist under `/home/user/app/output/...` on that server. See [`../doc-redaction-modifications/SKILL.md`](../doc-redaction-modifications/SKILL.md) § Split-container verify.
 
 Helper (synced into the workspace): `{PI_WORKSPACE_DIR}/.pi/helpers/remote_redaction.py`. When `predict` returns `[]`, retry once and parse the status message for paths — **do not** grep the Pi container filesystem.
 
