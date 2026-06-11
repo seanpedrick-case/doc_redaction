@@ -445,7 +445,7 @@ def build_hf_space_backend_guidance(
         "workspace (pandas/PyMuPDF), not via Agent API.\n"
         "- **Pass 2 VLM is not available** — do not call a VLM endpoint or use "
         "`CUSTOM_VLM_FACES` / `CUSTOM_VLM_SIGNATURE` entities.\n"
-        "- Helper module: `{workspace_root.rstrip('/')}/.pi/helpers/remote_redaction.py` "
+        f"- Helper module: `{workspace_root.rstrip('/')}/.pi/helpers/remote_redaction.py` "
         "(`make_redaction_client`, `fetch_redaction_files`)."
     ).format(output_base=output_base.rstrip("/") + "/")
 
