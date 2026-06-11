@@ -11,7 +11,7 @@
 # ===================================================================
 # Stage 1: Pi CLI (Node) — isolated so the runtime base stays Python 3.12
 # ===================================================================
-FROM node:22-bookworm-slim AS pi-cli
+FROM public.ecr.aws/docker/library/node:24.16.0-slim AS pi-cli
 
 ENV NPM_CONFIG_PREFIX=/opt/pi
 ENV PATH="/opt/pi/bin:${PATH}"

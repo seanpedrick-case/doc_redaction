@@ -223,19 +223,42 @@ def test_latest_redacted_pdf_path_returns_newest_match(tmp_path, monkeypatch):
     draft_dir = session_dir / "redact" / "doc.pdf" / "output_redact"
     draft_dir.mkdir(parents=True)
     older = draft_dir / "doc_redacted.pdf"
-    older.write_bytes(b"draft")
+    older.write_bytes(b"%PDF-1.4 draft")
     time.sleep(0.02)
     final_dir = session_dir / "redact" / "doc.pdf" / "review" / "output_review_final"
     final_dir.mkdir(parents=True)
     newer = final_dir / "doc_redacted.pdf"
-    newer.write_bytes(b"final")
+    newer.write_bytes(b"%PDF-1.4 final content" + b" " * 48)
     unrelated = session_dir / "notes.txt"
     unrelated.write_text("x")
 
     monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
     monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
 
-    assert of.latest_redacted_pdf_path("session") == str(newer.resolve())
+    path = of.latest_redacted_pdf_path("session")
+    assert path is not None
+    assert path.endswith("latest_redacted.pdf")
+    staged = Path(path)
+    assert staged.is_file()
+    assert staged.read_bytes().startswith(b"%PDF-1.4 final")
+
+
+def test_latest_redacted_pdf_path_skips_invalid_and_review_pdfs(tmp_path, monkeypatch):
+    base = tmp_path / "workspace"
+    session_dir = base / "session"
+    out_dir = session_dir / "redact" / "doc.pdf" / "output_redact"
+    out_dir.mkdir(parents=True)
+    (out_dir / "doc_redactions_for_review.pdf").write_bytes(b"%PDF-1.4 review")
+    (out_dir / "error_redacted.pdf").write_text("<html>429 Too Many Requests</html>")
+    valid = out_dir / "doc_redacted.pdf"
+    valid.write_bytes(b"%PDF-1.4 valid" + b" " * 52)
+
+    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+
+    path = of.latest_redacted_pdf_path("session")
+    assert path is not None
+    assert Path(path).read_bytes().startswith(b"%PDF-1.4 valid")
 
 
 def test_latest_redacted_pdf_path_returns_none_when_missing(tmp_path, monkeypatch):

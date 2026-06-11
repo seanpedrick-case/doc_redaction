@@ -1378,7 +1378,7 @@ def _fresh_task_chat_outputs(
         gr.update(interactive=True),
         collect_final_output_files(session_hash),
         gr.skip(),
-        latest_redacted_pdf_path(session_hash),
+        latest_redacted_pdf_path(session_hash) or gr.skip(),
         AGENT_FINISH_SIGNAL_NONE,
         False,
     )
@@ -1446,7 +1446,9 @@ def _chat_yield(
         session_log = gr.skip()
 
     if refresh_pdf_preview or refresh_final_files:
-        pdf_preview = latest_redacted_pdf_path(session_hash)
+        path = latest_redacted_pdf_path(session_hash)
+        # Avoid pushing ``None`` into the PDF component (clears/breaks the viewer).
+        pdf_preview = path if path else gr.skip()
     else:
         pdf_preview = gr.skip()
 
@@ -1936,8 +1938,8 @@ def _run_pi_chat(
                         agent_running=True,
                         session_info=session_info,
                         session_hash=session_hash,
-                        refresh_pdf_preview=event.kind in {"tool_end", "turn_end"},
-                        refresh_final_files=False,
+                        refresh_pdf_preview=event.kind == "turn_end",
+                        refresh_final_files=event.kind == "done",
                     )
                 turn_error = last_assistant_turn_error(client.get_messages())
             except PiRpcError as exc:
@@ -2147,6 +2149,7 @@ def _run_pi_chat(
         session_info=_session_summary(client),
         session_hash=session_hash,
         refresh_final_files=True,
+        refresh_pdf_preview=True,
         agent_finish_signal=finish_signal,
     )
     _schedule_post_pi_task(
@@ -2457,6 +2460,7 @@ def new_chat(
         msg="",
         session_hash=session_hash,
         refresh_final_files=True,
+        refresh_pdf_preview=True,
     )
 
 

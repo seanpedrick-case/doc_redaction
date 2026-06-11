@@ -203,15 +203,37 @@ def collect_final_output_files(
 
 
 _REDACTED_PDF_SUFFIX = "_redacted.pdf"
+_REVIEW_PDF_MARKER = "_redactions_for_review"
+_PREVIEW_DIRNAME = ".pi/preview"
+_PREVIEW_FILENAME = "latest_redacted.pdf"
+_MIN_PDF_BYTES = 64
 
 
-def latest_redacted_pdf_path(session_hash: str | None = None) -> str | None:
-    """
-    Return the newest ``*_redacted.pdf`` anywhere under the session workspace.
+def _is_redacted_pdf_candidate(path: Path) -> bool:
+    """True for deliverable ``*_redacted.pdf`` names (not review-only copies)."""
+    name = path.name.lower()
+    if not name.endswith(_REDACTED_PDF_SUFFIX):
+        return False
+    if _REVIEW_PDF_MARKER in name:
+        return False
+    return True
 
-    Used by the Gradio ``gradio_pdf_redaction.PDF`` preview (expects an absolute file path).
-    Interim drafts and final post-apply deliverables both match.
-    """
+
+def _is_valid_pdf_file(path: Path, *, min_bytes: int = _MIN_PDF_BYTES) -> bool:
+    """Reject empty, partial, or non-PDF files (e.g. HTML error bodies from failed downloads)."""
+    try:
+        if not path.is_file():
+            return False
+        if path.stat().st_size < min_bytes:
+            return False
+        with path.open("rb") as handle:
+            return handle.read(5).startswith(b"%PDF-")
+    except OSError:
+        return False
+
+
+def _find_newest_valid_redacted_pdf(session_hash: str | None) -> Path | None:
+    """Newest readable ``*_redacted.pdf`` under the session workspace."""
     root = workspace_root_from(session_hash)
     if not root.is_dir():
         return None
@@ -219,9 +241,9 @@ def latest_redacted_pdf_path(session_hash: str | None = None) -> str | None:
     newest: tuple[float, Path] | None = None
     try:
         for path in root.rglob("*"):
-            if not path.is_file():
+            if not path.is_file() or not _is_redacted_pdf_candidate(path):
                 continue
-            if not path.name.lower().endswith(_REDACTED_PDF_SUFFIX):
+            if not _is_valid_pdf_file(path):
                 continue
             try:
                 path.resolve(strict=False).relative_to(root.resolve())
@@ -233,9 +255,58 @@ def latest_redacted_pdf_path(session_hash: str | None = None) -> str | None:
     except OSError:
         return None
 
-    if newest is None:
+    return newest[1] if newest else None
+
+
+def _staged_preview_pdf_path(session_hash: str | None) -> Path:
+    root = workspace_root_from(session_hash)
+    return root / ".pi" / "preview" / _PREVIEW_FILENAME
+
+
+def _stage_preview_pdf(source: Path, session_hash: str | None) -> Path:
+    """
+    Copy *source* into a stable preview path under the session workspace.
+
+    The Gradio PDF component reads a single file path; staging avoids serving
+    files that are still being written in ``output_redact/`` and gives a
+    consistent path under ``allowed_paths``.
+    """
+    dest = _staged_preview_pdf_path(session_hash)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".tmp")
+    shutil.copy2(source, tmp)
+    tmp.replace(dest)
+    return dest.resolve()
+
+
+def latest_redacted_pdf_path(session_hash: str | None = None) -> str | None:
+    """
+    Return the newest valid ``*_redacted.pdf`` for the Gradio PDF preview.
+
+    Copies the chosen file to ``{session}/.pi/preview/latest_redacted.pdf`` so
+    the component always receives a complete PDF under the workspace root.
+    """
+    source = _find_newest_valid_redacted_pdf(session_hash)
+    staged = _staged_preview_pdf_path(session_hash)
+    if source is None:
+        if _is_valid_pdf_file(staged):
+            return str(staged.resolve())
         return None
-    return str(newest[1].resolve())
+
+    try:
+        if staged.is_file():
+            src_mtime = _file_created_timestamp(source)
+            staged_mtime = _file_created_timestamp(staged)
+            if (
+                src_mtime <= staged_mtime
+                and staged.stat().st_size == source.stat().st_size
+                and _is_valid_pdf_file(staged)
+            ):
+                return str(staged.resolve())
+    except OSError:
+        pass
+
+    return str(_stage_preview_pdf(source, session_hash))
 
 
 def workspace_root_from(session_hash: str | None = None) -> Path:
