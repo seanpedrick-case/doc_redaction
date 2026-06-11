@@ -2,7 +2,7 @@
 title: Agentic Document Redaction
 emoji: 🤖
 colorFrom: blue
-colorTo: green
+colorTo: yellow
 sdk: docker
 app_file: agent-redact/pi/gradio_app.py
 pinned: false

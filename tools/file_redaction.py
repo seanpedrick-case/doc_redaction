@@ -8953,9 +8953,17 @@ def redact_image_pdf(
     # SECOND PASS: Perform PII detection on all pages using stored OCR results
     print("Second pass: Performing PII detection on all pages...")
 
-    # Optional: run PII detection in parallel for Local and AWS Comprehend (skip when CUSTOM_VLM_FACES is used).
+    # Optional: run PII detection in parallel for Local and AWS Comprehend (skip when CUSTOM_VLM_FACES or CUSTOM_FUZZY is used).
     # IMPORTANT: never parallelise PII when using inference-server or local-transformers LLM backends.
     pii_results_by_page_image = {}
+    _has_custom_fuzzy = any(
+        "CUSTOM_FUZZY" in entity_list
+        for entity_list in (
+            chosen_redact_entities or [],
+            chosen_redact_comprehend_entities or [],
+            chosen_llm_entities or [],
+        )
+    )
     _use_parallel_image_pii = (
         pii_identification_method in (LOCAL_PII_OPTION, AWS_PII_OPTION)
         and pii_identification_method
@@ -8965,7 +8973,10 @@ def redact_image_pdf(
             pii_identification_method == AWS_PII_OPTION
             and "CUSTOM_VLM_FACES" in (chosen_redact_comprehend_entities or [])
         )
+        and not _has_custom_fuzzy
     )
+    if _has_custom_fuzzy:
+        print("CUSTOM_FUZZY selected: running PII detection sequentially.")
     if _use_parallel_image_pii and ocr_results_by_page:
         _pii_pages = (
             list(page_loop_pages)

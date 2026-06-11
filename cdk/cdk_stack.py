@@ -2291,7 +2291,7 @@ class CdkStack(Stack):
                                 subnets=self.private_subnets
                             ),  # Link to subnets
                             min_healthy_percent=0,
-                            max_healthy_percent=100,
+                            max_healthy_percent=600,
                             desired_count=0,
                             service_connect_configuration=service_connect_configuration,
                         )

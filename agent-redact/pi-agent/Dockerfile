@@ -91,7 +91,6 @@ ENV PI_DEPLOYMENT_PROFILE=hf-space
 ENV PI_DEFAULT_PROVIDER=google-gemini
 ENV PI_DEFAULT_MODEL=gemini-flash-lite-latest
 ENV DOC_REDACTION_GRADIO_URL=https://seanpedrickcase-document-redaction.hf.space
-ENV GRADIO_SERVER_PORT=7860
 ENV HOME=${APP_HOME}
 ENV PI_WORKDIR=/workspace/doc_redaction
 # Fargate uses volume mounts under ${APP_HOME}/app/workspace (CDK chown entrypoint).
@@ -111,6 +110,7 @@ ENV PI_UI_PORT=7860
 ENV PI_GRADIO_PORT=7860
 ENV GRADIO_SERVER_NAME=0.0.0.0
 ENV GRADIO_SERVER_PORT=7860
+ENV GRADIO_ANALYTICS_ENABLED=False
 ENV RUN_FASTAPI=False
 
 WORKDIR ${PI_WORKDIR}
