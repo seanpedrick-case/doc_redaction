@@ -301,8 +301,8 @@ services:
     command:
       - -hf
       - unsloth/gemma-4-31B-it-qat-GGUF
-      # - --hf-file
-      # - gemma-4-31B-it-qat-UD-Q4_K_XL.gguf
+      - --hf-file
+      - gemma-4-31B-it-qat-UD-Q4_K_XL.gguf
       - --mmproj-url
       - https://huggingface.co/unsloth/gemma-4-31B-it-qat-GGUF/resolve/main/mmproj-BF16.gguf
       #- --no-mmproj

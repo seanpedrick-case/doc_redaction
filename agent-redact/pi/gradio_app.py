@@ -512,6 +512,23 @@ def _set_last_assistant_content(history: list[dict[str, Any]], content: str) -> 
         history.append({"role": "assistant", "content": content})
 
 
+def _append_rate_limit_wait_notice(
+    history: list[dict[str, Any]],
+    completed_segments: list[str],
+    streaming_text: str,
+    message: str,
+) -> tuple[list[dict[str, Any]], list[str], str]:
+    completed_segments, streaming_text = _append_chat_segment(
+        completed_segments,
+        streaming_text,
+        message,
+    )
+    _set_last_assistant_content(
+        history, _assistant_display_text(completed_segments, streaming_text)
+    )
+    return history, completed_segments, streaming_text
+
+
 def _user_notice_content(label: str, message: str) -> str:
     return f"_**{label}:**_ {message.strip()}"
 
@@ -1976,7 +1993,7 @@ def _run_pi_chat(
                     _set_last_assistant_content(
                         history,
                         (
-                            f"**Gemini rate limit / quota:** stopped after "
+                            f"**API rate limit hit:** stopped after "
                             f"{QUOTA_RETRY_ATTEMPTS} consecutive attempts.\n\n"
                             f"{err_summary}"
                         ),
@@ -2012,12 +2029,18 @@ def _run_pi_chat(
                     )
                     return
 
-                activity = _append_activity(
-                    activity,
-                    (
-                        f"Gemini rate limit — waiting {QUOTA_RETRY_DELAY_S}s before "
-                        f"retry {quota_failures}/{QUOTA_RETRY_ATTEMPTS}…"
-                    ),
+                wait_message = (
+                    f"API rate limit hit — waiting {QUOTA_RETRY_DELAY_S}s before "
+                    f"retry {quota_failures}/{QUOTA_RETRY_ATTEMPTS}…"
+                )
+                activity = _append_activity(activity, wait_message)
+                history, completed_segments, streaming_text = (
+                    _append_rate_limit_wait_notice(
+                        history,
+                        completed_segments,
+                        streaming_text,
+                        wait_message,
+                    )
                 )
                 yield _chat_yield(
                     history,

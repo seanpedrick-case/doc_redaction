@@ -11,6 +11,7 @@ import gradio as gr
 from gradio_app import (
     _CHAT_OUTPUT_COMPONENT_COUNT,
     _append_chat_segment,
+    _append_rate_limit_wait_notice,
     _apply_event,
     _chat_segment_tool_label,
     _chat_yield,
@@ -86,7 +87,15 @@ def test_apply_event_done_skips_finish_notice_when_retry_pending():
     streaming_text = ""
 
     event = PiStreamEvent(kind="done", text="Agent finished.")
-    history, activity, thinking, tool_output, tool_heading, completed_segments, streaming_text = _apply_event(
+    (
+        history,
+        activity,
+        thinking,
+        tool_output,
+        tool_heading,
+        completed_segments,
+        streaming_text,
+    ) = _apply_event(
         event,
         history=history,
         activity=activity,
@@ -102,6 +111,27 @@ def test_apply_event_done_skips_finish_notice_when_retry_pending():
     assert history == [{"role": "assistant", "content": ""}]
     assert completed_segments == []
     assert streaming_text == ""
+
+
+def test_append_rate_limit_wait_notice_updates_assistant_chat():
+    history = [{"role": "assistant", "content": ""}]
+    completed_segments: list[str] = []
+    streaming_text = "Partial response"
+    wait_message = "API rate limit hit — waiting 60s before retry…"
+
+    history, completed_segments, streaming_text = _append_rate_limit_wait_notice(
+        history,
+        completed_segments,
+        streaming_text,
+        wait_message,
+    )
+
+    assert completed_segments == ["Partial response", wait_message]
+    assert streaming_text == ""
+    assert (
+        history[-1]["content"]
+        == "Partial response\n\nAPI rate limit hit — waiting 60s before retry…"
+    )
 
 
 class _FakePiClient:
