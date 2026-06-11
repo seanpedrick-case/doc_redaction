@@ -79,6 +79,31 @@ def test_append_chat_segment_keeps_distinct_tools():
     assert done[1].startswith("**bash:**")
 
 
+def test_apply_event_done_skips_finish_notice_when_retry_pending():
+    history = [{"role": "assistant", "content": ""}]
+    activity: list[str] = []
+    completed_segments: list[str] = []
+    streaming_text = ""
+
+    event = PiStreamEvent(kind="done", text="Agent finished.")
+    history, activity, thinking, tool_output, tool_heading, completed_segments, streaming_text = _apply_event(
+        event,
+        history=history,
+        activity=activity,
+        thinking="",
+        tool_output="",
+        tool_heading="",
+        completed_segments=completed_segments,
+        streaming_text=streaming_text,
+        append_finish_notice=False,
+    )
+
+    assert activity == ["Agent finished."]
+    assert history == [{"role": "assistant", "content": ""}]
+    assert completed_segments == []
+    assert streaming_text == ""
+
+
 class _FakePiClient:
     def __init__(
         self,

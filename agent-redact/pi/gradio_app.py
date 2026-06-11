@@ -913,6 +913,7 @@ def _apply_event(
     tool_heading: str,
     completed_segments: list[str],
     streaming_text: str,
+    append_finish_notice: bool = True,
 ) -> tuple[list[dict[str, Any]], list[str], str, str, str, list[str], str]:
     if event.kind == "text_snapshot":
         if event.text.strip().startswith("**") and ":" in event.text.split("\n", 1)[0]:
@@ -1011,13 +1012,14 @@ def _apply_event(
             completed_segments.append(streaming_text)
             streaming_text = ""
         aborted = event.text.strip().lower().startswith("agent aborted")
-        history, completed_segments, streaming_text = _append_agent_finish_notice(
-            history,
-            completed_segments,
-            streaming_text,
-            aborted=aborted,
-        )
         activity = _append_activity(activity, event.text)
+        if append_finish_notice:
+            history, completed_segments, streaming_text = _append_agent_finish_notice(
+                history,
+                completed_segments,
+                streaming_text,
+                aborted=aborted,
+            )
 
     return (
         history,
@@ -1869,6 +1871,7 @@ def _run_pi_chat(
 
     quota_failures = 0
     finish_aborted = False
+    done_event_received = False
 
     try:
         while True:
@@ -1886,11 +1889,12 @@ def _run_pi_chat(
                             streaming_text,
                         )
                     )
-                    is_terminal_done = event.kind == "done"
-                    if is_terminal_done:
+                    is_done_event = event.kind == "done"
+                    if is_done_event:
                         finish_aborted = (
                             event.text.strip().lower().startswith("agent aborted")
                         )
+                        done_event_received = True
                     (
                         history,
                         activity,
@@ -1908,6 +1912,7 @@ def _run_pi_chat(
                         tool_heading=tool_heading,
                         completed_segments=completed_segments,
                         streaming_text=streaming_text,
+                        append_finish_notice=not is_done_event,
                     )
                     yield _chat_yield(
                         history,
@@ -1917,14 +1922,13 @@ def _run_pi_chat(
                         tool_heading,
                         tool_output,
                         send_enabled=True,
-                        abort_enabled=not is_terminal_done,
-                        redact_enabled=is_terminal_done,
-                        agent_running=not is_terminal_done,
+                        abort_enabled=not is_done_event,
+                        redact_enabled=False,
+                        agent_running=True,
                         session_info=session_info,
                         session_hash=session_hash,
-                        refresh_pdf_preview=event.kind
-                        in {"tool_end", "done", "turn_end"},
-                        refresh_final_files=is_terminal_done,
+                        refresh_pdf_preview=event.kind in {"tool_end", "turn_end"},
+                        refresh_final_files=False,
                     )
                 turn_error = last_assistant_turn_error(client.get_messages())
             except PiRpcError as exc:
@@ -2092,6 +2096,14 @@ def _run_pi_chat(
             )
             return
         raise
+
+    if done_event_received:
+        history, completed_segments, streaming_text = _append_agent_finish_notice(
+            history,
+            completed_segments,
+            streaming_text,
+            aborted=finish_aborted,
+        )
 
     _finalize_assistant_chat(
         client,
