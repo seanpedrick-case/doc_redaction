@@ -160,6 +160,12 @@ def format_tool_chat_line(tool_name: str | None, args: dict[str, Any] | None) ->
         cmd = str(args["command"])
         if is_bash_commentary_only(cmd):
             return extract_bash_commentary_text(cmd)
+        commentary, executable = split_bash_commentary_and_command(cmd)
+        if commentary and executable:
+            short = executable[:200] + ("…" if len(executable) > 200 else "")
+            return f"{commentary}\n\n**bash:** `{short}`"
+        if commentary:
+            return commentary
     detail = format_tool_args(tool_name, args)
     if detail and detail != name:
         return f"**{name}:** {detail}"
@@ -303,6 +309,23 @@ def extract_bash_commentary_text(command: str) -> str:
     return "\n".join(parts)
 
 
+def split_bash_commentary_and_command(command: str) -> tuple[str, str]:
+    """Split ``#`` planning lines from executable shell lines."""
+    comments: list[str] = []
+    commands: list[str] = []
+    for raw in command.splitlines():
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            text = stripped.lstrip("#").strip()
+            if text:
+                comments.append(text)
+        else:
+            commands.append(stripped)
+    return "\n".join(comments), " ↵ ".join(commands)
+
+
 def format_tool_args(tool_name: str | None, args: dict[str, Any] | None) -> str:
     if not args:
         return ""
@@ -311,8 +334,11 @@ def format_tool_args(tool_name: str | None, args: dict[str, Any] | None) -> str:
         cmd = str(args["command"])
         if is_bash_commentary_only(cmd):
             return extract_bash_commentary_text(cmd)
-        cmd = cmd.replace("\n", " ↵ ")
-        return f"`{cmd[:240]}{'…' if len(cmd) > 240 else ''}`"
+        _commentary, executable = split_bash_commentary_and_command(cmd)
+        if not executable:
+            return extract_bash_commentary_text(cmd)
+        shown = executable[:240] + ("…" if len(executable) > 240 else "")
+        return f"`{shown}`"
     if name in {"read", "write", "edit"} and args.get("path"):
         return f"`{args['path']}`"
     compact = json.dumps(args, ensure_ascii=False)

@@ -221,7 +221,7 @@ def sync_workspace_helpers() -> Path:
     helpers = workspace_helpers_dir()
     helpers.mkdir(parents=True, exist_ok=True)
     pi_dir = Path(__file__).resolve().parent
-    for name in ("remote_redaction.py",):
+    for name in ("remote_redaction.py", "run_doc_redact.py"):
         src = pi_dir / name
         dest = helpers / name
         if not src.is_file():
@@ -266,7 +266,15 @@ def write_hf_space_deployment_skill(*, force: bool = False) -> Path | None:
         f"| **doc_redaction URL** | `{url}` **only** |\n"
         "| **Auth** | `HF_TOKEN` (Space secret; already in Pi subprocess env) |\n"
         f"| **Helper module** | `{helpers}/remote_redaction.py` |\n\n"
-        "## Minimal `/doc_redact` call (use this — do not hand-roll scripts)\n\n"
+        "## One-shot CLI (preferred over writing ``run_redact.py``)\n\n"
+        f"```bash\n"
+        f"python3 {helpers}/run_doc_redact.py \\\n"
+        f'  --pdf "<session-folder>/document.pdf" \\\n'
+        f'  --dest "<session-folder>/redact/document.pdf/output_redact/" \\\n'
+        f'  --ocr-method "Local model - selectable text" \\\n'
+        f'  --pii-method "Local"\n'
+        f"```\n\n"
+        "## Minimal Python (only if the CLI is insufficient)\n\n"
         "```python\n"
         "import importlib.util\n"
         "import sys\n"
@@ -289,11 +297,17 @@ def write_hf_space_deployment_skill(*, force: bool = False) -> Path | None:
         f"- **Helper path is shared:** `{helpers}/remote_redaction.py` lives under the "
         f"workspace root `{workspace_base_dir().as_posix()}/`, **not** under your session "
         f"subfolder's `.pi/` tree.\n"
-        f"- Call `/doc_redact` via `make_redaction_client()` from that helper.\n"
+        f"- Call `/doc_redact` via `{helpers}/run_doc_redact.py` or `make_redaction_client()`.\n"
+        "- **Do not** create `run_redact.py`, `run_redact_fixed.py`, or duplicate helpers in your session folder.\n"
+        "- **Do not** call `Client(...)` or `view_api()` in a loop from bash — each call hits HF rate limits. "
+        "Use the CLI once, or one `make_redaction_client()` (cached + retries).\n"
+        "- **Do not** pass `base_url=` manually — `make_redaction_client()` reads "
+        f"`DOC_REDACTION_GRADIO_URL` (`{url}`).\n"
         "- **Do not** use `host.docker.internal`, `localhost`, `redaction:7861`, or probe "
         "alternate URLs.\n"
         "- **Do not** rewrite or duplicate `remote_redaction.py` — use the synced helper.\n"
-        "- On rate limits, wait and retry the same URL (Pi UI handles backoff).\n"
+        "- On `TooManyRequestsError`, wait at least 60s and retry **once** via the CLI — "
+        "do not spawn repeated `python3 -c` Client probes.\n"
         "- Write status updates as **normal assistant text**, not bash `#` comments.\n"
         "- After `/doc_redact`, download outputs with `fetch_redaction_files` into your "
         "session `output_redact/` folder.\n\n"

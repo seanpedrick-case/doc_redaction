@@ -135,27 +135,19 @@ GEMINI_MODELS: tuple[tuple[str, str, int, bool], ...] = (
 
 BEDROCK_MODELS: tuple[tuple[str, str, int, bool], ...] = (
     (
-        "anthropic.claude-3-haiku-20240307-v1:0",
-        "Claude 3 Haiku (Bedrock)",
-        200000,
+        "anthropic.claude-sonnet-4-6",
+        "Anthropic Claude Sonnet 4.6 (Bedrock)",
+        1000000,
+        True,
+    ),
+    ("amazon.nova-pro-v1:0", "Amazon Nova Pro (Bedrock)", 300000, False),
+    (
+        "nvidia.nemotron-super-3-120b",
+        "NVIDIA Nemotron Super 3 120B (Bedrock)",
+        262000,
         False,
     ),
-    (
-        "anthropic.claude-3-7-sonnet-20250219-v1:0",
-        "Claude 3.7 Sonnet (Bedrock)",
-        200000,
-        True,
-    ),
-    (
-        "anthropic.claude-sonnet-4-5-20250929-v1:0",
-        "Claude Sonnet 4.5 (Bedrock)",
-        200000,
-        True,
-    ),
-    ("anthropic.claude-sonnet-4-6", "Claude Sonnet 4.6 (Bedrock)", 200000, True),
-    ("amazon.nova-micro-v1:0", "Amazon Nova Micro (Bedrock)", 128000, False),
-    ("amazon.nova-lite-v1:0", "Amazon Nova Lite (Bedrock)", 300000, False),
-    ("amazon.nova-pro-v1:0", "Amazon Nova Pro (Bedrock)", 300000, False),
+    ("mistral.devstral-2-123b", "Mistral Devstral 2 123B (Bedrock)", 256000, False),
 )
 
 PROVIDER_MODELS: dict[str, list[str]] = {

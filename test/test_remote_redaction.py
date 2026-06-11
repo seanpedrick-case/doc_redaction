@@ -10,11 +10,61 @@ if str(_PI_SRC) not in sys.path:
     sys.path.insert(0, str(_PI_SRC))
 
 from remote_redaction import (  # noqa: E402
+    clear_redaction_client_cache,
     discover_redaction_outputs,
     extract_server_paths,
     fetch_redaction_files,
     is_gradio_file_path,
+    is_gradio_rate_limit_error,
+    make_redaction_client,
 )
+
+
+def test_make_redaction_client_uses_token_kwarg(monkeypatch):
+    calls: list[tuple[str, str | None]] = []
+
+    class _FakeClient:
+        def __init__(self, url, token=None, **kwargs):
+            calls.append((url, token))
+
+    monkeypatch.setattr("remote_redaction.Client", _FakeClient)
+    monkeypatch.setenv("HF_TOKEN", "hf_secret")
+    monkeypatch.setenv("DOC_REDACTION_GRADIO_URL", "https://example.hf.space")
+    clear_redaction_client_cache()
+    client = make_redaction_client()
+    assert client is not None
+    assert calls == [("https://example.hf.space", "hf_secret")]
+
+
+def test_make_redaction_client_retries_rate_limit(monkeypatch):
+    attempts = {"n": 0}
+
+    class _TooMany(Exception):
+        pass
+
+    class _FakeClient:
+        def __init__(self, url, token=None, **kwargs):
+            attempts["n"] += 1
+            if attempts["n"] < 2:
+                raise _TooMany("429 Too Many Requests")
+
+    monkeypatch.setattr("remote_redaction.Client", _FakeClient)
+    monkeypatch.setattr("remote_redaction.is_gradio_rate_limit_error", lambda exc: True)
+    monkeypatch.setattr("remote_redaction._quota_retry_attempts", lambda: 3)
+    monkeypatch.setattr("remote_redaction._quota_retry_delay_s", lambda: 0)
+    monkeypatch.setenv("DOC_REDACTION_GRADIO_URL", "https://example.hf.space")
+    clear_redaction_client_cache()
+    make_redaction_client()
+    assert attempts["n"] == 2
+
+
+def test_is_gradio_rate_limit_error_detects_too_many_requests():
+    class TooManyRequestsError(Exception):
+        pass
+
+    assert is_gradio_rate_limit_error(TooManyRequestsError("x"))
+    assert is_gradio_rate_limit_error(RuntimeError("429 Too Many Requests"))
+    assert not is_gradio_rate_limit_error(RuntimeError("connection refused"))
 
 
 def test_is_gradio_file_path_windows_and_unix():

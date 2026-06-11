@@ -40,6 +40,16 @@ from pi_rpc_client import (
 )
 
 
+def test_format_tool_chat_line_bash_splits_commentary_from_command():
+    line = format_tool_chat_line(
+        "bash",
+        {"command": "# Wait and retry\nsleep 30\npython3 run.py"},
+    )
+    assert "Wait and retry" in line
+    assert "**bash:**" in line
+    assert "sleep 30" in line
+
+
 def test_format_tool_chat_line_bash_commentary_as_prose():
     line = format_tool_chat_line(
         "bash",

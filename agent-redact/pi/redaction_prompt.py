@@ -449,7 +449,10 @@ def build_hf_space_backend_guidance(
     from pi_workspace_skills import remote_redaction_helper_module
 
     helpers = remote_redaction_helper_module()
+    helpers_dir = helpers.rsplit("/", 1)[0]
+    run_cli = f"{helpers_dir}/run_doc_redact.py"
     base = _workspace_root().as_posix().rstrip("/")
+    output_dest = output_base.rstrip("/") + "/"
     return (
         f"- **Remote redaction backend (authoritative URL):** `{gradio_url}` **only**. "
         "This Pi Space orchestrates a separate private doc_redaction Hugging Face Space "
@@ -457,8 +460,11 @@ def build_hf_space_backend_guidance(
         "- **Read `/skill:hf-space-deployment` first** — it overrides Docker/local URLs "
         "(`host.docker.internal`, `localhost`, `redaction:7861`, internal service names) "
         "that appear in generic skills for local-docker or AWS ECS.\n"
-        f"- **Helper module (workspace base, not session folder):** `{helpers}` under "
-        f"`{base}/.pi/helpers/`. Do **not** look for `{workspace_root.rstrip('/')}/.pi/helpers/`.\n"
+        f"- **Helper module (workspace base, not session folder):** `{helpers}` and "
+        f"`{run_cli}` under `{base}/.pi/helpers/`. "
+        f"Do **not** look for `{workspace_root.rstrip('/')}/.pi/helpers/`.\n"
+        f"- **First redaction call:** run `{run_cli}` once (see `/skill:hf-space-deployment`) "
+        "— **do not** write `run_redact.py` in your session folder.\n"
         "- **Do not** probe alternate hosts, rewrite the helper, or hand-roll a new "
         "Gradio client script. Import `make_redaction_client`, `fetch_redaction_files`, "
         "and `resolve_redaction_output_paths` from that file (`HF_TOKEN` is already in "
@@ -468,7 +474,7 @@ def build_hf_space_backend_guidance(
         "server-side paths from the redaction container.\n"
         f"- Download all `/doc_redact` and `/review_apply` outputs via "
         f"`{gradio_url.rstrip('/')}/gradio_api/file=…` with "
-        "`Authorization: Bearer $HF_TOKEN` into `{output_base}` (create subdirs as needed).\n"
+        f"`Authorization: Bearer $HF_TOKEN` into `{output_dest}` (create subdirs as needed).\n"
         "- On Hugging Face rate limits (`TooManyRequestsError`), wait and retry the **same** "
         "URL via the helper — do not switch to another host.\n"
         "- Do not pass `CUSTOM_FUZZY` in `redact_entities` on `/doc_redact` unless the user explicitly requests fuzzy matching; it can be very CPU/RAM intensive and may return an empty path list even when the job completes. Use `CUSTOM` with an explicit `deny_list` on `/doc_redact`, or use `/redact_document` with `max_fuzzy_spelling_mistakes_num > 0` for fuzzy matching.\n"
@@ -479,7 +485,7 @@ def build_hf_space_backend_guidance(
         "- **User-facing updates:** write progress and reasoning as normal assistant text. "
         "Do not put commentary in bash `#` comments — the UI shows those as tool lines.\n"
         f"- Helper module: `{helpers}`."
-    ).format(output_base=output_base.rstrip("/") + "/", helpers=helpers)
+    )
 
 
 def build_split_container_redaction_guidance(
@@ -688,6 +694,16 @@ def build_redaction_prompt(
         text = text.replace("- {REMOTE_BACKEND_GUIDANCE}\n", "")
     for key, value in replacements.items():
         text = text.replace(key, value)
+
+    if is_hf_space_profile():
+        hf_row = (
+            "| **0 — HF deployment (read first)** | `hf-space-deployment` | "
+            "`.pi/skills/hf-space-deployment/SKILL.md` | "
+            "Use `run_doc_redact.py`; do not hand-roll Gradio clients |\n"
+        )
+        marker = "| **1 — Initial redaction** |"
+        if marker in text and hf_row not in text:
+            text = text.replace(marker, hf_row + marker, 1)
 
     if not _include_long_document_rules(page_range, total_pages):
         text = _strip_long_document_section(text)
