@@ -395,11 +395,16 @@ def build_local_redaction_client_guidance(
 ) -> str:
     """Pi agent and doc_redaction on the same host (local dev / shared Docker volumes)."""
     output_redact = f"{output_base.rstrip('/')}/output_redact/"
-    helpers = (
-        f"{workspace_root.rstrip('/')}/.pi/helpers/remote_redaction.py"
-        if workspace_root.strip()
-        else "`.pi/helpers/remote_redaction.py` (under `PI_WORKSPACE_DIR`)"
-    )
+    try:
+        from pi_workspace_skills import remote_redaction_helper_module
+
+        helpers = remote_redaction_helper_module()
+    except ImportError:
+        helpers = (
+            f"{workspace_root.rstrip('/')}/.pi/helpers/remote_redaction.py"
+            if workspace_root.strip()
+            else "`.pi/helpers/remote_redaction.py` (under `PI_WORKSPACE_DIR`)"
+        )
     doc_output_hint = ""
     try:
         from tools.config import OUTPUT_FOLDER, SESSION_OUTPUT_FOLDER
@@ -441,7 +446,10 @@ def build_hf_space_backend_guidance(
     output_base: str,
     workspace_root: str,
 ) -> str:
-    helpers = f"{workspace_root.rstrip('/')}/.pi/helpers/remote_redaction.py"
+    from pi_workspace_skills import remote_redaction_helper_module
+
+    helpers = remote_redaction_helper_module()
+    base = _workspace_root().as_posix().rstrip("/")
     return (
         f"- **Remote redaction backend (authoritative URL):** `{gradio_url}` **only**. "
         "This Pi Space orchestrates a separate private doc_redaction Hugging Face Space "
@@ -449,9 +457,11 @@ def build_hf_space_backend_guidance(
         "- **Read `/skill:hf-space-deployment` first** — it overrides Docker/local URLs "
         "(`host.docker.internal`, `localhost`, `redaction:7861`, internal service names) "
         "that appear in generic skills for local-docker or AWS ECS.\n"
-        "- **Do not** probe alternate hosts, rewrite `{helpers}`, or hand-roll a new "
+        f"- **Helper module (workspace base, not session folder):** `{helpers}` under "
+        f"`{base}/.pi/helpers/`. Do **not** look for `{workspace_root.rstrip('/')}/.pi/helpers/`.\n"
+        "- **Do not** probe alternate hosts, rewrite the helper, or hand-roll a new "
         "Gradio client script. Import `make_redaction_client`, `fetch_redaction_files`, "
-        "and `resolve_redaction_output_paths` from that helper (`HF_TOKEN` is already in "
+        "and `resolve_redaction_output_paths` from that file (`HF_TOKEN` is already in "
         "the Pi subprocess environment).\n"
         "- Use **`gradio_client` only** — upload local files with `handle_file()` from "
         f"`{workspace_root.rstrip('/')}/`. **Do not** call `/agent/*` routes or use "
@@ -479,11 +489,16 @@ def build_split_container_redaction_guidance(
     workspace_root: str,
 ) -> str:
     """AWS ECS (and similar): Pi agent and doc_redaction are separate containers."""
+    from pi_workspace_skills import remote_redaction_helper_module
+
     output_redact = f"{output_base.rstrip('/')}/output_redact/"
-    helpers = f"{workspace_root.rstrip('/')}/.pi/helpers/remote_redaction.py"
+    helpers = remote_redaction_helper_module()
+    base = _workspace_root().as_posix().rstrip("/")
     return (
         f"- **Split-container redaction backend:** doc_redaction runs at `{gradio_url}` "
         "(separate service from this Pi agent). Use **`gradio_client` only**.\n"
+        f"- **Helper module (workspace base):** `{helpers}` under `{base}/.pi/helpers/` "
+        f"(not `{workspace_root.rstrip('/')}/.pi/helpers/`).\n"
         f"- **Deliverables belong in your session workspace:** `{output_redact}` "
         f"(and `{output_base.rstrip('/')}/review/output_review_final/` after apply). "
         "That is the **only** output tree you should populate for this task.\n"

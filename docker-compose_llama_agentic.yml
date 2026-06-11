@@ -335,8 +335,8 @@ services:
       - "q8_0"
       - --cache-type-v
       - "q8_0"
-      #- --chat-template-kwargs
-      #- "{\"enable_thinking\": false}"
+      - --chat-template-kwargs
+      - "{\"enable_thinking\": false}"
       - --reasoning
       - "off"
       - --image_min_tokens
@@ -345,10 +345,10 @@ services:
       - "1800"
       - --split-mode
       - "layer"
-      - --spec-type
-      - "draft-mtp"
-      - --spec-draft-n-max
-      - "3"
+      # - --spec-type
+      # - "draft-mtp"
+      # - --spec-draft-n-max
+      # - "3"
     ports:
       - "8002:8080"
     volumes:

@@ -196,15 +196,16 @@ def workspace_context_prefix(session_hash: str) -> str:
         from redaction_prompt import doc_redaction_gradio_url
 
         if uses_split_redaction_backend():
-            helpers = (
-                f"{workspace_base_dir().as_posix()}/.pi/helpers/remote_redaction.py"
-            )
+            from pi_workspace_skills import remote_redaction_helper_module
+
+            helpers = remote_redaction_helper_module()
             lines.append(
                 f"**Redaction outputs (split backend):** doc_redaction at "
                 f"`{doc_redaction_gradio_url()}` writes to its own container — download "
                 f"artifacts into `{root}/redact/<document>/output_redact/` via "
-                f"`{helpers}` (`fetch_redaction_files`). Do not `find` or `ls` "
-                f"`/workspace/doc_redaction/output` from this agent."
+                f"`{helpers}` (`fetch_redaction_files`; helper is under workspace base "
+                f"`{workspace_base_dir().as_posix()}/.pi/helpers/`, not under `{root}/.pi/`). "
+                f"Do not `find` or `ls` `/workspace/doc_redaction/output` from this agent."
             )
     except ImportError:
         pass

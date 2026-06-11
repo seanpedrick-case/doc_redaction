@@ -28,6 +28,15 @@ def workspace_helpers_dir() -> Path:
     return workspace_pi_dir() / "helpers"
 
 
+def remote_redaction_helper_path() -> Path:
+    """Absolute path to synced ``remote_redaction.py`` (always under workspace base, not session subfolders)."""
+    return workspace_helpers_dir() / "remote_redaction.py"
+
+
+def remote_redaction_helper_module() -> str:
+    return remote_redaction_helper_path().as_posix()
+
+
 def repo_skills_dir() -> Path:
     return pi_repo_root_path() / "skills"
 
@@ -257,8 +266,30 @@ def write_hf_space_deployment_skill(*, force: bool = False) -> Path | None:
         f"| **doc_redaction URL** | `{url}` **only** |\n"
         "| **Auth** | `HF_TOKEN` (Space secret; already in Pi subprocess env) |\n"
         f"| **Helper module** | `{helpers}/remote_redaction.py` |\n\n"
+        "## Minimal `/doc_redact` call (use this — do not hand-roll scripts)\n\n"
+        "```python\n"
+        "import importlib.util\n"
+        "import sys\n"
+        f'helper = "{helpers}/remote_redaction.py"\n'
+        'spec = importlib.util.spec_from_file_location("remote_redaction", helper)\n'
+        "mod = importlib.util.module_from_spec(spec)\n"
+        'sys.modules["remote_redaction"] = mod\n'
+        "spec.loader.exec_module(mod)\n"
+        "from gradio_client import handle_file\n\n"
+        f"client = mod.make_redaction_client()  # URL: {url}\n"
+        'pdf = "<your-session-folder>/document.pdf"\n'
+        "result = client.predict(\n"
+        '    api_name="/doc_redact",\n'
+        "    document_file=handle_file(pdf),\n"
+        ")\n"
+        'paths = mod.resolve_redaction_output_paths(result, document_stem="document")\n'
+        'mod.fetch_redaction_files(paths, "<your-session-folder>/redact/document/output_redact/")\n'
+        "```\n\n"
         "## Rules\n\n"
-        f"- Call `/doc_redact` via `make_redaction_client()` from `{helpers}/remote_redaction.py`.\n"
+        f"- **Helper path is shared:** `{helpers}/remote_redaction.py` lives under the "
+        f"workspace root `{workspace_base_dir().as_posix()}/`, **not** under your session "
+        f"subfolder's `.pi/` tree.\n"
+        f"- Call `/doc_redact` via `make_redaction_client()` from that helper.\n"
         "- **Do not** use `host.docker.internal`, `localhost`, `redaction:7861`, or probe "
         "alternate URLs.\n"
         "- **Do not** rewrite or duplicate `remote_redaction.py` — use the synced helper.\n"
@@ -324,11 +355,13 @@ def workspace_boundary_prefix(session_hash: str | None = None) -> str:
         from redaction_prompt import doc_redaction_gradio_url
 
         if is_hf_space_profile():
+            helpers = remote_redaction_helper_module()
             hf_note = (
                 f"**HF Space redaction backend:** use `{doc_redaction_gradio_url()}` only "
-                "(see `/skill:hf-space-deployment`). Do not use Docker host URLs from "
-                "other skills. Write user-facing progress as normal chat text, not bash "
-                "comments.\n\n"
+                f"(see `/skill:hf-space-deployment`). Import helpers from `{helpers}` "
+                f"(workspace base — not `{root}/.pi/helpers/`). Do not use Docker host "
+                "URLs from other skills. Write user-facing progress as normal chat text, "
+                "not bash comments.\n\n"
             )
     except ImportError:
         pass
