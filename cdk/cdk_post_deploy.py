@@ -12,62 +12,8 @@ from typing import List, Union
 
 import boto3
 from cdk_config import (
-    ACCESS_LOG_DYNAMODB_TABLE_NAME,
     AWS_REGION,
-    FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
-    S3_LOG_CONFIG_BUCKET_NAME,
-    S3_OUTPUT_BUCKET_NAME,
-    USAGE_LOG_DYNAMODB_TABLE_NAME,
 )
-from dotenv import set_key
-
-
-def _ensure_folder_exists(output_folder: str) -> None:
-    if not os.path.exists(output_folder):
-        os.makedirs(output_folder, exist_ok=True)
-        print(f"Created the {output_folder} folder.")
-    else:
-        print(f"The {output_folder} folder already exists.")
-
-
-def create_basic_config_env(
-    out_dir: str = "config",
-    s3_log_config_bucket_name: str = S3_LOG_CONFIG_BUCKET_NAME,
-    s3_output_bucket_name: str = S3_OUTPUT_BUCKET_NAME,
-    access_log_dynamodb_table_name: str = ACCESS_LOG_DYNAMODB_TABLE_NAME,
-    feedback_log_dynamodb_table_name: str = FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
-    usage_log_dynamodb_table_name: str = USAGE_LOG_DYNAMODB_TABLE_NAME,
-    *,
-    headless: bool = False,
-):
-    """Create a basic config.env file for the deployed redaction app."""
-    variables = {
-        "COGNITO_AUTH": "False" if headless else "True",
-        "RUN_AWS_FUNCTIONS": "True",
-        "DISPLAY_FILE_NAMES_IN_LOGS": "False",
-        "SESSION_OUTPUT_FOLDER": "True",
-        "SAVE_LOGS_TO_DYNAMODB": "True",
-        "SHOW_COSTS": "True",
-        "SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS": "True",
-        "LOAD_PREVIOUS_TEXTRACT_JOBS_S3": "True",
-        "DOCUMENT_REDACTION_BUCKET": s3_log_config_bucket_name,
-        "TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET": s3_output_bucket_name,
-        "ACCESS_LOG_DYNAMODB_TABLE_NAME": access_log_dynamodb_table_name,
-        "FEEDBACK_LOG_DYNAMODB_TABLE_NAME": feedback_log_dynamodb_table_name,
-        "USAGE_LOG_DYNAMODB_TABLE_NAME": usage_log_dynamodb_table_name,
-    }
-
-    _ensure_folder_exists(out_dir + "/")
-    env_file_path = os.path.abspath(os.path.join(out_dir, "config.env"))
-
-    if not os.path.exists(env_file_path):
-        with open(env_file_path, "w", encoding="utf-8"):
-            pass
-
-    for key, value in variables.items():
-        set_key(env_file_path, key, str(value), quote_mode="never")
-
-    return variables
 
 
 def start_codebuild_build(project_name: str, aws_region: str = AWS_REGION) -> None:

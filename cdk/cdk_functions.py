@@ -21,8 +21,10 @@ from aws_cdk import aws_wafv2 as wafv2
 from aws_cdk import custom_resources as cr
 from botocore.exceptions import ClientError, NoCredentialsError
 from cdk_config import (
+    ACCESS_LOG_DYNAMODB_TABLE_NAME,
     AWS_REGION,
     ENABLE_RESOURCE_DELETE_PROTECTION,
+    FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
     NAT_GATEWAY_EIP_NAME,
     POLICY_FILE_LOCATIONS,
     PRIVATE_SUBNET_AVAILABILITY_ZONES,
@@ -31,10 +33,12 @@ from cdk_config import (
     PUBLIC_SUBNET_AVAILABILITY_ZONES,
     PUBLIC_SUBNET_CIDR_BLOCKS,
     PUBLIC_SUBNETS_TO_USE,
+    S3_LOG_CONFIG_BUCKET_NAME,
     S3_OUTPUT_BUCKET_NAME,
+    USAGE_LOG_DYNAMODB_TABLE_NAME,
 )
 from constructs import Construct
-from dotenv import dotenv_values
+from dotenv import dotenv_values, set_key
 
 # CDK CLI stores lookup-provider results under these key prefixes in cdk.context.json.
 _CDK_LOOKUP_CONTEXT_PREFIXES = (
@@ -46,6 +50,14 @@ _CDK_LOOKUP_CONTEXT_PREFIXES = (
     "key-provider:",
     "ami:",
 )
+
+
+def _ensure_folder_exists(output_folder: str) -> None:
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder, exist_ok=True)
+        print(f"Created the {output_folder} folder.")
+    else:
+        print(f"The {output_folder} folder already exists.")
 
 
 def is_resource_delete_protection_enabled() -> bool:
@@ -1873,6 +1885,46 @@ _EXPRESS_SECRET_ENV_NAMES = frozenset(
 )
 
 
+def create_basic_config_env(
+    out_dir: str = "config",
+    s3_log_config_bucket_name: str = S3_LOG_CONFIG_BUCKET_NAME,
+    s3_output_bucket_name: str = S3_OUTPUT_BUCKET_NAME,
+    access_log_dynamodb_table_name: str = ACCESS_LOG_DYNAMODB_TABLE_NAME,
+    feedback_log_dynamodb_table_name: str = FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
+    usage_log_dynamodb_table_name: str = USAGE_LOG_DYNAMODB_TABLE_NAME,
+    *,
+    headless: bool = False,
+):
+    """Create a basic config.env file for the deployed redaction app."""
+    variables = {
+        "COGNITO_AUTH": "False" if headless else "True",
+        "RUN_AWS_FUNCTIONS": "True",
+        "DISPLAY_FILE_NAMES_IN_LOGS": "False",
+        "SESSION_OUTPUT_FOLDER": "True",
+        "SAVE_LOGS_TO_DYNAMODB": "True",
+        "SHOW_COSTS": "True",
+        "SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS": "True",
+        "LOAD_PREVIOUS_TEXTRACT_JOBS_S3": "True",
+        "DOCUMENT_REDACTION_BUCKET": s3_log_config_bucket_name,
+        "TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET": s3_output_bucket_name,
+        "ACCESS_LOG_DYNAMODB_TABLE_NAME": access_log_dynamodb_table_name,
+        "FEEDBACK_LOG_DYNAMODB_TABLE_NAME": feedback_log_dynamodb_table_name,
+        "USAGE_LOG_DYNAMODB_TABLE_NAME": usage_log_dynamodb_table_name,
+    }
+
+    _ensure_folder_exists(out_dir + "/")
+    env_file_path = os.path.abspath(os.path.join(out_dir, "config.env"))
+
+    if not os.path.exists(env_file_path):
+        with open(env_file_path, "w", encoding="utf-8"):
+            pass
+
+    for key, value in variables.items():
+        set_key(env_file_path, key, str(value), quote_mode="never")
+
+    return variables
+
+
 def load_app_config_env_for_express(
     config_env_path: str,
     *,
@@ -1926,7 +1978,7 @@ def build_express_gateway_primary_container(
         image=image_uri,
         container_port=container_port,
         aws_logs_configuration=ecs.CfnExpressGatewayService.ExpressGatewayServiceAwsLogsConfigurationProperty(
-            log_group_name=log_group_name,
+            log_group=log_group_name,
             log_stream_prefix="ecs",
             region=aws_region,
         ),
@@ -2305,7 +2357,7 @@ def build_express_pi_primary_container(
         image=image_uri,
         container_port=container_port,
         aws_logs_configuration=ecs.CfnExpressGatewayService.ExpressGatewayServiceAwsLogsConfigurationProperty(
-            log_group_name=log_group_name,
+            log_group=log_group_name,
             log_stream_prefix="ecs-pi",
             region=aws_region,
         ),

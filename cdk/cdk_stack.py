@@ -326,7 +326,7 @@ class CdkStack(Stack):
             )
             print(f"Using VPC from pre-check context: {vpc_id}")
 
-        elif NEW_VPC_DEFAULT_NAME:
+        elif NEW_VPC_DEFAULT_NAME and not VPC_NAME:
             new_vpc_created = True
             print(
                 f"NEW_VPC_DEFAULT_NAME ('{NEW_VPC_DEFAULT_NAME}') is set. Creating a new VPC."

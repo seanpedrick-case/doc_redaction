@@ -97,7 +97,9 @@ CDK_CONFIG_PATH = get_or_create_env_var(
 if CDK_CONFIG_PATH:
     if os.path.exists(CDK_CONFIG_PATH):
         print(f"Loading CDK variables from config file {CDK_CONFIG_PATH}")
-        load_dotenv(CDK_CONFIG_PATH)
+        # override=True: stale empty defaults from an earlier cdk_config import in the
+        # same shell (e.g. cdk_install wizard calling cdk_functions) must not win.
+        load_dotenv(CDK_CONFIG_PATH, override=True)
     else:
         print("CDK config file not found at location:", CDK_CONFIG_PATH)
 

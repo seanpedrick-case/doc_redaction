@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -20,7 +21,8 @@ def _demo_answers() -> inst.InstallAnswers:
         cognito_domain_prefix="test-redaction",
         vpc_mode="existing",
         vpc_name="test-vpc",
-        subnet_mode="auto",
+        public_subnet_mode="auto",
+        private_subnet_mode="auto",
     )
 
 
@@ -42,7 +44,8 @@ def _headless_answers() -> inst.InstallAnswers:
         cognito_domain_prefix="headless-redaction",
         vpc_mode="existing",
         vpc_name="test-vpc",
-        subnet_mode="auto",
+        public_subnet_mode="auto",
+        private_subnet_mode="auto",
         enable_s3_batch=True,
     )
 
@@ -65,6 +68,7 @@ def test_build_env_values_production():
     assert values["ENABLE_RESOURCE_DELETE_PROTECTION"] == "True"
     assert values["ACM_SSL_CERTIFICATE_ARN"].startswith("arn:aws:acm:")
     assert values["SSL_CERTIFICATE_DOMAIN"] == "redaction.example.com"
+    assert values["APPREGISTRY_STACK_NAME"] == "Test-Redaction-AppRegistryStack"
 
 
 def test_build_env_values_headless():
@@ -91,6 +95,74 @@ def test_validate_rejects_express_with_acm():
     values["ACM_SSL_CERTIFICATE_ARN"] = "arn:aws:acm:eu-west-2:123:certificate/x"
     errors = inst.validate_env_values(values)
     assert any("ACM_SSL_CERTIFICATE_ARN" in e for e in errors)
+
+
+def test_build_env_values_mixed_subnet_tiers():
+    answers = _demo_answers()
+    answers.public_subnet_mode = "existing"
+    answers.private_subnet_mode = "create"
+    answers.public_subnet_names = ["existing-public-a", "existing-public-b"]
+    answers.public_subnet_cidrs = ["10.244.1.0/28", "10.244.2.0/28"]
+    answers.public_subnet_azs = ["eu-west-2a", "eu-west-2b"]
+    answers.private_subnet_names = ["Demo-Redaction-PrivateSubnet1"]
+    answers.private_subnet_cidrs = ["10.0.10.0/28"]
+    answers.private_subnet_azs = ["eu-west-2a"]
+    values = inst.build_env_values(answers)
+    assert (
+        values["PUBLIC_SUBNETS_TO_USE"] == '["existing-public-a", "existing-public-b"]'
+    )
+    assert values["PUBLIC_SUBNET_CIDR_BLOCKS"] == "['10.244.1.0/28', '10.244.2.0/28']"
+    assert values["PUBLIC_SUBNET_AVAILABILITY_ZONES"] == "['eu-west-2a', 'eu-west-2b']"
+    assert values["PRIVATE_SUBNETS_TO_USE"] == '["Demo-Redaction-PrivateSubnet1"]'
+    assert values["PRIVATE_SUBNET_CIDR_BLOCKS"] == "['10.0.10.0/28']"
+    assert values["PRIVATE_SUBNET_AVAILABILITY_ZONES"] == "['eu-west-2a']"
+
+
+def test_enrich_existing_subnet_details_from_aws(monkeypatch):
+    answers = _demo_answers()
+    answers.vpc_name = "test-vpc"
+    answers.public_subnet_mode = "existing"
+    answers.public_subnet_names = ["pub-a", "pub-b"]
+    answers.private_subnet_mode = "create"
+
+    monkeypatch.setattr(
+        inst,
+        "list_vpcs",
+        lambda _region: [{"name": "test-vpc", "id": "vpc-123", "cidr": "10.0.0.0/16"}],
+    )
+    monkeypatch.setattr(
+        inst,
+        "list_subnets_in_vpc",
+        lambda _vpc_id, _region: [
+            {"name": "pub-a", "cidr": "10.244.1.0/28", "az": "eu-west-2a"},
+            {"name": "pub-b", "cidr": "10.244.2.0/28", "az": "eu-west-2b"},
+        ],
+    )
+
+    errors = inst.enrich_existing_subnet_details_from_aws(answers)
+    assert errors == []
+    assert answers.public_subnet_cidrs == ["10.244.1.0/28", "10.244.2.0/28"]
+    assert answers.public_subnet_azs == ["eu-west-2a", "eu-west-2b"]
+
+
+def test_validate_subnet_answers_mixed_requires_public_names():
+    answers = _demo_answers()
+    answers.public_subnet_mode = "existing"
+    answers.private_subnet_mode = "create"
+    answers.private_subnet_names = ["new-private"]
+    errors = inst.validate_subnet_answers(answers)
+    assert any("Public subnets" in err for err in errors)
+
+
+def test_resolve_subnet_tier_modes_per_tier_override():
+    args = argparse.Namespace(
+        subnet_mode="auto",
+        public_subnet_mode="existing",
+        private_subnet_mode="create",
+    )
+    public, private = inst.resolve_subnet_tier_modes(args)
+    assert public == "existing"
+    assert private == "create"
 
 
 def test_format_list_env():
@@ -247,7 +319,41 @@ def test_stacks_to_check_without_appregistry():
     ]
 
 
+def test_derived_appregistry_stack_name_from_cdk_prefix():
+    name = inst.derived_appregistry_stack_name(
+        {"CDK_PREFIX": "Demo-Redaction-", "ENABLE_APPREGISTRY": "True"}
+    )
+    assert name == "Demo-Redaction-AppRegistryStack"
+
+
+def test_stacks_to_check_derives_appregistry_from_cdk_prefix():
+    checks = inst.stacks_to_check(
+        "eu-west-2",
+        {
+            "CDK_PREFIX": "Demo-Redaction-",
+            "ENABLE_APPREGISTRY": "True",
+        },
+    )
+    assert "Demo-Redaction-AppRegistryStack" in [name for name, _ in checks]
+
+
+def test_stacks_to_check_skips_cloudfront_when_disabled():
+    checks = inst.stacks_to_check(
+        "eu-west-2",
+        {
+            "USE_CLOUDFRONT": "False",
+            "RUN_USEAST_STACK": "False",
+            "ENABLE_APPREGISTRY": "False",
+        },
+    )
+    assert checks == [(inst.REGIONAL_STACK, "eu-west-2")]
+
+
 def test_discover_existing_doc_redaction_stacks_order(monkeypatch):
+    monkeypatch.setattr(
+        inst, "list_regional_appregistry_stack_names", lambda _region: []
+    )
+
     def fake_describe(stack_name: str, region: str):
         if stack_name == inst.REGIONAL_STACK and region == "eu-west-2":
             return inst.ExistingStack(
@@ -271,6 +377,64 @@ def test_discover_existing_doc_redaction_stacks_order(monkeypatch):
     found = inst.discover_existing_doc_redaction_stacks("eu-west-2")
     assert [s.name for s in found] == [inst.CLOUDFRONT_STACK, inst.REGIONAL_STACK]
     assert found[0].termination_protection is True
+
+
+def test_discover_existing_stacks_continues_after_access_denied(monkeypatch):
+    from botocore.exceptions import ClientError
+
+    monkeypatch.setattr(
+        inst, "list_regional_appregistry_stack_names", lambda _region: []
+    )
+
+    def fake_describe(stack_name: str, region: str):
+        if (
+            stack_name == inst.CLOUDFRONT_STACK
+            and region == inst.CLOUDFRONT_STACK_REGION
+        ):
+            raise ClientError(
+                {
+                    "Error": {
+                        "Code": "AccessDenied",
+                        "Message": "explicit deny in SCP",
+                    }
+                },
+                "DescribeStacks",
+            )
+        if stack_name == inst.REGIONAL_STACK and region == "eu-west-2":
+            return inst.ExistingStack(
+                name=stack_name,
+                region=region,
+                status="UPDATE_COMPLETE",
+            )
+        return None
+
+    monkeypatch.setattr(inst, "describe_existing_stack", fake_describe)
+    found = inst.discover_existing_doc_redaction_stacks("eu-west-2")
+    assert [s.name for s in found] == [inst.REGIONAL_STACK]
+
+
+def test_discover_includes_orphan_appregistry_when_disabled_in_config(monkeypatch):
+    monkeypatch.setattr(
+        inst,
+        "list_regional_appregistry_stack_names",
+        lambda _region: ["Old-Redaction-AppRegistryStack"],
+    )
+
+    def fake_describe(stack_name: str, region: str):
+        if stack_name == "Old-Redaction-AppRegistryStack":
+            return inst.ExistingStack(
+                name=stack_name,
+                region=region,
+                status="CREATE_COMPLETE",
+            )
+        return None
+
+    monkeypatch.setattr(inst, "describe_existing_stack", fake_describe)
+    found = inst.discover_existing_doc_redaction_stacks(
+        "eu-west-2",
+        {"ENABLE_APPREGISTRY": "False"},
+    )
+    assert [s.name for s in found] == ["Old-Redaction-AppRegistryStack"]
 
 
 def test_handle_existing_stacks_force_delete(monkeypatch):
@@ -343,3 +507,102 @@ def test_write_pi_agent_env_file_minimal(tmp_path, monkeypatch):
     text = target.read_text(encoding="utf-8")
     assert "PI_DEPLOYMENT_PROFILE=aws-ecs" in text
     assert "DOC_REDACTION_GRADIO_URL=http://redaction:7860" in text
+
+
+def test_build_cdk_subprocess_env_overrides_stale_defaults(tmp_path, monkeypatch):
+    env_path = tmp_path / "config" / "cdk_config.env"
+    env_path.parent.mkdir(parents=True)
+    env_path.write_text(
+        "VPC_NAME=my-vpc\nCDK_PREFIX=MyPrefix-\nAWS_REGION=eu-west-2\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(inst, "ENV_PATH", env_path)
+    monkeypatch.setattr(inst, "CDK_DIR", tmp_path)
+    monkeypatch.setenv("VPC_NAME", "")
+    monkeypatch.setenv("CDK_PREFIX", "")
+
+    env = inst.build_cdk_subprocess_env()
+    assert env["VPC_NAME"] == "my-vpc"
+    assert env["CDK_PREFIX"] == "MyPrefix-"
+    assert env["CDK_CONFIG_PATH"] == str(env_path)
+
+
+def test_apply_cdk_runtime_env_sets_paths(tmp_path, monkeypatch):
+    env_path = tmp_path / "cdk_config.env"
+    monkeypatch.setattr(inst, "ENV_PATH", env_path)
+    inst.apply_cdk_runtime_env(
+        {"CDK_FOLDER": "C:/example/cdk/", "AWS_REGION": "eu-west-2"}
+    )
+    assert os.environ["CDK_CONFIG_PATH"] == str(env_path)
+    assert os.environ["CDK_FOLDER"] == "C:/example/cdk/"
+
+
+def test_run_smoke_test_if_needed_skips_config_only(monkeypatch):
+    called = []
+
+    def fake_smoke(_python_exe):
+        called.append(True)
+
+    monkeypatch.setattr(inst, "smoke_test_python_app", fake_smoke)
+    args = argparse.Namespace(config_only=True, skip_cdk_json=False)
+    inst.run_smoke_test_if_needed(Path(sys.executable), args)
+    assert called == []
+
+
+def test_main_writes_config_before_smoke_test(monkeypatch, tmp_path):
+    call_order: list[str] = []
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    env_path = config_dir / "cdk_config.env"
+    cdk_json = tmp_path / "cdk.json"
+
+    monkeypatch.setattr(inst, "CONFIG_DIR", config_dir)
+    monkeypatch.setattr(inst, "ENV_PATH", env_path)
+    monkeypatch.setattr(inst, "CDK_JSON_PATH", cdk_json)
+    monkeypatch.setattr(inst, "CDK_DIR", tmp_path)
+    monkeypatch.setattr(inst, "check_cdk_cli", lambda: "2.0.0")
+    monkeypatch.setattr(
+        inst,
+        "handle_existing_stacks_at_start",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        inst,
+        "resolve_python_executable",
+        lambda **_kw: Path(sys.executable),
+    )
+    monkeypatch.setattr(inst, "write_cdk_json", lambda *_a, **_k: cdk_json)
+
+    def fake_wizard(_args):
+        call_order.append("wizard")
+        return _demo_answers()
+
+    def fake_write_env_file(path, values):
+        call_order.append("write_config")
+        path.write_text("VPC_NAME=test-vpc\n", encoding="utf-8")
+        return values
+
+    def fake_smoke(_python_exe):
+        call_order.append("smoke")
+
+    monkeypatch.setattr(inst, "run_wizard", fake_wizard)
+    monkeypatch.setattr(inst, "write_env_file", fake_write_env_file)
+    monkeypatch.setattr(inst, "smoke_test_python_app", fake_smoke)
+    monkeypatch.setattr(inst, "print_summary", lambda *_a, **_k: None)
+    monkeypatch.setattr(inst, "ask_yes_no", lambda *_a, **_k: True)
+    monkeypatch.setattr(inst, "cdk_bootstrap_needed", lambda *_a, **_k: False)
+    monkeypatch.setattr(inst, "run_cdk_command", lambda *_a, **_k: None)
+
+    inst.main(
+        [
+            "--yes",
+            "--profile",
+            "demo",
+            "--vpc-name",
+            "test-vpc",
+            "--synth-only",
+        ]
+    )
+
+    assert call_order.index("wizard") < call_order.index("write_config")
+    assert call_order.index("write_config") < call_order.index("smoke")

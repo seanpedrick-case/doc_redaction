@@ -65,13 +65,14 @@ QUICKSTART_SCRIPT = CDK_DIR / "post_cdk_build_quickstart.py"
 REGIONAL_STACK = "RedactionStack"
 CLOUDFRONT_STACK = "RedactionStackCloudfront"
 CLOUDFRONT_STACK_REGION = "us-east-1"
+APPREGISTRY_STACK_SUFFIX = "AppRegistryStack"
 
 DEMO_PRESET: Dict[str, str] = {
     "USE_ECS_EXPRESS_MODE": "True",
     "USE_CLOUDFRONT": "False",
     "RUN_USEAST_STACK": "False",
     "ENABLE_RESOURCE_DELETE_PROTECTION": "False",
-    "ENABLE_APPREGISTRY": "False",
+    "ENABLE_APPREGISTRY": "True",
     "ACM_SSL_CERTIFICATE_ARN": "",
     "SSL_CERTIFICATE_DOMAIN": "",
 }
@@ -89,7 +90,7 @@ HEADLESS_PRESET: Dict[str, str] = {
     "USE_CLOUDFRONT": "False",
     "RUN_USEAST_STACK": "False",
     "ENABLE_RESOURCE_DELETE_PROTECTION": "False",
-    "ENABLE_APPREGISTRY": "False",
+    "ENABLE_APPREGISTRY": "True",
     "ENABLE_HEADLESS_DEPLOYMENT": "True",
     "ENABLE_S3_BATCH_ECS_TRIGGER": "True",
     "COGNITO_AUTH": "False",
@@ -332,12 +333,63 @@ def write_cdk_json(
     return CDK_JSON_PATH
 
 
+def build_cdk_subprocess_env(
+    values: Optional[Dict[str, str]] = None,
+) -> Dict[str, str]:
+    """
+    Environment for child Python / CDK processes.
+
+    Merges config/cdk_config.env over the current process environment so stale
+    empty defaults from an earlier cdk_config import during the wizard do not
+    block load_dotenv (override=False) in app.py.
+    """
+    env = os.environ.copy()
+    env["CDK_CONFIG_PATH"] = str(ENV_PATH)
+    cdk_folder = ""
+    if values:
+        cdk_folder = (values.get("CDK_FOLDER") or "").strip()
+    if not cdk_folder and ENV_PATH.is_file():
+        cdk_folder = (read_env_file(ENV_PATH).get("CDK_FOLDER") or "").strip()
+    if not cdk_folder:
+        cdk_folder = str(CDK_DIR).replace("\\", "/") + "/"
+    env["CDK_FOLDER"] = cdk_folder
+
+    file_values: Dict[str, str] = {}
+    if ENV_PATH.is_file():
+        file_values = read_env_file(ENV_PATH)
+    elif values:
+        file_values = dict(values)
+
+    for key, val in file_values.items():
+        env[key] = str(val)
+    return env
+
+
+def apply_cdk_runtime_env(values: Dict[str, str]) -> None:
+    """Expose written config to app.py imports (smoke test, cdk synth/deploy)."""
+    os.environ.update(build_cdk_subprocess_env(values))
+
+
 def smoke_test_python_app(python_exe: Path) -> None:
     cmd = [str(python_exe), "-c", "import aws_cdk; import app"]
     print("Smoke test: import aws_cdk and app ...")
-    result = subprocess.run(cmd, cwd=str(CDK_DIR), check=False)
+    result = subprocess.run(
+        cmd,
+        cwd=str(CDK_DIR),
+        env=build_cdk_subprocess_env(),
+        check=False,
+    )
     if result.returncode != 0:
         raise SystemExit("Python smoke test failed. Fix dependencies before deploying.")
+
+
+def run_smoke_test_if_needed(
+    python_exe: Optional[Path],
+    args: argparse.Namespace,
+) -> None:
+    if args.config_only or args.skip_cdk_json or not python_exe:
+        return
+    smoke_test_python_app(python_exe)
 
 
 # ---------------------------------------------------------------------------
@@ -365,6 +417,7 @@ def get_aws_identity(region: Optional[str] = None) -> Tuple[str, str]:
 def check_cdk_cli() -> str:
     result = subprocess.run(
         ["cdk", "--version"],
+        executable=sys.executable,
         capture_output=True,
         text=True,
         check=False,
@@ -505,6 +558,278 @@ def format_list_env(values: Sequence[str], *, use_single_quotes: bool = False) -
     return f"[{inner}]"
 
 
+SUBNET_TIER_MODES = ("auto", "existing", "create")
+
+
+def parse_subnet_name_csv(raw: str) -> List[str]:
+    return [part.strip() for part in raw.split(",") if part.strip()]
+
+
+def resolve_subnet_tier_modes(args: argparse.Namespace) -> Tuple[str, str]:
+    """CLI: --subnet-mode sets both tiers; per-tier flags override individually."""
+    default = getattr(args, "subnet_mode", None) or "auto"
+    public = getattr(args, "public_subnet_mode", None) or default
+    private = getattr(args, "private_subnet_mode", None) or default
+    return public, private
+
+
+def apply_subnet_cli_flags(args: argparse.Namespace, answers: "InstallAnswers") -> None:
+    if getattr(args, "public_subnet_names", None):
+        answers.public_subnet_names = parse_subnet_name_csv(args.public_subnet_names)
+    if getattr(args, "private_subnet_names", None):
+        answers.private_subnet_names = parse_subnet_name_csv(args.private_subnet_names)
+
+
+def lookup_subnets_by_name(
+    vpc_subnets: Sequence[Dict[str, str]],
+) -> Dict[str, Dict[str, str]]:
+    return {subnet["name"]: subnet for subnet in vpc_subnets if subnet.get("name")}
+
+
+def fill_existing_subnet_tier_metadata(
+    names: Sequence[str],
+    lookup: Dict[str, Dict[str, str]],
+    *,
+    cidrs_out: List[str],
+    azs_out: List[str],
+) -> List[str]:
+    """Resolve CIDR/AZ for existing subnet names (order preserved)."""
+    errors: List[str] = []
+    cidrs_out.clear()
+    azs_out.clear()
+    for name in names:
+        info = lookup.get(name)
+        if not info:
+            errors.append(f"Subnet '{name}' was not found in the VPC.")
+            continue
+        cidr = (info.get("cidr") or "").strip()
+        az = (info.get("az") or "").strip()
+        if not az:
+            errors.append(f"Subnet '{name}' has no availability zone in AWS.")
+            continue
+        cidrs_out.append(cidr)
+        azs_out.append(az)
+    return errors
+
+
+def enrich_existing_subnet_details_from_aws(answers: "InstallAnswers") -> List[str]:
+    """Look up CIDR/AZ for tiers using existing named subnets (wizard or CLI)."""
+    if answers.vpc_mode != "existing" or not answers.vpc_name:
+        return []
+
+    tiers: List[Tuple[str, str, List[str], List[str], List[str]]] = []
+    if answers.public_subnet_mode == "existing" and answers.public_subnet_names:
+        tiers.append(
+            (
+                "Public",
+                answers.public_subnet_mode,
+                answers.public_subnet_names,
+                answers.public_subnet_cidrs,
+                answers.public_subnet_azs,
+            )
+        )
+    if answers.private_subnet_mode == "existing" and answers.private_subnet_names:
+        tiers.append(
+            (
+                "Private",
+                answers.private_subnet_mode,
+                answers.private_subnet_names,
+                answers.private_subnet_cidrs,
+                answers.private_subnet_azs,
+            )
+        )
+    if not tiers:
+        return []
+
+    vpc_list = list_vpcs(answers.aws_region)
+    vpc_id = next(
+        (vpc["id"] for vpc in vpc_list if vpc["name"] == answers.vpc_name),
+        None,
+    )
+    if not vpc_id:
+        return [f"VPC '{answers.vpc_name}' not found in {answers.aws_region}."]
+
+    lookup = lookup_subnets_by_name(list_subnets_in_vpc(vpc_id, answers.aws_region))
+    errors: List[str] = []
+    for _label, _mode, names, cidrs_out, azs_out in tiers:
+        if len(cidrs_out) == len(names) == len(azs_out) and names:
+            continue
+        errors.extend(
+            fill_existing_subnet_tier_metadata(
+                names,
+                lookup,
+                cidrs_out=cidrs_out,
+                azs_out=azs_out,
+            )
+        )
+    return errors
+
+
+def apply_subnet_tier_env(
+    values: Dict[str, str],
+    answers: "InstallAnswers",
+    *,
+    tier: str,
+    mode: str,
+) -> None:
+    """Write PUBLIC_* or PRIVATE_* subnet keys for one tier (auto | existing | create)."""
+    prefix = "PUBLIC" if tier == "public" else "PRIVATE"
+    names = (
+        answers.public_subnet_names
+        if tier == "public"
+        else answers.private_subnet_names
+    )
+    cidrs = (
+        answers.public_subnet_cidrs
+        if tier == "public"
+        else answers.private_subnet_cidrs
+    )
+    azs = answers.public_subnet_azs if tier == "public" else answers.private_subnet_azs
+
+    if mode == "auto":
+        values[f"{prefix}_SUBNETS_TO_USE"] = ""
+        values[f"{prefix}_SUBNET_CIDR_BLOCKS"] = ""
+        values[f"{prefix}_SUBNET_AVAILABILITY_ZONES"] = ""
+    elif mode == "existing":
+        values[f"{prefix}_SUBNETS_TO_USE"] = format_list_env(names)
+        if names and len(cidrs) == len(names) == len(azs):
+            values[f"{prefix}_SUBNET_CIDR_BLOCKS"] = format_list_env(
+                cidrs, use_single_quotes=True
+            )
+            values[f"{prefix}_SUBNET_AVAILABILITY_ZONES"] = format_list_env(
+                azs, use_single_quotes=True
+            )
+        else:
+            values[f"{prefix}_SUBNET_CIDR_BLOCKS"] = ""
+            values[f"{prefix}_SUBNET_AVAILABILITY_ZONES"] = ""
+    else:
+        values[f"{prefix}_SUBNETS_TO_USE"] = format_list_env(names)
+        values[f"{prefix}_SUBNET_CIDR_BLOCKS"] = format_list_env(
+            cidrs, use_single_quotes=True
+        )
+        values[f"{prefix}_SUBNET_AVAILABILITY_ZONES"] = format_list_env(
+            azs, use_single_quotes=True
+        )
+
+
+def validate_subnet_answers(answers: "InstallAnswers") -> List[str]:
+    errors: List[str] = []
+    if answers.vpc_mode != "existing":
+        return errors
+    for label, mode, names, cidrs in (
+        (
+            "Public",
+            answers.public_subnet_mode,
+            answers.public_subnet_names,
+            answers.public_subnet_cidrs,
+        ),
+        (
+            "Private",
+            answers.private_subnet_mode,
+            answers.private_subnet_names,
+            answers.private_subnet_cidrs,
+        ),
+    ):
+        if mode == "existing" and not names:
+            errors.append(
+                f"{label} subnets: provide at least one existing subnet name."
+            )
+        if mode == "create" and not names:
+            errors.append(f"{label} subnets: create mode requires subnet names.")
+        if mode == "create" and names and cidrs and len(names) != len(cidrs):
+            errors.append(f"{label} subnets: CIDR count must match subnet name count.")
+    return errors
+
+
+def ask_subnet_tier_mode(tier_label: str) -> str:
+    idx = ask_choice(
+        f"{tier_label} subnets",
+        [
+            "Auto-discover suitable subnets",
+            "Use existing named subnets",
+            "Create new stack-specific subnets (name + CIDR + AZ)",
+        ],
+        default_index=0,
+    )
+    return SUBNET_TIER_MODES[idx]
+
+
+def configure_subnet_tier(
+    answers: "InstallAnswers",
+    tier: str,
+    mode: str,
+    vpc_subnets: List[Dict[str, str]],
+    azs: Sequence[str],
+    *,
+    interactive: bool,
+) -> None:
+    """Collect subnet names/CIDRs for one tier in the wizard."""
+    is_public = tier == "public"
+    label = "Public" if is_public else "Private"
+    prefix_label = "Public" if is_public else "Private"
+
+    if mode == "auto":
+        return
+
+    if mode == "existing":
+        names = (
+            answers.public_subnet_names if is_public else answers.private_subnet_names
+        )
+        if interactive and not names:
+            print(
+                f"Enter {label.lower()} subnet names (comma-separated), or pick from:"
+            )
+            for subnet in vpc_subnets:
+                print(f"  - {subnet['name']} ({subnet['cidr']}, {subnet['az']})")
+            names = parse_subnet_name_csv(ask(f"{label} subnet names", ""))
+        if is_public:
+            answers.public_subnet_names = names
+            cidrs_out = answers.public_subnet_cidrs
+            azs_out = answers.public_subnet_azs
+        else:
+            answers.private_subnet_names = names
+            cidrs_out = answers.private_subnet_cidrs
+            azs_out = answers.private_subnet_azs
+        if names:
+            lookup = lookup_subnets_by_name(vpc_subnets)
+            missing = fill_existing_subnet_tier_metadata(
+                names,
+                lookup,
+                cidrs_out=cidrs_out,
+                azs_out=azs_out,
+            )
+            for err in missing:
+                print(f"Warning: {err}")
+        return
+
+    n_az = len(azs)
+    names = [f"{answers.cdk_prefix}{prefix_label}Subnet{i + 1}" for i in range(n_az)]
+    if is_public:
+        answers.public_subnet_names = names
+        cidrs_list = answers.public_subnet_cidrs
+        azs_list = answers.public_subnet_azs
+        cidr_base = 0
+    else:
+        answers.private_subnet_names = names
+        cidrs_list = answers.private_subnet_cidrs
+        azs_list = answers.private_subnet_azs
+        cidr_base = 10
+
+    if interactive:
+        print(f"Suggested AZs for {label.lower()} subnets: {', '.join(azs)}")
+        cidrs_list.clear()
+        azs_list.clear()
+        for i, name in enumerate(names):
+            cidr = ask(
+                f"CIDR for {label.lower()} {name}",
+                f"10.0.{cidr_base + i}.0/28",
+            )
+            cidrs_list.append(cidr)
+            azs_list.append(azs[i % len(azs)])
+    elif not azs_list:
+        azs_list.extend(azs[:n_az])
+
+
 @dataclass
 class InstallAnswers:
     profile: str = "demo"
@@ -516,7 +841,8 @@ class InstallAnswers:
     vpc_mode: str = "existing"  # new | existing
     vpc_name: str = ""
     new_vpc_cidr: str = ""
-    subnet_mode: str = "auto"  # create | existing | auto
+    public_subnet_mode: str = "auto"  # auto | existing | create
+    private_subnet_mode: str = "auto"  # auto | existing | create
     public_subnet_names: List[str] = field(default_factory=list)
     private_subnet_names: List[str] = field(default_factory=list)
     public_subnet_cidrs: List[str] = field(default_factory=list)
@@ -658,43 +984,17 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
     else:
         values["VPC_NAME"] = answers.vpc_name
         values["NEW_VPC_CIDR"] = ""
-        if answers.subnet_mode == "auto":
-            values["PUBLIC_SUBNETS_TO_USE"] = ""
-            values["PRIVATE_SUBNETS_TO_USE"] = ""
-            values["PUBLIC_SUBNET_CIDR_BLOCKS"] = ""
-            values["PRIVATE_SUBNET_CIDR_BLOCKS"] = ""
-            values["PUBLIC_SUBNET_AVAILABILITY_ZONES"] = ""
-            values["PRIVATE_SUBNET_AVAILABILITY_ZONES"] = ""
-        elif answers.subnet_mode == "existing":
-            values["PUBLIC_SUBNETS_TO_USE"] = format_list_env(
-                answers.public_subnet_names
-            )
-            values["PRIVATE_SUBNETS_TO_USE"] = format_list_env(
-                answers.private_subnet_names
-            )
-            values["PUBLIC_SUBNET_CIDR_BLOCKS"] = ""
-            values["PRIVATE_SUBNET_CIDR_BLOCKS"] = ""
-            values["PUBLIC_SUBNET_AVAILABILITY_ZONES"] = ""
-            values["PRIVATE_SUBNET_AVAILABILITY_ZONES"] = ""
-        else:  # create
-            values["PUBLIC_SUBNETS_TO_USE"] = format_list_env(
-                answers.public_subnet_names
-            )
-            values["PRIVATE_SUBNETS_TO_USE"] = format_list_env(
-                answers.private_subnet_names
-            )
-            values["PUBLIC_SUBNET_CIDR_BLOCKS"] = format_list_env(
-                answers.public_subnet_cidrs, use_single_quotes=True
-            )
-            values["PRIVATE_SUBNET_CIDR_BLOCKS"] = format_list_env(
-                answers.private_subnet_cidrs, use_single_quotes=True
-            )
-            values["PUBLIC_SUBNET_AVAILABILITY_ZONES"] = format_list_env(
-                answers.public_subnet_azs, use_single_quotes=True
-            )
-            values["PRIVATE_SUBNET_AVAILABILITY_ZONES"] = format_list_env(
-                answers.private_subnet_azs, use_single_quotes=True
-            )
+        apply_subnet_tier_env(
+            values, answers, tier="public", mode=answers.public_subnet_mode
+        )
+        apply_subnet_tier_env(
+            values, answers, tier="private", mode=answers.private_subnet_mode
+        )
+
+    if values.get("ENABLE_APPREGISTRY") == "True":
+        values["APPREGISTRY_STACK_NAME"] = (
+            f"{answers.cdk_prefix}{APPREGISTRY_STACK_SUFFIX}"
+        )
 
     return values
 
@@ -918,10 +1218,7 @@ def print_summary(values: Dict[str, str], python_exe: Optional[Path] = None) -> 
 
 
 def _deploy_env() -> Dict[str, str]:
-    env = os.environ.copy()
-    env["CDK_CONFIG_PATH"] = str(ENV_PATH)
-    env["CDK_FOLDER"] = str(CDK_DIR).replace("\\", "/") + "/"
-    return env
+    return build_cdk_subprocess_env()
 
 
 def run_cdk_command(
@@ -945,16 +1242,113 @@ class ExistingStack:
     termination_protection: bool = False
 
 
+def _should_check_cloudfront_stack(
+    config_values: Optional[Dict[str, str]] = None,
+) -> bool:
+    """Skip us-east-1 CloudFront stack lookup when config disables that path."""
+    if not config_values:
+        return True
+    use_cloudfront = config_values.get("USE_CLOUDFRONT")
+    run_useast = config_values.get("RUN_USEAST_STACK")
+    if use_cloudfront is not None and use_cloudfront != "True":
+        return False
+    if run_useast is not None and run_useast != "True":
+        return False
+    return True
+
+
+def _stack_check_skippable_error(exc: Exception) -> bool:
+    """Permission / SCP errors in one region must not block checks in others."""
+    from botocore.exceptions import ClientError
+
+    if not isinstance(exc, ClientError):
+        return False
+    code = exc.response.get("Error", {}).get("Code", "")
+    return code in (
+        "AccessDenied",
+        "UnauthorizedOperation",
+        "AuthorizationError",
+        "AccessDeniedException",
+    )
+
+
+def derived_appregistry_stack_name(
+    config_values: Optional[Dict[str, str]] = None,
+) -> Optional[str]:
+    """Resolve AppRegistry stack name from config (explicit or CDK_PREFIX default)."""
+    if not config_values:
+        return None
+    explicit = (config_values.get("APPREGISTRY_STACK_NAME") or "").strip()
+    if explicit:
+        return explicit
+    prefix = (config_values.get("CDK_PREFIX") or "").strip()
+    if prefix:
+        return f"{prefix}{APPREGISTRY_STACK_SUFFIX}"
+    return None
+
+
+def list_regional_appregistry_stack_names(region: str) -> List[str]:
+    """List active AppRegistry stacks in the regional account (suffix match)."""
+    import boto3
+    from botocore.exceptions import ClientError
+
+    cfn = boto3.client("cloudformation", region_name=region)
+    skip_statuses = {"DELETE_COMPLETE", "DELETE_IN_PROGRESS"}
+    names: List[str] = []
+    try:
+        paginator = cfn.get_paginator("list_stacks")
+        for page in paginator.paginate():
+            for summary in page.get("StackSummaries", []):
+                name = summary.get("StackName", "")
+                status = summary.get("StackStatus", "")
+                if not name.endswith(APPREGISTRY_STACK_SUFFIX):
+                    continue
+                if status in skip_statuses:
+                    continue
+                names.append(name)
+    except ClientError as exc:
+        if _stack_check_skippable_error(exc):
+            code = exc.response.get("Error", {}).get("Code", "ClientError")
+            print(
+                f"Warning: could not list AppRegistry stacks in {region} "
+                f"({code}). Continuing with configured stack names only."
+            )
+            return []
+        raise
+    return sorted(dict.fromkeys(names))
+
+
+def appregistry_stack_names_to_check(
+    config_values: Optional[Dict[str, str]] = None,
+    *,
+    discovered_names: Optional[Sequence[str]] = None,
+) -> List[str]:
+    """Merge configured and discovered AppRegistry stack names (deduped)."""
+    names: List[str] = []
+    derived = derived_appregistry_stack_name(config_values)
+    if derived:
+        names.append(derived)
+    for name in discovered_names or ():
+        if name not in names:
+            names.append(name)
+    return names
+
+
 def stacks_to_check(
     regional_region: str,
     config_values: Optional[Dict[str, str]] = None,
+    *,
+    discovered_appregistry_names: Optional[Sequence[str]] = None,
 ) -> List[Tuple[str, str]]:
     """Return (stack_name, region) pairs in safe deletion order."""
-    checks: List[Tuple[str, str]] = [(CLOUDFRONT_STACK, CLOUDFRONT_STACK_REGION)]
-    if config_values:
-        appregistry_name = (config_values.get("APPREGISTRY_STACK_NAME") or "").strip()
-        if appregistry_name and config_values.get("ENABLE_APPREGISTRY") == "True":
-            checks.append((appregistry_name, regional_region))
+    checks: List[Tuple[str, str]] = []
+    if _should_check_cloudfront_stack(config_values):
+        checks.append((CLOUDFRONT_STACK, CLOUDFRONT_STACK_REGION))
+    for appregistry_name in appregistry_stack_names_to_check(
+        config_values,
+        discovered_names=discovered_appregistry_names,
+    ):
+        checks.append((appregistry_name, regional_region))
     checks.append((REGIONAL_STACK, regional_region))
     return checks
 
@@ -990,10 +1384,27 @@ def discover_existing_doc_redaction_stacks(
     config_values: Optional[Dict[str, str]] = None,
 ) -> List[ExistingStack]:
     """Find deployed doc_redaction CloudFormation stacks in the target account."""
-    checks = stacks_to_check(regional_region, config_values)
+    from botocore.exceptions import ClientError
+
+    discovered_appregistry = list_regional_appregistry_stack_names(regional_region)
+    checks = stacks_to_check(
+        regional_region,
+        config_values,
+        discovered_appregistry_names=discovered_appregistry,
+    )
     ordered: List[ExistingStack] = []
     for stack_name, region in checks:
-        info = describe_existing_stack(stack_name, region)
+        try:
+            info = describe_existing_stack(stack_name, region)
+        except ClientError as exc:
+            if _stack_check_skippable_error(exc):
+                code = exc.response.get("Error", {}).get("Code", "ClientError")
+                print(
+                    f"Warning: could not check stack {stack_name!r} in {region} "
+                    f"({code}). Continuing with other regions."
+                )
+                continue
+            raise
         if info:
             ordered.append(info)
     return ordered
@@ -1470,57 +1881,50 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
             None,
         )
 
-        # Subnets
+        # Subnets (public and private tiers can be configured independently)
+        apply_subnet_cli_flags(args, answers)
         if interactive:
-            sub_idx = ask_choice(
+            layout_idx = ask_choice(
                 "Subnets in existing VPC",
                 [
-                    "Auto-discover suitable subnets (leave subnet lists empty)",
-                    "Use existing named subnets",
-                    "Create new stack-specific subnets (names + CIDR + AZ)",
+                    "Auto-discover public and private subnets",
+                    "Use existing named subnets (both tiers)",
+                    "Create new stack-specific subnets (both tiers)",
+                    "Configure public and private separately",
                 ],
                 default_index=0,
             )
-            answers.subnet_mode = ("auto", "existing", "create")[sub_idx]
+            if layout_idx < 3:
+                shared_mode = SUBNET_TIER_MODES[layout_idx]
+                answers.public_subnet_mode = shared_mode
+                answers.private_subnet_mode = shared_mode
+            else:
+                answers.public_subnet_mode = ask_subnet_tier_mode("Public")
+                answers.private_subnet_mode = ask_subnet_tier_mode("Private")
         else:
-            answers.subnet_mode = args.subnet_mode or "auto"
+            answers.public_subnet_mode, answers.private_subnet_mode = (
+                resolve_subnet_tier_modes(args)
+            )
 
         azs = list_availability_zones(answers.aws_region)[:3]
-        if answers.subnet_mode in ("existing", "create") and vpc_id:
+        if vpc_id:
             subnets = list_subnets_in_vpc(vpc_id, answers.aws_region)
-            if answers.subnet_mode == "existing" and interactive:
-                print("Enter public subnet names (comma-separated), or pick from:")
-                for s in subnets:
-                    print(f"  - {s['name']} ({s['cidr']}, {s['az']})")
-                pub = ask("Public subnet names", "")
-                priv = ask("Private subnet names", "")
-                answers.public_subnet_names = [
-                    x.strip() for x in pub.split(",") if x.strip()
-                ]
-                answers.private_subnet_names = [
-                    x.strip() for x in priv.split(",") if x.strip()
-                ]
-            elif answers.subnet_mode == "create":
-                n_az = len(azs)
-                answers.public_subnet_names = [
-                    f"{answers.cdk_prefix}PublicSubnet{i + 1}" for i in range(n_az)
-                ]
-                answers.private_subnet_names = [
-                    f"{answers.cdk_prefix}PrivateSubnet{i + 1}" for i in range(n_az)
-                ]
-                if interactive:
-                    print(f"Suggested AZs: {', '.join(azs)}")
-                    for i, name in enumerate(answers.public_subnet_names):
-                        cidr = ask(f"CIDR for public {name}", f"10.0.{i}.0/28")
-                        answers.public_subnet_cidrs.append(cidr)
-                        answers.public_subnet_azs.append(azs[i % len(azs)])
-                    for i, name in enumerate(answers.private_subnet_names):
-                        cidr = ask(f"CIDR for private {name}", f"10.0.{10 + i}.0/28")
-                        answers.private_subnet_cidrs.append(cidr)
-                        answers.private_subnet_azs.append(azs[i % len(azs)])
-                else:
-                    answers.public_subnet_azs = azs[:n_az]
-                    answers.private_subnet_azs = azs[:n_az]
+            configure_subnet_tier(
+                answers,
+                "public",
+                answers.public_subnet_mode,
+                subnets,
+                azs,
+                interactive=interactive,
+            )
+            configure_subnet_tier(
+                answers,
+                "private",
+                answers.private_subnet_mode,
+                subnets,
+                azs,
+                interactive=interactive,
+            )
 
         # Optional infra reuse
         if (
@@ -1530,8 +1934,11 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
         ):
             igws = list_igws_for_vpc(vpc_id, answers.aws_region)
             if igws:
+                igws_ids = [g["id"] for g in igws]
                 print("Internet gateways:", ", ".join(g["id"] for g in igws))
-                answers.existing_igw_id = ask("EXISTING_IGW_ID (blank=auto)", "")
+                answers.existing_igw_id = ask(
+                    "EXISTING_IGW_ID (blank=first)", igws_ids[0]
+                )
             albs = list_albs_in_vpc(vpc_id, answers.aws_region)
             if albs:
                 labels = [f"{a['name']} ({a['dns']})" for a in albs]
@@ -1662,7 +2069,29 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--cognito-prefix", help="Cognito user pool domain prefix")
     p.add_argument("--vpc-name", help="Existing VPC Name tag")
     p.add_argument("--new-vpc-cidr", help="CIDR for new VPC")
-    p.add_argument("--subnet-mode", choices=("auto", "existing", "create"))
+    p.add_argument(
+        "--subnet-mode",
+        choices=SUBNET_TIER_MODES,
+        help="Subnet mode for both public and private tiers (overridden by per-tier flags)",
+    )
+    p.add_argument(
+        "--public-subnet-mode",
+        choices=SUBNET_TIER_MODES,
+        help="Public subnet tier: auto, existing, or create",
+    )
+    p.add_argument(
+        "--private-subnet-mode",
+        choices=SUBNET_TIER_MODES,
+        help="Private subnet tier: auto, existing, or create",
+    )
+    p.add_argument(
+        "--public-subnet-names",
+        help="Comma-separated existing public subnet names (with --public-subnet-mode existing)",
+    )
+    p.add_argument(
+        "--private-subnet-names",
+        help="Comma-separated existing private subnet names (with --private-subnet-mode existing)",
+    )
     p.add_argument("--cert-arn", help="ACM certificate ARN (production)")
     p.add_argument("--domain", help="SSL certificate domain (production)")
     pi = p.add_argument_group("Pi agent (second Gradio app)")
@@ -1756,8 +2185,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             force=args.refresh_cdk_json or not CDK_JSON_PATH.is_file(),
             skip=args.skip_cdk_json,
         )
-        if not args.config_only and not args.deploy_only:
-            smoke_test_python_app(python_exe)
     elif CDK_JSON_PATH.is_file():
         # Best-effort parse python from existing cdk.json
         try:
@@ -1781,8 +2208,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             )
     else:
         answers = run_wizard(args)
+        errors = validate_subnet_answers(answers)
+        errors.extend(enrich_existing_subnet_details_from_aws(answers))
         values = build_env_values(answers)
-        errors = validate_env_values(values)
+        errors.extend(validate_env_values(values))
         if errors:
             print("Configuration errors:")
             for err in errors:
@@ -1810,12 +2239,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 overwrite=answers.overwrite_pi_agent_env,
             )
 
-    os.environ["CDK_CONFIG_PATH"] = str(ENV_PATH)
-    os.environ["CDK_FOLDER"] = str(CDK_DIR).replace("\\", "/") + "/"
+    apply_cdk_runtime_env(values)
 
     if args.config_only:
         print("Config written. Exiting (--config-only).")
         return 0
+
+    run_smoke_test_if_needed(python_exe, args)
 
     # Bootstrap prompt
     account = values.get("AWS_ACCOUNT_ID", "")
