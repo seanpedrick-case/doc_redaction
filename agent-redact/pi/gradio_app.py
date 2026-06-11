@@ -78,8 +78,10 @@ from pi_rpc_client import (
     PiStreamEvent,
     assistant_text_since_last_user,
     default_client,
+    format_tool_chat_line,
     is_rate_limit_error,
     last_assistant_turn_error,
+    start_pi_prompt_event_worker,
 )
 from redaction_prompt import (
     DEFAULT_OCR_METHOD,
@@ -970,8 +972,8 @@ def _apply_event(
             completed_segments.append(streaming_text.strip())
             streaming_text = ""
         label = event.tool_name or "tool"
-        detail = event.text or label
-        tool_line = f"**{label}:** {detail}" if detail != label else f"**{label}**"
+        tool_line = format_tool_chat_line(label, event.tool_args)
+        detail = event.text or tool_line or label
         completed_segments, streaming_text = _append_chat_segment(
             completed_segments, streaming_text, tool_line
         )
@@ -1874,17 +1876,7 @@ def _run_pi_chat(
         )
 
     event_queue: queue.Queue[PiStreamEvent | None] = queue.Queue()
-
-    def _prompt_events_worker() -> None:
-        try:
-            for event in client.prompt_events(prompt_to_send):
-                event_queue.put(event)
-        except Exception as exc:
-            event_queue.put(PiStreamEvent(kind="error", text=str(exc), is_error=True))
-        finally:
-            event_queue.put(None)
-
-    threading.Thread(target=_prompt_events_worker, daemon=True).start()
+    start_pi_prompt_event_worker(client, event_queue, prompt_to_send)
 
     quota_failures = 0
     finish_aborted = False
@@ -2061,6 +2053,10 @@ def _run_pi_chat(
                 history.append({"role": "assistant", "content": ""})
                 completed_segments = []
                 streaming_text = ""
+                done_event_received = False
+                finish_aborted = False
+                event_queue = queue.Queue()
+                start_pi_prompt_event_worker(client, event_queue, prompt_to_send)
                 continue
 
             break
@@ -2664,12 +2660,16 @@ def build_ui():
                             ),
                         )
                         hf_token = gr.Textbox(
-                            label="HF token for redaction Space (session override)",
+                            label="HF token for redaction Space (optional)",
                             type="password",
                             placeholder="Uses HF_TOKEN Space secret if empty",
                             visible=IS_HF_SPACE,
                         )
-                        with gr.Accordion("AWS credentials (optional)", open=False):
+                        with gr.Accordion(
+                            "AWS credentials (optional)",
+                            open=False,
+                            visible=not IS_HF_SPACE,
+                        ):
                             aws_region = gr.Textbox(
                                 label="AWS region (session override)",
                                 placeholder="e.g. eu-west-2",

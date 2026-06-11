@@ -432,22 +432,35 @@ def build_hf_space_backend_guidance(
     output_base: str,
     workspace_root: str,
 ) -> str:
+    helpers = f"{workspace_root.rstrip('/')}/.pi/helpers/remote_redaction.py"
     return (
-        f"- **Remote redaction backend:** the doc_redaction app runs at `{gradio_url}` "
-        "(private Hugging Face Space). Use **`gradio_client` only** — upload local files "
-        f"with `handle_file()` from `{workspace_root.rstrip('/')}/`. "
-        "**Do not** call `/agent/*` routes or use server-side paths from the redaction container.\n"
+        f"- **Remote redaction backend (authoritative URL):** `{gradio_url}` **only**. "
+        "This Pi Space orchestrates a separate private doc_redaction Hugging Face Space "
+        "over HTTPS.\n"
+        "- **Read `/skill:hf-space-deployment` first** — it overrides Docker/local URLs "
+        "(`host.docker.internal`, `localhost`, `redaction:7861`, internal service names) "
+        "that appear in generic skills for local-docker or AWS ECS.\n"
+        "- **Do not** probe alternate hosts, rewrite `{helpers}`, or hand-roll a new "
+        "Gradio client script. Import `make_redaction_client`, `fetch_redaction_files`, "
+        "and `resolve_redaction_output_paths` from that helper (`HF_TOKEN` is already in "
+        "the Pi subprocess environment).\n"
+        "- Use **`gradio_client` only** — upload local files with `handle_file()` from "
+        f"`{workspace_root.rstrip('/')}/`. **Do not** call `/agent/*` routes or use "
+        "server-side paths from the redaction container.\n"
         f"- Download all `/doc_redact` and `/review_apply` outputs via "
         f"`{gradio_url.rstrip('/')}/gradio_api/file=…` with "
         "`Authorization: Bearer $HF_TOKEN` into `{output_base}` (create subdirs as needed).\n"
+        "- On Hugging Face rate limits (`TooManyRequestsError`), wait and retry the **same** "
+        "URL via the helper — do not switch to another host.\n"
         "- Do not pass `CUSTOM_FUZZY` in `redact_entities` on `/doc_redact` unless the user explicitly requests fuzzy matching; it can be very CPU/RAM intensive and may return an empty path list even when the job completes. Use `CUSTOM` with an explicit `deny_list` on `/doc_redact`, or use `/redact_document` with `max_fuzzy_spelling_mistakes_num > 0` for fuzzy matching.\n"
         "- Run **`verify_redaction_coverage`** locally on downloaded CSV/PDF paths in this "
         "workspace (pandas/PyMuPDF), not via Agent API.\n"
         "- **Pass 2 VLM is not available** — do not call a VLM endpoint or use "
         "`CUSTOM_VLM_FACES` / `CUSTOM_VLM_SIGNATURE` entities.\n"
-        f"- Helper module: `{workspace_root.rstrip('/')}/.pi/helpers/remote_redaction.py` "
-        "(`make_redaction_client`, `fetch_redaction_files`)."
-    ).format(output_base=output_base.rstrip("/") + "/")
+        "- **User-facing updates:** write progress and reasoning as normal assistant text. "
+        "Do not put commentary in bash `#` comments — the UI shows those as tool lines.\n"
+        f"- Helper module: `{helpers}`."
+    ).format(output_base=output_base.rstrip("/") + "/", helpers=helpers)
 
 
 def build_split_container_redaction_guidance(

@@ -223,10 +223,58 @@ def sync_workspace_helpers() -> Path:
     return helpers.resolve()
 
 
+def write_hf_space_deployment_skill(*, force: bool = False) -> Path | None:
+    """
+    Write a deployment-specific skill that overrides Docker URLs in generic skills.
+
+    Only active when ``PI_DEPLOYMENT_PROFILE=hf-space``.
+    """
+    try:
+        from pi_agent_config import is_hf_space_profile
+        from redaction_prompt import doc_redaction_gradio_url
+    except ImportError:
+        return None
+    if not is_hf_space_profile():
+        return None
+
+    dest_dir = workspace_skills_dir() / "hf-space-deployment"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / "SKILL.md"
+    url = doc_redaction_gradio_url()
+    helpers = workspace_helpers_dir().as_posix()
+    content = (
+        "# HF Space deployment (read first)\n\n"
+        "This Pi agent runs on **Hugging Face Spaces** with **Gemini** and calls a "
+        "**remote** doc_redaction Space. Generic skills mention Docker URLs for "
+        "local-docker or AWS ECS — **ignore those here**.\n\n"
+        "## Authoritative settings\n\n"
+        "| Setting | Value |\n"
+        "|---------|--------|\n"
+        f"| **doc_redaction URL** | `{url}` **only** |\n"
+        "| **Auth** | `HF_TOKEN` (Space secret; already in Pi subprocess env) |\n"
+        f"| **Helper module** | `{helpers}/remote_redaction.py` |\n\n"
+        "## Rules\n\n"
+        f"- Call `/doc_redact` via `make_redaction_client()` from `{helpers}/remote_redaction.py`.\n"
+        "- **Do not** use `host.docker.internal`, `localhost`, `redaction:7861`, or probe "
+        "alternate URLs.\n"
+        "- **Do not** rewrite or duplicate `remote_redaction.py` — use the synced helper.\n"
+        "- On rate limits, wait and retry the same URL (Pi UI handles backoff).\n"
+        "- Write status updates as **normal assistant text**, not bash `#` comments.\n"
+        "- After `/doc_redact`, download outputs with `fetch_redaction_files` into your "
+        "session `output_redact/` folder.\n\n"
+        "Then read `/skill:doc-redaction-app` and `/skill:doc-redaction-modifications` "
+        "for workflow steps, substituting the URL above wherever examples show Docker hosts.\n"
+    )
+    if force or not dest.is_file() or dest.read_text(encoding="utf-8") != content:
+        dest.write_text(content, encoding="utf-8")
+    return dest
+
+
 def ensure_workspace_skills(*, force: bool = False) -> Path:
     """Idempotent sync used at app startup and before Pi RPC starts."""
     dest = sync_repo_skills_to_workspace(force=force)
     sync_workspace_helpers()
+    write_hf_space_deployment_skill(force=force)
     return dest
 
 
@@ -264,6 +312,21 @@ def workspace_boundary_prefix(session_hash: str | None = None) -> str:
         root = base
         scope = f"the workspace `{base}/`"
 
+    hf_note = ""
+    try:
+        from pi_agent_config import is_hf_space_profile
+        from redaction_prompt import doc_redaction_gradio_url
+
+        if is_hf_space_profile():
+            hf_note = (
+                f"**HF Space redaction backend:** use `{doc_redaction_gradio_url()}` only "
+                "(see `/skill:hf-space-deployment`). Do not use Docker host URLs from "
+                "other skills. Write user-facing progress as normal chat text, not bash "
+                "comments.\n\n"
+            )
+    except ImportError:
+        pass
+
     return (
         f"**Workspace boundary (mandatory):** work only under `{base}/`. "
         f"Your active directory is {scope}. "
@@ -272,4 +335,5 @@ def workspace_boundary_prefix(session_hash: str | None = None) -> str:
         f"**Skills (read-only):** doc_redaction skills are synced to `{skills}/`. "
         f"Use `/skill:doc-redaction-app`, `/skill:doc-redact-page-review`, etc. "
         f"Do not edit files under `{skills}/`.\n\n"
+        f"{hf_note}"
     )

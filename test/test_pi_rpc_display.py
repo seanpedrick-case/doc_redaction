@@ -54,6 +54,24 @@ def test_assistant_chat_text_prefers_visible():
     assert assistant_chat_text("Answer", "Reasoning") == "Answer"
 
 
+def test_format_assistant_message_for_chat_bash_commentary_as_prose():
+    message = {
+        "role": "assistant",
+        "content": [
+            {
+                "type": "toolCall",
+                "name": "bash",
+                "arguments": {
+                    "command": "# Planning next step\n# Will call doc_redact"
+                },
+            },
+        ],
+    }
+    rendered = format_assistant_message_for_chat(message)
+    assert "**bash:**" not in rendered
+    assert "Planning next step" in rendered
+
+
 def test_format_assistant_message_for_chat_tool_only():
     message = {
         "role": "assistant",

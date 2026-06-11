@@ -74,6 +74,20 @@ def test_aws_ecs_remote_guidance_forbids_workspace_output_grep(monkeypatch):
     assert ".pi/helpers/remote_redaction.py" in guidance
 
 
+def test_hf_space_remote_guidance_forbids_docker_urls(monkeypatch):
+    monkeypatch.setenv("DOC_REDACTION_GRADIO_URL", "https://example-redaction.hf.space")
+    module = _reload_redaction_prompt(monkeypatch, profile="hf-space")
+    guidance = module.build_remote_backend_guidance(
+        gradio_url="https://example-redaction.hf.space",
+        output_base="/home/user/app/workspace/sess/redact/doc.pdf/",
+        workspace_root="/home/user/app/workspace/sess",
+    )
+    assert "https://example-redaction.hf.space" in guidance
+    assert "host.docker.internal" in guidance
+    assert "hf-space-deployment" in guidance
+    assert "Do not" in guidance and "probe alternate" in guidance
+
+
 def test_build_redaction_prompt_keeps_long_document_rules_at_scale(monkeypatch):
     module = _reload_redaction_prompt(monkeypatch)
     prompt = module.build_redaction_prompt(

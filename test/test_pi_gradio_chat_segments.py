@@ -31,7 +31,37 @@ from gradio_app import (
     route_followup_message,
     submit_followup_chat_queued,
 )
-from pi_rpc_client import PiRpcClient, PiStreamEvent
+from pi_rpc_client import (
+    PiRpcClient,
+    PiStreamEvent,
+    extract_bash_commentary_text,
+    format_tool_chat_line,
+    is_bash_commentary_only,
+)
+
+
+def test_format_tool_chat_line_bash_commentary_as_prose():
+    line = format_tool_chat_line(
+        "bash",
+        {
+            "command": "# Verify the URL from the prompt\n# Let's try host.docker.internal"
+        },
+    )
+    assert "**bash:**" not in line
+    assert "Verify the URL" in line
+    assert "host.docker.internal" in line
+
+
+def test_format_tool_chat_line_bash_command_stays_tool():
+    line = format_tool_chat_line("bash", {"command": "ls -F skills/"})
+    assert line.startswith("**bash:**")
+    assert "ls -F" in line
+
+
+def test_is_bash_commentary_only():
+    assert is_bash_commentary_only("# only comments\n# second line")
+    assert not is_bash_commentary_only("# comment\nls")
+    assert extract_bash_commentary_text("# Hello\n# World") == "Hello\nWorld"
 
 
 def test_chat_segment_tool_label_bash_and_bare():
