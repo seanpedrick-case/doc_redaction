@@ -106,6 +106,7 @@ def test_aws_ecs_profile_applies_bedrock_retry_settings(
     tmp_path, monkeypatch, pi_workspace
 ):
     monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "aws-ecs")
+    monkeypatch.delenv("PI_DEFAULT_PROVIDER", raising=False)
     monkeypatch.setenv("PI_BEDROCK_RETRY_BASE_DELAY_MS", "55000")
     monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
 
