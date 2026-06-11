@@ -413,6 +413,7 @@ def build_local_redaction_client_guidance(
     return (
         f"- **Local doc_redaction backend:** `{gradio_url}` (same machine as this workspace).\n"
         f"{doc_output_hint}"
+        "- Do not pass `CUSTOM_FUZZY` in `redact_entities` on `/doc_redact` unless the user explicitly requests fuzzy matching; it can be very CPU/RAM intensive and may return an empty path list even when the job completes. Use `CUSTOM` with an explicit `deny_list` on `/doc_redact`, or use `/redact_document` with `max_fuzzy_spelling_mistakes_num > 0` for fuzzy matching.\n"
         f"- Call **`/doc_redact`** (omit `output_dir` or leave it empty), then copy artifacts "
         f"into `{output_redact}` with `remote_redaction.resolve_redaction_output_paths` "
         f"and `fetch_redaction_files`.\n"
@@ -439,6 +440,7 @@ def build_hf_space_backend_guidance(
         f"- Download all `/doc_redact` and `/review_apply` outputs via "
         f"`{gradio_url.rstrip('/')}/gradio_api/file=…` with "
         "`Authorization: Bearer $HF_TOKEN` into `{output_base}` (create subdirs as needed).\n"
+        "- Do not pass `CUSTOM_FUZZY` in `redact_entities` on `/doc_redact` unless the user explicitly requests fuzzy matching; it can be very CPU/RAM intensive and may return an empty path list even when the job completes. Use `CUSTOM` with an explicit `deny_list` on `/doc_redact`, or use `/redact_document` with `max_fuzzy_spelling_mistakes_num > 0` for fuzzy matching.\n"
         "- Run **`verify_redaction_coverage`** locally on downloaded CSV/PDF paths in this "
         "workspace (pandas/PyMuPDF), not via Agent API.\n"
         "- **Pass 2 VLM is not available** — do not call a VLM endpoint or use "
@@ -467,6 +469,7 @@ def build_split_container_redaction_guidance(
         "no `ls /home/user/app/output`, no `import tools.config OUTPUT_FOLDER` on the Pi "
         "agent — those paths are on the **redaction service**, not here (or are a read-only "
         "git checkout without live run artifacts).\n"
+        "- Do not pass `CUSTOM_FUZZY` in `redact_entities` on `/doc_redact` unless the user explicitly requests fuzzy matching; it can be very CPU/RAM intensive and may return an empty path list even when the job completes. Use `CUSTOM` with an explicit `deny_list` on `/doc_redact`, or use `/redact_document` with `max_fuzzy_spelling_mistakes_num > 0` for fuzzy matching.\n"
         f'- **Initial redaction:** `Client("{gradio_url}")` → `/doc_redact` with '
         f"`document_file=handle_file(\"<file under {workspace_root.rstrip('/')}/>\")`. "
         "Omit `output_dir` (server picks its own `OUTPUT_FOLDER`).\n"

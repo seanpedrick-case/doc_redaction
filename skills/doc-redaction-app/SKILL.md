@@ -135,7 +135,9 @@ Both routes support explicit term lists via **`deny_list`** / **`allow_list`** o
 
 **`/doc_redact` inline lists:** pass terms directly as `deny_list=["term1", "term2"]` (not a file path). When `deny_list` is non-empty, the API **auto-appends `CUSTOM`** to `redact_entities` if missing (deny-list matching requires that entity type). If you omit `redact_entities` entirely, CLI defaults already include `CUSTOM`.
 
-For fuzzy deny-list matching via API, include `CUSTOM_FUZZY` in `redact_entities` explicitly (or use CLI/`/redact_document` with `fuzzy_mistakes > 0`, which auto-adds `CUSTOM_FUZZY`).
+For fuzzy deny-list matching via API, include `CUSTOM_FUZZY` in `redact_entities` explicitly only when the user explicitly requests fuzzy matching. Otherwise prefer `CUSTOM` with an explicit `deny_list` on `/doc_redact`, and use `/redact_document` with `max_fuzzy_spelling_mistakes_num > 0` if you need fuzzy deny-list matching.
+
+> ⚠️ **Warning:** on `/doc_redact`, `CUSTOM_FUZZY` is expensive and may cause the endpoint to return an empty path list even when the redaction job completes. Use it only when the user asks for typo-tolerant deny-list redaction.
 
 `allow_list` excludes terms from redaction even when another entity type would match.
 
