@@ -5,7 +5,6 @@ from typing import Any, Dict, List
 from aws_cdk import (
     CfnOutput,  # <-- Import CfnOutput directly
     Duration,
-    Fn,
     SecretValue,
     Stack,
 )
@@ -161,6 +160,8 @@ from cdk_functions import (  # Only keep CDK-native functions
     create_s3_batch_ecs_trigger_lambda,
     create_subnets,
     create_web_acl_with_common_rules,
+    express_ingress_first_load_balancer_security_group,
+    express_ingress_load_balancer_arn,
     format_pi_public_urls,
     load_app_config_env_for_express,
     managed_resource_removal_policy,
@@ -1755,15 +1756,10 @@ class CdkStack(Stack):
                     container_port=int(GRADIO_SERVER_PORT),
                 )
 
-                express_alb_arn = express_service.get_att(
-                    "ECSManagedResourceArns.IngressPath.LoadBalancerArn"
-                ).to_string()
-                express_alb_dns = express_service.get_att("Endpoint").to_string()
-                express_alb_security_group_id = Fn.select(
-                    0,
-                    express_service.get_att(
-                        "ECSManagedResourceArns.IngressPath.LoadBalancerSecurityGroups"
-                    ),
+                express_alb_arn = express_ingress_load_balancer_arn(express_service)
+                express_alb_dns = express_service.attr_endpoint
+                express_alb_security_group_id = (
+                    express_ingress_first_load_balancer_security_group(express_service)
                 )
 
                 alb = elbv2.ApplicationLoadBalancer.from_application_load_balancer_attributes(
@@ -1790,20 +1786,18 @@ class CdkStack(Stack):
                 CfnOutput(
                     self,
                     "ExpressServiceEndpoint",
-                    value=express_service.get_att("Endpoint").to_string(),
+                    value=express_service.attr_endpoint,
                     description="HTTPS URL for the ECS Express Mode service",
                 )
                 CfnOutput(
                     self,
                     "ExpressServiceArn",
-                    value=express_service.get_att("ServiceArn").to_string(),
+                    value=express_service.attr_service_arn,
                 )
                 CfnOutput(
                     self,
                     "ExpressManagedCertificateArn",
-                    value=express_service.get_att(
-                        "ECSManagedResourceArns.IngressPath.CertificateArn"
-                    ).to_string(),
+                    value=express_service.attr_ecs_managed_resource_arns_ingress_path_certificate_arn,
                 )
 
                 if enable_pi_express:
@@ -1935,7 +1929,7 @@ class CdkStack(Stack):
                         CfnOutput(
                             self,
                             "PiExpressEndpoint",
-                            value=express_pi_service.get_att("Endpoint").to_string(),
+                            value=express_pi_service.attr_endpoint,
                             description="HTTPS URL for the Pi ECS Express service (AWS-managed cert)",
                         )
                         CfnOutput(

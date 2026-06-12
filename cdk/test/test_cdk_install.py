@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -48,6 +49,33 @@ def _headless_answers() -> inst.InstallAnswers:
         private_subnet_mode="auto",
         enable_s3_batch=True,
     )
+
+
+def test_default_cognito_domain_prefix_strips_reserved_words_from_cdk_prefix():
+    prefix = inst.default_cognito_domain_prefix_from_cdk_prefix(
+        "Lambeth-AWS-SharedServices-Dev-Redaction-"
+    )
+    assert prefix == "lambeth-sharedservic"
+    assert "aws" not in prefix
+    assert "amazon" not in prefix
+    assert "cognito" not in prefix
+
+
+def test_sanitize_cognito_domain_prefix_removes_reserved_substrings():
+    assert (
+        inst.sanitize_cognito_domain_prefix("lambeth-aws-sharedse")
+        == "lambeth-sharedse"
+    )
+    assert inst.sanitize_cognito_domain_prefix("my-cognito-login") == "my-login"
+    assert (
+        inst.sanitize_cognito_domain_prefix("amazon-redaction-dev") == "redaction-dev"
+    )
+    assert inst.sanitize_cognito_domain_prefix("aws") == "redaction-app"
+
+
+def test_validate_cognito_domain_prefix_rejects_reserved_words():
+    assert inst.validate_cognito_domain_prefix("lambeth-aws-sharedse") is not None
+    assert inst.validate_cognito_domain_prefix("lambeth-sharedse-dev") is None
 
 
 def test_build_env_values_demo():
@@ -507,6 +535,21 @@ def test_write_pi_agent_env_file_minimal(tmp_path, monkeypatch):
     text = target.read_text(encoding="utf-8")
     assert "PI_DEPLOYMENT_PROFILE=aws-ecs" in text
     assert "DOC_REDACTION_GRADIO_URL=http://redaction:7860" in text
+
+
+def test_run_cdk_command_invokes_cdk_cli_not_python(monkeypatch):
+    calls: list = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(inst, "resolve_cdk_executable", lambda: r"C:\npm\cdk.cmd")
+    monkeypatch.setattr(inst.subprocess, "run", fake_run)
+    inst.run_cdk_command(["synth"], check=False)
+    cmd, kwargs = calls[0]
+    assert cmd == [r"C:\npm\cdk.cmd", "synth"]
+    assert "executable" not in kwargs
 
 
 def test_build_cdk_subprocess_env_overrides_stale_defaults(tmp_path, monkeypatch):

@@ -1869,7 +1869,7 @@ def create_ecs_express_infrastructure_role(
     )
     role.add_managed_policy(
         iam.ManagedPolicy.from_aws_managed_policy_name(
-            "AmazonECSInfrastructureRoleforExpressGatewayServices"
+            "service-role/AmazonECSInfrastructureRoleforExpressGatewayServices"
         )
     )
     return role
@@ -1877,6 +1877,38 @@ def create_ecs_express_infrastructure_role(
 
 def _secret_value_from_arn(secret_arn: str, json_key: str) -> str:
     return f"{secret_arn}:{json_key}::"
+
+
+def express_ingress_listener_arn(
+    express_service: ecs.CfnExpressGatewayService,
+) -> str:
+    return express_service.attr_ecs_managed_resource_arns_ingress_path_listener_arn
+
+
+def express_ingress_load_balancer_arn(
+    express_service: ecs.CfnExpressGatewayService,
+) -> str:
+    return express_service.attr_ecs_managed_resource_arns_ingress_path_load_balancer_arn
+
+
+def express_ingress_first_target_group_arn(
+    express_service: ecs.CfnExpressGatewayService,
+) -> str:
+    """First target group ARN; use typed list attr (get_att returns a scalar Reference)."""
+    return Fn.select(
+        0,
+        express_service.attr_ecs_managed_resource_arns_ingress_path_target_group_arns,
+    )
+
+
+def express_ingress_first_load_balancer_security_group(
+    express_service: ecs.CfnExpressGatewayService,
+) -> str:
+    """First ALB security group; use typed list attr (get_att returns a scalar Reference)."""
+    return Fn.select(
+        0,
+        express_service.attr_ecs_managed_resource_arns_ingress_path_load_balancer_security_groups,
+    )
 
 
 # Injected via Express `secrets`, not plain environment (avoid duplication/leakage).
@@ -1980,7 +2012,6 @@ def build_express_gateway_primary_container(
         aws_logs_configuration=ecs.CfnExpressGatewayService.ExpressGatewayServiceAwsLogsConfigurationProperty(
             log_group=log_group_name,
             log_stream_prefix="ecs",
-            region=aws_region,
         ),
         environment=environment or None,
         secrets=[
@@ -2103,13 +2134,8 @@ def configure_express_listener_cognito_and_cloudfront(
     Attach Cognito auth to the Express-managed HTTPS listener and optionally add a
     CloudFront host-header rule (same pattern as the legacy HTTP listener path).
     """
-    listener_arn = express_service.get_att(
-        "ECSManagedResourceArns.IngressPath.ListenerArn"
-    ).to_string()
-    target_group_arn = Fn.select(
-        0,
-        express_service.get_att("ECSManagedResourceArns.IngressPath.TargetGroupArns"),
-    )
+    listener_arn = express_ingress_listener_arn(express_service)
+    target_group_arn = express_ingress_first_target_group_arn(express_service)
     default_actions = build_cognito_default_listener_actions(
         user_pool_arn=user_pool_arn,
         user_pool_client_id=user_pool_client_id,
@@ -2186,7 +2212,7 @@ def configure_express_listener_cognito_and_cloudfront(
             on_delete=cr.AwsSdkCall(
                 service="ELBv2",
                 action="deleteRule",
-                parameters={"RuleArn": cr.PhysicalResourceId.reference()},
+                parameters={"RuleArn": cr.PhysicalResourceIdReference()},
             ),
             policy=cr.AwsCustomResourcePolicy.from_sdk_calls(
                 resources=cr.AwsCustomResourcePolicy.ANY_RESOURCE
@@ -2204,12 +2230,7 @@ def allow_express_load_balancer_to_ecs_security_group(
     container_port: int,
 ) -> None:
     """Allow traffic from the Express-managed ALB security group to the task SG."""
-    lb_sg_arn = Fn.select(
-        0,
-        express_service.get_att(
-            "ECSManagedResourceArns.IngressPath.LoadBalancerSecurityGroups"
-        ),
-    )
+    lb_sg_arn = express_ingress_first_load_balancer_security_group(express_service)
     ec2.CfnSecurityGroupIngress(
         scope,
         logical_id,
@@ -2359,7 +2380,6 @@ def build_express_pi_primary_container(
         aws_logs_configuration=ecs.CfnExpressGatewayService.ExpressGatewayServiceAwsLogsConfigurationProperty(
             log_group=log_group_name,
             log_stream_prefix="ecs-pi",
-            region=aws_region,
         ),
         environment=env_pairs,
     )
@@ -2396,7 +2416,7 @@ def _express_pi_listener_rule_custom_resource(
             service="ELBv2",
             action="modifyRule",
             parameters={
-                "RuleArn": cr.PhysicalResourceId.reference(),
+                "RuleArn": cr.PhysicalResourceIdReference(),
                 "Conditions": conditions,
                 "Actions": rule_actions,
             },
@@ -2404,7 +2424,7 @@ def _express_pi_listener_rule_custom_resource(
         on_delete=cr.AwsSdkCall(
             service="ELBv2",
             action="deleteRule",
-            parameters={"RuleArn": cr.PhysicalResourceId.reference()},
+            parameters={"RuleArn": cr.PhysicalResourceIdReference()},
         ),
         policy=cr.AwsCustomResourcePolicy.from_sdk_calls(
             resources=cr.AwsCustomResourcePolicy.ANY_RESOURCE
@@ -2435,15 +2455,8 @@ def configure_express_pi_listener_rules(
     Returns the next free listener rule priority after Pi rules.
     """
     mode = normalize_pi_alb_routing_mode(routing_mode)
-    listener_arn = express_main_service.get_att(
-        "ECSManagedResourceArns.IngressPath.ListenerArn"
-    ).to_string()
-    pi_target_group_arn = Fn.select(
-        0,
-        express_pi_service.get_att(
-            "ECSManagedResourceArns.IngressPath.TargetGroupArns"
-        ),
-    )
+    listener_arn = express_ingress_listener_arn(express_main_service)
+    pi_target_group_arn = express_ingress_first_target_group_arn(express_pi_service)
     rule_actions = build_cognito_default_listener_actions(
         user_pool_arn=user_pool_arn,
         user_pool_client_id=user_pool_client_id,

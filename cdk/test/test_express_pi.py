@@ -119,6 +119,130 @@ def test_apply_service_connect_custom_resource_synth():
     )
 
 
+def test_express_infrastructure_role_uses_service_role_managed_policy():
+    from aws_cdk import App, Stack, assertions
+    from cdk_functions import create_ecs_express_infrastructure_role
+
+    app = App()
+    stack = Stack(app, "ExpressInfraRoleTest")
+    create_ecs_express_infrastructure_role(
+        stack, "ExpressInfrastructureRole", "test-express-infra"
+    )
+    template = assertions.Template.from_stack(stack)
+    template.has_resource_properties(
+        "AWS::IAM::Role",
+        {
+            "ManagedPolicyArns": assertions.Match.array_with(
+                [
+                    {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "arn:",
+                                {"Ref": "AWS::Partition"},
+                                ":iam::aws:policy/service-role/AmazonECSInfrastructureRoleforExpressGatewayServices",
+                            ],
+                        ]
+                    }
+                ]
+            )
+        },
+    )
+
+
+def test_express_listener_helpers_synth_without_reference_error():
+    """Fn.select on Express list attrs must use typed attr_* list properties."""
+    from aws_cdk import App, Environment, Stack, assertions
+    from aws_cdk import aws_ec2 as ec2
+    from aws_cdk import aws_ecs as ecs
+    from cdk_functions import (
+        allow_express_load_balancer_to_ecs_security_group,
+        configure_express_listener_cognito_and_cloudfront,
+        configure_express_pi_listener_rules,
+        create_express_gateway_service,
+    )
+
+    app = App()
+    stack = Stack(
+        app,
+        "ExpressListenerHelpers",
+        env=Environment(account="123456789012", region="eu-west-2"),
+    )
+    vpc = ec2.Vpc(stack, "Vpc", max_azs=2)
+    sg = ec2.SecurityGroup(stack, "TaskSg", vpc=vpc)
+    main = create_express_gateway_service(
+        stack,
+        "Main",
+        service_name="main-svc",
+        cluster_name="cl",
+        execution_role_arn="arn:aws:iam::123456789012:role/exec",
+        infrastructure_role_arn="arn:aws:iam::123456789012:role/infra",
+        task_role_arn="arn:aws:iam::123456789012:role/task",
+        cpu="1024",
+        memory="2048",
+        health_check_path="/",
+        primary_container=ecs.CfnExpressGatewayService.ExpressGatewayContainerProperty(
+            image="123456789012.dkr.ecr.eu-west-2.amazonaws.com/app:latest",
+            container_port=7860,
+        ),
+        subnet_ids=["subnet-abc"],
+        security_group_ids=["sg-main"],
+    )
+    pi = create_express_gateway_service(
+        stack,
+        "Pi",
+        service_name="pi-svc",
+        cluster_name="cl",
+        execution_role_arn="arn:aws:iam::123456789012:role/exec",
+        infrastructure_role_arn="arn:aws:iam::123456789012:role/infra",
+        task_role_arn="arn:aws:iam::123456789012:role/task",
+        cpu="1024",
+        memory="2048",
+        health_check_path="/pi/",
+        primary_container=ecs.CfnExpressGatewayService.ExpressGatewayContainerProperty(
+            image="123456789012.dkr.ecr.eu-west-2.amazonaws.com/pi:latest",
+            container_port=7862,
+        ),
+        subnet_ids=["subnet-abc"],
+        security_group_ids=["sg-pi"],
+    )
+    allow_express_load_balancer_to_ecs_security_group(
+        stack,
+        "MainLbToTask",
+        express_service=main,
+        ecs_security_group=sg,
+        container_port=7860,
+    )
+    configure_express_listener_cognito_and_cloudfront(
+        stack,
+        "MainListener",
+        express_service=main,
+        user_pool_arn="arn:aws:cognito-idp:eu-west-2:123456789012:userpool/pool",
+        user_pool_client_id="client",
+        user_pool_domain_prefix="demo-auth",
+        use_cloudfront=False,
+        cloudfront_host_header="",
+    )
+    configure_express_pi_listener_rules(
+        stack,
+        "PiRules",
+        express_main_service=main,
+        express_pi_service=pi,
+        routing_mode="path",
+        path_prefix="/pi",
+        pi_host_header="",
+        rule_priority=2,
+        user_pool_arn="arn:aws:cognito-idp:eu-west-2:123456789012:userpool/pool",
+        user_pool_client_id="client",
+        user_pool_domain_prefix="demo-auth",
+    )
+    app.synth()
+    template = assertions.Template.from_stack(stack)
+    template.resource_count_is("AWS::ECS::ExpressGatewayService", 2)
+    # modifyListener + Pi path rule
+    template.resource_count_is("Custom::AWS", 2)
+
+
 def test_dual_express_gateway_services_synth():
     """Two ExpressGatewayService resources when wiring main + Pi helpers."""
     from aws_cdk import App, Environment, Stack, assertions

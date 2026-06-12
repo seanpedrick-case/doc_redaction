@@ -26,13 +26,13 @@ Usage examples::
     python cdk_install.py --profile headless --vpc-name my-vpc \\
         --force-delete-stacks --yes
 
-    # Demo with Pi agent (Express) at /pi/
+    # Demo with Agent agent (Express) at /agent/
     python cdk_install.py --profile demo --enable-pi --yes --config-only
 
     # Headless batch (S3 job .env -> Lambda -> one-shot ECS direct mode)
     python cdk_install.py --profile headless --vpc-name my-vpc --yes
 
-    # Production with Pi on dedicated hostname
+    # Production with Pi agent mode on dedicated hostname
     python cdk_install.py --profile production --enable-pi-legacy \\
         --pi-alb-routing host --pi-host-header agent.example.com --yes
 """
@@ -414,10 +414,22 @@ def get_aws_identity(region: Optional[str] = None) -> Tuple[str, str]:
     return account, resolved_region
 
 
+def resolve_cdk_executable() -> str:
+    """Return the AWS CDK CLI on PATH (cdk.cmd on Windows)."""
+    for name in ("cdk", "cdk.cmd", "cdk.exe"):
+        found = shutil.which(name)
+        if found:
+            return found
+    raise SystemExit(
+        "AWS CDK CLI not found on PATH.\n"
+        "Install: npm install -g aws-cdk  (or use npx aws-cdk)"
+    )
+
+
 def check_cdk_cli() -> str:
+    cdk_exe = resolve_cdk_executable()
     result = subprocess.run(
-        ["cdk", "--version"],
-        executable=sys.executable,
+        [cdk_exe, "--version"],
         capture_output=True,
         text=True,
         check=False,
@@ -427,7 +439,14 @@ def check_cdk_cli() -> str:
             "AWS CDK CLI not found on PATH.\n"
             "Install: npm install -g aws-cdk  (or use npx aws-cdk)"
         )
-    return (result.stdout or result.stderr or "").strip()
+    version = (result.stdout or result.stderr or "").strip()
+    if version.startswith("Python "):
+        raise SystemExit(
+            "CDK CLI check failed: 'cdk' resolved to the Python interpreter instead "
+            "of the AWS CDK CLI. Install aws-cdk globally (npm install -g aws-cdk) "
+            "and ensure it is on PATH before python.exe."
+        )
+    return version
 
 
 def cdk_bootstrap_needed(account: str, region: str) -> bool:
@@ -861,7 +880,7 @@ class InstallAnswers:
     enable_s3_batch: bool = False
     ecs_memory: str = "4096"
     pi_alb_routing: str = "path"
-    pi_alb_path_prefix: str = "/pi"
+    pi_alb_path_prefix: str = "/agent"
     pi_alb_host_header: str = ""
     pi_alb_listener_rule_priority: str = ""
     pi_gradio_port: str = "7862"
@@ -877,9 +896,58 @@ class InstallAnswers:
         return self.enable_pi_express or self.enable_pi_legacy
 
 
+# Cognito hosted-UI prefix domains cannot contain these substrings (AWS docs).
+COGNITO_DOMAIN_RESERVED_SUBSTRINGS = ("amazon", "cognito", "aws")
+
+
+def sanitize_cognito_domain_prefix(raw: str, *, max_length: int = 63) -> str:
+    """Normalize a Cognito domain prefix: allowed chars, no reserved words."""
+    prefix = re.sub(r"[^a-z0-9-]", "-", (raw or "").lower())
+    for reserved in COGNITO_DOMAIN_RESERVED_SUBSTRINGS:
+        prefix = prefix.replace(reserved, "")
+    prefix = re.sub(r"-{2,}", "-", prefix).strip("-")
+    if max_length > 0:
+        prefix = prefix[:max_length].strip("-")
+    if not prefix or not re.match(r"^[a-z0-9]", prefix):
+        return "redaction-app"
+    prefix = prefix.rstrip("-")
+    if not prefix:
+        return "redaction-app"
+    for reserved in COGNITO_DOMAIN_RESERVED_SUBSTRINGS:
+        if reserved in prefix:
+            return "redaction-app"
+    return prefix
+
+
+def default_cognito_domain_prefix_from_cdk_prefix(cdk_prefix: str) -> str:
+    """Derive a short installer default from CDK_PREFIX (globally unique hint)."""
+    slug = re.sub(r"[^a-z0-9-]", "-", (cdk_prefix or "").lower()).strip("-")
+    return sanitize_cognito_domain_prefix(slug, max_length=20)
+
+
+def validate_cognito_domain_prefix(prefix: str) -> Optional[str]:
+    """Return an error message when prefix violates Cognito domain rules."""
+    cleaned = (prefix or "").strip().lower()
+    if not cleaned:
+        return "COGNITO_USER_POOL_DOMAIN_PREFIX is required."
+    reserved = [word for word in COGNITO_DOMAIN_RESERVED_SUBSTRINGS if word in cleaned]
+    if reserved:
+        return (
+            "COGNITO_USER_POOL_DOMAIN_PREFIX cannot contain reserved words: "
+            + ", ".join(reserved)
+            + "."
+        )
+    if not re.match(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", cleaned):
+        return (
+            "COGNITO_USER_POOL_DOMAIN_PREFIX must use lowercase letters, "
+            "numbers, and hyphens only."
+        )
+    return None
+
+
 def normalize_pi_path_prefix(raw: str) -> str:
-    segment = (raw or "pi").strip().strip("/")
-    return f"/{segment}" if segment else "/pi"
+    segment = (raw or "agent").strip().strip("/")
+    return f"/{segment}" if segment else "/agent"
 
 
 def default_pi_listener_priority(use_cloudfront: bool) -> str:
@@ -914,7 +982,9 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
             "AWS_ACCOUNT_ID": answers.aws_account_id,
             "CDK_FOLDER": cdk_folder,
             "CONTEXT_FILE": "precheck.context.json",
-            "COGNITO_USER_POOL_DOMAIN_PREFIX": answers.cognito_domain_prefix,
+            "COGNITO_USER_POOL_DOMAIN_PREFIX": sanitize_cognito_domain_prefix(
+                answers.cognito_domain_prefix
+            ),
             "GITHUB_REPO_BRANCH": answers.github_branch,
             "ECS_TASK_MEMORY_SIZE": answers.ecs_memory,
             "EXISTING_IGW_ID": answers.existing_igw_id,
@@ -1037,7 +1107,7 @@ def validate_env_values(values: Dict[str, str]) -> List[str]:
     pi_ecs = values.get("ENABLE_PI_AGENT_ECS_SERVICE") == "True"
     pi_express = values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True"
     if pi_ecs and pi_express:
-        errors.append("Enable at most one Pi mode (ECS or Express).")
+        errors.append("Enable at most one agent mode (ECS or Express).")
     if pi_express and not express:
         errors.append(
             "ENABLE_PI_AGENT_EXPRESS_SERVICE requires USE_ECS_EXPRESS_MODE=True."
@@ -1062,8 +1132,11 @@ def validate_env_values(values: Dict[str, str]) -> List[str]:
 
     if not (values.get("CDK_PREFIX") or "").strip():
         errors.append("CDK_PREFIX is required.")
-    if not (values.get("COGNITO_USER_POOL_DOMAIN_PREFIX") or "").strip():
-        errors.append("COGNITO_USER_POOL_DOMAIN_PREFIX is required.")
+    cognito_prefix_error = validate_cognito_domain_prefix(
+        values.get("COGNITO_USER_POOL_DOMAIN_PREFIX", "")
+    )
+    if cognito_prefix_error:
+        errors.append(cognito_prefix_error)
 
     if pi_ecs and values.get("ENABLE_ECS_SERVICE_CONNECT") != "True":
         errors.append(
@@ -1074,7 +1147,7 @@ def validate_env_values(values: Dict[str, str]) -> List[str]:
         pi_ecs or pi_express or values.get("ENABLE_ECS_SERVICE_CONNECT") == "True"
     ):
         errors.append(
-            "ENABLE_HEADLESS_DEPLOYMENT is incompatible with Pi agent or Service Connect."
+            "ENABLE_HEADLESS_DEPLOYMENT is incompatible with agent mode or Service Connect."
         )
 
     pi_routing = (values.get("PI_ALB_ROUTING") or "").strip().lower()
@@ -1095,7 +1168,7 @@ def validate_env_values(values: Dict[str, str]) -> List[str]:
 
 
 def build_pi_agent_env_values(answers: InstallAnswers) -> Dict[str, str]:
-    """Runtime settings for the Pi Gradio app (uploaded to S3 as pi_agent.env)."""
+    """Runtime settings for the Pi agent Gradio app (uploaded to S3 as pi_agent.env)."""
     path_prefix = normalize_pi_path_prefix(answers.pi_alb_path_prefix)
     values = {
         "PI_DEPLOYMENT_PROFILE": "aws-ecs",
@@ -1131,7 +1204,7 @@ def write_pi_agent_env_file(
         backup_file(PI_AGENT_ENV_PATH)
         lines = [f"{k}={v}" for k, v in existing.items()]
         PI_AGENT_ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        print(f"Updated {PI_AGENT_ENV_PATH} (AWS/Pi keys merged)")
+        print(f"Updated {PI_AGENT_ENV_PATH} (AWS/Pi agent keys merged)")
         return PI_AGENT_ENV_PATH
 
     if PI_AGENT_ENV_EXAMPLE.is_file() and not overwrite:
@@ -1224,7 +1297,8 @@ def _deploy_env() -> Dict[str, str]:
 def run_cdk_command(
     args: List[str], *, check: bool = True
 ) -> subprocess.CompletedProcess:
-    cmd = ["cdk", *args]
+    cdk_exe = resolve_cdk_executable()
+    cmd = [cdk_exe, *args]
     print(f"Running: {' '.join(cmd)}")
     return subprocess.run(
         cmd,
@@ -1683,10 +1757,10 @@ def configure_pi_options(
 
     if not answers.pi_enabled and interactive:
         if use_express:
-            label = "Deploy Pi agent (second Gradio app on Express, shared ALB)?"
+            label = "Deploy agent mode (second Gradio app on Express, shared ALB)?"
             answers.enable_pi_express = ask_yes_no(label, default=False)
         else:
-            label = "Deploy Pi agent (second Gradio app on legacy Fargate + Service Connect)?"
+            label = "Deploy agent mode (second Gradio app on legacy Fargate + Service Connect)?"
             if ask_yes_no(label, default=False):
                 answers.enable_pi_legacy = True
                 answers.enable_service_connect = True
@@ -1702,11 +1776,11 @@ def configure_pi_options(
     if interactive and not (
         args.pi_alb_routing or args.pi_path_prefix or args.pi_host_header or assume_yes
     ):
-        print("\n--- Pi agent ALB routing ---")
+        print("\n--- Agent mode ALB routing ---")
         ridx = ask_choice(
-            "How should the shared ALB route traffic to the Pi UI?",
+            "How should the shared ALB route traffic to the Agent UI?",
             [
-                "Path prefix (default /pi/ — e.g. https://host/pi/)",
+                "Path prefix (default /agent/ — e.g. https://host/agent/)",
                 "Dedicated hostname (PI_ALB_HOST_HEADER)",
                 "Both path prefix and hostname",
             ],
@@ -1716,7 +1790,7 @@ def configure_pi_options(
 
         if answers.pi_alb_routing in ("path", "both"):
             answers.pi_alb_path_prefix = ask(
-                "Pi path prefix",
+                "Agent path prefix",
                 answers.pi_alb_path_prefix,
             )
         if answers.pi_alb_routing in ("host", "both"):
@@ -1724,14 +1798,14 @@ def configure_pi_options(
             if answers.ssl_domain:
                 default_host = f"agent.{answers.ssl_domain}"
             answers.pi_alb_host_header = ask(
-                "Pi ALB host header (DNS CNAME to CloudFront/ALB)",
+                "Agent ALB host header (DNS CNAME to CloudFront/ALB)",
                 default_host,
             )
 
         if use_cloudfront:
             default_pri = default_pi_listener_priority(True)
             answers.pi_alb_listener_rule_priority = ask(
-                "Pi ALB listener rule priority (use 2+ if CloudFront uses priority 1)",
+                "Agent ALB listener rule priority (use 2+ if CloudFront uses priority 1)",
                 default_pri,
             )
 
@@ -1739,7 +1813,7 @@ def configure_pi_options(
             "Service Connect discovery name for main app",
             answers.sc_discovery_name,
         )
-        answers.pi_gradio_port = ask("Pi Gradio port", answers.pi_gradio_port)
+        answers.pi_gradio_port = ask("Agent Gradio port", answers.pi_gradio_port)
 
         if ask_yes_no(
             f"Write/update {PI_AGENT_ENV_PATH.name} for AWS ECS (DOC_REDACTION_GRADIO_URL, etc.)?",
@@ -1755,7 +1829,7 @@ def configure_pi_options(
             answers.write_pi_agent_env = False
 
     print(
-        f"Pi agent: "
+        f"Agent mode: "
         f"{'Express' if answers.enable_pi_express else 'legacy Fargate'}, "
         f"routing={answers.pi_alb_routing}, "
         f"prefix={normalize_pi_path_prefix(answers.pi_alb_path_prefix)}"
@@ -1832,15 +1906,17 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
     if not answers.cdk_prefix.endswith("-"):
         answers.cdk_prefix += "-"
 
-    default_cognito = re.sub(r"[^a-z0-9-]", "-", answers.cdk_prefix.lower())[:20]
-    default_cognito = default_cognito.strip("-") or "redaction-app"
-    answers.cognito_domain_prefix = args.cognito_prefix or (
+    default_cognito = default_cognito_domain_prefix_from_cdk_prefix(answers.cdk_prefix)
+    raw_cognito_prefix = args.cognito_prefix or (
         ask(
-            "Cognito hosted UI domain prefix (must be globally unique)", default_cognito
+            "Cognito hosted UI domain prefix (must be globally unique; "
+            "cannot contain aws, amazon, or cognito)",
+            default_cognito,
         )
         if interactive
         else default_cognito
     )
+    answers.cognito_domain_prefix = sanitize_cognito_domain_prefix(raw_cognito_prefix)
 
     # VPC
     if args.new_vpc_cidr:
@@ -1934,11 +2010,9 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
         ):
             igws = list_igws_for_vpc(vpc_id, answers.aws_region)
             if igws:
-                igws_ids = [g["id"] for g in igws]
+                # igws_ids = [g["id"] for g in igws]
                 print("Internet gateways:", ", ".join(g["id"] for g in igws))
-                answers.existing_igw_id = ask(
-                    "EXISTING_IGW_ID (blank=first)", igws_ids[0]
-                )
+                answers.existing_igw_id = ask("EXISTING_IGW_ID (blank=new)", "")
             albs = list_albs_in_vpc(vpc_id, answers.aws_region)
             if albs:
                 labels = [f"{a['name']} ({a['dns']})" for a in albs]
@@ -1986,7 +2060,7 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
     else:
         answers.enable_s3_batch = True
 
-    # Advanced add-ons (non-Pi)
+    # Advanced add-ons (non-Pi agent)
     is_express = (
         merge_preset(answers.profile, answers.custom_overrides).get(
             "USE_ECS_EXPRESS_MODE"
@@ -2001,7 +2075,7 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
         if not is_express:
             if not answers.enable_service_connect:
                 answers.enable_service_connect = ask_yes_no(
-                    "Enable ECS Service Connect (without Pi)?", False
+                    "Enable ECS Service Connect (without agent mode)?", False
                 )
             answers.enable_s3_batch = ask_yes_no("Enable S3 batch ECS trigger?", False)
         mem = ask("ECS task memory (MB)", answers.ecs_memory)
@@ -2094,42 +2168,44 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--cert-arn", help="ACM certificate ARN (production)")
     p.add_argument("--domain", help="SSL certificate domain (production)")
-    pi = p.add_argument_group("Pi agent (second Gradio app)")
+    pi = p.add_argument_group("Agent mode (second Gradio app)")
     pi.add_argument(
         "--enable-pi",
         action="store_true",
-        help="Enable Pi for current profile (Express on demo, legacy on production)",
+        help="Enable agent mode for current profile (Express on demo, legacy on production)",
     )
     pi.add_argument(
         "--enable-pi-express",
         action="store_true",
-        help="Enable Pi on ECS Express Mode (demo)",
+        help="Enable agent mode on ECS Express Mode (demo)",
     )
     pi.add_argument(
         "--enable-pi-legacy",
         action="store_true",
-        help="Enable Pi on legacy Fargate (implies Service Connect)",
+        help="Enable agent mode on legacy Fargate (implies Service Connect)",
     )
     pi.add_argument(
         "--pi-alb-routing",
         choices=PI_ALB_ROUTING_MODES,
-        help="ALB routing mode for Pi UI (default: path)",
+        help="ALB routing mode for Agent UI (default: path)",
     )
     pi.add_argument(
-        "--pi-path-prefix", default="", help="Pi path prefix (default: /pi)"
+        "--pi-path-prefix", default="", help="Agent path prefix (default: /agent)"
     )
     pi.add_argument(
         "--pi-host-header",
         default="",
-        help="Dedicated hostname for Pi when routing is host or both",
+        help="Dedicated hostname for Agent mode when routing is host or both",
     )
     pi.add_argument(
         "--pi-listener-priority",
         default="",
-        help="ALB listener rule priority for Pi (default 2 with CloudFront, else 1)",
+        help="ALB listener rule priority for Agent mode (default 2 with CloudFront, else 1)",
     )
     pi.add_argument(
-        "--pi-gradio-port", default="", help="Pi Gradio listen port (default 7862)"
+        "--pi-gradio-port",
+        default="",
+        help="Agent mode Gradio listen port (default 7862)",
     )
     pi.add_argument(
         "--sc-discovery-name",
@@ -2310,16 +2386,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ):
         routing = values.get("PI_ALB_ROUTING", "path")
         if routing in ("path", "both"):
-            prefix = values.get("PI_ALB_PATH_PREFIX", "/pi")
-            print(f"  - Pi UI path: {prefix}/ on your app URL")
+            prefix = values.get("PI_ALB_PATH_PREFIX", "/agent")
+            print(f"  - Agent UI path: {prefix}/ on your app URL")
         if routing in ("host", "both") and values.get("PI_ALB_HOST_HEADER"):
             print(
-                f"  - Pi DNS: CNAME {values['PI_ALB_HOST_HEADER']} -> "
+                f"  - Agent DNS: CNAME {values['PI_ALB_HOST_HEADER']} -> "
                 f"{values.get('CLOUDFRONT_DOMAIN') or 'ALB/Express endpoint'}"
             )
         if PI_AGENT_ENV_PATH.is_file():
             print(
-                f"  - Pi runtime config: {PI_AGENT_ENV_PATH} (uploaded by quickstart)"
+                f"  - Agent runtime config: {PI_AGENT_ENV_PATH} (uploaded by quickstart)"
             )
     if values.get("USE_CLOUDFRONT") == "True":
         domain = values.get("SSL_CERTIFICATE_DOMAIN", "")
