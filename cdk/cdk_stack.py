@@ -64,7 +64,6 @@ from cdk_config import (
     ECR_PI_REPO_NAME,
     ECS_EXPRESS_HEALTH_CHECK_PATH,
     ECS_EXPRESS_INFRASTRUCTURE_ROLE_NAME,
-    ECS_EXPRESS_SC_PORT_NAME,
     ECS_EXPRESS_SERVICE_NAME,
     ECS_LOG_GROUP_NAME,
     ECS_PI_EXPRESS_HEALTH_CHECK_PATH,
@@ -146,7 +145,6 @@ from cdk_functions import (  # Only keep CDK-native functions
     add_custom_policies,
     add_s3_enforce_ssl_policy,
     allow_express_load_balancer_to_ecs_security_group,
-    apply_service_connect_to_express_service,
     attach_pi_agent_to_shared_alb,
     build_express_gateway_primary_container,
     build_express_pi_primary_container,
@@ -980,10 +978,10 @@ class CdkStack(Stack):
                     task_role.add_managed_policy(
                         iam.ManagedPolicy.from_aws_managed_policy_name(f"{role}")
                     )
-                task_role = add_custom_policies(
-                    self, task_role, custom_policy_text=custom_sts_kms_policy
-                )
                 print("Successfully created new ECS task role")
+            task_role = add_custom_policies(
+                self, task_role, custom_policy_text=custom_sts_kms_policy
+            )
 
             execution_role_name = ECS_TASK_EXECUTION_ROLE_NAME
             if get_context_bool(f"exists:{execution_role_name}"):
@@ -1007,10 +1005,10 @@ class CdkStack(Stack):
                     execution_role.add_managed_policy(
                         iam.ManagedPolicy.from_aws_managed_policy_name(f"{role}")
                     )
-                execution_role = add_custom_policies(
-                    self, execution_role, custom_policy_text=custom_sts_kms_policy
-                )
                 print("Successfully created new ECS execution role")
+            execution_role = add_custom_policies(
+                self, execution_role, custom_policy_text=custom_sts_kms_policy
+            )
 
         except Exception as e:
             raise Exception("Failed at IAM role step due to:", e)
@@ -1625,11 +1623,22 @@ class CdkStack(Stack):
         try:
             secret_name = COGNITO_USER_POOL_CLIENT_SECRET_NAME
             if get_context_bool(f"exists:{secret_name}"):
-                # Lookup by name
-                secret = secretsmanager.Secret.from_secret_name_v2(
-                    self, "CognitoSecret", secret_name=secret_name
-                )
-                print("Using existing Secret.")
+                secret_arn = get_context_str(f"arn:{secret_name}")
+                if secret_arn:
+                    secret = secretsmanager.Secret.from_secret_complete_arn(
+                        self,
+                        "CognitoSecret",
+                        secret_complete_arn=secret_arn,
+                    )
+                    print("Using existing Secret (ARN from precheck context).")
+                else:
+                    secret = secretsmanager.Secret.from_secret_name_v2(
+                        self, "CognitoSecret", secret_name=secret_name
+                    )
+                    print(
+                        "Using existing Secret by name (IAM grants use ARN wildcard "
+                        "suffix; re-run precheck to pin the full ARN)."
+                    )
             else:
                 if USE_CUSTOM_KMS_KEY == "1" and isinstance(kms_key, kms.Key):
                     secret = secretsmanager.Secret(
@@ -1675,6 +1684,10 @@ class CdkStack(Stack):
         try:
             secret.grant_read(task_role)
             secret.grant_read(execution_role)
+            # Imported secrets (from_secret_name_v2) do not grant KMS decrypt on the CMK.
+            if USE_CUSTOM_KMS_KEY == "1" and isinstance(kms_key, kms.Key):
+                kms_key.grant_decrypt(task_role)
+                kms_key.grant_decrypt(execution_role)
         except Exception as e:
             raise Exception("Could not grant access to Secrets Manager due to:", e)
 
@@ -1731,6 +1744,7 @@ class CdkStack(Stack):
 
                 private_subnet_ids = [s.subnet_id for s in self.private_subnets]
 
+                # MinTaskCount=0 until post_cdk_build_quickstart builds/pushes :latest.
                 express_service = create_express_gateway_service(
                     self,
                     "ExpressGatewayService",
@@ -1891,26 +1905,9 @@ class CdkStack(Stack):
                             stickiness_seconds=stickiness_seconds,
                         )
 
-                        sc_main = apply_service_connect_to_express_service(
-                            self,
-                            "ExpressMainServiceConnect",
-                            cluster_name=CLUSTER_NAME,
-                            service_name=ECS_EXPRESS_SERVICE_NAME,
-                            namespace=ECS_SERVICE_CONNECT_NAMESPACE,
-                            express_service=express_service,
-                            port_name=ECS_EXPRESS_SC_PORT_NAME,
-                            discovery_name=ECS_SERVICE_CONNECT_DISCOVERY_NAME,
-                            port=int(GRADIO_SERVER_PORT),
-                        )
-                        sc_pi = apply_service_connect_to_express_service(
-                            self,
-                            "ExpressPiServiceConnect",
-                            cluster_name=CLUSTER_NAME,
-                            service_name=ECS_PI_EXPRESS_SERVICE_NAME,
-                            namespace=ECS_SERVICE_CONNECT_NAMESPACE,
-                            express_service=express_pi_service,
-                        )
-                        sc_pi.node.add_dependency(sc_main)
+                        # Service Connect for Express is applied in post_cdk_build_quickstart.py
+                        # after CodeBuild pushes :latest. Express primary containers do not
+                        # define named portMappings at create time; CDK cannot enable SC here.
 
                         _pi_public_urls = format_pi_public_urls(
                             routing_mode=PI_ALB_ROUTING,

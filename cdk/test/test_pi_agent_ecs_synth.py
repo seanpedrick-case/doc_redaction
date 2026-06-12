@@ -124,7 +124,7 @@ def test_pi_agent_alb_attachment_synth():
         routing_mode="host",
         path_prefix="/pi",
         pi_host_header="pi.example.com",
-        listener_rule_priority=1,
+        listener_rule_priority=3,
         target_group_name="test-pi-tg",
         stickiness_cookie_duration=Duration.hours(8),
         https_listener=None,

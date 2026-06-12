@@ -950,8 +950,10 @@ def normalize_pi_path_prefix(raw: str) -> str:
     return f"/{segment}" if segment else "/agent"
 
 
-def default_pi_listener_priority(use_cloudfront: bool) -> str:
-    return "2" if use_cloudfront else "1"
+def default_pi_listener_priority(use_cloudfront: bool = False) -> str:
+    """Default Pi path/host rule priority (1–2 reserved for CloudFront / Express rules)."""
+    del use_cloudfront  # kept for call-site compatibility
+    return "3"
 
 
 def merge_preset(
@@ -1805,7 +1807,7 @@ def configure_pi_options(
         if use_cloudfront:
             default_pri = default_pi_listener_priority(True)
             answers.pi_alb_listener_rule_priority = ask(
-                "Agent ALB listener rule priority (use 2+ if CloudFront uses priority 1)",
+                "Agent ALB listener rule priority (default 3; priorities 1–2 reserved)",
                 default_pri,
             )
 
@@ -2200,7 +2202,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     pi.add_argument(
         "--pi-listener-priority",
         default="",
-        help="ALB listener rule priority for Agent mode (default 2 with CloudFront, else 1)",
+        help="ALB listener rule priority for Agent mode (default 3; priorities 1–2 reserved)",
     )
     pi.add_argument(
         "--pi-gradio-port",

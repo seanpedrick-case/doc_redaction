@@ -5,21 +5,29 @@ from cdk_config import (
     CLUSTER_NAME,
     CODEBUILD_PI_PROJECT_NAME,
     CODEBUILD_PROJECT_NAME,
+    ECS_EXPRESS_SC_PORT_NAME,
+    ECS_EXPRESS_SERVICE_NAME,
     ECS_PI_EXPRESS_SERVICE_NAME,
     ECS_PI_SERVICE_NAME,
+    ECS_SERVICE_CONNECT_DISCOVERY_NAME,
+    ECS_SERVICE_CONNECT_NAMESPACE,
     ECS_SERVICE_NAME,
     ENABLE_HEADLESS_DEPLOYMENT,
     ENABLE_PI_AGENT_ECS_SERVICE,
     ENABLE_PI_AGENT_EXPRESS_SERVICE,
+    GRADIO_SERVER_PORT,
     PI_AGENT_ENV_S3_KEY,
     S3_LOG_CONFIG_BUCKET_NAME,
+    USE_ECS_EXPRESS_MODE,
 )
+from cdk_functions import create_basic_config_env
 
 # boto3-only module (does not import aws-cdk / Node.js)
 from cdk_post_deploy import (
-    create_basic_config_env,
+    configure_express_pi_service_connect,
     start_codebuild_build,
     start_ecs_task,
+    start_express_gateway_service,
     upload_file_to_s3,
 )
 from tqdm import tqdm
@@ -72,8 +80,14 @@ for i in tqdm(range(total_seconds), desc="Building container"):
 
 # Scale main ECS service to one task (skipped for headless batch-only deployments)
 if ENABLE_HEADLESS_DEPLOYMENT != "True":
-    print(f"Starting ECS service {ECS_SERVICE_NAME}")
-    start_ecs_task(cluster_name=CLUSTER_NAME, service_name=ECS_SERVICE_NAME)
+    if USE_ECS_EXPRESS_MODE == "True":
+        print(f"Starting Express ECS service {ECS_EXPRESS_SERVICE_NAME}")
+        start_express_gateway_service(
+            cluster_name=CLUSTER_NAME, service_name=ECS_EXPRESS_SERVICE_NAME
+        )
+    else:
+        print(f"Starting ECS service {ECS_SERVICE_NAME}")
+        start_ecs_task(cluster_name=CLUSTER_NAME, service_name=ECS_SERVICE_NAME)
 else:
     print(
         "Headless deployment: skipping always-on ECS service start "
@@ -85,5 +99,19 @@ if ENABLE_PI_AGENT_ECS_SERVICE == "True":
     start_ecs_task(cluster_name=CLUSTER_NAME, service_name=ECS_PI_SERVICE_NAME)
 
 if ENABLE_PI_AGENT_EXPRESS_SERVICE == "True":
+    print(
+        "Configuring Service Connect for main Express (server) and Pi Express (client)."
+    )
+    configure_express_pi_service_connect(
+        cluster_name=CLUSTER_NAME,
+        main_service_name=ECS_EXPRESS_SERVICE_NAME,
+        pi_service_name=ECS_PI_EXPRESS_SERVICE_NAME,
+        namespace=ECS_SERVICE_CONNECT_NAMESPACE,
+        main_port_name=ECS_EXPRESS_SC_PORT_NAME,
+        discovery_name=ECS_SERVICE_CONNECT_DISCOVERY_NAME,
+        main_port=int(GRADIO_SERVER_PORT),
+    )
     print(f"Starting Pi Express ECS service {ECS_PI_EXPRESS_SERVICE_NAME}")
-    start_ecs_task(cluster_name=CLUSTER_NAME, service_name=ECS_PI_EXPRESS_SERVICE_NAME)
+    start_express_gateway_service(
+        cluster_name=CLUSTER_NAME, service_name=ECS_PI_EXPRESS_SERVICE_NAME
+    )

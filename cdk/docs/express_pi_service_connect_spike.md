@@ -1,15 +1,16 @@
 # Phase 0: Express Service Connect validation (dev account)
 
-CDK applies Service Connect to Express gateway services via `ecs:UpdateService` after
-`CfnExpressGatewayService` create (`apply_service_connect_to_express_service` in
-`cdk_functions.py`). Use this checklist to confirm behaviour in a dev account before
-relying on Pi Express demos.
+Service Connect for Express is applied in `post_cdk_build_quickstart.py` (not during
+`cdk deploy`). Express primary containers do not define named `portMappings` at create
+time, so the post-deploy step registers a task-definition revision with
+`port-{port}` and then calls `ecs:UpdateService` with `serviceConnectConfiguration`.
+Use this checklist to confirm behaviour in a dev account before relying on Pi Express demos.
 
 ## Prerequisites
 
 - Main Express stack deployed (`USE_ECS_EXPRESS_MODE=True`).
-- Optional: deploy with `ENABLE_PI_AGENT_EXPRESS_SERVICE=True` and verify CDK custom
-  resources `ExpressMainServiceConnect` / `ExpressPiServiceConnect` succeed in CloudFormation.
+- Optional: deploy with `ENABLE_PI_AGENT_EXPRESS_SERVICE=True` and run
+  `python post_cdk_build_quickstart.py` (Service Connect is configured there).
 
 ## Manual validation (without Pi CDK flag)
 
@@ -66,6 +67,5 @@ Expect HTTP **200** (or Gradio redirect) without Cognito.
 
 ## CDK deploy path
 
-With `ENABLE_PI_AGENT_EXPRESS_SERVICE=True`, `cdk deploy` creates the custom resources
-above automatically. Check CloudFormation events for `Custom::AWS` failures on
-`ExpressMainServiceConnect` or `ExpressPiServiceConnect`.
+With `ENABLE_PI_AGENT_EXPRESS_SERVICE=True`, run `post_cdk_build_quickstart.py` after
+`cdk deploy`. Check its output for Service Connect / task-definition errors.

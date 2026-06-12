@@ -263,7 +263,7 @@ def test_build_env_values_pi_express():
     assert values["ENABLE_PI_AGENT_EXPRESS_SERVICE"] == "True"
     assert values["PI_ALB_ROUTING"] == "path"
     assert values["PI_ALB_PATH_PREFIX"] == "/pi"
-    assert values["PI_ALB_LISTENER_RULE_PRIORITY"] == "1"
+    assert values["PI_ALB_LISTENER_RULE_PRIORITY"] == "3"
     assert values["ECS_SERVICE_CONNECT_DISCOVERY_NAME"] == "redaction"
     assert values["ECS_PI_EXPRESS_SC_PORT_NAME"] == "port-7862"
 
@@ -278,7 +278,7 @@ def test_build_env_values_pi_production_host():
     assert values["ENABLE_PI_AGENT_ECS_SERVICE"] == "True"
     assert values["ENABLE_ECS_SERVICE_CONNECT"] == "True"
     assert values["PI_ALB_HOST_HEADER"] == "agent.redaction.example.com"
-    assert values["PI_ALB_LISTENER_RULE_PRIORITY"] == "2"
+    assert values["PI_ALB_LISTENER_RULE_PRIORITY"] == "3"
 
 
 def test_validate_pi_host_requires_header():

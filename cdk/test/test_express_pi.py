@@ -102,19 +102,106 @@ def test_apply_service_connect_custom_resource_synth():
     template.has_resource_properties(
         "Custom::AWS",
         {
-            "Create": assertions.Match.object_like(
-                {
-                    "service": "ECS",
-                    "action": "updateService",
-                    "parameters": assertions.Match.object_like(
-                        {
-                            "cluster": "test-cluster",
-                            "service": "main-express",
-                            "forceNewDeployment": True,
-                        }
-                    ),
-                }
+            "Create": assertions.Match.string_like_regexp(
+                r'"portName":"port-7860".*"discoveryName":"redaction"'
             ),
+        },
+    )
+
+
+def test_express_alb_ingress_uses_security_group_id_not_arn():
+    from aws_cdk import App, Stack, assertions
+    from aws_cdk import aws_ec2 as ec2
+    from aws_cdk import aws_ecs as ecs
+    from cdk_functions import allow_express_load_balancer_to_ecs_security_group
+
+    app = App()
+    stack = Stack(app, "ExpressAlbIngressTest")
+    vpc = ec2.Vpc(stack, "Vpc", max_azs=2)
+    task_sg = ec2.SecurityGroup(stack, "TaskSg", vpc=vpc)
+    express = ecs.CfnExpressGatewayService(
+        stack,
+        "Express",
+        service_name="main-express",
+        cluster="test-cluster",
+        execution_role_arn="arn:aws:iam::123456789012:role/exec",
+        infrastructure_role_arn="arn:aws:iam::123456789012:role/infra",
+        primary_container=ecs.CfnExpressGatewayService.ExpressGatewayContainerProperty(
+            image="123456789012.dkr.ecr.eu-west-2.amazonaws.com/app:latest",
+            container_port=7860,
+        ),
+    )
+    allow_express_load_balancer_to_ecs_security_group(
+        stack,
+        "ExpressAlbToTask",
+        express_service=express,
+        ecs_security_group=task_sg,
+        container_port=7860,
+    )
+    template = assertions.Template.from_stack(stack)
+    template.has_resource_properties(
+        "AWS::EC2::SecurityGroupIngress",
+        {
+            "SourceSecurityGroupId": {
+                "Fn::Select": [
+                    1,
+                    {
+                        "Fn::Split": [
+                            "security-group/",
+                            {
+                                "Fn::Select": [
+                                    0,
+                                    {
+                                        "Fn::GetAtt": [
+                                            "Express",
+                                            "ECSManagedResourceArns.IngressPath.LoadBalancerSecurityGroups",
+                                        ]
+                                    },
+                                ]
+                            },
+                        ]
+                    },
+                ]
+            }
+        },
+    )
+
+
+def test_express_gateway_service_defaults_to_idle_scaling_target():
+    from aws_cdk import App, Stack, assertions
+    from aws_cdk import aws_ecs as ecs
+    from cdk_functions import create_express_gateway_service
+
+    app = App()
+    stack = Stack(app, "ExpressIdleScalingTest")
+    create_express_gateway_service(
+        stack,
+        "Express",
+        service_name="main-express",
+        cluster_name="test-cluster",
+        execution_role_arn="arn:aws:iam::123456789012:role/exec",
+        infrastructure_role_arn="arn:aws:iam::123456789012:role/infra",
+        task_role_arn="arn:aws:iam::123456789012:role/task",
+        cpu="1024",
+        memory="4096",
+        health_check_path="/",
+        primary_container=ecs.CfnExpressGatewayService.ExpressGatewayContainerProperty(
+            image="123456789012.dkr.ecr.eu-west-2.amazonaws.com/app:latest",
+            container_port=7860,
+        ),
+        subnet_ids=["subnet-abc"],
+        security_group_ids=["sg-main"],
+    )
+    template = assertions.Template.from_stack(stack)
+    template.has_resource_properties(
+        "AWS::ECS::ExpressGatewayService",
+        {
+            "ScalingTarget": {
+                "MinTaskCount": 0,
+                "MaxTaskCount": 1,
+                "AutoScalingMetric": "AVERAGE_CPU",
+                "AutoScalingTargetValue": 60,
+            }
         },
     )
 
@@ -231,7 +318,7 @@ def test_express_listener_helpers_synth_without_reference_error():
         routing_mode="path",
         path_prefix="/pi",
         pi_host_header="",
-        rule_priority=2,
+        rule_priority=3,
         user_pool_arn="arn:aws:cognito-idp:eu-west-2:123456789012:userpool/pool",
         user_pool_client_id="client",
         user_pool_domain_prefix="demo-auth",
@@ -239,8 +326,22 @@ def test_express_listener_helpers_synth_without_reference_error():
     app.synth()
     template = assertions.Template.from_stack(stack)
     template.resource_count_is("AWS::ECS::ExpressGatewayService", 2)
-    # modifyListener + Pi path rule
-    template.resource_count_is("Custom::AWS", 2)
+    # modifyListener (Custom::AWS) + Pi path rule (Custom::Elbv2ListenerRuleUpsert)
+    template.resource_count_is("Custom::AWS", 1)
+    template.resource_count_is("Custom::Elbv2ListenerRuleUpsert", 1)
+    # authenticate-cognito on ALB requires DescribeUserPoolClient on the CR Lambda role
+    cr_policy_actions: list[str] = []
+    for props in template.find_resources("AWS::IAM::Policy").values():
+        for stmt in (
+            props.get("Properties", {}).get("PolicyDocument", {}).get("Statement", [])
+        ):
+            action = stmt.get("Action", [])
+            if isinstance(action, str):
+                cr_policy_actions.append(action)
+            else:
+                cr_policy_actions.extend(action)
+    assert "cognito-idp:DescribeUserPoolClient" in cr_policy_actions
+    assert "elasticloadbalancing:ModifyListener" in cr_policy_actions
 
 
 def test_dual_express_gateway_services_synth():

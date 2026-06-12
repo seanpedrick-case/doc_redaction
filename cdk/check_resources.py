@@ -478,9 +478,20 @@ def check_and_set_context():
 
     # Secrets Manager Secret (by name)
     secret_name = COGNITO_USER_POOL_CLIENT_SECRET_NAME
-    exists, _ = check_for_secret(secret_name)
+    exists, secret_response = check_for_secret(secret_name)
     context_data[f"exists:{secret_name}"] = exists
-    # You might not need the ARN if using from_secret_name_v2
+    if exists:
+        secret_arn = (
+            secret_response.get("ARN") if isinstance(secret_response, dict) else None
+        )
+        if secret_arn:
+            context_data[f"arn:{secret_name}"] = secret_arn
+            print(f"Secret '{secret_name}' ARN recorded for IAM grants.")
+        else:
+            print(
+                f"Warning: Secret '{secret_name}' exists but ARN was not returned; "
+                "CDK will use a name-based ARN wildcard in IAM policies."
+            )
 
     # Service Connect client security groups (by name in VPC)
     if ENABLE_ECS_SERVICE_CONNECT == "True":

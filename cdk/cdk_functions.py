@@ -5,7 +5,17 @@ from typing import Any, Dict, FrozenSet, List, Optional, Tuple, Union
 
 import boto3
 import pandas as pd
-from aws_cdk import App, CfnOutput, CfnTag, Duration, Fn, RemovalPolicy, Tags
+from aws_cdk import (
+    App,
+    CfnOutput,
+    CfnTag,
+    CustomResource,
+    Duration,
+    Fn,
+    RemovalPolicy,
+    Stack,
+    Tags,
+)
 from aws_cdk import aws_cognito as cognito
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecs as ecs
@@ -1326,15 +1336,16 @@ def check_for_secret(secret_name: str, secret_value: dict = ""):
         secret_value: A dictionary containing the key-value pairs for the secret.
 
     Returns:
-        True if the secret existed or was created, False otherwise (due to other errors).
+        Tuple of (exists, response). When exists is True, response is the
+        ``get_secret_value`` API dict (includes ``ARN`` for IAM grants).
     """
     secretsmanager_client = boto3.client("secretsmanager")
 
     try:
         # Try to get the secret. If it doesn't exist, a ResourceNotFoundException will be raised.
-        secret_value = secretsmanager_client.get_secret_value(SecretId=secret_name)
+        secret_response = secretsmanager_client.get_secret_value(SecretId=secret_name)
         print("Secret already exists.")
-        return True, secret_value
+        return True, secret_response
     except secretsmanager_client.exceptions.ResourceNotFoundException:
         print("Secret not found")
         return False, {}
@@ -1901,13 +1912,27 @@ def express_ingress_first_target_group_arn(
     )
 
 
-def express_ingress_first_load_balancer_security_group(
+def express_ingress_first_load_balancer_security_group_arn(
     express_service: ecs.CfnExpressGatewayService,
 ) -> str:
-    """First ALB security group; use typed list attr (get_att returns a scalar Reference)."""
+    """First Express-managed ALB security group ARN."""
     return Fn.select(
         0,
         express_service.attr_ecs_managed_resource_arns_ingress_path_load_balancer_security_groups,
+    )
+
+
+def _security_group_id_from_arn(security_group_arn: str) -> str:
+    """EC2 APIs expect sg- IDs; Express managed-resource attrs return full ARNs."""
+    return Fn.select(1, Fn.split("security-group/", security_group_arn))
+
+
+def express_ingress_first_load_balancer_security_group(
+    express_service: ecs.CfnExpressGatewayService,
+) -> str:
+    """First ALB security group ID (sg-...) for EC2/ELB imports."""
+    return _security_group_id_from_arn(
+        express_ingress_first_load_balancer_security_group_arn(express_service)
     )
 
 
@@ -2033,6 +2058,19 @@ def build_express_gateway_primary_container(
     )
 
 
+def express_gateway_idle_scaling_target(
+    *,
+    max_task_count: int = 1,
+) -> ecs.CfnExpressGatewayService.ExpressGatewayScalingTargetProperty:
+    """Defer running tasks until post-deploy image build (legacy Fargate uses desired_count=0)."""
+    return ecs.CfnExpressGatewayService.ExpressGatewayScalingTargetProperty(
+        min_task_count=0,
+        max_task_count=max_task_count,
+        auto_scaling_metric="AVERAGE_CPU",
+        auto_scaling_target_value=60,
+    )
+
+
 def create_express_gateway_service(
     scope: Construct,
     logical_id: str,
@@ -2048,6 +2086,9 @@ def create_express_gateway_service(
     primary_container: ecs.CfnExpressGatewayService.ExpressGatewayContainerProperty,
     subnet_ids: List[str],
     security_group_ids: List[str],
+    scaling_target: Optional[
+        ecs.CfnExpressGatewayService.ExpressGatewayScalingTargetProperty
+    ] = None,
 ) -> ecs.CfnExpressGatewayService:
     network = None
     if subnet_ids or security_group_ids:
@@ -2068,6 +2109,7 @@ def create_express_gateway_service(
         health_check_path=health_check_path,
         primary_container=primary_container,
         network_configuration=network,
+        scaling_target=scaling_target or express_gateway_idle_scaling_target(),
     )
     return express_service
 
@@ -2089,6 +2131,33 @@ def _forward_target_group_action(
             "DurationSeconds": stickiness_seconds,
         }
     return action
+
+
+def elbv2_cognito_auth_custom_resource_policy() -> cr.AwsCustomResourcePolicy:
+    """
+    IAM policy for AwsCustomResource calls that configure authenticate-cognito on ALB.
+
+    ELB validates the user pool client during modifyListener/createRule; the caller
+    (the custom-resource Lambda) needs cognito-idp:DescribeUserPoolClient.
+    """
+    return cr.AwsCustomResourcePolicy.from_statements(
+        [
+            iam.PolicyStatement(
+                actions=[
+                    "elasticloadbalancing:DescribeRules",
+                    "elasticloadbalancing:ModifyListener",
+                    "elasticloadbalancing:CreateRule",
+                    "elasticloadbalancing:ModifyRule",
+                    "elasticloadbalancing:DeleteRule",
+                ],
+                resources=["*"],
+            ),
+            iam.PolicyStatement(
+                actions=["cognito-idp:DescribeUserPoolClient"],
+                resources=["*"],
+            ),
+        ]
+    )
 
 
 def build_cognito_default_listener_actions(
@@ -2168,9 +2237,7 @@ def configure_express_listener_cognito_and_cloudfront(
                 f"express-listener-cognito-{logical_id_prefix}"
             ),
         ),
-        policy=cr.AwsCustomResourcePolicy.from_sdk_calls(
-            resources=cr.AwsCustomResourcePolicy.ANY_RESOURCE
-        ),
+        policy=elbv2_cognito_auth_custom_resource_policy(),
     )
     modify_listener.node.add_dependency(express_service)
 
@@ -2188,37 +2255,20 @@ def configure_express_listener_cognito_and_cloudfront(
                 },
             }
         ]
-        cf_rule = cr.AwsCustomResource(
+        _elbv2_listener_rule_custom_resource(
             scope,
             f"{logical_id_prefix}ExpressCloudFrontHostRule",
-            on_create=cr.AwsSdkCall(
-                service="ELBv2",
-                action="createRule",
-                parameters={
-                    "ListenerArn": listener_arn,
-                    "Priority": 1,
-                    "Conditions": [
-                        {
-                            "Field": "host-header",
-                            "HostHeaderConfig": {"Values": [cloudfront_host_header]},
-                        }
-                    ],
-                    "Actions": forward_only,
-                },
-                physical_resource_id=cr.PhysicalResourceId.from_response(
-                    "Rules[0].RuleArn"
-                ),
-            ),
-            on_delete=cr.AwsSdkCall(
-                service="ELBv2",
-                action="deleteRule",
-                parameters={"RuleArn": cr.PhysicalResourceIdReference()},
-            ),
-            policy=cr.AwsCustomResourcePolicy.from_sdk_calls(
-                resources=cr.AwsCustomResourcePolicy.ANY_RESOURCE
-            ),
+            listener_arn=listener_arn,
+            priority=1,
+            conditions=[
+                {
+                    "Field": "host-header",
+                    "HostHeaderConfig": {"Values": [cloudfront_host_header]},
+                }
+            ],
+            rule_actions=forward_only,
+            dependencies=[modify_listener],
         )
-        cf_rule.node.add_dependency(modify_listener)
 
 
 def allow_express_load_balancer_to_ecs_security_group(
@@ -2230,7 +2280,7 @@ def allow_express_load_balancer_to_ecs_security_group(
     container_port: int,
 ) -> None:
     """Allow traffic from the Express-managed ALB security group to the task SG."""
-    lb_sg_arn = express_ingress_first_load_balancer_security_group(express_service)
+    lb_sg_id = express_ingress_first_load_balancer_security_group(express_service)
     ec2.CfnSecurityGroupIngress(
         scope,
         logical_id,
@@ -2238,7 +2288,7 @@ def allow_express_load_balancer_to_ecs_security_group(
         ip_protocol="tcp",
         from_port=container_port,
         to_port=container_port,
-        source_security_group_id=lb_sg_arn,
+        source_security_group_id=lb_sg_id,
         description="Express Mode ALB to ECS tasks",
     )
 
@@ -2385,6 +2435,89 @@ def build_express_pi_primary_container(
     )
 
 
+_ELBV2_RULE_DELETE_IGNORE = (
+    ".*(not a valid listener rule ARN|RuleNotFound|ResourceNotFound|ValidationError).*"
+)
+_ELBV2_LISTENER_RULE_UPSERT_PROVIDER_ID = "Elbv2ListenerRuleUpsertProvider"
+
+
+def _elbv2_listener_rule_upsert_provider(scope: Construct) -> cr.Provider:
+    """Shared Provider for upserting ALB listener rules (one Lambda per stack)."""
+    stack = Stack.of(scope)
+    existing = stack.node.try_find_child(_ELBV2_LISTENER_RULE_UPSERT_PROVIDER_ID)
+    if existing is not None:
+        return existing
+
+    asset_dir = os.path.join(
+        os.path.dirname(__file__), "lambda_elbv2_listener_rule_upsert"
+    )
+    fn = lambda_.Function(
+        stack,
+        "Elbv2ListenerRuleUpsertFn",
+        runtime=lambda_.Runtime.PYTHON_3_12,
+        handler="lambda_function.handler",
+        code=lambda_.Code.from_asset(asset_dir),
+        timeout=Duration.seconds(120),
+        description="Upsert ALB listener rules for Express Cognito routing",
+    )
+    fn.add_to_role_policy(
+        iam.PolicyStatement(
+            actions=[
+                "elasticloadbalancing:DescribeRules",
+                "elasticloadbalancing:CreateRule",
+                "elasticloadbalancing:ModifyRule",
+                "elasticloadbalancing:DeleteRule",
+            ],
+            resources=["*"],
+        )
+    )
+    fn.add_to_role_policy(
+        iam.PolicyStatement(
+            actions=["cognito-idp:DescribeUserPoolClient"],
+            resources=["*"],
+        )
+    )
+    return cr.Provider(
+        stack,
+        _ELBV2_LISTENER_RULE_UPSERT_PROVIDER_ID,
+        on_event_handler=fn,
+    )
+
+
+def _elbv2_listener_rule_custom_resource(
+    scope: Construct,
+    logical_id: str,
+    *,
+    listener_arn: str,
+    priority: int,
+    conditions: List[Dict[str, Any]],
+    rule_actions: List[Dict[str, Any]],
+    dependencies: Optional[List[Any]] = None,
+) -> CustomResource:
+    """
+    Create or update a numbered listener rule (upsert by priority + conditions).
+
+    Reuses an existing rule at the same priority when conditions match, which
+    avoids PriorityInUse failures after partial deploy rollbacks.
+    """
+    provider = _elbv2_listener_rule_upsert_provider(scope)
+    resource = CustomResource(
+        scope,
+        logical_id,
+        service_token=provider.service_token,
+        resource_type="Custom::Elbv2ListenerRuleUpsert",
+        properties={
+            "ListenerArn": listener_arn,
+            "Priority": priority,
+            "Conditions": conditions,
+            "Actions": rule_actions,
+        },
+    )
+    for dep in dependencies or []:
+        resource.node.add_dependency(dep)
+    return resource
+
+
 def _express_pi_listener_rule_custom_resource(
     scope: Construct,
     logical_id: str,
@@ -2395,44 +2528,16 @@ def _express_pi_listener_rule_custom_resource(
     rule_actions: List[Dict[str, Any]],
     express_main_service: ecs.CfnExpressGatewayService,
     express_pi_service: ecs.CfnExpressGatewayService,
-) -> cr.AwsCustomResource:
-    pi_rule = cr.AwsCustomResource(
+) -> CustomResource:
+    return _elbv2_listener_rule_custom_resource(
         scope,
         logical_id,
-        on_create=cr.AwsSdkCall(
-            service="ELBv2",
-            action="createRule",
-            parameters={
-                "ListenerArn": listener_arn,
-                "Priority": priority,
-                "Conditions": conditions,
-                "Actions": rule_actions,
-            },
-            physical_resource_id=cr.PhysicalResourceId.from_response(
-                "Rules[0].RuleArn"
-            ),
-        ),
-        on_update=cr.AwsSdkCall(
-            service="ELBv2",
-            action="modifyRule",
-            parameters={
-                "RuleArn": cr.PhysicalResourceIdReference(),
-                "Conditions": conditions,
-                "Actions": rule_actions,
-            },
-        ),
-        on_delete=cr.AwsSdkCall(
-            service="ELBv2",
-            action="deleteRule",
-            parameters={"RuleArn": cr.PhysicalResourceIdReference()},
-        ),
-        policy=cr.AwsCustomResourcePolicy.from_sdk_calls(
-            resources=cr.AwsCustomResourcePolicy.ANY_RESOURCE
-        ),
+        listener_arn=listener_arn,
+        priority=priority,
+        conditions=conditions,
+        rule_actions=rule_actions,
+        dependencies=[express_pi_service, express_main_service],
     )
-    pi_rule.node.add_dependency(express_pi_service)
-    pi_rule.node.add_dependency(express_main_service)
-    return pi_rule
 
 
 def configure_express_pi_listener_rules(

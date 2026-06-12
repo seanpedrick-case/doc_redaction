@@ -603,7 +603,7 @@ PI_ALB_TARGET_GROUP_NAME = get_or_create_env_var(
     "PI_ALB_TARGET_GROUP_NAME", f"{CDK_PREFIX}PiAgentTG"[-32:]
 )
 PI_ALB_LISTENER_RULE_PRIORITY = int(
-    get_or_create_env_var("PI_ALB_LISTENER_RULE_PRIORITY", "1")
+    get_or_create_env_var("PI_ALB_LISTENER_RULE_PRIORITY", "3")
 )
 PI_AGENT_ENV_S3_KEY = get_or_create_env_var("PI_AGENT_ENV_S3_KEY", "pi_agent.env")
 
@@ -647,7 +647,7 @@ ECS_PI_EXPRESS_HEALTH_CHECK_PATH = get_or_create_env_var(
 ECS_PI_EXPRESS_SECURITY_GROUP_NAME = get_or_create_env_var(
     "ECS_PI_EXPRESS_SECURITY_GROUP_NAME", f"{CDK_PREFIX}SecurityGroupPiExpress"
 )
-# Service Connect port names for Express services (applied via ecs:UpdateService after create).
+# Service Connect port names for Express services (applied in post_cdk_build_quickstart.py).
 ECS_EXPRESS_SC_PORT_NAME = get_or_create_env_var(
     "ECS_EXPRESS_SC_PORT_NAME", ECS_SERVICE_CONNECT_PORT_MAPPING_NAME
 )
