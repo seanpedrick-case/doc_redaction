@@ -249,6 +249,11 @@ S3_OUTPUT_BUCKET_NAME = get_or_create_env_var(
     "S3_OUTPUT_BUCKET_NAME", f"{CDK_PREFIX}s3-output".lower()
 )
 
+### VPC endpoints for ECS tasks in private subnets (ECR image pull, logs, secrets)
+ENABLE_ECS_VPC_INTERFACE_ENDPOINTS = get_or_create_env_var(
+    "ENABLE_ECS_VPC_INTERFACE_ENDPOINTS", "True"
+)
+
 ### KMS KEYS FOR S3 AND SECRETS MANAGER
 USE_CUSTOM_KMS_KEY = get_or_create_env_var("USE_CUSTOM_KMS_KEY", "1")
 CUSTOM_KMS_KEY_NAME = get_or_create_env_var(
@@ -369,6 +374,11 @@ ECS_EXPRESS_INFRASTRUCTURE_ROLE_NAME = get_or_create_env_var(
 # After first deploy, set to ExpressServiceEndpoint output (https://...) if not using CloudFront.
 ECS_EXPRESS_COGNITO_REDIRECT_BASE = get_or_create_env_var(
     "ECS_EXPRESS_COGNITO_REDIRECT_BASE", ""
+)
+# Express networkConfiguration.subnets drives both tasks and the managed ALB.
+# Public subnets (IGW route) → internet-facing ALB; private → internal ALB only.
+ECS_EXPRESS_USE_PUBLIC_SUBNETS = get_or_create_env_var(
+    "ECS_EXPRESS_USE_PUBLIC_SUBNETS", "True"
 )
 
 if USE_ECS_EXPRESS_MODE == "True" and ACM_SSL_CERTIFICATE_ARN:

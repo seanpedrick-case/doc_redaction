@@ -65,6 +65,7 @@ from cdk_config import (
     ECS_EXPRESS_HEALTH_CHECK_PATH,
     ECS_EXPRESS_INFRASTRUCTURE_ROLE_NAME,
     ECS_EXPRESS_SERVICE_NAME,
+    ECS_EXPRESS_USE_PUBLIC_SUBNETS,
     ECS_LOG_GROUP_NAME,
     ECS_PI_EXPRESS_HEALTH_CHECK_PATH,
     ECS_PI_EXPRESS_SECURITY_GROUP_NAME,
@@ -91,6 +92,7 @@ from cdk_config import (
     ECS_TASK_ROLE_NAME,
     ECS_USE_FARGATE_SPOT,
     ENABLE_ECS_SERVICE_CONNECT,
+    ENABLE_ECS_VPC_INTERFACE_ENDPOINTS,
     ENABLE_HEADLESS_DEPLOYMENT,
     ENABLE_PI_AGENT_ECS_SERVICE,
     ENABLE_PI_AGENT_EXPRESS_SERVICE,
@@ -152,6 +154,7 @@ from cdk_functions import (  # Only keep CDK-native functions
     configure_express_listener_cognito_and_cloudfront,
     configure_express_pi_listener_rules,
     create_ecs_express_infrastructure_role,
+    create_ecs_vpc_endpoints_for_private_subnets,
     create_express_gateway_service,
     create_nat_gateway,
     create_pi_agent_ecs_resources,
@@ -855,30 +858,12 @@ class CdkStack(Stack):
 
         print("Private subnet route tables:", self.private_route_tables_cfn)
 
-        # Add the S3 Gateway Endpoint to the VPC
-        if names_to_create_private:
-            try:
-                s3_gateway_endpoint = vpc.add_gateway_endpoint(
-                    "S3GatewayEndpoint",
-                    service=ec2.GatewayVpcEndpointAwsService.S3,
-                    subnets=[private_subnet_selection],
-                )
-            except Exception as e:
-                print("Could not add S3 gateway endpoint to subnets due to:", e)
-
-            # Output some useful information
-            CfnOutput(
-                self,
-                "VpcIdOutput",
-                value=vpc.vpc_id,
-                description="The ID of the VPC where the S3 Gateway Endpoint is deployed.",
-            )
-            CfnOutput(
-                self,
-                "S3GatewayEndpointService",
-                value=s3_gateway_endpoint.vpc_endpoint_id,
-                description="The id for the S3 Gateway Endpoint.",
-            )  # Specify the S3 service
+        CfnOutput(
+            self,
+            "VpcIdOutput",
+            value=vpc.vpc_id,
+            description="The ID of the VPC used by this stack.",
+        )
 
         # --- IAM Roles ---
         if USE_CUSTOM_KMS_KEY == "1":
@@ -1415,6 +1400,32 @@ class CdkStack(Stack):
         except Exception as e:
             raise Exception("Could not handle security groups due to:", e)
 
+        if (
+            ENABLE_ECS_VPC_INTERFACE_ENDPOINTS == "True"
+            and self.private_subnets
+            and ENABLE_HEADLESS_DEPLOYMENT != "True"
+        ):
+            try:
+                create_ecs_vpc_endpoints_for_private_subnets(
+                    self,
+                    vpc=vpc,
+                    private_subnets=private_subnet_selection,
+                    logical_id_prefix="RedactionEcs",
+                    include_secrets_and_kms=True,
+                )
+                print(
+                    "Defined ECS VPC endpoints (ECR, Logs, Secrets Manager, KMS, S3) "
+                    "for private subnets."
+                )
+            except Exception as e:
+                raise Exception(
+                    "Could not create ECS VPC interface endpoints for private subnets. "
+                    "If this VPC already has them, set ENABLE_ECS_VPC_INTERFACE_ENDPOINTS=False "
+                    "in cdk_config.env and ensure private route tables reach ECR (NAT or "
+                    "existing endpoints).",
+                    e,
+                ) from e
+
         # --- DynamoDB tables for logs (optional) ---
 
         if SAVE_LOGS_TO_DYNAMODB == "True":
@@ -1742,7 +1753,32 @@ class CdkStack(Stack):
                     environment=express_app_environment,
                 )
 
-                private_subnet_ids = [s.subnet_id for s in self.private_subnets]
+                express_use_public_subnets = ECS_EXPRESS_USE_PUBLIC_SUBNETS == "True"
+                express_subnet_ids = [
+                    s.subnet_id
+                    for s in (
+                        self.public_subnets
+                        if express_use_public_subnets
+                        else self.private_subnets
+                    )
+                ]
+                if not express_subnet_ids:
+                    tier = "public" if express_use_public_subnets else "private"
+                    raise ValueError(
+                        f"No {tier} subnets available for ECS Express Mode. "
+                        f"Set ECS_EXPRESS_USE_PUBLIC_SUBNETS=False to use private "
+                        "subnets (internal ALB only), or create/import public subnets."
+                    )
+                if express_use_public_subnets:
+                    print(
+                        "ECS Express Mode using public subnets "
+                        "(internet-facing managed ALB)."
+                    )
+                else:
+                    print(
+                        "ECS Express Mode using private subnets "
+                        "(internal managed ALB)."
+                    )
 
                 # MinTaskCount=0 until post_cdk_build_quickstart builds/pushes :latest.
                 express_service = create_express_gateway_service(
@@ -1757,7 +1793,7 @@ class CdkStack(Stack):
                     memory=str(ECS_TASK_MEMORY_SIZE),
                     health_check_path=ECS_EXPRESS_HEALTH_CHECK_PATH,
                     primary_container=primary_container,
-                    subnet_ids=private_subnet_ids,
+                    subnet_ids=express_subnet_ids,
                     security_group_ids=[ecs_security_group.security_group_id],
                 )
                 express_service.node.add_dependency(cluster)
@@ -1862,7 +1898,7 @@ class CdkStack(Stack):
                             memory=str(ECS_PI_TASK_MEMORY_SIZE),
                             health_check_path=ECS_PI_EXPRESS_HEALTH_CHECK_PATH,
                             primary_container=pi_primary_container,
-                            subnet_ids=private_subnet_ids,
+                            subnet_ids=express_subnet_ids,
                             security_group_ids=[
                                 pi_express_security_group.security_group_id
                             ],

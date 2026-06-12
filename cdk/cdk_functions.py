@@ -360,6 +360,69 @@ def add_statement_to_policy(role: iam.IRole, policy_document: Dict[str, Any]):
             )
 
 
+def create_ecs_vpc_endpoints_for_private_subnets(
+    scope: Construct,
+    *,
+    vpc: ec2.IVpc,
+    private_subnets: ec2.SubnetSelection,
+    logical_id_prefix: str = "Ecs",
+    include_secrets_and_kms: bool = True,
+) -> None:
+    """
+    Interface (and S3 gateway) VPC endpoints so ECS tasks in private subnets can
+    pull from ECR, write logs, and read Secrets Manager without public internet.
+
+    Without ``ecr.api`` / ``ecr.dkr`` endpoints (or a working NAT path), tasks fail
+    with ``GetAuthorizationToken`` timeouts to ``api.ecr.<region>.amazonaws.com``.
+    """
+    endpoint_sg = ec2.SecurityGroup(
+        scope,
+        f"{logical_id_prefix}VpcEndpointSecurityGroup",
+        vpc=vpc,
+        description="HTTPS ingress for ECS-related VPC interface endpoints",
+        allow_all_outbound=True,
+    )
+    endpoint_sg.add_ingress_rule(
+        peer=ec2.Peer.ipv4(vpc.vpc_cidr_block),
+        connection=ec2.Port.tcp(443),
+        description="HTTPS from VPC workloads",
+    )
+
+    interface_services = [
+        ("EcrApi", ec2.InterfaceVpcEndpointAwsService.ECR),
+        ("EcrDkr", ec2.InterfaceVpcEndpointAwsService.ECR_DOCKER),
+        ("CloudWatchLogs", ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS),
+    ]
+    if include_secrets_and_kms:
+        interface_services.extend(
+            [
+                ("SecretsManager", ec2.InterfaceVpcEndpointAwsService.SECRETS_MANAGER),
+                ("Kms", ec2.InterfaceVpcEndpointAwsService.KMS),
+            ]
+        )
+
+    for suffix, service in interface_services:
+        vpc.add_interface_endpoint(
+            f"{logical_id_prefix}{suffix}Endpoint",
+            service=service,
+            subnets=private_subnets,
+            security_groups=[endpoint_sg],
+            private_dns_enabled=True,
+        )
+
+    try:
+        vpc.add_gateway_endpoint(
+            f"{logical_id_prefix}S3GatewayEndpoint",
+            service=ec2.GatewayVpcEndpointAwsService.S3,
+            subnets=[private_subnets],
+        )
+    except Exception as exc:
+        print(
+            "Note: could not add S3 gateway VPC endpoint (one may already exist on "
+            f"this VPC): {exc}"
+        )
+
+
 def add_s3_enforce_ssl_policy(bucket: s3.IBucket) -> None:
     """Deny non-TLS S3 requests (Security Hub S3.5). Compatible with all CDK versions."""
     bucket.add_to_resource_policy(
