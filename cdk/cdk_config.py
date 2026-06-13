@@ -291,6 +291,15 @@ ECS_TASK_CPU_SIZE = get_or_create_env_var("ECS_TASK_CPU_SIZE", "1024")
 ECS_TASK_MEMORY_SIZE = get_or_create_env_var("ECS_TASK_MEMORY_SIZE", "4096")
 ECS_USE_FARGATE_SPOT = get_or_create_env_var("USE_FARGATE_SPOT", "False")
 ECS_READ_ONLY_FILE_SYSTEM = get_or_create_env_var("ECS_READ_ONLY_FILE_SYSTEM", "True")
+# ECS service AZ rebalancing (AWS defaults new services to ENABLED if omitted).
+ECS_AVAILABILITY_ZONE_REBALANCING = get_or_create_env_var(
+    "ECS_AVAILABILITY_ZONE_REBALANCING", "DISABLED"
+)
+if ECS_AVAILABILITY_ZONE_REBALANCING not in ("ENABLED", "DISABLED"):
+    raise ValueError(
+        "ECS_AVAILABILITY_ZONE_REBALANCING must be ENABLED or DISABLED "
+        f"(got {ECS_AVAILABILITY_ZONE_REBALANCING!r})."
+    )
 
 ### Cognito
 COGNITO_USER_POOL_NAME = get_or_create_env_var(
@@ -372,6 +381,7 @@ ECS_EXPRESS_INFRASTRUCTURE_ROLE_NAME = get_or_create_env_var(
     "ECS_EXPRESS_INFRASTRUCTURE_ROLE_NAME", f"{CDK_PREFIX}ExpressInfraRole"
 )
 # After first deploy, set to ExpressServiceEndpoint output (https://...) if not using CloudFront.
+# The installer updates Cognito callback URLs via API (no second CDK deploy).
 ECS_EXPRESS_COGNITO_REDIRECT_BASE = get_or_create_env_var(
     "ECS_EXPRESS_COGNITO_REDIRECT_BASE", ""
 )

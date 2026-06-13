@@ -3,8 +3,8 @@
 Interactive CDK installer for doc_redaction.
 
 Walks through demo vs production deployment profiles, writes config/cdk_config.env
-and cdk.json, optionally runs cdk deploy, post-deploy URL fixups, and
-post_cdk_build_quickstart.py.
+and cdk.json, optionally runs cdk deploy, post-deploy Cognito callback fixups (API,
+no second deploy), and post_cdk_build_quickstart.py.
 
 Usage examples::
 
@@ -1629,14 +1629,28 @@ def fetch_stack_output(
 
 
 def apply_post_deploy_fixup(values: Dict[str, str], assume_yes: bool) -> bool:
-    """Return True if a redeploy was performed."""
+    """Return True if post-deploy fixup changed env and/or Cognito callbacks."""
+    from cdk_post_deploy import (
+        apply_cognito_alb_callback_fixup,
+        cognito_alb_callbacks_need_update,
+    )
+
     if values.get("ENABLE_HEADLESS_DEPLOYMENT") == "True":
         return False
 
     region = values.get("AWS_REGION", "")
     express = values.get("USE_ECS_EXPRESS_MODE") == "True"
     cloudfront = values.get("USE_CLOUDFRONT") == "True"
-    redeployed = False
+    fixup_applied = False
+
+    pool_id = fetch_stack_output(REGIONAL_STACK, "CognitoPoolId", region)
+    client_id = fetch_stack_output(REGIONAL_STACK, "CognitoAppClientId", region)
+    if not pool_id or not client_id:
+        print(
+            "CognitoPoolId or CognitoAppClientId stack output missing; "
+            "skipping Cognito callback fixup."
+        )
+        return False
 
     if express and not cloudfront:
         endpoint = fetch_stack_output(REGIONAL_STACK, "ExpressServiceEndpoint", region)
@@ -1645,61 +1659,144 @@ def apply_post_deploy_fixup(values: Dict[str, str], assume_yes: bool) -> bool:
             return False
         endpoint = endpoint.rstrip("/")
         current = (values.get("ECS_EXPRESS_COGNITO_REDIRECT_BASE") or "").strip()
-        if current == endpoint:
-            print("Express Cognito redirect base already set.")
-            return False
-        print(f"Setting ECS_EXPRESS_COGNITO_REDIRECT_BASE={endpoint}")
-        patch_env_file(
-            ENV_PATH,
-            {
-                "ECS_EXPRESS_COGNITO_REDIRECT_BASE": endpoint,
-                "COGNITO_REDIRECTION_URL": endpoint,
-            },
+        env_needs_patch = current != endpoint
+        cognito_needs_update = cognito_alb_callbacks_need_update(
+            pool_id, client_id, endpoint, aws_region=region
         )
-        if assume_yes or ask_yes_no(
-            "Redeploy RedactionStack with Express Cognito URLs?", True
-        ):
-            run_cdk_command(
-                ["deploy", REGIONAL_STACK, "--require-approval", "broadening"]
-            )
-            redeployed = True
+        if not env_needs_patch and not cognito_needs_update:
+            print("Express Cognito redirect base and callback URLs already set.")
+        else:
+            if env_needs_patch:
+                print(f"Setting ECS_EXPRESS_COGNITO_REDIRECT_BASE={endpoint}")
+                patch_env_file(
+                    ENV_PATH,
+                    {
+                        "ECS_EXPRESS_COGNITO_REDIRECT_BASE": endpoint,
+                        "COGNITO_REDIRECTION_URL": endpoint,
+                    },
+                )
+                fixup_applied = True
+            if cognito_needs_update and (
+                assume_yes
+                or ask_yes_no(
+                    "Update Cognito app client callback URLs for the Express endpoint "
+                    "(no CDK redeploy)?",
+                    True,
+                )
+            ):
+                if apply_cognito_alb_callback_fixup(
+                    user_pool_id=pool_id,
+                    client_id=client_id,
+                    redirect_base=endpoint,
+                    aws_region=region,
+                ):
+                    fixup_applied = True
+            elif env_needs_patch and cognito_needs_update:
+                print(
+                    "Env updated with Express URL; Cognito callbacks unchanged. "
+                    "ALB login will fail until callback URLs are updated."
+                )
 
     elif cloudfront:
         cf_domain = fetch_stack_output(
-            CLOUDFRONT_STACK, "CloudFrontDistributionURL", "us-east-1"
+            CLOUDFRONT_STACK, "CloudFrontDistributionURL", CLOUDFRONT_STACK_REGION
         )
         if not cf_domain:
             print(
                 "No CloudFrontDistributionURL output found; skipping CloudFront fixup."
             )
-            return False
+            return fixup_applied
+        redirect_base = f"https://{cf_domain.strip()}"
         current = (values.get("CLOUDFRONT_DOMAIN") or "").strip()
-        if current == cf_domain:
-            print("CLOUDFRONT_DOMAIN already set.")
-            return False
-        print(f"Setting CLOUDFRONT_DOMAIN={cf_domain}")
-        patch_env_file(
-            ENV_PATH,
-            {
-                "CLOUDFRONT_DOMAIN": cf_domain,
-                "COGNITO_REDIRECTION_URL": f"https://{cf_domain}",
-            },
+        env_needs_patch = current != cf_domain.strip()
+        cognito_needs_update = cognito_alb_callbacks_need_update(
+            pool_id, client_id, redirect_base, aws_region=region
         )
-        if assume_yes or ask_yes_no(
-            "Redeploy stacks with real CloudFront domain?", True
-        ):
-            run_cdk_command(
-                [
-                    "deploy",
-                    REGIONAL_STACK,
-                    CLOUDFRONT_STACK,
-                    "--require-approval",
-                    "broadening",
-                ]
+        if not env_needs_patch and not cognito_needs_update:
+            print("CloudFront domain and Cognito callback URLs already set.")
+            return fixup_applied
+        if env_needs_patch:
+            print(f"Setting CLOUDFRONT_DOMAIN={cf_domain}")
+            patch_env_file(
+                ENV_PATH,
+                {
+                    "CLOUDFRONT_DOMAIN": cf_domain,
+                    "COGNITO_REDIRECTION_URL": redirect_base,
+                },
             )
-            redeployed = True
+            fixup_applied = True
+        if cognito_needs_update and (
+            assume_yes
+            or ask_yes_no(
+                "Update Cognito app client callback URLs for the CloudFront domain "
+                "(no CDK redeploy)?",
+                True,
+            )
+        ):
+            if apply_cognito_alb_callback_fixup(
+                user_pool_id=pool_id,
+                client_id=client_id,
+                redirect_base=redirect_base,
+                aws_region=region,
+            ):
+                fixup_applied = True
+        elif env_needs_patch and cognito_needs_update:
+            print(
+                "Env updated with CloudFront domain; Cognito callbacks unchanged. "
+                "ALB login will fail until callback URLs are updated."
+            )
 
-    return redeployed
+    if express:
+        from cdk_functions import normalize_pi_alb_path_prefix
+        from cdk_post_deploy import (
+            apply_cognito_secret_fixup_from_stack,
+            apply_express_alb_listener_target_group_fixup,
+            apply_express_disable_in_app_cognito_auth,
+        )
+
+        cluster_name = (
+            values.get("CLUSTER_NAME") or f"{values.get('CDK_PREFIX', '')}Cluster"
+        )
+        main_service = values.get("ECS_EXPRESS_SERVICE_NAME") or values.get(
+            "ECS_SERVICE_NAME", ""
+        )
+        pi_enabled = values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True"
+        pi_service = values.get("ECS_PI_EXPRESS_SERVICE_NAME") if pi_enabled else None
+        pi_prefix = normalize_pi_alb_path_prefix(
+            values.get("PI_ALB_PATH_PREFIX", "/agent")
+        )
+        secret_name = values.get("COGNITO_USER_POOL_CLIENT_SECRET_NAME") or (
+            f"{values.get('CDK_PREFIX', '')}ParamCognitoSecret"
+        )
+        try:
+            if apply_express_alb_listener_target_group_fixup(
+                cluster_name=cluster_name,
+                main_service_name=main_service,
+                pi_service_name=pi_service,
+                pi_path_prefixes=(
+                    [pi_prefix, f"{pi_prefix}/*"] if pi_service else None
+                ),
+                aws_region=region,
+            ):
+                fixup_applied = True
+            if pool_id and client_id:
+                if apply_cognito_secret_fixup_from_stack(
+                    stack_name=REGIONAL_STACK,
+                    secret_name=secret_name,
+                    cluster_name=cluster_name,
+                    main_service_name=main_service,
+                    aws_region=region,
+                    recycle_tasks=False,
+                ):
+                    fixup_applied = True
+                if apply_express_disable_in_app_cognito_auth(
+                    cluster_name, main_service, aws_region=region
+                ):
+                    fixup_applied = True
+        except Exception as exc:
+            print(f"Warning: could not sync Express ALB/Cognito settings: {exc}")
+
+    return fixup_applied
 
 
 def run_quickstart(python_exe: Path) -> None:

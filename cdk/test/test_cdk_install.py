@@ -649,3 +649,45 @@ def test_main_writes_config_before_smoke_test(monkeypatch, tmp_path):
 
     assert call_order.index("wizard") < call_order.index("write_config")
     assert call_order.index("write_config") < call_order.index("smoke")
+
+
+def test_apply_post_deploy_fixup_express_uses_cognito_api_not_redeploy(monkeypatch):
+    import cdk_post_deploy as post
+
+    values = {
+        "USE_ECS_EXPRESS_MODE": "True",
+        "USE_CLOUDFRONT": "False",
+        "AWS_REGION": "eu-west-2",
+        "ECS_EXPRESS_COGNITO_REDIRECT_BASE": "",
+    }
+    outputs = {
+        "ExpressServiceEndpoint": "https://express.example.com",
+        "CognitoPoolId": "pool-1",
+        "CognitoAppClientId": "client-1",
+    }
+    monkeypatch.setattr(
+        inst,
+        "fetch_stack_output",
+        lambda _stack, key, _region: outputs.get(key),
+    )
+    monkeypatch.setattr(inst, "patch_env_file", lambda *_a, **_k: None)
+    monkeypatch.setattr(inst, "ask_yes_no", lambda *_a, **_k: True)
+    redeploy_calls: list = []
+    monkeypatch.setattr(
+        inst,
+        "run_cdk_command",
+        lambda *args, **_k: redeploy_calls.append(args),
+    )
+    monkeypatch.setattr(
+        post,
+        "cognito_alb_callbacks_need_update",
+        lambda *_a, **_k: True,
+    )
+    monkeypatch.setattr(
+        post,
+        "apply_cognito_alb_callback_fixup",
+        lambda *_a, **_k: True,
+    )
+
+    assert inst.apply_post_deploy_fixup(values, assume_yes=False) is True
+    assert redeploy_calls == []

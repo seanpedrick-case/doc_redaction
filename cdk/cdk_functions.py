@@ -33,6 +33,7 @@ from botocore.exceptions import ClientError, NoCredentialsError
 from cdk_config import (
     ACCESS_LOG_DYNAMODB_TABLE_NAME,
     AWS_REGION,
+    ECS_AVAILABILITY_ZONE_REBALANCING,
     ENABLE_RESOURCE_DELETE_PROTECTION,
     FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
     NAT_GATEWAY_EIP_NAME,
@@ -82,6 +83,15 @@ def is_resource_delete_protection_enabled() -> bool:
 def resource_deletion_protection_flag() -> bool:
     """AWS deletion_protection attribute (ALB, DynamoDB tables, Cognito user pools)."""
     return is_resource_delete_protection_enabled()
+
+
+def ecs_availability_zone_rebalancing(
+    setting: str,
+) -> ecs.AvailabilityZoneRebalancing:
+    """Map ``ECS_AVAILABILITY_ZONE_REBALANCING`` env value to the CDK enum."""
+    if setting == "ENABLED":
+        return ecs.AvailabilityZoneRebalancing.ENABLED
+    return ecs.AvailabilityZoneRebalancing.DISABLED
 
 
 def managed_resource_removal_policy() -> RemovalPolicy:
@@ -360,67 +370,269 @@ def add_statement_to_policy(role: iam.IRole, policy_document: Dict[str, Any]):
             )
 
 
+def vpc_endpoint_aws_service_name(service_suffix: str, region: str) -> str:
+    """Full EC2 ``ServiceName`` for a VPC endpoint (matches describe_vpc_endpoints)."""
+    return f"com.amazonaws.{region}.{service_suffix}"
+
+
+def list_existing_vpc_endpoint_service_names(
+    vpc_id: str,
+    *,
+    region_name: Optional[str] = None,
+) -> FrozenSet[str]:
+    """Return AWS service names for non-deleted VPC endpoints in the given VPC."""
+    ec2_client = boto3.client("ec2", region_name=region_name)
+    service_names: set[str] = set()
+    paginator = ec2_client.get_paginator("describe_vpc_endpoints")
+    for page in paginator.paginate(
+        Filters=[{"Name": "vpc-id", "Values": [vpc_id]}],
+    ):
+        for endpoint in page.get("VpcEndpoints", []):
+            state = endpoint.get("State")
+            if state in ("available", "pending", "pendingAcceptance"):
+                service_name = endpoint.get("ServiceName")
+                if service_name:
+                    service_names.add(service_name)
+    return frozenset(service_names)
+
+
+def resolve_ecs_vpc_endpoint_subnet_selection(
+    *,
+    use_express_ingress: bool,
+    express_use_public_subnets: bool,
+    public_subnets: List[ec2.ISubnet],
+    private_subnets: List[ec2.ISubnet],
+) -> Optional[ec2.SubnetSelection]:
+    """
+    Choose subnets for ECS-related **interface** VPC endpoints.
+
+    Interface ENIs must sit in the same subnets ECS tasks use. Express Mode with
+    ``ECS_EXPRESS_USE_PUBLIC_SUBNETS=True`` runs tasks in public subnets; legacy
+    Fargate and Express-on-private use private. S3 gateway routes use
+    ``resolve_ecs_s3_gateway_subnet_selection`` instead.
+    """
+    if use_express_ingress:
+        if express_use_public_subnets:
+            if not public_subnets:
+                return None
+            return ec2.SubnetSelection(subnets=public_subnets)
+        if not private_subnets:
+            return None
+        return ec2.SubnetSelection(subnets=private_subnets)
+    if not private_subnets:
+        return None
+    return ec2.SubnetSelection(subnets=private_subnets)
+
+
+def resolve_ecs_s3_gateway_subnet_selection(
+    *,
+    public_subnets: List[ec2.ISubnet],
+    private_subnets: List[ec2.ISubnet],
+) -> Optional[ec2.SubnetSelection]:
+    """
+    All stack-managed subnets for the S3 **gateway** endpoint.
+
+    Gateway endpoints attach to route tables; every public and private subnet the
+    stack imports or creates should get the S3 prefix-list route, not only the ECS
+    task tier.
+    """
+    all_subnets: List[ec2.ISubnet] = []
+    seen_subnet_ids: set[str] = set()
+    for subnet in public_subnets + private_subnets:
+        subnet_id = subnet.subnet_id
+        if subnet_id in seen_subnet_ids:
+            continue
+        seen_subnet_ids.add(subnet_id)
+        all_subnets.append(subnet)
+    if not all_subnets:
+        return None
+    return ec2.SubnetSelection(subnets=all_subnets)
+
+
+def list_vpc_associated_cidr_blocks(vpc: dict) -> List[str]:
+    """All associated IPv4 CIDR blocks for a VPC (primary and secondary)."""
+    cidrs: List[str] = []
+    seen: set[str] = set()
+    for assoc in vpc.get("CidrBlockAssociationSet") or []:
+        state = (assoc.get("CidrBlockState") or {}).get("State")
+        if state and state != "associated":
+            continue
+        cidr = assoc.get("CidrBlock")
+        if cidr and cidr not in seen:
+            seen.add(cidr)
+            cidrs.append(cidr)
+    primary = vpc.get("CidrBlock")
+    if primary and primary not in seen:
+        cidrs.insert(0, primary)
+    return cidrs
+
+
+def resolve_vpc_endpoint_ingress_cidr_blocks(
+    *,
+    vpc_cidr_block: Optional[str] = None,
+    vpc_cidr_blocks: Optional[List[str]] = None,
+    fallback_vpc_cidr: Optional[str] = None,
+) -> List[str]:
+    """CIDR list for VPC endpoint SG ingress (deduplicated, stable order)."""
+    resolved: List[str] = []
+    seen: set[str] = set()
+    for cidr in vpc_cidr_blocks or []:
+        if cidr and cidr not in seen:
+            seen.add(cidr)
+            resolved.append(cidr)
+    if not resolved:
+        single = vpc_cidr_block or fallback_vpc_cidr
+        if single:
+            resolved = [single]
+    return resolved
+
+
+def add_vpc_endpoint_https_ingress_from_vpc_cidrs(
+    endpoint_sg: ec2.SecurityGroup,
+    *,
+    vpc_cidr_block: Optional[str] = None,
+    vpc_cidr_blocks: Optional[List[str]] = None,
+    fallback_vpc_cidr: Optional[str] = None,
+) -> None:
+    """Allow HTTPS from every CIDR associated with the VPC."""
+    cidrs = resolve_vpc_endpoint_ingress_cidr_blocks(
+        vpc_cidr_block=vpc_cidr_block,
+        vpc_cidr_blocks=vpc_cidr_blocks,
+        fallback_vpc_cidr=fallback_vpc_cidr,
+    )
+    if not cidrs:
+        raise ValueError(
+            "VPC CIDR block(s) are required for the VPC endpoint security group. "
+            "Re-run check_resources.py so vpc_cidr_blocks is stored in precheck context."
+        )
+    for cidr in cidrs:
+        endpoint_sg.add_ingress_rule(
+            peer=ec2.Peer.ipv4(cidr),
+            connection=ec2.Port.tcp(443),
+            description=(
+                "HTTPS from VPC workloads"
+                if len(cidrs) == 1
+                else f"HTTPS from VPC workloads ({cidr})"
+            ),
+        )
+
+
 def create_ecs_vpc_endpoints_for_private_subnets(
     scope: Construct,
     *,
     vpc: ec2.IVpc,
-    private_subnets: ec2.SubnetSelection,
+    subnets: Optional[ec2.SubnetSelection],
     logical_id_prefix: str = "Ecs",
     include_secrets_and_kms: bool = True,
+    vpc_cidr_block: Optional[str] = None,
+    vpc_cidr_blocks: Optional[List[str]] = None,
+    skip_service_names: Optional[FrozenSet[str]] = None,
+    aws_region: str,
+    s3_gateway_subnets: Optional[ec2.SubnetSelection] = None,
 ) -> None:
     """
-    Interface (and S3 gateway) VPC endpoints so ECS tasks in private subnets can
-    pull from ECR, write logs, and read Secrets Manager without public internet.
+    Interface and S3 gateway VPC endpoints for ECS workloads.
 
-    Without ``ecr.api`` / ``ecr.dkr`` endpoints (or a working NAT path), tasks fail
-    with ``GetAuthorizationToken`` timeouts to ``api.ecr.<region>.amazonaws.com``.
+    Interface endpoints use ``subnets`` (ECS task tier). The S3 gateway uses
+    ``s3_gateway_subnets`` when provided, otherwise ``subnets``. Without
+    ``ecr.api`` / ``ecr.dkr`` endpoints (or a working NAT path), tasks fail with
+    ``GetAuthorizationToken`` timeouts.
+
+    ``skip_service_names`` should list full AWS endpoint service names already present
+    in the VPC (from pre-check) so shared VPCs do not fail on duplicate private DNS.
     """
-    endpoint_sg = ec2.SecurityGroup(
-        scope,
-        f"{logical_id_prefix}VpcEndpointSecurityGroup",
-        vpc=vpc,
-        description="HTTPS ingress for ECS-related VPC interface endpoints",
-        allow_all_outbound=True,
-    )
-    endpoint_sg.add_ingress_rule(
-        peer=ec2.Peer.ipv4(vpc.vpc_cidr_block),
-        connection=ec2.Port.tcp(443),
-        description="HTTPS from VPC workloads",
-    )
+    s3_subnets = s3_gateway_subnets or subnets
+    if not subnets and not s3_subnets:
+        return
+    skip = skip_service_names or frozenset()
 
-    interface_services = [
-        ("EcrApi", ec2.InterfaceVpcEndpointAwsService.ECR),
-        ("EcrDkr", ec2.InterfaceVpcEndpointAwsService.ECR_DOCKER),
-        ("CloudWatchLogs", ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS),
+    interface_services: List[Tuple[str, str, ec2.InterfaceVpcEndpointAwsService]] = [
+        ("EcrApi", "ecr.api", ec2.InterfaceVpcEndpointAwsService.ECR),
+        ("EcrDkr", "ecr.dkr", ec2.InterfaceVpcEndpointAwsService.ECR_DOCKER),
+        ("CloudWatchLogs", "logs", ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS),
     ]
     if include_secrets_and_kms:
         interface_services.extend(
             [
-                ("SecretsManager", ec2.InterfaceVpcEndpointAwsService.SECRETS_MANAGER),
-                ("Kms", ec2.InterfaceVpcEndpointAwsService.KMS),
+                (
+                    "SecretsManager",
+                    "secretsmanager",
+                    ec2.InterfaceVpcEndpointAwsService.SECRETS_MANAGER,
+                ),
+                ("Kms", "kms", ec2.InterfaceVpcEndpointAwsService.KMS),
             ]
         )
 
-    for suffix, service in interface_services:
-        vpc.add_interface_endpoint(
-            f"{logical_id_prefix}{suffix}Endpoint",
-            service=service,
-            subnets=private_subnets,
-            security_groups=[endpoint_sg],
-            private_dns_enabled=True,
+    interface_services_to_create = []
+    for suffix, service_suffix, service in interface_services:
+        service_name = vpc_endpoint_aws_service_name(service_suffix, aws_region)
+        if service_name in skip:
+            print(
+                f"Skipping {logical_id_prefix}{suffix}Endpoint "
+                f"({service_name} already exists in this VPC)."
+            )
+            continue
+        interface_services_to_create.append((suffix, service))
+
+    s3_service_name = vpc_endpoint_aws_service_name("s3", aws_region)
+    s3_service = ec2.GatewayVpcEndpointAwsService.S3
+    create_s3_gateway = s3_service_name not in skip
+    if not create_s3_gateway:
+        print(
+            f"Skipping {logical_id_prefix}S3GatewayEndpoint "
+            f"({s3_service_name} already exists in this VPC)."
         )
 
-    try:
-        vpc.add_gateway_endpoint(
-            f"{logical_id_prefix}S3GatewayEndpoint",
-            service=ec2.GatewayVpcEndpointAwsService.S3,
-            subnets=[private_subnets],
-        )
-    except Exception as exc:
+    if not interface_services_to_create and not create_s3_gateway:
         print(
-            "Note: could not add S3 gateway VPC endpoint (one may already exist on "
-            f"this VPC): {exc}"
+            "All ECS-related VPC endpoints already exist in this VPC; "
+            "nothing to create."
         )
+        return
+
+    endpoint_sg = None
+    if interface_services_to_create and subnets:
+        endpoint_sg = ec2.SecurityGroup(
+            scope,
+            f"{logical_id_prefix}VpcEndpointSecurityGroup",
+            vpc=vpc,
+            description="HTTPS ingress for ECS-related VPC interface endpoints",
+            allow_all_outbound=True,
+        )
+        add_vpc_endpoint_https_ingress_from_vpc_cidrs(
+            endpoint_sg,
+            vpc_cidr_block=vpc_cidr_block,
+            vpc_cidr_blocks=vpc_cidr_blocks,
+            fallback_vpc_cidr=vpc.vpc_cidr_block,
+        )
+
+    if subnets:
+        for suffix, service in interface_services_to_create:
+            vpc.add_interface_endpoint(
+                f"{logical_id_prefix}{suffix}Endpoint",
+                service=service,
+                subnets=subnets,
+                security_groups=[endpoint_sg],
+                private_dns_enabled=True,
+            )
+    elif interface_services_to_create:
+        print(
+            "Skipping ECS interface VPC endpoints: no task-tier subnet selection "
+            "was provided."
+        )
+
+    if create_s3_gateway and s3_subnets:
+        try:
+            vpc.add_gateway_endpoint(
+                f"{logical_id_prefix}S3GatewayEndpoint",
+                service=s3_service,
+                subnets=[s3_subnets],
+            )
+        except Exception as exc:
+            print(
+                "Note: could not add S3 gateway VPC endpoint (one may already exist on "
+                f"this VPC): {exc}"
+            )
 
 
 def add_s3_enforce_ssl_policy(bucket: s3.IBucket) -> None:
@@ -569,6 +781,85 @@ def check_s3_bucket_exists(
         raise  # Re-raise the original exception
 
 
+def default_secrets_manager_kms_key_arn(region: str, account_id: str) -> str:
+    """AWS managed CMK alias used by Secrets Manager when no customer key is set."""
+    return f"arn:aws:kms:{region}:{account_id}:key/aws/secretsmanager"
+
+
+def get_secret_kms_key_arn(
+    secret_id: str,
+    *,
+    region_name: Optional[str] = None,
+) -> Optional[str]:
+    """Return the KMS key ARN that encrypts a Secrets Manager secret."""
+    client = boto3.client("secretsmanager", region_name=region_name)
+    try:
+        description = client.describe_secret(SecretId=secret_id)
+    except Exception as exc:
+        print(f"Warning: could not describe secret '{secret_id}' for KMS key: {exc}")
+        return None
+    kms_key_id = description.get("KmsKeyId")
+    if not kms_key_id:
+        return None
+    if str(kms_key_id).startswith("arn:"):
+        return str(kms_key_id)
+    region = region_name or AWS_REGION
+    account_id = (
+        description.get("OwningAccount")
+        or boto3.client("sts", region_name=region).get_caller_identity()["Account"]
+    )
+    return f"arn:aws:kms:{region}:{account_id}:key/{kms_key_id}"
+
+
+def build_ecs_task_role_kms_policy(
+    *,
+    shared_kms_key_arn: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Task role: shared CMK for S3 bucket encryption (when USE_CUSTOM_KMS_KEY=1)."""
+    statements: List[Dict[str, Any]] = [
+        {
+            "Sid": "STSCallerIdentity",
+            "Effect": "Allow",
+            "Action": ["sts:GetCallerIdentity"],
+            "Resource": "*",
+        },
+    ]
+    if shared_kms_key_arn:
+        statements.append(
+            {
+                "Sid": "KMSS3Access",
+                "Effect": "Allow",
+                "Action": ["kms:Encrypt", "kms:Decrypt", "kms:GenerateDataKey"],
+                "Resource": shared_kms_key_arn,
+            }
+        )
+    return {"Version": "2012-10-17", "Statement": statements}
+
+
+def build_ecs_execution_role_kms_policy(
+    *,
+    secret_kms_key_arn: str,
+) -> Dict[str, Any]:
+    """Execution role: decrypt the CMK that encrypts the Cognito secret only."""
+    return {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Sid": "STSCallerIdentity",
+                "Effect": "Allow",
+                "Action": ["sts:GetCallerIdentity"],
+                "Resource": "*",
+            },
+            {
+                "Sid": "KMSSecretDecrypt",
+                "Effect": "Allow",
+                "Action": ["kms:Decrypt"],
+                "Resource": secret_kms_key_arn,
+            },
+        ],
+    }
+
+
 # Example usage in your check_resources.py:
 # exists, bucket_name_if_exists = check_s3_bucket_exists(log_bucket_name)
 # context_data[f"exists:{log_bucket_name}"] = exists
@@ -706,9 +997,13 @@ def check_codebuild_project_exists(
         raise  # Re-raise the original exception
 
 
-def get_vpc_id_by_name(vpc_name: str) -> Optional[str]:
+def get_vpc_id_by_name(vpc_name: str):
     """
     Finds a VPC ID by its 'Name' tag.
+
+    Returns ``(vpc_id, nat_gateways, vpc_cidr_block, vpc_cidr_blocks)`` or ``None``
+    if not found. ``vpc_cidr_block`` is the primary block; ``vpc_cidr_blocks`` lists
+    every associated IPv4 CIDR (primary + secondary).
     """
     ec2_client = boto3.client("ec2")
     try:
@@ -716,8 +1011,17 @@ def get_vpc_id_by_name(vpc_name: str) -> Optional[str]:
             Filters=[{"Name": "tag:Name", "Values": [vpc_name]}]
         )
         if response and response["Vpcs"]:
-            vpc_id = response["Vpcs"][0]["VpcId"]
-            print(f"VPC '{vpc_name}' found with ID: {vpc_id}")
+            vpc = response["Vpcs"][0]
+            vpc_id = vpc["VpcId"]
+            vpc_cidr_block = vpc.get("CidrBlock")
+            vpc_cidr_blocks = list_vpc_associated_cidr_blocks(vpc)
+            cidr_summary = (
+                ", ".join(vpc_cidr_blocks) if vpc_cidr_blocks else vpc_cidr_block
+            )
+            print(
+                f"VPC '{vpc_name}' found with ID: {vpc_id}"
+                + (f", CIDR(s): {cidr_summary}" if cidr_summary else "")
+            )
 
             # In get_vpc_id_by_name, after finding VPC ID:
 
@@ -741,7 +1045,7 @@ def get_vpc_id_by_name(vpc_name: str) -> Optional[str]:
 
             # Decide how to identify the specific NAT Gateway you want to check for.
 
-            return vpc_id, nat_gateways
+            return vpc_id, nat_gateways, vpc_cidr_block, vpc_cidr_blocks
         else:
             print(f"VPC '{vpc_name}' not found.")
             return None
@@ -2014,10 +2318,16 @@ def create_basic_config_env(
     usage_log_dynamodb_table_name: str = USAGE_LOG_DYNAMODB_TABLE_NAME,
     *,
     headless: bool = False,
+    alb_cognito: bool = False,
 ):
-    """Create a basic config.env file for the deployed redaction app."""
+    """
+    Create a basic config.env file for the deployed redaction app.
+
+    ``alb_cognito=True`` disables in-app Gradio Cognito login when the ALB
+    ``authenticate-cognito`` action already protects the service (Express Mode).
+    """
     variables = {
-        "COGNITO_AUTH": "False" if headless else "True",
+        "COGNITO_AUTH": "False" if headless or alb_cognito else "True",
         "RUN_AWS_FUNCTIONS": "True",
         "DISPLAY_FILE_NAMES_IN_LOGS": "False",
         "SESSION_OUTPUT_FOLDER": "True",
@@ -2049,12 +2359,14 @@ def load_app_config_env_for_express(
     config_env_path: str,
     *,
     exclude_names: Optional[FrozenSet[str]] = None,
+    overrides: Optional[Dict[str, str]] = None,
 ) -> List[ecs.CfnExpressGatewayService.KeyValuePairProperty]:
     """
     Load KEY=VALUE pairs from config/config.env for Express PrimaryContainer.environment.
 
     Uses the same file written by create_basic_config_env() and uploaded to S3 on the
-    legacy Fargate path (environmentFiles).
+    legacy Fargate path (environmentFiles). ``overrides`` replace keys after loading
+    (e.g. ``COGNITO_AUTH=False`` when ALB handles Cognito).
     """
     exclude = exclude_names or _EXPRESS_SECRET_ENV_NAMES
     path = os.path.abspath(config_env_path)
@@ -2065,7 +2377,9 @@ def load_app_config_env_for_express(
         )
         return []
 
-    raw = dotenv_values(path)
+    raw = dict(dotenv_values(path))
+    if overrides:
+        raw.update(overrides)
     environment: List[ecs.CfnExpressGatewayService.KeyValuePairProperty] = []
     for name, value in sorted(raw.items()):
         if not name or value is None or name in exclude:
@@ -3050,6 +3364,9 @@ def create_pi_agent_ecs_resources(
         min_healthy_percent=0,
         max_healthy_percent=100,
         desired_count=0,
+        availability_zone_rebalancing=ecs_availability_zone_rebalancing(
+            ECS_AVAILABILITY_ZONE_REBALANCING
+        ),
         service_connect_configuration=ecs.ServiceConnectProps(
             namespace=service_connect_namespace,
         ),

@@ -8,8 +8,10 @@ aws-cdk-lib installed to start CodeBuild / ECS after deployment.
 from __future__ import annotations
 
 import copy
+import json
 import os
-from typing import Any, Dict, List, Union
+import re
+from typing import Any, Dict, List, Optional, Union
 
 import boto3
 from cdk_config import (
@@ -417,3 +419,523 @@ def start_express_gateway_service(
             "statusCode": 500,
             "body": f"Error updating Express gateway service: {str(e)}",
         }
+
+
+_ALB_COGNITO_CALLBACK_SUFFIX = "/oauth2/idpresponse"
+
+# Fields preserved from describe_user_pool_client when updating CallbackURLs only.
+_USER_POOL_CLIENT_UPDATE_PASSTHROUGH_KEYS = (
+    "ClientName",
+    "RefreshTokenValidity",
+    "AccessTokenValidity",
+    "IdTokenValidity",
+    "TokenValidityUnits",
+    "ReadAttributes",
+    "WriteAttributes",
+    "ExplicitAuthFlows",
+    "SupportedIdentityProviders",
+    "DefaultRedirectURI",
+    "AllowedOAuthFlows",
+    "AllowedOAuthScopes",
+    "AllowedOAuthFlowsUserPoolClient",
+    "AnalyticsConfiguration",
+    "PreventUserExistenceErrors",
+    "EnableTokenRevocation",
+    "EnablePropagateAdditionalUserContextData",
+    "AuthSessionValidity",
+    "RefreshTokenRotation",
+)
+
+
+def cognito_https_callback_urls(redirect_base: str) -> List[str]:
+    """
+    ALB authenticate-cognito requires the app URL and ``/oauth2/idpresponse``.
+    """
+    base = (redirect_base or "").strip().rstrip("/")
+    if not base:
+        raise ValueError("redirect_base is required for Cognito callback URLs")
+    if not base.startswith("https://"):
+        base = f"https://{base.lstrip('/')}"
+    return [base, f"{base}{_ALB_COGNITO_CALLBACK_SUFFIX}"]
+
+
+def cognito_callback_urls_match(
+    existing_callbacks: List[str],
+    desired_callbacks: List[str],
+) -> bool:
+    return set(existing_callbacks or []) == set(desired_callbacks)
+
+
+def get_user_pool_client_callback_urls(
+    user_pool_id: str,
+    client_id: str,
+    *,
+    aws_region: str = AWS_REGION,
+) -> List[str]:
+    cognito_client = boto3.client("cognito-idp", region_name=aws_region)
+    existing = cognito_client.describe_user_pool_client(
+        UserPoolId=user_pool_id,
+        ClientId=client_id,
+    )["UserPoolClient"]
+    return list(existing.get("CallbackURLs") or [])
+
+
+def cognito_alb_callbacks_need_update(
+    user_pool_id: str,
+    client_id: str,
+    redirect_base: str,
+    *,
+    aws_region: str = AWS_REGION,
+) -> bool:
+    desired = cognito_https_callback_urls(redirect_base)
+    current = get_user_pool_client_callback_urls(
+        user_pool_id, client_id, aws_region=aws_region
+    )
+    return not cognito_callback_urls_match(current, desired)
+
+
+def update_user_pool_client_callback_urls(
+    user_pool_id: str,
+    client_id: str,
+    callback_urls: List[str],
+    *,
+    aws_region: str = AWS_REGION,
+) -> None:
+    """
+    Set Cognito app client callback URLs without a CDK redeploy.
+
+    Merges existing client settings from ``describe_user_pool_client`` so OAuth
+    flows/scopes and token validity are not reset.
+    """
+    cognito_client = boto3.client("cognito-idp", region_name=aws_region)
+    existing = cognito_client.describe_user_pool_client(
+        UserPoolId=user_pool_id,
+        ClientId=client_id,
+    )["UserPoolClient"]
+
+    update_kwargs: Dict[str, Any] = {
+        "UserPoolId": user_pool_id,
+        "ClientId": client_id,
+        "CallbackURLs": callback_urls,
+    }
+    for key in _USER_POOL_CLIENT_UPDATE_PASSTHROUGH_KEYS:
+        value = existing.get(key)
+        if value is not None:
+            update_kwargs[key] = value
+    logout_urls = existing.get("LogoutURLs")
+    if logout_urls:
+        update_kwargs["LogoutURLs"] = logout_urls
+
+    cognito_client.update_user_pool_client(**update_kwargs)
+    print("Updated Cognito app client callback URLs: " + ", ".join(callback_urls))
+
+
+def apply_cognito_alb_callback_fixup(
+    *,
+    user_pool_id: str,
+    client_id: str,
+    redirect_base: str,
+    aws_region: str = AWS_REGION,
+) -> bool:
+    """
+    Update Cognito callbacks when they differ from ``redirect_base``.
+
+    Returns True if URLs were updated, False if already correct.
+    """
+    desired = cognito_https_callback_urls(redirect_base)
+    cognito_client = boto3.client("cognito-idp", region_name=aws_region)
+    existing = cognito_client.describe_user_pool_client(
+        UserPoolId=user_pool_id,
+        ClientId=client_id,
+    )["UserPoolClient"]
+    current = existing.get("CallbackURLs") or []
+    if cognito_callback_urls_match(current, desired):
+        print("Cognito app client callback URLs already match the target endpoint.")
+        return False
+    update_user_pool_client_callback_urls(
+        user_pool_id,
+        client_id,
+        desired,
+        aws_region=aws_region,
+    )
+    return True
+
+
+_TARGET_GROUP_REGISTER_EVENT = re.compile(
+    r"target-group (arn:aws:elasticloadbalancing:[^\s)]+)",
+    re.IGNORECASE,
+)
+
+
+def target_group_arn_from_ecs_register_event(message: str) -> Optional[str]:
+    """Parse target group ARN from ECS ``registered N targets in (target-group ...)``."""
+    if "registered" not in (message or "").lower():
+        return None
+    match = _TARGET_GROUP_REGISTER_EVENT.search(message)
+    return match.group(1) if match else None
+
+
+def resolve_express_service_target_group_arn(
+    cluster_name: str,
+    service_name: str,
+    *,
+    aws_region: str = AWS_REGION,
+) -> str:
+    """
+    Target group where Express most recently registered tasks.
+
+    After post-deploy scaling, this ARN can differ from the TG baked into the CDK
+    Cognito listener custom resource at deploy time.
+    """
+    ecs_client = boto3.client("ecs", region_name=aws_region)
+    services = ecs_client.describe_services(
+        cluster=cluster_name, services=[service_name]
+    ).get("services", [])
+    if not services:
+        raise ValueError(
+            f"ECS service '{service_name}' not found in cluster '{cluster_name}'."
+        )
+    for event in services[0].get("events", []):
+        target_group_arn = target_group_arn_from_ecs_register_event(
+            event.get("message", "")
+        )
+        if target_group_arn:
+            return target_group_arn
+    raise ValueError(
+        f"No target group registration event found for service '{service_name}'."
+    )
+
+
+def find_express_gateway_https_listener(
+    *,
+    aws_region: str = AWS_REGION,
+) -> Dict[str, str]:
+    """Return Express-managed ALB HTTPS listener metadata."""
+    elbv2 = boto3.client("elbv2", region_name=aws_region)
+    for load_balancer in elbv2.describe_load_balancers().get("LoadBalancers", []):
+        if not load_balancer["LoadBalancerName"].startswith("ecs-express-gateway-alb"):
+            continue
+        listeners = elbv2.describe_listeners(
+            LoadBalancerArn=load_balancer["LoadBalancerArn"]
+        ).get("Listeners", [])
+        https_listener = next(
+            (listener for listener in listeners if listener.get("Port") == 443),
+            None,
+        )
+        if https_listener:
+            return {
+                "load_balancer_arn": load_balancer["LoadBalancerArn"],
+                "listener_arn": https_listener["ListenerArn"],
+                "dns_name": load_balancer["DNSName"],
+            }
+    raise ValueError(
+        "Express gateway ALB (ecs-express-gateway-alb-*) with HTTPS listener not found."
+    )
+
+
+def listener_actions_with_target_group(
+    existing_actions: List[Dict[str, Any]],
+    target_group_arn: str,
+) -> List[Dict[str, Any]]:
+    """Copy listener/rule actions, replacing the forward target group ARN."""
+    updated_actions: List[Dict[str, Any]] = []
+    for action in sorted(existing_actions, key=lambda item: item.get("Order", 0)):
+        action_copy = copy.deepcopy(action)
+        if action_copy.get("Type") == "forward":
+            action_copy["TargetGroupArn"] = target_group_arn
+            forward_config = action_copy.setdefault("ForwardConfig", {})
+            forward_config["TargetGroups"] = [
+                {"TargetGroupArn": target_group_arn, "Weight": 1}
+            ]
+        updated_actions.append(action_copy)
+    return updated_actions
+
+
+def apply_express_alb_listener_target_group_fixup(
+    *,
+    cluster_name: str,
+    main_service_name: str,
+    pi_service_name: Optional[str] = None,
+    pi_path_prefixes: Optional[List[str]] = None,
+    aws_region: str = AWS_REGION,
+) -> bool:
+    """
+    Point ALB Cognito listener actions at the target groups Express tasks use.
+
+    Express creates fresh target groups when a service scales up after deploy; the
+    CDK custom resource may still forward authenticated traffic to an empty TG.
+    """
+    main_target_group_arn = resolve_express_service_target_group_arn(
+        cluster_name, main_service_name, aws_region=aws_region
+    )
+    pi_target_group_arn = None
+    if pi_service_name:
+        try:
+            pi_target_group_arn = resolve_express_service_target_group_arn(
+                cluster_name, pi_service_name, aws_region=aws_region
+            )
+        except ValueError as exc:
+            print(f"Note: skipping Pi listener rule TG fixup: {exc}")
+
+    ingress = find_express_gateway_https_listener(aws_region=aws_region)
+    elbv2 = boto3.client("elbv2", region_name=aws_region)
+    listener_arn = ingress["listener_arn"]
+    listener = elbv2.describe_listeners(ListenerArns=[listener_arn])["Listeners"][0]
+    current_default = listener.get("DefaultActions", [])
+    current_forward_arn = next(
+        (
+            action.get("TargetGroupArn")
+            for action in current_default
+            if action.get("Type") == "forward"
+        ),
+        None,
+    )
+    changed = current_forward_arn != main_target_group_arn
+
+    if changed:
+        elbv2.modify_listener(
+            ListenerArn=listener_arn,
+            DefaultActions=listener_actions_with_target_group(
+                current_default, main_target_group_arn
+            ),
+        )
+        print(
+            "Updated Express ALB default listener forward target group to "
+            f"{main_target_group_arn}."
+        )
+    else:
+        print(
+            "Express ALB default listener already forwards to the active target group."
+        )
+
+    if pi_target_group_arn and pi_path_prefixes:
+        rules = elbv2.describe_rules(ListenerArn=listener_arn).get("Rules", [])
+        prefixes = {prefix.rstrip("/") for prefix in pi_path_prefixes}
+        for rule in rules:
+            if rule.get("IsDefault"):
+                continue
+            path_values = []
+            for condition in rule.get("Conditions", []):
+                if condition.get("Field") == "path-pattern":
+                    path_values.extend(condition.get("Values", []))
+            if not prefixes.intersection({value.rstrip("/") for value in path_values}):
+                continue
+            current_actions = rule.get("Actions", [])
+            current_pi_forward = next(
+                (
+                    action.get("TargetGroupArn")
+                    for action in current_actions
+                    if action.get("Type") == "forward"
+                ),
+                None,
+            )
+            if current_pi_forward == pi_target_group_arn:
+                continue
+            elbv2.modify_rule(
+                RuleArn=rule["RuleArn"],
+                Actions=listener_actions_with_target_group(
+                    current_actions, pi_target_group_arn
+                ),
+            )
+            print(
+                "Updated Pi ALB listener rule forward target group to "
+                f"{pi_target_group_arn}."
+            )
+            changed = True
+
+    return changed
+
+
+def build_cognito_secret_payload(
+    user_pool_id: str,
+    client_id: str,
+    *,
+    aws_region: str = AWS_REGION,
+) -> Dict[str, str]:
+    """Build Secrets Manager JSON for REDACTION_* Cognito keys."""
+    cognito_client = boto3.client("cognito-idp", region_name=aws_region)
+    client = cognito_client.describe_user_pool_client(
+        UserPoolId=user_pool_id,
+        ClientId=client_id,
+    )["UserPoolClient"]
+    client_secret = client.get("ClientSecret") or ""
+    return {
+        "REDACTION_USER_POOL_ID": user_pool_id,
+        "REDACTION_CLIENT_ID": client_id,
+        "REDACTION_CLIENT_SECRET": client_secret,
+    }
+
+
+def cognito_secret_payload_matches(
+    existing_secret_string: str,
+    desired_payload: Dict[str, str],
+) -> bool:
+    try:
+        current = json.loads(existing_secret_string or "{}")
+    except json.JSONDecodeError:
+        return False
+    return all(current.get(key) == value for key, value in desired_payload.items())
+
+
+def apply_cognito_secret_fixup(
+    *,
+    secret_name: str,
+    user_pool_id: str,
+    client_id: str,
+    aws_region: str = AWS_REGION,
+    recycle_express_service: Optional[Dict[str, str]] = None,
+) -> bool:
+    """
+    Sync imported Secrets Manager JSON with the stack's Cognito pool and app client.
+
+    Express tasks read ``AWS_USER_POOL_ID`` / ``AWS_CLIENT_*`` from this secret.
+    When the secret predates a redeploy, values can reference a deleted user pool.
+    """
+    desired_payload = build_cognito_secret_payload(
+        user_pool_id, client_id, aws_region=aws_region
+    )
+    secrets_client = boto3.client("secretsmanager", region_name=aws_region)
+    current = secrets_client.get_secret_value(SecretId=secret_name)
+    current_string = current.get("SecretString") or ""
+    if cognito_secret_payload_matches(current_string, desired_payload):
+        print(
+            f"Cognito secret '{secret_name}' already matches pool {user_pool_id} "
+            f"and client {client_id}."
+        )
+        return False
+
+    secrets_client.put_secret_value(
+        SecretId=secret_name,
+        SecretString=json.dumps(desired_payload),
+    )
+    print(
+        f"Updated Cognito secret '{secret_name}' for pool {user_pool_id} "
+        f"and client {client_id}."
+    )
+    if recycle_express_service:
+        recycle_express_gateway_tasks(
+            recycle_express_service["cluster_name"],
+            recycle_express_service["service_name"],
+            aws_region=aws_region,
+        )
+    return True
+
+
+def recycle_express_gateway_tasks(
+    cluster_name: str,
+    service_name: str,
+    *,
+    aws_region: str = AWS_REGION,
+) -> None:
+    """Stop running Express tasks so replacements pick up updated secrets/env."""
+    ecs_client = boto3.client("ecs", region_name=aws_region)
+    task_arns = ecs_client.list_tasks(
+        cluster=cluster_name,
+        serviceName=service_name,
+    ).get("taskArns", [])
+    for task_arn in task_arns:
+        ecs_client.stop_task(
+            cluster=cluster_name,
+            task=task_arn,
+            reason="Recycle task after Cognito secret/config sync",
+        )
+    if task_arns:
+        print(
+            f"Stopped {len(task_arns)} task(s) for {service_name} to pick up Cognito updates."
+        )
+
+
+def apply_express_disable_in_app_cognito_auth(
+    cluster_name: str,
+    service_name: str,
+    *,
+    aws_region: str = AWS_REGION,
+) -> bool:
+    """
+    Set ``COGNITO_AUTH=False`` on a running Express service revision.
+
+    ALB ``authenticate-cognito`` already gates access; in-app Gradio login is redundant
+    and fails when Secrets Manager still references an old user pool.
+    """
+    ecs_client = boto3.client("ecs", region_name=aws_region)
+    service_arn = resolve_express_gateway_service_arn(
+        cluster_name, service_name, aws_region=aws_region
+    )
+    express = ecs_client.describe_express_gateway_service(serviceArn=service_arn)[
+        "service"
+    ]
+    active_configs = express.get("activeConfigurations") or []
+    if not active_configs:
+        raise ValueError(
+            f"No active configuration for Express service '{service_name}'."
+        )
+    active = active_configs[0]
+    primary = copy.deepcopy(active.get("primaryContainer") or {})
+    environment = {
+        item["name"]: item["value"]
+        for item in primary.get("environment") or []
+        if item.get("name")
+    }
+    if environment.get("COGNITO_AUTH") == "False":
+        print(f"{service_name} already has COGNITO_AUTH=False.")
+        return False
+    environment["COGNITO_AUTH"] = "False"
+    primary["environment"] = [
+        {"name": name, "value": value} for name, value in sorted(environment.items())
+    ]
+    update_kwargs: Dict[str, Any] = {
+        "serviceArn": service_arn,
+        "primaryContainer": primary,
+    }
+    for key in (
+        "executionRoleArn",
+        "taskRoleArn",
+        "cpu",
+        "memory",
+        "healthCheckPath",
+        "networkConfiguration",
+    ):
+        value = active.get(key)
+        if value is not None:
+            update_kwargs[key] = value
+    scaling = express.get("scalingTarget") or active.get("scalingTarget")
+    if scaling is not None:
+        update_kwargs["scalingTarget"] = scaling
+    ecs_client.update_express_gateway_service(**update_kwargs)
+    print(f"Set COGNITO_AUTH=False on Express service {service_name}.")
+    return True
+
+
+def apply_cognito_secret_fixup_from_stack(
+    *,
+    stack_name: str,
+    secret_name: str,
+    cluster_name: str,
+    main_service_name: str,
+    aws_region: str = AWS_REGION,
+    recycle_tasks: bool = True,
+) -> bool:
+    """Read Cognito outputs from CloudFormation and sync the app client secret."""
+    cfn_client = boto3.client("cloudformation", region_name=aws_region)
+    stacks = cfn_client.describe_stacks(StackName=stack_name).get("Stacks", [])
+    outputs = {
+        item["OutputKey"]: item["OutputValue"]
+        for item in (stacks[0].get("Outputs") or [])
+    }
+    user_pool_id = outputs.get("CognitoPoolId")
+    client_id = outputs.get("CognitoAppClientId")
+    if not user_pool_id or not client_id:
+        raise ValueError(
+            f"Stack '{stack_name}' is missing CognitoPoolId or CognitoAppClientId outputs."
+        )
+    return apply_cognito_secret_fixup(
+        secret_name=secret_name,
+        user_pool_id=user_pool_id,
+        client_id=client_id,
+        aws_region=aws_region,
+        recycle_express_service=(
+            {"cluster_name": cluster_name, "service_name": main_service_name}
+            if recycle_tasks
+            else None
+        ),
+    )

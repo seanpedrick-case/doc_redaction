@@ -62,6 +62,7 @@ from cdk_config import (
     DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS,
     ECR_CDK_REPO_NAME,
     ECR_PI_REPO_NAME,
+    ECS_AVAILABILITY_ZONE_REBALANCING,
     ECS_EXPRESS_HEALTH_CHECK_PATH,
     ECS_EXPRESS_INFRASTRUCTURE_ROLE_NAME,
     ECS_EXPRESS_SERVICE_NAME,
@@ -148,6 +149,8 @@ from cdk_functions import (  # Only keep CDK-native functions
     add_s3_enforce_ssl_policy,
     allow_express_load_balancer_to_ecs_security_group,
     attach_pi_agent_to_shared_alb,
+    build_ecs_execution_role_kms_policy,
+    build_ecs_task_role_kms_policy,
     build_express_gateway_primary_container,
     build_express_pi_primary_container,
     build_pi_express_container_environment,
@@ -161,6 +164,8 @@ from cdk_functions import (  # Only keep CDK-native functions
     create_s3_batch_ecs_trigger_lambda,
     create_subnets,
     create_web_acl_with_common_rules,
+    default_secrets_manager_kms_key_arn,
+    ecs_availability_zone_rebalancing,
     express_ingress_first_load_balancer_security_group,
     express_ingress_load_balancer_arn,
     format_pi_public_urls,
@@ -168,6 +173,8 @@ from cdk_functions import (  # Only keep CDK-native functions
     managed_resource_removal_policy,
     pi_alb_root_path_for_container,
     pi_listener_rule_count,
+    resolve_ecs_s3_gateway_subnet_selection,
+    resolve_ecs_vpc_endpoint_subnet_selection,
     resolve_service_connect_client_security_group_ids,
     resource_deletion_protection_flag,
     s3_auto_delete_objects_on_stack_destroy,
@@ -300,6 +307,8 @@ class CdkStack(Stack):
 
         # --- VPC and Subnets (Assuming VPC is always lookup, Subnets are created/returned by create_subnets) ---
         new_vpc_created = False
+        imported_vpc_cidr_block = None
+        imported_vpc_cidr_blocks: List[str] = []
         if VPC_NAME:
             vpc_id = get_context_str("vpc_id")
             if not vpc_id:
@@ -320,13 +329,32 @@ class CdkStack(Stack):
                     "configured. Set PUBLIC_SUBNET_AVAILABILITY_ZONES and/or "
                     "PRIVATE_SUBNET_AVAILABILITY_ZONES in cdk_config.env."
                 )
-            vpc = ec2.Vpc.from_vpc_attributes(
-                self,
-                "VPC",
-                vpc_id=vpc_id,
-                availability_zones=availability_zones,
+            vpc_cidr_block = get_context_str("vpc_cidr_block")
+            imported_vpc_cidr_block = vpc_cidr_block
+            imported_vpc_cidr_blocks = list(
+                self.node.try_get_context("vpc_cidr_blocks") or []
             )
-            print(f"Using VPC from pre-check context: {vpc_id}")
+            if (
+                imported_vpc_cidr_block
+                and imported_vpc_cidr_block not in imported_vpc_cidr_blocks
+            ):
+                imported_vpc_cidr_blocks.insert(0, imported_vpc_cidr_block)
+            vpc_attrs = {
+                "vpc_id": vpc_id,
+                "availability_zones": availability_zones,
+            }
+            if vpc_cidr_block:
+                vpc_attrs["vpc_cidr_block"] = vpc_cidr_block
+            vpc = ec2.Vpc.from_vpc_attributes(self, "VPC", **vpc_attrs)
+            cidr_log = (
+                ", ".join(imported_vpc_cidr_blocks)
+                if imported_vpc_cidr_blocks
+                else vpc_cidr_block
+            )
+            print(
+                f"Using VPC from pre-check context: {vpc_id}"
+                + (f" (CIDR(s) {cidr_log})" if cidr_log else "")
+            )
 
         elif NEW_VPC_DEFAULT_NAME and not VPC_NAME:
             new_vpc_created = True
@@ -866,6 +894,11 @@ class CdkStack(Stack):
         )
 
         # --- IAM Roles ---
+        cognito_secret_name = COGNITO_USER_POOL_CLIENT_SECRET_NAME
+        secret_kms_key_arn_from_context = get_context_str(
+            f"kms_key_arn:{cognito_secret_name}"
+        )
+
         if USE_CUSTOM_KMS_KEY == "1":
             kms_key = kms.Key(
                 self,
@@ -873,45 +906,26 @@ class CdkStack(Stack):
                 alias=CUSTOM_KMS_KEY_NAME,
                 removal_policy=resource_removal_policy,
             )
-
-            custom_sts_kms_policy_dict = {
-                "Version": "2012-10-17",
-                "Statement": [
-                    {
-                        "Sid": "STSCallerIdentity",
-                        "Effect": "Allow",
-                        "Action": ["sts:GetCallerIdentity"],
-                        "Resource": "*",
-                    },
-                    {
-                        "Sid": "KMSAccess",
-                        "Effect": "Allow",
-                        "Action": ["kms:Encrypt", "kms:Decrypt", "kms:GenerateDataKey"],
-                        "Resource": kms_key.key_arn,  # Use key_arn, as it's the full ARN, safer than key_id
-                    },
-                ],
-            }
+            shared_kms_key_arn = kms_key.key_arn
+            secret_kms_key_arn = secret_kms_key_arn_from_context or kms_key.key_arn
         else:
             kms_key = None
+            shared_kms_key_arn = None
+            secret_kms_key_arn = (
+                secret_kms_key_arn_from_context
+                or default_secrets_manager_kms_key_arn(AWS_REGION, AWS_ACCOUNT_ID)
+            )
 
-            custom_sts_kms_policy_dict = {
-                "Version": "2012-10-17",
-                "Statement": [
-                    {
-                        "Sid": "STSCallerIdentity",
-                        "Effect": "Allow",
-                        "Action": ["sts:GetCallerIdentity"],
-                        "Resource": "*",
-                    },
-                    {
-                        "Sid": "KMSSecretsManagerDecrypt",  # Explicitly add decrypt for default key
-                        "Effect": "Allow",
-                        "Action": ["kms:Decrypt"],
-                        "Resource": f"arn:aws:kms:{AWS_REGION}:{AWS_ACCOUNT_ID}:key/aws/secretsmanager",
-                    },
-                ],
-            }
-        custom_sts_kms_policy = json.dumps(custom_sts_kms_policy_dict, indent=4)
+        task_role_kms_policy = json.dumps(
+            build_ecs_task_role_kms_policy(shared_kms_key_arn=shared_kms_key_arn),
+            indent=4,
+        )
+        execution_role_kms_policy = json.dumps(
+            build_ecs_execution_role_kms_policy(
+                secret_kms_key_arn=secret_kms_key_arn,
+            ),
+            indent=4,
+        )
 
         try:
             codebuild_role_name = CODEBUILD_ROLE_NAME
@@ -965,7 +979,7 @@ class CdkStack(Stack):
                     )
                 print("Successfully created new ECS task role")
             task_role = add_custom_policies(
-                self, task_role, custom_policy_text=custom_sts_kms_policy
+                self, task_role, custom_policy_text=task_role_kms_policy
             )
 
             execution_role_name = ECS_TASK_EXECUTION_ROLE_NAME
@@ -992,7 +1006,7 @@ class CdkStack(Stack):
                     )
                 print("Successfully created new ECS execution role")
             execution_role = add_custom_policies(
-                self, execution_role, custom_policy_text=custom_sts_kms_policy
+                self, execution_role, custom_policy_text=execution_role_kms_policy
             )
 
         except Exception as e:
@@ -1400,29 +1414,75 @@ class CdkStack(Stack):
         except Exception as e:
             raise Exception("Could not handle security groups due to:", e)
 
+        endpoint_subnet_selection = resolve_ecs_vpc_endpoint_subnet_selection(
+            use_express_ingress=use_express_ingress,
+            express_use_public_subnets=ECS_EXPRESS_USE_PUBLIC_SUBNETS == "True",
+            public_subnets=self.public_subnets,
+            private_subnets=self.private_subnets,
+        )
+        s3_gateway_subnet_selection = resolve_ecs_s3_gateway_subnet_selection(
+            public_subnets=self.public_subnets,
+            private_subnets=self.private_subnets,
+        )
+
         if (
             ENABLE_ECS_VPC_INTERFACE_ENDPOINTS == "True"
-            and self.private_subnets
+            and (endpoint_subnet_selection or s3_gateway_subnet_selection)
             and ENABLE_HEADLESS_DEPLOYMENT != "True"
         ):
+            if (
+                VPC_NAME
+                and not imported_vpc_cidr_block
+                and not imported_vpc_cidr_blocks
+            ):
+                raise ValueError(
+                    "vpc_cidr_block / vpc_cidr_blocks missing from precheck.context.json. "
+                    "Re-run check_resources.py from the cdk/ directory so the VPC "
+                    "CIDR(s) are stored for VPC endpoints and security groups."
+                )
+            existing_endpoint_services = frozenset(
+                self.node.try_get_context("existing_vpc_endpoint_service_names") or []
+            )
+            if VPC_NAME and not existing_endpoint_services:
+                print(
+                    "Note: existing_vpc_endpoint_service_names not in precheck context; "
+                    "re-run check_resources.py to skip duplicate endpoints in shared VPCs."
+                )
             try:
+                endpoint_tier = (
+                    "public"
+                    if use_express_ingress and ECS_EXPRESS_USE_PUBLIC_SUBNETS == "True"
+                    else "private"
+                )
                 create_ecs_vpc_endpoints_for_private_subnets(
                     self,
                     vpc=vpc,
-                    private_subnets=private_subnet_selection,
+                    subnets=endpoint_subnet_selection,
+                    s3_gateway_subnets=s3_gateway_subnet_selection,
                     logical_id_prefix="RedactionEcs",
                     include_secrets_and_kms=True,
+                    vpc_cidr_block=imported_vpc_cidr_block,
+                    vpc_cidr_blocks=imported_vpc_cidr_blocks or None,
+                    skip_service_names=existing_endpoint_services,
+                    aws_region=AWS_REGION,
+                )
+                s3_subnet_count = len(
+                    (s3_gateway_subnet_selection.subnets or [])
+                    if s3_gateway_subnet_selection
+                    else []
                 )
                 print(
-                    "Defined ECS VPC endpoints (ECR, Logs, Secrets Manager, KMS, S3) "
-                    "for private subnets."
+                    "Defined ECS VPC interface endpoints (ECR, Logs, Secrets Manager, "
+                    f"KMS) for {endpoint_tier} subnets where not already present; "
+                    f"S3 gateway for {s3_subnet_count} stack subnet(s) (public + "
+                    "private) where not already present."
                 )
             except Exception as e:
                 raise Exception(
-                    "Could not create ECS VPC interface endpoints for private subnets. "
-                    "If this VPC already has them, set ENABLE_ECS_VPC_INTERFACE_ENDPOINTS=False "
-                    "in cdk_config.env and ensure private route tables reach ECR (NAT or "
-                    "existing endpoints).",
+                    "Could not create ECS VPC interface endpoints for ECS task subnets. "
+                    "If this VPC already has them, re-run check_resources.py (auto-skip) "
+                    "or set ENABLE_ECS_VPC_INTERFACE_ENDPOINTS=False in cdk_config.env "
+                    "and ensure task subnets reach ECR (NAT, IGW, or existing endpoints).",
                     e,
                 ) from e
 
@@ -1695,10 +1755,8 @@ class CdkStack(Stack):
         try:
             secret.grant_read(task_role)
             secret.grant_read(execution_role)
-            # Imported secrets (from_secret_name_v2) do not grant KMS decrypt on the CMK.
-            if USE_CUSTOM_KMS_KEY == "1" and isinstance(kms_key, kms.Key):
-                kms_key.grant_decrypt(task_role)
-                kms_key.grant_decrypt(execution_role)
+            # KMS: task role uses shared S3 CMK via build_ecs_task_role_kms_policy;
+            # execution role uses the secret's CMK via build_ecs_execution_role_kms_policy.
         except Exception as e:
             raise Exception("Could not grant access to Secrets Manager due to:", e)
 
@@ -1742,7 +1800,12 @@ class CdkStack(Stack):
                 )
 
                 express_app_environment = load_app_config_env_for_express(
-                    APP_CONFIG_ENV_FILE
+                    APP_CONFIG_ENV_FILE,
+                    overrides=(
+                        {"COGNITO_AUTH": "False"}
+                        if ENABLE_HEADLESS_DEPLOYMENT != "True"
+                        else None
+                    ),
                 )
                 primary_container = build_express_gateway_primary_container(
                     image_uri=ecr_image_loc + ":latest",
@@ -2320,6 +2383,9 @@ class CdkStack(Stack):
                             min_healthy_percent=0,
                             max_healthy_percent=600,
                             desired_count=0,
+                            availability_zone_rebalancing=ecs_availability_zone_rebalancing(
+                                ECS_AVAILABILITY_ZONE_REBALANCING
+                            ),
                             service_connect_configuration=service_connect_configuration,
                         )
                         print("Successfully created new ECS service")

@@ -5,6 +5,7 @@ from cdk_config import (
     CLUSTER_NAME,
     CODEBUILD_PI_PROJECT_NAME,
     CODEBUILD_PROJECT_NAME,
+    COGNITO_USER_POOL_CLIENT_SECRET_NAME,
     ECS_EXPRESS_SC_PORT_NAME,
     ECS_EXPRESS_SERVICE_NAME,
     ECS_PI_EXPRESS_SERVICE_NAME,
@@ -17,6 +18,7 @@ from cdk_config import (
     ENABLE_PI_AGENT_EXPRESS_SERVICE,
     GRADIO_SERVER_PORT,
     PI_AGENT_ENV_S3_KEY,
+    PI_ALB_PATH_PREFIX_NORMALIZED,
     S3_LOG_CONFIG_BUCKET_NAME,
     USE_ECS_EXPRESS_MODE,
 )
@@ -24,6 +26,9 @@ from cdk_functions import create_basic_config_env
 
 # boto3-only module (does not import aws-cdk / Node.js)
 from cdk_post_deploy import (
+    apply_cognito_secret_fixup_from_stack,
+    apply_express_alb_listener_target_group_fixup,
+    apply_express_disable_in_app_cognito_auth,
     configure_express_pi_service_connect,
     start_codebuild_build,
     start_ecs_task,
@@ -33,7 +38,11 @@ from cdk_post_deploy import (
 from tqdm import tqdm
 
 # Create basic config.env file that user can use to run the app later. Input is the folder it is saved into.
-create_basic_config_env("config", headless=ENABLE_HEADLESS_DEPLOYMENT == "True")
+create_basic_config_env(
+    "config",
+    headless=ENABLE_HEADLESS_DEPLOYMENT == "True",
+    alb_cognito=USE_ECS_EXPRESS_MODE == "True" and ENABLE_HEADLESS_DEPLOYMENT != "True",
+)
 
 # Start CodeBuild for the main app image
 print("Starting main app CodeBuild project.")
@@ -85,6 +94,32 @@ if ENABLE_HEADLESS_DEPLOYMENT != "True":
         start_express_gateway_service(
             cluster_name=CLUSTER_NAME, service_name=ECS_EXPRESS_SERVICE_NAME
         )
+        print("Syncing Express ALB listener target groups after scale-up.")
+        apply_express_alb_listener_target_group_fixup(
+            cluster_name=CLUSTER_NAME,
+            main_service_name=ECS_EXPRESS_SERVICE_NAME,
+            pi_service_name=(
+                ECS_PI_EXPRESS_SERVICE_NAME
+                if ENABLE_PI_AGENT_EXPRESS_SERVICE == "True"
+                else None
+            ),
+            pi_path_prefixes=(
+                [PI_ALB_PATH_PREFIX_NORMALIZED, f"{PI_ALB_PATH_PREFIX_NORMALIZED}/*"]
+                if ENABLE_PI_AGENT_EXPRESS_SERVICE == "True"
+                else None
+            ),
+        )
+        print("Syncing Cognito secret and disabling in-app Cognito auth for Express.")
+        apply_cognito_secret_fixup_from_stack(
+            stack_name="RedactionStack",
+            secret_name=COGNITO_USER_POOL_CLIENT_SECRET_NAME,
+            cluster_name=CLUSTER_NAME,
+            main_service_name=ECS_EXPRESS_SERVICE_NAME,
+            recycle_tasks=False,
+        )
+        apply_express_disable_in_app_cognito_auth(
+            CLUSTER_NAME, ECS_EXPRESS_SERVICE_NAME
+        )
     else:
         print(f"Starting ECS service {ECS_SERVICE_NAME}")
         start_ecs_task(cluster_name=CLUSTER_NAME, service_name=ECS_SERVICE_NAME)
@@ -114,4 +149,14 @@ if ENABLE_PI_AGENT_EXPRESS_SERVICE == "True":
     print(f"Starting Pi Express ECS service {ECS_PI_EXPRESS_SERVICE_NAME}")
     start_express_gateway_service(
         cluster_name=CLUSTER_NAME, service_name=ECS_PI_EXPRESS_SERVICE_NAME
+    )
+    print("Syncing Express ALB listener target groups for Pi Express.")
+    apply_express_alb_listener_target_group_fixup(
+        cluster_name=CLUSTER_NAME,
+        main_service_name=ECS_EXPRESS_SERVICE_NAME,
+        pi_service_name=ECS_PI_EXPRESS_SERVICE_NAME,
+        pi_path_prefixes=[
+            PI_ALB_PATH_PREFIX_NORMALIZED,
+            f"{PI_ALB_PATH_PREFIX_NORMALIZED}/*",
+        ],
     )
