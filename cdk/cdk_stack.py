@@ -255,6 +255,13 @@ class CdkStack(Stack):
             not ACM_SSL_CERTIFICATE_ARN and USE_ECS_EXPRESS_MODE == "True"
         )
         enable_headless = ENABLE_HEADLESS_DEPLOYMENT == "True"
+        express_public_subnets_only = (
+            use_express_ingress and ECS_EXPRESS_USE_PUBLIC_SUBNETS == "True"
+        ) or (
+            enable_headless
+            and not use_express_ingress
+            and ECS_EXPRESS_USE_PUBLIC_SUBNETS == "True"
+        )
         deploy_web_ingress = not use_express_ingress and not enable_headless
         enable_service_connect = (
             ENABLE_ECS_SERVICE_CONNECT == "True" and not use_express_ingress
@@ -276,6 +283,16 @@ class CdkStack(Stack):
                 "USE_ECS_EXPRESS_MODE=True: using ECS Express Mode for HTTPS ingress "
                 "(no manual ALB/Fargate service)."
             )
+            if express_public_subnets_only:
+                print(
+                    "ECS_EXPRESS_USE_PUBLIC_SUBNETS=True: Express tasks and VPC "
+                    "endpoints use public subnets only (no private subnet install)."
+                )
+            elif enable_headless:
+                print(
+                    "ENABLE_HEADLESS_DEPLOYMENT=True: batch Fargate tasks use "
+                    "legacy private subnets (or public if configured)."
+                )
         service_connect_client_sg_ids: List[str] = []
 
         if enable_service_connect:
@@ -382,19 +399,20 @@ class CdkStack(Stack):
             # For resilience (NAT GW per AZ), set nat_gateways=new_vpc_max_azs.
             # The Vpc construct will create NAT Gateway(s) if subnet_type PRIVATE_WITH_EGRESS is used
             # and nat_gateways > 0.
-            new_vpc_nat_gateways = (
-                1  # Creates a single NAT Gateway for cost-effectiveness.
-            )
-            # If you need one per AZ for higher availability, set this to new_vpc_max_azs.
-
-            vpc = ec2.Vpc(
-                self,
-                "MyNewLogicalVpc",  # This is the CDK construct ID
-                vpc_name=NEW_VPC_DEFAULT_NAME,
-                ip_addresses=ec2.IpAddresses.cidr(new_vpc_cidr),
-                max_azs=new_vpc_max_azs,
-                nat_gateways=new_vpc_nat_gateways,  # Number of NAT gateways to create
-                subnet_configuration=[
+            if express_public_subnets_only:
+                new_vpc_nat_gateways = 0
+                new_vpc_subnet_configuration = [
+                    ec2.SubnetConfiguration(
+                        name="Public",
+                        subnet_type=ec2.SubnetType.PUBLIC,
+                        cidr_mask=28,
+                    ),
+                ]
+            else:
+                new_vpc_nat_gateways = (
+                    1  # Creates a single NAT Gateway for cost-effectiveness.
+                )
+                new_vpc_subnet_configuration = [
                     ec2.SubnetConfiguration(
                         name="Public",  # Name prefix for public subnets
                         subnet_type=ec2.SubnetType.PUBLIC,
@@ -406,7 +424,17 @@ class CdkStack(Stack):
                         cidr_mask=28,  # Adjust CIDR mask as needed
                     ),
                     # You could also add ec2.SubnetType.PRIVATE_ISOLATED if needed
-                ],
+                ]
+            # If you need one NAT GW per AZ for higher availability, set nat_gateways to new_vpc_max_azs.
+
+            vpc = ec2.Vpc(
+                self,
+                "MyNewLogicalVpc",  # This is the CDK construct ID
+                vpc_name=NEW_VPC_DEFAULT_NAME,
+                ip_addresses=ec2.IpAddresses.cidr(new_vpc_cidr),
+                max_azs=new_vpc_max_azs,
+                nat_gateways=new_vpc_nat_gateways,  # Number of NAT gateways to create
+                subnet_configuration=new_vpc_subnet_configuration,
                 # Internet Gateway is created and configured automatically for PUBLIC subnets.
                 # Route tables for public subnets will point to the IGW.
                 # Route tables for PRIVATE_WITH_EGRESS subnets will point to the NAT Gateway(s).
@@ -437,133 +465,160 @@ class CdkStack(Stack):
         names_to_create_public = []
 
         if not PUBLIC_SUBNETS_TO_USE and not PRIVATE_SUBNETS_TO_USE:
-            print(
-                "Warning: No public or private subnets specified in *_SUBNETS_TO_USE. Attempting to select from existing VPC subnets."
-            )
-
-            print("vpc.public_subnets:", vpc.public_subnets)
-            print("vpc.private_subnets:", vpc.private_subnets)
-
-            if (
-                vpc.public_subnets
-            ):  # These are already one_per_az if max_azs was used and Vpc created them
-                self.public_subnets.extend(vpc.public_subnets)
-            else:
-                self.node.add_warning("No public subnets found in the VPC.")
-
-            # Get private subnets with egress specifically
-            # selected_private_subnets_with_egress = vpc.select_subnets(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)
-
-            print(
-                f"Selected from VPC: {len(self.public_subnets)} public, {len(self.private_subnets)} private_with_egress subnets."
-            )
-
-            if (
-                len(self.public_subnets) < 1 or len(self.private_subnets) < 1
-            ):  # Simplified check for new VPC
-                # If new_vpc_max_azs was 1, you'd have 1 of each. If 2, then 2 of each.
-                # The original check ' < 2' might be too strict if new_vpc_max_azs=1
-                pass  # For new VPC, allow single AZ setups if configured that way. The VPC construct ensures one per AZ up to max_azs.
-
-            if not self.public_subnets and not self.private_subnets:
+            if express_public_subnets_only:
                 print(
-                    "Error: No public or private subnets could be found in the VPC for automatic selection. "
-                    "You must either specify subnets in *_SUBNETS_TO_USE or ensure the VPC has discoverable subnets."
+                    "Express public-subnet mode: auto-selecting public subnets only "
+                    "(private subnets are not installed)."
                 )
-                raise RuntimeError("No suitable subnets found for automatic selection.")
+                selected_public_subnets = vpc.select_subnets(
+                    subnet_type=ec2.SubnetType.PUBLIC, one_per_az=True
+                )
+                if len(selected_public_subnets.subnet_ids) < 2:
+                    raise Exception(
+                        "Express mode needs at least two public subnets in different "
+                        "availability zones."
+                    )
+                self.public_subnets = selected_public_subnets.subnets
+                self.private_subnets = []
+                print(
+                    f"Selected {len(self.public_subnets)} public subnets for Express."
+                )
             else:
                 print(
-                    f"Automatically selected {len(self.public_subnets)} public and {len(self.private_subnets)} private subnets based on VPC properties."
+                    "Warning: No public or private subnets specified in *_SUBNETS_TO_USE. Attempting to select from existing VPC subnets."
                 )
 
-            selected_public_subnets = vpc.select_subnets(
-                subnet_type=ec2.SubnetType.PUBLIC, one_per_az=True
-            )
-            private_subnets_egress = vpc.select_subnets(
-                subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS, one_per_az=True
-            )
+                print("vpc.public_subnets:", vpc.public_subnets)
+                print("vpc.private_subnets:", vpc.private_subnets)
 
-            if private_subnets_egress.subnets:
-                self.private_subnets.extend(private_subnets_egress.subnets)
-            else:
-                self.node.add_warning(
-                    "No PRIVATE_WITH_EGRESS subnets found in the VPC."
+                if (
+                    vpc.public_subnets
+                ):  # These are already one_per_az if max_azs was used and Vpc created them
+                    self.public_subnets.extend(vpc.public_subnets)
+                else:
+                    self.node.add_warning("No public subnets found in the VPC.")
+
+                # Get private subnets with egress specifically
+                # selected_private_subnets_with_egress = vpc.select_subnets(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)
+
+                print(
+                    f"Selected from VPC: {len(self.public_subnets)} public, {len(self.private_subnets)} private_with_egress subnets."
                 )
 
-            try:
-                private_subnets_isolated = vpc.select_subnets(
-                    subnet_type=ec2.SubnetType.PRIVATE_ISOLATED, one_per_az=True
-                )
-            except Exception as e:
-                private_subnets_isolated = []
-                print("Could not find any isolated subnets due to:", e)
+                if (
+                    len(self.public_subnets) < 1 or len(self.private_subnets) < 1
+                ):  # Simplified check for new VPC
+                    # If new_vpc_max_azs was 1, you'd have 1 of each. If 2, then 2 of each.
+                    # The original check ' < 2' might be too strict if new_vpc_max_azs=1
+                    pass  # For new VPC, allow single AZ setups if configured that way. The VPC construct ensures one per AZ up to max_azs.
 
-            ###
-            combined_subnet_objects = []
-
-            if private_subnets_isolated:
-                if private_subnets_egress.subnets:
-                    # Add the first PRIVATE_WITH_EGRESS subnet
-                    combined_subnet_objects.append(private_subnets_egress.subnets[0])
-            elif not private_subnets_isolated:
-                if private_subnets_egress.subnets:
-                    # Add the first PRIVATE_WITH_EGRESS subnet
-                    combined_subnet_objects.extend(private_subnets_egress.subnets)
-            else:
-                self.node.add_warning(
-                    "No PRIVATE_WITH_EGRESS subnets found to select the first one."
-                )
-
-            # Add all PRIVATE_ISOLATED subnets *except* the first one (if they exist)
-            try:
-                if len(private_subnets_isolated.subnets) > 1:
-                    combined_subnet_objects.extend(private_subnets_isolated.subnets[1:])
-                elif (
-                    private_subnets_isolated.subnets
-                ):  # Only 1 isolated subnet, add a warning if [1:] was desired
-                    self.node.add_warning(
-                        "Only one PRIVATE_ISOLATED subnet found, private_subnets_isolated.subnets[1:] will be empty."
+                if not self.public_subnets and not self.private_subnets:
+                    print(
+                        "Error: No public or private subnets could be found in the VPC for automatic selection. "
+                        "You must either specify subnets in *_SUBNETS_TO_USE or ensure the VPC has discoverable subnets."
+                    )
+                    raise RuntimeError(
+                        "No suitable subnets found for automatic selection."
                     )
                 else:
-                    self.node.add_warning("No PRIVATE_ISOLATED subnets found.")
-            except Exception as e:
-                print("Could not identify private isolated subnets due to:", e)
+                    print(
+                        f"Automatically selected {len(self.public_subnets)} public and {len(self.private_subnets)} private subnets based on VPC properties."
+                    )
 
-            # Create an ec2.SelectedSubnets object from the combined private subnet list.
-            selected_private_subnets = vpc.select_subnets(
-                subnets=combined_subnet_objects
-            )
-
-            print("selected_public_subnets:", selected_public_subnets)
-            print("selected_private_subnets:", selected_private_subnets)
-
-            if (
-                len(selected_public_subnets.subnet_ids) < 2
-                or len(selected_private_subnets.subnet_ids) < 2
-            ):
-                raise Exception(
-                    "Need at least two public or private subnets in different availability zones"
+                selected_public_subnets = vpc.select_subnets(
+                    subnet_type=ec2.SubnetType.PUBLIC, one_per_az=True
+                )
+                private_subnets_egress = vpc.select_subnets(
+                    subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS, one_per_az=True
                 )
 
-            if not selected_public_subnets and not selected_private_subnets:
-                # If no subnets could be found even with automatic selection, raise an error.
-                # This ensures the stack doesn't proceed if it absolutely needs subnets.
-                print(
-                    "Error: No existing public or private subnets could be found in the VPC for automatic selection. "
-                    "You must either specify subnets in *_SUBNETS_TO_USE or ensure the VPC has discoverable subnets."
-                )
-                raise RuntimeError("No suitable subnets found for automatic selection.")
-            else:
-                self.public_subnets = selected_public_subnets.subnets
-                self.private_subnets = selected_private_subnets.subnets
-                print(
-                    f"Automatically selected {len(self.public_subnets)} public and {len(self.private_subnets)} private subnets based on VPC discovery."
+                if private_subnets_egress.subnets:
+                    self.private_subnets.extend(private_subnets_egress.subnets)
+                else:
+                    self.node.add_warning(
+                        "No PRIVATE_WITH_EGRESS subnets found in the VPC."
+                    )
+
+                try:
+                    private_subnets_isolated = vpc.select_subnets(
+                        subnet_type=ec2.SubnetType.PRIVATE_ISOLATED, one_per_az=True
+                    )
+                except Exception as e:
+                    private_subnets_isolated = []
+                    print("Could not find any isolated subnets due to:", e)
+
+                ###
+                combined_subnet_objects = []
+
+                if private_subnets_isolated:
+                    if private_subnets_egress.subnets:
+                        # Add the first PRIVATE_WITH_EGRESS subnet
+                        combined_subnet_objects.append(
+                            private_subnets_egress.subnets[0]
+                        )
+                elif not private_subnets_isolated:
+                    if private_subnets_egress.subnets:
+                        # Add the first PRIVATE_WITH_EGRESS subnet
+                        combined_subnet_objects.extend(private_subnets_egress.subnets)
+                else:
+                    self.node.add_warning(
+                        "No PRIVATE_WITH_EGRESS subnets found to select the first one."
+                    )
+
+                # Add all PRIVATE_ISOLATED subnets *except* the first one (if they exist)
+                try:
+                    if len(private_subnets_isolated.subnets) > 1:
+                        combined_subnet_objects.extend(
+                            private_subnets_isolated.subnets[1:]
+                        )
+                    elif (
+                        private_subnets_isolated.subnets
+                    ):  # Only 1 isolated subnet, add a warning if [1:] was desired
+                        self.node.add_warning(
+                            "Only one PRIVATE_ISOLATED subnet found, private_subnets_isolated.subnets[1:] will be empty."
+                        )
+                    else:
+                        self.node.add_warning("No PRIVATE_ISOLATED subnets found.")
+                except Exception as e:
+                    print("Could not identify private isolated subnets due to:", e)
+
+                # Create an ec2.SelectedSubnets object from the combined private subnet list.
+                selected_private_subnets = vpc.select_subnets(
+                    subnets=combined_subnet_objects
                 )
 
-                print("self.public_subnets:", self.public_subnets)
-                print("self.private_subnets:", self.private_subnets)
-                # Since subnets are now assigned, we can exit this processing block.
-                # The rest of the original code (which iterates *_SUBNETS_TO_USE) will be skipped.
+                print("selected_public_subnets:", selected_public_subnets)
+                print("selected_private_subnets:", selected_private_subnets)
+
+                if (
+                    len(selected_public_subnets.subnet_ids) < 2
+                    or len(selected_private_subnets.subnet_ids) < 2
+                ):
+                    raise Exception(
+                        "Need at least two public or private subnets in different availability zones"
+                    )
+
+                if not selected_public_subnets and not selected_private_subnets:
+                    # If no subnets could be found even with automatic selection, raise an error.
+                    # This ensures the stack doesn't proceed if it absolutely needs subnets.
+                    print(
+                        "Error: No existing public or private subnets could be found in the VPC for automatic selection. "
+                        "You must either specify subnets in *_SUBNETS_TO_USE or ensure the VPC has discoverable subnets."
+                    )
+                    raise RuntimeError(
+                        "No suitable subnets found for automatic selection."
+                    )
+                else:
+                    self.public_subnets = selected_public_subnets.subnets
+                    self.private_subnets = selected_private_subnets.subnets
+                    print(
+                        f"Automatically selected {len(self.public_subnets)} public and {len(self.private_subnets)} private subnets based on VPC discovery."
+                    )
+
+                    print("self.public_subnets:", self.public_subnets)
+                    print("self.private_subnets:", self.private_subnets)
+                    # Since subnets are now assigned, we can exit this processing block.
+                    # The rest of the original code (which iterates *_SUBNETS_TO_USE) will be skipped.
 
         checked_public_subnets_ctx = get_context_dict("checked_public_subnets")
         checked_private_subnets_ctx = get_context_dict("checked_private_subnets")
@@ -686,153 +741,165 @@ class CdkStack(Stack):
             raise Exception("No public subnets found or created, exiting.")
 
         # --- NAT Gateway Creation/Lookup ---
-        print("Creating NAT gateway/located existing")
         self.single_nat_gateway_id = None
-
-        nat_gw_id_from_context = SINGLE_NAT_GATEWAY_ID or get_context_str(
-            "id:NatGateway"
-        )
-
-        if nat_gw_id_from_context:
+        if express_public_subnets_only:
             print(
-                f"Using existing NAT Gateway ID from context: {nat_gw_id_from_context}"
+                "Express public-subnet mode: skipping NAT Gateway install "
+                "(not required for public Express tasks)."
             )
-            self.single_nat_gateway_id = nat_gw_id_from_context
+        else:
+            print("Creating NAT gateway/located existing")
 
-        elif (
-            new_vpc_created
-            and new_vpc_nat_gateways > 0
-            and hasattr(vpc, "nat_gateways")
-            and vpc.nat_gateways
-        ):
-            self.single_nat_gateway_id = vpc.nat_gateways[0].gateway_id
-            print(
-                f"Using NAT Gateway {self.single_nat_gateway_id} created by the new VPC construct."
+            nat_gw_id_from_context = SINGLE_NAT_GATEWAY_ID or get_context_str(
+                "id:NatGateway"
             )
 
-        if not self.single_nat_gateway_id:
-            print("Creating a new NAT gateway")
-
-            if hasattr(vpc, "nat_gateways") and vpc.nat_gateways:
-                print("Existing NAT gateway found in vpc")
-                pass
-
-                # If not in context, create a new one, but only if we have a public subnet.
-            elif self.public_subnets:
-                print("NAT Gateway ID not found in context. Creating a new one.")
-                # Place the NAT GW in the first available public subnet
-                first_public_subnet = self.public_subnets[0]
-
-                self.single_nat_gateway_id = create_nat_gateway(
-                    self,
-                    first_public_subnet,
-                    nat_gateway_name=NAT_GATEWAY_NAME,
-                    nat_gateway_id_context_key=SINGLE_NAT_GATEWAY_ID,
-                )
-            else:
+            if nat_gw_id_from_context:
                 print(
-                    "WARNING: No public subnets available and NAT gateway not found in existing VPC. Cannot create a NAT Gateway."
+                    f"Using existing NAT Gateway ID from context: {nat_gw_id_from_context}"
                 )
+                self.single_nat_gateway_id = nat_gw_id_from_context
+
+            elif (
+                new_vpc_created
+                and new_vpc_nat_gateways > 0
+                and hasattr(vpc, "nat_gateways")
+                and vpc.nat_gateways
+            ):
+                self.single_nat_gateway_id = vpc.nat_gateways[0].gateway_id
+                print(
+                    f"Using NAT Gateway {self.single_nat_gateway_id} created by the new VPC construct."
+                )
+
+            if not self.single_nat_gateway_id:
+                print("Creating a new NAT gateway")
+
+                if hasattr(vpc, "nat_gateways") and vpc.nat_gateways:
+                    print("Existing NAT gateway found in vpc")
+                    pass
+
+                    # If not in context, create a new one, but only if we have a public subnet.
+                elif self.public_subnets:
+                    print("NAT Gateway ID not found in context. Creating a new one.")
+                    # Place the NAT GW in the first available public subnet
+                    first_public_subnet = self.public_subnets[0]
+
+                    self.single_nat_gateway_id = create_nat_gateway(
+                        self,
+                        first_public_subnet,
+                        nat_gateway_name=NAT_GATEWAY_NAME,
+                        nat_gateway_id_context_key=SINGLE_NAT_GATEWAY_ID,
+                    )
+                else:
+                    print(
+                        "WARNING: No public subnets available and NAT gateway not found in existing VPC. Cannot create a NAT Gateway."
+                    )
 
         # --- 4. Process Private Subnets ---
-        print("\n--- Processing Private Subnets ---")
-        if checked_private_subnets_ctx:
-            for i, subnet_name in enumerate(PRIVATE_SUBNETS_TO_USE):
-                subnet_info = checked_private_subnets_ctx.get(subnet_name)
-                if subnet_info and subnet_info.get("exists"):
-                    subnet_id = subnet_info.get("id")
-                    if not subnet_id:
-                        raise RuntimeError(
-                            f"Context for existing private subnet '{subnet_name}' is missing 'id'."
-                        )
-                    subnet_az = subnet_info.get("az")
-                    if (
-                        not subnet_az
-                        and PRIVATE_SUBNET_AVAILABILITY_ZONES
-                        and i < len(PRIVATE_SUBNET_AVAILABILITY_ZONES)
-                    ):
-                        subnet_az = PRIVATE_SUBNET_AVAILABILITY_ZONES[i]
-                    if not subnet_az:
-                        raise RuntimeError(
-                            f"Context for existing private subnet '{subnet_name}' is missing 'az'."
-                        )
-                    subnet_attrs = {
-                        "subnet_id": subnet_id,
-                        "availability_zone": subnet_az,
-                    }
-                    route_table_id = subnet_info.get("route_table_id")
-                    if route_table_id:
-                        subnet_attrs["route_table_id"] = route_table_id
-                    try:
-                        imported_subnet = ec2.Subnet.from_subnet_attributes(
-                            self,
-                            f"ImportedPrivateSubnet{subnet_name.replace('-', '')}{i}",
-                            **subnet_attrs,
-                        )
-                        self.private_subnets.append(imported_subnet)
-                        print(
-                            f"Imported existing private subnet: {subnet_name} (ID: {subnet_id})"
-                        )
-                    except Exception as e:
-                        raise RuntimeError(
-                            f"Failed to import private subnet '{subnet_name}' with ID '{subnet_id}'. Error: {e}"
-                        )
-
-        # Create new private subnets
-        if private_subnets_data_for_creation_ctx:
-            names_to_create_private = [
-                s["name"] for s in private_subnets_data_for_creation_ctx
-            ]
-            cidrs_to_create_private = [
-                s["cidr"] for s in private_subnets_data_for_creation_ctx
-            ]
-            azs_to_create_private = [
-                s["az"] for s in private_subnets_data_for_creation_ctx
-            ]
-
-            if names_to_create_private:
+        if express_public_subnets_only:
+            if PRIVATE_SUBNETS_TO_USE or private_subnets_data_for_creation_ctx:
                 print(
-                    f"Attempting to create {len(names_to_create_private)} new private subnets: {names_to_create_private}"
-                )
-                # --- CALL THE NEW CREATE_SUBNETS FUNCTION FOR PRIVATE ---
-                # Ensure self.single_nat_gateway_id is available before this call
-                if not self.single_nat_gateway_id:
-                    raise ValueError(
-                        "A single NAT Gateway ID is required for private subnets but was not resolved."
-                    )
-
-                newly_created_private_subnets_cfn, newly_created_private_rts_cfn = (
-                    create_subnets(
-                        self,
-                        vpc,
-                        CDK_PREFIX,
-                        names_to_create_private,
-                        cidrs_to_create_private,
-                        azs_to_create_private,
-                        is_public=False,
-                        single_nat_gateway_id=self.single_nat_gateway_id,  # Pass the single NAT Gateway ID
-                    )
-                )
-                self.private_subnets.extend(newly_created_private_subnets_cfn)
-                self.private_route_tables_cfn.extend(newly_created_private_rts_cfn)
-                print(
-                    f"Successfully defined {len(newly_created_private_subnets_cfn)} new private subnets and their route tables for creation."
+                    "Note: PRIVATE_* subnet settings are ignored in Express public-subnet mode."
                 )
         else:
-            print(
-                "No private subnets specified for creation in context ('private_subnets_to_create')."
-            )
+            print("\n--- Processing Private Subnets ---")
+            if checked_private_subnets_ctx:
+                for i, subnet_name in enumerate(PRIVATE_SUBNETS_TO_USE):
+                    subnet_info = checked_private_subnets_ctx.get(subnet_name)
+                    if subnet_info and subnet_info.get("exists"):
+                        subnet_id = subnet_info.get("id")
+                        if not subnet_id:
+                            raise RuntimeError(
+                                f"Context for existing private subnet '{subnet_name}' is missing 'id'."
+                            )
+                        subnet_az = subnet_info.get("az")
+                        if (
+                            not subnet_az
+                            and PRIVATE_SUBNET_AVAILABILITY_ZONES
+                            and i < len(PRIVATE_SUBNET_AVAILABILITY_ZONES)
+                        ):
+                            subnet_az = PRIVATE_SUBNET_AVAILABILITY_ZONES[i]
+                        if not subnet_az:
+                            raise RuntimeError(
+                                f"Context for existing private subnet '{subnet_name}' is missing 'az'."
+                            )
+                        subnet_attrs = {
+                            "subnet_id": subnet_id,
+                            "availability_zone": subnet_az,
+                        }
+                        route_table_id = subnet_info.get("route_table_id")
+                        if route_table_id:
+                            subnet_attrs["route_table_id"] = route_table_id
+                        try:
+                            imported_subnet = ec2.Subnet.from_subnet_attributes(
+                                self,
+                                f"ImportedPrivateSubnet{subnet_name.replace('-', '')}{i}",
+                                **subnet_attrs,
+                            )
+                            self.private_subnets.append(imported_subnet)
+                            print(
+                                f"Imported existing private subnet: {subnet_name} (ID: {subnet_id})"
+                            )
+                        except Exception as e:
+                            raise RuntimeError(
+                                f"Failed to import private subnet '{subnet_name}' with ID '{subnet_id}'. Error: {e}"
+                            )
 
-        # if not self.private_subnets:
-        #     raise Exception("No private subnets found or created, exiting.")
+            # Create new private subnets
+            if private_subnets_data_for_creation_ctx:
+                names_to_create_private = [
+                    s["name"] for s in private_subnets_data_for_creation_ctx
+                ]
+                cidrs_to_create_private = [
+                    s["cidr"] for s in private_subnets_data_for_creation_ctx
+                ]
+                azs_to_create_private = [
+                    s["az"] for s in private_subnets_data_for_creation_ctx
+                ]
 
-        if (
-            not self.private_subnets
-            and not names_to_create_private
-            and not PRIVATE_SUBNETS_TO_USE
-        ):
-            # This condition might need adjustment for new VPCs.
-            raise Exception("No private subnets found or created, exiting.")
+                if names_to_create_private:
+                    print(
+                        f"Attempting to create {len(names_to_create_private)} new private subnets: {names_to_create_private}"
+                    )
+                    # --- CALL THE NEW CREATE_SUBNETS FUNCTION FOR PRIVATE ---
+                    # Ensure self.single_nat_gateway_id is available before this call
+                    if not self.single_nat_gateway_id:
+                        raise ValueError(
+                            "A single NAT Gateway ID is required for private subnets but was not resolved."
+                        )
+
+                    newly_created_private_subnets_cfn, newly_created_private_rts_cfn = (
+                        create_subnets(
+                            self,
+                            vpc,
+                            CDK_PREFIX,
+                            names_to_create_private,
+                            cidrs_to_create_private,
+                            azs_to_create_private,
+                            is_public=False,
+                            single_nat_gateway_id=self.single_nat_gateway_id,  # Pass the single NAT Gateway ID
+                        )
+                    )
+                    self.private_subnets.extend(newly_created_private_subnets_cfn)
+                    self.private_route_tables_cfn.extend(newly_created_private_rts_cfn)
+                    print(
+                        f"Successfully defined {len(newly_created_private_subnets_cfn)} new private subnets and their route tables for creation."
+                    )
+            else:
+                print(
+                    "No private subnets specified for creation in context ('private_subnets_to_create')."
+                )
+
+            # if not self.private_subnets:
+            #     raise Exception("No private subnets found or created, exiting.")
+
+            if (
+                not self.private_subnets
+                and not names_to_create_private
+                and not PRIVATE_SUBNETS_TO_USE
+            ):
+                # This condition might need adjustment for new VPCs.
+                raise Exception("No private subnets found or created, exiting.")
 
         # --- 5. Sanity Check and Output ---
         # Output the single NAT Gateway ID for verification
@@ -842,6 +909,10 @@ class CdkStack(Stack):
                 "SingleNatGatewayId",
                 value=self.single_nat_gateway_id,
                 description="ID of the single NAT Gateway resolved or created.",
+            )
+        elif express_public_subnets_only:
+            print(
+                "INFO: Express public-subnet mode — NAT Gateway not installed or required."
             )
         elif (
             NEW_VPC_DEFAULT_NAME
@@ -1428,7 +1499,7 @@ class CdkStack(Stack):
         if (
             ENABLE_ECS_VPC_INTERFACE_ENDPOINTS == "True"
             and (endpoint_subnet_selection or s3_gateway_subnet_selection)
-            and ENABLE_HEADLESS_DEPLOYMENT != "True"
+            and (not enable_headless or express_public_subnets_only)
         ):
             if (
                 VPC_NAME
@@ -2437,6 +2508,14 @@ class CdkStack(Stack):
 
             if ENABLE_S3_BATCH_ECS_TRIGGER == "True":
                 try:
+                    batch_subnet_ids = [s.subnet_id for s in self.private_subnets]
+                    if not batch_subnet_ids:
+                        batch_subnet_ids = [s.subnet_id for s in self.public_subnets]
+                    if not batch_subnet_ids:
+                        raise ValueError(
+                            "S3 batch ECS trigger requires at least one public or "
+                            "private subnet."
+                        )
                     lambda_asset_dir = os.path.join(
                         os.path.dirname(__file__), "config", "lambda"
                     )
@@ -2450,7 +2529,7 @@ class CdkStack(Stack):
                         cluster_name=CLUSTER_NAME,
                         task_definition_arn=fargate_task_definition.task_definition_arn,
                         container_name=full_ecr_repo_name,
-                        subnet_ids=[s.subnet_id for s in self.private_subnets],
+                        subnet_ids=batch_subnet_ids,
                         security_group_id=ecs_security_group.security_group_id,
                         execution_role=execution_role,
                         task_role=task_role,
@@ -2459,6 +2538,7 @@ class CdkStack(Stack):
                         input_prefix=S3_BATCH_INPUT_PREFIX,
                         config_prefix=S3_BATCH_CONFIG_PREFIX,
                         default_params_key=S3_BATCH_DEFAULT_PARAMS_KEY,
+                        assign_public_ip=not bool(self.private_subnets),
                     )
                     CfnOutput(
                         self,

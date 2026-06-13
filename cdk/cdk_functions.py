@@ -2575,10 +2575,15 @@ def configure_express_listener_cognito_and_cloudfront(
     use_cloudfront: bool,
     cloudfront_host_header: str,
     stickiness_seconds: int = 28800,
+    allow_cloudfront_origin_without_cognito: bool = False,
 ) -> None:
     """
-    Attach Cognito auth to the Express-managed HTTPS listener and optionally add a
-    CloudFront host-header rule (same pattern as the legacy HTTP listener path).
+    Attach Cognito auth to the Express-managed HTTPS listener.
+
+    By default, **no** forward-only host-header rules are added. CloudFront (and all
+    other) traffic uses the listener default action: ``authenticate-cognito`` then
+    forward. Set ``allow_cloudfront_origin_without_cognito=True`` only when the ALB
+    must accept CloudFront origin requests without a Cognito session (legacy pattern).
     """
     listener_arn = express_ingress_listener_arn(express_service)
     target_group_arn = express_ingress_first_target_group_arn(express_service)
@@ -2618,7 +2623,11 @@ def configure_express_listener_cognito_and_cloudfront(
     )
     modify_listener.node.add_dependency(express_service)
 
-    if use_cloudfront and cloudfront_host_header:
+    if (
+        use_cloudfront
+        and cloudfront_host_header
+        and allow_cloudfront_origin_without_cognito
+    ):
         forward_only = [
             {
                 "Type": "forward",
@@ -3088,6 +3097,7 @@ def create_s3_batch_ecs_trigger_lambda(
     config_prefix: str,
     default_params_key: str,
     default_direct_mode_task: str = "redact",
+    assign_public_ip: bool = False,
 ) -> lambda_.Function:
     """
     Lambda triggered by job .env uploads on the output bucket; runs one-shot Fargate tasks.
@@ -3152,6 +3162,7 @@ def create_s3_batch_ecs_trigger_lambda(
             "SECURITY_GROUPS": security_group_id,
             "CONTAINER_NAME": container_name,
             "DEFAULT_DIRECT_MODE_TASK": default_direct_mode_task,
+            "ECS_ASSIGN_PUBLIC_IP": "true" if assign_public_ip else "false",
         },
     }
     if function_name:

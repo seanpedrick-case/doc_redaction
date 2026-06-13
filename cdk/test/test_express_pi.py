@@ -344,6 +344,104 @@ def test_express_listener_helpers_synth_without_reference_error():
     assert "elasticloadbalancing:ModifyListener" in cr_policy_actions
 
 
+def test_express_cloudfront_does_not_add_cognito_bypass_host_rule_by_default():
+    """With ALB Cognito, CloudFront must not add a forward-only host-header rule."""
+    from aws_cdk import App, Environment, Stack, assertions
+    from aws_cdk import aws_ec2 as ec2
+    from aws_cdk import aws_ecs as ecs
+    from cdk_functions import (
+        configure_express_listener_cognito_and_cloudfront,
+        create_express_gateway_service,
+    )
+
+    app = App()
+    stack = Stack(
+        app,
+        "ExpressCloudFrontCognitoTest",
+        env=Environment(account="123456789012", region="eu-west-2"),
+    )
+    vpc = ec2.Vpc(stack, "Vpc", max_azs=2)
+    main = create_express_gateway_service(
+        stack,
+        "Main",
+        service_name="main-svc",
+        cluster_name="cl",
+        execution_role_arn="arn:aws:iam::123456789012:role/exec",
+        infrastructure_role_arn="arn:aws:iam::123456789012:role/infra",
+        task_role_arn="arn:aws:iam::123456789012:role/task",
+        cpu="1024",
+        memory="2048",
+        health_check_path="/",
+        primary_container=ecs.CfnExpressGatewayService.ExpressGatewayContainerProperty(
+            image="123456789012.dkr.ecr.eu-west-2.amazonaws.com/app:latest",
+            container_port=7860,
+        ),
+        subnet_ids=[vpc.public_subnets[0].subnet_id],
+        security_group_ids=["sg-main"],
+    )
+    configure_express_listener_cognito_and_cloudfront(
+        stack,
+        "MainListener",
+        express_service=main,
+        user_pool_arn="arn:aws:cognito-idp:eu-west-2:123456789012:userpool/pool",
+        user_pool_client_id="client",
+        user_pool_domain_prefix="demo-auth",
+        use_cloudfront=True,
+        cloudfront_host_header="app.example.com",
+    )
+    template = assertions.Template.from_stack(stack)
+    template.resource_count_is("Custom::Elbv2ListenerRuleUpsert", 0)
+
+
+def test_express_cloudfront_can_opt_in_to_origin_bypass_without_cognito():
+    from aws_cdk import App, Environment, Stack, assertions
+    from aws_cdk import aws_ec2 as ec2
+    from aws_cdk import aws_ecs as ecs
+    from cdk_functions import (
+        configure_express_listener_cognito_and_cloudfront,
+        create_express_gateway_service,
+    )
+
+    app = App()
+    stack = Stack(
+        app,
+        "ExpressCloudFrontBypassTest",
+        env=Environment(account="123456789012", region="eu-west-2"),
+    )
+    vpc = ec2.Vpc(stack, "Vpc", max_azs=2)
+    main = create_express_gateway_service(
+        stack,
+        "Main",
+        service_name="main-svc",
+        cluster_name="cl",
+        execution_role_arn="arn:aws:iam::123456789012:role/exec",
+        infrastructure_role_arn="arn:aws:iam::123456789012:role/infra",
+        task_role_arn="arn:aws:iam::123456789012:role/task",
+        cpu="1024",
+        memory="2048",
+        health_check_path="/",
+        primary_container=ecs.CfnExpressGatewayService.ExpressGatewayContainerProperty(
+            image="123456789012.dkr.ecr.eu-west-2.amazonaws.com/app:latest",
+            container_port=7860,
+        ),
+        subnet_ids=[vpc.public_subnets[0].subnet_id],
+        security_group_ids=["sg-main"],
+    )
+    configure_express_listener_cognito_and_cloudfront(
+        stack,
+        "MainListener",
+        express_service=main,
+        user_pool_arn="arn:aws:cognito-idp:eu-west-2:123456789012:userpool/pool",
+        user_pool_client_id="client",
+        user_pool_domain_prefix="demo-auth",
+        use_cloudfront=True,
+        cloudfront_host_header="app.example.com",
+        allow_cloudfront_origin_without_cognito=True,
+    )
+    template = assertions.Template.from_stack(stack)
+    template.resource_count_is("Custom::Elbv2ListenerRuleUpsert", 1)
+
+
 def test_dual_express_gateway_services_synth():
     """Two ExpressGatewayService resources when wiring main + Pi helpers."""
     from aws_cdk import App, Environment, Stack, assertions

@@ -222,3 +222,10 @@ def test_cognito_secret_payload_matches():
     )
     assert post.cognito_secret_payload_matches(current, desired) is False
     assert post.cognito_secret_payload_matches(json.dumps(desired), desired) is True
+
+
+def test_listener_rule_has_cognito_auth():
+    assert post.listener_rule_has_cognito_auth(
+        [{"Type": "authenticate-cognito"}, {"Type": "forward"}]
+    )
+    assert not post.listener_rule_has_cognito_auth([{"Type": "forward"}])

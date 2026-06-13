@@ -30,6 +30,7 @@ from cdk_post_deploy import (
     apply_express_alb_listener_target_group_fixup,
     apply_express_disable_in_app_cognito_auth,
     configure_express_pi_service_connect,
+    remove_express_listener_rules_without_cognito,
     start_codebuild_build,
     start_ecs_task,
     start_express_gateway_service,
@@ -95,6 +96,7 @@ if ENABLE_HEADLESS_DEPLOYMENT != "True":
             cluster_name=CLUSTER_NAME, service_name=ECS_EXPRESS_SERVICE_NAME
         )
         print("Syncing Express ALB listener target groups after scale-up.")
+        remove_express_listener_rules_without_cognito()
         apply_express_alb_listener_target_group_fixup(
             cluster_name=CLUSTER_NAME,
             main_service_name=ECS_EXPRESS_SERVICE_NAME,

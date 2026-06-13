@@ -81,6 +81,8 @@ def test_validate_cognito_domain_prefix_rejects_reserved_words():
 def test_build_env_values_demo():
     values = inst.build_env_values(_demo_answers())
     assert values["USE_ECS_EXPRESS_MODE"] == "True"
+    assert values["ECS_EXPRESS_USE_PUBLIC_SUBNETS"] == "True"
+    assert values["PRIVATE_SUBNETS_TO_USE"] == ""
     assert values["USE_CLOUDFRONT"] == "False"
     assert values["ENABLE_RESOURCE_DELETE_PROTECTION"] == "False"
     assert values["VPC_NAME"] == "test-vpc"
@@ -107,13 +109,37 @@ def test_build_env_values_headless():
     assert values["ENABLE_HEADLESS_DEPLOYMENT"] == "True"
     assert values["ENABLE_S3_BATCH_ECS_TRIGGER"] == "True"
     assert values["COGNITO_AUTH"] == "False"
+    assert values["ECS_EXPRESS_USE_PUBLIC_SUBNETS"] == "True"
+    assert values["PRIVATE_SUBNETS_TO_USE"] == ""
+
+
+def test_build_env_values_demo_headless():
+    answers = _demo_answers()
+    answers.enable_headless = True
+    values = inst.build_env_values(answers)
+    assert values["USE_ECS_EXPRESS_MODE"] == "False"
+    assert values["ENABLE_HEADLESS_DEPLOYMENT"] == "True"
+    assert values["ENABLE_RESOURCE_DELETE_PROTECTION"] == "False"
+    assert values["ECS_EXPRESS_USE_PUBLIC_SUBNETS"] == "True"
+    assert values["PRIVATE_SUBNETS_TO_USE"] == ""
+
+
+def test_build_env_values_production_headless():
+    answers = _production_answers()
+    answers.enable_headless = True
+    values = inst.build_env_values(answers)
+    assert values["USE_ECS_EXPRESS_MODE"] == "False"
+    assert values["USE_CLOUDFRONT"] == "False"
+    assert values["ENABLE_HEADLESS_DEPLOYMENT"] == "True"
+    assert values["ENABLE_RESOURCE_DELETE_PROTECTION"] == "True"
+    assert values.get("ECS_EXPRESS_USE_PUBLIC_SUBNETS") != "True"
+    assert "PRIVATE_SUBNET_CIDR_BLOCKS" in values
 
 
 def test_validate_headless_rejects_pi():
-    answers = _headless_answers()
-    answers.enable_pi_legacy = True
-    answers.enable_service_connect = True
-    values = inst.build_env_values(answers)
+    values = inst.build_env_values(_headless_answers())
+    values["ENABLE_PI_AGENT_ECS_SERVICE"] = "True"
+    values["ENABLE_ECS_SERVICE_CONNECT"] = "True"
     errors = inst.validate_env_values(values)
     assert any("HEADLESS" in e for e in errors)
 
@@ -126,7 +152,7 @@ def test_validate_rejects_express_with_acm():
 
 
 def test_build_env_values_mixed_subnet_tiers():
-    answers = _demo_answers()
+    answers = _production_answers()
     answers.public_subnet_mode = "existing"
     answers.private_subnet_mode = "create"
     answers.public_subnet_names = ["existing-public-a", "existing-public-b"]

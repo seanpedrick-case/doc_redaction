@@ -29,8 +29,9 @@ Usage examples::
     # Demo with Agent agent (Express) at /agent/
     python cdk_install.py --profile demo --enable-pi --yes --config-only
 
-    # Headless batch (S3 job .env -> Lambda -> one-shot ECS direct mode)
-    python cdk_install.py --profile headless --vpc-name my-vpc --yes
+    # Headless batch (S3 → Lambda → one-shot ECS direct mode)
+    python cdk_install.py --profile demo --headless --vpc-name my-vpc --yes
+    python cdk_install.py --profile production --headless --vpc-name my-vpc --yes
 
     # Production with Pi agent mode on dedicated hostname
     python cdk_install.py --profile production --enable-pi-legacy \\
@@ -737,20 +738,26 @@ def validate_subnet_answers(answers: "InstallAnswers") -> List[str]:
     errors: List[str] = []
     if answers.vpc_mode != "existing":
         return errors
-    for label, mode, names, cidrs in (
+    tiers: List[tuple] = [
         (
             "Public",
             answers.public_subnet_mode,
             answers.public_subnet_names,
             answers.public_subnet_cidrs,
         ),
-        (
-            "Private",
-            answers.private_subnet_mode,
-            answers.private_subnet_names,
-            answers.private_subnet_cidrs,
-        ),
+    ]
+    if not answers_use_express_mode(answers) and not answers_use_public_subnets_only(
+        answers
     ):
+        tiers.append(
+            (
+                "Private",
+                answers.private_subnet_mode,
+                answers.private_subnet_names,
+                answers.private_subnet_cidrs,
+            )
+        )
+    for label, mode, names, cidrs in tiers:
         if mode == "existing" and not names:
             errors.append(
                 f"{label} subnets: provide at least one existing subnet name."
@@ -880,6 +887,7 @@ class InstallAnswers:
     enable_pi_legacy: bool = False
     enable_service_connect: bool = False
     enable_s3_batch: bool = False
+    enable_headless: bool = False
     ecs_memory: str = "4096"
     pi_alb_routing: str = "path"
     pi_alb_path_prefix: str = "/agent"
@@ -973,12 +981,42 @@ def merge_preset(
     return base
 
 
+def answers_preset_profile(answers: "InstallAnswers") -> str:
+    """Preset profile for env defaults (legacy ``headless`` maps to demo)."""
+    if answers.profile == "headless":
+        return "demo"
+    return answers.profile
+
+
+def answers_use_headless(answers: "InstallAnswers") -> bool:
+    return answers.profile == "headless" or answers.enable_headless
+
+
+def answers_use_express_mode(answers: "InstallAnswers") -> bool:
+    """True when the selected install profile/options enable ECS Express ingress."""
+    if answers_use_headless(answers):
+        return False
+    preset = merge_preset(answers.profile, answers.custom_overrides)
+    return preset.get("USE_ECS_EXPRESS_MODE") == "True"
+
+
+def answers_use_public_subnets_only(answers: "InstallAnswers") -> bool:
+    """Express ingress or demo-style headless batch (public subnets, no private install)."""
+    if answers_use_express_mode(answers):
+        return True
+    if not answers_use_headless(answers):
+        return False
+    return answers_preset_profile(answers) in ("demo", "custom")
+
+
 def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
     cdk_folder = str(CDK_DIR).replace("\\", "/")
     if not cdk_folder.endswith("/"):
         cdk_folder += "/"
 
-    values: Dict[str, str] = merge_preset(answers.profile, answers.custom_overrides)
+    values: Dict[str, str] = merge_preset(
+        answers_preset_profile(answers), answers.custom_overrides
+    )
     values.update(
         {
             "CDK_PREFIX": answers.cdk_prefix,
@@ -1006,14 +1044,29 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
             ),
             "ENABLE_S3_BATCH_ECS_TRIGGER": (
                 "True"
-                if answers.enable_s3_batch or answers.profile == "headless"
+                if answers.enable_s3_batch or answers_use_headless(answers)
                 else "False"
             ),
             "ENABLE_HEADLESS_DEPLOYMENT": (
-                "True" if answers.profile == "headless" else "False"
+                "True" if answers_use_headless(answers) else "False"
             ),
         }
     )
+
+    if answers_use_headless(answers):
+        values.update(
+            {
+                "ENABLE_HEADLESS_DEPLOYMENT": "True",
+                "ENABLE_S3_BATCH_ECS_TRIGGER": "True",
+                "USE_ECS_EXPRESS_MODE": "False",
+                "USE_CLOUDFRONT": "False",
+                "RUN_USEAST_STACK": "False",
+                "COGNITO_AUTH": "False",
+                "ENABLE_PI_AGENT_EXPRESS_SERVICE": "False",
+                "ENABLE_PI_AGENT_ECS_SERVICE": "False",
+                "ENABLE_ECS_SERVICE_CONNECT": "False",
+            }
+        )
 
     use_cloudfront = values.get("USE_CLOUDFRONT") == "True"
     if answers.pi_enabled:
@@ -1061,9 +1114,15 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
         apply_subnet_tier_env(
             values, answers, tier="public", mode=answers.public_subnet_mode
         )
-        apply_subnet_tier_env(
-            values, answers, tier="private", mode=answers.private_subnet_mode
-        )
+        if answers_use_public_subnets_only(answers):
+            values["ECS_EXPRESS_USE_PUBLIC_SUBNETS"] = "True"
+            values["PRIVATE_SUBNETS_TO_USE"] = ""
+            values["PRIVATE_SUBNET_CIDR_BLOCKS"] = ""
+            values["PRIVATE_SUBNET_AVAILABILITY_ZONES"] = ""
+        else:
+            apply_subnet_tier_env(
+                values, answers, tier="private", mode=answers.private_subnet_mode
+            )
 
     if values.get("ENABLE_APPREGISTRY") == "True":
         values["APPREGISTRY_STACK_NAME"] = (
@@ -1101,7 +1160,8 @@ def validate_env_values(values: Dict[str, str]) -> List[str]:
             )
         if express:
             errors.append(
-                "ENABLE_HEADLESS_DEPLOYMENT requires USE_ECS_EXPRESS_MODE=False."
+                "ENABLE_HEADLESS_DEPLOYMENT cannot be combined with USE_ECS_EXPRESS_MODE=True "
+                "(use demo/production profile + --headless for batch-only)."
             )
         if values.get("USE_CLOUDFRONT") == "True":
             errors.append(
@@ -1752,6 +1812,7 @@ def apply_post_deploy_fixup(values: Dict[str, str], assume_yes: bool) -> bool:
             apply_cognito_secret_fixup_from_stack,
             apply_express_alb_listener_target_group_fixup,
             apply_express_disable_in_app_cognito_auth,
+            remove_express_listener_rules_without_cognito,
         )
 
         cluster_name = (
@@ -1769,6 +1830,8 @@ def apply_post_deploy_fixup(values: Dict[str, str], assume_yes: bool) -> bool:
             f"{values.get('CDK_PREFIX', '')}ParamCognitoSecret"
         )
         try:
+            if remove_express_listener_rules_without_cognito(aws_region=region):
+                fixup_applied = True
             if apply_express_alb_listener_target_group_fixup(
                 cluster_name=cluster_name,
                 main_service_name=main_service,
@@ -1955,13 +2018,24 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
             [
                 "Demonstration (Express, no CloudFront, no delete protection)",
                 "Production (ACM cert, CloudFront, delete protection)",
-                "Headless (S3 batch / direct mode — no ALB or CloudFront)",
+                "Headless shortcut (demo-style batch only — same as demo + headless)",
                 "Custom (configure individual toggles)",
             ],
         )
         answers.profile = ("demo", "production", "headless", "custom")[idx]
     else:
         answers.profile = "demo"
+
+    if getattr(args, "headless", False):
+        answers.enable_headless = True
+    elif interactive and answers.profile in ("demo", "production", "custom"):
+        answers.enable_headless = ask_yes_no(
+            "Enable headless batch-only deployment (S3 → Lambda → one-shot ECS, "
+            "no always-on web UI)?",
+            default=answers.profile == "headless",
+        )
+    elif answers.profile == "headless":
+        answers.enable_headless = True
 
     if answers.profile == "custom" and interactive:
         answers.custom_overrides["USE_ECS_EXPRESS_MODE"] = (
@@ -2058,9 +2132,19 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
             None,
         )
 
-        # Subnets (public and private tiers can be configured independently)
+        # Subnets (public only for Express or demo-style headless)
         apply_subnet_cli_flags(args, answers)
-        if interactive:
+        public_subnets_only = answers_use_public_subnets_only(answers)
+        if public_subnets_only:
+            if interactive:
+                answers.public_subnet_mode = ask_subnet_tier_mode("Public")
+            else:
+                answers.public_subnet_mode, _ = resolve_subnet_tier_modes(args)
+            answers.private_subnet_mode = "auto"
+            answers.private_subnet_names = []
+            answers.private_subnet_cidrs = []
+            answers.private_subnet_azs = []
+        elif interactive:
             layout_idx = ask_choice(
                 "Subnets in existing VPC",
                 [
@@ -2094,14 +2178,15 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
                 azs,
                 interactive=interactive,
             )
-            configure_subnet_tier(
-                answers,
-                "private",
-                answers.private_subnet_mode,
-                subnets,
-                azs,
-                interactive=interactive,
-            )
+            if not public_subnets_only:
+                configure_subnet_tier(
+                    answers,
+                    "private",
+                    answers.private_subnet_mode,
+                    subnets,
+                    azs,
+                    interactive=interactive,
+                )
 
         # Optional infra reuse
         if (
@@ -2123,10 +2208,12 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
                     answers.existing_alb_dns = albs[aidx]["dns"]
 
     # Production TLS
-    preset = merge_preset(answers.profile, answers.custom_overrides)
+    preset = merge_preset(answers_preset_profile(answers), answers.custom_overrides)
+    use_express = preset.get("USE_ECS_EXPRESS_MODE") == "True"
     if (
         preset.get("USE_CLOUDFRONT") == "True"
         and preset.get("USE_ECS_EXPRESS_MODE") != "True"
+        and not answers_use_headless(answers)
     ):
         if args.cert_arn:
             answers.acm_cert_arn = args.cert_arn
@@ -2151,7 +2238,7 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
                 "CloudFront geo restriction (e.g. GB, blank=none)", ""
             )
 
-    if answers.profile != "headless":
+    if not answers_use_headless(answers):
         configure_pi_options(
             answers,
             args,
@@ -2162,13 +2249,8 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
         answers.enable_s3_batch = True
 
     # Advanced add-ons (non-Pi agent)
-    is_express = (
-        merge_preset(answers.profile, answers.custom_overrides).get(
-            "USE_ECS_EXPRESS_MODE"
-        )
-        == "True"
-    )
-    if answers.profile == "headless" and interactive:
+    is_express = use_express and not answers_use_headless(answers)
+    if answers_use_headless(answers) and interactive:
         mem = ask("ECS task memory (MB)", answers.ecs_memory)
         if mem:
             answers.ecs_memory = mem
@@ -2201,6 +2283,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--profile",
         choices=("demo", "production", "headless", "custom"),
+        help="Base profile; combine with --headless for batch-only (no web UI)",
     )
     p.add_argument(
         "--yes", action="store_true", help="Accept defaults / skip confirmations"
@@ -2266,6 +2349,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--private-subnet-names",
         help="Comma-separated existing private subnet names (with --private-subnet-mode existing)",
+    )
+    p.add_argument(
+        "--headless",
+        action="store_true",
+        help="Batch-only: S3 job .env → Lambda → one-shot ECS (no ALB/CloudFront/always-on service)",
     )
     p.add_argument("--cert-arn", help="ACM certificate ARN (production)")
     p.add_argument("--domain", help="SSL certificate domain (production)")

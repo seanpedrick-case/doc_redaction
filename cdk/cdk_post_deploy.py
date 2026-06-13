@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Union
 import boto3
 from cdk_config import (
     AWS_REGION,
+    CLOUDFRONT_DOMAIN,
 )
 
 _TASK_DEF_REGISTER_KEYS = (
@@ -743,6 +744,64 @@ def apply_express_alb_listener_target_group_fixup(
             )
             changed = True
 
+    return changed
+
+
+def listener_rule_has_cognito_auth(actions: List[Dict[str, Any]]) -> bool:
+    return any(action.get("Type") == "authenticate-cognito" for action in actions)
+
+
+def _listener_rule_is_cloudfront_bypass_without_cognito(
+    rule: Dict[str, Any],
+    *,
+    cloudfront_host_header: str,
+) -> bool:
+    """True for legacy forward-only host-header rules matching the CloudFront domain."""
+    if listener_rule_has_cognito_auth(rule.get("Actions", [])):
+        return False
+    host = (cloudfront_host_header or "").strip()
+    if not host or host == "cloudfront_placeholder.net":
+        return False
+    for condition in rule.get("Conditions") or []:
+        if condition.get("Field") != "host-header":
+            continue
+        values = (condition.get("HostHeaderConfig") or {}).get("Values") or []
+        if host in values:
+            return True
+    return False
+
+
+def remove_express_listener_rules_without_cognito(
+    *,
+    aws_region: str = AWS_REGION,
+    cloudfront_host_header: Optional[str] = None,
+) -> bool:
+    """
+    Delete legacy Express ALB rules that forward CloudFront host traffic without Cognito.
+
+    Only removes host-header rules whose value matches ``CLOUDFRONT_DOMAIN`` (or the
+    supplied override). ECS Express-managed ``*.ecs.*.on.aws`` host rules are left
+    intact.
+    """
+    cloudfront_host = (cloudfront_host_header or CLOUDFRONT_DOMAIN or "").strip()
+    ingress = find_express_gateway_https_listener(aws_region=aws_region)
+    elbv2 = boto3.client("elbv2", region_name=aws_region)
+    listener_arn = ingress["listener_arn"]
+    changed = False
+    for rule in elbv2.describe_rules(ListenerArn=listener_arn).get("Rules", []):
+        if rule.get("IsDefault"):
+            continue
+        if not _listener_rule_is_cloudfront_bypass_without_cognito(
+            rule, cloudfront_host_header=cloudfront_host
+        ):
+            continue
+        rule_arn = rule["RuleArn"]
+        elbv2.delete_rule(RuleArn=rule_arn)
+        print(
+            "Removed legacy Express CloudFront bypass ALB listener rule "
+            f"(host {cloudfront_host!r}): {rule_arn}"
+        )
+        changed = True
     return changed
 
 
