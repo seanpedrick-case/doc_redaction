@@ -113,17 +113,6 @@ def test_build_env_values_headless():
     assert values["PRIVATE_SUBNETS_TO_USE"] == ""
 
 
-def test_build_env_values_demo_headless():
-    answers = _demo_answers()
-    answers.enable_headless = True
-    values = inst.build_env_values(answers)
-    assert values["USE_ECS_EXPRESS_MODE"] == "False"
-    assert values["ENABLE_HEADLESS_DEPLOYMENT"] == "True"
-    assert values["ENABLE_RESOURCE_DELETE_PROTECTION"] == "False"
-    assert values["ECS_EXPRESS_USE_PUBLIC_SUBNETS"] == "True"
-    assert values["PRIVATE_SUBNETS_TO_USE"] == ""
-
-
 def test_build_env_values_production_headless():
     answers = _production_answers()
     answers.enable_headless = True
@@ -134,6 +123,30 @@ def test_build_env_values_production_headless():
     assert values["ENABLE_RESOURCE_DELETE_PROTECTION"] == "True"
     assert values.get("ECS_EXPRESS_USE_PUBLIC_SUBNETS") != "True"
     assert "PRIVATE_SUBNET_CIDR_BLOCKS" in values
+
+
+def test_validate_install_answers_rejects_demo_headless():
+    answers = _demo_answers()
+    answers.enable_headless = True
+    errors = inst.validate_install_answers(answers)
+    assert any("Demonstration" in err for err in errors)
+
+
+def test_validate_install_answers_rejects_custom_express_headless():
+    answers = inst.InstallAnswers(profile="custom", enable_headless=True)
+    answers.custom_overrides["USE_ECS_EXPRESS_MODE"] = "True"
+    errors = inst.validate_install_answers(answers)
+    assert any("USE_ECS_EXPRESS_MODE=False" in err for err in errors)
+
+
+def test_profile_allows_headless_add_on():
+    assert inst.profile_allows_headless_add_on(_demo_answers()) is False
+    assert inst.profile_allows_headless_add_on(_production_answers()) is True
+    assert inst.profile_allows_headless_add_on(_headless_answers()) is True
+    custom = inst.InstallAnswers(profile="custom")
+    assert inst.profile_allows_headless_add_on(custom) is True
+    custom.custom_overrides["USE_ECS_EXPRESS_MODE"] = "True"
+    assert inst.profile_allows_headless_add_on(custom) is False
 
 
 def test_validate_headless_rejects_pi():
@@ -217,6 +230,77 @@ def test_resolve_subnet_tier_modes_per_tier_override():
     public, private = inst.resolve_subnet_tier_modes(args)
     assert public == "existing"
     assert private == "create"
+
+
+def test_suggest_vpc_cidr_block_empty_region():
+    assert inst.suggest_vpc_cidr_block([]) == "10.0.0.0/24"
+
+
+def test_suggest_vpc_cidr_block_skips_overlaps():
+    assert inst.suggest_vpc_cidr_block(["10.0.0.0/24"]) == "10.0.1.0/24"
+    assert inst.suggest_vpc_cidr_block(["10.0.0.0/16"]) == "10.1.0.0/24"
+
+
+def test_suggest_subnet_cidr_blocks_lowest_available():
+    blocks = inst.suggest_subnet_cidr_blocks("10.0.0.0/24", ["10.0.0.0/28"], 2)
+    assert blocks == ["10.0.0.16/28", "10.0.0.32/28"]
+
+
+def test_suggest_subnet_cidr_blocks_respects_reserved():
+    blocks = inst.suggest_subnet_cidr_blocks(
+        "10.0.0.0/24",
+        [],
+        1,
+        reserved_cidrs=["10.0.0.0/28"],
+    )
+    assert blocks == ["10.0.0.16/28"]
+
+
+def test_vpc_cidr_blocks_from_describe_includes_associations():
+    vpc = {
+        "CidrBlock": "10.0.0.0/16",
+        "CidrBlockAssociationSet": [{"CidrBlock": "10.1.0.0/16"}],
+    }
+    assert inst.vpc_cidr_blocks_from_describe(vpc) == [
+        "10.0.0.0/16",
+        "10.1.0.0/16",
+    ]
+
+
+def test_build_app_config_env_values_express_alb_cognito():
+    values = inst.build_env_values(_demo_answers())
+    updates = inst.build_app_config_env_values(values)
+    assert updates["COGNITO_AUTH"] == "False"
+    assert updates["RUN_AWS_FUNCTIONS"] == "True"
+    assert updates["DOCUMENT_REDACTION_BUCKET"].endswith("s3-logs")
+
+
+def test_build_app_config_env_values_headless():
+    answers = _headless_answers()
+    values = inst.build_env_values(answers)
+    updates = inst.build_app_config_env_values(values)
+    assert updates["COGNITO_AUTH"] == "False"
+
+
+def test_write_app_config_env_from_example(tmp_path, monkeypatch):
+    example = tmp_path / "app_config.env.example"
+    example.write_text(
+        "RUN_FASTAPI=True\nDOCUMENT_REDACTION_BUCKET=placeholder\n",
+        encoding="utf-8",
+    )
+    target = tmp_path / "app_config.env"
+    monkeypatch.setattr(inst, "APP_CONFIG_ENV_EXAMPLE", example)
+    monkeypatch.setattr(inst, "APP_CONFIG_ENV_PATH", target)
+
+    answers = _demo_answers()
+    answers.write_app_config_env = True
+    values = inst.build_env_values(answers)
+    inst.write_app_config_env_file(answers, values)
+
+    written = inst.read_env_file(target)
+    assert written["RUN_FASTAPI"] == "True"
+    assert written["DOCUMENT_REDACTION_BUCKET"].endswith("s3-logs")
+    assert written["COGNITO_AUTH"] == "False"
 
 
 def test_format_list_env():

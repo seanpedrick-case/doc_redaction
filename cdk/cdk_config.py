@@ -160,7 +160,10 @@ CDK_FOLDER = get_or_create_env_var(
 )  # FULL_PATH_TO_CDK_FOLDER_HERE (with forward slash)
 
 # App runtime config (uploaded to S3 for legacy Fargate; inlined for ECS Express Mode)
-_app_config_rel = os.path.join(CONFIG_FOLDER, "config.env").replace("\\", "/")
+APP_CONFIG_ENV_BASENAME = "app_config.env"
+_app_config_rel = os.path.join(CONFIG_FOLDER, APP_CONFIG_ENV_BASENAME).replace(
+    "\\", "/"
+)
 APP_CONFIG_ENV_FILE = get_or_create_env_var(
     "APP_CONFIG_ENV_FILE",
     (

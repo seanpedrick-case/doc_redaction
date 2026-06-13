@@ -33,6 +33,7 @@ from cdk_config import (
     ALB_NAME,
     ALB_NAME_SECURITY_GROUP_NAME,
     ALB_TARGET_GROUP_NAME,
+    APP_CONFIG_ENV_BASENAME,
     APP_CONFIG_ENV_FILE,
     AWS_ACCOUNT_ID,
     AWS_MANAGED_TASK_ROLES_LIST,
@@ -2192,7 +2193,11 @@ class CdkStack(Stack):
                             },
                         },
                         "environmentFiles": [
-                            {"value": bucket.bucket_arn + "/config.env", "type": "s3"}
+                            {
+                                "value": bucket.bucket_arn
+                                + f"/{APP_CONFIG_ENV_BASENAME}",
+                                "type": "s3",
+                            }
                         ],
                         "memoryReservation": int(task_def_params["memory"])
                         - 512,  # Reserve some memory for the container
@@ -2884,7 +2889,7 @@ class CdkStack(Stack):
                 self,
                 "ServiceConnectAgentApiUrl",
                 value=f"{sc_base}/agent",
-                description="FastAPI Agent API prefix (when RUN_FASTAPI=True in config.env)",
+                description="FastAPI Agent API prefix (when RUN_FASTAPI=True in app_config.env)",
             )
             CfnOutput(
                 self,

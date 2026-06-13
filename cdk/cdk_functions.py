@@ -32,6 +32,7 @@ from aws_cdk import custom_resources as cr
 from botocore.exceptions import ClientError, NoCredentialsError
 from cdk_config import (
     ACCESS_LOG_DYNAMODB_TABLE_NAME,
+    APP_CONFIG_ENV_BASENAME,
     AWS_REGION,
     ECS_AVAILABILITY_ZONE_REBALANCING,
     ENABLE_RESOURCE_DELETE_PROTECTION,
@@ -2321,7 +2322,7 @@ def create_basic_config_env(
     alb_cognito: bool = False,
 ):
     """
-    Create a basic config.env file for the deployed redaction app.
+    Create a basic app_config.env file for the deployed redaction app.
 
     ``alb_cognito=True`` disables in-app Gradio Cognito login when the ALB
     ``authenticate-cognito`` action already protects the service (Express Mode).
@@ -2343,7 +2344,7 @@ def create_basic_config_env(
     }
 
     _ensure_folder_exists(out_dir + "/")
-    env_file_path = os.path.abspath(os.path.join(out_dir, "config.env"))
+    env_file_path = os.path.abspath(os.path.join(out_dir, APP_CONFIG_ENV_BASENAME))
 
     if not os.path.exists(env_file_path):
         with open(env_file_path, "w", encoding="utf-8"):
@@ -2362,7 +2363,7 @@ def load_app_config_env_for_express(
     overrides: Optional[Dict[str, str]] = None,
 ) -> List[ecs.CfnExpressGatewayService.KeyValuePairProperty]:
     """
-    Load KEY=VALUE pairs from config/config.env for Express PrimaryContainer.environment.
+    Load KEY=VALUE pairs from config/app_config.env for Express PrimaryContainer.environment.
 
     Uses the same file written by create_basic_config_env() and uploaded to S3 on the
     legacy Fargate path (environmentFiles). ``overrides`` replace keys after loading

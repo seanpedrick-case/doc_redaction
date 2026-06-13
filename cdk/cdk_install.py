@@ -30,7 +30,7 @@ Usage examples::
     python cdk_install.py --profile demo --enable-pi --yes --config-only
 
     # Headless batch (S3 → Lambda → one-shot ECS direct mode)
-    python cdk_install.py --profile demo --headless --vpc-name my-vpc --yes
+    python cdk_install.py --profile headless --vpc-name my-vpc --yes
     python cdk_install.py --profile production --headless --vpc-name my-vpc --yes
 
     # Production with Pi agent mode on dedicated hostname
@@ -41,6 +41,7 @@ Usage examples::
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import re
@@ -56,6 +57,8 @@ CDK_DIR = Path(__file__).resolve().parent
 REPO_ROOT = CDK_DIR.parent
 CONFIG_DIR = CDK_DIR / "config"
 ENV_PATH = CONFIG_DIR / "cdk_config.env"
+APP_CONFIG_ENV_PATH = CONFIG_DIR / "app_config.env"
+APP_CONFIG_ENV_EXAMPLE = CONFIG_DIR / "app_config.env.example"
 PI_AGENT_ENV_PATH = CONFIG_DIR / "pi_agent.env"
 PI_AGENT_ENV_EXAMPLE = REPO_ROOT / "config" / "pi_agent.env.example"
 PI_ALB_ROUTING_MODES = ("path", "host", "both")
@@ -478,14 +481,153 @@ def list_vpcs(region: str) -> List[Dict[str, str]]:
             if tag.get("Key") == "Name":
                 name = tag.get("Value", "")
                 break
+        cidrs = vpc_cidr_blocks_from_describe(vpc)
         vpcs.append(
             {
                 "id": vpc["VpcId"],
                 "name": name or vpc["VpcId"],
-                "cidr": vpc.get("CidrBlock", ""),
+                "cidr": cidrs[0] if cidrs else "",
+                "cidrs": ",".join(cidrs),
             }
         )
     return sorted(vpcs, key=lambda x: x["name"])
+
+
+def vpc_cidr_blocks_from_describe(vpc: Dict[str, Any]) -> List[str]:
+    """Primary and associated IPv4 CIDR blocks for one ``describe_vpcs`` entry."""
+    blocks: List[str] = []
+    seen: set[str] = set()
+    primary = (vpc.get("CidrBlock") or "").strip()
+    if primary and primary not in seen:
+        seen.add(primary)
+        blocks.append(primary)
+    for assoc in vpc.get("CidrBlockAssociationSet") or []:
+        cidr = (assoc.get("CidrBlock") or "").strip()
+        if cidr and cidr not in seen:
+            seen.add(cidr)
+            blocks.append(cidr)
+    return blocks
+
+
+def list_vpc_cidr_blocks_in_region(region: str) -> List[str]:
+    """All IPv4 VPC CIDR blocks in the account/region (primary + associations)."""
+    import boto3
+
+    ec2 = boto3.client("ec2", region_name=region)
+    blocks: List[str] = []
+    seen: set[str] = set()
+    for vpc in ec2.describe_vpcs().get("Vpcs", []):
+        for cidr in vpc_cidr_blocks_from_describe(vpc):
+            if cidr not in seen:
+                seen.add(cidr)
+                blocks.append(cidr)
+    return blocks
+
+
+VPC_CIDR_PREFIX_LEN = 24
+SUBNET_CIDR_PREFIX_LEN = 28
+_VPC_CIDR_SEARCH_SUPERNETS = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+
+
+def parse_ipv4_networks(cidrs: Sequence[str]) -> List[ipaddress.IPv4Network]:
+    networks: List[ipaddress.IPv4Network] = []
+    for cidr in cidrs:
+        raw = (cidr or "").strip()
+        if not raw:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(raw, strict=False))
+        except ValueError:
+            continue
+    return networks
+
+
+def suggest_vpc_cidr_block(
+    existing_vpc_cidrs: Sequence[str],
+    *,
+    prefix_len: int = VPC_CIDR_PREFIX_LEN,
+    search_supernets: Sequence[str] = _VPC_CIDR_SEARCH_SUPERNETS,
+) -> str:
+    """Return the lowest non-overlapping ``prefix_len`` block in RFC1918 space."""
+    occupied = parse_ipv4_networks(existing_vpc_cidrs)
+    for supernet_cidr in search_supernets:
+        supernet = ipaddress.ip_network(supernet_cidr, strict=False)
+        for candidate in supernet.subnets(new_prefix=prefix_len):
+            if any(candidate.overlaps(block) for block in occupied):
+                continue
+            return str(candidate)
+    raise ValueError(
+        f"No unused /{prefix_len} VPC CIDR found in region "
+        f"({len(occupied)} existing block(s))."
+    )
+
+
+def suggest_subnet_cidr_blocks(
+    vpc_cidr: str,
+    existing_subnet_cidrs: Sequence[str],
+    count: int,
+    *,
+    prefix_len: int = SUBNET_CIDR_PREFIX_LEN,
+    reserved_cidrs: Optional[Sequence[str]] = None,
+) -> List[str]:
+    """Return ``count`` lowest non-overlapping ``prefix_len`` blocks inside ``vpc_cidr``."""
+    if count < 1:
+        return []
+    vpc_net = ipaddress.ip_network(vpc_cidr.strip(), strict=False)
+    occupied = parse_ipv4_networks(existing_subnet_cidrs)
+    if reserved_cidrs:
+        occupied.extend(parse_ipv4_networks(reserved_cidrs))
+
+    suggestions: List[str] = []
+    for candidate in vpc_net.subnets(new_prefix=prefix_len):
+        if any(candidate.overlaps(block) for block in occupied):
+            continue
+        suggestions.append(str(candidate))
+        occupied.append(candidate)
+        if len(suggestions) >= count:
+            return suggestions
+
+    raise ValueError(
+        f"Only {len(suggestions)} available /{prefix_len} subnet block(s) in "
+        f"{vpc_cidr}; need {count}."
+    )
+
+
+def prompt_new_vpc_cidr(answers: "InstallAnswers", *, interactive: bool) -> None:
+    """Fill ``answers.new_vpc_cidr`` via auto-suggest and/or manual wizard prompt."""
+    if answers.new_vpc_cidr:
+        return
+
+    fallback = "10.0.0.0/24"
+    auto_prompt = (
+        f"Auto-select lowest available /{VPC_CIDR_PREFIX_LEN} VPC CIDR "
+        f"in {answers.aws_region}?"
+    )
+
+    def _auto_select() -> bool:
+        try:
+            occupied = list_vpc_cidr_blocks_in_region(answers.aws_region)
+            answers.new_vpc_cidr = suggest_vpc_cidr_block(occupied)
+            print(f"Selected VPC CIDR: {answers.new_vpc_cidr}")
+            return True
+        except ValueError as exc:
+            print(f"Warning: {exc}")
+            return False
+
+    if interactive:
+        if ask_yes_no(auto_prompt, default=True):
+            if not _auto_select():
+                answers.new_vpc_cidr = ask("New VPC CIDR", fallback)
+        else:
+            default_cidr = fallback
+            try:
+                occupied = list_vpc_cidr_blocks_in_region(answers.aws_region)
+                default_cidr = suggest_vpc_cidr_block(occupied)
+            except ValueError:
+                pass
+            answers.new_vpc_cidr = ask("New VPC CIDR", default_cidr)
+    elif not _auto_select():
+        answers.new_vpc_cidr = fallback
 
 
 def list_availability_zones(region: str) -> List[str]:
@@ -790,6 +932,8 @@ def configure_subnet_tier(
     azs: Sequence[str],
     *,
     interactive: bool,
+    vpc_cidr: str = "",
+    reserved_subnet_cidrs: Optional[Sequence[str]] = None,
 ) -> None:
     """Collect subnet names/CIDRs for one tier in the wizard."""
     is_public = tier == "public"
@@ -845,17 +989,55 @@ def configure_subnet_tier(
 
     if interactive:
         print(f"Suggested AZs for {label.lower()} subnets: {', '.join(azs)}")
-        cidrs_list.clear()
-        azs_list.clear()
-        for i, name in enumerate(names):
-            cidr = ask(
-                f"CIDR for {label.lower()} {name}",
-                f"10.0.{cidr_base + i}.0/28",
+        auto_assign = ask_yes_no(
+            f"Auto-assign lowest available /{SUBNET_CIDR_PREFIX_LEN} CIDR blocks "
+            f"for {label.lower()} subnets?",
+            default=True,
+        )
+    else:
+        auto_assign = bool(vpc_cidr)
+
+    existing_subnet_cidrs = [
+        subnet.get("cidr", "") for subnet in vpc_subnets if subnet.get("cidr")
+    ]
+    suggested: Optional[List[str]] = None
+    if auto_assign and vpc_cidr:
+        try:
+            suggested = suggest_subnet_cidr_blocks(
+                vpc_cidr,
+                existing_subnet_cidrs,
+                len(names),
+                reserved_cidrs=reserved_subnet_cidrs,
             )
-            cidrs_list.append(cidr)
-            azs_list.append(azs[i % len(azs)])
-    elif not azs_list:
-        azs_list.extend(azs[:n_az])
+        except ValueError as exc:
+            print(f"Warning: {exc}")
+            if not interactive:
+                raise SystemExit(str(exc)) from exc
+
+    cidrs_list.clear()
+    azs_list.clear()
+    for i, name in enumerate(names):
+        if suggested:
+            cidr = suggested[i]
+            if interactive:
+                print(f"  {name}: {cidr}")
+        elif interactive:
+            default_cidr = f"10.0.{cidr_base + i}.0/{SUBNET_CIDR_PREFIX_LEN}"
+            if vpc_cidr:
+                try:
+                    default_cidr = suggest_subnet_cidr_blocks(
+                        vpc_cidr,
+                        existing_subnet_cidrs + cidrs_list,
+                        1,
+                        reserved_cidrs=reserved_subnet_cidrs,
+                    )[0]
+                except ValueError:
+                    pass
+            cidr = ask(f"CIDR for {label.lower()} {name}", default_cidr)
+        else:
+            cidr = f"10.0.{cidr_base + i}.0/{SUBNET_CIDR_PREFIX_LEN}"
+        cidrs_list.append(cidr)
+        azs_list.append(azs[i % len(azs)])
 
 
 @dataclass
@@ -898,6 +1080,8 @@ class InstallAnswers:
     pi_default_provider: str = "amazon-bedrock"
     write_pi_agent_env: bool = True
     overwrite_pi_agent_env: bool = False
+    write_app_config_env: bool = True
+    overwrite_app_config_env: bool = False
     custom_overrides: Dict[str, str] = field(default_factory=dict)
     python_path: Optional[str] = None
 
@@ -990,6 +1174,47 @@ def answers_preset_profile(answers: "InstallAnswers") -> str:
 
 def answers_use_headless(answers: "InstallAnswers") -> bool:
     return answers.profile == "headless" or answers.enable_headless
+
+
+def profile_allows_headless_add_on(answers: "InstallAnswers") -> bool:
+    """Headless batch is incompatible with the Demonstration (Express) route."""
+    if answers.profile == "demo":
+        return False
+    if answers.profile in ("production", "headless"):
+        return True
+    if answers.profile == "custom":
+        return answers.custom_overrides.get("USE_ECS_EXPRESS_MODE") != "True"
+    return False
+
+
+def headless_profile_error(answers: "InstallAnswers") -> Optional[str]:
+    if not answers_use_headless(answers):
+        return None
+    if answers.profile == "headless":
+        return None
+    if answers.profile == "demo":
+        return (
+            "Headless batch mode is not available with the Demonstration (Express) "
+            "profile. Use the Headless shortcut profile, Production with headless, "
+            "or Custom without ECS Express."
+        )
+    if (
+        answers.profile == "custom"
+        and answers.custom_overrides.get("USE_ECS_EXPRESS_MODE") == "True"
+    ):
+        return (
+            "Headless batch mode requires USE_ECS_EXPRESS_MODE=False. "
+            "Disable ECS Express in the custom profile or omit --headless."
+        )
+    return None
+
+
+def validate_install_answers(answers: "InstallAnswers") -> List[str]:
+    errors: List[str] = []
+    msg = headless_profile_error(answers)
+    if msg:
+        errors.append(msg)
+    return errors
 
 
 def answers_use_express_mode(answers: "InstallAnswers") -> bool:
@@ -1161,7 +1386,7 @@ def validate_env_values(values: Dict[str, str]) -> List[str]:
         if express:
             errors.append(
                 "ENABLE_HEADLESS_DEPLOYMENT cannot be combined with USE_ECS_EXPRESS_MODE=True "
-                "(use demo/production profile + --headless for batch-only)."
+                "(use --profile headless, production --headless, or custom without Express)."
             )
         if values.get("USE_CLOUDFRONT") == "True":
             errors.append(
@@ -1229,6 +1454,84 @@ def validate_env_values(values: Dict[str, str]) -> List[str]:
             )
 
     return errors
+
+
+def build_app_config_env_values(values: Dict[str, str]) -> Dict[str, str]:
+    """AWS deployment keys merged into config/app_config.env for ECS tasks."""
+    prefix_lower = (values.get("CDK_PREFIX") or "").lower()
+    headless = values.get("ENABLE_HEADLESS_DEPLOYMENT") == "True"
+    express = values.get("USE_ECS_EXPRESS_MODE") == "True"
+    alb_cognito = express and not headless
+
+    def _name(env_key: str, suffix: str) -> str:
+        return (values.get(env_key) or "").strip() or f"{prefix_lower}{suffix}"
+
+    return {
+        "COGNITO_AUTH": "False" if headless or alb_cognito else "True",
+        "RUN_AWS_FUNCTIONS": "True",
+        "DISPLAY_FILE_NAMES_IN_LOGS": "False",
+        "SESSION_OUTPUT_FOLDER": "True",
+        "SAVE_LOGS_TO_DYNAMODB": "True",
+        "SHOW_COSTS": "True",
+        "SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS": "True",
+        "LOAD_PREVIOUS_TEXTRACT_JOBS_S3": "True",
+        "DOCUMENT_REDACTION_BUCKET": _name("S3_LOG_CONFIG_BUCKET_NAME", "s3-logs"),
+        "TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET": _name(
+            "S3_OUTPUT_BUCKET_NAME", "s3-output"
+        ),
+        "ACCESS_LOG_DYNAMODB_TABLE_NAME": _name(
+            "ACCESS_LOG_DYNAMODB_TABLE_NAME", "dynamodb-access-logs"
+        ),
+        "FEEDBACK_LOG_DYNAMODB_TABLE_NAME": _name(
+            "FEEDBACK_LOG_DYNAMODB_TABLE_NAME", "dynamodb-feedback-logs"
+        ),
+        "USAGE_LOG_DYNAMODB_TABLE_NAME": _name(
+            "USAGE_LOG_DYNAMODB_TABLE_NAME", "dynamodb-usage-logs"
+        ),
+    }
+
+
+def write_app_config_env_file(
+    answers: InstallAnswers,
+    values: Dict[str, str],
+    *,
+    overwrite: bool = False,
+) -> Optional[Path]:
+    if not answers.write_app_config_env:
+        return None
+
+    updates = build_app_config_env_values(values)
+    APP_CONFIG_ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    if APP_CONFIG_ENV_PATH.is_file() and not overwrite:
+        existing = read_env_file(APP_CONFIG_ENV_PATH)
+        existing.update(updates)
+        backup_file(APP_CONFIG_ENV_PATH)
+        lines = [f"{k}={v}" for k, v in existing.items()]
+        APP_CONFIG_ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print(f"Updated {APP_CONFIG_ENV_PATH} (AWS deployment keys merged)")
+        return APP_CONFIG_ENV_PATH
+
+    if APP_CONFIG_ENV_EXAMPLE.is_file() and not overwrite:
+        if APP_CONFIG_ENV_PATH.is_file():
+            backup_file(APP_CONFIG_ENV_PATH)
+        shutil.copy2(APP_CONFIG_ENV_EXAMPLE, APP_CONFIG_ENV_PATH)
+        existing = read_env_file(APP_CONFIG_ENV_PATH)
+        existing.update(updates)
+        lines = [f"{k}={v}" for k, v in existing.items()]
+        APP_CONFIG_ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print(f"Created {APP_CONFIG_ENV_PATH} from example + AWS defaults")
+        return APP_CONFIG_ENV_PATH
+
+    if APP_CONFIG_ENV_PATH.is_file():
+        backup_file(APP_CONFIG_ENV_PATH)
+    lines = [
+        "# Generated by cdk_install.py — app runtime config for AWS ECS",
+        *[f"{k}={v}" for k, v in updates.items()],
+    ]
+    APP_CONFIG_ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"Wrote {APP_CONFIG_ENV_PATH}")
+    return APP_CONFIG_ENV_PATH
 
 
 def build_pi_agent_env_values(answers: InstallAnswers) -> Dict[str, str]:
@@ -1906,6 +2209,43 @@ def apply_pi_cli_flags(args: argparse.Namespace, answers: InstallAnswers) -> Non
         answers.write_pi_agent_env = False
 
 
+def configure_app_config_options(
+    answers: InstallAnswers,
+    args: argparse.Namespace,
+    *,
+    interactive: bool,
+) -> None:
+    if getattr(args, "skip_app_config_env", False):
+        answers.write_app_config_env = False
+        return
+
+    if getattr(args, "overwrite_app_config_env", False):
+        answers.write_app_config_env = True
+        answers.overwrite_app_config_env = True
+        return
+
+    if not interactive:
+        answers.write_app_config_env = True
+        return
+
+    example_label = (
+        APP_CONFIG_ENV_EXAMPLE.name if APP_CONFIG_ENV_EXAMPLE.is_file() else "defaults"
+    )
+    if ask_yes_no(
+        f"Write/update {APP_CONFIG_ENV_PATH.name} for the deployed app "
+        f"(from {example_label} + AWS resource names)?",
+        default=True,
+    ):
+        answers.write_app_config_env = True
+        if APP_CONFIG_ENV_PATH.is_file():
+            answers.overwrite_app_config_env = ask_yes_no(
+                f"{APP_CONFIG_ENV_PATH.name} exists — replace file from example template?",
+                default=False,
+            )
+    else:
+        answers.write_app_config_env = False
+
+
 def configure_pi_options(
     answers: InstallAnswers,
     args: argparse.Namespace,
@@ -2018,7 +2358,7 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
             [
                 "Demonstration (Express, no CloudFront, no delete protection)",
                 "Production (ACM cert, CloudFront, delete protection)",
-                "Headless shortcut (demo-style batch only — same as demo + headless)",
+                "Headless batch only (demo-style networking, no Express web UI)",
                 "Custom (configure individual toggles)",
             ],
         )
@@ -2026,16 +2366,22 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
     else:
         answers.profile = "demo"
 
-    if getattr(args, "headless", False):
+    if answers.profile == "headless":
         answers.enable_headless = True
-    elif interactive and answers.profile in ("demo", "production", "custom"):
+    elif getattr(args, "headless", False):
+        if answers.profile == "demo":
+            raise SystemExit(
+                "Headless batch mode is not available with --profile demo (Express). "
+                "Use --profile headless, --profile production --headless, "
+                "or --profile custom without ECS Express."
+            )
+        answers.enable_headless = True
+    elif interactive and answers.profile == "production":
         answers.enable_headless = ask_yes_no(
             "Enable headless batch-only deployment (S3 → Lambda → one-shot ECS, "
             "no always-on web UI)?",
-            default=answers.profile == "headless",
+            default=False,
         )
-    elif answers.profile == "headless":
-        answers.enable_headless = True
 
     if answers.profile == "custom" and interactive:
         answers.custom_overrides["USE_ECS_EXPRESS_MODE"] = (
@@ -2058,6 +2404,23 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
         answers.custom_overrides["ENABLE_APPREGISTRY"] = (
             "True" if ask_yes_no("Enable AppRegistry?", True) else "False"
         )
+        if getattr(args, "headless", False):
+            if answers.custom_overrides.get("USE_ECS_EXPRESS_MODE") == "True":
+                raise SystemExit(
+                    "Headless batch mode requires USE_ECS_EXPRESS_MODE=False in "
+                    "the custom profile."
+                )
+            answers.enable_headless = True
+        elif profile_allows_headless_add_on(answers):
+            answers.enable_headless = ask_yes_no(
+                "Enable headless batch-only deployment (S3 → Lambda → one-shot ECS, "
+                "no always-on web UI)?",
+                default=False,
+            )
+
+    headless_err = headless_profile_error(answers)
+    if headless_err:
+        raise SystemExit(headless_err)
 
     try:
         account, region = get_aws_identity(args.region)
@@ -2110,9 +2473,7 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
         answers.vpc_mode = "existing"
 
     if answers.vpc_mode == "new":
-        answers.new_vpc_cidr = answers.new_vpc_cidr or ask(
-            "New VPC CIDR", "10.0.0.0/24"
-        )
+        prompt_new_vpc_cidr(answers, interactive=interactive)
     else:
         if not answers.vpc_name:
             vpcs = list_vpcs(answers.aws_region)
@@ -2168,6 +2529,10 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
             )
 
         azs = list_availability_zones(answers.aws_region)[:3]
+        vpc_cidr = next(
+            (v["cidr"] for v in vpc_list if v["name"] == answers.vpc_name),
+            "",
+        )
         if vpc_id:
             subnets = list_subnets_in_vpc(vpc_id, answers.aws_region)
             configure_subnet_tier(
@@ -2177,8 +2542,14 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
                 subnets,
                 azs,
                 interactive=interactive,
+                vpc_cidr=vpc_cidr,
             )
             if not public_subnets_only:
+                reserved_public = (
+                    list(answers.public_subnet_cidrs)
+                    if answers.public_subnet_mode == "create"
+                    else []
+                )
                 configure_subnet_tier(
                     answers,
                     "private",
@@ -2186,6 +2557,8 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
                     subnets,
                     azs,
                     interactive=interactive,
+                    vpc_cidr=vpc_cidr,
+                    reserved_subnet_cidrs=reserved_public,
                 )
 
         # Optional infra reuse
@@ -2265,6 +2638,8 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
         if mem:
             answers.ecs_memory = mem
 
+    configure_app_config_options(answers, args, interactive=interactive)
+
     answers.python_path = args.python
     return answers
 
@@ -2283,7 +2658,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--profile",
         choices=("demo", "production", "headless", "custom"),
-        help="Base profile; combine with --headless for batch-only (no web UI)",
+        help="Base profile; use --profile headless or production --headless for batch-only",
     )
     p.add_argument(
         "--yes", action="store_true", help="Accept defaults / skip confirmations"
@@ -2353,7 +2728,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--headless",
         action="store_true",
-        help="Batch-only: S3 job .env → Lambda → one-shot ECS (no ALB/CloudFront/always-on service)",
+        help="Batch-only add-on (production/custom without Express only; not valid with demo)",
     )
     p.add_argument("--cert-arn", help="ACM certificate ARN (production)")
     p.add_argument("--domain", help="SSL certificate domain (production)")
@@ -2410,6 +2785,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--skip-pi-agent-env",
         action="store_true",
         help="Do not write config/pi_agent.env",
+    )
+    p.add_argument(
+        "--skip-app-config-env",
+        action="store_true",
+        help="Do not write cdk/config/app_config.env from app_config.env.example",
+    )
+    p.add_argument(
+        "--overwrite-app-config-env",
+        action="store_true",
+        help="Replace existing config/app_config.env from app_config.env.example (non-interactive)",
     )
     return p
 
@@ -2473,7 +2858,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             )
     else:
         answers = run_wizard(args)
-        errors = validate_subnet_answers(answers)
+        errors = validate_install_answers(answers)
+        errors.extend(validate_subnet_answers(answers))
         errors.extend(enrich_existing_subnet_details_from_aws(answers))
         values = build_env_values(answers)
         errors.extend(validate_env_values(values))
@@ -2498,6 +2884,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return 0
 
         write_env_file(ENV_PATH, values)
+        if answers.write_app_config_env:
+            write_app_config_env_file(
+                answers,
+                values,
+                overwrite=answers.overwrite_app_config_env,
+            )
         if answers.pi_enabled:
             write_pi_agent_env_file(
                 answers,
@@ -2606,6 +2998,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         ep = values.get("ECS_EXPRESS_COGNITO_REDIRECT_BASE", "")
         if ep:
             print(f"  - Express endpoint: {ep}")
+    if APP_CONFIG_ENV_PATH.is_file():
+        print(f"  - App runtime config: {APP_CONFIG_ENV_PATH} (uploaded by quickstart)")
     print(f"  - Config: {ENV_PATH}")
     return 0
 

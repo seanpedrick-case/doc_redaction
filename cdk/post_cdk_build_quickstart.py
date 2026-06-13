@@ -38,7 +38,7 @@ from cdk_post_deploy import (
 )
 from tqdm import tqdm
 
-# Create basic config.env file that user can use to run the app later. Input is the folder it is saved into.
+# Create basic app_config.env file that user can use to run the app later. Input is the folder it is saved into.
 create_basic_config_env(
     "config",
     headless=ENABLE_HEADLESS_DEPLOYMENT == "True",
@@ -56,9 +56,11 @@ if _enable_pi_image_build:
     print("Starting Pi agent CodeBuild project.")
     start_codebuild_build(project_name=CODEBUILD_PI_PROJECT_NAME)
 
-# Upload config.env file to S3 bucket
+# Upload app_config.env file to S3 bucket
 upload_file_to_s3(
-    local_file_paths="config/config.env", s3_key="", s3_bucket=S3_LOG_CONFIG_BUCKET_NAME
+    local_file_paths="config/app_config.env",
+    s3_key="",
+    s3_bucket=S3_LOG_CONFIG_BUCKET_NAME,
 )
 
 if _enable_pi_image_build:
