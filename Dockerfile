@@ -39,11 +39,14 @@ ENV PADDLE_GPU_ENABLED=${PADDLE_GPU_ENABLED}
 RUN if [ "$INSTALL_PADDLEOCR" = "True" ] && [ "$PADDLE_GPU_ENABLED" = "False" ]; then \
     pip install --verbose --no-cache-dir --target=/install "protobuf<=7.34.0" && \
     pip install --verbose --no-cache-dir --target=/install "paddlepaddle<=3.2.1" && \
-    pip install --verbose --no-cache-dir --target=/install "paddleocr<=3.3.0"; \
+    pip install --verbose --no-cache-dir --target=/install "paddleocr<=3.7.0"; \
 elif [ "$INSTALL_PADDLEOCR" = "True" ] && [ "$PADDLE_GPU_ENABLED" = "True" ]; then \
     pip install --verbose --no-cache-dir --target=/install "protobuf<=7.34.0" && \
-    pip install --verbose --no-cache-dir --target=/install "paddlepaddle-gpu<=3.2.1" --index-url https://www.paddlepaddle.org.cn/packages/stable/cu129/ && \
-    pip install --verbose --no-cache-dir --target=/install "paddleocr<=3.3.0"; \
+    pip install --verbose --no-cache-dir --target=/install "paddlepaddle<=3.2.1" && \
+    pip install --verbose --no-cache-dir --target=/install "paddleocr<=3.7.0" && \
+    pip install --verbose --no-cache-dir --target=/install "torch<=2.9.1" --index-url https://download.pytorch.org/whl/cu129 && \
+    pip install --verbose --no-cache-dir --target=/install "torchvision<=0.24.1" --index-url https://download.pytorch.org/whl/cu129 && \
+    pip install --verbose --no-cache-dir --target=/install "transformers<=5.12.0"; \
 fi
 
 ARG INSTALL_VLM=False
@@ -57,16 +60,16 @@ RUN if [ "$INSTALL_VLM" = "True" ] && [ "$TORCH_GPU_ENABLED" = "False" ]; then \
     pip install --verbose --no-cache-dir --target=/install \
     "torch==2.9.1+cpu" \
     "torchvision==0.24.1+cpu" \
-    "transformers<=5.5.4" \
+    "transformers<=5.12.0" \
     "accelerate<=1.13.0" \
     "bitsandbytes<=0.49.2" \
     "sentencepiece<=0.2.1" \
     --extra-index-url https://download.pytorch.org/whl/cpu; \
 elif [ "$INSTALL_VLM" = "True" ] && [ "$TORCH_GPU_ENABLED" = "True" ]; then \
-    pip install --verbose --no-cache-dir --target=/install "torch<=2.8.0" --index-url https://download.pytorch.org/whl/cu129 && \
-    pip install --verbose --no-cache-dir --target=/install "torchvision<=0.23.0" --index-url https://download.pytorch.org/whl/cu129 && \
+    pip install --verbose --no-cache-dir --target=/install "torch<=2.9.1" --index-url https://download.pytorch.org/whl/cu129 && \
+    pip install --verbose --no-cache-dir --target=/install "torchvision<=0.24.1" --index-url https://download.pytorch.org/whl/cu129 && \
     pip install --verbose --no-cache-dir --target=/install \
-        "transformers<=5.5.4" \
+        "transformers<=5.12.0" \
         "accelerate<=1.13.0" \
         "bitsandbytes<=0.49.2" \
         "sentencepiece<=0.2.1" && \

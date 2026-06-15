@@ -208,6 +208,51 @@ def _venv_python_paths() -> List[Path]:
     return unique
 
 
+def _resolve_node_executable() -> Optional[str]:
+    return shutil.which("node")
+
+
+def _jsii_import_failure_hint(stderr: str) -> str:
+    if "JSONDecodeError" not in stderr and "Expecting value" not in stderr:
+        return ""
+    return (
+        "\nThis usually means the JSII Node.js helper process failed to start.\n"
+        "On the deployment machine, check:\n"
+        "  1. Node.js is installed and on PATH: node --version (LTS 18–22 recommended)\n"
+        "  2. Reinstall CDK Python deps: pip install --force-reinstall -r requirements.txt\n"
+        "  3. Test manually: python -c \"from aws_cdk import App; print('ok')\"\n"
+        "  4. If still failing, run: set JSII_DEBUG=1  (then retry synth for details)"
+    )
+
+
+def verify_node_for_jsii() -> str:
+    """Return the node executable path, or exit with guidance if missing."""
+    node = _resolve_node_executable()
+    if not node:
+        raise SystemExit(
+            "Node.js not found on PATH. aws-cdk-lib (JSII) requires Node.js.\n"
+            "Install Node.js LTS from https://nodejs.org/ and ensure 'node' is on PATH."
+        )
+    try:
+        result = subprocess.run(
+            [node, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise SystemExit(f"Could not run Node.js ({node}): {exc}") from exc
+    if result.returncode != 0:
+        raise SystemExit(
+            f"Node.js ({node}) returned exit code {result.returncode}.\n"
+            f"{(result.stderr or result.stdout or '').strip()}"
+        )
+    version = (result.stdout or result.stderr or "").strip()
+    print(f"Node.js for JSII: {node} ({version})")
+    return node
+
+
 def _python_has_aws_cdk(python_exe: Path) -> Tuple[bool, str]:
     if not python_exe.is_file():
         return False, "not found"
@@ -228,7 +273,11 @@ def _python_has_aws_cdk(python_exe: Path) -> Tuple[bool, str]:
         if result.returncode == 0:
             version = (result.stdout or "").strip().splitlines()[-1]
             return True, version
-        return False, (result.stderr or result.stdout or "import failed").strip()[:200]
+        detail = (result.stderr or result.stdout or "import failed").strip()
+        hint = _jsii_import_failure_hint(detail)
+        if hint:
+            detail = f"{detail[:400]}{hint}"
+        return False, detail[:800]
     except (OSError, subprocess.TimeoutExpired) as exc:
         return False, str(exc)
 
@@ -378,16 +427,26 @@ def apply_cdk_runtime_env(values: Dict[str, str]) -> None:
 
 
 def smoke_test_python_app(python_exe: Path) -> None:
+    verify_node_for_jsii()
     cmd = [str(python_exe), "-c", "import aws_cdk; import app"]
     print("Smoke test: import aws_cdk and app ...")
     result = subprocess.run(
         cmd,
         cwd=str(CDK_DIR),
         env=build_cdk_subprocess_env(),
+        capture_output=True,
+        text=True,
         check=False,
     )
     if result.returncode != 0:
-        raise SystemExit("Python smoke test failed. Fix dependencies before deploying.")
+        output = (result.stderr or result.stdout or "").strip()
+        print(output)
+        hint = _jsii_import_failure_hint(output)
+        if hint:
+            print(hint)
+        raise SystemExit(
+            "Python smoke test failed. Fix CDK dependencies on this machine before deploying."
+        )
 
 
 def run_smoke_test_if_needed(
@@ -1456,11 +1515,12 @@ def validate_env_values(values: Dict[str, str]) -> List[str]:
 
     if not (values.get("CDK_PREFIX") or "").strip():
         errors.append("CDK_PREFIX is required.")
-    cognito_prefix_error = validate_cognito_domain_prefix(
-        values.get("COGNITO_USER_POOL_DOMAIN_PREFIX", "")
-    )
-    if cognito_prefix_error:
-        errors.append(cognito_prefix_error)
+    if values.get("ENABLE_HEADLESS_DEPLOYMENT") != "True":
+        cognito_prefix_error = validate_cognito_domain_prefix(
+            values.get("COGNITO_USER_POOL_DOMAIN_PREFIX", "")
+        )
+        if cognito_prefix_error:
+            errors.append(cognito_prefix_error)
 
     if pi_ecs and values.get("ENABLE_ECS_SERVICE_CONNECT") != "True":
         errors.append(
@@ -2484,16 +2544,22 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
         answers.cdk_prefix += "-"
 
     default_cognito = default_cognito_domain_prefix_from_cdk_prefix(answers.cdk_prefix)
-    raw_cognito_prefix = args.cognito_prefix or (
-        ask(
-            "Cognito hosted UI domain prefix (must be globally unique; "
-            "cannot contain aws, amazon, or cognito)",
-            default_cognito,
+    if answers_use_headless(answers):
+        answers.cognito_domain_prefix = ""
+        print("Headless batch mode: skipping Cognito hosted UI domain (no web login).")
+    else:
+        raw_cognito_prefix = args.cognito_prefix or (
+            ask(
+                "Cognito hosted UI domain prefix (must be globally unique; "
+                "cannot contain aws, amazon, or cognito)",
+                default_cognito,
+            )
+            if interactive
+            else default_cognito
         )
-        if interactive
-        else default_cognito
-    )
-    answers.cognito_domain_prefix = sanitize_cognito_domain_prefix(raw_cognito_prefix)
+        answers.cognito_domain_prefix = sanitize_cognito_domain_prefix(
+            raw_cognito_prefix
+        )
 
     # VPC
     if args.new_vpc_cidr:
@@ -2960,6 +3026,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         except Exception as exc:
             print(f"Bootstrap check skipped: {exc}")
 
+    verify_node_for_jsii()
     run_cdk_command(["synth"], check=True)
 
     if args.synth_only or args.skip_deploy:

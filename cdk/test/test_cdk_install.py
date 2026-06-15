@@ -153,9 +153,14 @@ def test_profile_allows_headless_add_on():
     assert inst.profile_allows_headless_add_on(custom) is False
 
 
+def test_validate_install_answers_skips_cognito_prefix_for_headless():
+    values = inst.build_env_values(_headless_answers())
+    values["COGNITO_USER_POOL_DOMAIN_PREFIX"] = ""
+    assert inst.validate_env_values(values) == []
+
+
 def test_validate_headless_rejects_pi():
     values = inst.build_env_values(_headless_answers())
-    values["ENABLE_PI_AGENT_ECS_SERVICE"] = "True"
     values["ENABLE_ECS_SERVICE_CONNECT"] = "True"
     errors = inst.validate_env_values(values)
     assert any("HEADLESS" in e for e in errors)
@@ -839,3 +844,15 @@ def test_apply_post_deploy_fixup_express_syncs_cognito_secret_not_alb(monkeypatc
     assert secret_fixup_calls
     assert secret_fixup_calls[0]["main_service_name"] == "Demo-Redaction-ECSService"
     assert secret_fixup_calls[0]["cluster_name"] == "Demo-Redaction-Cluster"
+
+
+def test_jsii_import_failure_hint_detects_json_decode_error():
+    hint = inst._jsii_import_failure_hint(
+        "json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+    )
+    assert "JSII Node.js helper" in hint
+    assert "node --version" in hint
+
+
+def test_jsii_import_failure_hint_empty_for_other_errors():
+    assert inst._jsii_import_failure_hint("ModuleNotFoundError: aws_cdk") == ""
