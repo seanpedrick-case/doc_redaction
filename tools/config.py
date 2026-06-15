@@ -1338,7 +1338,7 @@ CONVERT_LINE_TO_WORD_LEVEL = convert_string_to_boolean(
 
 # Local OCR reading order: "column" (multi-column aware) or "legacy" (global top-left sort).
 LOCAL_OCR_READING_ORDER = (
-    get_or_create_env_var("LOCAL_OCR_READING_ORDER", "column").strip().lower()
+    get_or_create_env_var("LOCAL_OCR_READING_ORDER", "legacy").strip().lower()
 )
 if LOCAL_OCR_READING_ORDER not in ("column", "legacy"):
     LOCAL_OCR_READING_ORDER = "column"
