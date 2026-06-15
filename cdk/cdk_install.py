@@ -1535,7 +1535,7 @@ def validate_env_values(values: Dict[str, str]) -> List[str]:
         )
 
     pi_routing = (values.get("PI_ALB_ROUTING") or "").strip().lower()
-    if pi_ecs or pi_express:
+    if pi_ecs:
         if pi_routing not in PI_ALB_ROUTING_MODES:
             errors.append(
                 f"PI_ALB_ROUTING must be one of {list(PI_ALB_ROUTING_MODES)}; got '{pi_routing}'."

@@ -1420,12 +1420,22 @@ PADDLE_PRESERVE_LINE_BOXES = convert_string_to_boolean(
     get_or_create_env_var("PADDLE_PRESERVE_LINE_BOXES", "False")
 )  # Keep Paddle line boxes (skip word split + regrouping) when using Paddle OCR.
 
+SPACES_ZERO_GPU = convert_string_to_boolean(
+    get_or_create_env_var("SPACES_ZERO_GPU", "False")
+)  # Set by Hugging Face ZeroGPU runtime.
+
 LOAD_PADDLE_AT_STARTUP = convert_string_to_boolean(
     get_or_create_env_var(
         "LOAD_PADDLE_AT_STARTUP",
         "True" if os.environ.get("SPACES_ZERO_GPU") else "False",
     )
-)  # Whether to load the PaddleOCR model at startup (default True on ZeroGPU).
+)  # Eager PaddleOCR init at import (skipped on ZeroGPU main process; loads in @spaces.GPU worker).
+
+# PaddleOCR device for transformers backend, e.g. cpu, gpu, gpu:0 (default gpu:0 on ZeroGPU / CUDA).
+PADDLE_DEVICE = get_or_create_env_var(
+    "PADDLE_DEVICE",
+    "gpu:0" if os.environ.get("SPACES_ZERO_GPU") else "",
+).strip()
 
 PADDLE_USE_TEXTLINE_ORIENTATION = convert_string_to_boolean(
     get_or_create_env_var("PADDLE_USE_TEXTLINE_ORIENTATION", "False")

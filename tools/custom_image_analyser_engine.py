@@ -66,6 +66,7 @@ from tools.config import (
     MERGE_BOUNDING_BOXES,
     OUTPUT_FOLDER,
     PADDLE_DET_DB_UNCLIP_RATIO,
+    PADDLE_DEVICE,
     PADDLE_FONT_PATH,
     PADDLE_MODEL_PATH,
     PADDLE_PRESERVE_LINE_BOXES,
@@ -79,8 +80,10 @@ from tools.config import (
     SAVE_TEXTRACT_BEDROCK_HYBRID_EXAMPLES,
     SAVE_VLM_INPUT_IMAGES,
     SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL,
+    SPACES_ZERO_GPU,
     TESSERACT_SEGMENTATION_LEVEL,
     TESSERACT_WORD_LEVEL_OCR,
+    USE_FLASH_ATTENTION,
     USE_LLAMA_SWAP,
     USE_TRANSFORMERS_VLM_MODEL_AS_LLM,
     VLM_DEFAULT_STREAM,
@@ -381,6 +384,7 @@ def _paddle_lang_code(language: str) -> str:
 _module_paddle_ocr = None
 _module_paddle_ocr_lock = threading.Lock()
 _paddleocr_class = None
+_module_paddle_kwargs_template: Optional[Dict[str, Any]] = None
 
 
 def _configure_paddle_ocr_environment() -> None:
@@ -409,19 +413,108 @@ def _configure_paddle_ocr_environment() -> None:
             )
 
 
+def _default_paddle_device() -> str:
+    """Resolve PaddleOCR device for the transformers inference backend."""
+    if PADDLE_DEVICE:
+        return PADDLE_DEVICE
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            return "gpu:0"
+    except ImportError:
+        pass
+    return "cpu"
+
+
+def _default_paddle_engine_config(device: Optional[str] = None) -> Dict[str, Any]:
+    """engine_config for PaddleOCR transformers backend (see PaddleOCR inference-engine docs)."""
+    device = device or _default_paddle_device()
+    use_gpu = device.startswith("gpu")
+    config: Dict[str, Any] = {"dtype": "float32"}
+    if use_gpu:
+        device_id = 0
+        if ":" in device:
+            try:
+                device_id = int(device.split(":", 1)[1])
+            except ValueError:
+                device_id = 0
+        config.update(
+            {
+                "device_type": "gpu",
+                "device_id": device_id,
+                "attn_implementation": (
+                    "flash_attention_2" if USE_FLASH_ATTENTION else "sdpa"
+                ),
+            }
+        )
+    else:
+        config["device_type"] = "cpu"
+    return config
+
+
 def _default_paddle_kwargs(lang: Optional[str] = None) -> Dict[str, Any]:
     if lang is None:
         lang = _paddle_lang_code(DEFAULT_LANGUAGE)
+    device = _default_paddle_device()
     return {
         "text_detection_model_name": "PP-OCRv6_medium_det",
         "text_recognition_model_name": "PP-OCRv6_medium_rec",
         "engine": "transformers",
+        "device": device,
+        "engine_config": _default_paddle_engine_config(device),
         "det_db_unclip_ratio": PADDLE_DET_DB_UNCLIP_RATIO,
         "use_textline_orientation": PADDLE_USE_TEXTLINE_ORIENTATION,
         "use_doc_orientation_classify": False,
         "use_doc_unwarping": False,
         "lang": lang,
     }
+
+
+def _finalize_paddle_kwargs(paddle_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge caller overrides with GPU-aware defaults."""
+    kwargs = dict(paddle_kwargs)
+    defaults = _default_paddle_kwargs(kwargs.get("lang"))
+    kwargs.setdefault("engine", defaults["engine"])
+    kwargs.setdefault("device", defaults["device"])
+    default_engine_config = defaults["engine_config"]
+    if "engine_config" not in kwargs:
+        kwargs["engine_config"] = dict(default_engine_config)
+    else:
+        kwargs["engine_config"] = {
+            **default_engine_config,
+            **kwargs["engine_config"],
+        }
+    return kwargs
+
+
+def _log_paddle_runtime_diagnostics(device: str) -> None:
+    """Log torch/CUDA state when PaddleOCR is initialized (helps debug ZeroGPU)."""
+    try:
+        import torch
+    except ImportError:
+        print(
+            f"PaddleOCR init: device={device!r}, torch not installed "
+            "(required for engine=transformers)"
+        )
+        return
+
+    cuda_available = torch.cuda.is_available()
+    parts = [
+        f"PaddleOCR init: device={device!r}",
+        "engine=transformers",
+        f"torch={torch.__version__}",
+        f"cuda_available={cuda_available}",
+        f"spaces_zero_gpu={SPACES_ZERO_GPU}",
+    ]
+    if cuda_available:
+        try:
+            parts.append(
+                f"cuda_device={torch.cuda.get_device_name(torch.cuda.current_device())}"
+            )
+        except Exception:
+            pass
+    print(", ".join(parts))
 
 
 def _import_paddleocr_class():
@@ -442,6 +535,12 @@ def _import_paddleocr_class():
     return _paddleocr_class
 
 
+def register_module_paddle_kwargs(paddle_kwargs: Dict[str, Any]) -> None:
+    """Store Paddle kwargs for lazy init (ZeroGPU: init runs in @spaces.GPU worker)."""
+    global _module_paddle_kwargs_template
+    _module_paddle_kwargs_template = _finalize_paddle_kwargs(paddle_kwargs)
+
+
 def get_or_create_module_paddle_ocr(
     paddle_kwargs: Optional[Dict[str, Any]] = None,
 ) -> Any:
@@ -455,12 +554,15 @@ def get_or_create_module_paddle_ocr(
             return _module_paddle_ocr
 
         PaddleOCR = _import_paddleocr_class()
-        kwargs = (
-            dict(paddle_kwargs)
-            if paddle_kwargs is not None
-            else _default_paddle_kwargs()
-        )
-        kwargs.setdefault("lang", _paddle_lang_code(DEFAULT_LANGUAGE))
+        if paddle_kwargs is not None:
+            kwargs = dict(paddle_kwargs)
+            kwargs.setdefault("lang", _paddle_lang_code(DEFAULT_LANGUAGE))
+            kwargs = _finalize_paddle_kwargs(kwargs)
+        elif _module_paddle_kwargs_template is not None:
+            kwargs = dict(_module_paddle_kwargs_template)
+        else:
+            kwargs = _default_paddle_kwargs()
+        _log_paddle_runtime_diagnostics(str(kwargs.get("device", "")))
 
         try:
             _module_paddle_ocr = PaddleOCR(**kwargs)
@@ -546,7 +648,9 @@ def paddle_predict(image: Union[np.ndarray, str]) -> List[Dict[str, Any]]:
     return _paddle_results_to_plain_dicts(paddle_results)
 
 
-if LOAD_PADDLE_AT_STARTUP:
+# ZeroGPU: the main web process has no real GPU. PaddleOCR must initialize inside
+# paddle_predict (@spaces.GPU worker) so transformers weights land on CUDA.
+if LOAD_PADDLE_AT_STARTUP and not SPACES_ZERO_GPU:
     try:
         get_or_create_module_paddle_ocr()
     except Exception as e:
@@ -6842,25 +6946,35 @@ class CustomImageAnalyzerEngine:
             else:
                 paddle_kwargs = dict(paddle_kwargs)
                 paddle_kwargs.setdefault("lang", self.paddle_lang)
+            paddle_kwargs = _finalize_paddle_kwargs(paddle_kwargs)
 
-            try:
-                self.paddle_ocr = get_or_create_module_paddle_ocr(paddle_kwargs)
-            except Exception as e:
-                if (
-                    "WinError 127" in str(e)
-                    or "could not be found" in str(e).lower()
-                    or "dll" in str(e).lower()
-                ):
-                    print(
-                        f"Warning: GPU initialization failed (likely missing CUDA/cuDNN dependencies): {e}"
-                    )
-                    print("PaddleOCR will not be available. To fix GPU issues:")
-                    print("1. Install Visual C++ Redistributables (latest version)")
-                    print("2. Ensure CUDA runtime libraries are in your PATH")
-                    print(
-                        "3. Or reinstall paddlepaddle CPU version: pip install paddlepaddle"
-                    )
-                raise
+            if SPACES_ZERO_GPU:
+                register_module_paddle_kwargs(paddle_kwargs)
+                self.paddle_ocr = None
+                print(
+                    "ZeroGPU: PaddleOCR will load on GPU inside paddle_predict "
+                    f"(device={paddle_kwargs.get('device')!r}, "
+                    f"engine={paddle_kwargs.get('engine')!r})"
+                )
+            else:
+                try:
+                    self.paddle_ocr = get_or_create_module_paddle_ocr(paddle_kwargs)
+                except Exception as e:
+                    if (
+                        "WinError 127" in str(e)
+                        or "could not be found" in str(e).lower()
+                        or "dll" in str(e).lower()
+                    ):
+                        print(
+                            f"Warning: GPU initialization failed (likely missing CUDA/cuDNN dependencies): {e}"
+                        )
+                        print("PaddleOCR will not be available. To fix GPU issues:")
+                        print("1. Install Visual C++ Redistributables (latest version)")
+                        print("2. Ensure CUDA runtime libraries are in your PATH")
+                        print(
+                            "3. Or reinstall paddlepaddle CPU version: pip install paddlepaddle"
+                        )
+                    raise
 
         elif self.ocr_engine == "hybrid-vlm":
             # VLM-based hybrid OCR - no additional initialization needed
@@ -7774,7 +7888,7 @@ class CustomImageAnalyzerEngine:
             if ocr is None:
                 if hasattr(self, "paddle_ocr") and self.paddle_ocr is not None:
                     ocr = self.paddle_ocr
-                else:
+                elif not SPACES_ZERO_GPU:
                     raise ValueError(
                         "No OCR object provided and 'paddle_ocr' is not initialized."
                     )
@@ -8001,7 +8115,7 @@ class CustomImageAnalyzerEngine:
         if ocr is None:
             if hasattr(self, "paddle_ocr") and self.paddle_ocr is not None:
                 ocr = self.paddle_ocr
-            else:
+            elif not SPACES_ZERO_GPU:
                 raise ValueError(
                     "No OCR object provided and 'paddle_ocr' is not initialized."
                 )
@@ -8075,7 +8189,7 @@ class CustomImageAnalyzerEngine:
         if ocr is None:
             if hasattr(self, "paddle_ocr") and self.paddle_ocr is not None:
                 ocr = self.paddle_ocr
-            else:
+            elif not SPACES_ZERO_GPU:
                 raise ValueError(
                     "No OCR object provided and 'paddle_ocr' is not initialized."
                 )
@@ -8783,7 +8897,7 @@ class CustomImageAnalyzerEngine:
             if ocr is None:
                 if hasattr(self, "paddle_ocr") and self.paddle_ocr is not None:
                     ocr = self.paddle_ocr
-                else:
+                elif not SPACES_ZERO_GPU:
                     raise ValueError(
                         "No OCR object provided and 'paddle_ocr' is not initialised."
                     )

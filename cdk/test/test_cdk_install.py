@@ -425,6 +425,13 @@ def test_validate_pi_host_requires_header():
     assert any("PI_ALB_HOST_HEADER" in e for e in errors)
 
 
+def test_validate_pi_express_skips_alb_routing():
+    answers = _demo_answers()
+    answers.enable_pi_express = True
+    values = inst.build_env_values(answers)
+    assert inst.validate_env_values(values) == []
+
+
 def test_build_pi_agent_env_values():
     answers = _demo_answers()
     answers.enable_pi_express = False
