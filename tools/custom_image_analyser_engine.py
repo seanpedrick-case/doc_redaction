@@ -95,8 +95,10 @@ from tools.config import (
 )
 from tools.helper_functions import (
     clean_unicode_text,
+    extract_balanced_json_array,
     get_system_font_path,
     model_from_ocr_boxes,
+    strip_vlm_thinking_tags,
 )
 from tools.inference_attention import resolve_paddle_attn_implementation
 from tools.llm_funcs import _extract_choice_message_text
@@ -2377,6 +2379,7 @@ def _extract_and_combine_text_dicts_from_vlm_response(
     """
     if not raw or not isinstance(raw, str):
         return None
+    raw = strip_vlm_thinking_tags(raw)
     collected = []
     i = 0
     while i < len(raw):
@@ -4363,12 +4366,12 @@ def plot_text_bounding_boxes(
     draw = ImageDraw.Draw(img)
 
     # Parsing out the markdown fencing
-    bounding_boxes = parse_json(bounding_boxes)
+    bbox_list = _parse_vlm_bbox_dict_list(bounding_boxes)
 
     font = ImageFont.load_default()
 
     # Iterate over the bounding boxes
-    for i, bbox_dict in enumerate(ast.literal_eval(bounding_boxes)):
+    for i, bbox_dict in enumerate(bbox_list):
         color = "green"
 
         # Extract the bounding box coordinates (preserve the original dict for text extraction)
@@ -4458,7 +4461,10 @@ def plot_text_bounding_boxes(
 
 
 def parse_json(json_output):
-    # Parsing out the markdown fencing
+    # Parsing out the markdown fencing and Qwen thinking tags
+    if not isinstance(json_output, str):
+        return json_output
+    json_output = strip_vlm_thinking_tags(json_output)
     lines = json_output.splitlines()
     for i, line in enumerate(lines):
         if line == "```json":
@@ -4470,6 +4476,36 @@ def parse_json(json_output):
             ]  # Remove everything after the closing "```"
             break  # Exit the loop once "```json" is found
     return json_output
+
+
+def _parse_vlm_bbox_dict_list(bounding_boxes: str) -> List[Dict]:
+    """Parse a VLM bbox JSON/list response, ignoring thinking tags and extra prose."""
+    if not bounding_boxes or not isinstance(bounding_boxes, str):
+        return []
+    cleaned = parse_json(bounding_boxes)
+    cleaned = _preprocess_vlm_ocr_json_string(cleaned)
+    if not cleaned:
+        return []
+    for candidate in (cleaned, extract_balanced_json_array(cleaned)):
+        if not candidate:
+            continue
+        try:
+            data = json.loads(candidate)
+            if isinstance(data, list):
+                return data
+            if isinstance(data, dict):
+                return [data]
+        except json.JSONDecodeError:
+            pass
+        try:
+            data = ast.literal_eval(candidate)
+            if isinstance(data, list):
+                return data
+            if isinstance(data, dict):
+                return [data]
+        except Exception:
+            pass
+    return []
 
 
 def _fix_malformed_bbox_in_json_string(json_string):
@@ -4602,7 +4638,7 @@ def _preprocess_vlm_ocr_json_string(
     """Chain bbox fixes and stray-coordinate repair before json.loads."""
     if not raw or not isinstance(raw, str):
         return ""
-    s = raw.strip()
+    s = strip_vlm_thinking_tags(raw.strip())
     s = _fix_malformed_bbox_in_json_string(s)
     label = implied_label if implied_label else "[UNKNOWN]"
     s = _repair_vlm_json_stray_coordinate_strings(s, default_text=label)
@@ -5262,14 +5298,17 @@ def _vlm_page_ocr_predict(
             }
 
         if SAVE_VLM_INPUT_IMAGES:
-            plot_text_bounding_boxes(
-                processed_image,
-                extracted_text,
-                image_name=image_name,
-                image_folder="vlm_visualisations",
-                output_folder=output_folder,
-                task_type=task_type,
-            )
+            try:
+                plot_text_bounding_boxes(
+                    processed_image,
+                    extracted_text,
+                    image_name=image_name,
+                    image_folder="vlm_visualisations",
+                    output_folder=output_folder,
+                    task_type=task_type,
+                )
+            except Exception as viz_error:
+                print(f"Warning: VLM bbox visualization failed: {viz_error}")
 
         # Store a copy of the processed image for debug visualization (before rescaling)
         # IMPORTANT: This must be the EXACT same image that was sent to the API

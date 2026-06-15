@@ -41,7 +41,7 @@ from tools.config import (
     VLM_QWEN3_5_NOTHINK_SUFFIX,
     VLM_SEED,
 )
-from tools.helper_functions import get_system_font_path
+from tools.helper_functions import get_system_font_path, strip_vlm_thinking_tags
 from tools.inference_attention import (
     log_attn_implementation_choice,
     resolve_attn_implementation,
@@ -1358,6 +1358,8 @@ def extract_text_from_image_vlm(
     print(f"Time taken: {duration:.2f} seconds")
     print(f"Generated tokens: {output_tokens}")
     print(f"Tokens per second: {tokens_per_second:.2f}")
+
+    buffer = strip_vlm_thinking_tags(buffer)
 
     # Return the complete text and token estimates
     return buffer, input_tokens, output_tokens

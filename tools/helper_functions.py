@@ -74,6 +74,43 @@ from tools.secure_path_utils import (
     validate_path_safety,
 )
 
+_VLM_THINKING_TAG_BLOCK_RE = re.compile(
+    r"<\s*(?:think|thinking)\s*>.*?</\s*(?:think|thinking)\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+_VLM_THINKING_ORPHAN_TAG_RE = re.compile(
+    r"</?\s*(?:think|thinking)\s*>",
+    re.IGNORECASE,
+)
+
+
+def strip_vlm_thinking_tags(text: str) -> str:
+    """Remove Qwen3.5 thinking markup so JSON parsers see only the payload."""
+    if not text or not isinstance(text, str):
+        return ""
+    cleaned = _VLM_THINKING_TAG_BLOCK_RE.sub("", text)
+    cleaned = _VLM_THINKING_ORPHAN_TAG_RE.sub("", cleaned)
+    return cleaned.strip()
+
+
+def extract_balanced_json_array(text: str):
+    """Return the first top-level [...] substring, or None."""
+    if not text:
+        return None
+    start_idx = text.find("[")
+    if start_idx < 0:
+        return None
+    bracket_count = 0
+    for i in range(start_idx, len(text)):
+        ch = text[i]
+        if ch == "[":
+            bracket_count += 1
+        elif ch == "]":
+            bracket_count -= 1
+            if bracket_count == 0:
+                return text[start_idx : i + 1]
+    return None
+
 
 def reset_state_vars():
     return (
