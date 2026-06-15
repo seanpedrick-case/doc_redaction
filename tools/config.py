@@ -1047,7 +1047,7 @@ if VLM_MAX_ASPECT_RATIO < 1.0:
 
 USE_FLASH_ATTENTION = convert_string_to_boolean(
     get_or_create_env_var("USE_FLASH_ATTENTION", "False")
-)  # Whether to use flash attention for the VLM
+)  # Requires a flash-attn wheel matching torch/CUDA/Python; otherwise sdpa is used.
 
 QUANTISE_VLM_MODELS = convert_string_to_boolean(
     get_or_create_env_var("QUANTISE_VLM_MODELS", "False")

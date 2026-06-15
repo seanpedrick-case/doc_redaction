@@ -59,6 +59,8 @@ openai<=2.31.0
 
 # --- PyTorch (CUDA 12.8) ---
 --extra-index-url https://download.pytorch.org/whl/cu128
-torch<=2.9.1
-torchvision<=0.24.1
+torch<=2.8.0
+torchvision<=0.23.0
+# flash-attn is optional (USE_FLASH_ATTENTION=True). Official cp310 wheels exist for torch<=2.8 only;
+# with torch 2.9 + Python 3.10 the Space uses sdpa attention instead (no extra package needed).
 flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp310-cp310-linux_x86_64.whl
