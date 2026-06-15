@@ -2864,39 +2864,46 @@ def build_ui():
             inputs=_followup_route_inputs,
             outputs=[*chat_outputs, pending_followup_message],
             queue=False,
+            api_name="send_followup_message",
         )
         run_chat_queued_send = run_chat_send.then(
             submit_followup_chat_queued,
             inputs=_followup_queued_inputs,
             outputs=chat_outputs,
+            api_visibility="undocumented",
         )
         notify_after_chat_send = run_chat_queued_send.then(
             _passthrough_chat_outputs_for_notify,
             inputs=_chat_outputs_notify_inputs(chat_outputs),
             outputs=chat_outputs,
             js=PI_AGENT_FINISH_NOTIFY_JS,
+            api_visibility="undocumented",
         )
         run_chat_msg = msg.submit(
             route_followup_message,
             inputs=_followup_route_inputs,
             outputs=[*chat_outputs, pending_followup_message],
             queue=False,
+            api_visibility="undocumented",
         )
         run_chat_queued_msg = run_chat_msg.then(
             submit_followup_chat_queued,
             inputs=_followup_queued_inputs,
             outputs=chat_outputs,
+            api_visibility="undocumented",
         )
         notify_after_chat_msg = run_chat_queued_msg.then(
             _passthrough_chat_outputs_for_notify,
             inputs=_chat_outputs_notify_inputs(chat_outputs),
             outputs=chat_outputs,
             js=PI_AGENT_FINISH_NOTIFY_JS,
+            api_visibility="undocumented",
         )
         run_redact_prepare = start_redact_btn.click(
             prepare_redaction_session_ui,
             inputs=[session_hash_state],
             outputs=[session_hash_state, workspace_session_info],
+            api_visibility="undocumented",
         )
         run_redact_task = run_redact_prepare.then(
             submit_redaction_task,
@@ -2915,12 +2922,14 @@ def build_ui():
                 save_outputs_to_s3_state,
             ],
             outputs=chat_outputs,
+            api_name="run_agentic_redaction_task",
         )
         notify_after_redact_task = run_redact_task.then(
             _passthrough_chat_outputs_for_notify,
             inputs=_chat_outputs_notify_inputs(chat_outputs),
             outputs=chat_outputs,
             js=PI_AGENT_FINISH_NOTIFY_JS,
+            api_visibility="undocumented",
         )
         abort_btn.click(
             abort_agent,
@@ -2939,11 +2948,13 @@ def build_ui():
                 notify_after_redact_task,
             ],
             queue=False,
+            api_visibility="undocumented",
         )
         clear.click(
             new_chat,
             inputs=[chatbot, client_state, session_hash_state],
             outputs=chat_outputs,
+            api_visibility="undocumented",
         )
 
         if not IS_HF_SPACE:
@@ -2951,6 +2962,7 @@ def build_ui():
                 _backend_model_choices_update,
                 inputs=[backend_provider],
                 outputs=[backend_model],
+                api_visibility="undocumented",
             )
         apply_backend_btn.click(
             apply_backend,
@@ -2974,20 +2986,24 @@ def build_ui():
                 aws_secret_access_key,
                 aws_session_token,
             ],
+            api_name="apply_model_backend",
         )
 
         refresh_outputs_btn.click(
             fn=refresh_workspace_output_files_stub,
             inputs=None,
             outputs=workspace_output_explorer,
+            api_visibility="undocumented",
         ).success(
             fn=refresh_workspace_panel,
             inputs=[session_hash_state],
             outputs=[workspace_output_explorer, workspace_output_explorer_download],
+            api_visibility="undocumented",
         ).success(
             fn=latest_redacted_pdf_path,
             inputs=[session_hash_state],
             outputs=pdf_preview,
+            api_visibility="undocumented",
         ).success(
             fn=_export_workspace_outputs,
             inputs=[
@@ -2996,12 +3012,14 @@ def build_ui():
                 save_outputs_to_s3_state,
             ],
             outputs=None,
+            api_visibility="undocumented",
         )
 
         workspace_output_explorer.input(
             fn=workspace_files_download_fn,
-            inputs=[workspace_output_explorer, session_hash_state],
+            inputs=[workspace_output_explorer_download, session_hash_state],
             outputs=workspace_output_explorer_download,
+            api_visibility="undocumented",
         )
 
         demo.load(
@@ -3014,6 +3032,7 @@ def build_ui():
                 s3_output_folder_state,
                 *chat_outputs,
             ],
+            api_visibility="undocumented",
         )
 
     return demo

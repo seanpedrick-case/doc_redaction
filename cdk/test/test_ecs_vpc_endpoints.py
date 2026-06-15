@@ -218,6 +218,26 @@ def test_resolve_ecs_vpc_endpoint_subnet_selection_legacy_fargate():
     }
 
 
+def test_resolve_ecs_vpc_endpoint_subnet_selection_public_only_legacy():
+    from aws_cdk import App, Stack
+    from aws_cdk import aws_ec2 as ec2
+    from cdk_functions import resolve_ecs_vpc_endpoint_subnet_selection
+
+    app = App()
+    stack = Stack(app, "SubnetSelectPublicOnlyTest")
+    vpc = ec2.Vpc(stack, "Vpc", max_azs=2)
+    public_sel = resolve_ecs_vpc_endpoint_subnet_selection(
+        use_express_ingress=False,
+        express_use_public_subnets=True,
+        public_subnets=vpc.public_subnets,
+        private_subnets=[],
+    )
+    assert public_sel is not None
+    assert {s.subnet_id for s in public_sel.subnets} == {
+        s.subnet_id for s in vpc.public_subnets
+    }
+
+
 def test_create_ecs_vpc_endpoints_on_public_subnets():
     from aws_cdk import App, Stack, assertions
     from aws_cdk import aws_ec2 as ec2

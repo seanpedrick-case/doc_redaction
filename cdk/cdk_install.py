@@ -93,6 +93,7 @@ PRODUCTION_PRESET: Dict[str, str] = {
 
 HEADLESS_PRESET: Dict[str, str] = {
     "USE_ECS_EXPRESS_MODE": "False",
+    "ECS_EXPRESS_USE_PUBLIC_SUBNETS": "True",
     "USE_CLOUDFRONT": "False",
     "RUN_USEAST_STACK": "False",
     "ENABLE_RESOURCE_DELETE_PROTECTION": "False",
@@ -1150,6 +1151,34 @@ def default_pi_listener_priority(use_cloudfront: bool = False) -> str:
     return "3"
 
 
+def derive_ecs_resource_names(cdk_prefix: str) -> Dict[str, str]:
+    """ECS/CodeBuild resource names from CDK_PREFIX (matches cdk_config.py defaults)."""
+    prefix = (cdk_prefix or "").strip()
+    if not prefix:
+        return {}
+    return {
+        "CLUSTER_NAME": f"{prefix}Cluster",
+        "ECS_SERVICE_NAME": f"{prefix}ECSService",
+        "ECS_EXPRESS_SERVICE_NAME": f"{prefix}ECSService",
+        "ECS_PI_EXPRESS_SERVICE_NAME": f"{prefix}PiExpressService",
+        "ECS_PI_SERVICE_NAME": f"{prefix}PiAgentService",
+        "COGNITO_USER_POOL_CLIENT_SECRET_NAME": f"{prefix}ParamCognitoSecret",
+        "CODEBUILD_PROJECT_NAME": f"{prefix}CodeBuildProject",
+        "CODEBUILD_PI_PROJECT_NAME": f"{prefix}CodeBuildPiProject",
+    }
+
+
+def resolve_fixup_env_values(values: Dict[str, str]) -> Dict[str, str]:
+    """Fill missing ECS cluster/service keys from CDK_PREFIX for post-deploy boto3 calls."""
+    resolved = dict(values)
+    for key, default in derive_ecs_resource_names(
+        resolved.get("CDK_PREFIX", "")
+    ).items():
+        if not (resolved.get(key) or "").strip():
+            resolved[key] = default
+    return resolved
+
+
 def merge_preset(
     profile: str, overrides: Optional[Dict[str, str]] = None
 ) -> Dict[str, str]:
@@ -1231,7 +1260,7 @@ def answers_use_public_subnets_only(answers: "InstallAnswers") -> bool:
         return True
     if not answers_use_headless(answers):
         return False
-    return answers_preset_profile(answers) in ("demo", "custom")
+    return answers_preset_profile(answers) in ("headless", "demo", "custom")
 
 
 def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
@@ -1248,6 +1277,7 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
             "AWS_REGION": answers.aws_region,
             "AWS_ACCOUNT_ID": answers.aws_account_id,
             "CDK_FOLDER": cdk_folder,
+            **derive_ecs_resource_names(answers.cdk_prefix),
             "CONTEXT_FILE": "precheck.context.json",
             "COGNITO_USER_POOL_DOMAIN_PREFIX": sanitize_cognito_domain_prefix(
                 answers.cognito_domain_prefix
@@ -1295,26 +1325,31 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
 
     use_cloudfront = values.get("USE_CLOUDFRONT") == "True"
     if answers.pi_enabled:
-        routing = answers.pi_alb_routing.strip().lower()
-        path_prefix = normalize_pi_path_prefix(answers.pi_alb_path_prefix)
-        priority = (
-            answers.pi_alb_listener_rule_priority.strip()
-            or default_pi_listener_priority(use_cloudfront)
-        )
         values.update(
             {
-                "PI_ALB_ROUTING": routing,
-                "PI_ALB_PATH_PREFIX": path_prefix,
-                "PI_ALB_LISTENER_RULE_PRIORITY": priority,
                 "PI_GRADIO_PORT": answers.pi_gradio_port,
                 "ECS_SERVICE_CONNECT_DISCOVERY_NAME": answers.sc_discovery_name,
             }
         )
-        if routing in ("host", "both"):
-            values["PI_ALB_HOST_HEADER"] = answers.pi_alb_host_header.strip()
         if answers.enable_pi_express:
             values["ECS_EXPRESS_SC_PORT_NAME"] = "port-7860"
             values["ECS_PI_EXPRESS_SC_PORT_NAME"] = f"port-{answers.pi_gradio_port}"
+        else:
+            routing = answers.pi_alb_routing.strip().lower()
+            path_prefix = normalize_pi_path_prefix(answers.pi_alb_path_prefix)
+            priority = (
+                answers.pi_alb_listener_rule_priority.strip()
+                or default_pi_listener_priority(use_cloudfront)
+            )
+            values.update(
+                {
+                    "PI_ALB_ROUTING": routing,
+                    "PI_ALB_PATH_PREFIX": path_prefix,
+                    "PI_ALB_LISTENER_RULE_PRIORITY": priority,
+                }
+            )
+            if routing in ("host", "both"):
+                values["PI_ALB_HOST_HEADER"] = answers.pi_alb_host_header.strip()
 
     if answers.profile == "production":
         values["ACM_SSL_CERTIFICATE_ARN"] = answers.acm_cert_arn
@@ -1460,14 +1495,13 @@ def build_app_config_env_values(values: Dict[str, str]) -> Dict[str, str]:
     """AWS deployment keys merged into config/app_config.env for ECS tasks."""
     prefix_lower = (values.get("CDK_PREFIX") or "").lower()
     headless = values.get("ENABLE_HEADLESS_DEPLOYMENT") == "True"
-    express = values.get("USE_ECS_EXPRESS_MODE") == "True"
-    alb_cognito = express and not headless
+    pi_express = values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True"
 
     def _name(env_key: str, suffix: str) -> str:
         return (values.get(env_key) or "").strip() or f"{prefix_lower}{suffix}"
 
     return {
-        "COGNITO_AUTH": "False" if headless or alb_cognito else "True",
+        "COGNITO_AUTH": "False" if headless or pi_express else "True",
         "RUN_AWS_FUNCTIONS": "True",
         "DISPLAY_FILE_NAMES_IN_LOGS": "False",
         "SESSION_OUTPUT_FOLDER": "True",
@@ -1536,7 +1570,6 @@ def write_app_config_env_file(
 
 def build_pi_agent_env_values(answers: InstallAnswers) -> Dict[str, str]:
     """Runtime settings for the Pi agent Gradio app (uploaded to S3 as pi_agent.env)."""
-    path_prefix = normalize_pi_path_prefix(answers.pi_alb_path_prefix)
     values = {
         "PI_DEPLOYMENT_PROFILE": "aws-ecs",
         "PI_DEFAULT_PROVIDER": answers.pi_default_provider,
@@ -1547,6 +1580,10 @@ def build_pi_agent_env_values(answers: InstallAnswers) -> Dict[str, str]:
         "PI_DEFAULT_OCR_METHOD": "AWS Textract service - all PDF types",
         "PI_DEFAULT_PII_METHOD": "AWS Comprehend",
     }
+    if answers.enable_pi_express:
+        values["RUN_FASTAPI"] = "True"
+        return values
+    path_prefix = normalize_pi_path_prefix(answers.pi_alb_path_prefix)
     if answers.pi_alb_routing.strip().lower() in ("path", "both"):
         values["PI_ROOT_PATH"] = path_prefix
         values["ROOT_PATH"] = path_prefix
@@ -2016,11 +2053,13 @@ def apply_post_deploy_fixup(values: Dict[str, str], assume_yes: bool) -> bool:
         return False
 
     if express and not cloudfront:
+        from cdk_config import normalize_https_redirect_url
+
         endpoint = fetch_stack_output(REGIONAL_STACK, "ExpressServiceEndpoint", region)
         if not endpoint:
             print("No ExpressServiceEndpoint output found; skipping Cognito URL fixup.")
             return False
-        endpoint = endpoint.rstrip("/")
+        endpoint = normalize_https_redirect_url(endpoint)
         current = (values.get("ECS_EXPRESS_COGNITO_REDIRECT_BASE") or "").strip()
         env_needs_patch = current != endpoint
         cognito_needs_update = cognito_alb_callbacks_need_update(
@@ -2110,41 +2149,19 @@ def apply_post_deploy_fixup(values: Dict[str, str], assume_yes: bool) -> bool:
             )
 
     if express:
-        from cdk_functions import normalize_pi_alb_path_prefix
-        from cdk_post_deploy import (
-            apply_cognito_secret_fixup_from_stack,
-            apply_express_alb_listener_target_group_fixup,
-            apply_express_disable_in_app_cognito_auth,
-            remove_express_listener_rules_without_cognito,
-        )
+        from cdk_post_deploy import apply_cognito_secret_fixup_from_stack
 
-        cluster_name = (
-            values.get("CLUSTER_NAME") or f"{values.get('CDK_PREFIX', '')}Cluster"
-        )
-        main_service = values.get("ECS_EXPRESS_SERVICE_NAME") or values.get(
-            "ECS_SERVICE_NAME", ""
-        )
-        pi_enabled = values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True"
-        pi_service = values.get("ECS_PI_EXPRESS_SERVICE_NAME") if pi_enabled else None
-        pi_prefix = normalize_pi_alb_path_prefix(
-            values.get("PI_ALB_PATH_PREFIX", "/agent")
-        )
-        secret_name = values.get("COGNITO_USER_POOL_CLIENT_SECRET_NAME") or (
-            f"{values.get('CDK_PREFIX', '')}ParamCognitoSecret"
-        )
+        resolved = resolve_fixup_env_values(values)
+        cluster_name = resolved["CLUSTER_NAME"]
+        main_service = resolved["ECS_EXPRESS_SERVICE_NAME"]
+        secret_name = resolved.get("COGNITO_USER_POOL_CLIENT_SECRET_NAME", "")
+        if not main_service:
+            print(
+                "ECS express service name could not be resolved; "
+                "skipping Express Cognito secret sync."
+            )
+            return fixup_applied
         try:
-            if remove_express_listener_rules_without_cognito(aws_region=region):
-                fixup_applied = True
-            if apply_express_alb_listener_target_group_fixup(
-                cluster_name=cluster_name,
-                main_service_name=main_service,
-                pi_service_name=pi_service,
-                pi_path_prefixes=(
-                    [pi_prefix, f"{pi_prefix}/*"] if pi_service else None
-                ),
-                aws_region=region,
-            ):
-                fixup_applied = True
             if pool_id and client_id:
                 if apply_cognito_secret_fixup_from_stack(
                     stack_name=REGIONAL_STACK,
@@ -2155,12 +2172,8 @@ def apply_post_deploy_fixup(values: Dict[str, str], assume_yes: bool) -> bool:
                     recycle_tasks=False,
                 ):
                     fixup_applied = True
-                if apply_express_disable_in_app_cognito_auth(
-                    cluster_name, main_service, aws_region=region
-                ):
-                    fixup_applied = True
         except Exception as exc:
-            print(f"Warning: could not sync Express ALB/Cognito settings: {exc}")
+            print(f"Warning: could not sync Express Cognito secret: {exc}")
 
     return fixup_applied
 
@@ -2272,10 +2285,36 @@ def configure_pi_options(
     if not answers.pi_enabled:
         return
 
-    if not answers.pi_alb_listener_rule_priority:
+    if not answers.pi_alb_listener_rule_priority and not answers.enable_pi_express:
         answers.pi_alb_listener_rule_priority = default_pi_listener_priority(
             use_cloudfront
         )
+
+    if answers.enable_pi_express:
+        if interactive and not assume_yes:
+            print("\n--- Agent mode (ECS Express) ---")
+            answers.sc_discovery_name = ask(
+                "Service Connect discovery name for main app",
+                answers.sc_discovery_name,
+            )
+            answers.pi_gradio_port = ask("Agent Gradio port", answers.pi_gradio_port)
+            if ask_yes_no(
+                f"Write/update {PI_AGENT_ENV_PATH.name} for AWS ECS (DOC_REDACTION_GRADIO_URL, etc.)?",
+                default=True,
+            ):
+                answers.write_pi_agent_env = True
+                if PI_AGENT_ENV_PATH.is_file():
+                    answers.overwrite_pi_agent_env = ask_yes_no(
+                        "pi_agent.env exists — replace file from example template?",
+                        default=False,
+                    )
+            else:
+                answers.write_pi_agent_env = False
+        print(
+            f"Agent mode: Express (dedicated HTTPS endpoint per service); "
+            f"Service Connect discovery={answers.sc_discovery_name}"
+        )
+        return
 
     if interactive and not (
         args.pi_alb_routing or args.pi_path_prefix or args.pi_host_header or assume_yes
@@ -2936,6 +2975,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     values = read_env_file(ENV_PATH)
     apply_post_deploy_fixup(values, assume_yes=args.yes)
 
+    run_qs = False
     if args.skip_quickstart:
         print("Skipping post-deploy quickstart.")
     else:
@@ -2960,20 +3000,41 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 )
             run_quickstart(python_exe)
 
+    values = read_env_file(ENV_PATH)
+    is_headless = values.get("ENABLE_HEADLESS_DEPLOYMENT") == "True"
+    if values.get("USE_ECS_EXPRESS_MODE") == "True" and not is_headless:
+        from cdk_post_deploy import print_express_mode_next_steps
+
+        if args.skip_quickstart or not run_qs:
+            print_express_mode_next_steps(values)
+        return 0
+
+    if is_headless:
+        from cdk_post_deploy import print_headless_deployment_next_steps
+
+        if args.skip_quickstart or not run_qs:
+            print_headless_deployment_next_steps(values)
+        return 0
+
     print("\nDone. Next steps:")
     if (
         values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True"
         or values.get("ENABLE_PI_AGENT_ECS_SERVICE") == "True"
     ):
-        routing = values.get("PI_ALB_ROUTING", "path")
-        if routing in ("path", "both"):
-            prefix = values.get("PI_ALB_PATH_PREFIX", "/agent")
-            print(f"  - Agent UI path: {prefix}/ on your app URL")
-        if routing in ("host", "both") and values.get("PI_ALB_HOST_HEADER"):
+        if values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True":
             print(
-                f"  - Agent DNS: CNAME {values['PI_ALB_HOST_HEADER']} -> "
-                f"{values.get('CLOUDFRONT_DOMAIN') or 'ALB/Express endpoint'}"
+                "  - Agent UI: PiExpressEndpoint stack output (dedicated Express HTTPS URL)"
             )
+        else:
+            routing = values.get("PI_ALB_ROUTING", "path")
+            if routing in ("path", "both"):
+                prefix = values.get("PI_ALB_PATH_PREFIX", "/agent")
+                print(f"  - Agent UI path: {prefix}/ on your app URL")
+            if routing in ("host", "both") and values.get("PI_ALB_HOST_HEADER"):
+                print(
+                    f"  - Agent DNS: CNAME {values['PI_ALB_HOST_HEADER']} -> "
+                    f"{values.get('CLOUDFRONT_DOMAIN') or 'ALB/Express endpoint'}"
+                )
         if PI_AGENT_ENV_PATH.is_file():
             print(
                 f"  - Agent runtime config: {PI_AGENT_ENV_PATH} (uploaded by quickstart)"
@@ -2983,21 +3044,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         cf = values.get("CLOUDFRONT_DOMAIN", "")
         if domain and cf and cf != "cloudfront_placeholder.net":
             print(f"  - Point DNS CNAME {domain} -> {cf}")
-    elif values.get("ENABLE_HEADLESS_DEPLOYMENT") == "True":
-        prefix = values.get("S3_BATCH_ENV_PREFIX", "input/config/")
-        suffix = values.get("S3_BATCH_ENV_SUFFIX", ".env")
-        print(
-            f"  - Upload job files to s3://<output-bucket>/{prefix}*{suffix} "
-            "(see BatchJobEnvPrefix stack output after deploy)"
-        )
-        print(
-            "  - Lambda starts one-shot ECS tasks with RUN_DIRECT_MODE=True "
-            "(see cdk/config/lambda/lambda_function.py)"
-        )
     elif values.get("USE_ECS_EXPRESS_MODE") == "True":
         ep = values.get("ECS_EXPRESS_COGNITO_REDIRECT_BASE", "")
         if ep:
-            print(f"  - Express endpoint: {ep}")
+            from cdk_config import normalize_https_redirect_url
+
+            print(f"  - Express endpoint: {normalize_https_redirect_url(ep)}")
     if APP_CONFIG_ENV_PATH.is_file():
         print(f"  - App runtime config: {APP_CONFIG_ENV_PATH} (uploaded by quickstart)")
     print(f"  - Config: {ENV_PATH}")

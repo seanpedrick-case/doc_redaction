@@ -34,3 +34,18 @@ def test_delete_protection_helpers(monkeypatch, env_value, enabled):
         RemovalPolicy.RETAIN if enabled else RemovalPolicy.DESTROY
     )
     assert cdk_functions.s3_auto_delete_objects_on_stack_destroy() is (not enabled)
+    assert cdk_functions.ecr_empty_on_delete() is (not enabled)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("de-abc.ecs.eu-west-2.on.aws", "https://de-abc.ecs.eu-west-2.on.aws"),
+        ("https://app.example.com/", "https://app.example.com"),
+        ("http://app.example.com", "https://app.example.com"),
+    ],
+)
+def test_normalize_https_redirect_url(raw, expected):
+    import cdk_config
+
+    assert cdk_config.normalize_https_redirect_url(raw) == expected

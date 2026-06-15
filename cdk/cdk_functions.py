@@ -16,6 +16,7 @@ from aws_cdk import (
     Stack,
     Tags,
 )
+from aws_cdk import aws_codebuild as codebuild
 from aws_cdk import aws_cognito as cognito
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecs as ecs
@@ -38,7 +39,6 @@ from cdk_config import (
     ENABLE_RESOURCE_DELETE_PROTECTION,
     FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
     NAT_GATEWAY_EIP_NAME,
-    POLICY_FILE_LOCATIONS,
     PRIVATE_SUBNET_AVAILABILITY_ZONES,
     PRIVATE_SUBNET_CIDR_BLOCKS,
     PRIVATE_SUBNETS_TO_USE,
@@ -106,6 +106,11 @@ def managed_resource_removal_policy() -> RemovalPolicy:
 
 def s3_auto_delete_objects_on_stack_destroy() -> bool:
     """Empty S3 buckets automatically when the stack is destroyed (dev/teardown only)."""
+    return not is_resource_delete_protection_enabled()
+
+
+def ecr_empty_on_delete() -> bool:
+    """Force-delete ECR images when the repository is removed on stack destroy."""
     return not is_resource_delete_protection_enabled()
 
 
@@ -314,8 +319,38 @@ if PRIVATE_SUBNET_AVAILABILITY_ZONES:
         "PRIVATE_SUBNET_AVAILABILITY_ZONES"
     )
 
-if POLICY_FILE_LOCATIONS:
-    POLICY_FILE_LOCATIONS = _get_env_list(POLICY_FILE_LOCATIONS)
+
+def resolve_policy_file_paths(
+    paths: List[str],
+    *,
+    cdk_folder: str = "",
+) -> List[str]:
+    """Resolve JSON policy paths relative to ``CDK_FOLDER`` when not absolute."""
+    resolved: List[str] = []
+    base = (cdk_folder or "").strip().rstrip("/\\")
+    for raw in paths:
+        path = (raw or "").strip()
+        if not path:
+            continue
+        if os.path.isabs(path):
+            resolved.append(os.path.normpath(path))
+        elif base:
+            resolved.append(os.path.normpath(os.path.join(base, path)))
+        else:
+            resolved.append(os.path.normpath(path))
+    return resolved
+
+
+def attach_managed_policy_arns(role: iam.IRole, policy_arns: List[str]) -> None:
+    """Attach existing customer-managed policies by full ARN."""
+    for arn in policy_arns:
+        arn = (arn or "").strip()
+        if not arn:
+            continue
+        role.add_managed_policy(
+            iam.ManagedPolicy.from_managed_policy_arn(role, arn, arn)
+        )
+        print(f"Attached managed policy ARN to {role.node.id}: {arn}")
 
 
 def check_for_existing_role(role_name: str):
@@ -336,10 +371,6 @@ def check_for_existing_role(role_name: str):
 
 
 from typing import List
-
-# Assume POLICY_FILE_LOCATIONS is defined globally or passed as a default
-# For example:
-# POLICY_FILE_LOCATIONS = ["./policies/my_read_policy.json", "./policies/my_write_policy.json"]
 
 
 def add_statement_to_policy(role: iam.IRole, policy_document: Dict[str, Any]):
@@ -420,9 +451,11 @@ def resolve_ecs_vpc_endpoint_subnet_selection(
         if not private_subnets:
             return None
         return ec2.SubnetSelection(subnets=private_subnets)
-    if not private_subnets:
-        return None
-    return ec2.SubnetSelection(subnets=private_subnets)
+    if private_subnets:
+        return ec2.SubnetSelection(subnets=private_subnets)
+    if public_subnets:
+        return ec2.SubnetSelection(subnets=public_subnets)
+    return None
 
 
 def resolve_ecs_s3_gateway_subnet_selection(
@@ -797,7 +830,7 @@ def get_secret_kms_key_arn(
     try:
         description = client.describe_secret(SecretId=secret_id)
     except Exception as exc:
-        print(f"Warning: could not describe secret '{secret_id}' for KMS key: {exc}")
+        print(f"Warning: could not describe secret for KMS key: {exc}")
         return None
     kms_key_id = description.get("KmsKeyId")
     if not kms_key_id:
@@ -996,6 +1029,45 @@ def check_codebuild_project_exists(
         )
         # Decide how to handle other errors
         raise  # Re-raise the original exception
+
+
+def public_github_repository_url(owner: str, repo: str) -> str:
+    """HTTPS clone URL for a public GitHub repository."""
+    owner_clean = owner.strip().strip("/")
+    repo_clean = repo.strip().strip("/")
+    return f"https://github.com/{owner_clean}/{repo_clean}.git"
+
+
+def public_github_codebuild_source(
+    owner: str,
+    repo: str,
+    branch_or_ref: str,
+) -> codebuild.ISource:
+    """CodeBuild source for a public GitHub repo (no CodeConnections/OAuth)."""
+    return codebuild.Source.git_hub(
+        owner=owner,
+        repo=repo,
+        branch_or_ref=branch_or_ref,
+        webhook=False,
+        report_build_status=False,
+    )
+
+
+def configure_public_github_codebuild_source(
+    project: codebuild.Project,
+    owner: str,
+    repo: str,
+) -> None:
+    """Ensure CodeBuild clones a public repo without account-level GitHub credentials."""
+    cfn = project.node.default_child
+    if not isinstance(cfn, codebuild.CfnProject):
+        return
+    cfn.add_property_deletion_override("Source.Auth")
+    cfn.add_property_override(
+        "Source.Location", public_github_repository_url(owner, repo)
+    )
+    cfn.add_property_override("Source.ReportBuildStatus", False)
+    cfn.add_property_override("Triggers.Webhook", False)
 
 
 def get_vpc_id_by_name(vpc_name: str):
@@ -2320,15 +2392,21 @@ def create_basic_config_env(
     *,
     headless: bool = False,
     alb_cognito: bool = False,
+    pi_express_backend: bool = False,
 ):
     """
     Create a basic app_config.env file for the deployed redaction app.
 
     ``alb_cognito=True`` disables in-app Gradio Cognito login when the ALB
     ``authenticate-cognito`` action already protects the service (Express Mode).
+
+    ``pi_express_backend=True`` disables in-app login on the main redaction app when
+    Pi Express calls it over Service Connect (users authenticate on the Pi UI only).
     """
     variables = {
-        "COGNITO_AUTH": "False" if headless or alb_cognito else "True",
+        "COGNITO_AUTH": (
+            "False" if headless or alb_cognito or pi_express_backend else "True"
+        ),
         "RUN_AWS_FUNCTIONS": "True",
         "DISPLAY_FILE_NAMES_IN_LOGS": "False",
         "SESSION_OUTPUT_FOLDER": "True",
@@ -2735,6 +2813,12 @@ def pi_listener_rule_count(routing_mode: str) -> int:
     return count
 
 
+def format_express_pi_public_url(express_endpoint: str) -> str:
+    """Public Pi UI URL for a dedicated ECS Express managed HTTPS endpoint."""
+    base = (express_endpoint or "").strip().rstrip("/")
+    return f"{base}/" if base else ""
+
+
 def format_pi_public_urls(
     *,
     routing_mode: str,
@@ -2770,7 +2854,7 @@ def build_pi_express_container_environment(
     service_connect_discovery_name: str,
     main_app_port: Union[str, int],
     pi_gradio_port: Union[str, int],
-    pi_root_path: str = "",
+    cognito_auth: bool = True,
 ) -> Dict[str, str]:
     """Inline env for Pi on Express (no volume mounts; workspace under /tmp)."""
     port = int(main_app_port)
@@ -2792,10 +2876,10 @@ def build_pi_express_container_environment(
         "ACCESS_LOGS_FOLDER": "/tmp/pi-logs/",
         "USAGE_LOGS_FOLDER": "/tmp/pi-usage/",
         "FEEDBACK_LOGS_FOLDER": "/tmp/pi-feedback/",
-        "RUN_FASTAPI": "False",
-        "COGNITO_AUTH": "False",
+        "RUN_FASTAPI": "True",
+        "RUN_AWS_FUNCTIONS": "True",
+        "COGNITO_AUTH": "True" if cognito_auth else "False",
     }
-    _apply_pi_root_path_env(env, pi_root_path)
     return env
 
 
@@ -2806,11 +2890,32 @@ def build_express_pi_primary_container(
     log_group_name: str,
     aws_region: str,
     environment: Optional[Dict[str, str]] = None,
+    secret: Optional[secretsmanager.ISecret] = None,
+    cognito_auth: bool = True,
 ) -> ecs.CfnExpressGatewayService.ExpressGatewayContainerProperty:
-    """Express PrimaryContainer for Pi (no Secrets Manager; inline env only)."""
+    """Express PrimaryContainer for Pi (inline env; Cognito creds from Secrets Manager)."""
     env_pairs = (
         _dict_env_to_express_key_value_pairs(environment) if environment else None
     )
+    secrets: Optional[List[ecs.CfnExpressGatewayService.SecretProperty]] = None
+    if secret is not None and cognito_auth:
+        secret_arn = secret.secret_arn
+        secrets = [
+            ecs.CfnExpressGatewayService.SecretProperty(
+                name="AWS_USER_POOL_ID",
+                value_from=_secret_value_from_arn(secret_arn, "REDACTION_USER_POOL_ID"),
+            ),
+            ecs.CfnExpressGatewayService.SecretProperty(
+                name="AWS_CLIENT_ID",
+                value_from=_secret_value_from_arn(secret_arn, "REDACTION_CLIENT_ID"),
+            ),
+            ecs.CfnExpressGatewayService.SecretProperty(
+                name="AWS_CLIENT_SECRET",
+                value_from=_secret_value_from_arn(
+                    secret_arn, "REDACTION_CLIENT_SECRET"
+                ),
+            ),
+        ]
     return ecs.CfnExpressGatewayService.ExpressGatewayContainerProperty(
         image=image_uri,
         container_port=container_port,
@@ -2819,6 +2924,7 @@ def build_express_pi_primary_container(
             log_stream_prefix="ecs-pi",
         ),
         environment=env_pairs,
+        secrets=secrets,
     )
 
 
@@ -3164,6 +3270,7 @@ def create_s3_batch_ecs_trigger_lambda(
             "CONTAINER_NAME": container_name,
             "DEFAULT_DIRECT_MODE_TASK": default_direct_mode_task,
             "ECS_ASSIGN_PUBLIC_IP": "true" if assign_public_ip else "false",
+            "APP_CONFIG_ENV_KEY": APP_CONFIG_ENV_BASENAME,
         },
     }
     if function_name:
@@ -3178,6 +3285,25 @@ def create_s3_batch_ecs_trigger_lambda(
     )
 
     return batch_fn
+
+
+def create_headless_s3_batch_seed(
+    scope: Construct,
+    logical_id: str,
+    *,
+    destination_bucket: s3.IBucket,
+    seed_asset_directory: str,
+) -> None:
+    """Upload input/ and input/config/ markers plus example job .env to the output bucket."""
+    from aws_cdk import aws_s3_deployment as s3deploy
+
+    s3deploy.BucketDeployment(
+        scope,
+        logical_id,
+        sources=[s3deploy.Source.asset(seed_asset_directory)],
+        destination_bucket=destination_bucket,
+        prune=False,
+    )
 
 
 def build_pi_agent_container_environment(

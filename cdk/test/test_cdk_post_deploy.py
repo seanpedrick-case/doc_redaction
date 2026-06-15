@@ -191,6 +191,102 @@ def test_target_group_arn_from_ecs_register_event():
     )
 
 
+def test_resolve_express_service_target_group_arn_waits_for_registration_event():
+    mock_ecs = MagicMock()
+    mock_ecs.describe_services.side_effect = [
+        {
+            "services": [
+                {
+                    "events": [],
+                    "runningCount": 0,
+                    "desiredCount": 1,
+                }
+            ]
+        },
+        {
+            "services": [
+                {
+                    "events": [
+                        {
+                            "message": (
+                                "(service Demo-Redaction-ECSService) registered 1 targets in "
+                                "(target-group arn:aws:elasticloadbalancing:eu-west-2:123:"
+                                "targetgroup/ecs-gateway-tg-abc/def)"
+                            )
+                        }
+                    ],
+                    "runningCount": 1,
+                    "desiredCount": 1,
+                }
+            ]
+        },
+    ]
+
+    with (
+        patch("cdk_post_deploy.boto3.client", return_value=mock_ecs),
+        patch("cdk_post_deploy.time.sleep"),
+        patch("cdk_post_deploy.time.monotonic", side_effect=[0, 0, 600]),
+    ):
+        arn = post.resolve_express_service_target_group_arn(
+            "cluster",
+            "Demo-Redaction-ECSService",
+            max_wait_seconds=600,
+            poll_interval_seconds=15,
+        )
+
+    assert arn == (
+        "arn:aws:elasticloadbalancing:eu-west-2:123:targetgroup/ecs-gateway-tg-abc/def"
+    )
+    assert mock_ecs.describe_services.call_count == 2
+
+
+def test_resolve_express_service_target_group_arn_from_task_ips():
+    mock_ecs = MagicMock()
+    mock_ecs.describe_services.return_value = {
+        "services": [
+            {
+                "events": [],
+                "runningCount": 1,
+                "desiredCount": 1,
+            }
+        ]
+    }
+    mock_ecs.list_tasks.return_value = {"taskArns": ["arn:task/1"]}
+    mock_ecs.describe_tasks.return_value = {
+        "tasks": [
+            {
+                "attachments": [
+                    {"details": [{"name": "privateIPv4Address", "value": "10.0.1.42"}]}
+                ]
+            }
+        ]
+    }
+    mock_elbv2 = MagicMock()
+    mock_elbv2.describe_target_groups.return_value = {
+        "TargetGroups": [{"TargetGroupArn": "arn:tg/main"}]
+    }
+    mock_elbv2.describe_target_health.return_value = {
+        "TargetHealthDescriptions": [{"Target": {"Id": "10.0.1.42"}}]
+    }
+
+    def client_factory(service_name, **_kwargs):
+        return mock_elbv2 if service_name == "elbv2" else mock_ecs
+
+    with (
+        patch("cdk_post_deploy.boto3.client", side_effect=client_factory),
+        patch("cdk_post_deploy.time.monotonic", return_value=0),
+    ):
+        arn = post.resolve_express_service_target_group_arn(
+            "cluster",
+            "Demo-Redaction-ECSService",
+            load_balancer_arn="arn:lb/express",
+            max_wait_seconds=600,
+            poll_interval_seconds=15,
+        )
+
+    assert arn == "arn:tg/main"
+
+
 def test_listener_actions_with_target_group_replaces_forward_arn():
     actions = [
         {"Type": "authenticate-cognito", "Order": 1},
@@ -229,3 +325,75 @@ def test_listener_rule_has_cognito_auth():
         [{"Type": "authenticate-cognito"}, {"Type": "forward"}]
     )
     assert not post.listener_rule_has_cognito_auth([{"Type": "forward"}])
+
+
+def test_print_express_mode_next_steps(capsys, monkeypatch):
+    def fake_get_stack_output(stack_name, output_key, region):
+        outputs = {
+            "ExpressServiceEndpoint": "main.example.ecs.eu-west-2.on.aws",
+            "PiExpressEndpoint": "pi.example.ecs.eu-west-2.on.aws",
+        }
+        return outputs.get(output_key)
+
+    monkeypatch.setattr(post, "get_stack_output", fake_get_stack_output)
+    post.print_express_mode_next_steps(
+        {
+            "AWS_REGION": "eu-west-2",
+            "ENABLE_PI_AGENT_EXPRESS_SERVICE": "True",
+        }
+    )
+    out = capsys.readouterr().out
+    assert "Wait 10 minutes for app deployment to finish." in out
+    assert "Cognito authorisation" not in out
+    assert "sign in at the Pi agent URL" in out
+    assert "https://main.example.ecs.eu-west-2.on.aws" in out
+    assert "https://pi.example.ecs.eu-west-2.on.aws/" in out
+    assert "pi_agent.env" not in out
+
+
+def test_print_headless_deployment_next_steps(capsys):
+    post.print_headless_deployment_next_steps(
+        {
+            "AWS_REGION": "eu-west-2",
+            "S3_OUTPUT_BUCKET_NAME": "my-output-bucket",
+            "S3_BATCH_INPUT_PREFIX": "input/",
+            "S3_BATCH_ENV_PREFIX": "input/config/",
+            "S3_BATCH_LAMBDA_FUNCTION_NAME": "Headless-Redaction-S3BatchEcsTrigger",
+            "ECS_LOG_GROUP_NAME": "/ecs/headless-redaction-ecsservice-logs",
+        }
+    )
+    out = capsys.readouterr().out
+    assert "Upload a PDF file for redaction to s3://my-output-bucket/input/" in out
+    assert "example_headless_env_file.env" in out
+    assert "s3://my-output-bucket/input/config/" in out
+    assert "Headless-Redaction-S3BatchEcsTrigger" in out
+    assert "s3://my-output-bucket/output/<session-folder>/" in out
+    assert "tools/config.py" in out
+
+
+def test_seed_headless_batch_s3_layout_creates_prefixes(tmp_path):
+    from botocore.exceptions import ClientError
+
+    example = tmp_path / "example_headless_env_file.env"
+    example.write_text("DIRECT_MODE_TASK=redact\n", encoding="utf-8")
+
+    missing = ClientError(
+        {"Error": {"Code": "404", "Message": "Not Found"}},
+        "HeadObject",
+    )
+    s3 = MagicMock()
+    s3.head_object.side_effect = missing
+
+    with patch("cdk_post_deploy.boto3.client", return_value=s3):
+        post.seed_headless_batch_s3_layout(
+            "my-bucket",
+            example_env_local_path=str(example),
+            aws_region="eu-west-2",
+        )
+
+    put_calls = s3.put_object.call_args_list
+    assert len(put_calls) == 3
+    keys = [call.kwargs["Key"] for call in put_calls]
+    assert "input/" in keys
+    assert "input/config/" in keys
+    assert "input/config/example_headless_env_file.env" in keys

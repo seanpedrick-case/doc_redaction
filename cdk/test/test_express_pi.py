@@ -43,6 +43,50 @@ def test_build_pi_express_container_environment():
     assert env["PI_WORKSPACE_DIR"] == "/tmp/pi-workspace"
     assert env["PI_UPLOAD_ROOT"] == "/tmp/gradio"
     assert env["PI_DEPLOYMENT_PROFILE"] == "aws-ecs"
+    assert env["COGNITO_AUTH"] == "True"
+    assert env["RUN_FASTAPI"] == "True"
+
+
+def test_build_express_pi_primary_container_includes_cognito_secrets():
+    from aws_cdk import App, Stack
+    from aws_cdk import aws_secretsmanager as sm
+    from cdk_functions import build_express_pi_primary_container
+
+    app = App()
+    stack = Stack(app, "PiSecretTest")
+    secret = sm.Secret(stack, "CognitoSecret", secret_name="demo-cognito-secret")
+
+    container = build_express_pi_primary_container(
+        image_uri="123456789012.dkr.ecr.eu-west-2.amazonaws.com/pi:latest",
+        container_port=7862,
+        log_group_name="/ecs/pi-logs",
+        aws_region="eu-west-2",
+        secret=secret,
+        cognito_auth=True,
+    )
+    assert container.secrets is not None
+    secret_names = {item.name for item in container.secrets}
+    assert secret_names == {"AWS_USER_POOL_ID", "AWS_CLIENT_ID", "AWS_CLIENT_SECRET"}
+
+    no_auth = build_express_pi_primary_container(
+        image_uri="123456789012.dkr.ecr.eu-west-2.amazonaws.com/pi:latest",
+        container_port=7862,
+        log_group_name="/ecs/pi-logs",
+        aws_region="eu-west-2",
+        secret=secret,
+        cognito_auth=False,
+    )
+    assert no_auth.secrets is None
+
+
+def test_format_express_pi_public_url():
+    from cdk_functions import format_express_pi_public_url
+
+    assert (
+        format_express_pi_public_url("https://pi.example.ecs.eu-west-2.on.aws")
+        == "https://pi.example.ecs.eu-west-2.on.aws/"
+    )
+    assert format_express_pi_public_url("") == ""
 
 
 def test_express_service_connect_configuration_server_and_client():

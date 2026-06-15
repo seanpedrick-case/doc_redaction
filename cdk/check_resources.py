@@ -14,6 +14,7 @@ from cdk_config import (  # Import necessary config
     COGNITO_USER_POOL_NAME,
     CONTEXT_FILE,
     ECR_CDK_REPO_NAME,
+    ECR_PI_REPO_NAME,
     ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_NAMES_TO_LOOKUP,
     ECS_TASK_EXECUTION_ROLE_NAME,
     ECS_TASK_ROLE_NAME,
@@ -406,12 +407,10 @@ def check_and_set_context():
     if exists:
         pass
 
-    # ECR Repository
-    repo_name = ECR_CDK_REPO_NAME
-    exists, _ = check_ecr_repo_exists(repo_name)
-    context_data[f"exists:{repo_name}"] = exists
-    if exists:
-        pass  # from_repository_name is sufficient
+    # ECR Repositories
+    for repo_name in (ECR_CDK_REPO_NAME, ECR_PI_REPO_NAME):
+        exists, _ = check_ecr_repo_exists(repo_name)
+        context_data[f"exists:{repo_name}"] = exists
 
     # CodeBuild Project
     project_name = CODEBUILD_PROJECT_NAME
@@ -502,18 +501,16 @@ def check_and_set_context():
         )
         if secret_arn:
             context_data[f"arn:{secret_name}"] = secret_arn
-            print(f"Secret '{secret_name}' ARN recorded for IAM grants.")
+            print("Cognito secret ARN recorded for IAM grants.")
             secret_kms_key_arn = get_secret_kms_key_arn(
                 secret_name, region_name=AWS_REGION
             )
             if secret_kms_key_arn:
                 context_data[f"kms_key_arn:{secret_name}"] = secret_kms_key_arn
-                print(
-                    f"Secret '{secret_name}' KMS key recorded for execution role decrypt."
-                )
+                print("Cognito secret KMS key recorded for execution role decrypt.")
         else:
             print(
-                f"Warning: Secret '{secret_name}' exists but ARN was not returned; "
+                "Warning: Cognito secret exists but ARN was not returned; "
                 "CDK will use a name-based ARN wildcard in IAM policies."
             )
 

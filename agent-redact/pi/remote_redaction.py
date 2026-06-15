@@ -54,6 +54,20 @@ def redaction_hf_token() -> str | None:
     return token.strip() if token and token.strip() else None
 
 
+def redaction_gradio_auth() -> tuple[str, str] | None:
+    """
+    Optional Gradio HTTP basic auth for doc_redaction when ``COGNITO_AUTH=True``.
+
+    Set ``DOC_REDACTION_GRADIO_AUTH_USER`` and ``DOC_REDACTION_GRADIO_AUTH_PASSWORD``
+    (e.g. a dedicated Cognito service account). Not the Pi UI user's session.
+    """
+    user = (os.environ.get("DOC_REDACTION_GRADIO_AUTH_USER") or "").strip()
+    password = os.environ.get("DOC_REDACTION_GRADIO_AUTH_PASSWORD") or ""
+    if user and password:
+        return (user, password)
+    return None
+
+
 def httpx_timeout(
     *,
     connect: float = DEFAULT_CONNECT_TIMEOUT,
@@ -109,7 +123,8 @@ def make_redaction_client(
     """
     url = (base_url or redaction_base_url()).rstrip("/")
     token = hf_token if hf_token is not None else redaction_hf_token()
-    cache_key = (url, token or "")
+    auth = redaction_gradio_auth()
+    cache_key = (url, token or "", auth or ())
     if not force_new and cache_key in _CLIENT_CACHE:
         return _CLIENT_CACHE[cache_key]
 
@@ -123,7 +138,9 @@ def make_redaction_client(
 
     for attempt in range(1, max_attempts + 1):
         try:
-            if token:
+            if auth:
+                client = Client(url, auth=auth, **client_kwargs)
+            elif token:
                 client = Client(url, token=token, **client_kwargs)
             else:
                 client = Client(url, **client_kwargs)

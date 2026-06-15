@@ -113,6 +113,10 @@ def test_build_env_values_headless():
     assert values["PRIVATE_SUBNETS_TO_USE"] == ""
 
 
+def test_headless_profile_uses_public_subnets_only():
+    assert inst.answers_use_public_subnets_only(_headless_answers()) is True
+
+
 def test_build_env_values_production_headless():
     answers = _production_answers()
     answers.enable_headless = True
@@ -267,12 +271,20 @@ def test_vpc_cidr_blocks_from_describe_includes_associations():
     ]
 
 
-def test_build_app_config_env_values_express_alb_cognito():
+def test_build_app_config_env_values_express_uses_in_app_cognito():
     values = inst.build_env_values(_demo_answers())
     updates = inst.build_app_config_env_values(values)
-    assert updates["COGNITO_AUTH"] == "False"
+    assert updates["COGNITO_AUTH"] == "True"
     assert updates["RUN_AWS_FUNCTIONS"] == "True"
     assert updates["DOCUMENT_REDACTION_BUCKET"].endswith("s3-logs")
+
+
+def test_build_app_config_env_values_express_pi_disables_main_cognito():
+    answers = _demo_answers()
+    answers.enable_pi_express = True
+    values = inst.build_env_values(answers)
+    updates = inst.build_app_config_env_values(values)
+    assert updates["COGNITO_AUTH"] == "False"
 
 
 def test_build_app_config_env_values_headless():
@@ -300,7 +312,7 @@ def test_write_app_config_env_from_example(tmp_path, monkeypatch):
     written = inst.read_env_file(target)
     assert written["RUN_FASTAPI"] == "True"
     assert written["DOCUMENT_REDACTION_BUCKET"].endswith("s3-logs")
-    assert written["COGNITO_AUTH"] == "False"
+    assert written["COGNITO_AUTH"] == "True"
 
 
 def test_format_list_env():
@@ -367,15 +379,21 @@ def test_merge_preset_custom():
 def test_build_env_values_pi_express():
     answers = _demo_answers()
     answers.enable_pi_express = True
-    answers.pi_alb_routing = "path"
-    answers.pi_alb_path_prefix = "/pi"
     values = inst.build_env_values(answers)
     assert values["ENABLE_PI_AGENT_EXPRESS_SERVICE"] == "True"
-    assert values["PI_ALB_ROUTING"] == "path"
-    assert values["PI_ALB_PATH_PREFIX"] == "/pi"
-    assert values["PI_ALB_LISTENER_RULE_PRIORITY"] == "3"
+    assert "PI_ALB_PATH_PREFIX" not in values
+    assert "PI_ALB_ROUTING" not in values
     assert values["ECS_SERVICE_CONNECT_DISCOVERY_NAME"] == "redaction"
     assert values["ECS_PI_EXPRESS_SC_PORT_NAME"] == "port-7862"
+    assert values["ECS_EXPRESS_SC_PORT_NAME"] == "port-7860"
+
+
+def test_build_pi_agent_env_values_express_skips_root_path():
+    answers = _demo_answers()
+    answers.enable_pi_express = True
+    env = inst.build_pi_agent_env_values(answers)
+    assert env["RUN_FASTAPI"] == "True"
+    assert "PI_ROOT_PATH" not in env
 
 
 def test_build_env_values_pi_production_host():
@@ -404,7 +422,9 @@ def test_validate_pi_host_requires_header():
 
 def test_build_pi_agent_env_values():
     answers = _demo_answers()
-    answers.enable_pi_express = True
+    answers.enable_pi_express = False
+    answers.enable_pi_legacy = True
+    answers.pi_alb_routing = "path"
     answers.pi_alb_path_prefix = "/pi"
     values = inst.build_pi_agent_env_values(answers)
     assert values["PI_DEPLOYMENT_PROFILE"] == "aws-ecs"
@@ -761,13 +781,22 @@ def test_main_writes_config_before_smoke_test(monkeypatch, tmp_path):
     assert call_order.index("write_config") < call_order.index("smoke")
 
 
-def test_apply_post_deploy_fixup_express_uses_cognito_api_not_redeploy(monkeypatch):
+def test_resolve_fixup_env_values_derives_service_from_prefix():
+    values = {"CDK_PREFIX": "Demo-Redaction-", "USE_ECS_EXPRESS_MODE": "True"}
+    resolved = inst.resolve_fixup_env_values(values)
+    assert resolved["ECS_EXPRESS_SERVICE_NAME"] == "Demo-Redaction-ECSService"
+    assert resolved["CLUSTER_NAME"] == "Demo-Redaction-Cluster"
+    assert resolved["ECS_PI_EXPRESS_SERVICE_NAME"] == "Demo-Redaction-PiExpressService"
+
+
+def test_apply_post_deploy_fixup_express_syncs_cognito_secret_not_alb(monkeypatch):
     import cdk_post_deploy as post
 
     values = {
         "USE_ECS_EXPRESS_MODE": "True",
         "USE_CLOUDFRONT": "False",
         "AWS_REGION": "eu-west-2",
+        "CDK_PREFIX": "Demo-Redaction-",
         "ECS_EXPRESS_COGNITO_REDIRECT_BASE": "",
     }
     outputs = {
@@ -798,6 +827,15 @@ def test_apply_post_deploy_fixup_express_uses_cognito_api_not_redeploy(monkeypat
         "apply_cognito_alb_callback_fixup",
         lambda *_a, **_k: True,
     )
+    secret_fixup_calls: list = []
+    monkeypatch.setattr(
+        post,
+        "apply_cognito_secret_fixup_from_stack",
+        lambda **_k: secret_fixup_calls.append(_k) or True,
+    )
 
     assert inst.apply_post_deploy_fixup(values, assume_yes=False) is True
     assert redeploy_calls == []
+    assert secret_fixup_calls
+    assert secret_fixup_calls[0]["main_service_name"] == "Demo-Redaction-ECSService"
+    assert secret_fixup_calls[0]["cluster_name"] == "Demo-Redaction-Cluster"

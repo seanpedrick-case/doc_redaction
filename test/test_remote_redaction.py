@@ -21,11 +21,11 @@ from remote_redaction import (  # noqa: E402
 
 
 def test_make_redaction_client_uses_token_kwarg(monkeypatch):
-    calls: list[tuple[str, str | None]] = []
+    calls: list[tuple[str, str | None, tuple[str, str] | None]] = []
 
     class _FakeClient:
-        def __init__(self, url, token=None, **kwargs):
-            calls.append((url, token))
+        def __init__(self, url, token=None, auth=None, **kwargs):
+            calls.append((url, token, auth))
 
     monkeypatch.setattr("remote_redaction.Client", _FakeClient)
     monkeypatch.setenv("HF_TOKEN", "hf_secret")
@@ -33,7 +33,25 @@ def test_make_redaction_client_uses_token_kwarg(monkeypatch):
     clear_redaction_client_cache()
     client = make_redaction_client()
     assert client is not None
-    assert calls == [("https://example.hf.space", "hf_secret")]
+    assert calls == [("https://example.hf.space", "hf_secret", None)]
+
+
+def test_make_redaction_client_uses_gradio_auth(monkeypatch):
+    calls: list[tuple[str, str | None, tuple[str, str] | None]] = []
+
+    class _FakeClient:
+        def __init__(self, url, token=None, auth=None, **kwargs):
+            calls.append((url, token, auth))
+
+    monkeypatch.setattr("remote_redaction.Client", _FakeClient)
+    monkeypatch.setenv("DOC_REDACTION_GRADIO_URL", "https://redact.example.com")
+    monkeypatch.setenv("DOC_REDACTION_GRADIO_AUTH_USER", "svc-user")
+    monkeypatch.setenv("DOC_REDACTION_GRADIO_AUTH_PASSWORD", "svc-pass")
+    clear_redaction_client_cache()
+    make_redaction_client()
+    assert calls == [
+        ("https://redact.example.com", None, ("svc-user", "svc-pass")),
+    ]
 
 
 def test_make_redaction_client_retries_rate_limit(monkeypatch):

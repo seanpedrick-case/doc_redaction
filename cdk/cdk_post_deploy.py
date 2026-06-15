@@ -11,6 +11,7 @@ import copy
 import json
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional, Union
 
 import boto3
@@ -567,6 +568,9 @@ _TARGET_GROUP_REGISTER_EVENT = re.compile(
     re.IGNORECASE,
 )
 
+EXPRESS_TARGET_GROUP_RESOLVE_MAX_WAIT_SECONDS = 600
+EXPRESS_TARGET_GROUP_RESOLVE_POLL_INTERVAL_SECONDS = 15
+
 
 def target_group_arn_from_ecs_register_event(message: str) -> Optional[str]:
     """Parse target group ARN from ECS ``registered N targets in (target-group ...)``."""
@@ -576,35 +580,133 @@ def target_group_arn_from_ecs_register_event(message: str) -> Optional[str]:
     return match.group(1) if match else None
 
 
-def resolve_express_service_target_group_arn(
-    cluster_name: str,
-    service_name: str,
-    *,
-    aws_region: str = AWS_REGION,
-) -> str:
-    """
-    Target group where Express most recently registered tasks.
-
-    After post-deploy scaling, this ARN can differ from the TG baked into the CDK
-    Cognito listener custom resource at deploy time.
-    """
-    ecs_client = boto3.client("ecs", region_name=aws_region)
-    services = ecs_client.describe_services(
-        cluster=cluster_name, services=[service_name]
-    ).get("services", [])
-    if not services:
-        raise ValueError(
-            f"ECS service '{service_name}' not found in cluster '{cluster_name}'."
-        )
-    for event in services[0].get("events", []):
+def _target_group_arn_from_service_events(
+    events: List[Dict[str, Any]],
+) -> Optional[str]:
+    for event in events:
         target_group_arn = target_group_arn_from_ecs_register_event(
             event.get("message", "")
         )
         if target_group_arn:
             return target_group_arn
-    raise ValueError(
-        f"No target group registration event found for service '{service_name}'."
+    return None
+
+
+def _task_private_ipv4_addresses(
+    ecs_client: Any,
+    cluster_name: str,
+    service_name: str,
+) -> set[str]:
+    task_arns = ecs_client.list_tasks(
+        cluster=cluster_name, serviceName=service_name
+    ).get("taskArns", [])
+    if not task_arns:
+        return set()
+    tasks = ecs_client.describe_tasks(cluster=cluster_name, tasks=task_arns).get(
+        "tasks", []
     )
+    addresses: set[str] = set()
+    for task in tasks:
+        for attachment in task.get("attachments", []):
+            for detail in attachment.get("details", []):
+                if detail.get("name") == "privateIPv4Address" and detail.get("value"):
+                    addresses.add(detail["value"])
+    return addresses
+
+
+def _target_group_arn_from_task_ips(
+    elbv2_client: Any,
+    load_balancer_arn: str,
+    task_ips: set[str],
+) -> Optional[str]:
+    if not task_ips:
+        return None
+    target_groups = elbv2_client.describe_target_groups(
+        LoadBalancerArn=load_balancer_arn
+    ).get("TargetGroups", [])
+    for target_group in target_groups:
+        health = elbv2_client.describe_target_health(
+            TargetGroupArn=target_group["TargetGroupArn"]
+        ).get("TargetHealthDescriptions", [])
+        for description in health:
+            target_id = (description.get("Target") or {}).get("Id")
+            if target_id in task_ips:
+                return target_group["TargetGroupArn"]
+    return None
+
+
+def resolve_express_service_target_group_arn(
+    cluster_name: str,
+    service_name: str,
+    *,
+    aws_region: str = AWS_REGION,
+    load_balancer_arn: Optional[str] = None,
+    max_wait_seconds: int = EXPRESS_TARGET_GROUP_RESOLVE_MAX_WAIT_SECONDS,
+    poll_interval_seconds: int = EXPRESS_TARGET_GROUP_RESOLVE_POLL_INTERVAL_SECONDS,
+) -> str:
+    """
+    Target group where Express most recently registered tasks.
+
+    After post-deploy scaling, this ARN can differ from the TG baked into the CDK
+    Cognito listener custom resource at deploy time. Polls until a registration
+    event appears or running tasks are visible in an Express ALB target group.
+    """
+    ecs_client = boto3.client("ecs", region_name=aws_region)
+    elbv2_client = (
+        boto3.client("elbv2", region_name=aws_region) if load_balancer_arn else None
+    )
+    deadline = time.monotonic() + max_wait_seconds
+    attempt = 0
+    while True:
+        attempt += 1
+        services = ecs_client.describe_services(
+            cluster=cluster_name, services=[service_name]
+        ).get("services", [])
+        if not services:
+            raise ValueError(
+                f"ECS service '{service_name}' not found in cluster '{cluster_name}'."
+            )
+        service = services[0]
+        target_group_arn = _target_group_arn_from_service_events(
+            service.get("events", [])
+        )
+        if target_group_arn:
+            if attempt > 1:
+                print(
+                    f"Resolved target group for '{service_name}' "
+                    f"after {attempt} poll(s)."
+                )
+            return target_group_arn
+
+        if elbv2_client and load_balancer_arn:
+            task_ips = _task_private_ipv4_addresses(
+                ecs_client, cluster_name, service_name
+            )
+            target_group_arn = _target_group_arn_from_task_ips(
+                elbv2_client, load_balancer_arn, task_ips
+            )
+            if target_group_arn:
+                print(
+                    f"Resolved target group for '{service_name}' from running task IPs."
+                )
+                return target_group_arn
+
+        if time.monotonic() >= deadline:
+            running = service.get("runningCount", 0)
+            desired = service.get("desiredCount", 0)
+            raise ValueError(
+                f"No target group registration event found for service "
+                f"'{service_name}' after {max_wait_seconds}s "
+                f"(running {running}/{desired} tasks). "
+                "Ensure CodeBuild finished and the service scaled to at least one task."
+            )
+
+        if attempt == 1:
+            print(
+                f"Waiting for target group registration for '{service_name}' "
+                f"(up to {max_wait_seconds}s)..."
+            )
+        time.sleep(poll_interval_seconds)
 
 
 def find_express_gateway_https_listener(
@@ -666,19 +768,26 @@ def apply_express_alb_listener_target_group_fixup(
     Express creates fresh target groups when a service scales up after deploy; the
     CDK custom resource may still forward authenticated traffic to an empty TG.
     """
+    ingress = find_express_gateway_https_listener(aws_region=aws_region)
+    load_balancer_arn = ingress["load_balancer_arn"]
     main_target_group_arn = resolve_express_service_target_group_arn(
-        cluster_name, main_service_name, aws_region=aws_region
+        cluster_name,
+        main_service_name,
+        aws_region=aws_region,
+        load_balancer_arn=load_balancer_arn,
     )
     pi_target_group_arn = None
     if pi_service_name:
         try:
             pi_target_group_arn = resolve_express_service_target_group_arn(
-                cluster_name, pi_service_name, aws_region=aws_region
+                cluster_name,
+                pi_service_name,
+                aws_region=aws_region,
+                load_balancer_arn=load_balancer_arn,
             )
         except ValueError as exc:
             print(f"Note: skipping Pi listener rule TG fixup: {exc}")
 
-    ingress = find_express_gateway_https_listener(aws_region=aws_region)
     elbv2 = boto3.client("elbv2", region_name=aws_region)
     listener_arn = ingress["listener_arn"]
     listener = elbv2.describe_listeners(ListenerArns=[listener_arn])["Listeners"][0]
@@ -858,8 +967,8 @@ def apply_cognito_secret_fixup(
     current_string = current.get("SecretString") or ""
     if cognito_secret_payload_matches(current_string, desired_payload):
         print(
-            f"Cognito secret '{secret_name}' already matches pool {user_pool_id} "
-            f"and client {client_id}."
+            "Cognito secret already matches Cognito user pool ID "
+            "and Cognito app client ID."
         )
         return False
 
@@ -868,8 +977,7 @@ def apply_cognito_secret_fixup(
         SecretString=json.dumps(desired_payload),
     )
     print(
-        f"Updated Cognito secret '{secret_name}' for pool {user_pool_id} "
-        f"and client {client_id}."
+        "Updated Cognito secret for Cognito user pool ID " "and Cognito app client ID."
     )
     if recycle_express_service:
         recycle_express_gateway_tasks(
@@ -998,3 +1106,206 @@ def apply_cognito_secret_fixup_from_stack(
             else None
         ),
     )
+
+
+def get_stack_output(
+    stack_name: str,
+    output_key: str,
+    region: str,
+) -> Optional[str]:
+    """Return a CloudFormation stack output value, or None if missing."""
+    from botocore.exceptions import ClientError
+
+    cfn = boto3.client("cloudformation", region_name=region)
+    try:
+        response = cfn.describe_stacks(StackName=stack_name)
+    except ClientError:
+        return None
+    for stack in response.get("Stacks", []):
+        for output in stack.get("Outputs", []):
+            if output.get("OutputKey") == output_key:
+                return output.get("OutputValue")
+    return None
+
+
+def print_express_mode_next_steps(
+    values: Dict[str, str],
+    *,
+    stack_name: str = "RedactionStack",
+    region: Optional[str] = None,
+) -> None:
+    """Print user-facing next steps after Express mode deploy + quickstart."""
+    from cdk_config import normalize_https_redirect_url
+    from cdk_functions import format_express_pi_public_url
+
+    aws_region = region or values.get("AWS_REGION") or AWS_REGION
+
+    main_raw = (values.get("ECS_EXPRESS_COGNITO_REDIRECT_BASE") or "").strip()
+    if not main_raw:
+        main_raw = (
+            get_stack_output(stack_name, "ExpressServiceEndpoint", aws_region) or ""
+        )
+    main_url = normalize_https_redirect_url(main_raw) if main_raw else ""
+
+    print("\nDone. Next steps:")
+    print("  - Wait 10 minutes for app deployment to finish.")
+    pi_express = values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True"
+    if pi_express:
+        print(
+            "  - Register a Cognito user in AWS Console and sign in at the Pi agent URL "
+            "below. The main redaction backend runs without in-app login so the Pi agent "
+            "can call it over Service Connect."
+        )
+    else:
+        print(
+            "  - If you have enabled Cognito authorisation in app, register a new user "
+            "to your Cognito user pool in AWS Console and complete sign up with the app "
+            "client login. If you do not want Cognito login, then set COGNITO_AUTH to "
+            "False in the ECS task definition / ECS service options."
+        )
+    if main_url:
+        print(f"  - The main redaction app can be accessed at {main_url}")
+    else:
+        print("  - The main redaction app URL: see ExpressServiceEndpoint stack output")
+
+    if values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True":
+        pi_raw = get_stack_output(stack_name, "PiExpressEndpoint", aws_region) or ""
+        pi_url = (
+            format_express_pi_public_url(normalize_https_redirect_url(pi_raw))
+            if pi_raw
+            else ""
+        )
+        if pi_url:
+            print(f"  - The Pi agentic redaction app can be accessed at {pi_url}")
+        else:
+            print(
+                "  - The Pi agentic redaction app URL: see PiExpressEndpoint stack output"
+            )
+
+
+def _s3_object_exists(s3_client, bucket: str, key: str) -> bool:
+    from botocore.exceptions import ClientError
+
+    try:
+        s3_client.head_object(Bucket=bucket, Key=key)
+        return True
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code in ("404", "NoSuchKey", "NotFound"):
+            return False
+        raise
+
+
+def seed_headless_batch_s3_layout(
+    output_bucket: str,
+    *,
+    input_prefix: str = "input/",
+    env_prefix: str = "input/config/",
+    example_env_local_path: str,
+    example_env_basename: str = "example_headless_env_file.env",
+    aws_region: str = AWS_REGION,
+) -> None:
+    """
+    Ensure headless batch prefixes and example job .env exist on the output bucket.
+
+    Idempotent: existing keys are left unchanged (safe to run from quickstart).
+    """
+    if not output_bucket:
+        print("Skipping headless S3 layout seed: output bucket name is empty.")
+        return
+
+    input_prefix_norm = (
+        input_prefix if input_prefix.endswith("/") else f"{input_prefix}/"
+    )
+    env_prefix_norm = env_prefix if env_prefix.endswith("/") else f"{env_prefix}/"
+    if not env_prefix_norm.startswith(input_prefix_norm):
+        env_prefix_norm = f"{input_prefix_norm}{env_prefix_norm.lstrip('/')}"
+        if not env_prefix_norm.endswith("/"):
+            env_prefix_norm += "/"
+
+    s3_client = boto3.client("s3", region_name=aws_region)
+    markers = (
+        input_prefix_norm,
+        env_prefix_norm,
+    )
+    for key in markers:
+        if _s3_object_exists(s3_client, output_bucket, key):
+            print(f"S3 prefix marker already present: s3://{output_bucket}/{key}")
+            continue
+        s3_client.put_object(Bucket=output_bucket, Key=key, Body=b"")
+        print(f"Created S3 prefix marker: s3://{output_bucket}/{key}")
+
+    example_key = f"{env_prefix_norm}{example_env_basename}"
+    if _s3_object_exists(s3_client, output_bucket, example_key):
+        print(f"Example job .env already present: s3://{output_bucket}/{example_key}")
+        return
+
+    if not os.path.isfile(example_env_local_path):
+        print(f"Skipping example job .env upload: {example_env_local_path} not found.")
+        return
+
+    with open(example_env_local_path, "rb") as handle:
+        s3_client.put_object(Bucket=output_bucket, Key=example_key, Body=handle.read())
+    print(f"Uploaded example job .env to s3://{output_bucket}/{example_key}")
+
+
+def print_headless_deployment_next_steps(
+    values: Dict[str, str],
+    *,
+    stack_name: str = "RedactionStack",
+    region: Optional[str] = None,
+) -> None:
+    """Print user-facing next steps after headless deploy + quickstart."""
+    aws_region = region or values.get("AWS_REGION") or AWS_REGION
+    output_bucket = (values.get("S3_OUTPUT_BUCKET_NAME") or "").strip()
+    input_prefix = (values.get("S3_BATCH_INPUT_PREFIX") or "input/").strip("/")
+    config_prefix = (values.get("S3_BATCH_ENV_PREFIX") or "input/config/").strip("/")
+
+    lambda_name = (values.get("S3_BATCH_LAMBDA_FUNCTION_NAME") or "").strip()
+    if not lambda_name:
+        lambda_name = (
+            get_stack_output(stack_name, "BatchEcsTriggerLambdaName", aws_region) or ""
+        ).strip()
+    if not lambda_name:
+        prefix = (values.get("CDK_PREFIX") or "").strip()
+        lambda_name = f"{prefix}S3BatchEcsTrigger" if prefix else "S3BatchEcsTrigger"
+
+    input_uri = (
+        f"s3://{output_bucket}/{input_prefix}/"
+        if output_bucket
+        else f"<output-bucket>/{input_prefix}/"
+    )
+    config_uri = (
+        f"s3://{output_bucket}/{config_prefix}/"
+        if output_bucket
+        else f"<output-bucket>/{config_prefix}/"
+    )
+    output_uri = (
+        f"s3://{output_bucket}/output/<session-folder>/"
+        if output_bucket
+        else "<output-bucket>/output/<session-folder>/"
+    )
+    example_name = "example_headless_env_file.env"
+
+    print("\nDone. Next steps:")
+    print(f"  - Upload a PDF file for redaction to {input_uri}")
+    print(
+        f"  - Create a .env file for submitting a task. You can use '{example_name}' "
+        f"(also at {config_uri}{example_name}) and change the PDF filename inside. "
+        "Further direct-mode config variables are in tools/config.py (DIRECT_MODE_*)."
+    )
+    print(f"  - Upload your job .env file to {config_uri}")
+    print(
+        f"  - AWS Lambda function {lambda_name} will start an ECS task to redact your "
+        "document according to your instructions."
+    )
+    print(
+        f"  - Redaction outputs are written to {output_uri} when SAVE_OUTPUTS_TO_S3=True "
+        "in your job .env (see the example file)."
+    )
+    log_group = (values.get("ECS_LOG_GROUP_NAME") or "").strip()
+    if log_group:
+        print(
+            f"  - Batch task logs: CloudWatch log group {log_group} "
+            "(streams appear once the container starts)."
+        )

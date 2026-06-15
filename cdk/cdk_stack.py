@@ -38,6 +38,7 @@ from cdk_config import (
     AWS_ACCOUNT_ID,
     AWS_MANAGED_TASK_ROLES_LIST,
     AWS_REGION,
+    CDK_FOLDER,
     CDK_PREFIX,
     CLOUDFRONT_DISTRIBUTION_NAME,
     CLOUDFRONT_DOMAIN,
@@ -64,6 +65,9 @@ from cdk_config import (
     ECR_CDK_REPO_NAME,
     ECR_PI_REPO_NAME,
     ECS_AVAILABILITY_ZONE_REBALANCING,
+    ECS_EXECUTION_ROLE_MANAGED_POLICIES,
+    ECS_EXECUTION_ROLE_POLICY_ARNS,
+    ECS_EXECUTION_ROLE_POLICY_FILES,
     ECS_EXPRESS_HEALTH_CHECK_PATH,
     ECS_EXPRESS_INFRASTRUCTURE_ROLE_NAME,
     ECS_EXPRESS_SERVICE_NAME,
@@ -119,6 +123,8 @@ from cdk_config import (
     PI_ALB_ROUTING,
     PI_ALB_TARGET_GROUP_NAME,
     PI_GRADIO_PORT,
+    POLICY_FILE_ARNS,
+    POLICY_FILE_LOCATIONS,
     PRIVATE_SUBNET_AVAILABILITY_ZONES,
     PRIVATE_SUBNET_CIDR_BLOCKS,
     PRIVATE_SUBNETS_TO_USE,
@@ -149,33 +155,38 @@ from cdk_functions import (  # Only keep CDK-native functions
     add_custom_policies,
     add_s3_enforce_ssl_policy,
     allow_express_load_balancer_to_ecs_security_group,
+    attach_managed_policy_arns,
     attach_pi_agent_to_shared_alb,
     build_ecs_execution_role_kms_policy,
     build_ecs_task_role_kms_policy,
     build_express_gateway_primary_container,
     build_express_pi_primary_container,
     build_pi_express_container_environment,
-    configure_express_listener_cognito_and_cloudfront,
-    configure_express_pi_listener_rules,
+    configure_public_github_codebuild_source,
     create_ecs_express_infrastructure_role,
     create_ecs_vpc_endpoints_for_private_subnets,
     create_express_gateway_service,
+    create_headless_s3_batch_seed,
     create_nat_gateway,
     create_pi_agent_ecs_resources,
     create_s3_batch_ecs_trigger_lambda,
     create_subnets,
     create_web_acl_with_common_rules,
     default_secrets_manager_kms_key_arn,
+    ecr_empty_on_delete,
     ecs_availability_zone_rebalancing,
     express_ingress_first_load_balancer_security_group,
     express_ingress_load_balancer_arn,
+    format_express_pi_public_url,
     format_pi_public_urls,
     load_app_config_env_for_express,
     managed_resource_removal_policy,
     pi_alb_root_path_for_container,
     pi_listener_rule_count,
+    public_github_codebuild_source,
     resolve_ecs_s3_gateway_subnet_selection,
     resolve_ecs_vpc_endpoint_subnet_selection,
+    resolve_policy_file_paths,
     resolve_service_connect_client_security_group_ids,
     resource_deletion_protection_flag,
     s3_auto_delete_objects_on_stack_destroy,
@@ -210,8 +221,7 @@ if PRIVATE_SUBNET_AVAILABILITY_ZONES:
         "PRIVATE_SUBNET_AVAILABILITY_ZONES"
     )
 
-if AWS_MANAGED_TASK_ROLES_LIST:
-    AWS_MANAGED_TASK_ROLES_LIST = _get_env_list(AWS_MANAGED_TASK_ROLES_LIST)
+# AWS_MANAGED_TASK_ROLES_LIST and POLICY_* lists are parsed in cdk_config.py.
 
 
 class CdkStack(Stack):
@@ -1049,9 +1059,15 @@ class CdkStack(Stack):
                     task_role.add_managed_policy(
                         iam.ManagedPolicy.from_aws_managed_policy_name(f"{role}")
                     )
+                attach_managed_policy_arns(task_role, POLICY_FILE_ARNS)
                 print("Successfully created new ECS task role")
             task_role = add_custom_policies(
-                self, task_role, custom_policy_text=task_role_kms_policy
+                self,
+                task_role,
+                policy_file_locations=resolve_policy_file_paths(
+                    POLICY_FILE_LOCATIONS, cdk_folder=CDK_FOLDER
+                ),
+                custom_policy_text=task_role_kms_policy,
             )
 
             execution_role_name = ECS_TASK_EXECUTION_ROLE_NAME
@@ -1072,13 +1088,22 @@ class CdkStack(Stack):
                     role_name=execution_role_name,  # Explicit resource name
                     assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
                 )
-                for role in AWS_MANAGED_TASK_ROLES_LIST:
+                for role in ECS_EXECUTION_ROLE_MANAGED_POLICIES:
+                    print(f"Adding {role} to execution role")
                     execution_role.add_managed_policy(
                         iam.ManagedPolicy.from_aws_managed_policy_name(f"{role}")
                     )
+                attach_managed_policy_arns(
+                    execution_role, ECS_EXECUTION_ROLE_POLICY_ARNS
+                )
                 print("Successfully created new ECS execution role")
             execution_role = add_custom_policies(
-                self, execution_role, custom_policy_text=execution_role_kms_policy
+                self,
+                execution_role,
+                policy_file_locations=resolve_policy_file_paths(
+                    ECS_EXECUTION_ROLE_POLICY_FILES, cdk_folder=CDK_FOLDER
+                ),
+                custom_policy_text=execution_role_kms_policy,
             )
 
         except Exception as e:
@@ -1228,6 +1253,7 @@ class CdkStack(Stack):
                     "ECRRepo",
                     repository_name=full_ecr_repo_name,
                     removal_policy=resource_removal_policy,
+                    empty_on_delete=ecr_empty_on_delete(),
                 )  # Explicitly set repository_name
                 print("Created ECR repository", full_ecr_repo_name)
 
@@ -1252,12 +1278,12 @@ class CdkStack(Stack):
                 )
                 print("Using existing CodeBuild project")
             else:
-                codebuild.Project(
+                main_codebuild_project = codebuild.Project(
                     self,
                     "CodeBuildProject",  # Logical ID
                     project_name=codebuild_project_name,  # Explicit resource name
                     role=codebuild_role,
-                    source=codebuild.Source.git_hub(
+                    source=public_github_codebuild_source(
                         owner=GITHUB_REPO_USERNAME,
                         repo=GITHUB_REPO_NAME,
                         branch_or_ref=GITHUB_REPO_BRANCH,
@@ -1307,6 +1333,11 @@ class CdkStack(Stack):
                         }
                     ),
                 )
+                configure_public_github_codebuild_source(
+                    main_codebuild_project,
+                    GITHUB_REPO_USERNAME,
+                    GITHUB_REPO_NAME,
+                )
                 print("Successfully created CodeBuild project", codebuild_project_name)
 
             # Imported projects have role=undefined in CDK; use the actual service
@@ -1338,12 +1369,12 @@ class CdkStack(Stack):
                         )
                     print("Using existing Pi agent CodeBuild project")
                 else:
-                    codebuild.Project(
+                    pi_codebuild_project = codebuild.Project(
                         self,
                         "CodeBuildPiProject",
                         project_name=pi_codebuild_name,
                         role=codebuild_role,
-                        source=codebuild.Source.git_hub(
+                        source=public_github_codebuild_source(
                             owner=GITHUB_REPO_USERNAME,
                             repo=GITHUB_REPO_NAME,
                             branch_or_ref=GITHUB_REPO_BRANCH,
@@ -1390,6 +1421,11 @@ class CdkStack(Stack):
                             }
                         ),
                     )
+                    configure_public_github_codebuild_source(
+                        pi_codebuild_project,
+                        GITHUB_REPO_USERNAME,
+                        GITHUB_REPO_NAME,
+                    )
                     print("Created Pi agent CodeBuild project", pi_codebuild_name)
 
                 pi_ecr_repo_name = ECR_PI_REPO_NAME
@@ -1403,6 +1439,7 @@ class CdkStack(Stack):
                         "ECRPiRepo",
                         repository_name=pi_ecr_repo_name,
                         removal_policy=resource_removal_policy,
+                        empty_on_delete=ecr_empty_on_delete(),
                     )
                 pi_ecr_image_loc = pi_ecr_repo.repository_uri
                 pi_ecr_repo.grant_pull_push(ecr_grantee)
@@ -1497,10 +1534,8 @@ class CdkStack(Stack):
             private_subnets=self.private_subnets,
         )
 
-        if (
-            ENABLE_ECS_VPC_INTERFACE_ENDPOINTS == "True"
-            and (endpoint_subnet_selection or s3_gateway_subnet_selection)
-            and (not enable_headless or express_public_subnets_only)
+        if ENABLE_ECS_VPC_INTERFACE_ENDPOINTS == "True" and (
+            endpoint_subnet_selection or s3_gateway_subnet_selection
         ):
             if (
                 VPC_NAME
@@ -1827,6 +1862,8 @@ class CdkStack(Stack):
         try:
             secret.grant_read(task_role)
             secret.grant_read(execution_role)
+            # ECS environmentFiles (app_config.env) are fetched by the execution role at task start.
+            bucket.grant_read(execution_role, APP_CONFIG_ENV_BASENAME)
             # KMS: task role uses shared S3 CMK via build_ecs_task_role_kms_policy;
             # execution role uses the secret's CMK via build_ecs_execution_role_kms_policy.
         except Exception as e:
@@ -1871,13 +1908,16 @@ class CdkStack(Stack):
                     ECS_EXPRESS_INFRASTRUCTURE_ROLE_NAME,
                 )
 
+                express_app_overrides: Dict[str, str] = {}
+                if ENABLE_HEADLESS_DEPLOYMENT == "True":
+                    express_app_overrides["COGNITO_AUTH"] = "False"
+                elif enable_pi_express:
+                    # Pi agent calls main over Service Connect; Gradio auth blocks
+                    # gradio_client unless credentials are passed on every call.
+                    express_app_overrides["COGNITO_AUTH"] = "False"
                 express_app_environment = load_app_config_env_for_express(
                     APP_CONFIG_ENV_FILE,
-                    overrides=(
-                        {"COGNITO_AUTH": "False"}
-                        if ENABLE_HEADLESS_DEPLOYMENT != "True"
-                        else None
-                    ),
+                    overrides=express_app_overrides or None,
                 )
                 primary_container = build_express_gateway_primary_container(
                     image_uri=ecr_image_loc + ":latest",
@@ -1956,17 +1996,8 @@ class CdkStack(Stack):
                     vpc=vpc,
                 )
 
-                configure_express_listener_cognito_and_cloudfront(
-                    self,
-                    "Express",
-                    express_service=express_service,
-                    user_pool_arn=user_pool.user_pool_arn,
-                    user_pool_client_id=user_pool_client.user_pool_client_id,
-                    user_pool_domain_prefix=COGNITO_USER_POOL_DOMAIN_PREFIX,
-                    use_cloudfront=USE_CLOUDFRONT == "True",
-                    cloudfront_host_header=CLOUDFRONT_DOMAIN,
-                    stickiness_seconds=int(Duration.hours(8).to_seconds()),
-                )
+                # Express Mode manages host-header listener rules (priorities 1, 2, …).
+                # Do not add ALB authenticate-cognito rules here; use in-app COGNITO_AUTH.
 
                 CfnOutput(
                     self,
@@ -2004,14 +2035,11 @@ class CdkStack(Stack):
                             description="Pi agent ECS Express tasks",
                         )
 
-                        _pi_root_path = pi_alb_root_path_for_container(
-                            PI_ALB_PATH_PREFIX_NORMALIZED, PI_ALB_ROUTING
-                        )
                         pi_express_environment = build_pi_express_container_environment(
                             service_connect_discovery_name=ECS_SERVICE_CONNECT_DISCOVERY_NAME,
                             main_app_port=int(GRADIO_SERVER_PORT),
                             pi_gradio_port=int(PI_GRADIO_PORT),
-                            pi_root_path=_pi_root_path,
+                            cognito_auth=ENABLE_HEADLESS_DEPLOYMENT != "True",
                         )
                         pi_primary_container = build_express_pi_primary_container(
                             image_uri=pi_ecr_image_loc + ":latest",
@@ -2019,6 +2047,8 @@ class CdkStack(Stack):
                             log_group_name=pi_express_log_group.log_group_name,
                             aws_region=AWS_REGION,
                             environment=pi_express_environment,
+                            secret=secret,
+                            cognito_auth=ENABLE_HEADLESS_DEPLOYMENT != "True",
                         )
 
                         express_pi_service = create_express_gateway_service(
@@ -2060,36 +2090,13 @@ class CdkStack(Stack):
                             description="Pi Express (Service Connect) to main redaction app",
                         )
 
-                        stickiness_seconds = int(Duration.hours(8).to_seconds())
-                        configure_express_pi_listener_rules(
-                            self,
-                            "ExpressPi",
-                            express_main_service=express_service,
-                            express_pi_service=express_pi_service,
-                            routing_mode=PI_ALB_ROUTING,
-                            path_prefix=PI_ALB_PATH_PREFIX_NORMALIZED,
-                            pi_host_header=PI_ALB_HOST_HEADER.strip(),
-                            rule_priority=PI_ALB_LISTENER_RULE_PRIORITY,
-                            user_pool_arn=user_pool.user_pool_arn,
-                            user_pool_client_id=user_pool_client.user_pool_client_id,
-                            user_pool_domain_prefix=COGNITO_USER_POOL_DOMAIN_PREFIX,
-                            stickiness_seconds=stickiness_seconds,
-                        )
-
                         # Service Connect for Express is applied in post_cdk_build_quickstart.py
                         # after CodeBuild pushes :latest. Express primary containers do not
                         # define named portMappings at create time; CDK cannot enable SC here.
 
-                        _pi_public_urls = format_pi_public_urls(
-                            routing_mode=PI_ALB_ROUTING,
-                            path_prefix=PI_ALB_PATH_PREFIX_NORMALIZED,
-                            host_header=PI_ALB_HOST_HEADER,
-                            cloudfront_domain=(
-                                CLOUDFRONT_DOMAIN if USE_CLOUDFRONT == "True" else ""
-                            ),
-                            use_https=True,
+                        pi_public_url = format_express_pi_public_url(
+                            express_pi_service.attr_endpoint,
                         )
-                        pi_public_url = _pi_public_urls[0] if _pi_public_urls else ""
                         sc_backend = (
                             f"http://{ECS_SERVICE_CONNECT_DISCOVERY_NAME}:"
                             f"{GRADIO_SERVER_PORT}"
@@ -2104,20 +2111,7 @@ class CdkStack(Stack):
                             self,
                             "PiPublicUrl",
                             value=pi_public_url,
-                            description="Primary public URL for Pi UI (path and/or host ALB rules)",
-                        )
-                        if len(_pi_public_urls) > 1:
-                            CfnOutput(
-                                self,
-                                "PiPublicUrls",
-                                value=", ".join(_pi_public_urls),
-                                description="All configured Pi UI entry URLs",
-                            )
-                        CfnOutput(
-                            self,
-                            "PiAlbPathPrefix",
-                            value=PI_ALB_PATH_PREFIX_NORMALIZED,
-                            description="ALB path prefix for Pi when PI_ALB_ROUTING includes path",
+                            description="Public URL for Pi Express UI (managed HTTPS endpoint)",
                         )
                         CfnOutput(
                             self,
@@ -2138,7 +2132,7 @@ class CdkStack(Stack):
                         )
                         print(
                             "ECS Express Pi gateway service defined with Service Connect "
-                            f"backend {sc_backend}; public URLs: {', '.join(_pi_public_urls)}."
+                            f"backend {sc_backend}; public URL: {pi_public_url}."
                         )
                     except Exception as e:
                         raise Exception(
@@ -2192,13 +2186,17 @@ class CdkStack(Stack):
                                 "awslogs-stream-prefix": "ecs",
                             },
                         },
-                        "environmentFiles": [
-                            {
-                                "value": bucket.bucket_arn
-                                + f"/{APP_CONFIG_ENV_BASENAME}",
-                                "type": "s3",
-                            }
-                        ],
+                        "environmentFiles": (
+                            []
+                            if enable_headless
+                            else [
+                                {
+                                    "value": bucket.bucket_arn
+                                    + f"/{APP_CONFIG_ENV_BASENAME}",
+                                    "type": "s3",
+                                }
+                            ]
+                        ),
                         "memoryReservation": int(task_def_params["memory"])
                         - 512,  # Reserve some memory for the container
                         "mountPoints": [
@@ -2294,6 +2292,7 @@ class CdkStack(Stack):
                     retention=logs.RetentionDays.ONE_MONTH,
                     removal_policy=resource_removal_policy,
                 )
+                cdk_managed_log_group.grant_write(execution_role)
 
                 epheremal_storage_volume_cdk_obj = ecs.Volume(
                     name=epheremal_storage_volume_name
@@ -2320,8 +2319,8 @@ class CdkStack(Stack):
                 if task_def_params["containerDefinitions"]:
                     container_def_params = task_def_params["containerDefinitions"][0]
 
+                    env_files = []
                     if container_def_params.get("environmentFiles"):
-                        env_files = []
                         for env_file_param in container_def_params["environmentFiles"]:
                             # Need to parse the ARN to get the bucket object and key
                             env_file_arn_parts = env_file_param["value"].split(":::")
@@ -2354,7 +2353,7 @@ class CdkStack(Stack):
                                 secret, "REDACTION_CLIENT_SECRET"
                             ),
                         },
-                        environment_files=env_files,
+                        environment_files=env_files if env_files else None,
                         readonly_root_filesystem=read_only_file_system,
                         user=container_def_params.get("user", "1000"),
                     )
@@ -2557,6 +2556,28 @@ class CdkStack(Stack):
                         value=f"s3://{output_bucket.bucket_name}/{S3_BATCH_ENV_PREFIX}",
                         description="Upload job .env files here to start batch redaction tasks",
                     )
+                    CfnOutput(
+                        self,
+                        "BatchInputPrefix",
+                        value=f"s3://{output_bucket.bucket_name}/{S3_BATCH_INPUT_PREFIX}",
+                        description="Upload PDFs and other input documents for batch jobs",
+                    )
+                    CfnOutput(
+                        self,
+                        "BatchEcsTriggerLambdaName",
+                        value=batch_lambda.function_name,
+                        description="Lambda that starts ECS batch tasks on job .env upload",
+                    )
+                    if enable_headless:
+                        seed_asset_dir = os.path.join(
+                            os.path.dirname(__file__), "config", "headless_s3_seed"
+                        )
+                        create_headless_s3_batch_seed(
+                            self,
+                            "HeadlessBatchS3Seed",
+                            destination_bucket=output_bucket,
+                            seed_asset_directory=seed_asset_dir,
+                        )
                     print("S3 batch ECS trigger Lambda defined.")
                 except Exception as e:
                     raise Exception("Could not handle S3 batch ECS trigger due to:", e)
@@ -2869,6 +2890,15 @@ class CdkStack(Stack):
                 "ECSClusterName",
                 value=CLUSTER_NAME,
                 description="ECS cluster used for one-shot Fargate batch tasks",
+            )
+            CfnOutput(
+                self,
+                "EcsBatchLogGroup",
+                value=ECS_LOG_GROUP_NAME,
+                description=(
+                    "CloudWatch log group for batch tasks (streams appear only after "
+                    "the container starts; init failures may have no stream)"
+                ),
             )
 
         CfnOutput(self, "CognitoPoolId", value=user_pool.user_pool_id)

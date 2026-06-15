@@ -2,12 +2,16 @@ import os
 import time
 
 from cdk_config import (
+    AWS_REGION,
+    CDK_PREFIX,
     CLUSTER_NAME,
     CODEBUILD_PI_PROJECT_NAME,
     CODEBUILD_PROJECT_NAME,
     COGNITO_USER_POOL_CLIENT_SECRET_NAME,
+    ECS_EXPRESS_COGNITO_REDIRECT_BASE,
     ECS_EXPRESS_SC_PORT_NAME,
     ECS_EXPRESS_SERVICE_NAME,
+    ECS_LOG_GROUP_NAME,
     ECS_PI_EXPRESS_SERVICE_NAME,
     ECS_PI_SERVICE_NAME,
     ECS_SERVICE_CONNECT_DISCOVERY_NAME,
@@ -18,8 +22,11 @@ from cdk_config import (
     ENABLE_PI_AGENT_EXPRESS_SERVICE,
     GRADIO_SERVER_PORT,
     PI_AGENT_ENV_S3_KEY,
-    PI_ALB_PATH_PREFIX_NORMALIZED,
+    S3_BATCH_ENV_PREFIX,
+    S3_BATCH_INPUT_PREFIX,
+    S3_BATCH_LAMBDA_FUNCTION_NAME,
     S3_LOG_CONFIG_BUCKET_NAME,
+    S3_OUTPUT_BUCKET_NAME,
     USE_ECS_EXPRESS_MODE,
 )
 from cdk_functions import create_basic_config_env
@@ -27,10 +34,9 @@ from cdk_functions import create_basic_config_env
 # boto3-only module (does not import aws-cdk / Node.js)
 from cdk_post_deploy import (
     apply_cognito_secret_fixup_from_stack,
-    apply_express_alb_listener_target_group_fixup,
-    apply_express_disable_in_app_cognito_auth,
     configure_express_pi_service_connect,
-    remove_express_listener_rules_without_cognito,
+    print_headless_deployment_next_steps,
+    seed_headless_batch_s3_layout,
     start_codebuild_build,
     start_ecs_task,
     start_express_gateway_service,
@@ -42,7 +48,7 @@ from tqdm import tqdm
 create_basic_config_env(
     "config",
     headless=ENABLE_HEADLESS_DEPLOYMENT == "True",
-    alb_cognito=USE_ECS_EXPRESS_MODE == "True" and ENABLE_HEADLESS_DEPLOYMENT != "True",
+    pi_express_backend=ENABLE_PI_AGENT_EXPRESS_SERVICE == "True",
 )
 
 # Start CodeBuild for the main app image
@@ -97,32 +103,30 @@ if ENABLE_HEADLESS_DEPLOYMENT != "True":
         start_express_gateway_service(
             cluster_name=CLUSTER_NAME, service_name=ECS_EXPRESS_SERVICE_NAME
         )
-        print("Syncing Express ALB listener target groups after scale-up.")
-        remove_express_listener_rules_without_cognito()
-        apply_express_alb_listener_target_group_fixup(
-            cluster_name=CLUSTER_NAME,
-            main_service_name=ECS_EXPRESS_SERVICE_NAME,
-            pi_service_name=(
-                ECS_PI_EXPRESS_SERVICE_NAME
-                if ENABLE_PI_AGENT_EXPRESS_SERVICE == "True"
-                else None
-            ),
-            pi_path_prefixes=(
-                [PI_ALB_PATH_PREFIX_NORMALIZED, f"{PI_ALB_PATH_PREFIX_NORMALIZED}/*"]
-                if ENABLE_PI_AGENT_EXPRESS_SERVICE == "True"
-                else None
-            ),
-        )
-        print("Syncing Cognito secret and disabling in-app Cognito auth for Express.")
+        if ENABLE_PI_AGENT_EXPRESS_SERVICE == "True":
+            print(
+                "Configuring Service Connect for main Express (server) and "
+                "Pi Express (client)."
+            )
+            try:
+                configure_express_pi_service_connect(
+                    cluster_name=CLUSTER_NAME,
+                    main_service_name=ECS_EXPRESS_SERVICE_NAME,
+                    pi_service_name=ECS_PI_EXPRESS_SERVICE_NAME,
+                    namespace=ECS_SERVICE_CONNECT_NAMESPACE,
+                    main_port_name=ECS_EXPRESS_SC_PORT_NAME,
+                    discovery_name=ECS_SERVICE_CONNECT_DISCOVERY_NAME,
+                    main_port=int(GRADIO_SERVER_PORT),
+                )
+            except Exception as exc:
+                print("Warning: could not configure Express Service Connect: " f"{exc}")
+        print("Syncing Cognito app client secret for in-app authentication.")
         apply_cognito_secret_fixup_from_stack(
             stack_name="RedactionStack",
             secret_name=COGNITO_USER_POOL_CLIENT_SECRET_NAME,
             cluster_name=CLUSTER_NAME,
             main_service_name=ECS_EXPRESS_SERVICE_NAME,
             recycle_tasks=False,
-        )
-        apply_express_disable_in_app_cognito_auth(
-            CLUSTER_NAME, ECS_EXPRESS_SERVICE_NAME
         )
     else:
         print(f"Starting ECS service {ECS_SERVICE_NAME}")
@@ -132,35 +136,41 @@ else:
         "Headless deployment: skipping always-on ECS service start "
         "(tasks are started by the S3 batch Lambda)."
     )
+    seed_headless_batch_s3_layout(
+        S3_OUTPUT_BUCKET_NAME,
+        input_prefix=S3_BATCH_INPUT_PREFIX,
+        env_prefix=S3_BATCH_ENV_PREFIX,
+        example_env_local_path=os.path.join("config", "example_headless_env_file.env"),
+    )
+    print_headless_deployment_next_steps(
+        {
+            "AWS_REGION": AWS_REGION,
+            "S3_OUTPUT_BUCKET_NAME": S3_OUTPUT_BUCKET_NAME,
+            "S3_BATCH_INPUT_PREFIX": S3_BATCH_INPUT_PREFIX,
+            "S3_BATCH_ENV_PREFIX": S3_BATCH_ENV_PREFIX,
+            "ECS_LOG_GROUP_NAME": ECS_LOG_GROUP_NAME,
+            "S3_BATCH_LAMBDA_FUNCTION_NAME": S3_BATCH_LAMBDA_FUNCTION_NAME,
+            "CDK_PREFIX": CDK_PREFIX,
+        }
+    )
 
 if ENABLE_PI_AGENT_ECS_SERVICE == "True":
     print(f"Starting Pi agent ECS service {ECS_PI_SERVICE_NAME}")
     start_ecs_task(cluster_name=CLUSTER_NAME, service_name=ECS_PI_SERVICE_NAME)
 
 if ENABLE_PI_AGENT_EXPRESS_SERVICE == "True":
-    print(
-        "Configuring Service Connect for main Express (server) and Pi Express (client)."
-    )
-    configure_express_pi_service_connect(
-        cluster_name=CLUSTER_NAME,
-        main_service_name=ECS_EXPRESS_SERVICE_NAME,
-        pi_service_name=ECS_PI_EXPRESS_SERVICE_NAME,
-        namespace=ECS_SERVICE_CONNECT_NAMESPACE,
-        main_port_name=ECS_EXPRESS_SC_PORT_NAME,
-        discovery_name=ECS_SERVICE_CONNECT_DISCOVERY_NAME,
-        main_port=int(GRADIO_SERVER_PORT),
-    )
     print(f"Starting Pi Express ECS service {ECS_PI_EXPRESS_SERVICE_NAME}")
     start_express_gateway_service(
         cluster_name=CLUSTER_NAME, service_name=ECS_PI_EXPRESS_SERVICE_NAME
     )
-    print("Syncing Express ALB listener target groups for Pi Express.")
-    apply_express_alb_listener_target_group_fixup(
-        cluster_name=CLUSTER_NAME,
-        main_service_name=ECS_EXPRESS_SERVICE_NAME,
-        pi_service_name=ECS_PI_EXPRESS_SERVICE_NAME,
-        pi_path_prefixes=[
-            PI_ALB_PATH_PREFIX_NORMALIZED,
-            f"{PI_ALB_PATH_PREFIX_NORMALIZED}/*",
-        ],
+
+if USE_ECS_EXPRESS_MODE == "True" and ENABLE_HEADLESS_DEPLOYMENT != "True":
+    from cdk_post_deploy import print_express_mode_next_steps
+
+    print_express_mode_next_steps(
+        {
+            "AWS_REGION": AWS_REGION,
+            "ECS_EXPRESS_COGNITO_REDIRECT_BASE": ECS_EXPRESS_COGNITO_REDIRECT_BASE,
+            "ENABLE_PI_AGENT_EXPRESS_SERVICE": ENABLE_PI_AGENT_EXPRESS_SERVICE,
+        }
     )
