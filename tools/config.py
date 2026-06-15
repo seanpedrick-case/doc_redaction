@@ -1421,8 +1421,11 @@ PADDLE_PRESERVE_LINE_BOXES = convert_string_to_boolean(
 )  # Keep Paddle line boxes (skip word split + regrouping) when using Paddle OCR.
 
 LOAD_PADDLE_AT_STARTUP = convert_string_to_boolean(
-    get_or_create_env_var("LOAD_PADDLE_AT_STARTUP", "False")
-)  # Whether to load the PaddleOCR model at startup.
+    get_or_create_env_var(
+        "LOAD_PADDLE_AT_STARTUP",
+        "True" if os.environ.get("SPACES_ZERO_GPU") else "False",
+    )
+)  # Whether to load the PaddleOCR model at startup (default True on ZeroGPU).
 
 PADDLE_USE_TEXTLINE_ORIENTATION = convert_string_to_boolean(
     get_or_create_env_var("PADDLE_USE_TEXTLINE_ORIENTATION", "False")

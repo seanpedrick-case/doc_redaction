@@ -53,7 +53,7 @@ dependencies = [
     "gradio>=6.16.0,<=6.18.0",
     "gradio-pdf-redaction<=0.0.25",
     "boto3<=1.42.91",
-    "pyarrow<=23.0.1",
+    "pyarrow<=24.0.0",
     "openpyxl<=3.1.5",
     "Faker<=40.8.0",
     "python-levenshtein<=0.27.3",
