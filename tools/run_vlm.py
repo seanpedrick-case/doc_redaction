@@ -86,6 +86,9 @@ if LOAD_PADDLE_AT_STARTUP:
         # Default paddle configuration if none provided
         if paddle_kwargs is None:
             paddle_kwargs = {
+                "text_detection_model_name": "PP-OCRv6_medium_det",
+                "text_recognition_model_name": "PP-OCRv6_medium_rec",
+                "engine": "transformers",
                 "det_db_unclip_ratio": PADDLE_DET_DB_UNCLIP_RATIO,
                 "use_textline_orientation": PADDLE_USE_TEXTLINE_ORIENTATION,
                 "use_doc_orientation_classify": False,

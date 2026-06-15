@@ -6634,6 +6634,15 @@ def _azure_openai_page_ocr_predict(
         )
 
 
+@spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
+def paddle_predict(ocr, image_np: np.ndarray):
+    """
+    Run Paddle OCR analysis on an image
+    """
+    paddle_results = ocr.predict(image_np)
+    return paddle_results
+
+
 class CustomImageAnalyzerEngine:
     def __init__(
         self,
@@ -7773,7 +7782,8 @@ class CustomImageAnalyzerEngine:
                     if len(cropped_image_np.shape) == 2:
                         cropped_image_np = np.stack([cropped_image_np] * 3, axis=-1)
 
-                    paddle_results = ocr.predict(cropped_image_np)
+                    # paddle_results = ocr.predict(cropped_image_np)
+                    paddle_results = paddle_predict(ocr, cropped_image_np)
 
                     if paddle_results and paddle_results[0]:
                         rec_texts = paddle_results[0].get("rec_texts", [])
@@ -8772,7 +8782,8 @@ class CustomImageAnalyzerEngine:
                 else:
                     image_np = np.array(paddle_input_image)
 
-                paddle_results = ocr.predict(image_np)
+                # paddle_results = ocr.predict(image_np)
+                paddle_results = paddle_predict(ocr=ocr, image_np=image_np)
                 # PaddleOCR processed the prepared image (not a file-path open)
                 paddle_processed_original = False
 
@@ -8804,13 +8815,15 @@ class CustomImageAnalyzerEngine:
                     image_np = np.array(paddle_input_image)
                     if len(image_np.shape) == 2:
                         image_np = np.stack([image_np] * 3, axis=-1)
-                    paddle_results = ocr.predict(image_np)
+                    # paddle_results = ocr.predict(image_np)
+                    paddle_results = paddle_predict(ocr=ocr, image_np=image_np)
                     paddle_processed_original = False
                     paddle_processed_image = paddle_input_image.copy()
                 else:
                     # Use PaddleOCR's file-path loading (original behaviour).
                     try:
-                        paddle_results = ocr.predict(image_path)
+                        # paddle_results = ocr.predict(image_path)
+                        paddle_results = paddle_predict(ocr=ocr, image_np=image_np)
                     except Exception as ocr_path_exc:
                         # PaddleOCR's file-path path can hit OpenCV decode issues on
                         # specific pages. Retry using the already-loaded PIL image
@@ -8826,7 +8839,7 @@ class CustomImageAnalyzerEngine:
                         image_np = np.array(paddle_input_image)
                         if len(image_np.shape) == 2:
                             image_np = np.stack([image_np] * 3, axis=-1)
-                        paddle_results = ocr.predict(image_np)
+                        paddle_results = paddle_predict(ocr=ocr, image_np=image_np)
                     # PaddleOCR processed the original image from file path
                     paddle_processed_original = True
                     # Store the exact image that PaddleOCR processed (from file path)
