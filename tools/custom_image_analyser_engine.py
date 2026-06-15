@@ -483,6 +483,10 @@ def _finalize_paddle_kwargs(paddle_kwargs: Dict[str, Any]) -> Dict[str, Any]:
             **default_engine_config,
             **kwargs["engine_config"],
         }
+    # PP-OCRv6 transformers models only support eager (not sdpa / flash_attention_2).
+    kwargs["engine_config"][
+        "attn_implementation"
+    ] = resolve_paddle_attn_implementation()
     return kwargs
 
 
@@ -501,6 +505,7 @@ def _log_paddle_runtime_diagnostics(device: str) -> None:
     parts = [
         f"PaddleOCR init: device={device!r}",
         "engine=transformers",
+        f"attn_implementation={resolve_paddle_attn_implementation()!r}",
         f"torch={torch.__version__}",
         f"cuda_available={cuda_available}",
         f"spaces_zero_gpu={SPACES_ZERO_GPU}",

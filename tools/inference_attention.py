@@ -44,16 +44,16 @@ def resolve_paddle_attn_implementation() -> str:
     """
     Attention backend for PaddleOCR PP-OCRv6 transformers models.
 
-    These architectures do not support sdpa yet (transformers raises ValueError).
-    Use flash_attention_2 when a compatible flash-attn wheel is available,
-    otherwise eager (still runs on GPU via device=gpu:0).
+    PP-OCRv6 det/rec models only support ``eager`` in transformers today
+    (neither sdpa nor flash_attention_2). GPU inference still works via
+    ``device=gpu:0`` in engine_config. VLM flash attention is independent
+    (see ``resolve_attn_implementation()``).
     """
-    if flash_attention_is_usable():
-        return "flash_attention_2"
     return "eager"
 
 
 def log_attn_implementation_choice() -> None:
+    """Log VLM attention backend (independent of Paddle OCR eager)."""
     chosen = resolve_attn_implementation()
     if USE_FLASH_ATTENTION and chosen != "flash_attention_2":
         print(
