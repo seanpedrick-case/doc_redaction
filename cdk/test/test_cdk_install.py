@@ -111,6 +111,15 @@ def test_build_env_values_headless():
     assert values["COGNITO_AUTH"] == "False"
     assert values["ECS_EXPRESS_USE_PUBLIC_SUBNETS"] == "True"
     assert values["PRIVATE_SUBNETS_TO_USE"] == ""
+    assert values["S3_LOG_CONFIG_BUCKET_NAME"] == "headless-redaction-s3-logs"
+    assert values["S3_OUTPUT_BUCKET_NAME"] == "headless-redaction-s3-output"
+
+
+def test_validate_env_values_rejects_bare_s3_bucket_names():
+    values = inst.build_env_values(_headless_answers())
+    values["S3_LOG_CONFIG_BUCKET_NAME"] = "s3-logs"
+    errors = inst.validate_env_values(values)
+    assert any("S3_LOG_CONFIG_BUCKET_NAME" in e for e in errors)
 
 
 def test_headless_profile_uses_public_subnets_only():

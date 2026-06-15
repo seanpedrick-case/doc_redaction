@@ -98,7 +98,7 @@ from tools.helper_functions import (
     get_system_font_path,
     model_from_ocr_boxes,
 )
-from tools.inference_attention import resolve_attn_implementation
+from tools.inference_attention import resolve_paddle_attn_implementation
 from tools.llm_funcs import _extract_choice_message_text
 from tools.load_spacy_model_custom_recognisers import custom_entities
 from tools.ocr_reading_order import build_line_groups
@@ -443,7 +443,7 @@ def _default_paddle_engine_config(device: Optional[str] = None) -> Dict[str, Any
             {
                 "device_type": "gpu",
                 "device_id": device_id,
-                "attn_implementation": resolve_attn_implementation(),
+                "attn_implementation": resolve_paddle_attn_implementation(),
             }
         )
     else:

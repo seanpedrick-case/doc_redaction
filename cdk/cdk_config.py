@@ -272,13 +272,28 @@ ECR_CDK_REPO_NAME = get_or_create_env_var(
     "ECR_CDK_REPO_NAME", f"{CDK_PREFIX}{ECR_REPO_NAME}".lower()
 )
 
+
 ### S3
-S3_LOG_CONFIG_BUCKET_NAME = get_or_create_env_var(
-    "S3_LOG_CONFIG_BUCKET_NAME", f"{CDK_PREFIX}s3-logs".lower()
+def _resolve_s3_bucket_name(env_key: str, suffix: str) -> str:
+    """
+    Bucket name default is ``{CDK_PREFIX}{suffix}`` (lowercase).
+
+    If an earlier import cached a bare ``suffix`` in ``os.environ`` before
+    ``CDK_PREFIX`` was loaded from dotenv, upgrade it to the prefixed name.
+    """
+    prefix = (os.environ.get("CDK_PREFIX") or "").lower()
+    default = f"{prefix}{suffix}"
+    value = get_or_create_env_var(env_key, default)
+    if prefix and value == suffix:
+        os.environ[env_key] = default
+        return default
+    return value
+
+
+S3_LOG_CONFIG_BUCKET_NAME = _resolve_s3_bucket_name(
+    "S3_LOG_CONFIG_BUCKET_NAME", "s3-logs"
 )  # S3 bucket names need to be lower case
-S3_OUTPUT_BUCKET_NAME = get_or_create_env_var(
-    "S3_OUTPUT_BUCKET_NAME", f"{CDK_PREFIX}s3-output".lower()
-)
+S3_OUTPUT_BUCKET_NAME = _resolve_s3_bucket_name("S3_OUTPUT_BUCKET_NAME", "s3-output")
 
 ### VPC endpoints for ECS tasks in private subnets (ECR image pull, logs, secrets)
 ENABLE_ECS_VPC_INTERFACE_ENDPOINTS = get_or_create_env_var(

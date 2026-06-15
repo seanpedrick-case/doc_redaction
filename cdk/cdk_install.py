@@ -1227,12 +1227,26 @@ def derive_ecs_resource_names(cdk_prefix: str) -> Dict[str, str]:
     }
 
 
+def derive_s3_bucket_names(cdk_prefix: str) -> Dict[str, str]:
+    """S3 bucket names from CDK_PREFIX (must be written to cdk_config.env explicitly)."""
+    prefix = (cdk_prefix or "").strip().lower()
+    if not prefix:
+        return {}
+    return {
+        "S3_LOG_CONFIG_BUCKET_NAME": f"{prefix}s3-logs",
+        "S3_OUTPUT_BUCKET_NAME": f"{prefix}s3-output",
+    }
+
+
 def resolve_fixup_env_values(values: Dict[str, str]) -> Dict[str, str]:
     """Fill missing ECS cluster/service keys from CDK_PREFIX for post-deploy boto3 calls."""
     resolved = dict(values)
     for key, default in derive_ecs_resource_names(
         resolved.get("CDK_PREFIX", "")
     ).items():
+        if not (resolved.get(key) or "").strip():
+            resolved[key] = default
+    for key, default in derive_s3_bucket_names(resolved.get("CDK_PREFIX", "")).items():
         if not (resolved.get(key) or "").strip():
             resolved[key] = default
     return resolved
@@ -1337,6 +1351,7 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
             "AWS_ACCOUNT_ID": answers.aws_account_id,
             "CDK_FOLDER": cdk_folder,
             **derive_ecs_resource_names(answers.cdk_prefix),
+            **derive_s3_bucket_names(answers.cdk_prefix),
             "CONTEXT_FILE": "precheck.context.json",
             "COGNITO_USER_POOL_DOMAIN_PREFIX": sanitize_cognito_domain_prefix(
                 answers.cognito_domain_prefix
@@ -1515,6 +1530,23 @@ def validate_env_values(values: Dict[str, str]) -> List[str]:
 
     if not (values.get("CDK_PREFIX") or "").strip():
         errors.append("CDK_PREFIX is required.")
+    prefix_lower = (values.get("CDK_PREFIX") or "").strip().lower()
+    for env_key, bare_suffix in (
+        ("S3_LOG_CONFIG_BUCKET_NAME", "s3-logs"),
+        ("S3_OUTPUT_BUCKET_NAME", "s3-output"),
+    ):
+        bucket_name = (values.get(env_key) or "").strip().lower()
+        if prefix_lower and bucket_name == bare_suffix:
+            errors.append(
+                f"{env_key} must include CDK_PREFIX (got bare '{bare_suffix}'; "
+                f"expected '{prefix_lower}{bare_suffix}'). Re-run cdk_install or set "
+                f"{env_key}={prefix_lower}{bare_suffix} in config/cdk_config.env."
+            )
+        elif prefix_lower and bucket_name and not bucket_name.startswith(prefix_lower):
+            errors.append(
+                f"{env_key}={bucket_name!r} should start with CDK_PREFIX "
+                f"({prefix_lower!r}) to avoid collisions with other deployments."
+            )
     if values.get("ENABLE_HEADLESS_DEPLOYMENT") != "True":
         cognito_prefix_error = validate_cognito_domain_prefix(
             values.get("COGNITO_USER_POOL_DOMAIN_PREFIX", "")

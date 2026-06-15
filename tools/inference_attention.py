@@ -28,7 +28,7 @@ def flash_attention_is_usable() -> bool:
 
 def resolve_attn_implementation() -> str:
     """
-    Pick an attention backend for VLM / Paddle transformers engines.
+    Pick an attention backend for VLM transformers models (Qwen, etc.).
 
     Uses flash_attention_2 only when USE_FLASH_ATTENTION=True and the installed
     flash-attn wheel matches torch (otherwise transformers can raise
@@ -38,6 +38,19 @@ def resolve_attn_implementation() -> str:
     if flash_attention_is_usable():
         return "flash_attention_2"
     return "sdpa"
+
+
+def resolve_paddle_attn_implementation() -> str:
+    """
+    Attention backend for PaddleOCR PP-OCRv6 transformers models.
+
+    These architectures do not support sdpa yet (transformers raises ValueError).
+    Use flash_attention_2 when a compatible flash-attn wheel is available,
+    otherwise eager (still runs on GPU via device=gpu:0).
+    """
+    if flash_attention_is_usable():
+        return "flash_attention_2"
+    return "eager"
 
 
 def log_attn_implementation_choice() -> None:
