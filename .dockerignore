@@ -2,6 +2,7 @@
 *.ipynb
 *.pyc
 *.qmd
+*.json.bak.*
 _quarto.yml
 quarto_site/*
 src/*

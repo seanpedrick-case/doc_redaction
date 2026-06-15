@@ -283,11 +283,20 @@ def doc_redaction_gradio_url() -> str:
     Base URL of the doc_redaction Gradio app used for ``/doc_redact`` and review APIs.
 
     Set ``DOC_REDACTION_GRADIO_URL`` in ``config/pi_agent.env`` (or the process environment).
-    Loaded via ``tools.config`` when the Pi app starts (default local: ``http://127.0.0.1:7860``).
+    Reads the environment on each call so runtime overrides apply before ``tools.config``
+    is imported (e.g. HF Space Docker ``ENV``, tests, and late ``load_dotenv``).
     """
-    from tools.config import DOC_REDACTION_GRADIO_URL
+    raw = (os.environ.get("DOC_REDACTION_GRADIO_URL") or "").strip().rstrip("/")
+    if raw:
+        return raw
+    try:
+        from tools.config import DOC_REDACTION_GRADIO_URL
 
-    return str(DOC_REDACTION_GRADIO_URL).strip().rstrip("/")
+        return str(DOC_REDACTION_GRADIO_URL).strip().rstrip("/")
+    except ImportError:
+        return (
+            HF_DEFAULT_GRADIO_URL if is_hf_space_profile() else "http://127.0.0.1:7860"
+        )
 
 
 def _default_gradio_url() -> str:
@@ -386,11 +395,16 @@ def build_local_redaction_client_guidance(
 ) -> str:
     """Pi agent and doc_redaction on the same host (local dev / shared Docker volumes)."""
     output_redact = f"{output_base.rstrip('/')}/output_redact/"
-    helpers = (
-        f"{workspace_root.rstrip('/')}/.pi/helpers/remote_redaction.py"
-        if workspace_root.strip()
-        else "`.pi/helpers/remote_redaction.py` (under `PI_WORKSPACE_DIR`)"
-    )
+    try:
+        from pi_workspace_skills import remote_redaction_helper_module
+
+        helpers = remote_redaction_helper_module()
+    except ImportError:
+        helpers = (
+            f"{workspace_root.rstrip('/')}/.pi/helpers/remote_redaction.py"
+            if workspace_root.strip()
+            else "`.pi/helpers/remote_redaction.py` (under `PI_WORKSPACE_DIR`)"
+        )
     doc_output_hint = ""
     try:
         from tools.config import OUTPUT_FOLDER, SESSION_OUTPUT_FOLDER
@@ -432,22 +446,46 @@ def build_hf_space_backend_guidance(
     output_base: str,
     workspace_root: str,
 ) -> str:
+    from pi_workspace_skills import remote_redaction_helper_module
+
+    helpers = remote_redaction_helper_module()
+    helpers_dir = helpers.rsplit("/", 1)[0]
+    run_cli = f"{helpers_dir}/run_doc_redact.py"
+    base = _workspace_root().as_posix().rstrip("/")
+    output_dest = output_base.rstrip("/") + "/"
     return (
-        f"- **Remote redaction backend:** the doc_redaction app runs at `{gradio_url}` "
-        "(private Hugging Face Space). Use **`gradio_client` only** — upload local files "
-        f"with `handle_file()` from `{workspace_root.rstrip('/')}/`. "
-        "**Do not** call `/agent/*` routes or use server-side paths from the redaction container.\n"
+        f"- **Remote redaction backend (authoritative URL):** `{gradio_url}` **only**. "
+        "This Pi Space orchestrates a separate private doc_redaction Hugging Face Space "
+        "over HTTPS.\n"
+        "- **Read `/skill:hf-space-deployment` first** — it overrides Docker/local URLs "
+        "(`host.docker.internal`, `localhost`, `redaction:7861`, internal service names) "
+        "that appear in generic skills for local-docker or AWS ECS.\n"
+        f"- **Helper module (workspace base, not session folder):** `{helpers}` and "
+        f"`{run_cli}` under `{base}/.pi/helpers/`. "
+        f"Do **not** look for `{workspace_root.rstrip('/')}/.pi/helpers/`.\n"
+        f"- **First redaction call:** run `{run_cli}` once (see `/skill:hf-space-deployment`) "
+        "— **do not** write `run_redact.py` in your session folder.\n"
+        "- **Do not** probe alternate hosts, rewrite the helper, or hand-roll a new "
+        "Gradio client script. Import `make_redaction_client`, `fetch_redaction_files`, "
+        "and `resolve_redaction_output_paths` from that file (`HF_TOKEN` is already in "
+        "the Pi subprocess environment).\n"
+        "- Use **`gradio_client` only** — upload local files with `handle_file()` from "
+        f"`{workspace_root.rstrip('/')}/`. **Do not** call `/agent/*` routes or use "
+        "server-side paths from the redaction container.\n"
         f"- Download all `/doc_redact` and `/review_apply` outputs via "
         f"`{gradio_url.rstrip('/')}/gradio_api/file=…` with "
-        "`Authorization: Bearer $HF_TOKEN` into `{output_base}` (create subdirs as needed).\n"
+        f"`Authorization: Bearer $HF_TOKEN` into `{output_dest}` (create subdirs as needed).\n"
+        "- On Hugging Face rate limits (`TooManyRequestsError`), wait and retry the **same** "
+        "URL via the helper — do not switch to another host.\n"
         "- Do not pass `CUSTOM_FUZZY` in `redact_entities` on `/doc_redact` unless the user explicitly requests fuzzy matching; it can be very CPU/RAM intensive and may return an empty path list even when the job completes. Use `CUSTOM` with an explicit `deny_list` on `/doc_redact`, or use `/redact_document` with `max_fuzzy_spelling_mistakes_num > 0` for fuzzy matching.\n"
         "- Run **`verify_redaction_coverage`** locally on downloaded CSV/PDF paths in this "
         "workspace (pandas/PyMuPDF), not via Agent API.\n"
         "- **Pass 2 VLM is not available** — do not call a VLM endpoint or use "
         "`CUSTOM_VLM_FACES` / `CUSTOM_VLM_SIGNATURE` entities.\n"
-        "- Helper module: `{workspace_root.rstrip('/')}/.pi/helpers/remote_redaction.py` "
-        "(`make_redaction_client`, `fetch_redaction_files`)."
-    ).format(output_base=output_base.rstrip("/") + "/")
+        "- **User-facing updates:** write progress and reasoning as normal assistant text. "
+        "Do not put commentary in bash `#` comments — the UI shows those as tool lines.\n"
+        f"- Helper module: `{helpers}`."
+    )
 
 
 def build_split_container_redaction_guidance(
@@ -457,11 +495,16 @@ def build_split_container_redaction_guidance(
     workspace_root: str,
 ) -> str:
     """AWS ECS (and similar): Pi agent and doc_redaction are separate containers."""
+    from pi_workspace_skills import remote_redaction_helper_module
+
     output_redact = f"{output_base.rstrip('/')}/output_redact/"
-    helpers = f"{workspace_root.rstrip('/')}/.pi/helpers/remote_redaction.py"
+    helpers = remote_redaction_helper_module()
+    base = _workspace_root().as_posix().rstrip("/")
     return (
         f"- **Split-container redaction backend:** doc_redaction runs at `{gradio_url}` "
         "(separate service from this Pi agent). Use **`gradio_client` only**.\n"
+        f"- **Helper module (workspace base):** `{helpers}` under `{base}/.pi/helpers/` "
+        f"(not `{workspace_root.rstrip('/')}/.pi/helpers/`).\n"
         f"- **Deliverables belong in your session workspace:** `{output_redact}` "
         f"(and `{output_base.rstrip('/')}/review/output_review_final/` after apply). "
         "That is the **only** output tree you should populate for this task.\n"
@@ -478,9 +521,18 @@ def build_split_container_redaction_guidance(
         "once — **do not** spend turns grepping the filesystem.\n"
         f'- **Download:** `fetch_redaction_files(paths, "{output_redact}")` from '
         f"`{helpers}` (HTTP `GET /gradio_api/file=` — no shared disk copy).\n"
-        "- **`POST /agent/*`** only accepts paths on the **redaction server**. After "
-        "download, run `verify_redaction_coverage` on CSV/PDF under your workspace, not with "
-        "bare Agent API paths from this container.\n"
+        "- **Coverage verify (split-container):** `/agent/*` paths must already exist on "
+        "the **redaction server** under its `OUTPUT_FOLDER` (e.g. `/home/user/app/output/...`) "
+        "— not on this Pi container. **Pre-apply** (CSV edited here): download artifacts via "
+        "`fetch_redaction_files`, then run `python tools/verify_redaction_coverage.py` on "
+        "those local copies (the edited review CSV is not on the redaction server). "
+        "**Post-apply** (after `/review_apply`): call "
+        f"`POST {gradio_url.rstrip('/')}/agent/verify_redaction_coverage` with "
+        "**server paths** from `extract_server_paths(review_apply result)` for "
+        "`review_csv_path`, `ocr_words_csv_path` (from `/doc_redact`), and "
+        "`redacted_pdf_path`. **Do not** pass Pi workspace paths, `/tmp/gradio_tmp/...` "
+        "upload paths, or import `verify_redaction_coverage()` expecting redaction-server "
+        "paths to resolve from this container.\n"
         f"- Helper module (inside workspace boundary): `{helpers}`."
     )
 
@@ -651,6 +703,16 @@ def build_redaction_prompt(
         text = text.replace("- {REMOTE_BACKEND_GUIDANCE}\n", "")
     for key, value in replacements.items():
         text = text.replace(key, value)
+
+    if is_hf_space_profile():
+        hf_row = (
+            "| **0 — HF deployment (read first)** | `hf-space-deployment` | "
+            "`.pi/skills/hf-space-deployment/SKILL.md` | "
+            "Use `run_doc_redact.py`; do not hand-roll Gradio clients |\n"
+        )
+        marker = "| **1 — Initial redaction** |"
+        if marker in text and hf_row not in text:
+            text = text.replace(marker, hf_row + marker, 1)
 
     if not _include_long_document_rules(page_range, total_pages):
         text = _strip_long_document_section(text)

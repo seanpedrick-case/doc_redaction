@@ -3,8 +3,8 @@
 Interactive CDK installer for doc_redaction.
 
 Walks through demo vs production deployment profiles, writes config/cdk_config.env
-and cdk.json, optionally runs cdk deploy, post-deploy URL fixups, and
-post_cdk_build_quickstart.py.
+and cdk.json, optionally runs cdk deploy, post-deploy Cognito callback fixups (API,
+no second deploy), and post_cdk_build_quickstart.py.
 
 Usage examples::
 
@@ -26,13 +26,14 @@ Usage examples::
     python cdk_install.py --profile headless --vpc-name my-vpc \\
         --force-delete-stacks --yes
 
-    # Demo with Pi agent (Express) at /pi/
+    # Demo with Agent agent (Express) at /agent/
     python cdk_install.py --profile demo --enable-pi --yes --config-only
 
-    # Headless batch (S3 job .env -> Lambda -> one-shot ECS direct mode)
+    # Headless batch (S3 → Lambda → one-shot ECS direct mode)
     python cdk_install.py --profile headless --vpc-name my-vpc --yes
+    python cdk_install.py --profile production --headless --vpc-name my-vpc --yes
 
-    # Production with Pi on dedicated hostname
+    # Production with Pi agent mode on dedicated hostname
     python cdk_install.py --profile production --enable-pi-legacy \\
         --pi-alb-routing host --pi-host-header agent.example.com --yes
 """
@@ -40,6 +41,7 @@ Usage examples::
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import re
@@ -55,6 +57,8 @@ CDK_DIR = Path(__file__).resolve().parent
 REPO_ROOT = CDK_DIR.parent
 CONFIG_DIR = CDK_DIR / "config"
 ENV_PATH = CONFIG_DIR / "cdk_config.env"
+APP_CONFIG_ENV_PATH = CONFIG_DIR / "app_config.env"
+APP_CONFIG_ENV_EXAMPLE = CONFIG_DIR / "app_config.env.example"
 PI_AGENT_ENV_PATH = CONFIG_DIR / "pi_agent.env"
 PI_AGENT_ENV_EXAMPLE = REPO_ROOT / "config" / "pi_agent.env.example"
 PI_ALB_ROUTING_MODES = ("path", "host", "both")
@@ -65,13 +69,16 @@ QUICKSTART_SCRIPT = CDK_DIR / "post_cdk_build_quickstart.py"
 REGIONAL_STACK = "RedactionStack"
 CLOUDFRONT_STACK = "RedactionStackCloudfront"
 CLOUDFRONT_STACK_REGION = "us-east-1"
+APPREGISTRY_STACK_SUFFIX = "AppRegistryStack"
 
 DEMO_PRESET: Dict[str, str] = {
     "USE_ECS_EXPRESS_MODE": "True",
+    "ECS_EXPRESS_USE_PUBLIC_SUBNETS": "True",
+    "ENABLE_ECS_VPC_INTERFACE_ENDPOINTS": "True",
     "USE_CLOUDFRONT": "False",
     "RUN_USEAST_STACK": "False",
     "ENABLE_RESOURCE_DELETE_PROTECTION": "False",
-    "ENABLE_APPREGISTRY": "False",
+    "ENABLE_APPREGISTRY": "True",
     "ACM_SSL_CERTIFICATE_ARN": "",
     "SSL_CERTIFICATE_DOMAIN": "",
 }
@@ -86,10 +93,11 @@ PRODUCTION_PRESET: Dict[str, str] = {
 
 HEADLESS_PRESET: Dict[str, str] = {
     "USE_ECS_EXPRESS_MODE": "False",
+    "ECS_EXPRESS_USE_PUBLIC_SUBNETS": "True",
     "USE_CLOUDFRONT": "False",
     "RUN_USEAST_STACK": "False",
     "ENABLE_RESOURCE_DELETE_PROTECTION": "False",
-    "ENABLE_APPREGISTRY": "False",
+    "ENABLE_APPREGISTRY": "True",
     "ENABLE_HEADLESS_DEPLOYMENT": "True",
     "ENABLE_S3_BATCH_ECS_TRIGGER": "True",
     "COGNITO_AUTH": "False",
@@ -332,12 +340,63 @@ def write_cdk_json(
     return CDK_JSON_PATH
 
 
+def build_cdk_subprocess_env(
+    values: Optional[Dict[str, str]] = None,
+) -> Dict[str, str]:
+    """
+    Environment for child Python / CDK processes.
+
+    Merges config/cdk_config.env over the current process environment so stale
+    empty defaults from an earlier cdk_config import during the wizard do not
+    block load_dotenv (override=False) in app.py.
+    """
+    env = os.environ.copy()
+    env["CDK_CONFIG_PATH"] = str(ENV_PATH)
+    cdk_folder = ""
+    if values:
+        cdk_folder = (values.get("CDK_FOLDER") or "").strip()
+    if not cdk_folder and ENV_PATH.is_file():
+        cdk_folder = (read_env_file(ENV_PATH).get("CDK_FOLDER") or "").strip()
+    if not cdk_folder:
+        cdk_folder = str(CDK_DIR).replace("\\", "/") + "/"
+    env["CDK_FOLDER"] = cdk_folder
+
+    file_values: Dict[str, str] = {}
+    if ENV_PATH.is_file():
+        file_values = read_env_file(ENV_PATH)
+    elif values:
+        file_values = dict(values)
+
+    for key, val in file_values.items():
+        env[key] = str(val)
+    return env
+
+
+def apply_cdk_runtime_env(values: Dict[str, str]) -> None:
+    """Expose written config to app.py imports (smoke test, cdk synth/deploy)."""
+    os.environ.update(build_cdk_subprocess_env(values))
+
+
 def smoke_test_python_app(python_exe: Path) -> None:
     cmd = [str(python_exe), "-c", "import aws_cdk; import app"]
     print("Smoke test: import aws_cdk and app ...")
-    result = subprocess.run(cmd, cwd=str(CDK_DIR), check=False)
+    result = subprocess.run(
+        cmd,
+        cwd=str(CDK_DIR),
+        env=build_cdk_subprocess_env(),
+        check=False,
+    )
     if result.returncode != 0:
         raise SystemExit("Python smoke test failed. Fix dependencies before deploying.")
+
+
+def run_smoke_test_if_needed(
+    python_exe: Optional[Path],
+    args: argparse.Namespace,
+) -> None:
+    if args.config_only or args.skip_cdk_json or not python_exe:
+        return
+    smoke_test_python_app(python_exe)
 
 
 # ---------------------------------------------------------------------------
@@ -362,9 +421,22 @@ def get_aws_identity(region: Optional[str] = None) -> Tuple[str, str]:
     return account, resolved_region
 
 
+def resolve_cdk_executable() -> str:
+    """Return the AWS CDK CLI on PATH (cdk.cmd on Windows)."""
+    for name in ("cdk", "cdk.cmd", "cdk.exe"):
+        found = shutil.which(name)
+        if found:
+            return found
+    raise SystemExit(
+        "AWS CDK CLI not found on PATH.\n"
+        "Install: npm install -g aws-cdk  (or use npx aws-cdk)"
+    )
+
+
 def check_cdk_cli() -> str:
+    cdk_exe = resolve_cdk_executable()
     result = subprocess.run(
-        ["cdk", "--version"],
+        [cdk_exe, "--version"],
         capture_output=True,
         text=True,
         check=False,
@@ -374,7 +446,14 @@ def check_cdk_cli() -> str:
             "AWS CDK CLI not found on PATH.\n"
             "Install: npm install -g aws-cdk  (or use npx aws-cdk)"
         )
-    return (result.stdout or result.stderr or "").strip()
+    version = (result.stdout or result.stderr or "").strip()
+    if version.startswith("Python "):
+        raise SystemExit(
+            "CDK CLI check failed: 'cdk' resolved to the Python interpreter instead "
+            "of the AWS CDK CLI. Install aws-cdk globally (npm install -g aws-cdk) "
+            "and ensure it is on PATH before python.exe."
+        )
+    return version
 
 
 def cdk_bootstrap_needed(account: str, region: str) -> bool:
@@ -403,14 +482,153 @@ def list_vpcs(region: str) -> List[Dict[str, str]]:
             if tag.get("Key") == "Name":
                 name = tag.get("Value", "")
                 break
+        cidrs = vpc_cidr_blocks_from_describe(vpc)
         vpcs.append(
             {
                 "id": vpc["VpcId"],
                 "name": name or vpc["VpcId"],
-                "cidr": vpc.get("CidrBlock", ""),
+                "cidr": cidrs[0] if cidrs else "",
+                "cidrs": ",".join(cidrs),
             }
         )
     return sorted(vpcs, key=lambda x: x["name"])
+
+
+def vpc_cidr_blocks_from_describe(vpc: Dict[str, Any]) -> List[str]:
+    """Primary and associated IPv4 CIDR blocks for one ``describe_vpcs`` entry."""
+    blocks: List[str] = []
+    seen: set[str] = set()
+    primary = (vpc.get("CidrBlock") or "").strip()
+    if primary and primary not in seen:
+        seen.add(primary)
+        blocks.append(primary)
+    for assoc in vpc.get("CidrBlockAssociationSet") or []:
+        cidr = (assoc.get("CidrBlock") or "").strip()
+        if cidr and cidr not in seen:
+            seen.add(cidr)
+            blocks.append(cidr)
+    return blocks
+
+
+def list_vpc_cidr_blocks_in_region(region: str) -> List[str]:
+    """All IPv4 VPC CIDR blocks in the account/region (primary + associations)."""
+    import boto3
+
+    ec2 = boto3.client("ec2", region_name=region)
+    blocks: List[str] = []
+    seen: set[str] = set()
+    for vpc in ec2.describe_vpcs().get("Vpcs", []):
+        for cidr in vpc_cidr_blocks_from_describe(vpc):
+            if cidr not in seen:
+                seen.add(cidr)
+                blocks.append(cidr)
+    return blocks
+
+
+VPC_CIDR_PREFIX_LEN = 24
+SUBNET_CIDR_PREFIX_LEN = 28
+_VPC_CIDR_SEARCH_SUPERNETS = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+
+
+def parse_ipv4_networks(cidrs: Sequence[str]) -> List[ipaddress.IPv4Network]:
+    networks: List[ipaddress.IPv4Network] = []
+    for cidr in cidrs:
+        raw = (cidr or "").strip()
+        if not raw:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(raw, strict=False))
+        except ValueError:
+            continue
+    return networks
+
+
+def suggest_vpc_cidr_block(
+    existing_vpc_cidrs: Sequence[str],
+    *,
+    prefix_len: int = VPC_CIDR_PREFIX_LEN,
+    search_supernets: Sequence[str] = _VPC_CIDR_SEARCH_SUPERNETS,
+) -> str:
+    """Return the lowest non-overlapping ``prefix_len`` block in RFC1918 space."""
+    occupied = parse_ipv4_networks(existing_vpc_cidrs)
+    for supernet_cidr in search_supernets:
+        supernet = ipaddress.ip_network(supernet_cidr, strict=False)
+        for candidate in supernet.subnets(new_prefix=prefix_len):
+            if any(candidate.overlaps(block) for block in occupied):
+                continue
+            return str(candidate)
+    raise ValueError(
+        f"No unused /{prefix_len} VPC CIDR found in region "
+        f"({len(occupied)} existing block(s))."
+    )
+
+
+def suggest_subnet_cidr_blocks(
+    vpc_cidr: str,
+    existing_subnet_cidrs: Sequence[str],
+    count: int,
+    *,
+    prefix_len: int = SUBNET_CIDR_PREFIX_LEN,
+    reserved_cidrs: Optional[Sequence[str]] = None,
+) -> List[str]:
+    """Return ``count`` lowest non-overlapping ``prefix_len`` blocks inside ``vpc_cidr``."""
+    if count < 1:
+        return []
+    vpc_net = ipaddress.ip_network(vpc_cidr.strip(), strict=False)
+    occupied = parse_ipv4_networks(existing_subnet_cidrs)
+    if reserved_cidrs:
+        occupied.extend(parse_ipv4_networks(reserved_cidrs))
+
+    suggestions: List[str] = []
+    for candidate in vpc_net.subnets(new_prefix=prefix_len):
+        if any(candidate.overlaps(block) for block in occupied):
+            continue
+        suggestions.append(str(candidate))
+        occupied.append(candidate)
+        if len(suggestions) >= count:
+            return suggestions
+
+    raise ValueError(
+        f"Only {len(suggestions)} available /{prefix_len} subnet block(s) in "
+        f"{vpc_cidr}; need {count}."
+    )
+
+
+def prompt_new_vpc_cidr(answers: "InstallAnswers", *, interactive: bool) -> None:
+    """Fill ``answers.new_vpc_cidr`` via auto-suggest and/or manual wizard prompt."""
+    if answers.new_vpc_cidr:
+        return
+
+    fallback = "10.0.0.0/24"
+    auto_prompt = (
+        f"Auto-select lowest available /{VPC_CIDR_PREFIX_LEN} VPC CIDR "
+        f"in {answers.aws_region}?"
+    )
+
+    def _auto_select() -> bool:
+        try:
+            occupied = list_vpc_cidr_blocks_in_region(answers.aws_region)
+            answers.new_vpc_cidr = suggest_vpc_cidr_block(occupied)
+            print(f"Selected VPC CIDR: {answers.new_vpc_cidr}")
+            return True
+        except ValueError as exc:
+            print(f"Warning: {exc}")
+            return False
+
+    if interactive:
+        if ask_yes_no(auto_prompt, default=True):
+            if not _auto_select():
+                answers.new_vpc_cidr = ask("New VPC CIDR", fallback)
+        else:
+            default_cidr = fallback
+            try:
+                occupied = list_vpc_cidr_blocks_in_region(answers.aws_region)
+                default_cidr = suggest_vpc_cidr_block(occupied)
+            except ValueError:
+                pass
+            answers.new_vpc_cidr = ask("New VPC CIDR", default_cidr)
+    elif not _auto_select():
+        answers.new_vpc_cidr = fallback
 
 
 def list_availability_zones(region: str) -> List[str]:
@@ -505,6 +723,324 @@ def format_list_env(values: Sequence[str], *, use_single_quotes: bool = False) -
     return f"[{inner}]"
 
 
+SUBNET_TIER_MODES = ("auto", "existing", "create")
+
+
+def parse_subnet_name_csv(raw: str) -> List[str]:
+    return [part.strip() for part in raw.split(",") if part.strip()]
+
+
+def resolve_subnet_tier_modes(args: argparse.Namespace) -> Tuple[str, str]:
+    """CLI: --subnet-mode sets both tiers; per-tier flags override individually."""
+    default = getattr(args, "subnet_mode", None) or "auto"
+    public = getattr(args, "public_subnet_mode", None) or default
+    private = getattr(args, "private_subnet_mode", None) or default
+    return public, private
+
+
+def apply_subnet_cli_flags(args: argparse.Namespace, answers: "InstallAnswers") -> None:
+    if getattr(args, "public_subnet_names", None):
+        answers.public_subnet_names = parse_subnet_name_csv(args.public_subnet_names)
+    if getattr(args, "private_subnet_names", None):
+        answers.private_subnet_names = parse_subnet_name_csv(args.private_subnet_names)
+
+
+def lookup_subnets_by_name(
+    vpc_subnets: Sequence[Dict[str, str]],
+) -> Dict[str, Dict[str, str]]:
+    return {subnet["name"]: subnet for subnet in vpc_subnets if subnet.get("name")}
+
+
+def fill_existing_subnet_tier_metadata(
+    names: Sequence[str],
+    lookup: Dict[str, Dict[str, str]],
+    *,
+    cidrs_out: List[str],
+    azs_out: List[str],
+) -> List[str]:
+    """Resolve CIDR/AZ for existing subnet names (order preserved)."""
+    errors: List[str] = []
+    cidrs_out.clear()
+    azs_out.clear()
+    for name in names:
+        info = lookup.get(name)
+        if not info:
+            errors.append(f"Subnet '{name}' was not found in the VPC.")
+            continue
+        cidr = (info.get("cidr") or "").strip()
+        az = (info.get("az") or "").strip()
+        if not az:
+            errors.append(f"Subnet '{name}' has no availability zone in AWS.")
+            continue
+        cidrs_out.append(cidr)
+        azs_out.append(az)
+    return errors
+
+
+def enrich_existing_subnet_details_from_aws(answers: "InstallAnswers") -> List[str]:
+    """Look up CIDR/AZ for tiers using existing named subnets (wizard or CLI)."""
+    if answers.vpc_mode != "existing" or not answers.vpc_name:
+        return []
+
+    tiers: List[Tuple[str, str, List[str], List[str], List[str]]] = []
+    if answers.public_subnet_mode == "existing" and answers.public_subnet_names:
+        tiers.append(
+            (
+                "Public",
+                answers.public_subnet_mode,
+                answers.public_subnet_names,
+                answers.public_subnet_cidrs,
+                answers.public_subnet_azs,
+            )
+        )
+    if answers.private_subnet_mode == "existing" and answers.private_subnet_names:
+        tiers.append(
+            (
+                "Private",
+                answers.private_subnet_mode,
+                answers.private_subnet_names,
+                answers.private_subnet_cidrs,
+                answers.private_subnet_azs,
+            )
+        )
+    if not tiers:
+        return []
+
+    vpc_list = list_vpcs(answers.aws_region)
+    vpc_id = next(
+        (vpc["id"] for vpc in vpc_list if vpc["name"] == answers.vpc_name),
+        None,
+    )
+    if not vpc_id:
+        return [f"VPC '{answers.vpc_name}' not found in {answers.aws_region}."]
+
+    lookup = lookup_subnets_by_name(list_subnets_in_vpc(vpc_id, answers.aws_region))
+    errors: List[str] = []
+    for _label, _mode, names, cidrs_out, azs_out in tiers:
+        if len(cidrs_out) == len(names) == len(azs_out) and names:
+            continue
+        errors.extend(
+            fill_existing_subnet_tier_metadata(
+                names,
+                lookup,
+                cidrs_out=cidrs_out,
+                azs_out=azs_out,
+            )
+        )
+    return errors
+
+
+def apply_subnet_tier_env(
+    values: Dict[str, str],
+    answers: "InstallAnswers",
+    *,
+    tier: str,
+    mode: str,
+) -> None:
+    """Write PUBLIC_* or PRIVATE_* subnet keys for one tier (auto | existing | create)."""
+    prefix = "PUBLIC" if tier == "public" else "PRIVATE"
+    names = (
+        answers.public_subnet_names
+        if tier == "public"
+        else answers.private_subnet_names
+    )
+    cidrs = (
+        answers.public_subnet_cidrs
+        if tier == "public"
+        else answers.private_subnet_cidrs
+    )
+    azs = answers.public_subnet_azs if tier == "public" else answers.private_subnet_azs
+
+    if mode == "auto":
+        values[f"{prefix}_SUBNETS_TO_USE"] = ""
+        values[f"{prefix}_SUBNET_CIDR_BLOCKS"] = ""
+        values[f"{prefix}_SUBNET_AVAILABILITY_ZONES"] = ""
+    elif mode == "existing":
+        values[f"{prefix}_SUBNETS_TO_USE"] = format_list_env(names)
+        if names and len(cidrs) == len(names) == len(azs):
+            values[f"{prefix}_SUBNET_CIDR_BLOCKS"] = format_list_env(
+                cidrs, use_single_quotes=True
+            )
+            values[f"{prefix}_SUBNET_AVAILABILITY_ZONES"] = format_list_env(
+                azs, use_single_quotes=True
+            )
+        else:
+            values[f"{prefix}_SUBNET_CIDR_BLOCKS"] = ""
+            values[f"{prefix}_SUBNET_AVAILABILITY_ZONES"] = ""
+    else:
+        values[f"{prefix}_SUBNETS_TO_USE"] = format_list_env(names)
+        values[f"{prefix}_SUBNET_CIDR_BLOCKS"] = format_list_env(
+            cidrs, use_single_quotes=True
+        )
+        values[f"{prefix}_SUBNET_AVAILABILITY_ZONES"] = format_list_env(
+            azs, use_single_quotes=True
+        )
+
+
+def validate_subnet_answers(answers: "InstallAnswers") -> List[str]:
+    errors: List[str] = []
+    if answers.vpc_mode != "existing":
+        return errors
+    tiers: List[tuple] = [
+        (
+            "Public",
+            answers.public_subnet_mode,
+            answers.public_subnet_names,
+            answers.public_subnet_cidrs,
+        ),
+    ]
+    if not answers_use_express_mode(answers) and not answers_use_public_subnets_only(
+        answers
+    ):
+        tiers.append(
+            (
+                "Private",
+                answers.private_subnet_mode,
+                answers.private_subnet_names,
+                answers.private_subnet_cidrs,
+            )
+        )
+    for label, mode, names, cidrs in tiers:
+        if mode == "existing" and not names:
+            errors.append(
+                f"{label} subnets: provide at least one existing subnet name."
+            )
+        if mode == "create" and not names:
+            errors.append(f"{label} subnets: create mode requires subnet names.")
+        if mode == "create" and names and cidrs and len(names) != len(cidrs):
+            errors.append(f"{label} subnets: CIDR count must match subnet name count.")
+    return errors
+
+
+def ask_subnet_tier_mode(tier_label: str) -> str:
+    idx = ask_choice(
+        f"{tier_label} subnets",
+        [
+            "Auto-discover suitable subnets",
+            "Use existing named subnets",
+            "Create new stack-specific subnets (name + CIDR + AZ)",
+        ],
+        default_index=0,
+    )
+    return SUBNET_TIER_MODES[idx]
+
+
+def configure_subnet_tier(
+    answers: "InstallAnswers",
+    tier: str,
+    mode: str,
+    vpc_subnets: List[Dict[str, str]],
+    azs: Sequence[str],
+    *,
+    interactive: bool,
+    vpc_cidr: str = "",
+    reserved_subnet_cidrs: Optional[Sequence[str]] = None,
+) -> None:
+    """Collect subnet names/CIDRs for one tier in the wizard."""
+    is_public = tier == "public"
+    label = "Public" if is_public else "Private"
+    prefix_label = "Public" if is_public else "Private"
+
+    if mode == "auto":
+        return
+
+    if mode == "existing":
+        names = (
+            answers.public_subnet_names if is_public else answers.private_subnet_names
+        )
+        if interactive and not names:
+            print(
+                f"Enter {label.lower()} subnet names (comma-separated), or pick from:"
+            )
+            for subnet in vpc_subnets:
+                print(f"  - {subnet['name']} ({subnet['cidr']}, {subnet['az']})")
+            names = parse_subnet_name_csv(ask(f"{label} subnet names", ""))
+        if is_public:
+            answers.public_subnet_names = names
+            cidrs_out = answers.public_subnet_cidrs
+            azs_out = answers.public_subnet_azs
+        else:
+            answers.private_subnet_names = names
+            cidrs_out = answers.private_subnet_cidrs
+            azs_out = answers.private_subnet_azs
+        if names:
+            lookup = lookup_subnets_by_name(vpc_subnets)
+            missing = fill_existing_subnet_tier_metadata(
+                names,
+                lookup,
+                cidrs_out=cidrs_out,
+                azs_out=azs_out,
+            )
+            for err in missing:
+                print(f"Warning: {err}")
+        return
+
+    n_az = len(azs)
+    names = [f"{answers.cdk_prefix}{prefix_label}Subnet{i + 1}" for i in range(n_az)]
+    if is_public:
+        answers.public_subnet_names = names
+        cidrs_list = answers.public_subnet_cidrs
+        azs_list = answers.public_subnet_azs
+        cidr_base = 0
+    else:
+        answers.private_subnet_names = names
+        cidrs_list = answers.private_subnet_cidrs
+        azs_list = answers.private_subnet_azs
+        cidr_base = 10
+
+    if interactive:
+        print(f"Suggested AZs for {label.lower()} subnets: {', '.join(azs)}")
+        auto_assign = ask_yes_no(
+            f"Auto-assign lowest available /{SUBNET_CIDR_PREFIX_LEN} CIDR blocks "
+            f"for {label.lower()} subnets?",
+            default=True,
+        )
+    else:
+        auto_assign = bool(vpc_cidr)
+
+    existing_subnet_cidrs = [
+        subnet.get("cidr", "") for subnet in vpc_subnets if subnet.get("cidr")
+    ]
+    suggested: Optional[List[str]] = None
+    if auto_assign and vpc_cidr:
+        try:
+            suggested = suggest_subnet_cidr_blocks(
+                vpc_cidr,
+                existing_subnet_cidrs,
+                len(names),
+                reserved_cidrs=reserved_subnet_cidrs,
+            )
+        except ValueError as exc:
+            print(f"Warning: {exc}")
+            if not interactive:
+                raise SystemExit(str(exc)) from exc
+
+    cidrs_list.clear()
+    azs_list.clear()
+    for i, name in enumerate(names):
+        if suggested:
+            cidr = suggested[i]
+            if interactive:
+                print(f"  {name}: {cidr}")
+        elif interactive:
+            default_cidr = f"10.0.{cidr_base + i}.0/{SUBNET_CIDR_PREFIX_LEN}"
+            if vpc_cidr:
+                try:
+                    default_cidr = suggest_subnet_cidr_blocks(
+                        vpc_cidr,
+                        existing_subnet_cidrs + cidrs_list,
+                        1,
+                        reserved_cidrs=reserved_subnet_cidrs,
+                    )[0]
+                except ValueError:
+                    pass
+            cidr = ask(f"CIDR for {label.lower()} {name}", default_cidr)
+        else:
+            cidr = f"10.0.{cidr_base + i}.0/{SUBNET_CIDR_PREFIX_LEN}"
+        cidrs_list.append(cidr)
+        azs_list.append(azs[i % len(azs)])
+
+
 @dataclass
 class InstallAnswers:
     profile: str = "demo"
@@ -516,7 +1052,8 @@ class InstallAnswers:
     vpc_mode: str = "existing"  # new | existing
     vpc_name: str = ""
     new_vpc_cidr: str = ""
-    subnet_mode: str = "auto"  # create | existing | auto
+    public_subnet_mode: str = "auto"  # auto | existing | create
+    private_subnet_mode: str = "auto"  # auto | existing | create
     public_subnet_names: List[str] = field(default_factory=list)
     private_subnet_names: List[str] = field(default_factory=list)
     public_subnet_cidrs: List[str] = field(default_factory=list)
@@ -533,9 +1070,10 @@ class InstallAnswers:
     enable_pi_legacy: bool = False
     enable_service_connect: bool = False
     enable_s3_batch: bool = False
+    enable_headless: bool = False
     ecs_memory: str = "4096"
     pi_alb_routing: str = "path"
-    pi_alb_path_prefix: str = "/pi"
+    pi_alb_path_prefix: str = "/agent"
     pi_alb_host_header: str = ""
     pi_alb_listener_rule_priority: str = ""
     pi_gradio_port: str = "7862"
@@ -543,6 +1081,8 @@ class InstallAnswers:
     pi_default_provider: str = "amazon-bedrock"
     write_pi_agent_env: bool = True
     overwrite_pi_agent_env: bool = False
+    write_app_config_env: bool = True
+    overwrite_app_config_env: bool = False
     custom_overrides: Dict[str, str] = field(default_factory=dict)
     python_path: Optional[str] = None
 
@@ -551,13 +1091,92 @@ class InstallAnswers:
         return self.enable_pi_express or self.enable_pi_legacy
 
 
+# Cognito hosted-UI prefix domains cannot contain these substrings (AWS docs).
+COGNITO_DOMAIN_RESERVED_SUBSTRINGS = ("amazon", "cognito", "aws")
+
+
+def sanitize_cognito_domain_prefix(raw: str, *, max_length: int = 63) -> str:
+    """Normalize a Cognito domain prefix: allowed chars, no reserved words."""
+    prefix = re.sub(r"[^a-z0-9-]", "-", (raw or "").lower())
+    for reserved in COGNITO_DOMAIN_RESERVED_SUBSTRINGS:
+        prefix = prefix.replace(reserved, "")
+    prefix = re.sub(r"-{2,}", "-", prefix).strip("-")
+    if max_length > 0:
+        prefix = prefix[:max_length].strip("-")
+    if not prefix or not re.match(r"^[a-z0-9]", prefix):
+        return "redaction-app"
+    prefix = prefix.rstrip("-")
+    if not prefix:
+        return "redaction-app"
+    for reserved in COGNITO_DOMAIN_RESERVED_SUBSTRINGS:
+        if reserved in prefix:
+            return "redaction-app"
+    return prefix
+
+
+def default_cognito_domain_prefix_from_cdk_prefix(cdk_prefix: str) -> str:
+    """Derive a short installer default from CDK_PREFIX (globally unique hint)."""
+    slug = re.sub(r"[^a-z0-9-]", "-", (cdk_prefix or "").lower()).strip("-")
+    return sanitize_cognito_domain_prefix(slug, max_length=20)
+
+
+def validate_cognito_domain_prefix(prefix: str) -> Optional[str]:
+    """Return an error message when prefix violates Cognito domain rules."""
+    cleaned = (prefix or "").strip().lower()
+    if not cleaned:
+        return "COGNITO_USER_POOL_DOMAIN_PREFIX is required."
+    reserved = [word for word in COGNITO_DOMAIN_RESERVED_SUBSTRINGS if word in cleaned]
+    if reserved:
+        return (
+            "COGNITO_USER_POOL_DOMAIN_PREFIX cannot contain reserved words: "
+            + ", ".join(reserved)
+            + "."
+        )
+    if not re.match(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", cleaned):
+        return (
+            "COGNITO_USER_POOL_DOMAIN_PREFIX must use lowercase letters, "
+            "numbers, and hyphens only."
+        )
+    return None
+
+
 def normalize_pi_path_prefix(raw: str) -> str:
-    segment = (raw or "pi").strip().strip("/")
-    return f"/{segment}" if segment else "/pi"
+    segment = (raw or "agent").strip().strip("/")
+    return f"/{segment}" if segment else "/agent"
 
 
-def default_pi_listener_priority(use_cloudfront: bool) -> str:
-    return "2" if use_cloudfront else "1"
+def default_pi_listener_priority(use_cloudfront: bool = False) -> str:
+    """Default Pi path/host rule priority (1–2 reserved for CloudFront / Express rules)."""
+    del use_cloudfront  # kept for call-site compatibility
+    return "3"
+
+
+def derive_ecs_resource_names(cdk_prefix: str) -> Dict[str, str]:
+    """ECS/CodeBuild resource names from CDK_PREFIX (matches cdk_config.py defaults)."""
+    prefix = (cdk_prefix or "").strip()
+    if not prefix:
+        return {}
+    return {
+        "CLUSTER_NAME": f"{prefix}Cluster",
+        "ECS_SERVICE_NAME": f"{prefix}ECSService",
+        "ECS_EXPRESS_SERVICE_NAME": f"{prefix}ECSService",
+        "ECS_PI_EXPRESS_SERVICE_NAME": f"{prefix}PiExpressService",
+        "ECS_PI_SERVICE_NAME": f"{prefix}PiAgentService",
+        "COGNITO_USER_POOL_CLIENT_SECRET_NAME": f"{prefix}ParamCognitoSecret",
+        "CODEBUILD_PROJECT_NAME": f"{prefix}CodeBuildProject",
+        "CODEBUILD_PI_PROJECT_NAME": f"{prefix}CodeBuildPiProject",
+    }
+
+
+def resolve_fixup_env_values(values: Dict[str, str]) -> Dict[str, str]:
+    """Fill missing ECS cluster/service keys from CDK_PREFIX for post-deploy boto3 calls."""
+    resolved = dict(values)
+    for key, default in derive_ecs_resource_names(
+        resolved.get("CDK_PREFIX", "")
+    ).items():
+        if not (resolved.get(key) or "").strip():
+            resolved[key] = default
+    return resolved
 
 
 def merge_preset(
@@ -575,20 +1194,94 @@ def merge_preset(
     return base
 
 
+def answers_preset_profile(answers: "InstallAnswers") -> str:
+    """Preset profile for env defaults (legacy ``headless`` maps to demo)."""
+    if answers.profile == "headless":
+        return "demo"
+    return answers.profile
+
+
+def answers_use_headless(answers: "InstallAnswers") -> bool:
+    return answers.profile == "headless" or answers.enable_headless
+
+
+def profile_allows_headless_add_on(answers: "InstallAnswers") -> bool:
+    """Headless batch is incompatible with the Demonstration (Express) route."""
+    if answers.profile == "demo":
+        return False
+    if answers.profile in ("production", "headless"):
+        return True
+    if answers.profile == "custom":
+        return answers.custom_overrides.get("USE_ECS_EXPRESS_MODE") != "True"
+    return False
+
+
+def headless_profile_error(answers: "InstallAnswers") -> Optional[str]:
+    if not answers_use_headless(answers):
+        return None
+    if answers.profile == "headless":
+        return None
+    if answers.profile == "demo":
+        return (
+            "Headless batch mode is not available with the Demonstration (Express) "
+            "profile. Use the Headless shortcut profile, Production with headless, "
+            "or Custom without ECS Express."
+        )
+    if (
+        answers.profile == "custom"
+        and answers.custom_overrides.get("USE_ECS_EXPRESS_MODE") == "True"
+    ):
+        return (
+            "Headless batch mode requires USE_ECS_EXPRESS_MODE=False. "
+            "Disable ECS Express in the custom profile or omit --headless."
+        )
+    return None
+
+
+def validate_install_answers(answers: "InstallAnswers") -> List[str]:
+    errors: List[str] = []
+    msg = headless_profile_error(answers)
+    if msg:
+        errors.append(msg)
+    return errors
+
+
+def answers_use_express_mode(answers: "InstallAnswers") -> bool:
+    """True when the selected install profile/options enable ECS Express ingress."""
+    if answers_use_headless(answers):
+        return False
+    preset = merge_preset(answers.profile, answers.custom_overrides)
+    return preset.get("USE_ECS_EXPRESS_MODE") == "True"
+
+
+def answers_use_public_subnets_only(answers: "InstallAnswers") -> bool:
+    """Express ingress or demo-style headless batch (public subnets, no private install)."""
+    if answers_use_express_mode(answers):
+        return True
+    if not answers_use_headless(answers):
+        return False
+    return answers_preset_profile(answers) in ("headless", "demo", "custom")
+
+
 def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
     cdk_folder = str(CDK_DIR).replace("\\", "/")
     if not cdk_folder.endswith("/"):
         cdk_folder += "/"
 
-    values: Dict[str, str] = merge_preset(answers.profile, answers.custom_overrides)
+    values: Dict[str, str] = merge_preset(
+        answers_preset_profile(answers), answers.custom_overrides
+    )
     values.update(
         {
             "CDK_PREFIX": answers.cdk_prefix,
             "AWS_REGION": answers.aws_region,
             "AWS_ACCOUNT_ID": answers.aws_account_id,
             "CDK_FOLDER": cdk_folder,
+            **derive_ecs_resource_names(answers.cdk_prefix),
             "CONTEXT_FILE": "precheck.context.json",
-            "COGNITO_USER_POOL_DOMAIN_PREFIX": answers.cognito_domain_prefix,
+            "COGNITO_USER_POOL_DOMAIN_PREFIX": sanitize_cognito_domain_prefix(
+                answers.cognito_domain_prefix
+            ),
             "GITHUB_REPO_BRANCH": answers.github_branch,
             "ECS_TASK_MEMORY_SIZE": answers.ecs_memory,
             "EXISTING_IGW_ID": answers.existing_igw_id,
@@ -606,37 +1299,57 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
             ),
             "ENABLE_S3_BATCH_ECS_TRIGGER": (
                 "True"
-                if answers.enable_s3_batch or answers.profile == "headless"
+                if answers.enable_s3_batch or answers_use_headless(answers)
                 else "False"
             ),
             "ENABLE_HEADLESS_DEPLOYMENT": (
-                "True" if answers.profile == "headless" else "False"
+                "True" if answers_use_headless(answers) else "False"
             ),
         }
     )
 
-    use_cloudfront = values.get("USE_CLOUDFRONT") == "True"
-    if answers.pi_enabled:
-        routing = answers.pi_alb_routing.strip().lower()
-        path_prefix = normalize_pi_path_prefix(answers.pi_alb_path_prefix)
-        priority = (
-            answers.pi_alb_listener_rule_priority.strip()
-            or default_pi_listener_priority(use_cloudfront)
-        )
+    if answers_use_headless(answers):
         values.update(
             {
-                "PI_ALB_ROUTING": routing,
-                "PI_ALB_PATH_PREFIX": path_prefix,
-                "PI_ALB_LISTENER_RULE_PRIORITY": priority,
+                "ENABLE_HEADLESS_DEPLOYMENT": "True",
+                "ENABLE_S3_BATCH_ECS_TRIGGER": "True",
+                "USE_ECS_EXPRESS_MODE": "False",
+                "USE_CLOUDFRONT": "False",
+                "RUN_USEAST_STACK": "False",
+                "COGNITO_AUTH": "False",
+                "ENABLE_PI_AGENT_EXPRESS_SERVICE": "False",
+                "ENABLE_PI_AGENT_ECS_SERVICE": "False",
+                "ENABLE_ECS_SERVICE_CONNECT": "False",
+            }
+        )
+
+    use_cloudfront = values.get("USE_CLOUDFRONT") == "True"
+    if answers.pi_enabled:
+        values.update(
+            {
                 "PI_GRADIO_PORT": answers.pi_gradio_port,
                 "ECS_SERVICE_CONNECT_DISCOVERY_NAME": answers.sc_discovery_name,
             }
         )
-        if routing in ("host", "both"):
-            values["PI_ALB_HOST_HEADER"] = answers.pi_alb_host_header.strip()
         if answers.enable_pi_express:
             values["ECS_EXPRESS_SC_PORT_NAME"] = "port-7860"
             values["ECS_PI_EXPRESS_SC_PORT_NAME"] = f"port-{answers.pi_gradio_port}"
+        else:
+            routing = answers.pi_alb_routing.strip().lower()
+            path_prefix = normalize_pi_path_prefix(answers.pi_alb_path_prefix)
+            priority = (
+                answers.pi_alb_listener_rule_priority.strip()
+                or default_pi_listener_priority(use_cloudfront)
+            )
+            values.update(
+                {
+                    "PI_ALB_ROUTING": routing,
+                    "PI_ALB_PATH_PREFIX": path_prefix,
+                    "PI_ALB_LISTENER_RULE_PRIORITY": priority,
+                }
+            )
+            if routing in ("host", "both"):
+                values["PI_ALB_HOST_HEADER"] = answers.pi_alb_host_header.strip()
 
     if answers.profile == "production":
         values["ACM_SSL_CERTIFICATE_ARN"] = answers.acm_cert_arn
@@ -658,43 +1371,23 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
     else:
         values["VPC_NAME"] = answers.vpc_name
         values["NEW_VPC_CIDR"] = ""
-        if answers.subnet_mode == "auto":
-            values["PUBLIC_SUBNETS_TO_USE"] = ""
+        apply_subnet_tier_env(
+            values, answers, tier="public", mode=answers.public_subnet_mode
+        )
+        if answers_use_public_subnets_only(answers):
+            values["ECS_EXPRESS_USE_PUBLIC_SUBNETS"] = "True"
             values["PRIVATE_SUBNETS_TO_USE"] = ""
-            values["PUBLIC_SUBNET_CIDR_BLOCKS"] = ""
             values["PRIVATE_SUBNET_CIDR_BLOCKS"] = ""
-            values["PUBLIC_SUBNET_AVAILABILITY_ZONES"] = ""
             values["PRIVATE_SUBNET_AVAILABILITY_ZONES"] = ""
-        elif answers.subnet_mode == "existing":
-            values["PUBLIC_SUBNETS_TO_USE"] = format_list_env(
-                answers.public_subnet_names
+        else:
+            apply_subnet_tier_env(
+                values, answers, tier="private", mode=answers.private_subnet_mode
             )
-            values["PRIVATE_SUBNETS_TO_USE"] = format_list_env(
-                answers.private_subnet_names
-            )
-            values["PUBLIC_SUBNET_CIDR_BLOCKS"] = ""
-            values["PRIVATE_SUBNET_CIDR_BLOCKS"] = ""
-            values["PUBLIC_SUBNET_AVAILABILITY_ZONES"] = ""
-            values["PRIVATE_SUBNET_AVAILABILITY_ZONES"] = ""
-        else:  # create
-            values["PUBLIC_SUBNETS_TO_USE"] = format_list_env(
-                answers.public_subnet_names
-            )
-            values["PRIVATE_SUBNETS_TO_USE"] = format_list_env(
-                answers.private_subnet_names
-            )
-            values["PUBLIC_SUBNET_CIDR_BLOCKS"] = format_list_env(
-                answers.public_subnet_cidrs, use_single_quotes=True
-            )
-            values["PRIVATE_SUBNET_CIDR_BLOCKS"] = format_list_env(
-                answers.private_subnet_cidrs, use_single_quotes=True
-            )
-            values["PUBLIC_SUBNET_AVAILABILITY_ZONES"] = format_list_env(
-                answers.public_subnet_azs, use_single_quotes=True
-            )
-            values["PRIVATE_SUBNET_AVAILABILITY_ZONES"] = format_list_env(
-                answers.private_subnet_azs, use_single_quotes=True
-            )
+
+    if values.get("ENABLE_APPREGISTRY") == "True":
+        values["APPREGISTRY_STACK_NAME"] = (
+            f"{answers.cdk_prefix}{APPREGISTRY_STACK_SUFFIX}"
+        )
 
     return values
 
@@ -727,7 +1420,8 @@ def validate_env_values(values: Dict[str, str]) -> List[str]:
             )
         if express:
             errors.append(
-                "ENABLE_HEADLESS_DEPLOYMENT requires USE_ECS_EXPRESS_MODE=False."
+                "ENABLE_HEADLESS_DEPLOYMENT cannot be combined with USE_ECS_EXPRESS_MODE=True "
+                "(use --profile headless, production --headless, or custom without Express)."
             )
         if values.get("USE_CLOUDFRONT") == "True":
             errors.append(
@@ -737,7 +1431,7 @@ def validate_env_values(values: Dict[str, str]) -> List[str]:
     pi_ecs = values.get("ENABLE_PI_AGENT_ECS_SERVICE") == "True"
     pi_express = values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True"
     if pi_ecs and pi_express:
-        errors.append("Enable at most one Pi mode (ECS or Express).")
+        errors.append("Enable at most one agent mode (ECS or Express).")
     if pi_express and not express:
         errors.append(
             "ENABLE_PI_AGENT_EXPRESS_SERVICE requires USE_ECS_EXPRESS_MODE=True."
@@ -762,8 +1456,11 @@ def validate_env_values(values: Dict[str, str]) -> List[str]:
 
     if not (values.get("CDK_PREFIX") or "").strip():
         errors.append("CDK_PREFIX is required.")
-    if not (values.get("COGNITO_USER_POOL_DOMAIN_PREFIX") or "").strip():
-        errors.append("COGNITO_USER_POOL_DOMAIN_PREFIX is required.")
+    cognito_prefix_error = validate_cognito_domain_prefix(
+        values.get("COGNITO_USER_POOL_DOMAIN_PREFIX", "")
+    )
+    if cognito_prefix_error:
+        errors.append(cognito_prefix_error)
 
     if pi_ecs and values.get("ENABLE_ECS_SERVICE_CONNECT") != "True":
         errors.append(
@@ -774,7 +1471,7 @@ def validate_env_values(values: Dict[str, str]) -> List[str]:
         pi_ecs or pi_express or values.get("ENABLE_ECS_SERVICE_CONNECT") == "True"
     ):
         errors.append(
-            "ENABLE_HEADLESS_DEPLOYMENT is incompatible with Pi agent or Service Connect."
+            "ENABLE_HEADLESS_DEPLOYMENT is incompatible with agent mode or Service Connect."
         )
 
     pi_routing = (values.get("PI_ALB_ROUTING") or "").strip().lower()
@@ -794,9 +1491,85 @@ def validate_env_values(values: Dict[str, str]) -> List[str]:
     return errors
 
 
+def build_app_config_env_values(values: Dict[str, str]) -> Dict[str, str]:
+    """AWS deployment keys merged into config/app_config.env for ECS tasks."""
+    prefix_lower = (values.get("CDK_PREFIX") or "").lower()
+    headless = values.get("ENABLE_HEADLESS_DEPLOYMENT") == "True"
+    pi_express = values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True"
+
+    def _name(env_key: str, suffix: str) -> str:
+        return (values.get(env_key) or "").strip() or f"{prefix_lower}{suffix}"
+
+    return {
+        "COGNITO_AUTH": "False" if headless or pi_express else "True",
+        "RUN_AWS_FUNCTIONS": "True",
+        "DISPLAY_FILE_NAMES_IN_LOGS": "False",
+        "SESSION_OUTPUT_FOLDER": "True",
+        "SAVE_LOGS_TO_DYNAMODB": "True",
+        "SHOW_COSTS": "True",
+        "SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS": "True",
+        "LOAD_PREVIOUS_TEXTRACT_JOBS_S3": "True",
+        "DOCUMENT_REDACTION_BUCKET": _name("S3_LOG_CONFIG_BUCKET_NAME", "s3-logs"),
+        "TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET": _name(
+            "S3_OUTPUT_BUCKET_NAME", "s3-output"
+        ),
+        "ACCESS_LOG_DYNAMODB_TABLE_NAME": _name(
+            "ACCESS_LOG_DYNAMODB_TABLE_NAME", "dynamodb-access-logs"
+        ),
+        "FEEDBACK_LOG_DYNAMODB_TABLE_NAME": _name(
+            "FEEDBACK_LOG_DYNAMODB_TABLE_NAME", "dynamodb-feedback-logs"
+        ),
+        "USAGE_LOG_DYNAMODB_TABLE_NAME": _name(
+            "USAGE_LOG_DYNAMODB_TABLE_NAME", "dynamodb-usage-logs"
+        ),
+    }
+
+
+def write_app_config_env_file(
+    answers: InstallAnswers,
+    values: Dict[str, str],
+    *,
+    overwrite: bool = False,
+) -> Optional[Path]:
+    if not answers.write_app_config_env:
+        return None
+
+    updates = build_app_config_env_values(values)
+    APP_CONFIG_ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    if APP_CONFIG_ENV_PATH.is_file() and not overwrite:
+        existing = read_env_file(APP_CONFIG_ENV_PATH)
+        existing.update(updates)
+        backup_file(APP_CONFIG_ENV_PATH)
+        lines = [f"{k}={v}" for k, v in existing.items()]
+        APP_CONFIG_ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print(f"Updated {APP_CONFIG_ENV_PATH} (AWS deployment keys merged)")
+        return APP_CONFIG_ENV_PATH
+
+    if APP_CONFIG_ENV_EXAMPLE.is_file() and not overwrite:
+        if APP_CONFIG_ENV_PATH.is_file():
+            backup_file(APP_CONFIG_ENV_PATH)
+        shutil.copy2(APP_CONFIG_ENV_EXAMPLE, APP_CONFIG_ENV_PATH)
+        existing = read_env_file(APP_CONFIG_ENV_PATH)
+        existing.update(updates)
+        lines = [f"{k}={v}" for k, v in existing.items()]
+        APP_CONFIG_ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print(f"Created {APP_CONFIG_ENV_PATH} from example + AWS defaults")
+        return APP_CONFIG_ENV_PATH
+
+    if APP_CONFIG_ENV_PATH.is_file():
+        backup_file(APP_CONFIG_ENV_PATH)
+    lines = [
+        "# Generated by cdk_install.py — app runtime config for AWS ECS",
+        *[f"{k}={v}" for k, v in updates.items()],
+    ]
+    APP_CONFIG_ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"Wrote {APP_CONFIG_ENV_PATH}")
+    return APP_CONFIG_ENV_PATH
+
+
 def build_pi_agent_env_values(answers: InstallAnswers) -> Dict[str, str]:
-    """Runtime settings for the Pi Gradio app (uploaded to S3 as pi_agent.env)."""
-    path_prefix = normalize_pi_path_prefix(answers.pi_alb_path_prefix)
+    """Runtime settings for the Pi agent Gradio app (uploaded to S3 as pi_agent.env)."""
     values = {
         "PI_DEPLOYMENT_PROFILE": "aws-ecs",
         "PI_DEFAULT_PROVIDER": answers.pi_default_provider,
@@ -807,6 +1580,10 @@ def build_pi_agent_env_values(answers: InstallAnswers) -> Dict[str, str]:
         "PI_DEFAULT_OCR_METHOD": "AWS Textract service - all PDF types",
         "PI_DEFAULT_PII_METHOD": "AWS Comprehend",
     }
+    if answers.enable_pi_express:
+        values["RUN_FASTAPI"] = "True"
+        return values
+    path_prefix = normalize_pi_path_prefix(answers.pi_alb_path_prefix)
     if answers.pi_alb_routing.strip().lower() in ("path", "both"):
         values["PI_ROOT_PATH"] = path_prefix
         values["ROOT_PATH"] = path_prefix
@@ -831,7 +1608,7 @@ def write_pi_agent_env_file(
         backup_file(PI_AGENT_ENV_PATH)
         lines = [f"{k}={v}" for k, v in existing.items()]
         PI_AGENT_ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        print(f"Updated {PI_AGENT_ENV_PATH} (AWS/Pi keys merged)")
+        print(f"Updated {PI_AGENT_ENV_PATH} (AWS/Pi agent keys merged)")
         return PI_AGENT_ENV_PATH
 
     if PI_AGENT_ENV_EXAMPLE.is_file() and not overwrite:
@@ -918,16 +1695,14 @@ def print_summary(values: Dict[str, str], python_exe: Optional[Path] = None) -> 
 
 
 def _deploy_env() -> Dict[str, str]:
-    env = os.environ.copy()
-    env["CDK_CONFIG_PATH"] = str(ENV_PATH)
-    env["CDK_FOLDER"] = str(CDK_DIR).replace("\\", "/") + "/"
-    return env
+    return build_cdk_subprocess_env()
 
 
 def run_cdk_command(
     args: List[str], *, check: bool = True
 ) -> subprocess.CompletedProcess:
-    cmd = ["cdk", *args]
+    cdk_exe = resolve_cdk_executable()
+    cmd = [cdk_exe, *args]
     print(f"Running: {' '.join(cmd)}")
     return subprocess.run(
         cmd,
@@ -945,16 +1720,113 @@ class ExistingStack:
     termination_protection: bool = False
 
 
+def _should_check_cloudfront_stack(
+    config_values: Optional[Dict[str, str]] = None,
+) -> bool:
+    """Skip us-east-1 CloudFront stack lookup when config disables that path."""
+    if not config_values:
+        return True
+    use_cloudfront = config_values.get("USE_CLOUDFRONT")
+    run_useast = config_values.get("RUN_USEAST_STACK")
+    if use_cloudfront is not None and use_cloudfront != "True":
+        return False
+    if run_useast is not None and run_useast != "True":
+        return False
+    return True
+
+
+def _stack_check_skippable_error(exc: Exception) -> bool:
+    """Permission / SCP errors in one region must not block checks in others."""
+    from botocore.exceptions import ClientError
+
+    if not isinstance(exc, ClientError):
+        return False
+    code = exc.response.get("Error", {}).get("Code", "")
+    return code in (
+        "AccessDenied",
+        "UnauthorizedOperation",
+        "AuthorizationError",
+        "AccessDeniedException",
+    )
+
+
+def derived_appregistry_stack_name(
+    config_values: Optional[Dict[str, str]] = None,
+) -> Optional[str]:
+    """Resolve AppRegistry stack name from config (explicit or CDK_PREFIX default)."""
+    if not config_values:
+        return None
+    explicit = (config_values.get("APPREGISTRY_STACK_NAME") or "").strip()
+    if explicit:
+        return explicit
+    prefix = (config_values.get("CDK_PREFIX") or "").strip()
+    if prefix:
+        return f"{prefix}{APPREGISTRY_STACK_SUFFIX}"
+    return None
+
+
+def list_regional_appregistry_stack_names(region: str) -> List[str]:
+    """List active AppRegistry stacks in the regional account (suffix match)."""
+    import boto3
+    from botocore.exceptions import ClientError
+
+    cfn = boto3.client("cloudformation", region_name=region)
+    skip_statuses = {"DELETE_COMPLETE", "DELETE_IN_PROGRESS"}
+    names: List[str] = []
+    try:
+        paginator = cfn.get_paginator("list_stacks")
+        for page in paginator.paginate():
+            for summary in page.get("StackSummaries", []):
+                name = summary.get("StackName", "")
+                status = summary.get("StackStatus", "")
+                if not name.endswith(APPREGISTRY_STACK_SUFFIX):
+                    continue
+                if status in skip_statuses:
+                    continue
+                names.append(name)
+    except ClientError as exc:
+        if _stack_check_skippable_error(exc):
+            code = exc.response.get("Error", {}).get("Code", "ClientError")
+            print(
+                f"Warning: could not list AppRegistry stacks in {region} "
+                f"({code}). Continuing with configured stack names only."
+            )
+            return []
+        raise
+    return sorted(dict.fromkeys(names))
+
+
+def appregistry_stack_names_to_check(
+    config_values: Optional[Dict[str, str]] = None,
+    *,
+    discovered_names: Optional[Sequence[str]] = None,
+) -> List[str]:
+    """Merge configured and discovered AppRegistry stack names (deduped)."""
+    names: List[str] = []
+    derived = derived_appregistry_stack_name(config_values)
+    if derived:
+        names.append(derived)
+    for name in discovered_names or ():
+        if name not in names:
+            names.append(name)
+    return names
+
+
 def stacks_to_check(
     regional_region: str,
     config_values: Optional[Dict[str, str]] = None,
+    *,
+    discovered_appregistry_names: Optional[Sequence[str]] = None,
 ) -> List[Tuple[str, str]]:
     """Return (stack_name, region) pairs in safe deletion order."""
-    checks: List[Tuple[str, str]] = [(CLOUDFRONT_STACK, CLOUDFRONT_STACK_REGION)]
-    if config_values:
-        appregistry_name = (config_values.get("APPREGISTRY_STACK_NAME") or "").strip()
-        if appregistry_name and config_values.get("ENABLE_APPREGISTRY") == "True":
-            checks.append((appregistry_name, regional_region))
+    checks: List[Tuple[str, str]] = []
+    if _should_check_cloudfront_stack(config_values):
+        checks.append((CLOUDFRONT_STACK, CLOUDFRONT_STACK_REGION))
+    for appregistry_name in appregistry_stack_names_to_check(
+        config_values,
+        discovered_names=discovered_appregistry_names,
+    ):
+        checks.append((appregistry_name, regional_region))
     checks.append((REGIONAL_STACK, regional_region))
     return checks
 
@@ -990,10 +1862,27 @@ def discover_existing_doc_redaction_stacks(
     config_values: Optional[Dict[str, str]] = None,
 ) -> List[ExistingStack]:
     """Find deployed doc_redaction CloudFormation stacks in the target account."""
-    checks = stacks_to_check(regional_region, config_values)
+    from botocore.exceptions import ClientError
+
+    discovered_appregistry = list_regional_appregistry_stack_names(regional_region)
+    checks = stacks_to_check(
+        regional_region,
+        config_values,
+        discovered_appregistry_names=discovered_appregistry,
+    )
     ordered: List[ExistingStack] = []
     for stack_name, region in checks:
-        info = describe_existing_stack(stack_name, region)
+        try:
+            info = describe_existing_stack(stack_name, region)
+        except ClientError as exc:
+            if _stack_check_skippable_error(exc):
+                code = exc.response.get("Error", {}).get("Code", "ClientError")
+                print(
+                    f"Warning: could not check stack {stack_name!r} in {region} "
+                    f"({code}). Continuing with other regions."
+                )
+                continue
+            raise
         if info:
             ordered.append(info)
     return ordered
@@ -1140,77 +2029,153 @@ def fetch_stack_output(
 
 
 def apply_post_deploy_fixup(values: Dict[str, str], assume_yes: bool) -> bool:
-    """Return True if a redeploy was performed."""
+    """Return True if post-deploy fixup changed env and/or Cognito callbacks."""
+    from cdk_post_deploy import (
+        apply_cognito_alb_callback_fixup,
+        cognito_alb_callbacks_need_update,
+    )
+
     if values.get("ENABLE_HEADLESS_DEPLOYMENT") == "True":
         return False
 
     region = values.get("AWS_REGION", "")
     express = values.get("USE_ECS_EXPRESS_MODE") == "True"
     cloudfront = values.get("USE_CLOUDFRONT") == "True"
-    redeployed = False
+    fixup_applied = False
+
+    pool_id = fetch_stack_output(REGIONAL_STACK, "CognitoPoolId", region)
+    client_id = fetch_stack_output(REGIONAL_STACK, "CognitoAppClientId", region)
+    if not pool_id or not client_id:
+        print(
+            "CognitoPoolId or CognitoAppClientId stack output missing; "
+            "skipping Cognito callback fixup."
+        )
+        return False
 
     if express and not cloudfront:
+        from cdk_config import normalize_https_redirect_url
+
         endpoint = fetch_stack_output(REGIONAL_STACK, "ExpressServiceEndpoint", region)
         if not endpoint:
             print("No ExpressServiceEndpoint output found; skipping Cognito URL fixup.")
             return False
-        endpoint = endpoint.rstrip("/")
+        endpoint = normalize_https_redirect_url(endpoint)
         current = (values.get("ECS_EXPRESS_COGNITO_REDIRECT_BASE") or "").strip()
-        if current == endpoint:
-            print("Express Cognito redirect base already set.")
-            return False
-        print(f"Setting ECS_EXPRESS_COGNITO_REDIRECT_BASE={endpoint}")
-        patch_env_file(
-            ENV_PATH,
-            {
-                "ECS_EXPRESS_COGNITO_REDIRECT_BASE": endpoint,
-                "COGNITO_REDIRECTION_URL": endpoint,
-            },
+        env_needs_patch = current != endpoint
+        cognito_needs_update = cognito_alb_callbacks_need_update(
+            pool_id, client_id, endpoint, aws_region=region
         )
-        if assume_yes or ask_yes_no(
-            "Redeploy RedactionStack with Express Cognito URLs?", True
-        ):
-            run_cdk_command(
-                ["deploy", REGIONAL_STACK, "--require-approval", "broadening"]
-            )
-            redeployed = True
+        if not env_needs_patch and not cognito_needs_update:
+            print("Express Cognito redirect base and callback URLs already set.")
+        else:
+            if env_needs_patch:
+                print(f"Setting ECS_EXPRESS_COGNITO_REDIRECT_BASE={endpoint}")
+                patch_env_file(
+                    ENV_PATH,
+                    {
+                        "ECS_EXPRESS_COGNITO_REDIRECT_BASE": endpoint,
+                        "COGNITO_REDIRECTION_URL": endpoint,
+                    },
+                )
+                fixup_applied = True
+            if cognito_needs_update and (
+                assume_yes
+                or ask_yes_no(
+                    "Update Cognito app client callback URLs for the Express endpoint "
+                    "(no CDK redeploy)?",
+                    True,
+                )
+            ):
+                if apply_cognito_alb_callback_fixup(
+                    user_pool_id=pool_id,
+                    client_id=client_id,
+                    redirect_base=endpoint,
+                    aws_region=region,
+                ):
+                    fixup_applied = True
+            elif env_needs_patch and cognito_needs_update:
+                print(
+                    "Env updated with Express URL; Cognito callbacks unchanged. "
+                    "ALB login will fail until callback URLs are updated."
+                )
 
     elif cloudfront:
         cf_domain = fetch_stack_output(
-            CLOUDFRONT_STACK, "CloudFrontDistributionURL", "us-east-1"
+            CLOUDFRONT_STACK, "CloudFrontDistributionURL", CLOUDFRONT_STACK_REGION
         )
         if not cf_domain:
             print(
                 "No CloudFrontDistributionURL output found; skipping CloudFront fixup."
             )
-            return False
+            return fixup_applied
+        redirect_base = f"https://{cf_domain.strip()}"
         current = (values.get("CLOUDFRONT_DOMAIN") or "").strip()
-        if current == cf_domain:
-            print("CLOUDFRONT_DOMAIN already set.")
-            return False
-        print(f"Setting CLOUDFRONT_DOMAIN={cf_domain}")
-        patch_env_file(
-            ENV_PATH,
-            {
-                "CLOUDFRONT_DOMAIN": cf_domain,
-                "COGNITO_REDIRECTION_URL": f"https://{cf_domain}",
-            },
+        env_needs_patch = current != cf_domain.strip()
+        cognito_needs_update = cognito_alb_callbacks_need_update(
+            pool_id, client_id, redirect_base, aws_region=region
         )
-        if assume_yes or ask_yes_no(
-            "Redeploy stacks with real CloudFront domain?", True
-        ):
-            run_cdk_command(
-                [
-                    "deploy",
-                    REGIONAL_STACK,
-                    CLOUDFRONT_STACK,
-                    "--require-approval",
-                    "broadening",
-                ]
+        if not env_needs_patch and not cognito_needs_update:
+            print("CloudFront domain and Cognito callback URLs already set.")
+            return fixup_applied
+        if env_needs_patch:
+            print(f"Setting CLOUDFRONT_DOMAIN={cf_domain}")
+            patch_env_file(
+                ENV_PATH,
+                {
+                    "CLOUDFRONT_DOMAIN": cf_domain,
+                    "COGNITO_REDIRECTION_URL": redirect_base,
+                },
             )
-            redeployed = True
+            fixup_applied = True
+        if cognito_needs_update and (
+            assume_yes
+            or ask_yes_no(
+                "Update Cognito app client callback URLs for the CloudFront domain "
+                "(no CDK redeploy)?",
+                True,
+            )
+        ):
+            if apply_cognito_alb_callback_fixup(
+                user_pool_id=pool_id,
+                client_id=client_id,
+                redirect_base=redirect_base,
+                aws_region=region,
+            ):
+                fixup_applied = True
+        elif env_needs_patch and cognito_needs_update:
+            print(
+                "Env updated with CloudFront domain; Cognito callbacks unchanged. "
+                "ALB login will fail until callback URLs are updated."
+            )
 
-    return redeployed
+    if express:
+        from cdk_post_deploy import apply_cognito_secret_fixup_from_stack
+
+        resolved = resolve_fixup_env_values(values)
+        cluster_name = resolved["CLUSTER_NAME"]
+        main_service = resolved["ECS_EXPRESS_SERVICE_NAME"]
+        secret_name = resolved.get("COGNITO_USER_POOL_CLIENT_SECRET_NAME", "")
+        if not main_service:
+            print(
+                "ECS express service name could not be resolved; "
+                "skipping Express Cognito secret sync."
+            )
+            return fixup_applied
+        try:
+            if pool_id and client_id:
+                if apply_cognito_secret_fixup_from_stack(
+                    stack_name=REGIONAL_STACK,
+                    secret_name=secret_name,
+                    cluster_name=cluster_name,
+                    main_service_name=main_service,
+                    aws_region=region,
+                    recycle_tasks=False,
+                ):
+                    fixup_applied = True
+        except Exception as exc:
+            print(f"Warning: could not sync Express Cognito secret: {exc}")
+
+    return fixup_applied
 
 
 def run_quickstart(python_exe: Path) -> None:
@@ -1257,6 +2222,43 @@ def apply_pi_cli_flags(args: argparse.Namespace, answers: InstallAnswers) -> Non
         answers.write_pi_agent_env = False
 
 
+def configure_app_config_options(
+    answers: InstallAnswers,
+    args: argparse.Namespace,
+    *,
+    interactive: bool,
+) -> None:
+    if getattr(args, "skip_app_config_env", False):
+        answers.write_app_config_env = False
+        return
+
+    if getattr(args, "overwrite_app_config_env", False):
+        answers.write_app_config_env = True
+        answers.overwrite_app_config_env = True
+        return
+
+    if not interactive:
+        answers.write_app_config_env = True
+        return
+
+    example_label = (
+        APP_CONFIG_ENV_EXAMPLE.name if APP_CONFIG_ENV_EXAMPLE.is_file() else "defaults"
+    )
+    if ask_yes_no(
+        f"Write/update {APP_CONFIG_ENV_PATH.name} for the deployed app "
+        f"(from {example_label} + AWS resource names)?",
+        default=True,
+    ):
+        answers.write_app_config_env = True
+        if APP_CONFIG_ENV_PATH.is_file():
+            answers.overwrite_app_config_env = ask_yes_no(
+                f"{APP_CONFIG_ENV_PATH.name} exists — replace file from example template?",
+                default=False,
+            )
+    else:
+        answers.write_app_config_env = False
+
+
 def configure_pi_options(
     answers: InstallAnswers,
     args: argparse.Namespace,
@@ -1272,10 +2274,10 @@ def configure_pi_options(
 
     if not answers.pi_enabled and interactive:
         if use_express:
-            label = "Deploy Pi agent (second Gradio app on Express, shared ALB)?"
+            label = "Deploy agent mode (second Gradio app on Express, shared ALB)?"
             answers.enable_pi_express = ask_yes_no(label, default=False)
         else:
-            label = "Deploy Pi agent (second Gradio app on legacy Fargate + Service Connect)?"
+            label = "Deploy agent mode (second Gradio app on legacy Fargate + Service Connect)?"
             if ask_yes_no(label, default=False):
                 answers.enable_pi_legacy = True
                 answers.enable_service_connect = True
@@ -1283,19 +2285,45 @@ def configure_pi_options(
     if not answers.pi_enabled:
         return
 
-    if not answers.pi_alb_listener_rule_priority:
+    if not answers.pi_alb_listener_rule_priority and not answers.enable_pi_express:
         answers.pi_alb_listener_rule_priority = default_pi_listener_priority(
             use_cloudfront
         )
 
+    if answers.enable_pi_express:
+        if interactive and not assume_yes:
+            print("\n--- Agent mode (ECS Express) ---")
+            answers.sc_discovery_name = ask(
+                "Service Connect discovery name for main app",
+                answers.sc_discovery_name,
+            )
+            answers.pi_gradio_port = ask("Agent Gradio port", answers.pi_gradio_port)
+            if ask_yes_no(
+                f"Write/update {PI_AGENT_ENV_PATH.name} for AWS ECS (DOC_REDACTION_GRADIO_URL, etc.)?",
+                default=True,
+            ):
+                answers.write_pi_agent_env = True
+                if PI_AGENT_ENV_PATH.is_file():
+                    answers.overwrite_pi_agent_env = ask_yes_no(
+                        "pi_agent.env exists — replace file from example template?",
+                        default=False,
+                    )
+            else:
+                answers.write_pi_agent_env = False
+        print(
+            f"Agent mode: Express (dedicated HTTPS endpoint per service); "
+            f"Service Connect discovery={answers.sc_discovery_name}"
+        )
+        return
+
     if interactive and not (
         args.pi_alb_routing or args.pi_path_prefix or args.pi_host_header or assume_yes
     ):
-        print("\n--- Pi agent ALB routing ---")
+        print("\n--- Agent mode ALB routing ---")
         ridx = ask_choice(
-            "How should the shared ALB route traffic to the Pi UI?",
+            "How should the shared ALB route traffic to the Agent UI?",
             [
-                "Path prefix (default /pi/ — e.g. https://host/pi/)",
+                "Path prefix (default /agent/ — e.g. https://host/agent/)",
                 "Dedicated hostname (PI_ALB_HOST_HEADER)",
                 "Both path prefix and hostname",
             ],
@@ -1305,7 +2333,7 @@ def configure_pi_options(
 
         if answers.pi_alb_routing in ("path", "both"):
             answers.pi_alb_path_prefix = ask(
-                "Pi path prefix",
+                "Agent path prefix",
                 answers.pi_alb_path_prefix,
             )
         if answers.pi_alb_routing in ("host", "both"):
@@ -1313,14 +2341,14 @@ def configure_pi_options(
             if answers.ssl_domain:
                 default_host = f"agent.{answers.ssl_domain}"
             answers.pi_alb_host_header = ask(
-                "Pi ALB host header (DNS CNAME to CloudFront/ALB)",
+                "Agent ALB host header (DNS CNAME to CloudFront/ALB)",
                 default_host,
             )
 
         if use_cloudfront:
             default_pri = default_pi_listener_priority(True)
             answers.pi_alb_listener_rule_priority = ask(
-                "Pi ALB listener rule priority (use 2+ if CloudFront uses priority 1)",
+                "Agent ALB listener rule priority (default 3; priorities 1–2 reserved)",
                 default_pri,
             )
 
@@ -1328,7 +2356,7 @@ def configure_pi_options(
             "Service Connect discovery name for main app",
             answers.sc_discovery_name,
         )
-        answers.pi_gradio_port = ask("Pi Gradio port", answers.pi_gradio_port)
+        answers.pi_gradio_port = ask("Agent Gradio port", answers.pi_gradio_port)
 
         if ask_yes_no(
             f"Write/update {PI_AGENT_ENV_PATH.name} for AWS ECS (DOC_REDACTION_GRADIO_URL, etc.)?",
@@ -1344,7 +2372,7 @@ def configure_pi_options(
             answers.write_pi_agent_env = False
 
     print(
-        f"Pi agent: "
+        f"Agent mode: "
         f"{'Express' if answers.enable_pi_express else 'legacy Fargate'}, "
         f"routing={answers.pi_alb_routing}, "
         f"prefix={normalize_pi_path_prefix(answers.pi_alb_path_prefix)}"
@@ -1369,13 +2397,30 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
             [
                 "Demonstration (Express, no CloudFront, no delete protection)",
                 "Production (ACM cert, CloudFront, delete protection)",
-                "Headless (S3 batch / direct mode — no ALB or CloudFront)",
+                "Headless batch only (demo-style networking, no Express web UI)",
                 "Custom (configure individual toggles)",
             ],
         )
         answers.profile = ("demo", "production", "headless", "custom")[idx]
     else:
         answers.profile = "demo"
+
+    if answers.profile == "headless":
+        answers.enable_headless = True
+    elif getattr(args, "headless", False):
+        if answers.profile == "demo":
+            raise SystemExit(
+                "Headless batch mode is not available with --profile demo (Express). "
+                "Use --profile headless, --profile production --headless, "
+                "or --profile custom without ECS Express."
+            )
+        answers.enable_headless = True
+    elif interactive and answers.profile == "production":
+        answers.enable_headless = ask_yes_no(
+            "Enable headless batch-only deployment (S3 → Lambda → one-shot ECS, "
+            "no always-on web UI)?",
+            default=False,
+        )
 
     if answers.profile == "custom" and interactive:
         answers.custom_overrides["USE_ECS_EXPRESS_MODE"] = (
@@ -1398,6 +2443,23 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
         answers.custom_overrides["ENABLE_APPREGISTRY"] = (
             "True" if ask_yes_no("Enable AppRegistry?", True) else "False"
         )
+        if getattr(args, "headless", False):
+            if answers.custom_overrides.get("USE_ECS_EXPRESS_MODE") == "True":
+                raise SystemExit(
+                    "Headless batch mode requires USE_ECS_EXPRESS_MODE=False in "
+                    "the custom profile."
+                )
+            answers.enable_headless = True
+        elif profile_allows_headless_add_on(answers):
+            answers.enable_headless = ask_yes_no(
+                "Enable headless batch-only deployment (S3 → Lambda → one-shot ECS, "
+                "no always-on web UI)?",
+                default=False,
+            )
+
+    headless_err = headless_profile_error(answers)
+    if headless_err:
+        raise SystemExit(headless_err)
 
     try:
         account, region = get_aws_identity(args.region)
@@ -1421,15 +2483,17 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
     if not answers.cdk_prefix.endswith("-"):
         answers.cdk_prefix += "-"
 
-    default_cognito = re.sub(r"[^a-z0-9-]", "-", answers.cdk_prefix.lower())[:20]
-    default_cognito = default_cognito.strip("-") or "redaction-app"
-    answers.cognito_domain_prefix = args.cognito_prefix or (
+    default_cognito = default_cognito_domain_prefix_from_cdk_prefix(answers.cdk_prefix)
+    raw_cognito_prefix = args.cognito_prefix or (
         ask(
-            "Cognito hosted UI domain prefix (must be globally unique)", default_cognito
+            "Cognito hosted UI domain prefix (must be globally unique; "
+            "cannot contain aws, amazon, or cognito)",
+            default_cognito,
         )
         if interactive
         else default_cognito
     )
+    answers.cognito_domain_prefix = sanitize_cognito_domain_prefix(raw_cognito_prefix)
 
     # VPC
     if args.new_vpc_cidr:
@@ -1448,9 +2512,7 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
         answers.vpc_mode = "existing"
 
     if answers.vpc_mode == "new":
-        answers.new_vpc_cidr = answers.new_vpc_cidr or ask(
-            "New VPC CIDR", "10.0.0.0/24"
-        )
+        prompt_new_vpc_cidr(answers, interactive=interactive)
     else:
         if not answers.vpc_name:
             vpcs = list_vpcs(answers.aws_region)
@@ -1470,57 +2532,73 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
             None,
         )
 
-        # Subnets
-        if interactive:
-            sub_idx = ask_choice(
+        # Subnets (public only for Express or demo-style headless)
+        apply_subnet_cli_flags(args, answers)
+        public_subnets_only = answers_use_public_subnets_only(answers)
+        if public_subnets_only:
+            if interactive:
+                answers.public_subnet_mode = ask_subnet_tier_mode("Public")
+            else:
+                answers.public_subnet_mode, _ = resolve_subnet_tier_modes(args)
+            answers.private_subnet_mode = "auto"
+            answers.private_subnet_names = []
+            answers.private_subnet_cidrs = []
+            answers.private_subnet_azs = []
+        elif interactive:
+            layout_idx = ask_choice(
                 "Subnets in existing VPC",
                 [
-                    "Auto-discover suitable subnets (leave subnet lists empty)",
-                    "Use existing named subnets",
-                    "Create new stack-specific subnets (names + CIDR + AZ)",
+                    "Auto-discover public and private subnets",
+                    "Use existing named subnets (both tiers)",
+                    "Create new stack-specific subnets (both tiers)",
+                    "Configure public and private separately",
                 ],
                 default_index=0,
             )
-            answers.subnet_mode = ("auto", "existing", "create")[sub_idx]
+            if layout_idx < 3:
+                shared_mode = SUBNET_TIER_MODES[layout_idx]
+                answers.public_subnet_mode = shared_mode
+                answers.private_subnet_mode = shared_mode
+            else:
+                answers.public_subnet_mode = ask_subnet_tier_mode("Public")
+                answers.private_subnet_mode = ask_subnet_tier_mode("Private")
         else:
-            answers.subnet_mode = args.subnet_mode or "auto"
+            answers.public_subnet_mode, answers.private_subnet_mode = (
+                resolve_subnet_tier_modes(args)
+            )
 
         azs = list_availability_zones(answers.aws_region)[:3]
-        if answers.subnet_mode in ("existing", "create") and vpc_id:
+        vpc_cidr = next(
+            (v["cidr"] for v in vpc_list if v["name"] == answers.vpc_name),
+            "",
+        )
+        if vpc_id:
             subnets = list_subnets_in_vpc(vpc_id, answers.aws_region)
-            if answers.subnet_mode == "existing" and interactive:
-                print("Enter public subnet names (comma-separated), or pick from:")
-                for s in subnets:
-                    print(f"  - {s['name']} ({s['cidr']}, {s['az']})")
-                pub = ask("Public subnet names", "")
-                priv = ask("Private subnet names", "")
-                answers.public_subnet_names = [
-                    x.strip() for x in pub.split(",") if x.strip()
-                ]
-                answers.private_subnet_names = [
-                    x.strip() for x in priv.split(",") if x.strip()
-                ]
-            elif answers.subnet_mode == "create":
-                n_az = len(azs)
-                answers.public_subnet_names = [
-                    f"{answers.cdk_prefix}PublicSubnet{i + 1}" for i in range(n_az)
-                ]
-                answers.private_subnet_names = [
-                    f"{answers.cdk_prefix}PrivateSubnet{i + 1}" for i in range(n_az)
-                ]
-                if interactive:
-                    print(f"Suggested AZs: {', '.join(azs)}")
-                    for i, name in enumerate(answers.public_subnet_names):
-                        cidr = ask(f"CIDR for public {name}", f"10.0.{i}.0/28")
-                        answers.public_subnet_cidrs.append(cidr)
-                        answers.public_subnet_azs.append(azs[i % len(azs)])
-                    for i, name in enumerate(answers.private_subnet_names):
-                        cidr = ask(f"CIDR for private {name}", f"10.0.{10 + i}.0/28")
-                        answers.private_subnet_cidrs.append(cidr)
-                        answers.private_subnet_azs.append(azs[i % len(azs)])
-                else:
-                    answers.public_subnet_azs = azs[:n_az]
-                    answers.private_subnet_azs = azs[:n_az]
+            configure_subnet_tier(
+                answers,
+                "public",
+                answers.public_subnet_mode,
+                subnets,
+                azs,
+                interactive=interactive,
+                vpc_cidr=vpc_cidr,
+            )
+            if not public_subnets_only:
+                reserved_public = (
+                    list(answers.public_subnet_cidrs)
+                    if answers.public_subnet_mode == "create"
+                    else []
+                )
+                configure_subnet_tier(
+                    answers,
+                    "private",
+                    answers.private_subnet_mode,
+                    subnets,
+                    azs,
+                    interactive=interactive,
+                    vpc_cidr=vpc_cidr,
+                    reserved_subnet_cidrs=reserved_public,
+                )
 
         # Optional infra reuse
         if (
@@ -1530,8 +2608,9 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
         ):
             igws = list_igws_for_vpc(vpc_id, answers.aws_region)
             if igws:
+                # igws_ids = [g["id"] for g in igws]
                 print("Internet gateways:", ", ".join(g["id"] for g in igws))
-                answers.existing_igw_id = ask("EXISTING_IGW_ID (blank=auto)", "")
+                answers.existing_igw_id = ask("EXISTING_IGW_ID (blank=new)", "")
             albs = list_albs_in_vpc(vpc_id, answers.aws_region)
             if albs:
                 labels = [f"{a['name']} ({a['dns']})" for a in albs]
@@ -1541,10 +2620,12 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
                     answers.existing_alb_dns = albs[aidx]["dns"]
 
     # Production TLS
-    preset = merge_preset(answers.profile, answers.custom_overrides)
+    preset = merge_preset(answers_preset_profile(answers), answers.custom_overrides)
+    use_express = preset.get("USE_ECS_EXPRESS_MODE") == "True"
     if (
         preset.get("USE_CLOUDFRONT") == "True"
         and preset.get("USE_ECS_EXPRESS_MODE") != "True"
+        and not answers_use_headless(answers)
     ):
         if args.cert_arn:
             answers.acm_cert_arn = args.cert_arn
@@ -1569,7 +2650,7 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
                 "CloudFront geo restriction (e.g. GB, blank=none)", ""
             )
 
-    if answers.profile != "headless":
+    if not answers_use_headless(answers):
         configure_pi_options(
             answers,
             args,
@@ -1579,14 +2660,9 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
     else:
         answers.enable_s3_batch = True
 
-    # Advanced add-ons (non-Pi)
-    is_express = (
-        merge_preset(answers.profile, answers.custom_overrides).get(
-            "USE_ECS_EXPRESS_MODE"
-        )
-        == "True"
-    )
-    if answers.profile == "headless" and interactive:
+    # Advanced add-ons (non-Pi agent)
+    is_express = use_express and not answers_use_headless(answers)
+    if answers_use_headless(answers) and interactive:
         mem = ask("ECS task memory (MB)", answers.ecs_memory)
         if mem:
             answers.ecs_memory = mem
@@ -1594,12 +2670,14 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
         if not is_express:
             if not answers.enable_service_connect:
                 answers.enable_service_connect = ask_yes_no(
-                    "Enable ECS Service Connect (without Pi)?", False
+                    "Enable ECS Service Connect (without agent mode)?", False
                 )
             answers.enable_s3_batch = ask_yes_no("Enable S3 batch ECS trigger?", False)
         mem = ask("ECS task memory (MB)", answers.ecs_memory)
         if mem:
             answers.ecs_memory = mem
+
+    configure_app_config_options(answers, args, interactive=interactive)
 
     answers.python_path = args.python
     return answers
@@ -1619,6 +2697,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--profile",
         choices=("demo", "production", "headless", "custom"),
+        help="Base profile; use --profile headless or production --headless for batch-only",
     )
     p.add_argument(
         "--yes", action="store_true", help="Accept defaults / skip confirmations"
@@ -1662,45 +2741,74 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--cognito-prefix", help="Cognito user pool domain prefix")
     p.add_argument("--vpc-name", help="Existing VPC Name tag")
     p.add_argument("--new-vpc-cidr", help="CIDR for new VPC")
-    p.add_argument("--subnet-mode", choices=("auto", "existing", "create"))
+    p.add_argument(
+        "--subnet-mode",
+        choices=SUBNET_TIER_MODES,
+        help="Subnet mode for both public and private tiers (overridden by per-tier flags)",
+    )
+    p.add_argument(
+        "--public-subnet-mode",
+        choices=SUBNET_TIER_MODES,
+        help="Public subnet tier: auto, existing, or create",
+    )
+    p.add_argument(
+        "--private-subnet-mode",
+        choices=SUBNET_TIER_MODES,
+        help="Private subnet tier: auto, existing, or create",
+    )
+    p.add_argument(
+        "--public-subnet-names",
+        help="Comma-separated existing public subnet names (with --public-subnet-mode existing)",
+    )
+    p.add_argument(
+        "--private-subnet-names",
+        help="Comma-separated existing private subnet names (with --private-subnet-mode existing)",
+    )
+    p.add_argument(
+        "--headless",
+        action="store_true",
+        help="Batch-only add-on (production/custom without Express only; not valid with demo)",
+    )
     p.add_argument("--cert-arn", help="ACM certificate ARN (production)")
     p.add_argument("--domain", help="SSL certificate domain (production)")
-    pi = p.add_argument_group("Pi agent (second Gradio app)")
+    pi = p.add_argument_group("Agent mode (second Gradio app)")
     pi.add_argument(
         "--enable-pi",
         action="store_true",
-        help="Enable Pi for current profile (Express on demo, legacy on production)",
+        help="Enable agent mode for current profile (Express on demo, legacy on production)",
     )
     pi.add_argument(
         "--enable-pi-express",
         action="store_true",
-        help="Enable Pi on ECS Express Mode (demo)",
+        help="Enable agent mode on ECS Express Mode (demo)",
     )
     pi.add_argument(
         "--enable-pi-legacy",
         action="store_true",
-        help="Enable Pi on legacy Fargate (implies Service Connect)",
+        help="Enable agent mode on legacy Fargate (implies Service Connect)",
     )
     pi.add_argument(
         "--pi-alb-routing",
         choices=PI_ALB_ROUTING_MODES,
-        help="ALB routing mode for Pi UI (default: path)",
+        help="ALB routing mode for Agent UI (default: path)",
     )
     pi.add_argument(
-        "--pi-path-prefix", default="", help="Pi path prefix (default: /pi)"
+        "--pi-path-prefix", default="", help="Agent path prefix (default: /agent)"
     )
     pi.add_argument(
         "--pi-host-header",
         default="",
-        help="Dedicated hostname for Pi when routing is host or both",
+        help="Dedicated hostname for Agent mode when routing is host or both",
     )
     pi.add_argument(
         "--pi-listener-priority",
         default="",
-        help="ALB listener rule priority for Pi (default 2 with CloudFront, else 1)",
+        help="ALB listener rule priority for Agent mode (default 3; priorities 1–2 reserved)",
     )
     pi.add_argument(
-        "--pi-gradio-port", default="", help="Pi Gradio listen port (default 7862)"
+        "--pi-gradio-port",
+        default="",
+        help="Agent mode Gradio listen port (default 7862)",
     )
     pi.add_argument(
         "--sc-discovery-name",
@@ -1716,6 +2824,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--skip-pi-agent-env",
         action="store_true",
         help="Do not write config/pi_agent.env",
+    )
+    p.add_argument(
+        "--skip-app-config-env",
+        action="store_true",
+        help="Do not write cdk/config/app_config.env from app_config.env.example",
+    )
+    p.add_argument(
+        "--overwrite-app-config-env",
+        action="store_true",
+        help="Replace existing config/app_config.env from app_config.env.example (non-interactive)",
     )
     return p
 
@@ -1756,8 +2874,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             force=args.refresh_cdk_json or not CDK_JSON_PATH.is_file(),
             skip=args.skip_cdk_json,
         )
-        if not args.config_only and not args.deploy_only:
-            smoke_test_python_app(python_exe)
     elif CDK_JSON_PATH.is_file():
         # Best-effort parse python from existing cdk.json
         try:
@@ -1781,8 +2897,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             )
     else:
         answers = run_wizard(args)
+        errors = validate_install_answers(answers)
+        errors.extend(validate_subnet_answers(answers))
+        errors.extend(enrich_existing_subnet_details_from_aws(answers))
         values = build_env_values(answers)
-        errors = validate_env_values(values)
+        errors.extend(validate_env_values(values))
         if errors:
             print("Configuration errors:")
             for err in errors:
@@ -1804,18 +2923,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return 0
 
         write_env_file(ENV_PATH, values)
+        if answers.write_app_config_env:
+            write_app_config_env_file(
+                answers,
+                values,
+                overwrite=answers.overwrite_app_config_env,
+            )
         if answers.pi_enabled:
             write_pi_agent_env_file(
                 answers,
                 overwrite=answers.overwrite_pi_agent_env,
             )
 
-    os.environ["CDK_CONFIG_PATH"] = str(ENV_PATH)
-    os.environ["CDK_FOLDER"] = str(CDK_DIR).replace("\\", "/") + "/"
+    apply_cdk_runtime_env(values)
 
     if args.config_only:
         print("Config written. Exiting (--config-only).")
         return 0
+
+    run_smoke_test_if_needed(python_exe, args)
 
     # Bootstrap prompt
     account = values.get("AWS_ACCOUNT_ID", "")
@@ -1849,6 +2975,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     values = read_env_file(ENV_PATH)
     apply_post_deploy_fixup(values, assume_yes=args.yes)
 
+    run_qs = False
     if args.skip_quickstart:
         print("Skipping post-deploy quickstart.")
     else:
@@ -1873,44 +3000,58 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 )
             run_quickstart(python_exe)
 
+    values = read_env_file(ENV_PATH)
+    is_headless = values.get("ENABLE_HEADLESS_DEPLOYMENT") == "True"
+    if values.get("USE_ECS_EXPRESS_MODE") == "True" and not is_headless:
+        from cdk_post_deploy import print_express_mode_next_steps
+
+        if args.skip_quickstart or not run_qs:
+            print_express_mode_next_steps(values)
+        return 0
+
+    if is_headless:
+        from cdk_post_deploy import print_headless_deployment_next_steps
+
+        if args.skip_quickstart or not run_qs:
+            print_headless_deployment_next_steps(values)
+        return 0
+
     print("\nDone. Next steps:")
     if (
         values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True"
         or values.get("ENABLE_PI_AGENT_ECS_SERVICE") == "True"
     ):
-        routing = values.get("PI_ALB_ROUTING", "path")
-        if routing in ("path", "both"):
-            prefix = values.get("PI_ALB_PATH_PREFIX", "/pi")
-            print(f"  - Pi UI path: {prefix}/ on your app URL")
-        if routing in ("host", "both") and values.get("PI_ALB_HOST_HEADER"):
+        if values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True":
             print(
-                f"  - Pi DNS: CNAME {values['PI_ALB_HOST_HEADER']} -> "
-                f"{values.get('CLOUDFRONT_DOMAIN') or 'ALB/Express endpoint'}"
+                "  - Agent UI: PiExpressEndpoint stack output (dedicated Express HTTPS URL)"
             )
+        else:
+            routing = values.get("PI_ALB_ROUTING", "path")
+            if routing in ("path", "both"):
+                prefix = values.get("PI_ALB_PATH_PREFIX", "/agent")
+                print(f"  - Agent UI path: {prefix}/ on your app URL")
+            if routing in ("host", "both") and values.get("PI_ALB_HOST_HEADER"):
+                print(
+                    f"  - Agent DNS: CNAME {values['PI_ALB_HOST_HEADER']} -> "
+                    f"{values.get('CLOUDFRONT_DOMAIN') or 'ALB/Express endpoint'}"
+                )
         if PI_AGENT_ENV_PATH.is_file():
             print(
-                f"  - Pi runtime config: {PI_AGENT_ENV_PATH} (uploaded by quickstart)"
+                f"  - Agent runtime config: {PI_AGENT_ENV_PATH} (uploaded by quickstart)"
             )
     if values.get("USE_CLOUDFRONT") == "True":
         domain = values.get("SSL_CERTIFICATE_DOMAIN", "")
         cf = values.get("CLOUDFRONT_DOMAIN", "")
         if domain and cf and cf != "cloudfront_placeholder.net":
             print(f"  - Point DNS CNAME {domain} -> {cf}")
-    elif values.get("ENABLE_HEADLESS_DEPLOYMENT") == "True":
-        prefix = values.get("S3_BATCH_ENV_PREFIX", "input/config/")
-        suffix = values.get("S3_BATCH_ENV_SUFFIX", ".env")
-        print(
-            f"  - Upload job files to s3://<output-bucket>/{prefix}*{suffix} "
-            "(see BatchJobEnvPrefix stack output after deploy)"
-        )
-        print(
-            "  - Lambda starts one-shot ECS tasks with RUN_DIRECT_MODE=True "
-            "(see cdk/config/lambda/lambda_function.py)"
-        )
     elif values.get("USE_ECS_EXPRESS_MODE") == "True":
         ep = values.get("ECS_EXPRESS_COGNITO_REDIRECT_BASE", "")
         if ep:
-            print(f"  - Express endpoint: {ep}")
+            from cdk_config import normalize_https_redirect_url
+
+            print(f"  - Express endpoint: {normalize_https_redirect_url(ep)}")
+    if APP_CONFIG_ENV_PATH.is_file():
+        print(f"  - App runtime config: {APP_CONFIG_ENV_PATH} (uploaded by quickstart)")
     print(f"  - Config: {ENV_PATH}")
     return 0
 

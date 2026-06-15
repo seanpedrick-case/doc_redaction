@@ -49,14 +49,33 @@ def _apply_retry_settings(
     *,
     provider: str,
 ) -> None:
-    """Write Pi ``settings.json`` retry block (Gemini uses longer delays)."""
+    """Write Pi ``settings.json`` retry block (cloud providers use longer delays)."""
     max_retries = pi_max_retries()
-    gemini_delays = provider == PROVIDER_GEMINI or is_hf_space_profile()
+    use_long_delays = (
+        provider == PROVIDER_GEMINI
+        or provider == PROVIDER_BEDROCK
+        or is_hf_space_profile()
+        or is_aws_ecs_profile()
+    )
     base_delay_ms = 2000
     max_delay_ms = 60000
-    if gemini_delays:
-        base_delay_ms = int(os.environ.get("PI_GEMINI_RETRY_BASE_DELAY_MS", "60000"))
-        max_delay_ms = int(os.environ.get("PI_GEMINI_RETRY_MAX_DELAY_MS", "90000"))
+    if use_long_delays:
+        default_base_ms = int(os.environ.get("PI_QUOTA_RETRY_DELAY_S", "60")) * 1000
+        default_max_ms = int(default_base_ms * 1.5)
+        if provider == PROVIDER_BEDROCK or (
+            is_aws_ecs_profile() and not is_hf_space_profile()
+        ):
+            prefix = "PI_BEDROCK"
+        else:
+            prefix = "PI_GEMINI"
+        base_delay_ms = int(
+            os.environ.get(f"{prefix}_RETRY_BASE_DELAY_MS")
+            or os.environ.get("PI_GEMINI_RETRY_BASE_DELAY_MS", str(default_base_ms))
+        )
+        max_delay_ms = int(
+            os.environ.get(f"{prefix}_RETRY_MAX_DELAY_MS")
+            or os.environ.get("PI_GEMINI_RETRY_MAX_DELAY_MS", str(default_max_ms))
+        )
     settings["retry"] = {
         "enabled": True,
         "maxRetries": max_retries,
@@ -135,27 +154,19 @@ GEMINI_MODELS: tuple[tuple[str, str, int, bool], ...] = (
 
 BEDROCK_MODELS: tuple[tuple[str, str, int, bool], ...] = (
     (
-        "anthropic.claude-3-haiku-20240307-v1:0",
-        "Claude 3 Haiku (Bedrock)",
-        200000,
+        "anthropic.claude-sonnet-4-6",
+        "Anthropic Claude Sonnet 4.6 (Bedrock)",
+        1000000,
+        True,
+    ),
+    ("amazon.nova-pro-v1:0", "Amazon Nova Pro (Bedrock)", 300000, False),
+    (
+        "nvidia.nemotron-super-3-120b",
+        "NVIDIA Nemotron Super 3 120B (Bedrock)",
+        262000,
         False,
     ),
-    (
-        "anthropic.claude-3-7-sonnet-20250219-v1:0",
-        "Claude 3.7 Sonnet (Bedrock)",
-        200000,
-        True,
-    ),
-    (
-        "anthropic.claude-sonnet-4-5-20250929-v1:0",
-        "Claude Sonnet 4.5 (Bedrock)",
-        200000,
-        True,
-    ),
-    ("anthropic.claude-sonnet-4-6", "Claude Sonnet 4.6 (Bedrock)", 200000, True),
-    ("amazon.nova-micro-v1:0", "Amazon Nova Micro (Bedrock)", 128000, False),
-    ("amazon.nova-lite-v1:0", "Amazon Nova Lite (Bedrock)", 300000, False),
-    ("amazon.nova-pro-v1:0", "Amazon Nova Pro (Bedrock)", 300000, False),
+    ("mistral.devstral-2-123b", "Mistral Devstral 2 123B (Bedrock)", 256000, False),
 )
 
 PROVIDER_MODELS: dict[str, list[str]] = {
@@ -672,7 +683,11 @@ def build_settings_config(
     _apply_compaction_settings(settings)
     session_path = ensure_session_dir(resolve_session_dir())
     settings["sessionDir"] = session_path.as_posix()
-    if is_hf_space_profile() or provider == PROVIDER_GEMINI:
+    if (
+        is_hf_space_profile()
+        or is_aws_ecs_profile()
+        or provider in (PROVIDER_GEMINI, PROVIDER_BEDROCK)
+    ):
         _apply_retry_settings(settings, provider=provider)
     from pi_workspace_skills import ensure_workspace_skills, workspace_skills_dir
 

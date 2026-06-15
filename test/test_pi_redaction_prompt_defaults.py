@@ -72,6 +72,47 @@ def test_aws_ecs_remote_guidance_forbids_workspace_output_grep(monkeypatch):
     assert "Do not" in guidance and "find /workspace" in guidance
     assert "/home/user/app/workspace/sess/redact/doc.pdf/output_redact/" in guidance
     assert ".pi/helpers/remote_redaction.py" in guidance
+    assert "Pre-apply" in guidance
+    assert "Post-apply" in guidance
+    assert "/agent/verify_redaction_coverage" in guidance
+    assert "gradio_tmp" in guidance
+
+
+def test_hf_space_remote_guidance_uses_workspace_base_helpers(tmp_path, monkeypatch):
+    base = tmp_path / "workspace"
+    session = base / "sess1"
+    session.mkdir(parents=True)
+    helpers = base / ".pi" / "helpers"
+    helpers.mkdir(parents=True)
+    (helpers / "remote_redaction.py").write_text("# helper\n", encoding="utf-8")
+
+    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+    monkeypatch.setenv("DOC_REDACTION_GRADIO_URL", "https://example-redaction.hf.space")
+    module = _reload_redaction_prompt(monkeypatch, profile="hf-space")
+    guidance = module.build_remote_backend_guidance(
+        gradio_url="https://example-redaction.hf.space",
+        output_base=f"{session.as_posix()}/redact/doc.pdf/",
+        workspace_root=session.as_posix(),
+    )
+    normalized = guidance.replace("\\", "/")
+    assert "/.pi/helpers/remote_redaction.py" in normalized
+    assert "Do **not** look for" in guidance
+    assert session.as_posix() in guidance.replace("\\", "/")
+
+
+def test_hf_space_remote_guidance_forbids_docker_urls(monkeypatch):
+    monkeypatch.setenv("DOC_REDACTION_GRADIO_URL", "https://example-redaction.hf.space")
+    module = _reload_redaction_prompt(monkeypatch, profile="hf-space")
+    guidance = module.build_remote_backend_guidance(
+        gradio_url="https://example-redaction.hf.space",
+        output_base="/home/user/app/workspace/sess/redact/doc.pdf/",
+        workspace_root="/home/user/app/workspace/sess",
+    )
+    assert "https://example-redaction.hf.space" in guidance
+    assert "host.docker.internal" in guidance
+    assert "hf-space-deployment" in guidance
+    assert "Do not" in guidance and "probe alternate" in guidance
 
 
 def test_build_redaction_prompt_keeps_long_document_rules_at_scale(monkeypatch):

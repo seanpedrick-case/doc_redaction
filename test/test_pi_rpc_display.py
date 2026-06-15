@@ -54,6 +54,24 @@ def test_assistant_chat_text_prefers_visible():
     assert assistant_chat_text("Answer", "Reasoning") == "Answer"
 
 
+def test_format_assistant_message_for_chat_bash_commentary_as_prose():
+    message = {
+        "role": "assistant",
+        "content": [
+            {
+                "type": "toolCall",
+                "name": "bash",
+                "arguments": {
+                    "command": "# Planning next step\n# Will call doc_redact"
+                },
+            },
+        ],
+    }
+    rendered = format_assistant_message_for_chat(message)
+    assert "**bash:**" not in rendered
+    assert "Planning next step" in rendered
+
+
 def test_format_assistant_message_for_chat_tool_only():
     message = {
         "role": "assistant",
@@ -126,6 +144,12 @@ def test_is_rate_limit_error_detects_gemini_quota():
         '"status":"RESOURCE_EXHAUSTED"}}'
     )
     assert is_rate_limit_error(err)
+
+
+def test_is_rate_limit_error_detects_bedrock_throttling():
+    err = "ThrottlingException: Too many requests, please wait before trying again."
+    assert is_rate_limit_error(err)
+    assert is_rate_limit_error("ServiceQuotaExceededException: Limit exceeded")
 
 
 def test_is_rate_limit_error_rejects_unrelated():

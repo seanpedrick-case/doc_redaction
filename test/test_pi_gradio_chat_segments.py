@@ -11,6 +11,7 @@ import gradio as gr
 from gradio_app import (
     _CHAT_OUTPUT_COMPONENT_COUNT,
     _append_chat_segment,
+    _append_rate_limit_wait_notice,
     _apply_event,
     _chat_segment_tool_label,
     _chat_yield,
@@ -30,7 +31,47 @@ from gradio_app import (
     route_followup_message,
     submit_followup_chat_queued,
 )
-from pi_rpc_client import PiRpcClient, PiStreamEvent
+from pi_rpc_client import (
+    PiRpcClient,
+    PiStreamEvent,
+    extract_bash_commentary_text,
+    format_tool_chat_line,
+    is_bash_commentary_only,
+)
+
+
+def test_format_tool_chat_line_bash_splits_commentary_from_command():
+    line = format_tool_chat_line(
+        "bash",
+        {"command": "# Wait and retry\nsleep 30\npython3 run.py"},
+    )
+    assert "Wait and retry" in line
+    assert "**bash:**" in line
+    assert "sleep 30" in line
+
+
+def test_format_tool_chat_line_bash_commentary_as_prose():
+    line = format_tool_chat_line(
+        "bash",
+        {
+            "command": "# Verify the URL from the prompt\n# Let's try host.docker.internal"
+        },
+    )
+    assert "**bash:**" not in line
+    assert "Verify the URL" in line
+    assert "host.docker.internal" in line
+
+
+def test_format_tool_chat_line_bash_command_stays_tool():
+    line = format_tool_chat_line("bash", {"command": "ls -F skills/"})
+    assert line.startswith("**bash:**")
+    assert "ls -F" in line
+
+
+def test_is_bash_commentary_only():
+    assert is_bash_commentary_only("# only comments\n# second line")
+    assert not is_bash_commentary_only("# comment\nls")
+    assert extract_bash_commentary_text("# Hello\n# World") == "Hello\nWorld"
 
 
 def test_chat_segment_tool_label_bash_and_bare():
@@ -77,6 +118,60 @@ def test_append_chat_segment_keeps_distinct_tools():
     assert len(done) == 2
     assert done[0].startswith("**read:**")
     assert done[1].startswith("**bash:**")
+
+
+def test_apply_event_done_skips_finish_notice_when_retry_pending():
+    history = [{"role": "assistant", "content": ""}]
+    activity: list[str] = []
+    completed_segments: list[str] = []
+    streaming_text = ""
+
+    event = PiStreamEvent(kind="done", text="Agent finished.")
+    (
+        history,
+        activity,
+        thinking,
+        tool_output,
+        tool_heading,
+        completed_segments,
+        streaming_text,
+    ) = _apply_event(
+        event,
+        history=history,
+        activity=activity,
+        thinking="",
+        tool_output="",
+        tool_heading="",
+        completed_segments=completed_segments,
+        streaming_text=streaming_text,
+        append_finish_notice=False,
+    )
+
+    assert activity == ["Agent finished."]
+    assert history == [{"role": "assistant", "content": ""}]
+    assert completed_segments == []
+    assert streaming_text == ""
+
+
+def test_append_rate_limit_wait_notice_updates_assistant_chat():
+    history = [{"role": "assistant", "content": ""}]
+    completed_segments: list[str] = []
+    streaming_text = "Partial response"
+    wait_message = "API rate limit hit — waiting 60s before retry…"
+
+    history, completed_segments, streaming_text = _append_rate_limit_wait_notice(
+        history,
+        completed_segments,
+        streaming_text,
+        wait_message,
+    )
+
+    assert completed_segments == ["Partial response", wait_message]
+    assert streaming_text == ""
+    assert (
+        history[-1]["content"]
+        == "Partial response\n\nAPI rate limit hit — waiting 60s before retry…"
+    )
 
 
 class _FakePiClient:

@@ -39,6 +39,20 @@ def test_build_pi_agent_container_environment():
     assert env["S3_OUTPUTS_BUCKET"]
 
 
+def test_ecs_availability_zone_rebalancing_default_disabled():
+    from aws_cdk import aws_ecs as ecs
+    from cdk_functions import ecs_availability_zone_rebalancing
+
+    assert (
+        ecs_availability_zone_rebalancing("DISABLED")
+        == ecs.AvailabilityZoneRebalancing.DISABLED
+    )
+    assert (
+        ecs_availability_zone_rebalancing("ENABLED")
+        == ecs.AvailabilityZoneRebalancing.ENABLED
+    )
+
+
 def test_pi_agent_alb_attachment_synth():
     from aws_cdk import App, Duration, Environment, Stack
     from aws_cdk import aws_ec2 as ec2
@@ -124,7 +138,7 @@ def test_pi_agent_alb_attachment_synth():
         routing_mode="host",
         path_prefix="/pi",
         pi_host_header="pi.example.com",
-        listener_rule_priority=1,
+        listener_rule_priority=3,
         target_group_name="test-pi-tg",
         stickiness_cookie_duration=Duration.hours(8),
         https_listener=None,
@@ -150,3 +164,6 @@ def test_pi_agent_alb_attachment_synth():
     )
     assert lb_count == 1
     assert tg_count == 1
+    ecs_services = [r for r in resources.values() if r["Type"] == "AWS::ECS::Service"]
+    assert len(ecs_services) == 1
+    assert ecs_services[0]["Properties"]["AvailabilityZoneRebalancing"] == "DISABLED"

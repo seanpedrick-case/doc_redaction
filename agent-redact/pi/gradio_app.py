@@ -78,8 +78,10 @@ from pi_rpc_client import (
     PiStreamEvent,
     assistant_text_since_last_user,
     default_client,
+    format_tool_chat_line,
     is_rate_limit_error,
     last_assistant_turn_error,
+    start_pi_prompt_event_worker,
 )
 from redaction_prompt import (
     DEFAULT_OCR_METHOD,
@@ -512,6 +514,23 @@ def _set_last_assistant_content(history: list[dict[str, Any]], content: str) -> 
         history.append({"role": "assistant", "content": content})
 
 
+def _append_rate_limit_wait_notice(
+    history: list[dict[str, Any]],
+    completed_segments: list[str],
+    streaming_text: str,
+    message: str,
+) -> tuple[list[dict[str, Any]], list[str], str]:
+    completed_segments, streaming_text = _append_chat_segment(
+        completed_segments,
+        streaming_text,
+        message,
+    )
+    _set_last_assistant_content(
+        history, _assistant_display_text(completed_segments, streaming_text)
+    )
+    return history, completed_segments, streaming_text
+
+
 def _user_notice_content(label: str, message: str) -> str:
     return f"_**{label}:**_ {message.strip()}"
 
@@ -913,6 +932,7 @@ def _apply_event(
     tool_heading: str,
     completed_segments: list[str],
     streaming_text: str,
+    append_finish_notice: bool = True,
 ) -> tuple[list[dict[str, Any]], list[str], str, str, str, list[str], str]:
     if event.kind == "text_snapshot":
         if event.text.strip().startswith("**") and ":" in event.text.split("\n", 1)[0]:
@@ -952,8 +972,8 @@ def _apply_event(
             completed_segments.append(streaming_text.strip())
             streaming_text = ""
         label = event.tool_name or "tool"
-        detail = event.text or label
-        tool_line = f"**{label}:** {detail}" if detail != label else f"**{label}**"
+        tool_line = format_tool_chat_line(label, event.tool_args)
+        detail = event.text or tool_line or label
         completed_segments, streaming_text = _append_chat_segment(
             completed_segments, streaming_text, tool_line
         )
@@ -1011,13 +1031,14 @@ def _apply_event(
             completed_segments.append(streaming_text)
             streaming_text = ""
         aborted = event.text.strip().lower().startswith("agent aborted")
-        history, completed_segments, streaming_text = _append_agent_finish_notice(
-            history,
-            completed_segments,
-            streaming_text,
-            aborted=aborted,
-        )
         activity = _append_activity(activity, event.text)
+        if append_finish_notice:
+            history, completed_segments, streaming_text = _append_agent_finish_notice(
+                history,
+                completed_segments,
+                streaming_text,
+                aborted=aborted,
+            )
 
     return (
         history,
@@ -1357,7 +1378,7 @@ def _fresh_task_chat_outputs(
         gr.update(interactive=True),
         collect_final_output_files(session_hash),
         gr.skip(),
-        latest_redacted_pdf_path(session_hash),
+        latest_redacted_pdf_path(session_hash) or gr.skip(),
         AGENT_FINISH_SIGNAL_NONE,
         False,
     )
@@ -1425,7 +1446,9 @@ def _chat_yield(
         session_log = gr.skip()
 
     if refresh_pdf_preview or refresh_final_files:
-        pdf_preview = latest_redacted_pdf_path(session_hash)
+        path = latest_redacted_pdf_path(session_hash)
+        # Avoid pushing ``None`` into the PDF component (clears/breaks the viewer).
+        pdf_preview = path if path else gr.skip()
     else:
         pdf_preview = gr.skip()
 
@@ -1855,20 +1878,11 @@ def _run_pi_chat(
         )
 
     event_queue: queue.Queue[PiStreamEvent | None] = queue.Queue()
-
-    def _prompt_events_worker() -> None:
-        try:
-            for event in client.prompt_events(prompt_to_send):
-                event_queue.put(event)
-        except Exception as exc:
-            event_queue.put(PiStreamEvent(kind="error", text=str(exc), is_error=True))
-        finally:
-            event_queue.put(None)
-
-    threading.Thread(target=_prompt_events_worker, daemon=True).start()
+    start_pi_prompt_event_worker(client, event_queue, prompt_to_send)
 
     quota_failures = 0
     finish_aborted = False
+    done_event_received = False
 
     try:
         while True:
@@ -1886,11 +1900,12 @@ def _run_pi_chat(
                             streaming_text,
                         )
                     )
-                    is_terminal_done = event.kind == "done"
-                    if is_terminal_done:
+                    is_done_event = event.kind == "done"
+                    if is_done_event:
                         finish_aborted = (
                             event.text.strip().lower().startswith("agent aborted")
                         )
+                        done_event_received = True
                     (
                         history,
                         activity,
@@ -1908,6 +1923,7 @@ def _run_pi_chat(
                         tool_heading=tool_heading,
                         completed_segments=completed_segments,
                         streaming_text=streaming_text,
+                        append_finish_notice=not is_done_event,
                     )
                     yield _chat_yield(
                         history,
@@ -1917,14 +1933,13 @@ def _run_pi_chat(
                         tool_heading,
                         tool_output,
                         send_enabled=True,
-                        abort_enabled=not is_terminal_done,
-                        redact_enabled=is_terminal_done,
-                        agent_running=not is_terminal_done,
+                        abort_enabled=not is_done_event,
+                        redact_enabled=False,
+                        agent_running=True,
                         session_info=session_info,
                         session_hash=session_hash,
-                        refresh_pdf_preview=event.kind
-                        in {"tool_end", "done", "turn_end"},
-                        refresh_final_files=is_terminal_done,
+                        refresh_pdf_preview=event.kind == "turn_end",
+                        refresh_final_files=event.kind == "done",
                     )
                 turn_error = last_assistant_turn_error(client.get_messages())
             except PiRpcError as exc:
@@ -1972,7 +1987,7 @@ def _run_pi_chat(
                     _set_last_assistant_content(
                         history,
                         (
-                            f"**Gemini rate limit / quota:** stopped after "
+                            f"**API rate limit hit:** stopped after "
                             f"{QUOTA_RETRY_ATTEMPTS} consecutive attempts.\n\n"
                             f"{err_summary}"
                         ),
@@ -2008,12 +2023,18 @@ def _run_pi_chat(
                     )
                     return
 
-                activity = _append_activity(
-                    activity,
-                    (
-                        f"Gemini rate limit — waiting {QUOTA_RETRY_DELAY_S}s before "
-                        f"retry {quota_failures}/{QUOTA_RETRY_ATTEMPTS}…"
-                    ),
+                wait_message = (
+                    f"API rate limit hit — waiting {QUOTA_RETRY_DELAY_S}s before "
+                    f"retry {quota_failures}/{QUOTA_RETRY_ATTEMPTS}…"
+                )
+                activity = _append_activity(activity, wait_message)
+                history, completed_segments, streaming_text = (
+                    _append_rate_limit_wait_notice(
+                        history,
+                        completed_segments,
+                        streaming_text,
+                        wait_message,
+                    )
                 )
                 yield _chat_yield(
                     history,
@@ -2034,6 +2055,10 @@ def _run_pi_chat(
                 history.append({"role": "assistant", "content": ""})
                 completed_segments = []
                 streaming_text = ""
+                done_event_received = False
+                finish_aborted = False
+                event_queue = queue.Queue()
+                start_pi_prompt_event_worker(client, event_queue, prompt_to_send)
                 continue
 
             break
@@ -2093,6 +2118,14 @@ def _run_pi_chat(
             return
         raise
 
+    if done_event_received:
+        history, completed_segments, streaming_text = _append_agent_finish_notice(
+            history,
+            completed_segments,
+            streaming_text,
+            aborted=finish_aborted,
+        )
+
     _finalize_assistant_chat(
         client,
         history,
@@ -2116,6 +2149,7 @@ def _run_pi_chat(
         session_info=_session_summary(client),
         session_hash=session_hash,
         refresh_final_files=True,
+        refresh_pdf_preview=True,
         agent_finish_signal=finish_signal,
     )
     _schedule_post_pi_task(
@@ -2426,6 +2460,7 @@ def new_chat(
         msg="",
         session_hash=session_hash,
         refresh_final_files=True,
+        refresh_pdf_preview=True,
     )
 
 
@@ -2629,12 +2664,16 @@ def build_ui():
                             ),
                         )
                         hf_token = gr.Textbox(
-                            label="HF token for redaction Space (session override)",
+                            label="HF token for redaction space (optional, neededfor private spaces)",
                             type="password",
                             placeholder="Uses HF_TOKEN Space secret if empty",
                             visible=IS_HF_SPACE,
                         )
-                        with gr.Accordion("AWS credentials (optional)", open=False):
+                        with gr.Accordion(
+                            "AWS credentials (optional)",
+                            open=False,
+                            visible=not IS_HF_SPACE,
+                        ):
                             aws_region = gr.Textbox(
                                 label="AWS region (session override)",
                                 placeholder="e.g. eu-west-2",
@@ -2825,39 +2864,46 @@ def build_ui():
             inputs=_followup_route_inputs,
             outputs=[*chat_outputs, pending_followup_message],
             queue=False,
+            api_name="send_followup_message",
         )
         run_chat_queued_send = run_chat_send.then(
             submit_followup_chat_queued,
             inputs=_followup_queued_inputs,
             outputs=chat_outputs,
+            api_visibility="undocumented",
         )
         notify_after_chat_send = run_chat_queued_send.then(
             _passthrough_chat_outputs_for_notify,
             inputs=_chat_outputs_notify_inputs(chat_outputs),
             outputs=chat_outputs,
             js=PI_AGENT_FINISH_NOTIFY_JS,
+            api_visibility="undocumented",
         )
         run_chat_msg = msg.submit(
             route_followup_message,
             inputs=_followup_route_inputs,
             outputs=[*chat_outputs, pending_followup_message],
             queue=False,
+            api_visibility="undocumented",
         )
         run_chat_queued_msg = run_chat_msg.then(
             submit_followup_chat_queued,
             inputs=_followup_queued_inputs,
             outputs=chat_outputs,
+            api_visibility="undocumented",
         )
         notify_after_chat_msg = run_chat_queued_msg.then(
             _passthrough_chat_outputs_for_notify,
             inputs=_chat_outputs_notify_inputs(chat_outputs),
             outputs=chat_outputs,
             js=PI_AGENT_FINISH_NOTIFY_JS,
+            api_visibility="undocumented",
         )
         run_redact_prepare = start_redact_btn.click(
             prepare_redaction_session_ui,
             inputs=[session_hash_state],
             outputs=[session_hash_state, workspace_session_info],
+            api_visibility="undocumented",
         )
         run_redact_task = run_redact_prepare.then(
             submit_redaction_task,
@@ -2876,12 +2922,14 @@ def build_ui():
                 save_outputs_to_s3_state,
             ],
             outputs=chat_outputs,
+            api_name="run_agentic_redaction_task",
         )
         notify_after_redact_task = run_redact_task.then(
             _passthrough_chat_outputs_for_notify,
             inputs=_chat_outputs_notify_inputs(chat_outputs),
             outputs=chat_outputs,
             js=PI_AGENT_FINISH_NOTIFY_JS,
+            api_visibility="undocumented",
         )
         abort_btn.click(
             abort_agent,
@@ -2900,11 +2948,13 @@ def build_ui():
                 notify_after_redact_task,
             ],
             queue=False,
+            api_visibility="undocumented",
         )
         clear.click(
             new_chat,
             inputs=[chatbot, client_state, session_hash_state],
             outputs=chat_outputs,
+            api_visibility="undocumented",
         )
 
         if not IS_HF_SPACE:
@@ -2912,6 +2962,7 @@ def build_ui():
                 _backend_model_choices_update,
                 inputs=[backend_provider],
                 outputs=[backend_model],
+                api_visibility="undocumented",
             )
         apply_backend_btn.click(
             apply_backend,
@@ -2935,20 +2986,24 @@ def build_ui():
                 aws_secret_access_key,
                 aws_session_token,
             ],
+            api_name="apply_model_backend",
         )
 
         refresh_outputs_btn.click(
             fn=refresh_workspace_output_files_stub,
             inputs=None,
             outputs=workspace_output_explorer,
+            api_visibility="undocumented",
         ).success(
             fn=refresh_workspace_panel,
             inputs=[session_hash_state],
             outputs=[workspace_output_explorer, workspace_output_explorer_download],
+            api_visibility="undocumented",
         ).success(
             fn=latest_redacted_pdf_path,
             inputs=[session_hash_state],
             outputs=pdf_preview,
+            api_visibility="undocumented",
         ).success(
             fn=_export_workspace_outputs,
             inputs=[
@@ -2957,12 +3012,14 @@ def build_ui():
                 save_outputs_to_s3_state,
             ],
             outputs=None,
+            api_visibility="undocumented",
         )
 
         workspace_output_explorer.input(
             fn=workspace_files_download_fn,
-            inputs=[workspace_output_explorer, session_hash_state],
-            outputs=workspace_output_download,
+            inputs=[workspace_output_explorer_download, session_hash_state],
+            outputs=workspace_output_explorer_download,
+            api_visibility="undocumented",
         )
 
         demo.load(
@@ -2975,6 +3032,7 @@ def build_ui():
                 s3_output_folder_state,
                 *chat_outputs,
             ],
+            api_visibility="undocumented",
         )
 
     return demo

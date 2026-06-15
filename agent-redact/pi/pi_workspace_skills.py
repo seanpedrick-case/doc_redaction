@@ -28,6 +28,15 @@ def workspace_helpers_dir() -> Path:
     return workspace_pi_dir() / "helpers"
 
 
+def remote_redaction_helper_path() -> Path:
+    """Absolute path to synced ``remote_redaction.py`` (always under workspace base, not session subfolders)."""
+    return workspace_helpers_dir() / "remote_redaction.py"
+
+
+def remote_redaction_helper_module() -> str:
+    return remote_redaction_helper_path().as_posix()
+
+
 def repo_skills_dir() -> Path:
     return pi_repo_root_path() / "skills"
 
@@ -197,7 +206,6 @@ def sync_repo_skills_to_workspace(*, force: bool = False) -> Path:
                 continue
             _copy_tree_item_filtered(item, dest / item.name, src_root=src)
 
-    _make_readonly(dest)
     write_workspace_pi_settings()
     os.environ["PI_WORKSPACE_SKILLS_DIR"] = str(dest.resolve())
     return dest.resolve()
@@ -213,7 +221,7 @@ def sync_workspace_helpers() -> Path:
     helpers = workspace_helpers_dir()
     helpers.mkdir(parents=True, exist_ok=True)
     pi_dir = Path(__file__).resolve().parent
-    for name in ("remote_redaction.py",):
+    for name in ("remote_redaction.py", "run_doc_redact.py"):
         src = pi_dir / name
         dest = helpers / name
         if not src.is_file():
@@ -223,10 +231,101 @@ def sync_workspace_helpers() -> Path:
     return helpers.resolve()
 
 
+def write_hf_space_deployment_skill(*, force: bool = False) -> Path | None:
+    """
+    Write a deployment-specific skill that overrides Docker URLs in generic skills.
+
+    Only active when ``PI_DEPLOYMENT_PROFILE=hf-space``.
+    """
+    try:
+        from pi_agent_config import is_hf_space_profile
+        from redaction_prompt import doc_redaction_gradio_url
+    except ImportError:
+        return None
+    if not is_hf_space_profile():
+        return None
+
+    skills_root = workspace_skills_dir()
+    skills_root.mkdir(parents=True, exist_ok=True)
+    if skills_root.is_dir():
+        _make_writable(skills_root)
+
+    dest_dir = skills_root / "hf-space-deployment"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / "SKILL.md"
+    url = doc_redaction_gradio_url()
+    helpers = workspace_helpers_dir().as_posix()
+    content = (
+        "# HF Space deployment (read first)\n\n"
+        "This Pi agent runs on **Hugging Face Spaces** with **Gemini** and calls a "
+        "**remote** doc_redaction Space. Generic skills mention Docker URLs for "
+        "local-docker or AWS ECS — **ignore those here**.\n\n"
+        "## Authoritative settings\n\n"
+        "| Setting | Value |\n"
+        "|---------|--------|\n"
+        f"| **doc_redaction URL** | `{url}` **only** |\n"
+        "| **Auth** | `HF_TOKEN` (Space secret; already in Pi subprocess env) |\n"
+        f"| **Helper module** | `{helpers}/remote_redaction.py` |\n\n"
+        "## One-shot CLI (preferred over writing ``run_redact.py``)\n\n"
+        f"```bash\n"
+        f"python3 {helpers}/run_doc_redact.py \\\n"
+        f'  --pdf "<session-folder>/document.pdf" \\\n'
+        f'  --dest "<session-folder>/redact/document.pdf/output_redact/" \\\n'
+        f'  --ocr-method "Local model - selectable text" \\\n'
+        f'  --pii-method "Local"\n'
+        f"```\n\n"
+        "## Minimal Python (only if the CLI is insufficient)\n\n"
+        "```python\n"
+        "import importlib.util\n"
+        "import sys\n"
+        f'helper = "{helpers}/remote_redaction.py"\n'
+        'spec = importlib.util.spec_from_file_location("remote_redaction", helper)\n'
+        "mod = importlib.util.module_from_spec(spec)\n"
+        'sys.modules["remote_redaction"] = mod\n'
+        "spec.loader.exec_module(mod)\n"
+        "from gradio_client import handle_file\n\n"
+        f"client = mod.make_redaction_client()  # URL: {url}\n"
+        'pdf = "<your-session-folder>/document.pdf"\n'
+        "result = client.predict(\n"
+        '    api_name="/doc_redact",\n'
+        "    document_file=handle_file(pdf),\n"
+        ")\n"
+        'paths = mod.resolve_redaction_output_paths(result, document_stem="document")\n'
+        'mod.fetch_redaction_files(paths, "<your-session-folder>/redact/document/output_redact/")\n'
+        "```\n\n"
+        "## Rules\n\n"
+        f"- **Helper path is shared:** `{helpers}/remote_redaction.py` lives under the "
+        f"workspace root `{workspace_base_dir().as_posix()}/`, **not** under your session "
+        f"subfolder's `.pi/` tree.\n"
+        f"- Call `/doc_redact` via `{helpers}/run_doc_redact.py` or `make_redaction_client()`.\n"
+        "- **Do not** create `run_redact.py`, `run_redact_fixed.py`, or duplicate helpers in your session folder.\n"
+        "- **Do not** call `Client(...)` or `view_api()` in a loop from bash — each call hits HF rate limits. "
+        "Use the CLI once, or one `make_redaction_client()` (cached + retries).\n"
+        "- **Do not** pass `base_url=` manually — `make_redaction_client()` reads "
+        f"`DOC_REDACTION_GRADIO_URL` (`{url}`).\n"
+        "- **Do not** use `host.docker.internal`, `localhost`, `redaction:7861`, or probe "
+        "alternate URLs.\n"
+        "- **Do not** rewrite or duplicate `remote_redaction.py` — use the synced helper.\n"
+        "- On `TooManyRequestsError`, wait at least 60s and retry **once** via the CLI — "
+        "do not spawn repeated `python3 -c` Client probes.\n"
+        "- Write status updates as **normal assistant text**, not bash `#` comments.\n"
+        "- After `/doc_redact`, download outputs with `fetch_redaction_files` into your "
+        "session `output_redact/` folder.\n\n"
+        "Then read `/skill:doc-redaction-app` and `/skill:doc-redaction-modifications` "
+        "for workflow steps, substituting the URL above wherever examples show Docker hosts.\n"
+    )
+    if force or not dest.is_file() or dest.read_text(encoding="utf-8") != content:
+        dest.write_text(content, encoding="utf-8")
+    return dest
+
+
 def ensure_workspace_skills(*, force: bool = False) -> Path:
     """Idempotent sync used at app startup and before Pi RPC starts."""
     dest = sync_repo_skills_to_workspace(force=force)
     sync_workspace_helpers()
+    write_hf_space_deployment_skill(force=force)
+    if dest.is_dir():
+        _make_readonly(dest)
     return dest
 
 
@@ -264,6 +363,23 @@ def workspace_boundary_prefix(session_hash: str | None = None) -> str:
         root = base
         scope = f"the workspace `{base}/`"
 
+    hf_note = ""
+    try:
+        from pi_agent_config import is_hf_space_profile
+        from redaction_prompt import doc_redaction_gradio_url
+
+        if is_hf_space_profile():
+            helpers = remote_redaction_helper_module()
+            hf_note = (
+                f"**HF Space redaction backend:** use `{doc_redaction_gradio_url()}` only "
+                f"(see `/skill:hf-space-deployment`). Import helpers from `{helpers}` "
+                f"(workspace base — not `{root}/.pi/helpers/`). Do not use Docker host "
+                "URLs from other skills. Write user-facing progress as normal chat text, "
+                "not bash comments.\n\n"
+            )
+    except ImportError:
+        pass
+
     return (
         f"**Workspace boundary (mandatory):** work only under `{base}/`. "
         f"Your active directory is {scope}. "
@@ -272,4 +388,5 @@ def workspace_boundary_prefix(session_hash: str | None = None) -> str:
         f"**Skills (read-only):** doc_redaction skills are synced to `{skills}/`. "
         f"Use `/skill:doc-redaction-app`, `/skill:doc-redact-page-review`, etc. "
         f"Do not edit files under `{skills}/`.\n\n"
+        f"{hf_note}"
     )

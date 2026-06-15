@@ -1,7 +1,7 @@
 ---
 name: doc-redact-page-review
 description: "After initial redaction (doc-redaction-app): Pass 1 parallel per-page OCR/CSV review (subagents), merge, single /review_apply; optional Pass 2 VLM visual check after Pass 1 outputs."
-version: 1.4.0
+version: 1.4.1
 author: repo-maintained
 license: AGPL-3.0-only
 ---
@@ -98,6 +98,7 @@ Follow modifications skill **Pass 1**: word OCR merge rules, line OCR for contex
 ## Pass 1 — Verify (parent)
 
 - Re-run **`verify_redaction_coverage`** after apply with `redacted_pdf_path` for text-layer checks.
+- **Split container (Pi + separate redaction service):** pre-apply coverage on the **merged CSV downloaded locally** via CLI; post-apply coverage via **`POST /agent/verify_redaction_coverage`** with server paths from `/review_apply`. See [`../doc-redaction-modifications/SKILL.md`](../doc-redaction-modifications/SKILL.md) § Split-container verify.
 - Deliver when `pass_strict` is true. **`pages_flagged_for_vlm`** = policy/visual risk → optional Pass 2. **`pages_needing_csv_cleanup`** = run prune, not VLM.
 
 **Pass 1 deliverables:** per-page JSON/CSVs under `output_review_p{N}/`; coverage JSON; merged PDF/CSV under `output_review_final/`.

@@ -14,6 +14,7 @@ from cdk_config import (  # Import necessary config
     COGNITO_USER_POOL_NAME,
     CONTEXT_FILE,
     ECR_CDK_REPO_NAME,
+    ECR_PI_REPO_NAME,
     ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_NAMES_TO_LOOKUP,
     ECS_TASK_EXECUTION_ROLE_NAME,
     ECS_TASK_ROLE_NAME,
@@ -47,8 +48,10 @@ from cdk_functions import (  # Import your check functions (assuming they use Bo
     check_s3_bucket_exists,
     check_subnet_exists_by_name,
     check_web_acl_exists,
+    get_secret_kms_key_arn,
     get_security_group_id_by_name,
     get_vpc_id_by_name,
+    list_existing_vpc_endpoint_service_names,
     validate_subnet_creation_parameters,
     # Add other check functions as needed
 )
@@ -95,7 +98,12 @@ def check_and_set_context():
     # --- Find the VPC ID first ---
     if VPC_NAME:
         print("VPC_NAME:", VPC_NAME)
-        vpc_id, nat_gateways = get_vpc_id_by_name(VPC_NAME)
+        vpc_lookup = get_vpc_id_by_name(VPC_NAME)
+        if not vpc_lookup:
+            raise RuntimeError(
+                f"Required VPC '{VPC_NAME}' not found. Cannot proceed with subnet checks."
+            )
+        vpc_id, nat_gateways, vpc_cidr_block, vpc_cidr_blocks = vpc_lookup
 
         # If you expect only one, or one per AZ and you're creating one per AZ in CDK:
         if nat_gateways:
@@ -109,14 +117,23 @@ def check_and_set_context():
             context_data["exists:NatGateway"] = False
             context_data["id:NatGateway"] = None
 
-        if not vpc_id:
-            # If the VPC doesn't exist, you might not be able to check/create subnets.
-            # Decide how to handle this: raise an error, set a flag, etc.
-            raise RuntimeError(
-                f"Required VPC '{VPC_NAME}' not found. Cannot proceed with subnet checks."
-            )
-
         context_data["vpc_id"] = vpc_id  # Store VPC ID in context
+        if vpc_cidr_block:
+            context_data["vpc_cidr_block"] = vpc_cidr_block
+        if vpc_cidr_blocks:
+            context_data["vpc_cidr_blocks"] = vpc_cidr_blocks
+
+        existing_endpoint_services = sorted(
+            list_existing_vpc_endpoint_service_names(vpc_id, region_name=AWS_REGION)
+        )
+        if existing_endpoint_services:
+            context_data["existing_vpc_endpoint_service_names"] = (
+                existing_endpoint_services
+            )
+            print(
+                "Existing VPC endpoints in target VPC (will be skipped on deploy): "
+                + ", ".join(existing_endpoint_services)
+            )
 
         # SUBNET CHECKS
         all_proposed_subnets_data: List[Dict[str, str]] = []
@@ -390,12 +407,10 @@ def check_and_set_context():
     if exists:
         pass
 
-    # ECR Repository
-    repo_name = ECR_CDK_REPO_NAME
-    exists, _ = check_ecr_repo_exists(repo_name)
-    context_data[f"exists:{repo_name}"] = exists
-    if exists:
-        pass  # from_repository_name is sufficient
+    # ECR Repositories
+    for repo_name in (ECR_CDK_REPO_NAME, ECR_PI_REPO_NAME):
+        exists, _ = check_ecr_repo_exists(repo_name)
+        context_data[f"exists:{repo_name}"] = exists
 
     # CodeBuild Project
     project_name = CODEBUILD_PROJECT_NAME
@@ -478,9 +493,26 @@ def check_and_set_context():
 
     # Secrets Manager Secret (by name)
     secret_name = COGNITO_USER_POOL_CLIENT_SECRET_NAME
-    exists, _ = check_for_secret(secret_name)
+    exists, secret_response = check_for_secret(secret_name)
     context_data[f"exists:{secret_name}"] = exists
-    # You might not need the ARN if using from_secret_name_v2
+    if exists:
+        secret_arn = (
+            secret_response.get("ARN") if isinstance(secret_response, dict) else None
+        )
+        if secret_arn:
+            context_data[f"arn:{secret_name}"] = secret_arn
+            print("Cognito secret ARN recorded for IAM grants.")
+            secret_kms_key_arn = get_secret_kms_key_arn(
+                secret_name, region_name=AWS_REGION
+            )
+            if secret_kms_key_arn:
+                context_data[f"kms_key_arn:{secret_name}"] = secret_kms_key_arn
+                print("Cognito secret KMS key recorded for execution role decrypt.")
+        else:
+            print(
+                "Warning: Cognito secret exists but ARN was not returned; "
+                "CDK will use a name-based ARN wildcard in IAM policies."
+            )
 
     # Service Connect client security groups (by name in VPC)
     if ENABLE_ECS_SERVICE_CONNECT == "True":
@@ -517,3 +549,19 @@ def check_and_set_context():
         json.dump(context_data, f, indent=2)
 
     print(f"Context data written to {CONTEXT_FILE}")
+
+
+if __name__ == "__main__":
+    print(f"Pre-check context file: {CONTEXT_FILE}")
+    print(
+        "Running AWS pre-check (requires credentials for the target account/region)..."
+    )
+    try:
+        check_and_set_context()
+    except SystemExit:
+        raise
+    except Exception as exc:
+        raise SystemExit(f"Pre-check failed: {exc}") from exc
+    if not os.path.exists(CONTEXT_FILE):
+        raise SystemExit(f"Pre-check finished but {CONTEXT_FILE} was not created.")
+    print(f"Pre-check complete. Context written to {os.path.abspath(CONTEXT_FILE)}")

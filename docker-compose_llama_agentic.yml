@@ -300,12 +300,12 @@ services:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda12
     command:
       - -hf
-      - unsloth/gemma-4-31B-it-GGUF
+      - unsloth/gemma-4-31B-it-qat-GGUF
       - --hf-file
-      - gemma-4-31B-it-UD-Q4_K_XL.gguf
-      #- --mmproj-url
-      #- https://huggingface.co/unsloth/gemma-4-31B-it-GGUF/resolve/main/mmproj-BF16.gguf
-      - --no-mmproj
+      - gemma-4-31B-it-qat-UD-Q4_K_XL.gguf
+      - --mmproj-url
+      - https://huggingface.co/unsloth/gemma-4-31B-it-qat-GGUF/resolve/main/mmproj-BF16.gguf
+      #- --no-mmproj
       - --n-gpu-layers
       - "-1"
       # - --tensor-split
@@ -317,7 +317,7 @@ services:
       - --fit
       - "off"
       - --temp
-      - "0.1"
+      - "1.0"
       - --top-k
       - "64"
       - --top-p
@@ -335,22 +335,20 @@ services:
       - "q8_0"
       - --cache-type-v
       - "q8_0"
-      #- --chat-template-kwargs
-      #- "{\"enable_thinking\": false}"
+      - --chat-template-kwargs
+      - "{\"enable_thinking\": false}"
       - --reasoning
       - "off"
       - --image_min_tokens
       - "300"
-      #- --image_max_tokens
-      #- "1800"
-      - -hfrd # This and the following parameters are for enabling speculative decoding. This should only be enabled when not using the mmproj parameter (i.e. no vision model available)
-      - unsloth/gemma-4-E2B-it-GGUF:IQ4_NL
-      - --spec-type
-      - "draft-simple"
-      - --spec-draft-n-min
-      - "1"
-      - --spec-draft-n-max
-      - "6"
+      - --image_max_tokens
+      - "1800"
+      - --split-mode
+      - "layer"
+      # - --spec-type
+      # - "draft-mtp"
+      # - --spec-draft-n-max
+      # - "3"
     ports:
       - "8002:8080"
     volumes:
@@ -511,7 +509,7 @@ services:
       - SHOW_CUSTOM_VLM_ENTITIES=True
       - SESSION_OUTPUT_FOLDER=True
       - SAVE_PAGE_OCR_VISUALISATIONS=False
-      - HYBRID_OCR_CONFIDENCE_THRESHOLD=97
+      - HYBRID_OCR_CONFIDENCE_THRESHOLD=90
       - INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES=True
       - PREPROCESS_LOCAL_OCR_IMAGES=False
       - INFERENCE_SERVER_DISABLE_THINKING=True
@@ -573,7 +571,7 @@ services:
       - EFFICIENT_OCR=True
       - SESSION_OUTPUT_FOLDER=True
       - SAVE_PAGE_OCR_VISUALISATIONS=False
-      - HYBRID_OCR_CONFIDENCE_THRESHOLD=97
+      - HYBRID_OCR_CONFIDENCE_THRESHOLD=90
       - INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES=False
       - PREPROCESS_LOCAL_OCR_IMAGES=False
       - MAX_NEW_TOKENS=8192
@@ -623,7 +621,7 @@ services:
       - EFFICIENT_OCR=True
       - SESSION_OUTPUT_FOLDER=True
       - SAVE_PAGE_OCR_VISUALISATIONS=False
-      - HYBRID_OCR_CONFIDENCE_THRESHOLD=97
+      - HYBRID_OCR_CONFIDENCE_THRESHOLD=90
       - INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES=False
       - PREPROCESS_LOCAL_OCR_IMAGES=False
       - MAX_NEW_TOKENS=8192
@@ -743,7 +741,7 @@ services:
         condition: service_started
     environment:
       <<: *pi-agent-env
-      # PI_DEFAULT_PROVIDER: amazon-bedrock
+      PI_DEFAULT_PROVIDER: amazon-bedrock
       # PI_DEFAULT_MODEL: ${PI_DEFAULT_MODEL:-anthropic.claude-sonnet-4-6}
       # PI_DEFAULT_OCR_METHOD: AWS Textract service - all PDF types
       # PI_DEFAULT_PII_METHOD: AWS Comprehend

@@ -148,8 +148,28 @@ def _tool_lines_from_content(content: list[Any]) -> list[str]:
                 args = {"raw": args}
         if not isinstance(args, dict):
             args = {}
-        tool_lines.append(f"**{name}:** {format_tool_args(name, args)}")
+        tool_lines.append(format_tool_chat_line(name, args))
     return tool_lines
+
+
+def format_tool_chat_line(tool_name: str | None, args: dict[str, Any] | None) -> str:
+    """Render one tool invocation for the chat UI (prose for comment-only bash)."""
+    name = str(tool_name or "tool")
+    lowered = name.lower()
+    if lowered == "bash" and args and args.get("command"):
+        cmd = str(args["command"])
+        if is_bash_commentary_only(cmd):
+            return extract_bash_commentary_text(cmd)
+        commentary, executable = split_bash_commentary_and_command(cmd)
+        if commentary and executable:
+            short = executable[:200] + ("…" if len(executable) > 200 else "")
+            return f"{commentary}\n\n**bash:** `{short}`"
+        if commentary:
+            return commentary
+    detail = format_tool_args(tool_name, args)
+    if detail and detail != name:
+        return f"**{name}:** {detail}"
+    return f"**{name}**"
 
 
 def format_assistant_message_for_chat(message: dict[str, Any]) -> str:
@@ -179,6 +199,10 @@ _RATE_LIMIT_MARKERS = (
     "rate-limit",
     "resource_exhausted",
     "too many requests",
+    "throttlingexception",
+    "throttling",
+    "toomanyrequestsexception",
+    "servicequotaexceeded",
 )
 
 
@@ -268,13 +292,57 @@ def partial_message_from_update(event: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def is_bash_commentary_only(command: str) -> bool:
+    """True when a bash tool call contains only shell comments (no executable lines)."""
+    lines = [ln.strip() for ln in command.splitlines() if ln.strip()]
+    if not lines:
+        return False
+    return all(ln.startswith("#") for ln in lines)
+
+
+def extract_bash_commentary_text(command: str) -> str:
+    """Join non-empty ``#`` comment bodies from a bash command into readable prose."""
+    parts: list[str] = []
+    for raw in command.splitlines():
+        stripped = raw.strip()
+        if not stripped.startswith("#"):
+            continue
+        text = stripped.lstrip("#").strip()
+        if text:
+            parts.append(text)
+    return "\n".join(parts)
+
+
+def split_bash_commentary_and_command(command: str) -> tuple[str, str]:
+    """Split ``#`` planning lines from executable shell lines."""
+    comments: list[str] = []
+    commands: list[str] = []
+    for raw in command.splitlines():
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            text = stripped.lstrip("#").strip()
+            if text:
+                comments.append(text)
+        else:
+            commands.append(stripped)
+    return "\n".join(comments), " ↵ ".join(commands)
+
+
 def format_tool_args(tool_name: str | None, args: dict[str, Any] | None) -> str:
     if not args:
         return ""
     name = (tool_name or "").lower()
     if name == "bash" and args.get("command"):
-        cmd = str(args["command"]).replace("\n", " ↵ ")
-        return f"`{cmd[:240]}{'…' if len(cmd) > 240 else ''}`"
+        cmd = str(args["command"])
+        if is_bash_commentary_only(cmd):
+            return extract_bash_commentary_text(cmd)
+        _commentary, executable = split_bash_commentary_and_command(cmd)
+        if not executable:
+            return extract_bash_commentary_text(cmd)
+        shown = executable[:240] + ("…" if len(executable) > 240 else "")
+        return f"`{shown}`"
     if name in {"read", "write", "edit"} and args.get("path"):
         return f"`{args['path']}`"
     compact = json.dumps(args, ensure_ascii=False)
@@ -853,8 +921,7 @@ class PiRpcClient:
                     tool_args = {"raw": tool_args}
             if not isinstance(tool_args, dict):
                 tool_args = {}
-            detail = format_tool_args(str(tool_name), tool_args)
-            chat_line = f"**{tool_name}:** {detail}" if detail else f"**{tool_name}**"
+            chat_line = format_tool_chat_line(str(tool_name), tool_args)
             yield PiStreamEvent(kind="text_snapshot", text=chat_line)
 
         elif delta_type == "error":
@@ -877,6 +944,25 @@ class PiRpcClient:
                 yield f"\n\n_[Running {event.tool_name}…]_\n"
             elif event.kind == "error":
                 yield f"\n\n**Error:** {event.text}\n"
+
+
+def start_pi_prompt_event_worker(
+    client: PiRpcClient,
+    event_queue: queue.Queue[Any],
+    prompt: str,
+) -> None:
+    """Run ``client.prompt_events`` on a background thread, feeding *event_queue*."""
+
+    def _worker() -> None:
+        try:
+            for event in client.prompt_events(prompt):
+                event_queue.put(event)
+        except Exception as exc:
+            event_queue.put(PiStreamEvent(kind="error", text=str(exc), is_error=True))
+        finally:
+            event_queue.put(None)
+
+    threading.Thread(target=_worker, daemon=True).start()
 
 
 def default_client(session_hash: str | None = None) -> PiRpcClient:

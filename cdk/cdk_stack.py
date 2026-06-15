@@ -5,7 +5,6 @@ from typing import Any, Dict, List
 from aws_cdk import (
     CfnOutput,  # <-- Import CfnOutput directly
     Duration,
-    Fn,
     SecretValue,
     Stack,
 )
@@ -34,10 +33,12 @@ from cdk_config import (
     ALB_NAME,
     ALB_NAME_SECURITY_GROUP_NAME,
     ALB_TARGET_GROUP_NAME,
+    APP_CONFIG_ENV_BASENAME,
     APP_CONFIG_ENV_FILE,
     AWS_ACCOUNT_ID,
     AWS_MANAGED_TASK_ROLES_LIST,
     AWS_REGION,
+    CDK_FOLDER,
     CDK_PREFIX,
     CLOUDFRONT_DISTRIBUTION_NAME,
     CLOUDFRONT_DOMAIN,
@@ -63,10 +64,14 @@ from cdk_config import (
     DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS,
     ECR_CDK_REPO_NAME,
     ECR_PI_REPO_NAME,
+    ECS_AVAILABILITY_ZONE_REBALANCING,
+    ECS_EXECUTION_ROLE_MANAGED_POLICIES,
+    ECS_EXECUTION_ROLE_POLICY_ARNS,
+    ECS_EXECUTION_ROLE_POLICY_FILES,
     ECS_EXPRESS_HEALTH_CHECK_PATH,
     ECS_EXPRESS_INFRASTRUCTURE_ROLE_NAME,
-    ECS_EXPRESS_SC_PORT_NAME,
     ECS_EXPRESS_SERVICE_NAME,
+    ECS_EXPRESS_USE_PUBLIC_SUBNETS,
     ECS_LOG_GROUP_NAME,
     ECS_PI_EXPRESS_HEALTH_CHECK_PATH,
     ECS_PI_EXPRESS_SECURITY_GROUP_NAME,
@@ -93,6 +98,7 @@ from cdk_config import (
     ECS_TASK_ROLE_NAME,
     ECS_USE_FARGATE_SPOT,
     ENABLE_ECS_SERVICE_CONNECT,
+    ENABLE_ECS_VPC_INTERFACE_ENDPOINTS,
     ENABLE_HEADLESS_DEPLOYMENT,
     ENABLE_PI_AGENT_ECS_SERVICE,
     ENABLE_PI_AGENT_EXPRESS_SERVICE,
@@ -117,6 +123,8 @@ from cdk_config import (
     PI_ALB_ROUTING,
     PI_ALB_TARGET_GROUP_NAME,
     PI_GRADIO_PORT,
+    POLICY_FILE_ARNS,
+    POLICY_FILE_LOCATIONS,
     PRIVATE_SUBNET_AVAILABILITY_ZONES,
     PRIVATE_SUBNET_CIDR_BLOCKS,
     PRIVATE_SUBNETS_TO_USE,
@@ -147,25 +155,38 @@ from cdk_functions import (  # Only keep CDK-native functions
     add_custom_policies,
     add_s3_enforce_ssl_policy,
     allow_express_load_balancer_to_ecs_security_group,
-    apply_service_connect_to_express_service,
+    attach_managed_policy_arns,
     attach_pi_agent_to_shared_alb,
+    build_ecs_execution_role_kms_policy,
+    build_ecs_task_role_kms_policy,
     build_express_gateway_primary_container,
     build_express_pi_primary_container,
     build_pi_express_container_environment,
-    configure_express_listener_cognito_and_cloudfront,
-    configure_express_pi_listener_rules,
+    configure_public_github_codebuild_source,
     create_ecs_express_infrastructure_role,
+    create_ecs_vpc_endpoints_for_private_subnets,
     create_express_gateway_service,
+    create_headless_s3_batch_seed,
     create_nat_gateway,
     create_pi_agent_ecs_resources,
     create_s3_batch_ecs_trigger_lambda,
     create_subnets,
     create_web_acl_with_common_rules,
+    default_secrets_manager_kms_key_arn,
+    ecr_empty_on_delete,
+    ecs_availability_zone_rebalancing,
+    express_ingress_first_load_balancer_security_group,
+    express_ingress_load_balancer_arn,
+    format_express_pi_public_url,
     format_pi_public_urls,
     load_app_config_env_for_express,
     managed_resource_removal_policy,
     pi_alb_root_path_for_container,
     pi_listener_rule_count,
+    public_github_codebuild_source,
+    resolve_ecs_s3_gateway_subnet_selection,
+    resolve_ecs_vpc_endpoint_subnet_selection,
+    resolve_policy_file_paths,
     resolve_service_connect_client_security_group_ids,
     resource_deletion_protection_flag,
     s3_auto_delete_objects_on_stack_destroy,
@@ -200,8 +221,7 @@ if PRIVATE_SUBNET_AVAILABILITY_ZONES:
         "PRIVATE_SUBNET_AVAILABILITY_ZONES"
     )
 
-if AWS_MANAGED_TASK_ROLES_LIST:
-    AWS_MANAGED_TASK_ROLES_LIST = _get_env_list(AWS_MANAGED_TASK_ROLES_LIST)
+# AWS_MANAGED_TASK_ROLES_LIST and POLICY_* lists are parsed in cdk_config.py.
 
 
 class CdkStack(Stack):
@@ -246,6 +266,13 @@ class CdkStack(Stack):
             not ACM_SSL_CERTIFICATE_ARN and USE_ECS_EXPRESS_MODE == "True"
         )
         enable_headless = ENABLE_HEADLESS_DEPLOYMENT == "True"
+        express_public_subnets_only = (
+            use_express_ingress and ECS_EXPRESS_USE_PUBLIC_SUBNETS == "True"
+        ) or (
+            enable_headless
+            and not use_express_ingress
+            and ECS_EXPRESS_USE_PUBLIC_SUBNETS == "True"
+        )
         deploy_web_ingress = not use_express_ingress and not enable_headless
         enable_service_connect = (
             ENABLE_ECS_SERVICE_CONNECT == "True" and not use_express_ingress
@@ -267,6 +294,16 @@ class CdkStack(Stack):
                 "USE_ECS_EXPRESS_MODE=True: using ECS Express Mode for HTTPS ingress "
                 "(no manual ALB/Fargate service)."
             )
+            if express_public_subnets_only:
+                print(
+                    "ECS_EXPRESS_USE_PUBLIC_SUBNETS=True: Express tasks and VPC "
+                    "endpoints use public subnets only (no private subnet install)."
+                )
+            elif enable_headless:
+                print(
+                    "ENABLE_HEADLESS_DEPLOYMENT=True: batch Fargate tasks use "
+                    "legacy private subnets (or public if configured)."
+                )
         service_connect_client_sg_ids: List[str] = []
 
         if enable_service_connect:
@@ -298,6 +335,8 @@ class CdkStack(Stack):
 
         # --- VPC and Subnets (Assuming VPC is always lookup, Subnets are created/returned by create_subnets) ---
         new_vpc_created = False
+        imported_vpc_cidr_block = None
+        imported_vpc_cidr_blocks: List[str] = []
         if VPC_NAME:
             vpc_id = get_context_str("vpc_id")
             if not vpc_id:
@@ -318,15 +357,34 @@ class CdkStack(Stack):
                     "configured. Set PUBLIC_SUBNET_AVAILABILITY_ZONES and/or "
                     "PRIVATE_SUBNET_AVAILABILITY_ZONES in cdk_config.env."
                 )
-            vpc = ec2.Vpc.from_vpc_attributes(
-                self,
-                "VPC",
-                vpc_id=vpc_id,
-                availability_zones=availability_zones,
+            vpc_cidr_block = get_context_str("vpc_cidr_block")
+            imported_vpc_cidr_block = vpc_cidr_block
+            imported_vpc_cidr_blocks = list(
+                self.node.try_get_context("vpc_cidr_blocks") or []
             )
-            print(f"Using VPC from pre-check context: {vpc_id}")
+            if (
+                imported_vpc_cidr_block
+                and imported_vpc_cidr_block not in imported_vpc_cidr_blocks
+            ):
+                imported_vpc_cidr_blocks.insert(0, imported_vpc_cidr_block)
+            vpc_attrs = {
+                "vpc_id": vpc_id,
+                "availability_zones": availability_zones,
+            }
+            if vpc_cidr_block:
+                vpc_attrs["vpc_cidr_block"] = vpc_cidr_block
+            vpc = ec2.Vpc.from_vpc_attributes(self, "VPC", **vpc_attrs)
+            cidr_log = (
+                ", ".join(imported_vpc_cidr_blocks)
+                if imported_vpc_cidr_blocks
+                else vpc_cidr_block
+            )
+            print(
+                f"Using VPC from pre-check context: {vpc_id}"
+                + (f" (CIDR(s) {cidr_log})" if cidr_log else "")
+            )
 
-        elif NEW_VPC_DEFAULT_NAME:
+        elif NEW_VPC_DEFAULT_NAME and not VPC_NAME:
             new_vpc_created = True
             print(
                 f"NEW_VPC_DEFAULT_NAME ('{NEW_VPC_DEFAULT_NAME}') is set. Creating a new VPC."
@@ -352,19 +410,20 @@ class CdkStack(Stack):
             # For resilience (NAT GW per AZ), set nat_gateways=new_vpc_max_azs.
             # The Vpc construct will create NAT Gateway(s) if subnet_type PRIVATE_WITH_EGRESS is used
             # and nat_gateways > 0.
-            new_vpc_nat_gateways = (
-                1  # Creates a single NAT Gateway for cost-effectiveness.
-            )
-            # If you need one per AZ for higher availability, set this to new_vpc_max_azs.
-
-            vpc = ec2.Vpc(
-                self,
-                "MyNewLogicalVpc",  # This is the CDK construct ID
-                vpc_name=NEW_VPC_DEFAULT_NAME,
-                ip_addresses=ec2.IpAddresses.cidr(new_vpc_cidr),
-                max_azs=new_vpc_max_azs,
-                nat_gateways=new_vpc_nat_gateways,  # Number of NAT gateways to create
-                subnet_configuration=[
+            if express_public_subnets_only:
+                new_vpc_nat_gateways = 0
+                new_vpc_subnet_configuration = [
+                    ec2.SubnetConfiguration(
+                        name="Public",
+                        subnet_type=ec2.SubnetType.PUBLIC,
+                        cidr_mask=28,
+                    ),
+                ]
+            else:
+                new_vpc_nat_gateways = (
+                    1  # Creates a single NAT Gateway for cost-effectiveness.
+                )
+                new_vpc_subnet_configuration = [
                     ec2.SubnetConfiguration(
                         name="Public",  # Name prefix for public subnets
                         subnet_type=ec2.SubnetType.PUBLIC,
@@ -376,7 +435,17 @@ class CdkStack(Stack):
                         cidr_mask=28,  # Adjust CIDR mask as needed
                     ),
                     # You could also add ec2.SubnetType.PRIVATE_ISOLATED if needed
-                ],
+                ]
+            # If you need one NAT GW per AZ for higher availability, set nat_gateways to new_vpc_max_azs.
+
+            vpc = ec2.Vpc(
+                self,
+                "MyNewLogicalVpc",  # This is the CDK construct ID
+                vpc_name=NEW_VPC_DEFAULT_NAME,
+                ip_addresses=ec2.IpAddresses.cidr(new_vpc_cidr),
+                max_azs=new_vpc_max_azs,
+                nat_gateways=new_vpc_nat_gateways,  # Number of NAT gateways to create
+                subnet_configuration=new_vpc_subnet_configuration,
                 # Internet Gateway is created and configured automatically for PUBLIC subnets.
                 # Route tables for public subnets will point to the IGW.
                 # Route tables for PRIVATE_WITH_EGRESS subnets will point to the NAT Gateway(s).
@@ -407,133 +476,160 @@ class CdkStack(Stack):
         names_to_create_public = []
 
         if not PUBLIC_SUBNETS_TO_USE and not PRIVATE_SUBNETS_TO_USE:
-            print(
-                "Warning: No public or private subnets specified in *_SUBNETS_TO_USE. Attempting to select from existing VPC subnets."
-            )
-
-            print("vpc.public_subnets:", vpc.public_subnets)
-            print("vpc.private_subnets:", vpc.private_subnets)
-
-            if (
-                vpc.public_subnets
-            ):  # These are already one_per_az if max_azs was used and Vpc created them
-                self.public_subnets.extend(vpc.public_subnets)
-            else:
-                self.node.add_warning("No public subnets found in the VPC.")
-
-            # Get private subnets with egress specifically
-            # selected_private_subnets_with_egress = vpc.select_subnets(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)
-
-            print(
-                f"Selected from VPC: {len(self.public_subnets)} public, {len(self.private_subnets)} private_with_egress subnets."
-            )
-
-            if (
-                len(self.public_subnets) < 1 or len(self.private_subnets) < 1
-            ):  # Simplified check for new VPC
-                # If new_vpc_max_azs was 1, you'd have 1 of each. If 2, then 2 of each.
-                # The original check ' < 2' might be too strict if new_vpc_max_azs=1
-                pass  # For new VPC, allow single AZ setups if configured that way. The VPC construct ensures one per AZ up to max_azs.
-
-            if not self.public_subnets and not self.private_subnets:
+            if express_public_subnets_only:
                 print(
-                    "Error: No public or private subnets could be found in the VPC for automatic selection. "
-                    "You must either specify subnets in *_SUBNETS_TO_USE or ensure the VPC has discoverable subnets."
+                    "Express public-subnet mode: auto-selecting public subnets only "
+                    "(private subnets are not installed)."
                 )
-                raise RuntimeError("No suitable subnets found for automatic selection.")
+                selected_public_subnets = vpc.select_subnets(
+                    subnet_type=ec2.SubnetType.PUBLIC, one_per_az=True
+                )
+                if len(selected_public_subnets.subnet_ids) < 2:
+                    raise Exception(
+                        "Express mode needs at least two public subnets in different "
+                        "availability zones."
+                    )
+                self.public_subnets = selected_public_subnets.subnets
+                self.private_subnets = []
+                print(
+                    f"Selected {len(self.public_subnets)} public subnets for Express."
+                )
             else:
                 print(
-                    f"Automatically selected {len(self.public_subnets)} public and {len(self.private_subnets)} private subnets based on VPC properties."
+                    "Warning: No public or private subnets specified in *_SUBNETS_TO_USE. Attempting to select from existing VPC subnets."
                 )
 
-            selected_public_subnets = vpc.select_subnets(
-                subnet_type=ec2.SubnetType.PUBLIC, one_per_az=True
-            )
-            private_subnets_egress = vpc.select_subnets(
-                subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS, one_per_az=True
-            )
+                print("vpc.public_subnets:", vpc.public_subnets)
+                print("vpc.private_subnets:", vpc.private_subnets)
 
-            if private_subnets_egress.subnets:
-                self.private_subnets.extend(private_subnets_egress.subnets)
-            else:
-                self.node.add_warning(
-                    "No PRIVATE_WITH_EGRESS subnets found in the VPC."
+                if (
+                    vpc.public_subnets
+                ):  # These are already one_per_az if max_azs was used and Vpc created them
+                    self.public_subnets.extend(vpc.public_subnets)
+                else:
+                    self.node.add_warning("No public subnets found in the VPC.")
+
+                # Get private subnets with egress specifically
+                # selected_private_subnets_with_egress = vpc.select_subnets(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)
+
+                print(
+                    f"Selected from VPC: {len(self.public_subnets)} public, {len(self.private_subnets)} private_with_egress subnets."
                 )
 
-            try:
-                private_subnets_isolated = vpc.select_subnets(
-                    subnet_type=ec2.SubnetType.PRIVATE_ISOLATED, one_per_az=True
-                )
-            except Exception as e:
-                private_subnets_isolated = []
-                print("Could not find any isolated subnets due to:", e)
+                if (
+                    len(self.public_subnets) < 1 or len(self.private_subnets) < 1
+                ):  # Simplified check for new VPC
+                    # If new_vpc_max_azs was 1, you'd have 1 of each. If 2, then 2 of each.
+                    # The original check ' < 2' might be too strict if new_vpc_max_azs=1
+                    pass  # For new VPC, allow single AZ setups if configured that way. The VPC construct ensures one per AZ up to max_azs.
 
-            ###
-            combined_subnet_objects = []
-
-            if private_subnets_isolated:
-                if private_subnets_egress.subnets:
-                    # Add the first PRIVATE_WITH_EGRESS subnet
-                    combined_subnet_objects.append(private_subnets_egress.subnets[0])
-            elif not private_subnets_isolated:
-                if private_subnets_egress.subnets:
-                    # Add the first PRIVATE_WITH_EGRESS subnet
-                    combined_subnet_objects.extend(private_subnets_egress.subnets)
-            else:
-                self.node.add_warning(
-                    "No PRIVATE_WITH_EGRESS subnets found to select the first one."
-                )
-
-            # Add all PRIVATE_ISOLATED subnets *except* the first one (if they exist)
-            try:
-                if len(private_subnets_isolated.subnets) > 1:
-                    combined_subnet_objects.extend(private_subnets_isolated.subnets[1:])
-                elif (
-                    private_subnets_isolated.subnets
-                ):  # Only 1 isolated subnet, add a warning if [1:] was desired
-                    self.node.add_warning(
-                        "Only one PRIVATE_ISOLATED subnet found, private_subnets_isolated.subnets[1:] will be empty."
+                if not self.public_subnets and not self.private_subnets:
+                    print(
+                        "Error: No public or private subnets could be found in the VPC for automatic selection. "
+                        "You must either specify subnets in *_SUBNETS_TO_USE or ensure the VPC has discoverable subnets."
+                    )
+                    raise RuntimeError(
+                        "No suitable subnets found for automatic selection."
                     )
                 else:
-                    self.node.add_warning("No PRIVATE_ISOLATED subnets found.")
-            except Exception as e:
-                print("Could not identify private isolated subnets due to:", e)
+                    print(
+                        f"Automatically selected {len(self.public_subnets)} public and {len(self.private_subnets)} private subnets based on VPC properties."
+                    )
 
-            # Create an ec2.SelectedSubnets object from the combined private subnet list.
-            selected_private_subnets = vpc.select_subnets(
-                subnets=combined_subnet_objects
-            )
-
-            print("selected_public_subnets:", selected_public_subnets)
-            print("selected_private_subnets:", selected_private_subnets)
-
-            if (
-                len(selected_public_subnets.subnet_ids) < 2
-                or len(selected_private_subnets.subnet_ids) < 2
-            ):
-                raise Exception(
-                    "Need at least two public or private subnets in different availability zones"
+                selected_public_subnets = vpc.select_subnets(
+                    subnet_type=ec2.SubnetType.PUBLIC, one_per_az=True
+                )
+                private_subnets_egress = vpc.select_subnets(
+                    subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS, one_per_az=True
                 )
 
-            if not selected_public_subnets and not selected_private_subnets:
-                # If no subnets could be found even with automatic selection, raise an error.
-                # This ensures the stack doesn't proceed if it absolutely needs subnets.
-                print(
-                    "Error: No existing public or private subnets could be found in the VPC for automatic selection. "
-                    "You must either specify subnets in *_SUBNETS_TO_USE or ensure the VPC has discoverable subnets."
-                )
-                raise RuntimeError("No suitable subnets found for automatic selection.")
-            else:
-                self.public_subnets = selected_public_subnets.subnets
-                self.private_subnets = selected_private_subnets.subnets
-                print(
-                    f"Automatically selected {len(self.public_subnets)} public and {len(self.private_subnets)} private subnets based on VPC discovery."
+                if private_subnets_egress.subnets:
+                    self.private_subnets.extend(private_subnets_egress.subnets)
+                else:
+                    self.node.add_warning(
+                        "No PRIVATE_WITH_EGRESS subnets found in the VPC."
+                    )
+
+                try:
+                    private_subnets_isolated = vpc.select_subnets(
+                        subnet_type=ec2.SubnetType.PRIVATE_ISOLATED, one_per_az=True
+                    )
+                except Exception as e:
+                    private_subnets_isolated = []
+                    print("Could not find any isolated subnets due to:", e)
+
+                ###
+                combined_subnet_objects = []
+
+                if private_subnets_isolated:
+                    if private_subnets_egress.subnets:
+                        # Add the first PRIVATE_WITH_EGRESS subnet
+                        combined_subnet_objects.append(
+                            private_subnets_egress.subnets[0]
+                        )
+                elif not private_subnets_isolated:
+                    if private_subnets_egress.subnets:
+                        # Add the first PRIVATE_WITH_EGRESS subnet
+                        combined_subnet_objects.extend(private_subnets_egress.subnets)
+                else:
+                    self.node.add_warning(
+                        "No PRIVATE_WITH_EGRESS subnets found to select the first one."
+                    )
+
+                # Add all PRIVATE_ISOLATED subnets *except* the first one (if they exist)
+                try:
+                    if len(private_subnets_isolated.subnets) > 1:
+                        combined_subnet_objects.extend(
+                            private_subnets_isolated.subnets[1:]
+                        )
+                    elif (
+                        private_subnets_isolated.subnets
+                    ):  # Only 1 isolated subnet, add a warning if [1:] was desired
+                        self.node.add_warning(
+                            "Only one PRIVATE_ISOLATED subnet found, private_subnets_isolated.subnets[1:] will be empty."
+                        )
+                    else:
+                        self.node.add_warning("No PRIVATE_ISOLATED subnets found.")
+                except Exception as e:
+                    print("Could not identify private isolated subnets due to:", e)
+
+                # Create an ec2.SelectedSubnets object from the combined private subnet list.
+                selected_private_subnets = vpc.select_subnets(
+                    subnets=combined_subnet_objects
                 )
 
-                print("self.public_subnets:", self.public_subnets)
-                print("self.private_subnets:", self.private_subnets)
-                # Since subnets are now assigned, we can exit this processing block.
-                # The rest of the original code (which iterates *_SUBNETS_TO_USE) will be skipped.
+                print("selected_public_subnets:", selected_public_subnets)
+                print("selected_private_subnets:", selected_private_subnets)
+
+                if (
+                    len(selected_public_subnets.subnet_ids) < 2
+                    or len(selected_private_subnets.subnet_ids) < 2
+                ):
+                    raise Exception(
+                        "Need at least two public or private subnets in different availability zones"
+                    )
+
+                if not selected_public_subnets and not selected_private_subnets:
+                    # If no subnets could be found even with automatic selection, raise an error.
+                    # This ensures the stack doesn't proceed if it absolutely needs subnets.
+                    print(
+                        "Error: No existing public or private subnets could be found in the VPC for automatic selection. "
+                        "You must either specify subnets in *_SUBNETS_TO_USE or ensure the VPC has discoverable subnets."
+                    )
+                    raise RuntimeError(
+                        "No suitable subnets found for automatic selection."
+                    )
+                else:
+                    self.public_subnets = selected_public_subnets.subnets
+                    self.private_subnets = selected_private_subnets.subnets
+                    print(
+                        f"Automatically selected {len(self.public_subnets)} public and {len(self.private_subnets)} private subnets based on VPC discovery."
+                    )
+
+                    print("self.public_subnets:", self.public_subnets)
+                    print("self.private_subnets:", self.private_subnets)
+                    # Since subnets are now assigned, we can exit this processing block.
+                    # The rest of the original code (which iterates *_SUBNETS_TO_USE) will be skipped.
 
         checked_public_subnets_ctx = get_context_dict("checked_public_subnets")
         checked_private_subnets_ctx = get_context_dict("checked_private_subnets")
@@ -656,153 +752,165 @@ class CdkStack(Stack):
             raise Exception("No public subnets found or created, exiting.")
 
         # --- NAT Gateway Creation/Lookup ---
-        print("Creating NAT gateway/located existing")
         self.single_nat_gateway_id = None
-
-        nat_gw_id_from_context = SINGLE_NAT_GATEWAY_ID or get_context_str(
-            "id:NatGateway"
-        )
-
-        if nat_gw_id_from_context:
+        if express_public_subnets_only:
             print(
-                f"Using existing NAT Gateway ID from context: {nat_gw_id_from_context}"
+                "Express public-subnet mode: skipping NAT Gateway install "
+                "(not required for public Express tasks)."
             )
-            self.single_nat_gateway_id = nat_gw_id_from_context
+        else:
+            print("Creating NAT gateway/located existing")
 
-        elif (
-            new_vpc_created
-            and new_vpc_nat_gateways > 0
-            and hasattr(vpc, "nat_gateways")
-            and vpc.nat_gateways
-        ):
-            self.single_nat_gateway_id = vpc.nat_gateways[0].gateway_id
-            print(
-                f"Using NAT Gateway {self.single_nat_gateway_id} created by the new VPC construct."
+            nat_gw_id_from_context = SINGLE_NAT_GATEWAY_ID or get_context_str(
+                "id:NatGateway"
             )
 
-        if not self.single_nat_gateway_id:
-            print("Creating a new NAT gateway")
-
-            if hasattr(vpc, "nat_gateways") and vpc.nat_gateways:
-                print("Existing NAT gateway found in vpc")
-                pass
-
-                # If not in context, create a new one, but only if we have a public subnet.
-            elif self.public_subnets:
-                print("NAT Gateway ID not found in context. Creating a new one.")
-                # Place the NAT GW in the first available public subnet
-                first_public_subnet = self.public_subnets[0]
-
-                self.single_nat_gateway_id = create_nat_gateway(
-                    self,
-                    first_public_subnet,
-                    nat_gateway_name=NAT_GATEWAY_NAME,
-                    nat_gateway_id_context_key=SINGLE_NAT_GATEWAY_ID,
-                )
-            else:
+            if nat_gw_id_from_context:
                 print(
-                    "WARNING: No public subnets available and NAT gateway not found in existing VPC. Cannot create a NAT Gateway."
+                    f"Using existing NAT Gateway ID from context: {nat_gw_id_from_context}"
                 )
+                self.single_nat_gateway_id = nat_gw_id_from_context
+
+            elif (
+                new_vpc_created
+                and new_vpc_nat_gateways > 0
+                and hasattr(vpc, "nat_gateways")
+                and vpc.nat_gateways
+            ):
+                self.single_nat_gateway_id = vpc.nat_gateways[0].gateway_id
+                print(
+                    f"Using NAT Gateway {self.single_nat_gateway_id} created by the new VPC construct."
+                )
+
+            if not self.single_nat_gateway_id:
+                print("Creating a new NAT gateway")
+
+                if hasattr(vpc, "nat_gateways") and vpc.nat_gateways:
+                    print("Existing NAT gateway found in vpc")
+                    pass
+
+                    # If not in context, create a new one, but only if we have a public subnet.
+                elif self.public_subnets:
+                    print("NAT Gateway ID not found in context. Creating a new one.")
+                    # Place the NAT GW in the first available public subnet
+                    first_public_subnet = self.public_subnets[0]
+
+                    self.single_nat_gateway_id = create_nat_gateway(
+                        self,
+                        first_public_subnet,
+                        nat_gateway_name=NAT_GATEWAY_NAME,
+                        nat_gateway_id_context_key=SINGLE_NAT_GATEWAY_ID,
+                    )
+                else:
+                    print(
+                        "WARNING: No public subnets available and NAT gateway not found in existing VPC. Cannot create a NAT Gateway."
+                    )
 
         # --- 4. Process Private Subnets ---
-        print("\n--- Processing Private Subnets ---")
-        if checked_private_subnets_ctx:
-            for i, subnet_name in enumerate(PRIVATE_SUBNETS_TO_USE):
-                subnet_info = checked_private_subnets_ctx.get(subnet_name)
-                if subnet_info and subnet_info.get("exists"):
-                    subnet_id = subnet_info.get("id")
-                    if not subnet_id:
-                        raise RuntimeError(
-                            f"Context for existing private subnet '{subnet_name}' is missing 'id'."
-                        )
-                    subnet_az = subnet_info.get("az")
-                    if (
-                        not subnet_az
-                        and PRIVATE_SUBNET_AVAILABILITY_ZONES
-                        and i < len(PRIVATE_SUBNET_AVAILABILITY_ZONES)
-                    ):
-                        subnet_az = PRIVATE_SUBNET_AVAILABILITY_ZONES[i]
-                    if not subnet_az:
-                        raise RuntimeError(
-                            f"Context for existing private subnet '{subnet_name}' is missing 'az'."
-                        )
-                    subnet_attrs = {
-                        "subnet_id": subnet_id,
-                        "availability_zone": subnet_az,
-                    }
-                    route_table_id = subnet_info.get("route_table_id")
-                    if route_table_id:
-                        subnet_attrs["route_table_id"] = route_table_id
-                    try:
-                        imported_subnet = ec2.Subnet.from_subnet_attributes(
-                            self,
-                            f"ImportedPrivateSubnet{subnet_name.replace('-', '')}{i}",
-                            **subnet_attrs,
-                        )
-                        self.private_subnets.append(imported_subnet)
-                        print(
-                            f"Imported existing private subnet: {subnet_name} (ID: {subnet_id})"
-                        )
-                    except Exception as e:
-                        raise RuntimeError(
-                            f"Failed to import private subnet '{subnet_name}' with ID '{subnet_id}'. Error: {e}"
-                        )
-
-        # Create new private subnets
-        if private_subnets_data_for_creation_ctx:
-            names_to_create_private = [
-                s["name"] for s in private_subnets_data_for_creation_ctx
-            ]
-            cidrs_to_create_private = [
-                s["cidr"] for s in private_subnets_data_for_creation_ctx
-            ]
-            azs_to_create_private = [
-                s["az"] for s in private_subnets_data_for_creation_ctx
-            ]
-
-            if names_to_create_private:
+        if express_public_subnets_only:
+            if PRIVATE_SUBNETS_TO_USE or private_subnets_data_for_creation_ctx:
                 print(
-                    f"Attempting to create {len(names_to_create_private)} new private subnets: {names_to_create_private}"
-                )
-                # --- CALL THE NEW CREATE_SUBNETS FUNCTION FOR PRIVATE ---
-                # Ensure self.single_nat_gateway_id is available before this call
-                if not self.single_nat_gateway_id:
-                    raise ValueError(
-                        "A single NAT Gateway ID is required for private subnets but was not resolved."
-                    )
-
-                newly_created_private_subnets_cfn, newly_created_private_rts_cfn = (
-                    create_subnets(
-                        self,
-                        vpc,
-                        CDK_PREFIX,
-                        names_to_create_private,
-                        cidrs_to_create_private,
-                        azs_to_create_private,
-                        is_public=False,
-                        single_nat_gateway_id=self.single_nat_gateway_id,  # Pass the single NAT Gateway ID
-                    )
-                )
-                self.private_subnets.extend(newly_created_private_subnets_cfn)
-                self.private_route_tables_cfn.extend(newly_created_private_rts_cfn)
-                print(
-                    f"Successfully defined {len(newly_created_private_subnets_cfn)} new private subnets and their route tables for creation."
+                    "Note: PRIVATE_* subnet settings are ignored in Express public-subnet mode."
                 )
         else:
-            print(
-                "No private subnets specified for creation in context ('private_subnets_to_create')."
-            )
+            print("\n--- Processing Private Subnets ---")
+            if checked_private_subnets_ctx:
+                for i, subnet_name in enumerate(PRIVATE_SUBNETS_TO_USE):
+                    subnet_info = checked_private_subnets_ctx.get(subnet_name)
+                    if subnet_info and subnet_info.get("exists"):
+                        subnet_id = subnet_info.get("id")
+                        if not subnet_id:
+                            raise RuntimeError(
+                                f"Context for existing private subnet '{subnet_name}' is missing 'id'."
+                            )
+                        subnet_az = subnet_info.get("az")
+                        if (
+                            not subnet_az
+                            and PRIVATE_SUBNET_AVAILABILITY_ZONES
+                            and i < len(PRIVATE_SUBNET_AVAILABILITY_ZONES)
+                        ):
+                            subnet_az = PRIVATE_SUBNET_AVAILABILITY_ZONES[i]
+                        if not subnet_az:
+                            raise RuntimeError(
+                                f"Context for existing private subnet '{subnet_name}' is missing 'az'."
+                            )
+                        subnet_attrs = {
+                            "subnet_id": subnet_id,
+                            "availability_zone": subnet_az,
+                        }
+                        route_table_id = subnet_info.get("route_table_id")
+                        if route_table_id:
+                            subnet_attrs["route_table_id"] = route_table_id
+                        try:
+                            imported_subnet = ec2.Subnet.from_subnet_attributes(
+                                self,
+                                f"ImportedPrivateSubnet{subnet_name.replace('-', '')}{i}",
+                                **subnet_attrs,
+                            )
+                            self.private_subnets.append(imported_subnet)
+                            print(
+                                f"Imported existing private subnet: {subnet_name} (ID: {subnet_id})"
+                            )
+                        except Exception as e:
+                            raise RuntimeError(
+                                f"Failed to import private subnet '{subnet_name}' with ID '{subnet_id}'. Error: {e}"
+                            )
 
-        # if not self.private_subnets:
-        #     raise Exception("No private subnets found or created, exiting.")
+            # Create new private subnets
+            if private_subnets_data_for_creation_ctx:
+                names_to_create_private = [
+                    s["name"] for s in private_subnets_data_for_creation_ctx
+                ]
+                cidrs_to_create_private = [
+                    s["cidr"] for s in private_subnets_data_for_creation_ctx
+                ]
+                azs_to_create_private = [
+                    s["az"] for s in private_subnets_data_for_creation_ctx
+                ]
 
-        if (
-            not self.private_subnets
-            and not names_to_create_private
-            and not PRIVATE_SUBNETS_TO_USE
-        ):
-            # This condition might need adjustment for new VPCs.
-            raise Exception("No private subnets found or created, exiting.")
+                if names_to_create_private:
+                    print(
+                        f"Attempting to create {len(names_to_create_private)} new private subnets: {names_to_create_private}"
+                    )
+                    # --- CALL THE NEW CREATE_SUBNETS FUNCTION FOR PRIVATE ---
+                    # Ensure self.single_nat_gateway_id is available before this call
+                    if not self.single_nat_gateway_id:
+                        raise ValueError(
+                            "A single NAT Gateway ID is required for private subnets but was not resolved."
+                        )
+
+                    newly_created_private_subnets_cfn, newly_created_private_rts_cfn = (
+                        create_subnets(
+                            self,
+                            vpc,
+                            CDK_PREFIX,
+                            names_to_create_private,
+                            cidrs_to_create_private,
+                            azs_to_create_private,
+                            is_public=False,
+                            single_nat_gateway_id=self.single_nat_gateway_id,  # Pass the single NAT Gateway ID
+                        )
+                    )
+                    self.private_subnets.extend(newly_created_private_subnets_cfn)
+                    self.private_route_tables_cfn.extend(newly_created_private_rts_cfn)
+                    print(
+                        f"Successfully defined {len(newly_created_private_subnets_cfn)} new private subnets and their route tables for creation."
+                    )
+            else:
+                print(
+                    "No private subnets specified for creation in context ('private_subnets_to_create')."
+                )
+
+            # if not self.private_subnets:
+            #     raise Exception("No private subnets found or created, exiting.")
+
+            if (
+                not self.private_subnets
+                and not names_to_create_private
+                and not PRIVATE_SUBNETS_TO_USE
+            ):
+                # This condition might need adjustment for new VPCs.
+                raise Exception("No private subnets found or created, exiting.")
 
         # --- 5. Sanity Check and Output ---
         # Output the single NAT Gateway ID for verification
@@ -812,6 +920,10 @@ class CdkStack(Stack):
                 "SingleNatGatewayId",
                 value=self.single_nat_gateway_id,
                 description="ID of the single NAT Gateway resolved or created.",
+            )
+        elif express_public_subnets_only:
+            print(
+                "INFO: Express public-subnet mode — NAT Gateway not installed or required."
             )
         elif (
             NEW_VPC_DEFAULT_NAME
@@ -856,32 +968,19 @@ class CdkStack(Stack):
 
         print("Private subnet route tables:", self.private_route_tables_cfn)
 
-        # Add the S3 Gateway Endpoint to the VPC
-        if names_to_create_private:
-            try:
-                s3_gateway_endpoint = vpc.add_gateway_endpoint(
-                    "S3GatewayEndpoint",
-                    service=ec2.GatewayVpcEndpointAwsService.S3,
-                    subnets=[private_subnet_selection],
-                )
-            except Exception as e:
-                print("Could not add S3 gateway endpoint to subnets due to:", e)
-
-            # Output some useful information
-            CfnOutput(
-                self,
-                "VpcIdOutput",
-                value=vpc.vpc_id,
-                description="The ID of the VPC where the S3 Gateway Endpoint is deployed.",
-            )
-            CfnOutput(
-                self,
-                "S3GatewayEndpointService",
-                value=s3_gateway_endpoint.vpc_endpoint_id,
-                description="The id for the S3 Gateway Endpoint.",
-            )  # Specify the S3 service
+        CfnOutput(
+            self,
+            "VpcIdOutput",
+            value=vpc.vpc_id,
+            description="The ID of the VPC used by this stack.",
+        )
 
         # --- IAM Roles ---
+        cognito_secret_name = COGNITO_USER_POOL_CLIENT_SECRET_NAME
+        secret_kms_key_arn_from_context = get_context_str(
+            f"kms_key_arn:{cognito_secret_name}"
+        )
+
         if USE_CUSTOM_KMS_KEY == "1":
             kms_key = kms.Key(
                 self,
@@ -889,45 +988,26 @@ class CdkStack(Stack):
                 alias=CUSTOM_KMS_KEY_NAME,
                 removal_policy=resource_removal_policy,
             )
-
-            custom_sts_kms_policy_dict = {
-                "Version": "2012-10-17",
-                "Statement": [
-                    {
-                        "Sid": "STSCallerIdentity",
-                        "Effect": "Allow",
-                        "Action": ["sts:GetCallerIdentity"],
-                        "Resource": "*",
-                    },
-                    {
-                        "Sid": "KMSAccess",
-                        "Effect": "Allow",
-                        "Action": ["kms:Encrypt", "kms:Decrypt", "kms:GenerateDataKey"],
-                        "Resource": kms_key.key_arn,  # Use key_arn, as it's the full ARN, safer than key_id
-                    },
-                ],
-            }
+            shared_kms_key_arn = kms_key.key_arn
+            secret_kms_key_arn = secret_kms_key_arn_from_context or kms_key.key_arn
         else:
             kms_key = None
+            shared_kms_key_arn = None
+            secret_kms_key_arn = (
+                secret_kms_key_arn_from_context
+                or default_secrets_manager_kms_key_arn(AWS_REGION, AWS_ACCOUNT_ID)
+            )
 
-            custom_sts_kms_policy_dict = {
-                "Version": "2012-10-17",
-                "Statement": [
-                    {
-                        "Sid": "STSCallerIdentity",
-                        "Effect": "Allow",
-                        "Action": ["sts:GetCallerIdentity"],
-                        "Resource": "*",
-                    },
-                    {
-                        "Sid": "KMSSecretsManagerDecrypt",  # Explicitly add decrypt for default key
-                        "Effect": "Allow",
-                        "Action": ["kms:Decrypt"],
-                        "Resource": f"arn:aws:kms:{AWS_REGION}:{AWS_ACCOUNT_ID}:key/aws/secretsmanager",
-                    },
-                ],
-            }
-        custom_sts_kms_policy = json.dumps(custom_sts_kms_policy_dict, indent=4)
+        task_role_kms_policy = json.dumps(
+            build_ecs_task_role_kms_policy(shared_kms_key_arn=shared_kms_key_arn),
+            indent=4,
+        )
+        execution_role_kms_policy = json.dumps(
+            build_ecs_execution_role_kms_policy(
+                secret_kms_key_arn=secret_kms_key_arn,
+            ),
+            indent=4,
+        )
 
         try:
             codebuild_role_name = CODEBUILD_ROLE_NAME
@@ -979,10 +1059,16 @@ class CdkStack(Stack):
                     task_role.add_managed_policy(
                         iam.ManagedPolicy.from_aws_managed_policy_name(f"{role}")
                     )
-                task_role = add_custom_policies(
-                    self, task_role, custom_policy_text=custom_sts_kms_policy
-                )
+                attach_managed_policy_arns(task_role, POLICY_FILE_ARNS)
                 print("Successfully created new ECS task role")
+            task_role = add_custom_policies(
+                self,
+                task_role,
+                policy_file_locations=resolve_policy_file_paths(
+                    POLICY_FILE_LOCATIONS, cdk_folder=CDK_FOLDER
+                ),
+                custom_policy_text=task_role_kms_policy,
+            )
 
             execution_role_name = ECS_TASK_EXECUTION_ROLE_NAME
             if get_context_bool(f"exists:{execution_role_name}"):
@@ -1002,14 +1088,23 @@ class CdkStack(Stack):
                     role_name=execution_role_name,  # Explicit resource name
                     assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
                 )
-                for role in AWS_MANAGED_TASK_ROLES_LIST:
+                for role in ECS_EXECUTION_ROLE_MANAGED_POLICIES:
+                    print(f"Adding {role} to execution role")
                     execution_role.add_managed_policy(
                         iam.ManagedPolicy.from_aws_managed_policy_name(f"{role}")
                     )
-                execution_role = add_custom_policies(
-                    self, execution_role, custom_policy_text=custom_sts_kms_policy
+                attach_managed_policy_arns(
+                    execution_role, ECS_EXECUTION_ROLE_POLICY_ARNS
                 )
                 print("Successfully created new ECS execution role")
+            execution_role = add_custom_policies(
+                self,
+                execution_role,
+                policy_file_locations=resolve_policy_file_paths(
+                    ECS_EXECUTION_ROLE_POLICY_FILES, cdk_folder=CDK_FOLDER
+                ),
+                custom_policy_text=execution_role_kms_policy,
+            )
 
         except Exception as e:
             raise Exception("Failed at IAM role step due to:", e)
@@ -1158,6 +1253,7 @@ class CdkStack(Stack):
                     "ECRRepo",
                     repository_name=full_ecr_repo_name,
                     removal_policy=resource_removal_policy,
+                    empty_on_delete=ecr_empty_on_delete(),
                 )  # Explicitly set repository_name
                 print("Created ECR repository", full_ecr_repo_name)
 
@@ -1182,12 +1278,12 @@ class CdkStack(Stack):
                 )
                 print("Using existing CodeBuild project")
             else:
-                codebuild.Project(
+                main_codebuild_project = codebuild.Project(
                     self,
                     "CodeBuildProject",  # Logical ID
                     project_name=codebuild_project_name,  # Explicit resource name
                     role=codebuild_role,
-                    source=codebuild.Source.git_hub(
+                    source=public_github_codebuild_source(
                         owner=GITHUB_REPO_USERNAME,
                         repo=GITHUB_REPO_NAME,
                         branch_or_ref=GITHUB_REPO_BRANCH,
@@ -1237,6 +1333,11 @@ class CdkStack(Stack):
                         }
                     ),
                 )
+                configure_public_github_codebuild_source(
+                    main_codebuild_project,
+                    GITHUB_REPO_USERNAME,
+                    GITHUB_REPO_NAME,
+                )
                 print("Successfully created CodeBuild project", codebuild_project_name)
 
             # Imported projects have role=undefined in CDK; use the actual service
@@ -1268,12 +1369,12 @@ class CdkStack(Stack):
                         )
                     print("Using existing Pi agent CodeBuild project")
                 else:
-                    codebuild.Project(
+                    pi_codebuild_project = codebuild.Project(
                         self,
                         "CodeBuildPiProject",
                         project_name=pi_codebuild_name,
                         role=codebuild_role,
-                        source=codebuild.Source.git_hub(
+                        source=public_github_codebuild_source(
                             owner=GITHUB_REPO_USERNAME,
                             repo=GITHUB_REPO_NAME,
                             branch_or_ref=GITHUB_REPO_BRANCH,
@@ -1320,6 +1421,11 @@ class CdkStack(Stack):
                             }
                         ),
                     )
+                    configure_public_github_codebuild_source(
+                        pi_codebuild_project,
+                        GITHUB_REPO_USERNAME,
+                        GITHUB_REPO_NAME,
+                    )
                     print("Created Pi agent CodeBuild project", pi_codebuild_name)
 
                 pi_ecr_repo_name = ECR_PI_REPO_NAME
@@ -1333,6 +1439,7 @@ class CdkStack(Stack):
                         "ECRPiRepo",
                         repository_name=pi_ecr_repo_name,
                         removal_policy=resource_removal_policy,
+                        empty_on_delete=ecr_empty_on_delete(),
                     )
                 pi_ecr_image_loc = pi_ecr_repo.repository_uri
                 pi_ecr_repo.grant_pull_push(ecr_grantee)
@@ -1415,6 +1522,76 @@ class CdkStack(Stack):
 
         except Exception as e:
             raise Exception("Could not handle security groups due to:", e)
+
+        endpoint_subnet_selection = resolve_ecs_vpc_endpoint_subnet_selection(
+            use_express_ingress=use_express_ingress,
+            express_use_public_subnets=ECS_EXPRESS_USE_PUBLIC_SUBNETS == "True",
+            public_subnets=self.public_subnets,
+            private_subnets=self.private_subnets,
+        )
+        s3_gateway_subnet_selection = resolve_ecs_s3_gateway_subnet_selection(
+            public_subnets=self.public_subnets,
+            private_subnets=self.private_subnets,
+        )
+
+        if ENABLE_ECS_VPC_INTERFACE_ENDPOINTS == "True" and (
+            endpoint_subnet_selection or s3_gateway_subnet_selection
+        ):
+            if (
+                VPC_NAME
+                and not imported_vpc_cidr_block
+                and not imported_vpc_cidr_blocks
+            ):
+                raise ValueError(
+                    "vpc_cidr_block / vpc_cidr_blocks missing from precheck.context.json. "
+                    "Re-run check_resources.py from the cdk/ directory so the VPC "
+                    "CIDR(s) are stored for VPC endpoints and security groups."
+                )
+            existing_endpoint_services = frozenset(
+                self.node.try_get_context("existing_vpc_endpoint_service_names") or []
+            )
+            if VPC_NAME and not existing_endpoint_services:
+                print(
+                    "Note: existing_vpc_endpoint_service_names not in precheck context; "
+                    "re-run check_resources.py to skip duplicate endpoints in shared VPCs."
+                )
+            try:
+                endpoint_tier = (
+                    "public"
+                    if use_express_ingress and ECS_EXPRESS_USE_PUBLIC_SUBNETS == "True"
+                    else "private"
+                )
+                create_ecs_vpc_endpoints_for_private_subnets(
+                    self,
+                    vpc=vpc,
+                    subnets=endpoint_subnet_selection,
+                    s3_gateway_subnets=s3_gateway_subnet_selection,
+                    logical_id_prefix="RedactionEcs",
+                    include_secrets_and_kms=True,
+                    vpc_cidr_block=imported_vpc_cidr_block,
+                    vpc_cidr_blocks=imported_vpc_cidr_blocks or None,
+                    skip_service_names=existing_endpoint_services,
+                    aws_region=AWS_REGION,
+                )
+                s3_subnet_count = len(
+                    (s3_gateway_subnet_selection.subnets or [])
+                    if s3_gateway_subnet_selection
+                    else []
+                )
+                print(
+                    "Defined ECS VPC interface endpoints (ECR, Logs, Secrets Manager, "
+                    f"KMS) for {endpoint_tier} subnets where not already present; "
+                    f"S3 gateway for {s3_subnet_count} stack subnet(s) (public + "
+                    "private) where not already present."
+                )
+            except Exception as e:
+                raise Exception(
+                    "Could not create ECS VPC interface endpoints for ECS task subnets. "
+                    "If this VPC already has them, re-run check_resources.py (auto-skip) "
+                    "or set ENABLE_ECS_VPC_INTERFACE_ENDPOINTS=False in cdk_config.env "
+                    "and ensure task subnets reach ECR (NAT, IGW, or existing endpoints).",
+                    e,
+                ) from e
 
         # --- DynamoDB tables for logs (optional) ---
 
@@ -1624,11 +1801,22 @@ class CdkStack(Stack):
         try:
             secret_name = COGNITO_USER_POOL_CLIENT_SECRET_NAME
             if get_context_bool(f"exists:{secret_name}"):
-                # Lookup by name
-                secret = secretsmanager.Secret.from_secret_name_v2(
-                    self, "CognitoSecret", secret_name=secret_name
-                )
-                print("Using existing Secret.")
+                secret_arn = get_context_str(f"arn:{secret_name}")
+                if secret_arn:
+                    secret = secretsmanager.Secret.from_secret_complete_arn(
+                        self,
+                        "CognitoSecret",
+                        secret_complete_arn=secret_arn,
+                    )
+                    print("Using existing Secret (ARN from precheck context).")
+                else:
+                    secret = secretsmanager.Secret.from_secret_name_v2(
+                        self, "CognitoSecret", secret_name=secret_name
+                    )
+                    print(
+                        "Using existing Secret by name (IAM grants use ARN wildcard "
+                        "suffix; re-run precheck to pin the full ARN)."
+                    )
             else:
                 if USE_CUSTOM_KMS_KEY == "1" and isinstance(kms_key, kms.Key):
                     secret = secretsmanager.Secret(
@@ -1674,6 +1862,10 @@ class CdkStack(Stack):
         try:
             secret.grant_read(task_role)
             secret.grant_read(execution_role)
+            # ECS environmentFiles (app_config.env) are fetched by the execution role at task start.
+            bucket.grant_read(execution_role, APP_CONFIG_ENV_BASENAME)
+            # KMS: task role uses shared S3 CMK via build_ecs_task_role_kms_policy;
+            # execution role uses the secret's CMK via build_ecs_execution_role_kms_policy.
         except Exception as e:
             raise Exception("Could not grant access to Secrets Manager due to:", e)
 
@@ -1716,8 +1908,16 @@ class CdkStack(Stack):
                     ECS_EXPRESS_INFRASTRUCTURE_ROLE_NAME,
                 )
 
+                express_app_overrides: Dict[str, str] = {}
+                if ENABLE_HEADLESS_DEPLOYMENT == "True":
+                    express_app_overrides["COGNITO_AUTH"] = "False"
+                elif enable_pi_express:
+                    # Pi agent calls main over Service Connect; Gradio auth blocks
+                    # gradio_client unless credentials are passed on every call.
+                    express_app_overrides["COGNITO_AUTH"] = "False"
                 express_app_environment = load_app_config_env_for_express(
-                    APP_CONFIG_ENV_FILE
+                    APP_CONFIG_ENV_FILE,
+                    overrides=express_app_overrides or None,
                 )
                 primary_container = build_express_gateway_primary_container(
                     image_uri=ecr_image_loc + ":latest",
@@ -1728,8 +1928,34 @@ class CdkStack(Stack):
                     environment=express_app_environment,
                 )
 
-                private_subnet_ids = [s.subnet_id for s in self.private_subnets]
+                express_use_public_subnets = ECS_EXPRESS_USE_PUBLIC_SUBNETS == "True"
+                express_subnet_ids = [
+                    s.subnet_id
+                    for s in (
+                        self.public_subnets
+                        if express_use_public_subnets
+                        else self.private_subnets
+                    )
+                ]
+                if not express_subnet_ids:
+                    tier = "public" if express_use_public_subnets else "private"
+                    raise ValueError(
+                        f"No {tier} subnets available for ECS Express Mode. "
+                        f"Set ECS_EXPRESS_USE_PUBLIC_SUBNETS=False to use private "
+                        "subnets (internal ALB only), or create/import public subnets."
+                    )
+                if express_use_public_subnets:
+                    print(
+                        "ECS Express Mode using public subnets "
+                        "(internet-facing managed ALB)."
+                    )
+                else:
+                    print(
+                        "ECS Express Mode using private subnets "
+                        "(internal managed ALB)."
+                    )
 
+                # MinTaskCount=0 until post_cdk_build_quickstart builds/pushes :latest.
                 express_service = create_express_gateway_service(
                     self,
                     "ExpressGatewayService",
@@ -1742,7 +1968,7 @@ class CdkStack(Stack):
                     memory=str(ECS_TASK_MEMORY_SIZE),
                     health_check_path=ECS_EXPRESS_HEALTH_CHECK_PATH,
                     primary_container=primary_container,
-                    subnet_ids=private_subnet_ids,
+                    subnet_ids=express_subnet_ids,
                     security_group_ids=[ecs_security_group.security_group_id],
                 )
                 express_service.node.add_dependency(cluster)
@@ -1755,15 +1981,10 @@ class CdkStack(Stack):
                     container_port=int(GRADIO_SERVER_PORT),
                 )
 
-                express_alb_arn = express_service.get_att(
-                    "ECSManagedResourceArns.IngressPath.LoadBalancerArn"
-                ).to_string()
-                express_alb_dns = express_service.get_att("Endpoint").to_string()
-                express_alb_security_group_id = Fn.select(
-                    0,
-                    express_service.get_att(
-                        "ECSManagedResourceArns.IngressPath.LoadBalancerSecurityGroups"
-                    ),
+                express_alb_arn = express_ingress_load_balancer_arn(express_service)
+                express_alb_dns = express_service.attr_endpoint
+                express_alb_security_group_id = (
+                    express_ingress_first_load_balancer_security_group(express_service)
                 )
 
                 alb = elbv2.ApplicationLoadBalancer.from_application_load_balancer_attributes(
@@ -1775,35 +1996,24 @@ class CdkStack(Stack):
                     vpc=vpc,
                 )
 
-                configure_express_listener_cognito_and_cloudfront(
-                    self,
-                    "Express",
-                    express_service=express_service,
-                    user_pool_arn=user_pool.user_pool_arn,
-                    user_pool_client_id=user_pool_client.user_pool_client_id,
-                    user_pool_domain_prefix=COGNITO_USER_POOL_DOMAIN_PREFIX,
-                    use_cloudfront=USE_CLOUDFRONT == "True",
-                    cloudfront_host_header=CLOUDFRONT_DOMAIN,
-                    stickiness_seconds=int(Duration.hours(8).to_seconds()),
-                )
+                # Express Mode manages host-header listener rules (priorities 1, 2, …).
+                # Do not add ALB authenticate-cognito rules here; use in-app COGNITO_AUTH.
 
                 CfnOutput(
                     self,
                     "ExpressServiceEndpoint",
-                    value=express_service.get_att("Endpoint").to_string(),
+                    value=express_service.attr_endpoint,
                     description="HTTPS URL for the ECS Express Mode service",
                 )
                 CfnOutput(
                     self,
                     "ExpressServiceArn",
-                    value=express_service.get_att("ServiceArn").to_string(),
+                    value=express_service.attr_service_arn,
                 )
                 CfnOutput(
                     self,
                     "ExpressManagedCertificateArn",
-                    value=express_service.get_att(
-                        "ECSManagedResourceArns.IngressPath.CertificateArn"
-                    ).to_string(),
+                    value=express_service.attr_ecs_managed_resource_arns_ingress_path_certificate_arn,
                 )
 
                 if enable_pi_express:
@@ -1825,14 +2035,11 @@ class CdkStack(Stack):
                             description="Pi agent ECS Express tasks",
                         )
 
-                        _pi_root_path = pi_alb_root_path_for_container(
-                            PI_ALB_PATH_PREFIX_NORMALIZED, PI_ALB_ROUTING
-                        )
                         pi_express_environment = build_pi_express_container_environment(
                             service_connect_discovery_name=ECS_SERVICE_CONNECT_DISCOVERY_NAME,
                             main_app_port=int(GRADIO_SERVER_PORT),
                             pi_gradio_port=int(PI_GRADIO_PORT),
-                            pi_root_path=_pi_root_path,
+                            cognito_auth=ENABLE_HEADLESS_DEPLOYMENT != "True",
                         )
                         pi_primary_container = build_express_pi_primary_container(
                             image_uri=pi_ecr_image_loc + ":latest",
@@ -1840,6 +2047,8 @@ class CdkStack(Stack):
                             log_group_name=pi_express_log_group.log_group_name,
                             aws_region=AWS_REGION,
                             environment=pi_express_environment,
+                            secret=secret,
+                            cognito_auth=ENABLE_HEADLESS_DEPLOYMENT != "True",
                         )
 
                         express_pi_service = create_express_gateway_service(
@@ -1854,7 +2063,7 @@ class CdkStack(Stack):
                             memory=str(ECS_PI_TASK_MEMORY_SIZE),
                             health_check_path=ECS_PI_EXPRESS_HEALTH_CHECK_PATH,
                             primary_container=pi_primary_container,
-                            subnet_ids=private_subnet_ids,
+                            subnet_ids=express_subnet_ids,
                             security_group_ids=[
                                 pi_express_security_group.security_group_id
                             ],
@@ -1881,53 +2090,13 @@ class CdkStack(Stack):
                             description="Pi Express (Service Connect) to main redaction app",
                         )
 
-                        stickiness_seconds = int(Duration.hours(8).to_seconds())
-                        configure_express_pi_listener_rules(
-                            self,
-                            "ExpressPi",
-                            express_main_service=express_service,
-                            express_pi_service=express_pi_service,
-                            routing_mode=PI_ALB_ROUTING,
-                            path_prefix=PI_ALB_PATH_PREFIX_NORMALIZED,
-                            pi_host_header=PI_ALB_HOST_HEADER.strip(),
-                            rule_priority=PI_ALB_LISTENER_RULE_PRIORITY,
-                            user_pool_arn=user_pool.user_pool_arn,
-                            user_pool_client_id=user_pool_client.user_pool_client_id,
-                            user_pool_domain_prefix=COGNITO_USER_POOL_DOMAIN_PREFIX,
-                            stickiness_seconds=stickiness_seconds,
-                        )
+                        # Service Connect for Express is applied in post_cdk_build_quickstart.py
+                        # after CodeBuild pushes :latest. Express primary containers do not
+                        # define named portMappings at create time; CDK cannot enable SC here.
 
-                        sc_main = apply_service_connect_to_express_service(
-                            self,
-                            "ExpressMainServiceConnect",
-                            cluster_name=CLUSTER_NAME,
-                            service_name=ECS_EXPRESS_SERVICE_NAME,
-                            namespace=ECS_SERVICE_CONNECT_NAMESPACE,
-                            express_service=express_service,
-                            port_name=ECS_EXPRESS_SC_PORT_NAME,
-                            discovery_name=ECS_SERVICE_CONNECT_DISCOVERY_NAME,
-                            port=int(GRADIO_SERVER_PORT),
+                        pi_public_url = format_express_pi_public_url(
+                            express_pi_service.attr_endpoint,
                         )
-                        sc_pi = apply_service_connect_to_express_service(
-                            self,
-                            "ExpressPiServiceConnect",
-                            cluster_name=CLUSTER_NAME,
-                            service_name=ECS_PI_EXPRESS_SERVICE_NAME,
-                            namespace=ECS_SERVICE_CONNECT_NAMESPACE,
-                            express_service=express_pi_service,
-                        )
-                        sc_pi.node.add_dependency(sc_main)
-
-                        _pi_public_urls = format_pi_public_urls(
-                            routing_mode=PI_ALB_ROUTING,
-                            path_prefix=PI_ALB_PATH_PREFIX_NORMALIZED,
-                            host_header=PI_ALB_HOST_HEADER,
-                            cloudfront_domain=(
-                                CLOUDFRONT_DOMAIN if USE_CLOUDFRONT == "True" else ""
-                            ),
-                            use_https=True,
-                        )
-                        pi_public_url = _pi_public_urls[0] if _pi_public_urls else ""
                         sc_backend = (
                             f"http://{ECS_SERVICE_CONNECT_DISCOVERY_NAME}:"
                             f"{GRADIO_SERVER_PORT}"
@@ -1935,27 +2104,14 @@ class CdkStack(Stack):
                         CfnOutput(
                             self,
                             "PiExpressEndpoint",
-                            value=express_pi_service.get_att("Endpoint").to_string(),
+                            value=express_pi_service.attr_endpoint,
                             description="HTTPS URL for the Pi ECS Express service (AWS-managed cert)",
                         )
                         CfnOutput(
                             self,
                             "PiPublicUrl",
                             value=pi_public_url,
-                            description="Primary public URL for Pi UI (path and/or host ALB rules)",
-                        )
-                        if len(_pi_public_urls) > 1:
-                            CfnOutput(
-                                self,
-                                "PiPublicUrls",
-                                value=", ".join(_pi_public_urls),
-                                description="All configured Pi UI entry URLs",
-                            )
-                        CfnOutput(
-                            self,
-                            "PiAlbPathPrefix",
-                            value=PI_ALB_PATH_PREFIX_NORMALIZED,
-                            description="ALB path prefix for Pi when PI_ALB_ROUTING includes path",
+                            description="Public URL for Pi Express UI (managed HTTPS endpoint)",
                         )
                         CfnOutput(
                             self,
@@ -1976,7 +2132,7 @@ class CdkStack(Stack):
                         )
                         print(
                             "ECS Express Pi gateway service defined with Service Connect "
-                            f"backend {sc_backend}; public URLs: {', '.join(_pi_public_urls)}."
+                            f"backend {sc_backend}; public URL: {pi_public_url}."
                         )
                     except Exception as e:
                         raise Exception(
@@ -2030,9 +2186,17 @@ class CdkStack(Stack):
                                 "awslogs-stream-prefix": "ecs",
                             },
                         },
-                        "environmentFiles": [
-                            {"value": bucket.bucket_arn + "/config.env", "type": "s3"}
-                        ],
+                        "environmentFiles": (
+                            []
+                            if enable_headless
+                            else [
+                                {
+                                    "value": bucket.bucket_arn
+                                    + f"/{APP_CONFIG_ENV_BASENAME}",
+                                    "type": "s3",
+                                }
+                            ]
+                        ),
                         "memoryReservation": int(task_def_params["memory"])
                         - 512,  # Reserve some memory for the container
                         "mountPoints": [
@@ -2128,6 +2292,7 @@ class CdkStack(Stack):
                     retention=logs.RetentionDays.ONE_MONTH,
                     removal_policy=resource_removal_policy,
                 )
+                cdk_managed_log_group.grant_write(execution_role)
 
                 epheremal_storage_volume_cdk_obj = ecs.Volume(
                     name=epheremal_storage_volume_name
@@ -2154,8 +2319,8 @@ class CdkStack(Stack):
                 if task_def_params["containerDefinitions"]:
                     container_def_params = task_def_params["containerDefinitions"][0]
 
+                    env_files = []
                     if container_def_params.get("environmentFiles"):
-                        env_files = []
                         for env_file_param in container_def_params["environmentFiles"]:
                             # Need to parse the ARN to get the bucket object and key
                             env_file_arn_parts = env_file_param["value"].split(":::")
@@ -2188,7 +2353,7 @@ class CdkStack(Stack):
                                 secret, "REDACTION_CLIENT_SECRET"
                             ),
                         },
-                        environment_files=env_files,
+                        environment_files=env_files if env_files else None,
                         readonly_root_filesystem=read_only_file_system,
                         user=container_def_params.get("user", "1000"),
                     )
@@ -2291,8 +2456,11 @@ class CdkStack(Stack):
                                 subnets=self.private_subnets
                             ),  # Link to subnets
                             min_healthy_percent=0,
-                            max_healthy_percent=100,
+                            max_healthy_percent=600,
                             desired_count=0,
+                            availability_zone_rebalancing=ecs_availability_zone_rebalancing(
+                                ECS_AVAILABILITY_ZONE_REBALANCING
+                            ),
                             service_connect_configuration=service_connect_configuration,
                         )
                         print("Successfully created new ECS service")
@@ -2344,6 +2512,14 @@ class CdkStack(Stack):
 
             if ENABLE_S3_BATCH_ECS_TRIGGER == "True":
                 try:
+                    batch_subnet_ids = [s.subnet_id for s in self.private_subnets]
+                    if not batch_subnet_ids:
+                        batch_subnet_ids = [s.subnet_id for s in self.public_subnets]
+                    if not batch_subnet_ids:
+                        raise ValueError(
+                            "S3 batch ECS trigger requires at least one public or "
+                            "private subnet."
+                        )
                     lambda_asset_dir = os.path.join(
                         os.path.dirname(__file__), "config", "lambda"
                     )
@@ -2357,7 +2533,7 @@ class CdkStack(Stack):
                         cluster_name=CLUSTER_NAME,
                         task_definition_arn=fargate_task_definition.task_definition_arn,
                         container_name=full_ecr_repo_name,
-                        subnet_ids=[s.subnet_id for s in self.private_subnets],
+                        subnet_ids=batch_subnet_ids,
                         security_group_id=ecs_security_group.security_group_id,
                         execution_role=execution_role,
                         task_role=task_role,
@@ -2366,6 +2542,7 @@ class CdkStack(Stack):
                         input_prefix=S3_BATCH_INPUT_PREFIX,
                         config_prefix=S3_BATCH_CONFIG_PREFIX,
                         default_params_key=S3_BATCH_DEFAULT_PARAMS_KEY,
+                        assign_public_ip=not bool(self.private_subnets),
                     )
                     CfnOutput(
                         self,
@@ -2379,6 +2556,28 @@ class CdkStack(Stack):
                         value=f"s3://{output_bucket.bucket_name}/{S3_BATCH_ENV_PREFIX}",
                         description="Upload job .env files here to start batch redaction tasks",
                     )
+                    CfnOutput(
+                        self,
+                        "BatchInputPrefix",
+                        value=f"s3://{output_bucket.bucket_name}/{S3_BATCH_INPUT_PREFIX}",
+                        description="Upload PDFs and other input documents for batch jobs",
+                    )
+                    CfnOutput(
+                        self,
+                        "BatchEcsTriggerLambdaName",
+                        value=batch_lambda.function_name,
+                        description="Lambda that starts ECS batch tasks on job .env upload",
+                    )
+                    if enable_headless:
+                        seed_asset_dir = os.path.join(
+                            os.path.dirname(__file__), "config", "headless_s3_seed"
+                        )
+                        create_headless_s3_batch_seed(
+                            self,
+                            "HeadlessBatchS3Seed",
+                            destination_bucket=output_bucket,
+                            seed_asset_directory=seed_asset_dir,
+                        )
                     print("S3 batch ECS trigger Lambda defined.")
                 except Exception as e:
                     raise Exception("Could not handle S3 batch ECS trigger due to:", e)
@@ -2692,6 +2891,15 @@ class CdkStack(Stack):
                 value=CLUSTER_NAME,
                 description="ECS cluster used for one-shot Fargate batch tasks",
             )
+            CfnOutput(
+                self,
+                "EcsBatchLogGroup",
+                value=ECS_LOG_GROUP_NAME,
+                description=(
+                    "CloudWatch log group for batch tasks (streams appear only after "
+                    "the container starts; init failures may have no stream)"
+                ),
+            )
 
         CfnOutput(self, "CognitoPoolId", value=user_pool.user_pool_id)
         # Add other outputs if needed
@@ -2711,7 +2919,7 @@ class CdkStack(Stack):
                 self,
                 "ServiceConnectAgentApiUrl",
                 value=f"{sc_base}/agent",
-                description="FastAPI Agent API prefix (when RUN_FASTAPI=True in config.env)",
+                description="FastAPI Agent API prefix (when RUN_FASTAPI=True in app_config.env)",
             )
             CfnOutput(
                 self,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -13,6 +14,17 @@ from gradio_client import Client
 
 DEFAULT_CONNECT_TIMEOUT = 120.0
 DEFAULT_READ_TIMEOUT = 1800.0
+_DEFAULT_REDACT_ENTITIES = (
+    "PERSON",
+    "EMAIL_ADDRESS",
+    "PHONE_NUMBER",
+    "STREETNAME",
+    "UKPOSTCODE",
+    "TITLES",
+    "CUSTOM",
+)
+
+_CLIENT_CACHE: dict[tuple[str, str], Client] = {}
 
 
 def split_redaction_backend() -> bool:
@@ -42,6 +54,20 @@ def redaction_hf_token() -> str | None:
     return token.strip() if token and token.strip() else None
 
 
+def redaction_gradio_auth() -> tuple[str, str] | None:
+    """
+    Optional Gradio HTTP basic auth for doc_redaction when ``COGNITO_AUTH=True``.
+
+    Set ``DOC_REDACTION_GRADIO_AUTH_USER`` and ``DOC_REDACTION_GRADIO_AUTH_PASSWORD``
+    (e.g. a dedicated Cognito service account). Not the Pi UI user's session.
+    """
+    user = (os.environ.get("DOC_REDACTION_GRADIO_AUTH_USER") or "").strip()
+    password = os.environ.get("DOC_REDACTION_GRADIO_AUTH_PASSWORD") or ""
+    if user and password:
+        return (user, password)
+    return None
+
+
 def httpx_timeout(
     *,
     connect: float = DEFAULT_CONNECT_TIMEOUT,
@@ -50,17 +76,134 @@ def httpx_timeout(
     return httpx.Timeout(connect=connect, read=read, write=connect, pool=connect)
 
 
+def _quota_retry_attempts() -> int:
+    for key in ("PI_QUOTA_RETRY_ATTEMPTS", "PI_MAX_RETRIES"):
+        raw = (os.environ.get(key) or "").strip()
+        if raw.isdigit():
+            return max(1, int(raw))
+    return 5
+
+
+def _quota_retry_delay_s() -> int:
+    raw = (os.environ.get("PI_QUOTA_RETRY_DELAY_S") or "60").strip()
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 60
+
+
+def is_gradio_rate_limit_error(exc: BaseException) -> bool:
+    if type(exc).__name__ == "TooManyRequestsError":
+        return True
+    lowered = str(exc).lower()
+    return any(
+        marker in lowered
+        for marker in ("429", "too many requests", "rate limit", "rate-limit")
+    )
+
+
+def clear_redaction_client_cache() -> None:
+    """Drop cached gradio_client instances (tests or after credential rotation)."""
+    _CLIENT_CACHE.clear()
+
+
 def make_redaction_client(
     base_url: str | None = None,
     hf_token: str | None = None,
+    *,
+    force_new: bool = False,
+    verbose: bool = False,
 ) -> Client:
-    """Return a gradio_client for the remote doc_redaction Space."""
+    """
+    Return a gradio_client for the remote doc_redaction Space.
+
+    Uses ``token=`` (gradio_client 2.x). Retries ``TooManyRequestsError`` with
+    ``PI_QUOTA_RETRY_DELAY_S`` backoff and caches one client per URL+token pair
+    so agents do not re-fetch ``/gradio_api/info`` on every bash one-liner.
+    """
     url = (base_url or redaction_base_url()).rstrip("/")
     token = hf_token if hf_token is not None else redaction_hf_token()
-    kwargs = {"httpx_kwargs": {"timeout": httpx_timeout()}}
-    if token:
-        return Client(url, hf_token=token, **kwargs)
-    return Client(url, **kwargs)
+    auth = redaction_gradio_auth()
+    cache_key = (url, token or "", auth or ())
+    if not force_new and cache_key in _CLIENT_CACHE:
+        return _CLIENT_CACHE[cache_key]
+
+    client_kwargs: dict[str, Any] = {
+        "httpx_kwargs": {"timeout": httpx_timeout()},
+        "verbose": verbose,
+    }
+    max_attempts = _quota_retry_attempts()
+    delay_s = _quota_retry_delay_s()
+    last_error: BaseException | None = None
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            if auth:
+                client = Client(url, auth=auth, **client_kwargs)
+            elif token:
+                client = Client(url, token=token, **client_kwargs)
+            else:
+                client = Client(url, **client_kwargs)
+            _CLIENT_CACHE[cache_key] = client
+            return client
+        except Exception as exc:
+            if not is_gradio_rate_limit_error(exc):
+                raise
+            last_error = exc
+            if attempt >= max_attempts:
+                break
+            time.sleep(delay_s)
+
+    assert last_error is not None
+    raise last_error
+
+
+def call_doc_redact(
+    pdf_path: str | Path,
+    dest_dir: str | Path,
+    *,
+    ocr_method: str | None = None,
+    pii_method: str | None = None,
+    deny_list: list[str] | None = None,
+    allow_list: list[str] | None = None,
+    redact_entities: list[str] | None = None,
+    page_min: int | None = None,
+    page_max: int | None = None,
+) -> tuple[Any, list[Path]]:
+    """
+    Run ``/doc_redact`` and download outputs into *dest_dir*.
+
+    Prefer this or ``run_doc_redact.py`` over hand-written Gradio scripts.
+    """
+    from gradio_client import handle_file
+
+    pdf = Path(pdf_path).expanduser().resolve()
+    if not pdf.is_file():
+        raise FileNotFoundError(f"PDF not found: {pdf}")
+
+    predict_kwargs: dict[str, Any] = {
+        "api_name": "/doc_redact",
+        "document_file": handle_file(str(pdf)),
+        "redact_entities": list(redact_entities or _DEFAULT_REDACT_ENTITIES),
+    }
+    if ocr_method:
+        predict_kwargs["ocr_method"] = ocr_method
+    if pii_method:
+        predict_kwargs["pii_method"] = pii_method
+    if deny_list:
+        predict_kwargs["deny_list"] = deny_list
+    if allow_list:
+        predict_kwargs["allow_list"] = allow_list
+    if page_min is not None:
+        predict_kwargs["page_min"] = page_min
+    if page_max is not None:
+        predict_kwargs["page_max"] = page_max
+
+    client = make_redaction_client()
+    result = client.predict(**predict_kwargs)
+    paths = resolve_redaction_output_paths(result, document_stem=pdf.stem)
+    saved = fetch_redaction_files(paths, dest_dir)
+    return result, saved
 
 
 def is_gradio_file_path(value: str) -> bool:

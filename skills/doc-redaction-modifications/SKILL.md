@@ -1,7 +1,7 @@
 ---
 name: doc-redaction-modifications
 description: "Review and reapply: two-pass workflow — Pass 1 (OCR/CSV/text, default) then optional Pass 2 (VLM per page). Edit *_review_file.csv, preview, /review_apply, verify. Parallel page orchestration → doc-redact-page-review. Initial redaction → doc-redaction-app."
-version: 2.5.1
+version: 2.5.2
 author: repo-maintained
 license: AGPL-3.0-only
 ---
@@ -40,7 +40,7 @@ Review is split into a **fast, text-based first pass** (default) and an **option
 
 **Never** run post-apply text-layer checks on `*_redactions_for_review.pdf` — that file **retains text** for human review. `/review_apply` returns **both** files; only `*_redacted.pdf` is the deliverable.
 
-Use [`tools/verify_redaction_coverage.py`](../../tools/verify_redaction_coverage.py) or `POST /agent/verify_redaction_coverage` — **do not** reimplement coverage scripts locally.
+Use [`tools/verify_redaction_coverage.py`](../../tools/verify_redaction_coverage.py) or `POST /agent/verify_redaction_coverage` — **do not** reimplement coverage logic ad hoc (pandas/regex scripts). On split-container Pi deployments, **pre-apply** checks use the **CLI on downloaded artifacts** (edited CSV is local); **post-apply** checks use the **Agent API with server paths** — see § Split-container verify below.
 
 ### Text-layer leak troubleshooting
 
@@ -141,6 +141,21 @@ python tools/verify_redaction_coverage.py merged_review_file.csv ocr_words.csv \
 ```
 
 Response includes `coverage_pass_strict`, `coverage_pass_with_cleanup`, `pruned_csv_path`, `prune_log`, per-page issues, and `pages_flagged_for_vlm` vs `pages_needing_csv_cleanup`.
+
+### Split-container verify (Pi agent + separate redaction service)
+
+When the Pi agent and doc_redaction run in **separate containers** (e.g. `http://redaction:7860`), path validation in `secure_path_utils` runs on the **redaction server**. Agent API paths must resolve under repo root, `INPUT_FOLDER`, or `OUTPUT_FOLDER` on that server.
+
+| Phase | Where files live | How to verify |
+|-------|------------------|---------------|
+| **Pre-apply** | Edited `*_review_file.csv` in Pi session workspace; OCR CSV downloaded locally | `python tools/verify_redaction_coverage.py <local_review_csv> <local_ocr_words_csv> ...` — official CLI on downloaded copies |
+| **Post-apply** | `*_redacted.pdf` and review CSV on redaction server from `/review_apply` | `POST {gradio_url}/agent/verify_redaction_coverage` with server paths from `extract_server_paths(review_apply result)` plus OCR words path from `/doc_redact` |
+
+**Rejected paths (common mistakes):**
+
+- Pi workspace paths (e.g. `/home/user/app/workspace/sess/...`)
+- `/tmp/gradio_tmp/...` from `/gradio_api/upload` (not under `OUTPUT_FOLDER`)
+- Calling `verify_redaction_coverage()` from the Pi container with redaction-server path strings
 
 **Word search:** `POST /agent/word_level_ocr_text_search` with `ocr_words_csv_path`, `search_text`, optional `review_csv_path`.
 

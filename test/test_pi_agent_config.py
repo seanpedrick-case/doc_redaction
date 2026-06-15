@@ -26,7 +26,7 @@ def test_build_settings_config_uses_pi_default_model_for_bedrock(
     tmp_path, monkeypatch, pi_workspace
 ):
     monkeypatch.setenv("PI_DEFAULT_PROVIDER", "amazon-bedrock")
-    monkeypatch.setenv("PI_DEFAULT_MODEL", "amazon.nova-lite-v1:0")
+    monkeypatch.setenv("PI_DEFAULT_MODEL", "anthropic.claude-sonnet-4-6")
     monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
 
     import importlib
@@ -35,9 +35,9 @@ def test_build_settings_config_uses_pi_default_model_for_bedrock(
 
     settings = pac.build_settings_config()
     assert settings["defaultProvider"] == "amazon-bedrock"
-    assert settings["defaultModel"] == "amazon.nova-lite-v1:0"
+    assert settings["defaultModel"] == "anthropic.claude-sonnet-4-6"
     assert pac.default_model_for_provider(pac.PROVIDER_BEDROCK) == (
-        "amazon.nova-lite-v1:0"
+        "anthropic.claude-sonnet-4-6"
     )
     assert pac.resolved_default_model(pac.PROVIDER_LLAMA) == pac.LLAMA_MODEL_ID
 
@@ -86,6 +86,34 @@ def test_gemini_provider_applies_retry_settings(tmp_path, monkeypatch, pi_worksp
     settings = pac.build_settings_config(default_provider="google-gemini")
     assert settings["retry"]["maxRetries"] == 7
     assert settings["retry"]["provider"]["maxRetries"] == 7
+
+
+def test_bedrock_provider_applies_quota_retry_settings(
+    tmp_path, monkeypatch, pi_workspace
+):
+    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "local-docker")
+    monkeypatch.setenv("PI_DEFAULT_PROVIDER", "amazon-bedrock")
+    monkeypatch.setenv("PI_QUOTA_RETRY_DELAY_S", "45")
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
+
+    settings = pac.build_settings_config(default_provider="amazon-bedrock")
+    assert settings["retry"]["baseDelayMs"] == 45000
+    assert settings["retry"]["provider"]["maxRetryDelayMs"] == 67500
+    assert settings["retry"]["maxRetries"] == 5
+
+
+def test_aws_ecs_profile_applies_bedrock_retry_settings(
+    tmp_path, monkeypatch, pi_workspace
+):
+    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "aws-ecs")
+    monkeypatch.delenv("PI_DEFAULT_PROVIDER", raising=False)
+    monkeypatch.setenv("PI_BEDROCK_RETRY_BASE_DELAY_MS", "55000")
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
+
+    settings = pac.build_settings_config()
+    assert settings["defaultProvider"] == "amazon-bedrock"
+    assert settings["retry"]["baseDelayMs"] == 55000
+    assert settings["retry"]["maxRetries"] == 5
 
 
 def test_pi_session_dir_override(tmp_path, monkeypatch, pi_workspace):

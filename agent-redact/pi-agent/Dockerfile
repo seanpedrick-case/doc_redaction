@@ -11,7 +11,7 @@
 # ===================================================================
 # Stage 1: Pi CLI (Node) — isolated so the runtime base stays Python 3.12
 # ===================================================================
-FROM node:22-bookworm-slim AS pi-cli
+FROM public.ecr.aws/docker/library/node:24.16.0-slim AS pi-cli
 
 ENV NPM_CONFIG_PREFIX=/opt/pi
 ENV PATH="/opt/pi/bin:${PATH}"
@@ -91,7 +91,6 @@ ENV PI_DEPLOYMENT_PROFILE=hf-space
 ENV PI_DEFAULT_PROVIDER=google-gemini
 ENV PI_DEFAULT_MODEL=gemini-flash-lite-latest
 ENV DOC_REDACTION_GRADIO_URL=https://seanpedrickcase-document-redaction.hf.space
-ENV GRADIO_SERVER_PORT=7860
 ENV HOME=${APP_HOME}
 ENV PI_WORKDIR=/workspace/doc_redaction
 # Fargate uses volume mounts under ${APP_HOME}/app/workspace (CDK chown entrypoint).
@@ -106,6 +105,13 @@ ENV FEEDBACK_LOGS_FOLDER=/tmp/pi-feedback/
 ENV PI_OFFLINE=1
 ENV PI_SKIP_VERSION_CHECK=1
 ENV PI_GRADIO_SHOW_EXAMPLES=true
+ENV PI_UI_HOST=0.0.0.0
+ENV PI_UI_PORT=7860
+ENV PI_GRADIO_PORT=7860
+ENV GRADIO_SERVER_NAME=0.0.0.0
+ENV GRADIO_SERVER_PORT=7860
+ENV GRADIO_ANALYTICS_ENABLED=False
+ENV RUN_FASTAPI=False
 
 WORKDIR ${PI_WORKDIR}
 

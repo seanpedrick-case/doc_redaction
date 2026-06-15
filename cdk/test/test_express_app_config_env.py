@@ -1,4 +1,4 @@
-"""Tests for loading config/config.env into Express container environment."""
+"""Tests for loading config/app_config.env into Express container environment."""
 
 import sys
 from pathlib import Path
@@ -10,7 +10,7 @@ from cdk_functions import load_app_config_env_for_express
 
 
 def test_load_app_config_env_for_express_reads_config_env():
-    config_path = CDK_DIR / "config" / "config.env"
+    config_path = CDK_DIR / "config" / "app_config.env"
     env_vars = load_app_config_env_for_express(str(config_path))
     names = {p.name for p in env_vars}
     assert "RUN_FASTAPI" in names

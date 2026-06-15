@@ -2863,7 +2863,15 @@ PI_ROOT_PATH = get_or_create_env_var("PI_ROOT_PATH", "")
 
 PI_UI_HOST = os.environ.get("PI_UI_HOST", "0.0.0.0")
 
-SHOW_THINKING = os.environ.get("PI_GRADIO_SHOW_THINKING", "false").lower() in {
+_thinking_default = (
+    "true"
+    if os.environ.get("PI_DEPLOYMENT_PROFILE", "local-docker").strip().lower()
+    == "hf-space"
+    else "false"
+)
+SHOW_THINKING = os.environ.get(
+    "PI_GRADIO_SHOW_THINKING", _thinking_default
+).lower() in {
     "1",
     "true",
     "yes",

@@ -5,7 +5,18 @@ from typing import Any, Dict, FrozenSet, List, Optional, Tuple, Union
 
 import boto3
 import pandas as pd
-from aws_cdk import App, CfnOutput, CfnTag, Duration, Fn, RemovalPolicy, Tags
+from aws_cdk import (
+    App,
+    CfnOutput,
+    CfnTag,
+    CustomResource,
+    Duration,
+    Fn,
+    RemovalPolicy,
+    Stack,
+    Tags,
+)
+from aws_cdk import aws_codebuild as codebuild
 from aws_cdk import aws_cognito as cognito
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecs as ecs
@@ -21,20 +32,25 @@ from aws_cdk import aws_wafv2 as wafv2
 from aws_cdk import custom_resources as cr
 from botocore.exceptions import ClientError, NoCredentialsError
 from cdk_config import (
+    ACCESS_LOG_DYNAMODB_TABLE_NAME,
+    APP_CONFIG_ENV_BASENAME,
     AWS_REGION,
+    ECS_AVAILABILITY_ZONE_REBALANCING,
     ENABLE_RESOURCE_DELETE_PROTECTION,
+    FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
     NAT_GATEWAY_EIP_NAME,
-    POLICY_FILE_LOCATIONS,
     PRIVATE_SUBNET_AVAILABILITY_ZONES,
     PRIVATE_SUBNET_CIDR_BLOCKS,
     PRIVATE_SUBNETS_TO_USE,
     PUBLIC_SUBNET_AVAILABILITY_ZONES,
     PUBLIC_SUBNET_CIDR_BLOCKS,
     PUBLIC_SUBNETS_TO_USE,
+    S3_LOG_CONFIG_BUCKET_NAME,
     S3_OUTPUT_BUCKET_NAME,
+    USAGE_LOG_DYNAMODB_TABLE_NAME,
 )
 from constructs import Construct
-from dotenv import dotenv_values
+from dotenv import dotenv_values, set_key
 
 # CDK CLI stores lookup-provider results under these key prefixes in cdk.context.json.
 _CDK_LOOKUP_CONTEXT_PREFIXES = (
@@ -46,6 +62,14 @@ _CDK_LOOKUP_CONTEXT_PREFIXES = (
     "key-provider:",
     "ami:",
 )
+
+
+def _ensure_folder_exists(output_folder: str) -> None:
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder, exist_ok=True)
+        print(f"Created the {output_folder} folder.")
+    else:
+        print(f"The {output_folder} folder already exists.")
 
 
 def is_resource_delete_protection_enabled() -> bool:
@@ -62,6 +86,15 @@ def resource_deletion_protection_flag() -> bool:
     return is_resource_delete_protection_enabled()
 
 
+def ecs_availability_zone_rebalancing(
+    setting: str,
+) -> ecs.AvailabilityZoneRebalancing:
+    """Map ``ECS_AVAILABILITY_ZONE_REBALANCING`` env value to the CDK enum."""
+    if setting == "ENABLED":
+        return ecs.AvailabilityZoneRebalancing.ENABLED
+    return ecs.AvailabilityZoneRebalancing.DISABLED
+
+
 def managed_resource_removal_policy() -> RemovalPolicy:
     """Removal policy for CDK-managed resources without a native deletion_protection flag."""
     return (
@@ -73,6 +106,11 @@ def managed_resource_removal_policy() -> RemovalPolicy:
 
 def s3_auto_delete_objects_on_stack_destroy() -> bool:
     """Empty S3 buckets automatically when the stack is destroyed (dev/teardown only)."""
+    return not is_resource_delete_protection_enabled()
+
+
+def ecr_empty_on_delete() -> bool:
+    """Force-delete ECR images when the repository is removed on stack destroy."""
     return not is_resource_delete_protection_enabled()
 
 
@@ -281,8 +319,38 @@ if PRIVATE_SUBNET_AVAILABILITY_ZONES:
         "PRIVATE_SUBNET_AVAILABILITY_ZONES"
     )
 
-if POLICY_FILE_LOCATIONS:
-    POLICY_FILE_LOCATIONS = _get_env_list(POLICY_FILE_LOCATIONS)
+
+def resolve_policy_file_paths(
+    paths: List[str],
+    *,
+    cdk_folder: str = "",
+) -> List[str]:
+    """Resolve JSON policy paths relative to ``CDK_FOLDER`` when not absolute."""
+    resolved: List[str] = []
+    base = (cdk_folder or "").strip().rstrip("/\\")
+    for raw in paths:
+        path = (raw or "").strip()
+        if not path:
+            continue
+        if os.path.isabs(path):
+            resolved.append(os.path.normpath(path))
+        elif base:
+            resolved.append(os.path.normpath(os.path.join(base, path)))
+        else:
+            resolved.append(os.path.normpath(path))
+    return resolved
+
+
+def attach_managed_policy_arns(role: iam.IRole, policy_arns: List[str]) -> None:
+    """Attach existing customer-managed policies by full ARN."""
+    for arn in policy_arns:
+        arn = (arn or "").strip()
+        if not arn:
+            continue
+        role.add_managed_policy(
+            iam.ManagedPolicy.from_managed_policy_arn(role, arn, arn)
+        )
+        print(f"Attached managed policy ARN to {role.node.id}: {arn}")
 
 
 def check_for_existing_role(role_name: str):
@@ -303,10 +371,6 @@ def check_for_existing_role(role_name: str):
 
 
 from typing import List
-
-# Assume POLICY_FILE_LOCATIONS is defined globally or passed as a default
-# For example:
-# POLICY_FILE_LOCATIONS = ["./policies/my_read_policy.json", "./policies/my_write_policy.json"]
 
 
 def add_statement_to_policy(role: iam.IRole, policy_document: Dict[str, Any]):
@@ -335,6 +399,273 @@ def add_statement_to_policy(role: iam.IRole, policy_document: Dict[str, Any]):
         except Exception as e:
             print(
                 f"Warning: Could not process policy statement: {statement_dict}. Error: {e}"
+            )
+
+
+def vpc_endpoint_aws_service_name(service_suffix: str, region: str) -> str:
+    """Full EC2 ``ServiceName`` for a VPC endpoint (matches describe_vpc_endpoints)."""
+    return f"com.amazonaws.{region}.{service_suffix}"
+
+
+def list_existing_vpc_endpoint_service_names(
+    vpc_id: str,
+    *,
+    region_name: Optional[str] = None,
+) -> FrozenSet[str]:
+    """Return AWS service names for non-deleted VPC endpoints in the given VPC."""
+    ec2_client = boto3.client("ec2", region_name=region_name)
+    service_names: set[str] = set()
+    paginator = ec2_client.get_paginator("describe_vpc_endpoints")
+    for page in paginator.paginate(
+        Filters=[{"Name": "vpc-id", "Values": [vpc_id]}],
+    ):
+        for endpoint in page.get("VpcEndpoints", []):
+            state = endpoint.get("State")
+            if state in ("available", "pending", "pendingAcceptance"):
+                service_name = endpoint.get("ServiceName")
+                if service_name:
+                    service_names.add(service_name)
+    return frozenset(service_names)
+
+
+def resolve_ecs_vpc_endpoint_subnet_selection(
+    *,
+    use_express_ingress: bool,
+    express_use_public_subnets: bool,
+    public_subnets: List[ec2.ISubnet],
+    private_subnets: List[ec2.ISubnet],
+) -> Optional[ec2.SubnetSelection]:
+    """
+    Choose subnets for ECS-related **interface** VPC endpoints.
+
+    Interface ENIs must sit in the same subnets ECS tasks use. Express Mode with
+    ``ECS_EXPRESS_USE_PUBLIC_SUBNETS=True`` runs tasks in public subnets; legacy
+    Fargate and Express-on-private use private. S3 gateway routes use
+    ``resolve_ecs_s3_gateway_subnet_selection`` instead.
+    """
+    if use_express_ingress:
+        if express_use_public_subnets:
+            if not public_subnets:
+                return None
+            return ec2.SubnetSelection(subnets=public_subnets)
+        if not private_subnets:
+            return None
+        return ec2.SubnetSelection(subnets=private_subnets)
+    if private_subnets:
+        return ec2.SubnetSelection(subnets=private_subnets)
+    if public_subnets:
+        return ec2.SubnetSelection(subnets=public_subnets)
+    return None
+
+
+def resolve_ecs_s3_gateway_subnet_selection(
+    *,
+    public_subnets: List[ec2.ISubnet],
+    private_subnets: List[ec2.ISubnet],
+) -> Optional[ec2.SubnetSelection]:
+    """
+    All stack-managed subnets for the S3 **gateway** endpoint.
+
+    Gateway endpoints attach to route tables; every public and private subnet the
+    stack imports or creates should get the S3 prefix-list route, not only the ECS
+    task tier.
+    """
+    all_subnets: List[ec2.ISubnet] = []
+    seen_subnet_ids: set[str] = set()
+    for subnet in public_subnets + private_subnets:
+        subnet_id = subnet.subnet_id
+        if subnet_id in seen_subnet_ids:
+            continue
+        seen_subnet_ids.add(subnet_id)
+        all_subnets.append(subnet)
+    if not all_subnets:
+        return None
+    return ec2.SubnetSelection(subnets=all_subnets)
+
+
+def list_vpc_associated_cidr_blocks(vpc: dict) -> List[str]:
+    """All associated IPv4 CIDR blocks for a VPC (primary and secondary)."""
+    cidrs: List[str] = []
+    seen: set[str] = set()
+    for assoc in vpc.get("CidrBlockAssociationSet") or []:
+        state = (assoc.get("CidrBlockState") or {}).get("State")
+        if state and state != "associated":
+            continue
+        cidr = assoc.get("CidrBlock")
+        if cidr and cidr not in seen:
+            seen.add(cidr)
+            cidrs.append(cidr)
+    primary = vpc.get("CidrBlock")
+    if primary and primary not in seen:
+        cidrs.insert(0, primary)
+    return cidrs
+
+
+def resolve_vpc_endpoint_ingress_cidr_blocks(
+    *,
+    vpc_cidr_block: Optional[str] = None,
+    vpc_cidr_blocks: Optional[List[str]] = None,
+    fallback_vpc_cidr: Optional[str] = None,
+) -> List[str]:
+    """CIDR list for VPC endpoint SG ingress (deduplicated, stable order)."""
+    resolved: List[str] = []
+    seen: set[str] = set()
+    for cidr in vpc_cidr_blocks or []:
+        if cidr and cidr not in seen:
+            seen.add(cidr)
+            resolved.append(cidr)
+    if not resolved:
+        single = vpc_cidr_block or fallback_vpc_cidr
+        if single:
+            resolved = [single]
+    return resolved
+
+
+def add_vpc_endpoint_https_ingress_from_vpc_cidrs(
+    endpoint_sg: ec2.SecurityGroup,
+    *,
+    vpc_cidr_block: Optional[str] = None,
+    vpc_cidr_blocks: Optional[List[str]] = None,
+    fallback_vpc_cidr: Optional[str] = None,
+) -> None:
+    """Allow HTTPS from every CIDR associated with the VPC."""
+    cidrs = resolve_vpc_endpoint_ingress_cidr_blocks(
+        vpc_cidr_block=vpc_cidr_block,
+        vpc_cidr_blocks=vpc_cidr_blocks,
+        fallback_vpc_cidr=fallback_vpc_cidr,
+    )
+    if not cidrs:
+        raise ValueError(
+            "VPC CIDR block(s) are required for the VPC endpoint security group. "
+            "Re-run check_resources.py so vpc_cidr_blocks is stored in precheck context."
+        )
+    for cidr in cidrs:
+        endpoint_sg.add_ingress_rule(
+            peer=ec2.Peer.ipv4(cidr),
+            connection=ec2.Port.tcp(443),
+            description=(
+                "HTTPS from VPC workloads"
+                if len(cidrs) == 1
+                else f"HTTPS from VPC workloads ({cidr})"
+            ),
+        )
+
+
+def create_ecs_vpc_endpoints_for_private_subnets(
+    scope: Construct,
+    *,
+    vpc: ec2.IVpc,
+    subnets: Optional[ec2.SubnetSelection],
+    logical_id_prefix: str = "Ecs",
+    include_secrets_and_kms: bool = True,
+    vpc_cidr_block: Optional[str] = None,
+    vpc_cidr_blocks: Optional[List[str]] = None,
+    skip_service_names: Optional[FrozenSet[str]] = None,
+    aws_region: str,
+    s3_gateway_subnets: Optional[ec2.SubnetSelection] = None,
+) -> None:
+    """
+    Interface and S3 gateway VPC endpoints for ECS workloads.
+
+    Interface endpoints use ``subnets`` (ECS task tier). The S3 gateway uses
+    ``s3_gateway_subnets`` when provided, otherwise ``subnets``. Without
+    ``ecr.api`` / ``ecr.dkr`` endpoints (or a working NAT path), tasks fail with
+    ``GetAuthorizationToken`` timeouts.
+
+    ``skip_service_names`` should list full AWS endpoint service names already present
+    in the VPC (from pre-check) so shared VPCs do not fail on duplicate private DNS.
+    """
+    s3_subnets = s3_gateway_subnets or subnets
+    if not subnets and not s3_subnets:
+        return
+    skip = skip_service_names or frozenset()
+
+    interface_services: List[Tuple[str, str, ec2.InterfaceVpcEndpointAwsService]] = [
+        ("EcrApi", "ecr.api", ec2.InterfaceVpcEndpointAwsService.ECR),
+        ("EcrDkr", "ecr.dkr", ec2.InterfaceVpcEndpointAwsService.ECR_DOCKER),
+        ("CloudWatchLogs", "logs", ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS),
+    ]
+    if include_secrets_and_kms:
+        interface_services.extend(
+            [
+                (
+                    "SecretsManager",
+                    "secretsmanager",
+                    ec2.InterfaceVpcEndpointAwsService.SECRETS_MANAGER,
+                ),
+                ("Kms", "kms", ec2.InterfaceVpcEndpointAwsService.KMS),
+            ]
+        )
+
+    interface_services_to_create = []
+    for suffix, service_suffix, service in interface_services:
+        service_name = vpc_endpoint_aws_service_name(service_suffix, aws_region)
+        if service_name in skip:
+            print(
+                f"Skipping {logical_id_prefix}{suffix}Endpoint "
+                f"({service_name} already exists in this VPC)."
+            )
+            continue
+        interface_services_to_create.append((suffix, service))
+
+    s3_service_name = vpc_endpoint_aws_service_name("s3", aws_region)
+    s3_service = ec2.GatewayVpcEndpointAwsService.S3
+    create_s3_gateway = s3_service_name not in skip
+    if not create_s3_gateway:
+        print(
+            f"Skipping {logical_id_prefix}S3GatewayEndpoint "
+            f"({s3_service_name} already exists in this VPC)."
+        )
+
+    if not interface_services_to_create and not create_s3_gateway:
+        print(
+            "All ECS-related VPC endpoints already exist in this VPC; "
+            "nothing to create."
+        )
+        return
+
+    endpoint_sg = None
+    if interface_services_to_create and subnets:
+        endpoint_sg = ec2.SecurityGroup(
+            scope,
+            f"{logical_id_prefix}VpcEndpointSecurityGroup",
+            vpc=vpc,
+            description="HTTPS ingress for ECS-related VPC interface endpoints",
+            allow_all_outbound=True,
+        )
+        add_vpc_endpoint_https_ingress_from_vpc_cidrs(
+            endpoint_sg,
+            vpc_cidr_block=vpc_cidr_block,
+            vpc_cidr_blocks=vpc_cidr_blocks,
+            fallback_vpc_cidr=vpc.vpc_cidr_block,
+        )
+
+    if subnets:
+        for suffix, service in interface_services_to_create:
+            vpc.add_interface_endpoint(
+                f"{logical_id_prefix}{suffix}Endpoint",
+                service=service,
+                subnets=subnets,
+                security_groups=[endpoint_sg],
+                private_dns_enabled=True,
+            )
+    elif interface_services_to_create:
+        print(
+            "Skipping ECS interface VPC endpoints: no task-tier subnet selection "
+            "was provided."
+        )
+
+    if create_s3_gateway and s3_subnets:
+        try:
+            vpc.add_gateway_endpoint(
+                f"{logical_id_prefix}S3GatewayEndpoint",
+                service=s3_service,
+                subnets=[s3_subnets],
+            )
+        except Exception as exc:
+            print(
+                "Note: could not add S3 gateway VPC endpoint (one may already exist on "
+                f"this VPC): {exc}"
             )
 
 
@@ -484,6 +815,85 @@ def check_s3_bucket_exists(
         raise  # Re-raise the original exception
 
 
+def default_secrets_manager_kms_key_arn(region: str, account_id: str) -> str:
+    """AWS managed CMK alias used by Secrets Manager when no customer key is set."""
+    return f"arn:aws:kms:{region}:{account_id}:key/aws/secretsmanager"
+
+
+def get_secret_kms_key_arn(
+    secret_id: str,
+    *,
+    region_name: Optional[str] = None,
+) -> Optional[str]:
+    """Return the KMS key ARN that encrypts a Secrets Manager secret."""
+    client = boto3.client("secretsmanager", region_name=region_name)
+    try:
+        description = client.describe_secret(SecretId=secret_id)
+    except Exception as exc:
+        print(f"Warning: could not describe secret for KMS key: {exc}")
+        return None
+    kms_key_id = description.get("KmsKeyId")
+    if not kms_key_id:
+        return None
+    if str(kms_key_id).startswith("arn:"):
+        return str(kms_key_id)
+    region = region_name or AWS_REGION
+    account_id = (
+        description.get("OwningAccount")
+        or boto3.client("sts", region_name=region).get_caller_identity()["Account"]
+    )
+    return f"arn:aws:kms:{region}:{account_id}:key/{kms_key_id}"
+
+
+def build_ecs_task_role_kms_policy(
+    *,
+    shared_kms_key_arn: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Task role: shared CMK for S3 bucket encryption (when USE_CUSTOM_KMS_KEY=1)."""
+    statements: List[Dict[str, Any]] = [
+        {
+            "Sid": "STSCallerIdentity",
+            "Effect": "Allow",
+            "Action": ["sts:GetCallerIdentity"],
+            "Resource": "*",
+        },
+    ]
+    if shared_kms_key_arn:
+        statements.append(
+            {
+                "Sid": "KMSS3Access",
+                "Effect": "Allow",
+                "Action": ["kms:Encrypt", "kms:Decrypt", "kms:GenerateDataKey"],
+                "Resource": shared_kms_key_arn,
+            }
+        )
+    return {"Version": "2012-10-17", "Statement": statements}
+
+
+def build_ecs_execution_role_kms_policy(
+    *,
+    secret_kms_key_arn: str,
+) -> Dict[str, Any]:
+    """Execution role: decrypt the CMK that encrypts the Cognito secret only."""
+    return {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Sid": "STSCallerIdentity",
+                "Effect": "Allow",
+                "Action": ["sts:GetCallerIdentity"],
+                "Resource": "*",
+            },
+            {
+                "Sid": "KMSSecretDecrypt",
+                "Effect": "Allow",
+                "Action": ["kms:Decrypt"],
+                "Resource": secret_kms_key_arn,
+            },
+        ],
+    }
+
+
 # Example usage in your check_resources.py:
 # exists, bucket_name_if_exists = check_s3_bucket_exists(log_bucket_name)
 # context_data[f"exists:{log_bucket_name}"] = exists
@@ -621,9 +1031,52 @@ def check_codebuild_project_exists(
         raise  # Re-raise the original exception
 
 
-def get_vpc_id_by_name(vpc_name: str) -> Optional[str]:
+def public_github_repository_url(owner: str, repo: str) -> str:
+    """HTTPS clone URL for a public GitHub repository."""
+    owner_clean = owner.strip().strip("/")
+    repo_clean = repo.strip().strip("/")
+    return f"https://github.com/{owner_clean}/{repo_clean}.git"
+
+
+def public_github_codebuild_source(
+    owner: str,
+    repo: str,
+    branch_or_ref: str,
+) -> codebuild.ISource:
+    """CodeBuild source for a public GitHub repo (no CodeConnections/OAuth)."""
+    return codebuild.Source.git_hub(
+        owner=owner,
+        repo=repo,
+        branch_or_ref=branch_or_ref,
+        webhook=False,
+        report_build_status=False,
+    )
+
+
+def configure_public_github_codebuild_source(
+    project: codebuild.Project,
+    owner: str,
+    repo: str,
+) -> None:
+    """Ensure CodeBuild clones a public repo without account-level GitHub credentials."""
+    cfn = project.node.default_child
+    if not isinstance(cfn, codebuild.CfnProject):
+        return
+    cfn.add_property_deletion_override("Source.Auth")
+    cfn.add_property_override(
+        "Source.Location", public_github_repository_url(owner, repo)
+    )
+    cfn.add_property_override("Source.ReportBuildStatus", False)
+    cfn.add_property_override("Triggers.Webhook", False)
+
+
+def get_vpc_id_by_name(vpc_name: str):
     """
     Finds a VPC ID by its 'Name' tag.
+
+    Returns ``(vpc_id, nat_gateways, vpc_cidr_block, vpc_cidr_blocks)`` or ``None``
+    if not found. ``vpc_cidr_block`` is the primary block; ``vpc_cidr_blocks`` lists
+    every associated IPv4 CIDR (primary + secondary).
     """
     ec2_client = boto3.client("ec2")
     try:
@@ -631,8 +1084,17 @@ def get_vpc_id_by_name(vpc_name: str) -> Optional[str]:
             Filters=[{"Name": "tag:Name", "Values": [vpc_name]}]
         )
         if response and response["Vpcs"]:
-            vpc_id = response["Vpcs"][0]["VpcId"]
-            print(f"VPC '{vpc_name}' found with ID: {vpc_id}")
+            vpc = response["Vpcs"][0]
+            vpc_id = vpc["VpcId"]
+            vpc_cidr_block = vpc.get("CidrBlock")
+            vpc_cidr_blocks = list_vpc_associated_cidr_blocks(vpc)
+            cidr_summary = (
+                ", ".join(vpc_cidr_blocks) if vpc_cidr_blocks else vpc_cidr_block
+            )
+            print(
+                f"VPC '{vpc_name}' found with ID: {vpc_id}"
+                + (f", CIDR(s): {cidr_summary}" if cidr_summary else "")
+            )
 
             # In get_vpc_id_by_name, after finding VPC ID:
 
@@ -656,7 +1118,7 @@ def get_vpc_id_by_name(vpc_name: str) -> Optional[str]:
 
             # Decide how to identify the specific NAT Gateway you want to check for.
 
-            return vpc_id, nat_gateways
+            return vpc_id, nat_gateways, vpc_cidr_block, vpc_cidr_blocks
         else:
             print(f"VPC '{vpc_name}' not found.")
             return None
@@ -1314,15 +1776,16 @@ def check_for_secret(secret_name: str, secret_value: dict = ""):
         secret_value: A dictionary containing the key-value pairs for the secret.
 
     Returns:
-        True if the secret existed or was created, False otherwise (due to other errors).
+        Tuple of (exists, response). When exists is True, response is the
+        ``get_secret_value`` API dict (includes ``ARN`` for IAM grants).
     """
     secretsmanager_client = boto3.client("secretsmanager")
 
     try:
         # Try to get the secret. If it doesn't exist, a ResourceNotFoundException will be raised.
-        secret_value = secretsmanager_client.get_secret_value(SecretId=secret_name)
+        secret_response = secretsmanager_client.get_secret_value(SecretId=secret_name)
         print("Secret already exists.")
-        return True, secret_value
+        return True, secret_response
     except secretsmanager_client.exceptions.ResourceNotFoundException:
         print("Secret not found")
         return False, {}
@@ -1857,7 +2320,7 @@ def create_ecs_express_infrastructure_role(
     )
     role.add_managed_policy(
         iam.ManagedPolicy.from_aws_managed_policy_name(
-            "AmazonECSInfrastructureRoleforExpressGatewayServices"
+            "service-role/AmazonECSInfrastructureRoleforExpressGatewayServices"
         )
     )
     return role
@@ -1867,22 +2330,122 @@ def _secret_value_from_arn(secret_arn: str, json_key: str) -> str:
     return f"{secret_arn}:{json_key}::"
 
 
+def express_ingress_listener_arn(
+    express_service: ecs.CfnExpressGatewayService,
+) -> str:
+    return express_service.attr_ecs_managed_resource_arns_ingress_path_listener_arn
+
+
+def express_ingress_load_balancer_arn(
+    express_service: ecs.CfnExpressGatewayService,
+) -> str:
+    return express_service.attr_ecs_managed_resource_arns_ingress_path_load_balancer_arn
+
+
+def express_ingress_first_target_group_arn(
+    express_service: ecs.CfnExpressGatewayService,
+) -> str:
+    """First target group ARN; use typed list attr (get_att returns a scalar Reference)."""
+    return Fn.select(
+        0,
+        express_service.attr_ecs_managed_resource_arns_ingress_path_target_group_arns,
+    )
+
+
+def express_ingress_first_load_balancer_security_group_arn(
+    express_service: ecs.CfnExpressGatewayService,
+) -> str:
+    """First Express-managed ALB security group ARN."""
+    return Fn.select(
+        0,
+        express_service.attr_ecs_managed_resource_arns_ingress_path_load_balancer_security_groups,
+    )
+
+
+def _security_group_id_from_arn(security_group_arn: str) -> str:
+    """EC2 APIs expect sg- IDs; Express managed-resource attrs return full ARNs."""
+    return Fn.select(1, Fn.split("security-group/", security_group_arn))
+
+
+def express_ingress_first_load_balancer_security_group(
+    express_service: ecs.CfnExpressGatewayService,
+) -> str:
+    """First ALB security group ID (sg-...) for EC2/ELB imports."""
+    return _security_group_id_from_arn(
+        express_ingress_first_load_balancer_security_group_arn(express_service)
+    )
+
+
 # Injected via Express `secrets`, not plain environment (avoid duplication/leakage).
 _EXPRESS_SECRET_ENV_NAMES = frozenset(
     {"AWS_USER_POOL_ID", "AWS_CLIENT_ID", "AWS_CLIENT_SECRET"}
 )
 
 
+def create_basic_config_env(
+    out_dir: str = "config",
+    s3_log_config_bucket_name: str = S3_LOG_CONFIG_BUCKET_NAME,
+    s3_output_bucket_name: str = S3_OUTPUT_BUCKET_NAME,
+    access_log_dynamodb_table_name: str = ACCESS_LOG_DYNAMODB_TABLE_NAME,
+    feedback_log_dynamodb_table_name: str = FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
+    usage_log_dynamodb_table_name: str = USAGE_LOG_DYNAMODB_TABLE_NAME,
+    *,
+    headless: bool = False,
+    alb_cognito: bool = False,
+    pi_express_backend: bool = False,
+):
+    """
+    Create a basic app_config.env file for the deployed redaction app.
+
+    ``alb_cognito=True`` disables in-app Gradio Cognito login when the ALB
+    ``authenticate-cognito`` action already protects the service (Express Mode).
+
+    ``pi_express_backend=True`` disables in-app login on the main redaction app when
+    Pi Express calls it over Service Connect (users authenticate on the Pi UI only).
+    """
+    variables = {
+        "COGNITO_AUTH": (
+            "False" if headless or alb_cognito or pi_express_backend else "True"
+        ),
+        "RUN_AWS_FUNCTIONS": "True",
+        "DISPLAY_FILE_NAMES_IN_LOGS": "False",
+        "SESSION_OUTPUT_FOLDER": "True",
+        "SAVE_LOGS_TO_DYNAMODB": "True",
+        "SHOW_COSTS": "True",
+        "SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS": "True",
+        "LOAD_PREVIOUS_TEXTRACT_JOBS_S3": "True",
+        "DOCUMENT_REDACTION_BUCKET": s3_log_config_bucket_name,
+        "TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET": s3_output_bucket_name,
+        "ACCESS_LOG_DYNAMODB_TABLE_NAME": access_log_dynamodb_table_name,
+        "FEEDBACK_LOG_DYNAMODB_TABLE_NAME": feedback_log_dynamodb_table_name,
+        "USAGE_LOG_DYNAMODB_TABLE_NAME": usage_log_dynamodb_table_name,
+    }
+
+    _ensure_folder_exists(out_dir + "/")
+    env_file_path = os.path.abspath(os.path.join(out_dir, APP_CONFIG_ENV_BASENAME))
+
+    if not os.path.exists(env_file_path):
+        with open(env_file_path, "w", encoding="utf-8"):
+            pass
+
+    for key, value in variables.items():
+        set_key(env_file_path, key, str(value), quote_mode="never")
+
+    return variables
+
+
 def load_app_config_env_for_express(
     config_env_path: str,
     *,
     exclude_names: Optional[FrozenSet[str]] = None,
+    overrides: Optional[Dict[str, str]] = None,
 ) -> List[ecs.CfnExpressGatewayService.KeyValuePairProperty]:
     """
-    Load KEY=VALUE pairs from config/config.env for Express PrimaryContainer.environment.
+    Load KEY=VALUE pairs from config/app_config.env for Express PrimaryContainer.environment.
 
     Uses the same file written by create_basic_config_env() and uploaded to S3 on the
-    legacy Fargate path (environmentFiles).
+    legacy Fargate path (environmentFiles). ``overrides`` replace keys after loading
+    (e.g. ``COGNITO_AUTH=False`` when ALB handles Cognito).
     """
     exclude = exclude_names or _EXPRESS_SECRET_ENV_NAMES
     path = os.path.abspath(config_env_path)
@@ -1893,7 +2456,9 @@ def load_app_config_env_for_express(
         )
         return []
 
-    raw = dotenv_values(path)
+    raw = dict(dotenv_values(path))
+    if overrides:
+        raw.update(overrides)
     environment: List[ecs.CfnExpressGatewayService.KeyValuePairProperty] = []
     for name, value in sorted(raw.items()):
         if not name or value is None or name in exclude:
@@ -1926,9 +2491,8 @@ def build_express_gateway_primary_container(
         image=image_uri,
         container_port=container_port,
         aws_logs_configuration=ecs.CfnExpressGatewayService.ExpressGatewayServiceAwsLogsConfigurationProperty(
-            log_group_name=log_group_name,
+            log_group=log_group_name,
             log_stream_prefix="ecs",
-            region=aws_region,
         ),
         environment=environment or None,
         secrets=[
@@ -1950,6 +2514,19 @@ def build_express_gateway_primary_container(
     )
 
 
+def express_gateway_idle_scaling_target(
+    *,
+    max_task_count: int = 1,
+) -> ecs.CfnExpressGatewayService.ExpressGatewayScalingTargetProperty:
+    """Defer running tasks until post-deploy image build (legacy Fargate uses desired_count=0)."""
+    return ecs.CfnExpressGatewayService.ExpressGatewayScalingTargetProperty(
+        min_task_count=0,
+        max_task_count=max_task_count,
+        auto_scaling_metric="AVERAGE_CPU",
+        auto_scaling_target_value=60,
+    )
+
+
 def create_express_gateway_service(
     scope: Construct,
     logical_id: str,
@@ -1965,6 +2542,9 @@ def create_express_gateway_service(
     primary_container: ecs.CfnExpressGatewayService.ExpressGatewayContainerProperty,
     subnet_ids: List[str],
     security_group_ids: List[str],
+    scaling_target: Optional[
+        ecs.CfnExpressGatewayService.ExpressGatewayScalingTargetProperty
+    ] = None,
 ) -> ecs.CfnExpressGatewayService:
     network = None
     if subnet_ids or security_group_ids:
@@ -1985,6 +2565,7 @@ def create_express_gateway_service(
         health_check_path=health_check_path,
         primary_container=primary_container,
         network_configuration=network,
+        scaling_target=scaling_target or express_gateway_idle_scaling_target(),
     )
     return express_service
 
@@ -2006,6 +2587,33 @@ def _forward_target_group_action(
             "DurationSeconds": stickiness_seconds,
         }
     return action
+
+
+def elbv2_cognito_auth_custom_resource_policy() -> cr.AwsCustomResourcePolicy:
+    """
+    IAM policy for AwsCustomResource calls that configure authenticate-cognito on ALB.
+
+    ELB validates the user pool client during modifyListener/createRule; the caller
+    (the custom-resource Lambda) needs cognito-idp:DescribeUserPoolClient.
+    """
+    return cr.AwsCustomResourcePolicy.from_statements(
+        [
+            iam.PolicyStatement(
+                actions=[
+                    "elasticloadbalancing:DescribeRules",
+                    "elasticloadbalancing:ModifyListener",
+                    "elasticloadbalancing:CreateRule",
+                    "elasticloadbalancing:ModifyRule",
+                    "elasticloadbalancing:DeleteRule",
+                ],
+                resources=["*"],
+            ),
+            iam.PolicyStatement(
+                actions=["cognito-idp:DescribeUserPoolClient"],
+                resources=["*"],
+            ),
+        ]
+    )
 
 
 def build_cognito_default_listener_actions(
@@ -2046,18 +2654,18 @@ def configure_express_listener_cognito_and_cloudfront(
     use_cloudfront: bool,
     cloudfront_host_header: str,
     stickiness_seconds: int = 28800,
+    allow_cloudfront_origin_without_cognito: bool = False,
 ) -> None:
     """
-    Attach Cognito auth to the Express-managed HTTPS listener and optionally add a
-    CloudFront host-header rule (same pattern as the legacy HTTP listener path).
+    Attach Cognito auth to the Express-managed HTTPS listener.
+
+    By default, **no** forward-only host-header rules are added. CloudFront (and all
+    other) traffic uses the listener default action: ``authenticate-cognito`` then
+    forward. Set ``allow_cloudfront_origin_without_cognito=True`` only when the ALB
+    must accept CloudFront origin requests without a Cognito session (legacy pattern).
     """
-    listener_arn = express_service.get_att(
-        "ECSManagedResourceArns.IngressPath.ListenerArn"
-    ).to_string()
-    target_group_arn = Fn.select(
-        0,
-        express_service.get_att("ECSManagedResourceArns.IngressPath.TargetGroupArns"),
-    )
+    listener_arn = express_ingress_listener_arn(express_service)
+    target_group_arn = express_ingress_first_target_group_arn(express_service)
     default_actions = build_cognito_default_listener_actions(
         user_pool_arn=user_pool_arn,
         user_pool_client_id=user_pool_client_id,
@@ -2090,13 +2698,15 @@ def configure_express_listener_cognito_and_cloudfront(
                 f"express-listener-cognito-{logical_id_prefix}"
             ),
         ),
-        policy=cr.AwsCustomResourcePolicy.from_sdk_calls(
-            resources=cr.AwsCustomResourcePolicy.ANY_RESOURCE
-        ),
+        policy=elbv2_cognito_auth_custom_resource_policy(),
     )
     modify_listener.node.add_dependency(express_service)
 
-    if use_cloudfront and cloudfront_host_header:
+    if (
+        use_cloudfront
+        and cloudfront_host_header
+        and allow_cloudfront_origin_without_cognito
+    ):
         forward_only = [
             {
                 "Type": "forward",
@@ -2110,37 +2720,20 @@ def configure_express_listener_cognito_and_cloudfront(
                 },
             }
         ]
-        cf_rule = cr.AwsCustomResource(
+        _elbv2_listener_rule_custom_resource(
             scope,
             f"{logical_id_prefix}ExpressCloudFrontHostRule",
-            on_create=cr.AwsSdkCall(
-                service="ELBv2",
-                action="createRule",
-                parameters={
-                    "ListenerArn": listener_arn,
-                    "Priority": 1,
-                    "Conditions": [
-                        {
-                            "Field": "host-header",
-                            "HostHeaderConfig": {"Values": [cloudfront_host_header]},
-                        }
-                    ],
-                    "Actions": forward_only,
-                },
-                physical_resource_id=cr.PhysicalResourceId.from_response(
-                    "Rules[0].RuleArn"
-                ),
-            ),
-            on_delete=cr.AwsSdkCall(
-                service="ELBv2",
-                action="deleteRule",
-                parameters={"RuleArn": cr.PhysicalResourceId.reference()},
-            ),
-            policy=cr.AwsCustomResourcePolicy.from_sdk_calls(
-                resources=cr.AwsCustomResourcePolicy.ANY_RESOURCE
-            ),
+            listener_arn=listener_arn,
+            priority=1,
+            conditions=[
+                {
+                    "Field": "host-header",
+                    "HostHeaderConfig": {"Values": [cloudfront_host_header]},
+                }
+            ],
+            rule_actions=forward_only,
+            dependencies=[modify_listener],
         )
-        cf_rule.node.add_dependency(modify_listener)
 
 
 def allow_express_load_balancer_to_ecs_security_group(
@@ -2152,12 +2745,7 @@ def allow_express_load_balancer_to_ecs_security_group(
     container_port: int,
 ) -> None:
     """Allow traffic from the Express-managed ALB security group to the task SG."""
-    lb_sg_arn = Fn.select(
-        0,
-        express_service.get_att(
-            "ECSManagedResourceArns.IngressPath.LoadBalancerSecurityGroups"
-        ),
-    )
+    lb_sg_id = express_ingress_first_load_balancer_security_group(express_service)
     ec2.CfnSecurityGroupIngress(
         scope,
         logical_id,
@@ -2165,7 +2753,7 @@ def allow_express_load_balancer_to_ecs_security_group(
         ip_protocol="tcp",
         from_port=container_port,
         to_port=container_port,
-        source_security_group_id=lb_sg_arn,
+        source_security_group_id=lb_sg_id,
         description="Express Mode ALB to ECS tasks",
     )
 
@@ -2225,6 +2813,12 @@ def pi_listener_rule_count(routing_mode: str) -> int:
     return count
 
 
+def format_express_pi_public_url(express_endpoint: str) -> str:
+    """Public Pi UI URL for a dedicated ECS Express managed HTTPS endpoint."""
+    base = (express_endpoint or "").strip().rstrip("/")
+    return f"{base}/" if base else ""
+
+
 def format_pi_public_urls(
     *,
     routing_mode: str,
@@ -2260,7 +2854,7 @@ def build_pi_express_container_environment(
     service_connect_discovery_name: str,
     main_app_port: Union[str, int],
     pi_gradio_port: Union[str, int],
-    pi_root_path: str = "",
+    cognito_auth: bool = True,
 ) -> Dict[str, str]:
     """Inline env for Pi on Express (no volume mounts; workspace under /tmp)."""
     port = int(main_app_port)
@@ -2282,10 +2876,10 @@ def build_pi_express_container_environment(
         "ACCESS_LOGS_FOLDER": "/tmp/pi-logs/",
         "USAGE_LOGS_FOLDER": "/tmp/pi-usage/",
         "FEEDBACK_LOGS_FOLDER": "/tmp/pi-feedback/",
-        "RUN_FASTAPI": "False",
-        "COGNITO_AUTH": "False",
+        "RUN_FASTAPI": "True",
+        "RUN_AWS_FUNCTIONS": "True",
+        "COGNITO_AUTH": "True" if cognito_auth else "False",
     }
-    _apply_pi_root_path_env(env, pi_root_path)
     return env
 
 
@@ -2296,21 +2890,125 @@ def build_express_pi_primary_container(
     log_group_name: str,
     aws_region: str,
     environment: Optional[Dict[str, str]] = None,
+    secret: Optional[secretsmanager.ISecret] = None,
+    cognito_auth: bool = True,
 ) -> ecs.CfnExpressGatewayService.ExpressGatewayContainerProperty:
-    """Express PrimaryContainer for Pi (no Secrets Manager; inline env only)."""
+    """Express PrimaryContainer for Pi (inline env; Cognito creds from Secrets Manager)."""
     env_pairs = (
         _dict_env_to_express_key_value_pairs(environment) if environment else None
     )
+    secrets: Optional[List[ecs.CfnExpressGatewayService.SecretProperty]] = None
+    if secret is not None and cognito_auth:
+        secret_arn = secret.secret_arn
+        secrets = [
+            ecs.CfnExpressGatewayService.SecretProperty(
+                name="AWS_USER_POOL_ID",
+                value_from=_secret_value_from_arn(secret_arn, "REDACTION_USER_POOL_ID"),
+            ),
+            ecs.CfnExpressGatewayService.SecretProperty(
+                name="AWS_CLIENT_ID",
+                value_from=_secret_value_from_arn(secret_arn, "REDACTION_CLIENT_ID"),
+            ),
+            ecs.CfnExpressGatewayService.SecretProperty(
+                name="AWS_CLIENT_SECRET",
+                value_from=_secret_value_from_arn(
+                    secret_arn, "REDACTION_CLIENT_SECRET"
+                ),
+            ),
+        ]
     return ecs.CfnExpressGatewayService.ExpressGatewayContainerProperty(
         image=image_uri,
         container_port=container_port,
         aws_logs_configuration=ecs.CfnExpressGatewayService.ExpressGatewayServiceAwsLogsConfigurationProperty(
-            log_group_name=log_group_name,
+            log_group=log_group_name,
             log_stream_prefix="ecs-pi",
-            region=aws_region,
         ),
         environment=env_pairs,
+        secrets=secrets,
     )
+
+
+_ELBV2_RULE_DELETE_IGNORE = (
+    ".*(not a valid listener rule ARN|RuleNotFound|ResourceNotFound|ValidationError).*"
+)
+_ELBV2_LISTENER_RULE_UPSERT_PROVIDER_ID = "Elbv2ListenerRuleUpsertProvider"
+
+
+def _elbv2_listener_rule_upsert_provider(scope: Construct) -> cr.Provider:
+    """Shared Provider for upserting ALB listener rules (one Lambda per stack)."""
+    stack = Stack.of(scope)
+    existing = stack.node.try_find_child(_ELBV2_LISTENER_RULE_UPSERT_PROVIDER_ID)
+    if existing is not None:
+        return existing
+
+    asset_dir = os.path.join(
+        os.path.dirname(__file__), "lambda_elbv2_listener_rule_upsert"
+    )
+    fn = lambda_.Function(
+        stack,
+        "Elbv2ListenerRuleUpsertFn",
+        runtime=lambda_.Runtime.PYTHON_3_12,
+        handler="lambda_function.handler",
+        code=lambda_.Code.from_asset(asset_dir),
+        timeout=Duration.seconds(120),
+        description="Upsert ALB listener rules for Express Cognito routing",
+    )
+    fn.add_to_role_policy(
+        iam.PolicyStatement(
+            actions=[
+                "elasticloadbalancing:DescribeRules",
+                "elasticloadbalancing:CreateRule",
+                "elasticloadbalancing:ModifyRule",
+                "elasticloadbalancing:DeleteRule",
+            ],
+            resources=["*"],
+        )
+    )
+    fn.add_to_role_policy(
+        iam.PolicyStatement(
+            actions=["cognito-idp:DescribeUserPoolClient"],
+            resources=["*"],
+        )
+    )
+    return cr.Provider(
+        stack,
+        _ELBV2_LISTENER_RULE_UPSERT_PROVIDER_ID,
+        on_event_handler=fn,
+    )
+
+
+def _elbv2_listener_rule_custom_resource(
+    scope: Construct,
+    logical_id: str,
+    *,
+    listener_arn: str,
+    priority: int,
+    conditions: List[Dict[str, Any]],
+    rule_actions: List[Dict[str, Any]],
+    dependencies: Optional[List[Any]] = None,
+) -> CustomResource:
+    """
+    Create or update a numbered listener rule (upsert by priority + conditions).
+
+    Reuses an existing rule at the same priority when conditions match, which
+    avoids PriorityInUse failures after partial deploy rollbacks.
+    """
+    provider = _elbv2_listener_rule_upsert_provider(scope)
+    resource = CustomResource(
+        scope,
+        logical_id,
+        service_token=provider.service_token,
+        resource_type="Custom::Elbv2ListenerRuleUpsert",
+        properties={
+            "ListenerArn": listener_arn,
+            "Priority": priority,
+            "Conditions": conditions,
+            "Actions": rule_actions,
+        },
+    )
+    for dep in dependencies or []:
+        resource.node.add_dependency(dep)
+    return resource
 
 
 def _express_pi_listener_rule_custom_resource(
@@ -2323,44 +3021,16 @@ def _express_pi_listener_rule_custom_resource(
     rule_actions: List[Dict[str, Any]],
     express_main_service: ecs.CfnExpressGatewayService,
     express_pi_service: ecs.CfnExpressGatewayService,
-) -> cr.AwsCustomResource:
-    pi_rule = cr.AwsCustomResource(
+) -> CustomResource:
+    return _elbv2_listener_rule_custom_resource(
         scope,
         logical_id,
-        on_create=cr.AwsSdkCall(
-            service="ELBv2",
-            action="createRule",
-            parameters={
-                "ListenerArn": listener_arn,
-                "Priority": priority,
-                "Conditions": conditions,
-                "Actions": rule_actions,
-            },
-            physical_resource_id=cr.PhysicalResourceId.from_response(
-                "Rules[0].RuleArn"
-            ),
-        ),
-        on_update=cr.AwsSdkCall(
-            service="ELBv2",
-            action="modifyRule",
-            parameters={
-                "RuleArn": cr.PhysicalResourceId.reference(),
-                "Conditions": conditions,
-                "Actions": rule_actions,
-            },
-        ),
-        on_delete=cr.AwsSdkCall(
-            service="ELBv2",
-            action="deleteRule",
-            parameters={"RuleArn": cr.PhysicalResourceId.reference()},
-        ),
-        policy=cr.AwsCustomResourcePolicy.from_sdk_calls(
-            resources=cr.AwsCustomResourcePolicy.ANY_RESOURCE
-        ),
+        listener_arn=listener_arn,
+        priority=priority,
+        conditions=conditions,
+        rule_actions=rule_actions,
+        dependencies=[express_pi_service, express_main_service],
     )
-    pi_rule.node.add_dependency(express_pi_service)
-    pi_rule.node.add_dependency(express_main_service)
-    return pi_rule
 
 
 def configure_express_pi_listener_rules(
@@ -2383,15 +3053,8 @@ def configure_express_pi_listener_rules(
     Returns the next free listener rule priority after Pi rules.
     """
     mode = normalize_pi_alb_routing_mode(routing_mode)
-    listener_arn = express_main_service.get_att(
-        "ECSManagedResourceArns.IngressPath.ListenerArn"
-    ).to_string()
-    pi_target_group_arn = Fn.select(
-        0,
-        express_pi_service.get_att(
-            "ECSManagedResourceArns.IngressPath.TargetGroupArns"
-        ),
-    )
+    listener_arn = express_ingress_listener_arn(express_main_service)
+    pi_target_group_arn = express_ingress_first_target_group_arn(express_pi_service)
     rule_actions = build_cognito_default_listener_actions(
         user_pool_arn=user_pool_arn,
         user_pool_client_id=user_pool_client_id,
@@ -2541,6 +3204,7 @@ def create_s3_batch_ecs_trigger_lambda(
     config_prefix: str,
     default_params_key: str,
     default_direct_mode_task: str = "redact",
+    assign_public_ip: bool = False,
 ) -> lambda_.Function:
     """
     Lambda triggered by job .env uploads on the output bucket; runs one-shot Fargate tasks.
@@ -2605,6 +3269,8 @@ def create_s3_batch_ecs_trigger_lambda(
             "SECURITY_GROUPS": security_group_id,
             "CONTAINER_NAME": container_name,
             "DEFAULT_DIRECT_MODE_TASK": default_direct_mode_task,
+            "ECS_ASSIGN_PUBLIC_IP": "true" if assign_public_ip else "false",
+            "APP_CONFIG_ENV_KEY": APP_CONFIG_ENV_BASENAME,
         },
     }
     if function_name:
@@ -2619,6 +3285,25 @@ def create_s3_batch_ecs_trigger_lambda(
     )
 
     return batch_fn
+
+
+def create_headless_s3_batch_seed(
+    scope: Construct,
+    logical_id: str,
+    *,
+    destination_bucket: s3.IBucket,
+    seed_asset_directory: str,
+) -> None:
+    """Upload input/ and input/config/ markers plus example job .env to the output bucket."""
+    from aws_cdk import aws_s3_deployment as s3deploy
+
+    s3deploy.BucketDeployment(
+        scope,
+        logical_id,
+        sources=[s3deploy.Source.asset(seed_asset_directory)],
+        destination_bucket=destination_bucket,
+        prune=False,
+    )
 
 
 def build_pi_agent_container_environment(
@@ -2817,6 +3502,9 @@ def create_pi_agent_ecs_resources(
         min_healthy_percent=0,
         max_healthy_percent=100,
         desired_count=0,
+        availability_zone_rebalancing=ecs_availability_zone_rebalancing(
+            ECS_AVAILABILITY_ZONE_REBALANCING
+        ),
         service_connect_configuration=ecs.ServiceConnectProps(
             namespace=service_connect_namespace,
         ),

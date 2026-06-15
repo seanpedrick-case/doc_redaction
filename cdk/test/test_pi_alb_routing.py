@@ -143,7 +143,7 @@ def test_attach_pi_path_rule_synth():
         routing_mode="path",
         path_prefix="/pi",
         pi_host_header="",
-        listener_rule_priority=1,
+        listener_rule_priority=3,
         target_group_name="test-pi-tg",
         stickiness_cookie_duration=Duration.hours(8),
         https_listener=None,

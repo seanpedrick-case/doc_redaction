@@ -97,7 +97,9 @@ CDK_CONFIG_PATH = get_or_create_env_var(
 if CDK_CONFIG_PATH:
     if os.path.exists(CDK_CONFIG_PATH):
         print(f"Loading CDK variables from config file {CDK_CONFIG_PATH}")
-        load_dotenv(CDK_CONFIG_PATH)
+        # override=True: stale empty defaults from an earlier cdk_config import in the
+        # same shell (e.g. cdk_install wizard calling cdk_functions) must not win.
+        load_dotenv(CDK_CONFIG_PATH, override=True)
     else:
         print("CDK config file not found at location:", CDK_CONFIG_PATH)
 
@@ -158,7 +160,10 @@ CDK_FOLDER = get_or_create_env_var(
 )  # FULL_PATH_TO_CDK_FOLDER_HERE (with forward slash)
 
 # App runtime config (uploaded to S3 for legacy Fargate; inlined for ECS Express Mode)
-_app_config_rel = os.path.join(CONFIG_FOLDER, "config.env").replace("\\", "/")
+APP_CONFIG_ENV_BASENAME = "app_config.env"
+_app_config_rel = os.path.join(CONFIG_FOLDER, APP_CONFIG_ENV_BASENAME).replace(
+    "\\", "/"
+)
 APP_CONFIG_ENV_FILE = get_or_create_env_var(
     "APP_CONFIG_ENV_FILE",
     (
@@ -208,15 +213,43 @@ NAT_GATEWAY_EIP_NAME = get_or_create_env_var(
 )
 NAT_GATEWAY_NAME = get_or_create_env_var("NAT_GATEWAY_NAME", f"{CDK_PREFIX}NatGateway")
 
-# IAM roles
+# IAM roles — managed policy *names* (AWS managed) and JSON policy *files* (inline statements)
 AWS_MANAGED_TASK_ROLES_LIST = get_or_create_env_var(
     "AWS_MANAGED_TASK_ROLES_LIST",
-    '["AmazonCognitoReadOnly", "service-role/AmazonECSTaskExecutionRolePolicy", "AmazonS3FullAccess", "AmazonTextractFullAccess", "ComprehendReadOnly", "AmazonDynamoDBFullAccess", "service-role/AWSAppSyncPushToCloudWatchLogs", "AmazonBedrockFullAccess"]',
+    '["AmazonCognitoReadOnly", "service-role/AmazonECSTaskExecutionRolePolicy", "AmazonS3FullAccess", "AmazonDynamoDBFullAccess", "service-role/AWSAppSyncPushToCloudWatchLogs", "AmazonBedrockLimitedAccess"]',
 )
+ECS_EXECUTION_ROLE_MANAGED_POLICIES = get_or_create_env_var(
+    "ECS_EXECUTION_ROLE_MANAGED_POLICIES",
+    '["service-role/AmazonECSTaskExecutionRolePolicy"]',
+)
+# JSON IAM policy document paths (relative to CDK_FOLDER or absolute). Task role = app runtime.
 POLICY_FILE_LOCATIONS = get_or_create_env_var(
-    "POLICY_FILE_LOCATIONS", ""
-)  # e.g. '["config/sts_permissions.json"]'
+    "POLICY_FILE_LOCATIONS",
+    '["policies/textract_policy.json", "policies/comprehend_policy.json"]',
+)
+# Optional extra JSON policies for the ECS task *execution* role (image pull / logs / secrets).
+ECS_EXECUTION_ROLE_POLICY_FILES = get_or_create_env_var(
+    "ECS_EXECUTION_ROLE_POLICY_FILES",
+    "",
+)
+# Customer-managed policy ARNs (full ARN per entry), attached in addition to the lists above.
 POLICY_FILE_ARNS = get_or_create_env_var("POLICY_FILE_ARNS", "")
+ECS_EXECUTION_ROLE_POLICY_ARNS = get_or_create_env_var(
+    "ECS_EXECUTION_ROLE_POLICY_ARNS", ""
+)
+
+AWS_MANAGED_TASK_ROLES_LIST = parse_comma_separated_list(AWS_MANAGED_TASK_ROLES_LIST)
+ECS_EXECUTION_ROLE_MANAGED_POLICIES = parse_comma_separated_list(
+    ECS_EXECUTION_ROLE_MANAGED_POLICIES
+)
+POLICY_FILE_LOCATIONS = parse_comma_separated_list(POLICY_FILE_LOCATIONS)
+ECS_EXECUTION_ROLE_POLICY_FILES = parse_comma_separated_list(
+    ECS_EXECUTION_ROLE_POLICY_FILES
+)
+POLICY_FILE_ARNS = parse_comma_separated_list(POLICY_FILE_ARNS)
+ECS_EXECUTION_ROLE_POLICY_ARNS = parse_comma_separated_list(
+    ECS_EXECUTION_ROLE_POLICY_ARNS
+)
 
 # GITHUB REPO
 GITHUB_REPO_USERNAME = get_or_create_env_var("GITHUB_REPO_USERNAME", "seanpedrick-case")
@@ -245,6 +278,11 @@ S3_LOG_CONFIG_BUCKET_NAME = get_or_create_env_var(
 )  # S3 bucket names need to be lower case
 S3_OUTPUT_BUCKET_NAME = get_or_create_env_var(
     "S3_OUTPUT_BUCKET_NAME", f"{CDK_PREFIX}s3-output".lower()
+)
+
+### VPC endpoints for ECS tasks in private subnets (ECR image pull, logs, secrets)
+ENABLE_ECS_VPC_INTERFACE_ENDPOINTS = get_or_create_env_var(
+    "ENABLE_ECS_VPC_INTERFACE_ENDPOINTS", "True"
 )
 
 ### KMS KEYS FOR S3 AND SECRETS MANAGER
@@ -284,6 +322,15 @@ ECS_TASK_CPU_SIZE = get_or_create_env_var("ECS_TASK_CPU_SIZE", "1024")
 ECS_TASK_MEMORY_SIZE = get_or_create_env_var("ECS_TASK_MEMORY_SIZE", "4096")
 ECS_USE_FARGATE_SPOT = get_or_create_env_var("USE_FARGATE_SPOT", "False")
 ECS_READ_ONLY_FILE_SYSTEM = get_or_create_env_var("ECS_READ_ONLY_FILE_SYSTEM", "True")
+# ECS service AZ rebalancing (AWS defaults new services to ENABLED if omitted).
+ECS_AVAILABILITY_ZONE_REBALANCING = get_or_create_env_var(
+    "ECS_AVAILABILITY_ZONE_REBALANCING", "DISABLED"
+)
+if ECS_AVAILABILITY_ZONE_REBALANCING not in ("ENABLED", "DISABLED"):
+    raise ValueError(
+        "ECS_AVAILABILITY_ZONE_REBALANCING must be ENABLED or DISABLED "
+        f"(got {ECS_AVAILABILITY_ZONE_REBALANCING!r})."
+    )
 
 ### Cognito
 COGNITO_USER_POOL_NAME = get_or_create_env_var(
@@ -365,8 +412,14 @@ ECS_EXPRESS_INFRASTRUCTURE_ROLE_NAME = get_or_create_env_var(
     "ECS_EXPRESS_INFRASTRUCTURE_ROLE_NAME", f"{CDK_PREFIX}ExpressInfraRole"
 )
 # After first deploy, set to ExpressServiceEndpoint output (https://...) if not using CloudFront.
+# The installer updates Cognito callback URLs via API (no second CDK deploy).
 ECS_EXPRESS_COGNITO_REDIRECT_BASE = get_or_create_env_var(
     "ECS_EXPRESS_COGNITO_REDIRECT_BASE", ""
+)
+# Express networkConfiguration.subnets drives both tasks and the managed ALB.
+# Public subnets (IGW route) → internet-facing ALB; private → internal ALB only.
+ECS_EXPRESS_USE_PUBLIC_SUBNETS = get_or_create_env_var(
+    "ECS_EXPRESS_USE_PUBLIC_SUBNETS", "True"
 )
 
 if USE_ECS_EXPRESS_MODE == "True" and ACM_SSL_CERTIFICATE_ARN:
@@ -402,6 +455,19 @@ ECS_SERVICE_CONNECT_CLIENT_CDK_PREFIXES = get_or_create_env_var(
     "ECS_SERVICE_CONNECT_CLIENT_CDK_PREFIXES", ""
 )
 
+
+def normalize_https_redirect_url(url: str) -> str:
+    """Ensure Cognito/OAuth redirect bases use an explicit https:// scheme."""
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("https://"):
+        return raw.rstrip("/")
+    if raw.startswith("http://"):
+        return ("https://" + raw[len("http://") :]).rstrip("/")
+    return ("https://" + raw.lstrip("/")).rstrip("/")
+
+
 # This should be the CloudFront domain, the domain linked to your ACM certificate, or the DNS of your application load balancer in console afterwards
 if USE_CLOUDFRONT == "True":
     COGNITO_REDIRECTION_URL = get_or_create_env_var(
@@ -421,6 +487,12 @@ elif USE_ECS_EXPRESS_MODE == "True":
 else:
     COGNITO_REDIRECTION_URL = get_or_create_env_var(
         "COGNITO_REDIRECTION_URL", "https://" + EXISTING_LOAD_BALANCER_DNS
+    )
+
+COGNITO_REDIRECTION_URL = normalize_https_redirect_url(COGNITO_REDIRECTION_URL)
+if ECS_EXPRESS_COGNITO_REDIRECT_BASE:
+    ECS_EXPRESS_COGNITO_REDIRECT_BASE = normalize_https_redirect_url(
+        ECS_EXPRESS_COGNITO_REDIRECT_BASE
     )
 
 # Custom headers e.g. if routing traffic through Cloudfront
@@ -548,7 +620,7 @@ S3_BATCH_DEFAULT_PARAMS_KEY = get_or_create_env_var(
     "S3_BATCH_DEFAULT_PARAMS_KEY", "general-config/batch_defaults.env"
 )
 S3_BATCH_LAMBDA_FUNCTION_NAME = get_or_create_env_var(
-    "S3_BATCH_LAMBDA_FUNCTION_NAME", ""
+    "S3_BATCH_LAMBDA_FUNCTION_NAME", f"{CDK_PREFIX}S3BatchEcsTrigger"
 )
 
 if ENABLE_S3_BATCH_ECS_TRIGGER == "True" and USE_ECS_EXPRESS_MODE == "True":
@@ -601,7 +673,7 @@ PI_ALB_TARGET_GROUP_NAME = get_or_create_env_var(
     "PI_ALB_TARGET_GROUP_NAME", f"{CDK_PREFIX}PiAgentTG"[-32:]
 )
 PI_ALB_LISTENER_RULE_PRIORITY = int(
-    get_or_create_env_var("PI_ALB_LISTENER_RULE_PRIORITY", "1")
+    get_or_create_env_var("PI_ALB_LISTENER_RULE_PRIORITY", "3")
 )
 PI_AGENT_ENV_S3_KEY = get_or_create_env_var("PI_AGENT_ENV_S3_KEY", "pi_agent.env")
 
@@ -636,16 +708,13 @@ ENABLE_PI_AGENT_EXPRESS_SERVICE = get_or_create_env_var(
 ECS_PI_EXPRESS_SERVICE_NAME = get_or_create_env_var(
     "ECS_PI_EXPRESS_SERVICE_NAME", f"{CDK_PREFIX}PiExpressService"
 )
-_default_pi_express_health = (
-    f"{PI_ALB_PATH_PREFIX_NORMALIZED}/" if PI_ALB_ROUTING in ("path", "both") else "/"
-)
 ECS_PI_EXPRESS_HEALTH_CHECK_PATH = get_or_create_env_var(
-    "ECS_PI_EXPRESS_HEALTH_CHECK_PATH", _default_pi_express_health
+    "ECS_PI_EXPRESS_HEALTH_CHECK_PATH", "/health"
 )
 ECS_PI_EXPRESS_SECURITY_GROUP_NAME = get_or_create_env_var(
     "ECS_PI_EXPRESS_SECURITY_GROUP_NAME", f"{CDK_PREFIX}SecurityGroupPiExpress"
 )
-# Service Connect port names for Express services (applied via ecs:UpdateService after create).
+# Service Connect port names for Express services (applied in post_cdk_build_quickstart.py).
 ECS_EXPRESS_SC_PORT_NAME = get_or_create_env_var(
     "ECS_EXPRESS_SC_PORT_NAME", ECS_SERVICE_CONNECT_PORT_MAPPING_NAME
 )
@@ -663,8 +732,6 @@ if ENABLE_PI_AGENT_EXPRESS_SERVICE == "True" and USE_ECS_EXPRESS_MODE != "True":
         "ENABLE_PI_AGENT_EXPRESS_SERVICE=True requires USE_ECS_EXPRESS_MODE=True "
         "(no ACM_SSL_CERTIFICATE_ARN)."
     )
-if ENABLE_PI_AGENT_EXPRESS_SERVICE == "True":
-    _validate_pi_alb_routing_for_enabled_pi()
 if ENABLE_PI_AGENT_ECS_SERVICE == "True" and USE_ECS_EXPRESS_MODE == "True":
     raise ValueError(
         "ENABLE_PI_AGENT_ECS_SERVICE=True requires legacy Fargate (USE_ECS_EXPRESS_MODE=False). "
