@@ -3017,7 +3017,7 @@ def build_ui():
 
         workspace_output_explorer.input(
             fn=workspace_files_download_fn,
-            inputs=[workspace_output_explorer_download, session_hash_state],
+            inputs=[workspace_output_explorer, session_hash_state],
             outputs=workspace_output_explorer_download,
             api_visibility="undocumented",
         )
