@@ -200,12 +200,12 @@ def test_foreword_interleave_regression():
         _ocr("Forewords", 0.05, 0.18, width=0.60, height=0.05),
         # Row 1 – mid line sits slightly above left line on the page
         _ocr("left line", 0.05, 0.32, width=0.17, height=0.01),
-        _ocr("mid line", 0.26, 0.317, width=0.18, height=0.01),
+        _ocr("mid line", 0.30, 0.317, width=0.18, height=0.01),
         # Rows 2 & 3 – needed to reach min_gutter_rows=3
         _ocr("left next", 0.05, 0.34, width=0.17, height=0.01),
-        _ocr("mid next", 0.26, 0.34, width=0.18, height=0.01),
+        _ocr("mid next", 0.30, 0.34, width=0.18, height=0.01),
         _ocr("left third", 0.05, 0.36, width=0.17, height=0.01),
-        _ocr("mid third", 0.26, 0.36, width=0.18, height=0.01),
+        _ocr("mid third", 0.30, 0.36, width=0.18, height=0.01),
     ]
     ordered = sort_reading_order(
         boxes, page_width=1.0, page_height=1.0, reading_order_mode="column"
