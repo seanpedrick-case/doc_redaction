@@ -18,7 +18,7 @@ emoji: ⚡
 colorFrom: indigo
 colorTo: green
 sdk: gradio
-sdk_version: 6.16.0
+sdk_version: 6.17.3
 app_file: app.py
 pinned: true
 license: agpl-3.0

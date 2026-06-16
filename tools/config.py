@@ -647,7 +647,7 @@ AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION = get_or_create_env_var(
 # When True, use a two-step OCR process for PDFs: try selectable text extraction per page first;
 # only run OCR (Tesseract/Textract/VLM) on pages where no text could be extracted. Saves cost/time.
 EFFICIENT_OCR = convert_string_to_boolean(
-    get_or_create_env_var("EFFICIENT_OCR", "False")
+    get_or_create_env_var("EFFICIENT_OCR", "True")
 )
 # Minimum number of extractable words on a page to use text-only route; below this use OCR.
 EFFICIENT_OCR_MIN_WORDS = int(get_or_create_env_var("EFFICIENT_OCR_MIN_WORDS", "20"))
@@ -1342,7 +1342,7 @@ CONVERT_LINE_TO_WORD_LEVEL = convert_string_to_boolean(
 # - "paddle_native": when using Paddle OCR, preserve Paddle's native line boxes and
 #   assign line numbers directly from them (still column-aware ordering).
 LOCAL_OCR_READING_ORDER = (
-    get_or_create_env_var("LOCAL_OCR_READING_ORDER", "paddle_native").strip().lower()
+    get_or_create_env_var("LOCAL_OCR_READING_ORDER", "column").strip().lower()
 )
 if LOCAL_OCR_READING_ORDER not in ("column", "legacy", "paddle_native"):
     LOCAL_OCR_READING_ORDER = "column"
@@ -1352,11 +1352,11 @@ OCR_FULL_SPAN_WIDTH_RATIO = float(
 )  # Box width / page width above this is treated as a full-width line (header/footer).
 
 OCR_COLUMN_GAP_MIN_FRACTION = float(
-    get_or_create_env_var("OCR_COLUMN_GAP_MIN_FRACTION", "0.04")
+    get_or_create_env_var("OCR_COLUMN_GAP_MIN_FRACTION", "0.08")  # was 0.04
 )  # Minimum horizontal gap (fraction of page width) between x-center clusters.
 
 OCR_COLUMN_GUTTER_MIN_FRACTION = float(
-    get_or_create_env_var("OCR_COLUMN_GUTTER_MIN_FRACTION", "0.04")
+    get_or_create_env_var("OCR_COLUMN_GUTTER_MIN_FRACTION", "0.08")  # was 0.04
 )  # Min horizontal gap between boxes on the same text row to treat as multi-column.
 
 OCR_COLUMN_MIN_GUTTER_ROWS = int(
@@ -1373,7 +1373,7 @@ OCR_COLUMN_MAX_BOX_HEIGHT_RATIO = float(
 # gutter rows that trigger column mode on single-column pages.
 
 OCR_COLUMN_MAX_CONSECUTIVE_GUTTER_GAP = float(
-    get_or_create_env_var("OCR_COLUMN_MAX_CONSECUTIVE_GUTTER_GAP", "0.06")
+    get_or_create_env_var("OCR_COLUMN_MAX_CONSECUTIVE_GUTTER_GAP", "0.1")  # was 0.06
 )  # Maximum y-gap (as fraction of page height) between adjacent gutter rows that are
 # still considered part of the same consecutive cluster.  Gutter rows separated by more
 # than this gap (e.g. a header at y=0.07 and signatures at y=0.81) belong to distinct
@@ -1387,13 +1387,13 @@ OCR_COLUMN_FOOTER_ZONE_FRACTION = float(
 # order on the single-column body text above them.
 
 OCR_COLUMN_SUBGUTTER_MIN_FRACTION = float(
-    get_or_create_env_var("OCR_COLUMN_SUBGUTTER_MIN_FRACTION", "0.015")
+    get_or_create_env_var("OCR_COLUMN_SUBGUTTER_MIN_FRACTION", "0.03")  # was 0.015
 )  # Fine-grained gutter threshold used inside assign_layout_boxes (after the page is already
 # confirmed multi-column) to detect narrow sub-column boundaries that the standard
 # OCR_COLUMN_GUTTER_MIN_FRACTION (0.04) would miss (e.g. a 1.9 % gutter on a two-page spread).
 
 OCR_LINE_SPLIT_GAP_FRACTION = float(
-    get_or_create_env_var("OCR_LINE_SPLIT_GAP_FRACTION", "0.025")
+    get_or_create_env_var("OCR_LINE_SPLIT_GAP_FRACTION", "0.1")  # was 0.025
 )  # When merging word-level boxes into lines, a horizontal gap between adjacent boxes
 # that exceeds this fraction of page width forces a new line (build-time rightward gap)
 # or triggers a post-processing split (_finalize_line) even when both boxes share the
@@ -1408,11 +1408,11 @@ OCR_LINE_SPLIT_GAP_FRACTION = float(
 # gutters in multi-column documents.
 
 OCR_LINE_Y_THRESHOLD_FRACTION = float(
-    get_or_create_env_var("OCR_LINE_Y_THRESHOLD_FRACTION", "0.013")
+    get_or_create_env_var("OCR_LINE_Y_THRESHOLD_FRACTION", "0.013")  # was 0.013
 )  # Vertical alignment tolerance as a fraction of page height.  Two word-level boxes
 # whose tops differ by less than this fraction are treated as belonging to the same
 # logical text row.  0.013 (1.3 %) is chosen to stay below the ~0.014 row spacing of
-# tightly-set 10 pt body text (e.g. the Lambeth foreword two-page spread) while still
+# tightly-set 10 pt body text while still
 # being well above typical within-row top jitter (< 0.005).  For normalised 0-1
 # coordinates page_height=1.0, so the fraction doubles as the absolute threshold.
 
