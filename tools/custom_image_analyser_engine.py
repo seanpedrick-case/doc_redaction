@@ -7434,6 +7434,9 @@ class CustomImageAnalyzerEngine:
             "height": [],
             "conf": [],
             "model": [],
+            # Preserve the originating line index so downstream can keep Paddle's
+            # native line grouping even after word-level conversion.
+            "line": [],
         }
         if thread_local_segmenter is not None:
             segmenter = getattr(thread_local_segmenter, "segmenter", None)
@@ -7481,6 +7484,7 @@ class CustomImageAnalyzerEngine:
                         word_dict["height"].append(line_height)
                         word_dict["conf"].append(line_conf)
                         word_dict["model"].append(line_model)
+                        word_dict["line"].append(i)
                         current_left += word_width + estimated_space_width
             return (i, word_dict)
         for j in range(len(word_output["text"])):
@@ -7491,6 +7495,7 @@ class CustomImageAnalyzerEngine:
             word_dict["height"].append(word_output["height"][j])
             word_dict["conf"].append(word_output["conf"][j])
             word_dict["model"].append(line_model)
+            word_dict["line"].append(i)
         return (i, word_dict)
 
     def _convert_line_to_word_level(
@@ -7523,6 +7528,7 @@ class CustomImageAnalyzerEngine:
             "height": list(),
             "conf": list(),
             "model": list(),
+            "line": list(),
         }
 
         if not line_data or not line_data.get("text"):
@@ -9479,6 +9485,11 @@ class CustomImageAnalyzerEngine:
                 width=ocr_result["width"][i],
                 height=ocr_result["height"][i],
                 conf=round(float(ocr_result["conf"][i]), 0),
+                line=(
+                    ocr_result.get("line", [None] * len(ocr_result["text"]))[i]
+                    if isinstance(ocr_result, dict)
+                    else None
+                ),
                 model=get_model_name(i),
             )
             for i in valid_indices

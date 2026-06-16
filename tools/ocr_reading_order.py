@@ -811,6 +811,59 @@ def build_line_groups(
     page_width, page_height = infer_page_dimensions(ocr_results)
     mode = reading_order_mode or LOCAL_OCR_READING_ORDER
 
+    # Paddle-native mode: if upstream word-level conversion preserved originating
+    # line numbers, we can reconstruct line groups *exactly* instead of guessing
+    # with y-threshold heuristics.
+    mode_norm = (mode or "").strip().lower()
+    if (
+        mode_norm == "paddle_native"
+        and not preserve_line_boxes
+        and all(getattr(b, "line", None) is not None for b in ocr_results)
+    ):
+        from dataclasses import dataclass
+
+        @dataclass
+        class _LineBox:
+            line_id: int
+            left: float
+            top: float
+            width: float
+            height: float
+            text: str = ""
+
+        by_line: dict[int, list[Any]] = {}
+        for b in ocr_results:
+            by_line.setdefault(int(getattr(b, "line")), []).append(b)
+
+        line_boxes: list[_LineBox] = []
+        for lid, items in by_line.items():
+            left = min(float(x.left) for x in items)
+            top = min(float(x.top) for x in items)
+            right = max(float(x.left) + float(x.width) for x in items)
+            bottom = max(float(x.top) + float(x.height) for x in items)
+            line_boxes.append(
+                _LineBox(
+                    line_id=lid,
+                    left=left,
+                    top=top,
+                    width=max(0.0, right - left),
+                    height=max(0.0, bottom - top),
+                    text=" ".join(str(getattr(x, "text", "")) for x in items[:3]),
+                )
+            )
+
+        ordered_line_boxes = sort_reading_order(
+            line_boxes,
+            page_width=page_width,
+            page_height=page_height,
+            reading_order_mode="paddle_native",
+        )
+        ordered_ids = [lb.line_id for lb in ordered_line_boxes]
+        ordered_lines = [
+            sorted(by_line[lid], key=lambda b: float(b.left)) for lid in ordered_ids
+        ]
+        return ordered_lines, page_width, page_height
+
     use_columns = should_use_column_reading_order(
         ocr_results, page_width, page_height, reading_order_mode=mode
     )
