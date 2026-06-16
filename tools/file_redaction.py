@@ -735,6 +735,7 @@ def run_custom_vlm_only_pass(
     page_max: int = 0,
     progress=None,
     inference_server_vlm_model: str = "",
+    text_extraction_method: str = LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION,
 ) -> tuple:
     """
     Run only the CUSTOM_VLM (face, signature) detection on page images and apply
@@ -930,6 +931,8 @@ def run_custom_vlm_only_pass(
             page_sizes_df=page_sizes_df,
             input_folder=input_folder,
             image_dimensions_override=image_dimensions_override,
+            text_extraction_method=text_extraction_method,
+            custom_vlm_enabled=True,
         )
         # In dual-output mode, capture the final redacted page copy so _redacted.pdf
         # merge includes CUSTOM_VLM pages (signature/face post-pass as well).
@@ -2891,6 +2894,7 @@ def _choose_and_run_redactor_impl(
                             page_max=page_max if page_max > 0 else num_pages,
                             progress=progress,
                             inference_server_vlm_model=inference_server_vlm_model,
+                            text_extraction_method=text_extraction_method,
                         )
                         vlm_total_input_tokens += vlm_in
                         vlm_total_output_tokens += vlm_out
@@ -3125,6 +3129,7 @@ def _choose_and_run_redactor_impl(
                     page_max=page_max if page_max > 0 else number_of_pages,
                     progress=progress,
                     inference_server_vlm_model=inference_server_vlm_model,
+                    text_extraction_method=text_extraction_method,
                 )
                 vlm_total_input_tokens += vlm_in
                 vlm_total_output_tokens += vlm_out
@@ -4492,6 +4497,8 @@ def prepare_custom_image_recogniser_result_annotation_box(
     image: Image,
     page_sizes_df: pd.DataFrame,
     custom_colours: bool = USE_GUI_BOX_COLOURS_FOR_OUTPUTS,
+    text_extraction_method: str = LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION,
+    custom_vlm_enabled: bool = False,
 ):
     """
     Prepare an image annotation box and coordinates based on a CustomImageRecogniserResult, PyMuPDF page, and PIL Image.
@@ -4508,7 +4515,11 @@ def prepare_custom_image_recogniser_result_annotation_box(
 
     pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2 = 0, 0, 0, 0  # Initialize defaults
 
-    if image:
+    if (
+        image
+        and text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION
+        and not custom_vlm_enabled
+    ):
         # When "Local text" extraction is used but CUSTOM_VLM_* is enabled, we prepare
         # images for VLM detection. That means we can receive a *mixture* of boxes:
         # - text-based boxes already in PDF coordinates (points)
@@ -4518,38 +4529,48 @@ def prepare_custom_image_recogniser_result_annotation_box(
         # incorrectly scaled (shifted and oversized). Detect "already PDF" boxes by
         # checking whether they fit in the page's PDF coordinate space.
 
-        # Test on looks_like_pdf_points has been deprecated for now
-        looks_like_pdf_points = False
+        # Test on looks_like_pdf_points has been deprecated for now. Assume always if an image exists and selectable text extraction is the method that we have pymupdf coordinates.
+        # looks_like_pdf_points = True
 
-        try:
-            mb_w = float(page.mediabox.width)
-            mb_h = float(page.mediabox.height)
-            a_x2 = float(annot.left + annot.width)
-            a_y2 = float(annot.top + annot.height)
-            a_x1 = float(annot.left)
-            a_y1 = float(annot.top)
-            # Tolerate minor float/int noise. If bbox is plausibly within mediabox,
-            # assume it's already in PDF points (CropBox-local in our pipeline).
-            _eps = 2.0
-            looks_like_pdf_points = (
-                a_x1 >= -_eps
-                and a_y1 >= -_eps
-                and a_x2 <= (mb_w + _eps)
-                and a_y2 <= (mb_h + _eps)
-            )
+        pymupdf_x1 = float(annot.left)
+        pymupdf_y1 = float(annot.top)
+        pymupdf_x2 = float(annot.left + annot.width)
+        pymupdf_y2 = float(annot.top + annot.height)
 
-        except Exception:
-            looks_like_pdf_points = False
+        # try:
+        #     mb_w = float(page.mediabox.width)
+        #     mb_h = float(page.mediabox.height)
+        #     a_x2 = float(annot.left + annot.width)
+        #     a_y2 = float(annot.top + annot.height)
+        #     a_x1 = float(annot.left)
+        #     a_y1 = float(annot.top)
+        #     # Tolerate minor float/int noise. If bbox is plausibly within mediabox,
+        #     # assume it's already in PDF points (CropBox-local in our pipeline).
+        #     _eps = 2.0
+        #     looks_like_pdf_points = (
+        #         a_x1 >= -_eps
+        #         and a_y1 >= -_eps
+        #         and a_x2 <= (mb_w + _eps)
+        #         and a_y2 <= (mb_h + _eps)
+        #     )
 
-        if looks_like_pdf_points:
-            pymupdf_x1 = float(annot.left)
-            pymupdf_y1 = float(annot.top)
-            pymupdf_x2 = float(annot.left + annot.width)
-            pymupdf_y2 = float(annot.top + annot.height)
-        else:
-            pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2 = (
-                convert_image_coords_to_pymupdf(page, annot, image)
-            )
+        # except Exception:
+        #     looks_like_pdf_points = False
+    elif (
+        image
+        and text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION
+        and custom_vlm_enabled
+    ):
+        pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2 = (
+            convert_image_coords_to_pymupdf(page, annot, image)
+        )
+
+    elif image:
+        # looks_like_pdf_points = False
+
+        pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2 = (
+            convert_image_coords_to_pymupdf(page, annot, image)
+        )
 
     else:
         # --- Calculate coordinates when no image is present ---
@@ -5223,6 +5244,8 @@ def redact_page_with_pymupdf(
     input_folder: str = INPUT_FOLDER,
     image_dimensions_override: Optional[dict] = None,
     review_page: Optional[Page] = None,
+    text_extraction_method: str = LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION,
+    custom_vlm_enabled: bool = False,
 ):
     """
     Applies redactions to a single PyMuPDF page based on provided annotations.
@@ -5254,7 +5277,8 @@ def redact_page_with_pymupdf(
                                                       Defaults to RETURN_REDACTED_PDF.
         review_page (Page, optional): When provided, the same redactions are applied to this page (with text
                                       retained for review) in a single pass, avoiding a second full annotation loop.
-
+        text_extraction_method (str, optional): The method used to extract text from the page. Defaults to LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION.
+        custom_vlm_enabled (bool, optional): If True, custom VLM model is enabled. Defaults to False.
     Returns:
         Tuple[Page, dict] or Tuple[Tuple[Page, Page], dict]: A tuple containing:
             - page (Page or Tuple[Page, Page]): The PyMuPDF page object(s) with redactions applied.
@@ -5511,7 +5535,13 @@ def redact_page_with_pymupdf(
 
                 img_annotation_box, rect = (
                     prepare_custom_image_recogniser_result_annotation_box(
-                        page, annot, image, page_sizes_df, custom_colours
+                        page,
+                        annot,
+                        image,
+                        page_sizes_df,
+                        custom_colours,
+                        text_extraction_method,
+                        custom_vlm_enabled,
                     )
                 )
 
@@ -9708,6 +9738,7 @@ def redact_image_pdf(
                             "image_width": page_width,
                             "image_height": page_height,
                         },
+                        text_extraction_method=text_extraction_method,
                     )
 
                     # Handle dual page objects if returned
@@ -11691,6 +11722,7 @@ def redact_text_pdf(
                 image_dimensions_override=page_to_image_dimensions.get(
                     int(reported_page_number)
                 ),
+                text_extraction_method=SELECTABLE_TEXT_EXTRACT_OPTION,
             )
 
             # Handle dual page objects if returned
