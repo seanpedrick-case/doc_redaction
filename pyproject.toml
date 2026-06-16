@@ -50,7 +50,7 @@ dependencies = [
     "pandas<=2.3.3",
     "scikit-learn<=1.8.0",
     "spacy<=3.8.14",
-    "gradio==6.18.0",
+    "gradio==6.10.0",
     "gradio-pdf-redaction<=0.0.25",
     "boto3<=1.42.91",
     "pyarrow<=24.0.0",
@@ -109,7 +109,7 @@ vlm = [
 
 # Run Gradio as an mcp server
 mcp = [
-    "gradio[mcp]<=6.18.0"
+    "gradio[mcp]==6.10.0"
 ]
 
 [project.urls]

@@ -1152,9 +1152,11 @@ def print_express_mode_next_steps(
     pi_express = values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True"
     if pi_express:
         print(
-            "  - Register a Cognito user in AWS Console and sign in at the Pi agent URL "
-            "below. The main redaction backend runs without in-app login so the Pi agent "
-            "can call it over Service Connect."
+            "  - Register a Cognito user in AWS Console, change password at the login page URL, "
+            " and sign in at the Pi agent URL below. The main redaction backend runs without "
+            " in-app login so the Pi agent can call it over Service Connect. You can disable 
+            " Cognito authorisation by setting COGNITO_AUTH to False in the ECS task definition / "
+            " ECS service options."
         )
     else:
         print(
