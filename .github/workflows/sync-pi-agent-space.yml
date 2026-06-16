@@ -1,0 +1,64 @@
+name: Sync Pi agent to Hugging Face Space
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - "agent-redact/**"
+      - "skills/**"
+      - "tools/**"
+      - "intros/**"
+      - "doc_redaction/example_data/**"
+      - "AGENTS.md"
+      - "config/**"
+      - ".github/workflows/sync-pi-agent-space.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync-pi-agent-space:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          lfs: true
+
+      - name: Install Git LFS
+        run: git lfs install
+
+      - name: Materialize example PDFs (Git LFS)
+        run: |
+          git lfs pull --include="doc_redaction/example_data/*.pdf"
+          for f in \
+            doc_redaction/example_data/example_of_emails_sent_to_a_professor_before_applying.pdf \
+            doc_redaction/example_data/graduate-job-example-cover-letter.pdf; do
+            if head -1 "$f" | grep -q "^version https://git-lfs.github.com/spec/v1"; then
+              echo "Example PDF is still an LFS pointer (not materialized): $f" >&2
+              exit 1
+            fi
+          done
+
+      - name: Flatten Pi agent Space tree
+        run: |
+          chmod +x agent-redact/pi-agent/sync_to_space.sh
+          agent-redact/pi-agent/sync_to_space.sh /tmp/pi-agent-space
+
+      - name: Push to Hugging Face Space
+        run: |
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          echo "Syncing Pi agent Space: seanpedrickcase/agentic_document_redaction"
+          cd /tmp/pi-agent-space
+          git init -b main
+          git config user.name "$HF_USERNAME"
+          git config user.email "$HF_EMAIL"
+          git add .
+          git commit -m "Sync Pi agent Space: $COMMIT_MSG"
+          git remote add hf "https://${HF_USERNAME}:${HF_TOKEN}@huggingface.co/spaces/${HF_USERNAME}/agentic_document_redaction"
+          git push --force hf main
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_USERNAME: ${{ secrets.HF_USERNAME }}
+          HF_EMAIL: ${{ secrets.HF_EMAIL }}

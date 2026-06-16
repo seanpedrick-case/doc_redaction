@@ -677,6 +677,36 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
         default=RETURN_REDACTED_PDF,
         help="Return PDF at end of redaction process.",
     )
+    post_redact_qa_group = pdf_group.add_mutually_exclusive_group()
+    post_redact_qa_group.add_argument(
+        "--post-redact-pass1-qa",
+        dest="post_redact_pass1_qa",
+        action="store_true",
+        help="Enable post-redaction Pass 1 QA for this run (overrides POST_REDACT_PASS1_QA env).",
+    )
+    post_redact_qa_group.add_argument(
+        "--no-post-redact-pass1-qa",
+        dest="post_redact_pass1_qa",
+        action="store_false",
+        help="Disable post-redaction Pass 1 QA for this run.",
+    )
+    post_redact_prune_group = pdf_group.add_mutually_exclusive_group()
+    post_redact_prune_group.add_argument(
+        "--post-redact-pass1-auto-prune",
+        dest="post_redact_pass1_auto_prune",
+        action="store_true",
+        help="Write sibling pruned review CSV during Pass 1 QA (overrides POST_REDACT_PASS1_AUTO_PRUNE env).",
+    )
+    post_redact_prune_group.add_argument(
+        "--no-post-redact-pass1-auto-prune",
+        dest="post_redact_pass1_auto_prune",
+        action="store_false",
+        help="Disable auto-prune during Pass 1 QA for this run.",
+    )
+    pdf_group.set_defaults(
+        post_redact_pass1_qa=None,
+        post_redact_pass1_auto_prune=None,
+    )
     pdf_group.add_argument(
         "--deny_list_file",
         default=DENY_LIST_PATH,
@@ -1063,6 +1093,50 @@ def get_cli_default_args_dict() -> dict:
     return vars(build_cli_argument_parser().parse_args([]))
 
 
+def resolve_deny_list_for_redaction(args) -> list[str] | str:
+    """
+    Inline ``deny_list`` (API/direct mode) takes precedence over ``deny_list_file``.
+    """
+    inline = getattr(args, "deny_list", None)
+    if isinstance(inline, list):
+        return [str(x) for x in inline if str(x).strip()]
+    file_path = getattr(args, "deny_list_file", None) or ""
+    return file_path
+
+
+def resolve_allow_list_for_redaction(args) -> list[str] | str:
+    """
+    Inline ``allow_list`` (API/direct mode) takes precedence over file paths.
+    """
+    inline = getattr(args, "allow_list", None)
+    if isinstance(inline, list):
+        return [str(x) for x in inline if str(x).strip()]
+    file_path = getattr(args, "allow_list_file", None) or ""
+    if file_path:
+        return file_path
+    path_only = getattr(args, "allow_list", None)
+    return path_only if isinstance(path_only, str) else ""
+
+
+def resolve_efficient_ocr_for_redaction(args) -> bool:
+    """
+    CLI ``--efficient_ocr`` defaults to ``None`` when unset; treat that as the
+    deployment ``EFFICIENT_OCR`` config (same as the Gradio checkbox default).
+    """
+    value = getattr(args, "efficient_ocr", None)
+    if value is None:
+        return bool(EFFICIENT_OCR)
+    return bool(value)
+
+
+def resolve_chosen_local_ocr_model_for_redaction(args) -> str:
+    """Local OCR engine from CLI/API overrides, else deployment default."""
+    model = getattr(args, "chosen_local_ocr_model", None)
+    if model is None or str(model).strip() == "":
+        return str(DEFAULT_LOCAL_OCR_MODEL)
+    return str(model)
+
+
 def main(direct_mode_args={}):
     """
     A unified command-line interface to prepare, redact, and anonymise various document types.
@@ -1074,8 +1148,9 @@ def main(direct_mode_args={}):
     parser = build_cli_argument_parser()
     # Parse arguments - either from command line or direct mode
     if direct_mode_args:
-        # Use direct mode arguments
-        args = argparse.Namespace(**direct_mode_args)
+        # Merge CLI defaults so partial direct-mode dicts (app.py, Lambda) stay valid.
+        merged_args = {**get_cli_default_args_dict(), **direct_mode_args}
+        args = argparse.Namespace(**merged_args)
     else:
         # Parse command line arguments
         args = parser.parse_args()
@@ -1373,8 +1448,8 @@ def main(direct_mode_args={}):
                         chosen_redact_comprehend_entities=args.aws_redact_entities,
                         chosen_llm_entities=args.llm_redact_entities,
                         text_extraction_method=args.ocr_method,
-                        in_allow_list=args.allow_list_file,
-                        in_deny_list=args.deny_list_file,
+                        in_allow_list=resolve_allow_list_for_redaction(args),
+                        in_deny_list=resolve_deny_list_for_redaction(args),
                         redact_whole_page_list=args.redact_whole_page_file,
                         page_min=args.page_min,
                         page_max=args.page_max,
@@ -1393,7 +1468,10 @@ def main(direct_mode_args={}):
                             if args.inference_server_vlm_model
                             else DEFAULT_INFERENCE_SERVER_VLM_MODEL
                         ),
-                        efficient_ocr=getattr(args, "efficient_ocr", EFFICIENT_OCR),
+                        chosen_local_ocr_model=resolve_chosen_local_ocr_model_for_redaction(
+                            args
+                        ),
+                        efficient_ocr=resolve_efficient_ocr_for_redaction(args),
                         efficient_ocr_min_words=(
                             args.efficient_ocr_min_words
                             if getattr(args, "efficient_ocr_min_words", None)
@@ -1439,6 +1517,12 @@ def main(direct_mode_args={}):
                             if getattr(args, "save_page_ocr_visualisations", None)
                             is not None
                             else SAVE_PAGE_OCR_VISUALISATIONS
+                        ),
+                        post_redact_pass1_qa=getattr(
+                            args, "post_redact_pass1_qa", None
+                        ),
+                        post_redact_pass1_auto_prune=getattr(
+                            args, "post_redact_pass1_auto_prune", None
                         ),
                     ),
                     RedactionContext(
@@ -1585,17 +1669,18 @@ def main(direct_mode_args={}):
                     _,
                     _,
                     _,
+                    _,
                 ) = anonymise_files_with_open_text(
                     file_paths=args.input_file,
                     in_text="",  # Not used for file-based operations
                     anon_strategy=args.anon_strategy,
                     chosen_cols=args.text_columns,
                     chosen_redact_entities=args.local_redact_entities,
-                    in_allow_list=args.allow_list_file,
+                    in_allow_list=resolve_allow_list_for_redaction(args),
                     in_excel_sheets=args.excel_sheets,
                     first_loop_state=True,
                     output_folder=args.output_dir,
-                    in_deny_list=args.deny_list_file,
+                    in_deny_list=resolve_deny_list_for_redaction(args),
                     max_fuzzy_spelling_mistakes_num=args.fuzzy_mistakes,
                     pii_identification_method=args.pii_detector,
                     chosen_redact_comprehend_entities=args.aws_redact_entities,
@@ -2312,8 +2397,8 @@ def main(direct_mode_args={}):
                         or [],
                         chosen_llm_entities=args.llm_redact_entities or [],
                         text_extraction_method=args.ocr_method,
-                        in_allow_list=args.allow_list_file,
-                        in_deny_list=args.deny_list_file,
+                        in_allow_list=resolve_allow_list_for_redaction(args),
+                        in_deny_list=resolve_deny_list_for_redaction(args),
                         redact_whole_page_list=args.redact_whole_page_file,
                         page_min=args.page_min,
                         page_max=args.page_max,
@@ -2336,7 +2421,10 @@ def main(direct_mode_args={}):
                             getattr(args, "inference_server_vlm_model", None)
                             or DEFAULT_INFERENCE_SERVER_VLM_MODEL
                         ),
-                        efficient_ocr=getattr(args, "efficient_ocr", EFFICIENT_OCR),
+                        chosen_local_ocr_model=resolve_chosen_local_ocr_model_for_redaction(
+                            args
+                        ),
+                        efficient_ocr=resolve_efficient_ocr_for_redaction(args),
                         efficient_ocr_min_words=(
                             getattr(args, "efficient_ocr_min_words", None)
                             or EFFICIENT_OCR_MIN_WORDS
@@ -2380,6 +2468,12 @@ def main(direct_mode_args={}):
                             else SAVE_PAGE_OCR_VISUALISATIONS
                         ),
                         text_extraction_only=True,
+                        post_redact_pass1_qa=getattr(
+                            args, "post_redact_pass1_qa", None
+                        ),
+                        post_redact_pass1_auto_prune=getattr(
+                            args, "post_redact_pass1_auto_prune", None
+                        ),
                     ),
                     RedactionContext(
                         prepared_pdf_file_paths=prepared_pdf_paths,

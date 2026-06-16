@@ -55,6 +55,7 @@ GRADIO_API_NAMES: tuple[str, ...] = (
     "combine_review_pdfs",
     "export_review_redaction_overlay",
     "export_review_page_ocr_visualisation",
+    "verify_redaction_coverage",
 )
 
 
@@ -261,6 +262,68 @@ class AgentTaskResponse(BaseModel):
     message: str
     log_excerpt: Optional[str] = None
     output_paths: Optional[list[str]] = None
+
+
+class AgentVerifyRedactionRequest(BaseModel):
+    review_csv_path: str = Field(..., description="Path to *_review_file.csv")
+    ocr_words_csv_path: str = Field(
+        ..., description="Path to *_ocr_results_with_words_*.csv from the same run"
+    )
+    must_redact: Optional[List[str]] = Field(
+        None,
+        description="Regex patterns for terms that must be covered by review boxes.",
+    )
+    must_not_redact: Optional[List[str]] = Field(
+        None,
+        description="Regex patterns for terms that must not appear in review rows.",
+    )
+    redacted_pdf_path: Optional[str] = Field(
+        None, description="Optional applied *_redacted.pdf for text-layer leak checks."
+    )
+    total_pages: Optional[int] = Field(None, ge=1)
+    min_word_length: int = Field(3, ge=1, le=32)
+    sample_pixels: bool = Field(
+        False,
+        description="Sample pixel darkness at box centres on redacted PDF (requires redacted_pdf_path).",
+    )
+    auto_prune_suspicious: bool = Field(
+        False,
+        description="Remove prunable suspicious short/OCR-fragment rows and write pruned CSV.",
+    )
+    pruned_output_path: Optional[str] = Field(
+        None,
+        description="Output path for pruned CSV when auto_prune_suspicious is true.",
+    )
+
+
+class AgentVerifyRedactionResponse(BaseModel):
+    status: str
+    gradio_api_name: str = "verify_redaction_coverage"
+    coverage_pass: bool
+    coverage_pass_strict: bool
+    coverage_pass_with_cleanup: bool
+    pruned_csv_path: Optional[str] = None
+    prune_log: Optional[Dict[str, Any]] = None
+    report: Dict[str, Any]
+
+
+class AgentWordLevelOcrSearchRequest(BaseModel):
+    ocr_words_csv_path: str = Field(
+        ..., description="Path to *_ocr_results_with_words_*.csv"
+    )
+    search_text: str = Field(..., min_length=3, max_length=500)
+    similarity_threshold: float = Field(1.0, ge=0.0, le=1.0)
+    use_regex: bool = False
+    review_csv_path: Optional[str] = Field(
+        None,
+        description="Optional *_review_file.csv to flag whether each hit is covered by a box.",
+    )
+
+
+class AgentWordLevelOcrSearchResponse(BaseModel):
+    status: str
+    gradio_api_name: str = "word_level_ocr_text_search"
+    result: Dict[str, Any]
 
 
 def _merge_redact_direct_mode(body: AgentRedactDocumentRequest) -> dict[str, Any]:
@@ -882,12 +945,82 @@ def post_apply_review_redactions(
     )
 
 
-@router.post("/word_level_ocr_text_search")
-def post_word_level_ocr_text_search() -> JSONResponse:
-    return _gradio_only(
-        "word_level_ocr_text_search",
-        "Search uses in-memory OCR dataframes in the UI session.",
+@router.post(
+    "/verify_redaction_coverage",
+    response_model=AgentVerifyRedactionResponse,
+    summary="verify_redaction_coverage (Pass 1 programmatic QA)",
+)
+def post_verify_redaction_coverage(
+    body: AgentVerifyRedactionRequest,
+    _: None = Depends(_optional_agent_api_key),
+) -> AgentVerifyRedactionResponse:
+    from tools.simplified_api import run_verify_redaction_coverage
+
+    review = _path_must_be_allowed_file(body.review_csv_path)
+    ocr_words = _path_must_be_allowed_file(body.ocr_words_csv_path)
+    redacted = None
+    if body.redacted_pdf_path:
+        redacted = _path_must_be_allowed_file(body.redacted_pdf_path)
+    try:
+        report, pruned_csv_path, prune_log = run_verify_redaction_coverage(
+            review_csv_path=review,
+            ocr_words_csv_path=ocr_words,
+            must_redact=body.must_redact,
+            must_not_redact=body.must_not_redact,
+            redacted_pdf_path=redacted,
+            total_pages=body.total_pages,
+            min_word_length=body.min_word_length,
+            sample_pixels=body.sample_pixels,
+            auto_prune_suspicious=body.auto_prune_suspicious,
+            pruned_output_path=body.pruned_output_path,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"verify_redaction_coverage failed: {e}"
+        ) from e
+    return AgentVerifyRedactionResponse(
+        status="completed",
+        coverage_pass=bool(report.get("pass_strict", report.get("pass"))),
+        coverage_pass_strict=bool(report.get("pass_strict", report.get("pass"))),
+        coverage_pass_with_cleanup=bool(report.get("pass_with_cleanup")),
+        pruned_csv_path=pruned_csv_path,
+        prune_log=prune_log,
+        report=report,
     )
+
+
+@router.post(
+    "/word_level_ocr_text_search",
+    response_model=AgentWordLevelOcrSearchResponse,
+    summary="word_level_ocr_text_search (headless OCR CSV search)",
+)
+def post_word_level_ocr_text_search(
+    body: AgentWordLevelOcrSearchRequest,
+    _: None = Depends(_optional_agent_api_key),
+) -> AgentWordLevelOcrSearchResponse:
+    from tools.simplified_api import run_word_level_ocr_text_search_api
+
+    ocr_words = _path_must_be_allowed_file(body.ocr_words_csv_path)
+    review = None
+    if body.review_csv_path:
+        review = _path_must_be_allowed_file(body.review_csv_path)
+    try:
+        result = run_word_level_ocr_text_search_api(
+            ocr_words_csv_path=ocr_words,
+            search_text=body.search_text,
+            similarity_threshold=body.similarity_threshold,
+            use_regex=body.use_regex,
+            review_csv_path=review,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"word_level_ocr_text_search failed: {e}"
+        ) from e
+    return AgentWordLevelOcrSearchResponse(status="completed", result=result)
 
 
 @router.get("/operations")
@@ -903,7 +1036,6 @@ def list_operations() -> dict[str, Any]:
             "call_pattern": 'POST /gradio_api/call/<api_name> with JSON body {"data": [...]}',
             "names": [
                 "load_and_prepare_documents_or_data",
-                "word_level_ocr_text_search",
             ],
         },
         "routes": [
@@ -1006,10 +1138,25 @@ def list_operations() -> dict[str, Any]:
                 "implementation": "tools.simplified_api.run_apply_review_redactions",
             },
             {
+                "gradio_api_name": "verify_redaction_coverage",
+                "method": "POST",
+                "path": "/agent/verify_redaction_coverage",
+                "implementation": "tools.verify_redaction_coverage.verify_redaction_coverage",
+                "notes": {
+                    "purpose": "Pass 1 programmatic QA — pass_strict (policy), pass_with_cleanup (+ suspicious rows), optional prune and text/pixel checks.",
+                    "must_redact": "list of regex strings",
+                    "must_not_redact": "list of regex strings",
+                    "auto_prune_suspicious": "remove short OCR-fragment rows before reporting",
+                    "pages_flagged_for_vlm": "policy/visual failures only",
+                    "pages_needing_csv_cleanup": "suspicious rows — prune, not VLM",
+                    "leak_likely_causes": "per-page hints when text_layer_leaks (coord_not_normalized, missing_page_boxes, etc.) — not a broken /review_apply",
+                },
+            },
+            {
                 "gradio_api_name": "word_level_ocr_text_search",
                 "method": "POST",
                 "path": "/agent/word_level_ocr_text_search",
-                "implementation": "not_implemented_http",
+                "implementation": "tools.verify_redaction_coverage.run_word_level_ocr_text_search",
             },
         ],
     }

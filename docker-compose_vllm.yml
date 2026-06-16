@@ -10,6 +10,16 @@
 
 # Recommended for 24gb VRAM systems:
 # docker compose -f docker-compose_vllm.yml --profile vllm-27b up -d
+#
+# Optional Docker-only settings for redaction-app-vllm: config/docker_app_config.env
+# (see config/docker_app_config.env.example). Loaded at container start; the
+# service environment: block overrides values from that file.
+
+x-redaction-app-env: &redaction-app-env
+  env_file:
+    - path: config/docker_app_config.env
+      required: false
+
 services:
   vllm-server-qwen35-9b:
     profiles: ["vllm-9b"]
@@ -87,6 +97,7 @@ services:
           - vllm-inference
 
   redaction-app-vllm:
+    <<: *redaction-app-env
     profiles: ["vllm-9b", "vllm-27b"]
     image: redaction-app-main
     build:

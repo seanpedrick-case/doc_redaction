@@ -293,6 +293,7 @@ from tools.config import (
     S3_ALLOW_LIST_PATH,
     S3_COST_CODES_PATH,
     S3_FEEDBACK_LOGS_FOLDER,
+    S3_OUTPUTS_BUCKET,
     S3_OUTPUTS_FOLDER,
     S3_USAGE_LOGS_FOLDER,
     SAVE_LOGS_TO_CSV,
@@ -337,7 +338,10 @@ from tools.config import (
     WHOLE_PAGE_REDACTION_LIST_PATH,
 )
 from tools.custom_csvlogger import CSVLogger_custom
-from tools.data_anonymise import anonymise_files_with_open_text
+from tools.data_anonymise import (
+    REDACTION_EXAMPLE_PLACEHOLDER,
+    anonymise_files_with_open_text,
+)
 from tools.file_conversion import (
     combine_review_pdf_files,
     get_document_file_names,
@@ -391,6 +395,7 @@ from tools.helper_functions import (
     reset_state_vars,
     reveal_feedback_buttons,
     save_default_cost_code_for_session,
+    seed_bundled_example_textract_json,
     show_duplicate_info_box_on_click,
     show_info_box_on_click,
     show_info_box_on_click_ocr_examples,
@@ -536,6 +541,13 @@ def _example_data_path(rel: str) -> str:
     if _EXAMPLE_DATA_DIR is None:
         return rel
     return str((_EXAMPLE_DATA_DIR / rel).resolve())
+
+
+def seed_example_textract_json_on_app_load(output_folder: str) -> None:
+    """On app load, copy shipped example Textract JSON into the active output folder."""
+    seed_bundled_example_textract_json(
+        output_folder, _example_data_path("example_outputs")
+    )
 
 
 # Check which example files exist and create examples only for available files
@@ -1113,6 +1125,14 @@ nav button[role="tab"],
 div[class*="tab-nav"] button {
     font-size: 1.1em !important;
     padding: 0.75em 1.2em !important;
+}
+
+/* Tabular redaction example: wrap long lines instead of horizontal scroll */
+#text-redaction-example-markdown pre,
+#text-redaction-example-markdown code {
+    white-space: pre-wrap !important;
+    word-break: break-word;
+    overflow-wrap: anywhere;
 }
 """
 
@@ -1696,7 +1716,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                     [example_files[3]],
                     "Local OCR model - PDFs without selectable text",
                     "Local",
-                    [],
+                    ["Extract handwriting", "Extract signatures"],
                     ["CUSTOM"],  # Use CUSTOM entity to enable deny list functionality
                     ["CUSTOM"],
                     [example_files[3]],
@@ -3134,7 +3154,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                                 type="pandas",
                                 label="Click table row to select and go to page",
                                 headers=["page", "label", "text", "id"],
-                                wrap=True,
+                                column_widths=["10%", "40%", "40%", "10%"],
+                                wrap=False,
                                 max_height=400,
                                 show_search="filter",
                             )
@@ -3485,10 +3506,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ###
         # WORD / TABULAR DATA TAB
         ###
-        with gr.Tab(label="Word or Excel/CSV files", id=5):
+        with gr.Tab(label="Open text, Word or Excel/CSV files", id=5):
 
             gr.Markdown(
-                """Choose a Word or tabular data file (xlsx or csv) to redact. Note that when redacting complex Word files with e.g. images, some content/formatting will be removed, and it may not attempt to redact headers. You may prefer to convert the document file to PDF in Word, and then run it through the first tab of this app (Redact PDFs/images)."""
+                """Enter open text, or choose a Word/tabular data file (XLSX or CSV) to redact. Note that when redacting complex Word files with e.g. images, some content/formatting will be removed, and it may not attempt to redact headers. You may prefer to convert the document file to PDF in Word, and then run it through the first tab of this app (Redact PDFs/images)."""
             )
 
             # Examples for Word/Excel/csv redaction and tabular duplicate detection
@@ -3589,17 +3610,17 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                     )
 
             with gr.Accordion(
-                "Redact Word or Excel/CSV files options. Further settings such as entity types and custom allow/deny lists can be set in the first tab (Redact PDFs/images).",
+                "Redact open text, Word or Excel/CSV files. Further settings such as entity types and custom allow/deny lists can be set in the first tab (Redact PDFs/images).",
                 open=show_main_redaction_accordion,
             ):
-                with gr.Accordion("Upload docx, xlsx, or csv files", open=True):
-                    in_data_files.render()
                 with gr.Accordion("Redact open text", open=False):
                     in_text = gr.Textbox(
                         label="Enter open text",
                         lines=10,
                         max_length=MAX_OPEN_TEXT_CHARACTERS,
                     )
+                with gr.Accordion("Upload docx, xlsx, or csv files", open=True):
+                    in_data_files.render()
 
                 in_excel_sheets.render()
 
@@ -3631,6 +3652,12 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                         interactive=False,
                         visible=False,
                     )
+                text_redaction_example_markdown = gr.Markdown(
+                    value=REDACTION_EXAMPLE_PLACEHOLDER,
+                    label="Example redacted output",
+                    elem_id="text-redaction-example-markdown",
+                    buttons=["copy"],
+                )
 
             ###
             # TABULAR DUPLICATE DETECTION
@@ -4007,6 +4034,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                                 precision=0,
                                 minimum=0,
                                 step=1,
+                                visible=False,
                             )
                     with gr.Column(scale=1):
                         overwrite_existing_ocr_checkbox = gr.Checkbox(
@@ -4111,18 +4139,18 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                     "Merge multiple review files into one", variant="primary"
                 )
 
-        if SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER:
-            with gr.Accordion(
-                "View all and download all output files from this session",
-                open=False,
-            ):
-                all_output_files_btn.render()
-                all_output_files.render()
-                all_outputs_file_download.render()
-        else:
+    if SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER:
+        with gr.Accordion(
+            "View all and download all output files from this session",
+            open=False,
+        ):
             all_output_files_btn.render()
             all_output_files.render()
             all_outputs_file_download.render()
+    else:
+        all_output_files_btn.render()
+        all_output_files.render()
+        all_outputs_file_download.render()
 
     ###
     # UI INTERACTION
@@ -8520,6 +8548,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     # Redact tabular data
 
+    def reset_tabular_redact_session():
+        actual_time, logs, comprehend_q = reset_data_vars()
+        return actual_time, logs, comprehend_q, REDACTION_EXAMPLE_PLACEHOLDER
+
     ## From walkthrough tab button – use walkthrough_ components so step 1–3 choices are used
     step_4_next_tabular_redact_btn.click(
         change_tab_to_tabular_or_document_redactions,
@@ -8527,11 +8559,12 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         outputs=tabs,
         api_visibility="undocumented",
     ).success(
-        fn=reset_data_vars,
+        fn=reset_tabular_redact_session,
         outputs=[
             actual_time_taken_number,
             log_files_output_list_state,
             comprehend_query_number,
+            text_redaction_example_markdown,
         ],
         api_visibility="undocumented",
     ).success(
@@ -8575,6 +8608,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             llm_total_input_tokens_number,
             llm_total_output_tokens_number,
             llm_model_name_textbox,
+            text_redaction_example_markdown,
         ],
         api_visibility="undocumented",
         show_progress_on=[text_output_summary],
@@ -8656,11 +8690,12 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     ## From tabular data redaction tab button
     tabular_data_redact_btn.click(
-        reset_data_vars,
+        reset_tabular_redact_session,
         outputs=[
             actual_time_taken_number,
             log_files_output_list_state,
             comprehend_query_number,
+            text_redaction_example_markdown,
         ],
         api_visibility="undocumented",
     ).success(
@@ -8704,6 +8739,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             llm_total_input_tokens_number,
             llm_total_output_tokens_number,
             llm_model_name_textbox,
+            text_redaction_example_markdown,
         ],
         api_name="redact_data",
         show_progress_on=[text_output_summary],
@@ -9857,7 +9893,52 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
     # Get connection details on app load
 
     if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS:
-        blocks.load(
+        app_load_event = (
+            blocks.load(
+                get_connection_params,
+                inputs=[
+                    output_folder_textbox,
+                    input_folder_textbox,
+                    session_output_folder_textbox,
+                    s3_output_folder_state,
+                    s3_whole_document_textract_input_subfolder,
+                    s3_whole_document_textract_output_subfolder,
+                    s3_whole_document_textract_logs_subfolder,
+                    local_whole_document_textract_logs_subfolder,
+                ],
+                outputs=[
+                    session_hash_state,
+                    output_folder_textbox,
+                    session_hash_textbox,
+                    input_folder_textbox,
+                    s3_whole_document_textract_input_subfolder,
+                    s3_whole_document_textract_output_subfolder,
+                    s3_whole_document_textract_logs_subfolder,
+                    local_whole_document_textract_logs_subfolder,
+                    s3_output_folder_state,
+                ],
+                api_visibility="undocumented",
+            )
+            .success(
+                load_in_textract_job_details,
+                inputs=[
+                    load_s3_whole_document_textract_logs_bool,
+                    s3_whole_document_textract_logs_subfolder,
+                    local_whole_document_textract_logs_subfolder,
+                ],
+                outputs=[textract_job_detail_df],
+                api_visibility="undocumented",
+            )
+            .success(
+                fn=load_all_output_files,
+                inputs=output_folder_textbox,
+                outputs=all_output_files,
+                api_visibility="undocumented",
+            )
+        )
+
+    else:
+        app_load_event = blocks.load(
             get_connection_params,
             inputs=[
                 output_folder_textbox,
@@ -9880,15 +9961,6 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                 local_whole_document_textract_logs_subfolder,
                 s3_output_folder_state,
             ],
-            api_visibility="undocumented",
-        ).success(
-            load_in_textract_job_details,
-            inputs=[
-                load_s3_whole_document_textract_logs_bool,
-                s3_whole_document_textract_logs_subfolder,
-                local_whole_document_textract_logs_subfolder,
-            ],
-            outputs=[textract_job_detail_df],
             api_visibility="undocumented",
         ).success(
             fn=load_all_output_files,
@@ -9897,30 +9969,12 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             api_visibility="undocumented",
         )
 
-    else:
-        blocks.load(
-            get_connection_params,
-            inputs=[
-                output_folder_textbox,
-                input_folder_textbox,
-                session_output_folder_textbox,
-                s3_output_folder_state,
-                s3_whole_document_textract_input_subfolder,
-                s3_whole_document_textract_output_subfolder,
-                s3_whole_document_textract_logs_subfolder,
-                local_whole_document_textract_logs_subfolder,
-            ],
-            outputs=[
-                session_hash_state,
-                output_folder_textbox,
-                session_hash_textbox,
-                input_folder_textbox,
-                s3_whole_document_textract_input_subfolder,
-                s3_whole_document_textract_output_subfolder,
-                s3_whole_document_textract_logs_subfolder,
-                local_whole_document_textract_logs_subfolder,
-                s3_output_folder_state,
-            ],
+    # Copy bundled example Textract JSON into the session output folder so AWS demo
+    # examples reuse local results instead of calling Textract on every run.
+    if RUN_ALL_EXAMPLES_THROUGH_AWS and SHOW_EXAMPLES:
+        app_load_event = app_load_event.success(
+            seed_example_textract_json_on_app_load,
+            inputs=[output_folder_textbox],
             api_visibility="undocumented",
         ).success(
             fn=load_all_output_files,
@@ -10301,6 +10355,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         api_name="doc_redact",
         api_description=(
             "Redact a single PDF/image in one call (CLI-aligned). "
+            "Optional handwrite_signature_checkbox for AWS Textract extraction "
+            "(e.g. Extract handwriting, Extract signatures). "
             "Returns (output_paths, message). Does not update the main UI session."
         ),
     )
@@ -10310,6 +10366,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         api_name="review_apply",
         api_description=(
             "Apply redactions in one call from the original PDF and a *_review_file.csv. "
+            "Uses PyMuPDF redaction annotations and strips underlying text in *_redacted.pdf. "
+            "Also returns *_redactions_for_review.pdf (text retained for review). "
             "Returns (output_paths, message). Does not update the Review tab UI session."
         ),
     )
@@ -10360,6 +10418,16 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             str(Path(OUTPUT_FOLDER).resolve()),
             str(Path(INPUT_FOLDER).resolve()),
         ]
+        if GRADIO_TEMP_DIR:
+            _gradio_file_allowed_paths.append(str(Path(GRADIO_TEMP_DIR).resolve()))
+        # Pi agent + local dev: /redact_document may return paths under workspace/.gradio_uploads
+        _workspace_gradio_uploads = (
+            Path(__file__).resolve().parent / "workspace" / ".gradio_uploads"
+        )
+        if _workspace_gradio_uploads.is_dir():
+            _gradio_file_allowed_paths.append(str(_workspace_gradio_uploads.resolve()))
+        # Stable order, no duplicates (Gradio rejects duplicate allowed_paths on some versions).
+        _gradio_file_allowed_paths = list(dict.fromkeys(_gradio_file_allowed_paths))
 
         # If running through command line with uvicorn
         if RUN_FASTAPI:
@@ -10394,7 +10462,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                 show_error=True,
                 auth=authenticate_user if COGNITO_AUTH else None,
                 max_file_size=MAX_FILE_SIZE,
-                path="",
+                path="/",
                 favicon_path=_resolve_optional_file_path(FAVICON_PATH),
                 mcp_server=RUN_MCP_SERVER,
                 allowed_paths=_gradio_file_allowed_paths,
@@ -10483,6 +10551,9 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                 "cost_code": DEFAULT_COST_CODE,
                 "aws_region": AWS_REGION,
                 "s3_bucket": DOCUMENT_REDACTION_BUCKET,
+                "save_outputs_to_s3": SAVE_OUTPUTS_TO_S3,
+                "s3_outputs_folder": S3_OUTPUTS_FOLDER,
+                "s3_outputs_bucket": S3_OUTPUTS_BUCKET,
                 "do_initial_clean": DO_INITIAL_TABULAR_DATA_CLEAN,
                 "save_logs_to_csv": SAVE_LOGS_TO_CSV,
                 "save_logs_to_dynamodb": SAVE_LOGS_TO_DYNAMODB,

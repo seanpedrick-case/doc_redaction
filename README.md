@@ -21,7 +21,7 @@ Redact personally identifiable information (PII) from documents (PDF, PNG, JPG),
 
 Follow these instructions to get the document redaction application running on your local machine.
 
-### 1. Package installation
+### 1. Installation
 
 #### Option 1 - Recommended: Install from source repo
 
@@ -35,16 +35,12 @@ pip install -e .
 
 ##### Install extras (Paddle or Transformers/Torch VLM)
 
-To install with PaddleOCR:
+To install with PaddleOCR (with a transformers backend as of v2.4.0):
 
 ```bash
 pip install -e ".[paddle]"
 ```
 
-Note that the versions of both PaddleOCR and Torch installed by default are the CPU-only versions. If you want to install the equivalent GPU versions, you will need to run the following commands:
-```bash
-pip install paddlepaddle-gpu==3.2.1 --index-url https://www.paddlepaddle.org.cn/packages/stable/cu129/
-```
 
 If you want to run VLMs / LLMs with the transformers package:
 
@@ -53,11 +49,9 @@ pip install -e ".[vlm]"
 ```
 
 
-**Note:** It is difficult to get paddlepaddle gpu working in an environment alongside torch. You may well need to reinstall the cpu version to ensure compatibility, and run paddlepaddle-gpu in a separate environment without torch installed. If you get errors related to .dll files following paddle gpu install, you may need to install the latest c++ redistributables. For Windows, you can find them [here](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170)
-
+Note that the versions of both PaddleOCR and Torch installed by default are the CPU-only versions. If you want to install the GPU-enabled version of torch, it is advised to install the following version:
 ```bash
-pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu129
-pip install torchvision --index-url https://download.pytorch.org/whl/cu129
+pip install torch==2.9.1 torchvision==0.24.1 --index-url https://download.pytorch.org/whl/cu129
 ```
 
 #### Option 2 - Install from PyPI
@@ -122,9 +116,38 @@ You will need ~40 GB of disk space to run everything depending on the model chos
 
 If you want a working Docker installation without GPU support, you can install from the [Dockerfile](https://github.com/seanpedrick-case/doc_redaction/blob/main/Dockerfile) in the repo. A working example of this, with the CPU version of PaddleOCR, can be found on [Hugging Face](https://huggingface.co/spaces/seanpedrickcase/document_redaction). You can adjust the INSTALL_PADDLEOCR, PADDLE_GPU_ENABLED, INSTALL_VLM, and TORCH_GPU_ENABLED config variables to adjust for PaddleOCR and Transformers packages for local VLM support. Note that GPU-enabled PaddleOCR, and GPU-enabled Transformers/Torch often don't work well together, which is one reason why a Llama.cpp/vLLM inference server Docker installation option is provided below.
 
+The main [Dockerfile](https://github.com/seanpedrick-case/doc_redaction/blob/main/Dockerfile) produces two final images via build targets: **`gradio`** (default web UI, non-root user, named volumes for writable paths) and **`lambda`** (AWS Lambda handler). Build examples:
+
+```bash
+docker build -f Dockerfile --target gradio -t doc-redaction-gradio .
+docker build -f Dockerfile --target lambda -t doc-redaction-lambda .
+```
+
+##### Pi agent (agentic redaction)
+
+The [Pi](https://github.com/earendil-works/pi) orchestration UI uses a separate multi-stage image at [agent-redact/pi-agent/Dockerfile](https://github.com/seanpedrick-case/doc_redaction/blob/main/agent-redact/pi-agent/Dockerfile). It shares the same Python 3.12 slim base as the main app; a small Node stage installs the `pi` CLI, which is copied into the runtime image.
+
+| Build target | Typical use |
+|--------------|-------------|
+| **`dev`** | Local development with [docker-compose_llama_agentic.yml](https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_llama_agentic.yml) — the repo is bind-mounted; only Pi CLI + Python deps are in the image. |
+| **`runtime`** | [Hugging Face Space](https://huggingface.co/spaces/seanpedrickcase/agentic_document_redaction) and AWS ECS — agent code is baked in; runs as non-root `user` with **named volumes** for workspace, uploads, and session dirs (read-only root filesystem friendly). |
+
+Build from the repository root:
+
+```bash
+docker build -f agent-redact/pi-agent/Dockerfile --target dev -t pi-agent-dev .
+docker build -f agent-redact/pi-agent/Dockerfile --target runtime -t pi-agent-runtime .
+```
+
+For llama.cpp + Pi together, see the compose examples at the top of [docker-compose_llama_agentic.yml](https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_llama_agentic.yml). Further detail: [agent-redact/README.md](https://github.com/seanpedrick-case/doc_redaction/blob/main/agent-redact/README.md).
+
+#### Option 4 - Installation on AWS with CDK
+
+The repo contains a [CDK folder](https://github.com/seanpedrick-case/doc_redaction/tree/main/cdk), that contains all the files you need to setup and deploy to an AWS environment with CDK. The installation wizard is [cdk_install.py](https://github.com/seanpedrick-case/doc_redaction/blob/main/cdk/cdk_install.py), which provides a number of options to deploy the Document Redaction App to AWS for demonstration or production. More details on CDK deployment can be found in the [Installation Guide](https://seanpedrick-case.github.io/doc_redaction/src/installation_guide.html).
+
 ### 2. Install prerequisites: Tesseract and Poppler
 
-This application relies on two external tools for OCR (Tesseract) and PDF processing (Poppler). Please install them on your system before proceeding. To run the Document Redaction app successfully, these tools need to be installed and either 1. added to PATH, or 2. be in a folder that is directly referenced in the config/app_config.env file with the variables TESSERACT_FOLDER and POPPLER_FOLDER (defined [here](https://github.com/seanpedrick-case/doc_redaction/blob/main/tools/config.py) if you want to see the code). The instructions below will guide you through diffferent ways to install these dependencies.
+This application relies on two external tools for OCR (Tesseract) and PDF processing (Poppler). If not using a Docker-based deployment, you will need to install them on your system before proceeding. To run the Document Redaction app successfully, these tools need to be installed and either 1. added to PATH, or 2. be in a folder that is directly referenced in the config/app_config.env file with the variables TESSERACT_FOLDER and POPPLER_FOLDER (defined [here](https://github.com/seanpedrick-case/doc_redaction/blob/main/tools/config.py) if you want to see the code). The instructions below will guide you through diffferent ways to install these dependencies.
 
 ---
 
@@ -231,10 +254,8 @@ For Python examples in using the Python package, please see [Python Package usag
 You can customise the application's behavior by creating a configuration file. This allows you to change settings without modifying the source code, such as enabling AWS features, changing logging behavior, or pointing to local Tesseract/Poppler installations. A full overview of all the potential settings you can modify in the app_config.env file can be seen in tools/config.py, with explanation on the documentation website for [the github repo](https://seanpedrick-case.github.io/doc_redaction/)
 
 To get started:
-1.  Locate the `example_config.env` file in the root of the project.
-2.  Create a new file named `app_config.env` inside the `config/` directory (i.e., `config/app_config.env`).
-3.  Copy the contents from `example_config.env` into your new `config/app_config.env` file.
-4.  Modify the values in `config/app_config.env` to suit your needs. The application will automatically load these settings on startup.
+1.  Copy `config/app_config.env.example` to `config/app_config.env`.
+2.  Modify the values in `config/app_config.env` to suit your needs. The application will automatically load these settings on startup.
 
 If you do not create this file, the application will run with default settings.
 
@@ -319,7 +340,7 @@ If you are an LLM/agent interacting with this app over HTTP (e.g. Hugging Face S
 Fetch `/gradio_api/info` and then prefer the simplest route that exists:
 
 - **Apply edited review CSV to a PDF**: `/review_apply`
-- **Redact a PDF/image document**: `/doc_redact`
+- **Redact a PDF/image document**: `/doc_redact` — optional `handwrite_signature_checkbox` for AWS Textract (e.g. `Extract handwriting`, `Extract signatures`)
 - **Summarise a PDF**: `/pdf_summarise`
 - **Redact tabular files (CSV/XLSX/Parquet/DOCX)**: `/tabular_redact`
 

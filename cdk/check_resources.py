@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Any, Dict, List
+from typing import Dict, List
 
 from cdk_config import (  # Import necessary config
     ALB_NAME,
@@ -14,8 +14,15 @@ from cdk_config import (  # Import necessary config
     COGNITO_USER_POOL_NAME,
     CONTEXT_FILE,
     ECR_CDK_REPO_NAME,
+    ECR_PI_REPO_NAME,
+    ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_NAMES_TO_LOOKUP,
     ECS_TASK_EXECUTION_ROLE_NAME,
     ECS_TASK_ROLE_NAME,
+    ENABLE_ECS_SERVICE_CONNECT,
+    ENABLE_HEADLESS_DEPLOYMENT,
+    ENABLE_PI_AGENT_ECS_SERVICE,
+    ENABLE_S3_BATCH_ECS_TRIGGER,
+    EXISTING_IGW_ID,
     PRIVATE_SUBNET_AVAILABILITY_ZONES,
     PRIVATE_SUBNET_CIDR_BLOCKS,
     PRIVATE_SUBNETS_TO_USE,
@@ -24,11 +31,13 @@ from cdk_config import (  # Import necessary config
     PUBLIC_SUBNETS_TO_USE,
     S3_LOG_CONFIG_BUCKET_NAME,
     S3_OUTPUT_BUCKET_NAME,
+    USE_ECS_EXPRESS_MODE,
     VPC_NAME,
     WEB_ACL_NAME,
 )
 from cdk_functions import (  # Import your check functions (assuming they use Boto3)
     _get_existing_subnets_in_vpc,
+    audit_public_subnet_internet_connectivity,
     check_alb_exists,
     check_codebuild_project_exists,
     check_ecr_repo_exists,
@@ -39,7 +48,10 @@ from cdk_functions import (  # Import your check functions (assuming they use Bo
     check_s3_bucket_exists,
     check_subnet_exists_by_name,
     check_web_acl_exists,
+    get_secret_kms_key_arn,
+    get_security_group_id_by_name,
     get_vpc_id_by_name,
+    list_existing_vpc_endpoint_service_names,
     validate_subnet_creation_parameters,
     # Add other check functions as needed
 )
@@ -86,7 +98,12 @@ def check_and_set_context():
     # --- Find the VPC ID first ---
     if VPC_NAME:
         print("VPC_NAME:", VPC_NAME)
-        vpc_id, nat_gateways = get_vpc_id_by_name(VPC_NAME)
+        vpc_lookup = get_vpc_id_by_name(VPC_NAME)
+        if not vpc_lookup:
+            raise RuntimeError(
+                f"Required VPC '{VPC_NAME}' not found. Cannot proceed with subnet checks."
+            )
+        vpc_id, nat_gateways, vpc_cidr_block, vpc_cidr_blocks = vpc_lookup
 
         # If you expect only one, or one per AZ and you're creating one per AZ in CDK:
         if nat_gateways:
@@ -100,17 +117,25 @@ def check_and_set_context():
             context_data["exists:NatGateway"] = False
             context_data["id:NatGateway"] = None
 
-        if not vpc_id:
-            # If the VPC doesn't exist, you might not be able to check/create subnets.
-            # Decide how to handle this: raise an error, set a flag, etc.
-            raise RuntimeError(
-                f"Required VPC '{VPC_NAME}' not found. Cannot proceed with subnet checks."
+        context_data["vpc_id"] = vpc_id  # Store VPC ID in context
+        if vpc_cidr_block:
+            context_data["vpc_cidr_block"] = vpc_cidr_block
+        if vpc_cidr_blocks:
+            context_data["vpc_cidr_blocks"] = vpc_cidr_blocks
+
+        existing_endpoint_services = sorted(
+            list_existing_vpc_endpoint_service_names(vpc_id, region_name=AWS_REGION)
+        )
+        if existing_endpoint_services:
+            context_data["existing_vpc_endpoint_service_names"] = (
+                existing_endpoint_services
+            )
+            print(
+                "Existing VPC endpoints in target VPC (will be skipped on deploy): "
+                + ", ".join(existing_endpoint_services)
             )
 
-        context_data["vpc_id"] = vpc_id  # Store VPC ID in context
-
         # SUBNET CHECKS
-        context_data: Dict[str, Any] = {}
         all_proposed_subnets_data: List[Dict[str, str]] = []
 
         # Flag to indicate if full validation mode (with CIDR/AZs) is active
@@ -193,6 +218,18 @@ def check_and_set_context():
                 checked_public_subnets[subnet_name] = {
                     "exists": exists,
                     "id": subnet_id,
+                    "az": (
+                        existing_aws_subnets["by_name"].get(subnet_name, {}).get("az")
+                        if exists
+                        else None
+                    ),
+                    "route_table_id": (
+                        existing_aws_subnets["by_name"]
+                        .get(subnet_name, {})
+                        .get("route_table_id")
+                        if exists
+                        else None
+                    ),
                 }
 
                 # If the subnet exists, remove it from the proposed subnets list
@@ -215,6 +252,18 @@ def check_and_set_context():
                 checked_private_subnets[subnet_name] = {
                     "exists": exists,
                     "id": subnet_id,
+                    "az": (
+                        existing_aws_subnets["by_name"].get(subnet_name, {}).get("az")
+                        if exists
+                        else None
+                    ),
+                    "route_table_id": (
+                        existing_aws_subnets["by_name"]
+                        .get(subnet_name, {})
+                        .get("route_table_id")
+                        if exists
+                        else None
+                    ),
                 }
 
                 # If the subnet exists, remove it from the proposed subnets list
@@ -226,6 +275,58 @@ def check_and_set_context():
                     ]
 
         context_data["checked_private_subnets"] = checked_private_subnets
+
+        # Internet Gateway + public subnet default routes (legacy ALB / NAT public subnets)
+        if PUBLIC_SUBNETS_TO_USE and vpc_id:
+            public_entries_for_igw_audit = []
+            for subnet_name in PUBLIC_SUBNETS_TO_USE:
+                info = checked_public_subnets.get(subnet_name, {})
+                if not info.get("exists"):
+                    continue
+                public_entries_for_igw_audit.append(
+                    {
+                        "name": subnet_name,
+                        "subnet_id": info.get("id"),
+                        "route_table_id": info.get("route_table_id"),
+                    }
+                )
+            if public_entries_for_igw_audit or EXISTING_IGW_ID:
+                print("\n--- Auditing Internet Gateway and public subnet routes ---")
+                try:
+                    igw_audit = audit_public_subnet_internet_connectivity(
+                        vpc_id,
+                        EXISTING_IGW_ID,
+                        public_entries_for_igw_audit,
+                    )
+                    context_data["internet_gateway_id"] = igw_audit[
+                        "internet_gateway_id"
+                    ]
+                    context_data["internet_gateway_needs_vpc_attachment"] = igw_audit[
+                        "internet_gateway_needs_vpc_attachment"
+                    ]
+                    context_data["public_subnets_needing_igw_route"] = igw_audit[
+                        "public_subnets_needing_igw_route"
+                    ]
+                    needing = igw_audit["public_subnets_needing_igw_route"]
+                    if igw_audit["internet_gateway_needs_vpc_attachment"]:
+                        print(
+                            f"CDK will attach IGW '{igw_audit['internet_gateway_id']}' "
+                            f"to VPC '{vpc_id}' on deploy."
+                        )
+                    if needing:
+                        print(
+                            f"CDK will add default internet routes on deploy for: "
+                            f"{', '.join(n['name'] for n in needing)}"
+                        )
+                    else:
+                        print(
+                            "All audited public subnets already have 0.0.0.0/0 -> IGW routes."
+                        )
+                except ValueError as e:
+                    print(
+                        f"\nFATAL ERROR: Internet Gateway / public route audit failed: {e}\n"
+                    )
+                    raise SystemExit(1) from e
 
         print("\nName-only existence subnet check complete.\n")
 
@@ -239,10 +340,13 @@ def check_and_set_context():
                 )
                 print("\nPre-synth validation successful. Proceeding with CDK synth.\n")
 
-                # Populate context_data for downstream CDK construct creation
+                # Populate context_data for downstream CDK construct creation.
+                # Skip subnets that already exist in AWS (imported in the stack).
                 context_data["public_subnets_to_create"] = []
                 if public_ready_for_full_validation:
                     for i, name in enumerate(PUBLIC_SUBNETS_TO_USE):
+                        if checked_public_subnets.get(name, {}).get("exists"):
+                            continue
                         context_data["public_subnets_to_create"].append(
                             {
                                 "name": name,
@@ -254,6 +358,8 @@ def check_and_set_context():
                 context_data["private_subnets_to_create"] = []
                 if private_ready_for_full_validation:
                     for i, name in enumerate(PRIVATE_SUBNETS_TO_USE):
+                        if checked_private_subnets.get(name, {}).get("exists"):
+                            continue
                         context_data["private_subnets_to_create"].append(
                             {
                                 "name": name,
@@ -270,24 +376,21 @@ def check_and_set_context():
     # Example checks and setting context values
     # IAM Roles
     role_name = CODEBUILD_ROLE_NAME
-    exists, _, _ = check_for_existing_role(role_name)
-    context_data[f"exists:{role_name}"] = exists  # Use boolean
+    exists, role_arn, _ = check_for_existing_role(role_name)
+    context_data[f"exists:{role_name}"] = exists
     if exists:
-        _, role_arn, _ = check_for_existing_role(role_name)  # Get ARN if needed
         context_data[f"arn:{role_name}"] = role_arn
 
     role_name = ECS_TASK_ROLE_NAME
-    exists, _, _ = check_for_existing_role(role_name)
+    exists, role_arn, _ = check_for_existing_role(role_name)
     context_data[f"exists:{role_name}"] = exists
     if exists:
-        _, role_arn, _ = check_for_existing_role(role_name)
         context_data[f"arn:{role_name}"] = role_arn
 
     role_name = ECS_TASK_EXECUTION_ROLE_NAME
-    exists, _, _ = check_for_existing_role(role_name)
+    exists, role_arn, _ = check_for_existing_role(role_name)
     context_data[f"exists:{role_name}"] = exists
     if exists:
-        _, role_arn, _ = check_for_existing_role(role_name)
         context_data[f"arn:{role_name}"] = role_arn
 
     # S3 Buckets
@@ -304,72 +407,168 @@ def check_and_set_context():
     if exists:
         pass
 
-    # ECR Repository
-    repo_name = ECR_CDK_REPO_NAME
-    exists, _ = check_ecr_repo_exists(repo_name)
-    context_data[f"exists:{repo_name}"] = exists
-    if exists:
-        pass  # from_repository_name is sufficient
+    # ECR Repositories
+    for repo_name in (ECR_CDK_REPO_NAME, ECR_PI_REPO_NAME):
+        exists, _ = check_ecr_repo_exists(repo_name)
+        context_data[f"exists:{repo_name}"] = exists
 
     # CodeBuild Project
     project_name = CODEBUILD_PROJECT_NAME
-    exists, _ = check_codebuild_project_exists(project_name)
+    exists, project_arn, service_role_arn = check_codebuild_project_exists(project_name)
     context_data[f"exists:{project_name}"] = exists
     if exists:
-        # Need a way to get the ARN from the check function
-        _, project_arn = check_codebuild_project_exists(
-            project_name
-        )  # Assuming it returns ARN
         context_data[f"arn:{project_name}"] = project_arn
+        if service_role_arn:
+            context_data[f"service_role_arn:{project_name}"] = service_role_arn
 
-    # ALB (by name lookup)
-    alb_name = ALB_NAME
-    exists, _ = check_alb_exists(alb_name, region_name=AWS_REGION)
-    context_data[f"exists:{alb_name}"] = exists
-    if exists:
-        _, alb_object = check_alb_exists(
-            alb_name, region_name=AWS_REGION
-        )  # Assuming check returns object
-        print("alb_object:", alb_object)
-        context_data[f"arn:{alb_name}"] = alb_object["LoadBalancerArn"]
+    # ALB (by name lookup) — skipped when Express Mode will provision its own ALB
+    alb_name = ALB_NAME[-32:] if len(ALB_NAME) > 32 else ALB_NAME
+    if USE_ECS_EXPRESS_MODE == "True":
+        context_data[f"exists:{alb_name}"] = False
+        print(
+            "USE_ECS_EXPRESS_MODE=True: skipping ALB pre-check (Express provisions ALB)."
+        )
+    elif ENABLE_HEADLESS_DEPLOYMENT == "True":
+        context_data[f"exists:{alb_name}"] = False
+        print(
+            "ENABLE_HEADLESS_DEPLOYMENT=True: skipping ALB pre-check (no web ingress)."
+        )
+    if ENABLE_HEADLESS_DEPLOYMENT == "True":
+        print(
+            "ENABLE_HEADLESS_DEPLOYMENT=True: requires ENABLE_S3_BATCH_ECS_TRIGGER=True "
+            "and USE_ECS_EXPRESS_MODE=False."
+        )
+    elif ENABLE_S3_BATCH_ECS_TRIGGER == "True":
+        print(
+            "ENABLE_S3_BATCH_ECS_TRIGGER=True: requires legacy Fargate (USE_ECS_EXPRESS_MODE=False)."
+        )
+    if ENABLE_PI_AGENT_ECS_SERVICE == "True":
+        print(
+            "ENABLE_PI_AGENT_ECS_SERVICE=True: requires legacy Fargate, Service Connect, "
+            "and PI_ALB_ROUTING (default path=/pi on shared ALB; host mode needs PI_ALB_HOST_HEADER)."
+        )
+    elif ENABLE_HEADLESS_DEPLOYMENT == "True":
+        print(
+            "ENABLE_HEADLESS_DEPLOYMENT=True: legacy Fargate task definition + "
+            "S3 batch Lambda only (no ALB pre-check)."
+        )
+    else:
+        exists, alb_object = check_alb_exists(alb_name, region_name=AWS_REGION)
+        context_data[f"exists:{alb_name}"] = exists
+        if exists:
+            print("alb_object:", alb_object)
+            context_data[f"arn:{alb_name}"] = alb_object["LoadBalancerArn"]
+            context_data[f"dns:{alb_name}"] = alb_object["DNSName"]
+            context_data[f"canonical_hosted_zone_id:{alb_name}"] = alb_object[
+                "CanonicalHostedZoneId"
+            ]
+            if alb_object.get("SecurityGroups"):
+                context_data[f"security_group_id:{alb_name}"] = alb_object[
+                    "SecurityGroups"
+                ][0]
 
-    # Cognito User Pool (by name)
-    user_pool_name = COGNITO_USER_POOL_NAME
-    exists, user_pool_id, _ = check_for_existing_user_pool(user_pool_name)
-    context_data[f"exists:{user_pool_name}"] = exists
-    if exists:
-        context_data[f"id:{user_pool_name}"] = user_pool_id
+    # Cognito (web login only; headless batch mode has no Gradio/ALB ingress)
+    if ENABLE_HEADLESS_DEPLOYMENT != "True":
+        user_pool_name = COGNITO_USER_POOL_NAME
+        exists, user_pool_id, _ = check_for_existing_user_pool(user_pool_name)
+        context_data[f"exists:{user_pool_name}"] = exists
+        if exists:
+            context_data[f"id:{user_pool_name}"] = user_pool_id
 
-    # Cognito User Pool Client (by name and pool ID) - requires User Pool ID from check
-    if user_pool_id:
-        user_pool_id_for_client_check = user_pool_id  # context_data.get(f"id:{user_pool_name}") # Use ID from context
-        user_pool_client_name = COGNITO_USER_POOL_CLIENT_NAME
-        if user_pool_id_for_client_check:
-            exists, client_id, _ = check_for_existing_user_pool_client(
-                user_pool_client_name, user_pool_id_for_client_check
+        # Cognito User Pool Client (by name and pool ID) - requires User Pool ID from check
+        if user_pool_id:
+            user_pool_id_for_client_check = user_pool_id  # context_data.get(f"id:{user_pool_name}") # Use ID from context
+            user_pool_client_name = COGNITO_USER_POOL_CLIENT_NAME
+            if user_pool_id_for_client_check:
+                exists, client_id, _ = check_for_existing_user_pool_client(
+                    user_pool_client_name, user_pool_id_for_client_check
+                )
+                context_data[f"exists:{user_pool_client_name}"] = exists
+                if exists:
+                    context_data[f"id:{user_pool_client_name}"] = client_id
+                else:
+                    print(
+                        f"User pool '{user_pool_name}' exists but app client "
+                        f"'{user_pool_client_name}' does not; CDK will create a new client."
+                    )
+
+        # Secrets Manager Secret (by name)
+        secret_name = COGNITO_USER_POOL_CLIENT_SECRET_NAME
+        exists, secret_response = check_for_secret(secret_name)
+        context_data[f"exists:{secret_name}"] = exists
+        if exists:
+            secret_arn = (
+                secret_response.get("ARN")
+                if isinstance(secret_response, dict)
+                else None
             )
-            context_data[f"exists:{user_pool_client_name}"] = exists
-            if exists:
-                context_data[f"id:{user_pool_client_name}"] = client_id
+            if secret_arn:
+                context_data[f"arn:{secret_name}"] = secret_arn
+                print("Cognito secret ARN recorded for IAM grants.")
+                secret_kms_key_arn = get_secret_kms_key_arn(
+                    secret_name, region_name=AWS_REGION
+                )
+                if secret_kms_key_arn:
+                    context_data[f"kms_key_arn:{secret_name}"] = secret_kms_key_arn
+                    print("Cognito secret KMS key recorded for execution role decrypt.")
+            else:
+                print(
+                    "Warning: Cognito secret exists but ARN was not returned; "
+                    "CDK will use a name-based ARN wildcard in IAM policies."
+                )
+    else:
+        print(
+            "ENABLE_HEADLESS_DEPLOYMENT=True: skipping Cognito user pool and secret pre-checks."
+        )
 
-    # Secrets Manager Secret (by name)
-    secret_name = COGNITO_USER_POOL_CLIENT_SECRET_NAME
-    exists, _ = check_for_secret(secret_name)
-    context_data[f"exists:{secret_name}"] = exists
-    # You might not need the ARN if using from_secret_name_v2
+    # Service Connect client security groups (by name in VPC)
+    if ENABLE_ECS_SERVICE_CONNECT == "True":
+        vpc_id_for_sg = context_data.get("vpc_id")
+        if vpc_id_for_sg:
+            for sg_name in ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_NAMES_TO_LOOKUP:
+                exists, sg_id = get_security_group_id_by_name(
+                    sg_name, vpc_id_for_sg, region_name=AWS_REGION
+                )
+                context_data[f"exists:sg:{sg_name}"] = exists
+                if exists:
+                    context_data[f"security_group_id:{sg_name}"] = sg_id
+                    print(f"Service Connect client SG '{sg_name}' -> {sg_id}")
+                else:
+                    print(
+                        f"Warning: Service Connect client SG '{sg_name}' "
+                        f"not found in VPC {vpc_id_for_sg}"
+                    )
+        else:
+            print(
+                "Warning: vpc_id missing from context; cannot resolve Service "
+                "Connect client security group names."
+            )
 
     # WAF Web ACL (by name and scope)
     web_acl_name = WEB_ACL_NAME
-    exists, _ = check_web_acl_exists(
-        web_acl_name, scope="CLOUDFRONT"
-    )  # Assuming check returns object
+    exists, existing_web_acl = check_web_acl_exists(web_acl_name, scope="CLOUDFRONT")
     context_data[f"exists:{web_acl_name}"] = exists
     if exists:
-        _, existing_web_acl = check_web_acl_exists(web_acl_name, scope="CLOUDFRONT")
-        context_data[f"arn:{web_acl_name}"] = existing_web_acl.attr_arn
+        context_data[f"arn:{web_acl_name}"] = existing_web_acl["ARN"]
 
     # Write the context data to the file
     with open(CONTEXT_FILE, "w") as f:
         json.dump(context_data, f, indent=2)
 
     print(f"Context data written to {CONTEXT_FILE}")
+
+
+if __name__ == "__main__":
+    print(f"Pre-check context file: {CONTEXT_FILE}")
+    print(
+        "Running AWS pre-check (requires credentials for the target account/region)..."
+    )
+    try:
+        check_and_set_context()
+    except SystemExit:
+        raise
+    except Exception as exc:
+        raise SystemExit(f"Pre-check failed: {exc}") from exc
+    if not os.path.exists(CONTEXT_FILE):
+        raise SystemExit(f"Pre-check finished but {CONTEXT_FILE} was not created.")
+    print(f"Pre-check complete. Context written to {os.path.abspath(CONTEXT_FILE)}")

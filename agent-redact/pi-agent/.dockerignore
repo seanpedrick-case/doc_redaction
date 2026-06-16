@@ -1,0 +1,10 @@
+.git
+.github
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/node_modules
+workspace
+output
+input
+config/pi_agent.env

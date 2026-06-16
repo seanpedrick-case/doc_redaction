@@ -87,12 +87,21 @@ def _buffer_looks_like_gradio_sse(buf: str) -> bool:
     return b.startswith("event:") or "\nevent:" in b
 
 
+def _looks_like_gradio_file_path(value: str) -> bool:
+    s = value.strip()
+    if not s:
+        return False
+    if s.startswith("/") and len(s) > 1:
+        return True
+    return len(s) >= 3 and s[1] == ":" and s[0].isalpha() and s[2] in ("\\", "/")
+
+
 def extract_file_like_paths(value: Any) -> list[str]:
     """
     Recursively extract Gradio file paths from a completed payload.
 
     Handles:
-    - strings that look like absolute paths (/tmp/gradio..., /home/user/..., etc.)
+    - strings that look like absolute paths (/tmp/gradio..., C:\\..., etc.)
     - dicts with key 'path'
     - lists/tuples of nested values
     """
@@ -103,12 +112,12 @@ def extract_file_like_paths(value: Any) -> list[str]:
             return
         if isinstance(v, str):
             s = v.strip()
-            if s.startswith("/") and len(s) > 1:
+            if _looks_like_gradio_file_path(s):
                 out.append(s)
             return
         if isinstance(v, dict):
             p = v.get("path")
-            if isinstance(p, str) and p.strip().startswith("/"):
+            if isinstance(p, str) and _looks_like_gradio_file_path(p):
                 out.append(p.strip())
             for vv in v.values():
                 walk(vv)

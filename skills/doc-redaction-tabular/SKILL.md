@@ -5,9 +5,7 @@ version: 1.4.0
 author: repo-maintained
 license: AGPL-3.0-only
 changelog:
-  - "v1.4.0 (Apr 21, 2026): Added /find_duplicate_tabular docs with handle_file caveat. Clarified HF Space '0 entities' quirk.
-Added Excel multi-sheet handling. Output file naming convention section expanded strategy
-comparison. Added error handling patterns and edge case notes."
+  - "v1.4.0 (Apr 21, 2026): Added /find_duplicate_tabular docs with handle_file caveat. Clarified HF Space '0 entities' quirk. Added Excel multi-sheet handling. Output file naming convention section expanded strategy comparison. Added error handling patterns and edge case notes."
 ---
 
 ## Purpose
@@ -177,7 +175,9 @@ docker cp doc_redaction-redaction-app-llama-1:/home/user/app/output/combined_cas
 | Parameter | Type | Notes |
 |-----------|------|-------|
 | `chosen_cols` | list[str] | Column names to anonymize. If empty, all columns with PII are processed. Use exact column header names from the CSV/XLSX. |
-| `chosen_redact_entities` | list[str] | Entity types for spaCy NER: `PERSON`, `PHONE_NUMBER`, `EMAIL_ADDRESS`, `STREETNAME`, `UKPOSTCODE` |
+| `chosen_redact_entities` | list[str] | **Local** (spaCy + custom recognizers) — full list in [`../doc-redaction-app/SKILL.md`](../doc-redaction-app/SKILL.md) §2e. Includes `TITLES`, `UKPOSTCODE`, `STREETNAME`, `CUSTOM`, `CUSTOM_FUZZY` |
+| `chosen_redact_comprehend_entities` | list[str] | **AWS Comprehend** labels when `pii_identification_method="AWS Comprehend"` — full list in doc-redaction-app §2e; may also include `TITLES`, `UKPOSTCODE`, `STREETNAME`, `CUSTOM`, `CUSTOM_FUZZY` |
+| `in_deny_list` / `in_allow_list` | list[str] | Terms always redacted (`CUSTOM` / `CUSTOM_FUZZY`) or never redacted (`allow_list`). See doc-redaction-app §2e |
 | `max_fuzzy_spelling_mistakes_num` | int | 0 = exact match. 1–2 allows fuzzy matching (useful for typos in PII). |
 | `do_initial_clean` | bool | True: strips whitespace, normalizes text. Recommended for dirty data. |
 | `pii_identification_method` | str | `"Local"` (spaCy, no API keys) or `"AWS Comprehend"` (requires AWS creds). |

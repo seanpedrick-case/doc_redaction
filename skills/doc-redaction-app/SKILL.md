@@ -1,14 +1,16 @@
 ---
 name: doc-redaction-app
 description: "Initial document redaction and downloading server outputs: gradio_client, `/doc_redact` first, path/download traps, and `/redact_document` when needed. Not for CSV review or reapply (see doc-redaction-modifications); parallel multi-page review orchestration → doc-redact-page-review."
-version: 2.1.1
+version: 2.3.3
 author: repo-maintained
 license: AGPL-3.0-only
 ---
 
 ## Scope
 
-This skill covers **running an initial redaction** and **getting artifacts onto the client**. For edited review CSVs, `/review_apply`, coordinate fixes, and visual QA, use [`../doc-redaction-modifications/SKILL.md`](../doc-redaction-modifications/SKILL.md). For **parallel per-page review** (spawn subagents, merge CSV, one `/review_apply`), use [`../doc-redact-page-review/SKILL.md`](../doc-redact-page-review/SKILL.md).
+This skill covers **running an initial redaction** and **getting artifacts onto the client**. For review after a run: **Pass 1** (OCR/CSV edits, `/review_apply`) and optional **Pass 2** (visual VLM) — [`../doc-redaction-modifications/SKILL.md`](../doc-redaction-modifications/SKILL.md). For **parallel Pass 1 page review** (subagents, merge, one apply), use [`../doc-redact-page-review/SKILL.md`](../doc-redact-page-review/SKILL.md).
+
+**Starting a new task from chat:** copy [`../doc-redaction-task-prompt/TASK_PROMPT_TEMPLATE.md`](../doc-redaction-task-prompt/TASK_PROMPT_TEMPLATE.md), fill setup placeholders, and put case-specific **must redact / must not redact** rules in the **User redaction requirements** section at the end.
 
 ## Quick start
 
@@ -20,19 +22,34 @@ This skill covers **running an initial redaction** and **getting artifacts onto 
 
 ### 2) Prefer `/doc_redact` over `/redact_document`
 
-Use `/doc_redact` for a normal PDF/image first pass. Use `/redact_document` only when you need the full Gradio control surface.
+Use `/doc_redact` for a normal PDF/image first pass. Use `/redact_document` only when you need the full Gradio control surface. Note that the `/doc_redact` endpoint may not be visible when calling `client.view_api()`.
 
-### 2b) `/doc_redact` can succeed with no artifacts
+### 2b) `/doc_redact` empty path list
 
-Some deployments return a success message but **`[]`** for output paths. Treat that as **no deliverable** for automation.
+If the API returns **`[]`** with `"doc_redact completed"` but the server log shows **Generated Files**, common causes are: (1) **`SESSION_OUTPUT_FOLDER=True`** and a **re-run** overwrote the same filenames (fixed in recent builds via mtime-based path return); (2) path collectors that ignore **Windows** `C:\...` paths. Fallback on **shared-disk** deployments: glob `OUTPUT_FOLDER` (including per-user subfolders) for `*{document_stem}*`, or use `remote_redaction.resolve_redaction_output_paths`. Do **not** pass a Pi workspace path as `output_dir` — only directories under the app `OUTPUT_FOLDER` are accepted.
 
-- **Custom VLM entity types** (e.g. `CUSTOM_VLM_SIGNATURE`, `CUSTOM_VLM_FACES`) are a common trigger: processing may complete but paths stay empty. Fall back to `/redact_document` (or deployment-specific docs) if you need those entities.
+### 2f) AWS ECS / split-container Pi (no shared disk with doc_redaction)
+
+When `PI_DEPLOYMENT_PROFILE=aws-ecs` (or `DOC_REDACTION_GRADIO_URL` points at an internal service like `http://redaction:7860`), the Pi agent and doc_redaction run in **separate containers**.
+
+| Do | Don't |
+|----|-------|
+| Save deliverables under `{session}/redact/<document>/output_redact/` | `find /workspace`, `ls /home/user/app/output`, or read `/workspace/doc_redaction/output/` on the Pi container |
+| `/doc_redact` via `gradio_client` + `handle_file()` for uploads from the session workspace | Pass Pi workspace paths as `output_dir` on `/doc_redact` |
+| `extract_server_paths(result)` then `fetch_redaction_files(paths, dest)` (HTTP only) | `shutil.copy2` from server paths (no shared filesystem) |
+| **Pre-apply verify:** `python tools/verify_redaction_coverage.py` on **downloaded** CSV/PDF in your session workspace | Pass Pi workspace paths to `POST /agent/verify_redaction_coverage` |
+| **Post-apply verify:** `POST {gradio_url}/agent/verify_redaction_coverage` with **server paths** from `/review_apply` (`extract_server_paths`) plus OCR words path from `/doc_redact` | Import/call `verify_redaction_coverage()` on the Pi container with redaction-server path strings |
+| Keep server paths from `extract_server_paths` for Agent API calls | Use `/tmp/gradio_tmp/...` paths from `/gradio_api/upload` on Agent API (not under `OUTPUT_FOLDER`) |
+
+**Split-container verify playbook:** pre-apply checks run on **local copies** of the edited review CSV (it only exists in your session workspace until `/review_apply`). Post-apply checks use the **Agent API on the redaction service** with paths that already exist under `/home/user/app/output/...` on that server. See [`../doc-redaction-modifications/SKILL.md`](../doc-redaction-modifications/SKILL.md) § Split-container verify.
+
+Helper (synced into the workspace): `{PI_WORKSPACE_DIR}/.pi/helpers/remote_redaction.py`. When `predict` returns `[]`, retry once and parse the status message for paths — **do not** grep the Pi container filesystem.
 
 ### 2c) `/doc_redact` vs `/redact_document` parameter names
 
 They are **not** interchangeable. Wrong kwargs raise errors such as `Parameter is not a valid keyword argument`.
 
-- `/doc_redact`: e.g. `document_file`, `ocr_method`, `pii_method`, `redact_entities` (not `file_paths`, `chosen_local_ocr_model`, `chosen_redact_entities`).
+- `/doc_redact`: e.g. `document_file`, `ocr_method`, `pii_method`, `redact_entities`, `handwrite_signature_checkbox` (not `file_paths`, `chosen_local_ocr_model`, `chosen_redact_entities`, `custom_llm_instructions`).
 - `/redact_document`: long-form names (`file_paths`, `chosen_redact_entities`, `chosen_local_ocr_model`, `pii_identification_method`, etc.). Use `client.view_api()` when in doubt.
 
 ### 2d) OCR / PII labels on `/doc_redact`
@@ -41,6 +58,154 @@ They are **not** interchangeable. Wrong kwargs raise errors such as `Parameter i
 - `pii_method`: e.g. `Local`, `AWS Comprehend`, `LLM (AWS Bedrock)`, `Local inference server`, `Local transformers LLM`, `None`. Prefer exact labels from the deployment.
 
 Optional **page window** (when exposed): `page_min` / `page_max` (1-based; `0` often means first/last page—confirm in `view_api()`).
+
+**AWS Textract extraction** (`handwrite_signature_checkbox`): multiselect list passed when using `AWS Textract` (or hybrid Textract routes). Values must match the deployment UI labels exactly.
+
+| Value | Always available? | Purpose |
+|-------|-------------------|---------|
+| `Extract handwriting` | Yes (base default) | Handwritten text via Textract |
+| `Extract signatures` | Yes (base default) | Signature blocks via Textract |
+| `Extract forms` | Only if deployment enables it | Key-value / form fields |
+| `Extract layout` | Only if deployment enables it | Document layout structure |
+| `Extract tables` | Only if deployment enables it | Table detection |
+| `Face detection` | Only if deployment enables it | Face regions (often used with VLM routes) |
+
+Base deployments expose only the first two (`HANDWRITE_SIGNATURE_TEXTBOX_FULL_OPTIONS` default). Extra rows appear when the server config sets `INCLUDE_FORM_EXTRACTION_TEXTRACT_OPTION`, `INCLUDE_LAYOUT_EXTRACTION_TEXTRACT_OPTION`, `INCLUDE_TABLE_EXTRACTION_TEXTRACT_OPTION`, or `INCLUDE_FACE_IDENTIFICATION_TEXTRACT_OPTION` to `True`. Confirm with the UI “AWS Textract extraction settings” checkbox group or `GET /gradio_api/info`.
+
+Example:
+
+```python
+client.predict(
+    api_name="/doc_redact",
+    document_file=handle_file("/local/path/document.pdf"),
+    ocr_method="AWS Textract",
+    handwrite_signature_checkbox=["Extract handwriting", "Extract signatures"],
+)
+```
+
+When omitted, server/CLI defaults apply (`DEFAULT_HANDWRITE_SIGNATURE_CHECKBOX`, often `[]`).
+
+### 2e) PII entity lists — Local vs AWS Comprehend
+
+**Which parameter to use depends on `pii_method`:**
+
+| `pii_method` | `/doc_redact` | `/redact_document` |
+|--------------|---------------|-------------------|
+| `Local` (spaCy/Presidio) | `redact_entities` | `chosen_redact_entities` |
+| `AWS Comprehend` | **Not exposed** — use `/redact_document` or CLI | `chosen_redact_comprehend_entities` |
+
+`/doc_redact` maps `redact_entities` → CLI `local_redact_entities` only. For Comprehend entity selection, call `/redact_document` (or `cli_redact.py --aws_redact_entities …`).
+
+**Local PII entities** (`FULL_ENTITY_LIST` in `tools/config.py`; deployment may extend via env):
+
+`TITLES`, `PERSON`, `PHONE_NUMBER`, `EMAIL_ADDRESS`, `STREETNAME`, `UKPOSTCODE`, `CREDIT_CARD`, `CRYPTO`, `DATE_TIME`, `IBAN_CODE`, `IP_ADDRESS`, `NRP`, `LOCATION`, `MEDICAL_LICENSE`, `URL`, `UK_NHS`, `CUSTOM`, `CUSTOM_FUZZY`
+
+When VLM face/signature detection is enabled on the deployment, the list may also include: `CUSTOM_VLM_FACES`, `CUSTOM_VLM_SIGNATURE`.
+
+**Textract + `CUSTOM_VLM_SIGNATURE`:** when `ocr_method` is `AWS Textract` and `handwrite_signature_checkbox` includes `Extract signatures`, Textract signature analysis runs and **inline/post-pass `CUSTOM_VLM_SIGNATURE` VLM detection is skipped** (no duplicate signature finding). Keep `CUSTOM_VLM_SIGNATURE` in the entity list if you want those regions redacted; Textract supplies the boxes. Without `Extract signatures`, `CUSTOM_VLM_SIGNATURE` still uses VLM as before.
+
+Default selection (`CHOSEN_REDACT_ENTITIES`): `TITLES`, `PERSON`, `PHONE_NUMBER`, `EMAIL_ADDRESS`, `STREETNAME`, `UKPOSTCODE`, `CUSTOM`.
+
+**AWS Comprehend entities** (`FULL_COMPREHEND_ENTITY_LIST`):
+
+`BANK_ACCOUNT_NUMBER`, `BANK_ROUTING`, `CREDIT_DEBIT_NUMBER`, `CREDIT_DEBIT_CVV`, `CREDIT_DEBIT_EXPIRY`, `PIN`, `EMAIL`, `ADDRESS`, `NAME`, `PHONE`, `SSN`, `DATE_TIME`, `PASSPORT_NUMBER`, `DRIVER_ID`, `URL`, `AGE`, `USERNAME`, `PASSWORD`, `AWS_ACCESS_KEY`, `AWS_SECRET_KEY`, `IP_ADDRESS`, `MAC_ADDRESS`, `LICENSE_PLATE`, `VEHICLE_IDENTIFICATION_NUMBER`, `UK_NATIONAL_INSURANCE_NUMBER`, `INTERNATIONAL_BANK_ACCOUNT_NUMBER`, `SWIFT_CODE`, `UK_NATIONAL_HEALTH_SERVICE_NUMBER`, `ALL`, `CUSTOM`, `CUSTOM_FUZZY`
+
+Default selection (`CHOSEN_COMPREHEND_ENTITIES`): `EMAIL`, `ADDRESS`, `NAME`, `PHONE`, `PASSPORT_NUMBER`, `UK_NATIONAL_INSURANCE_NUMBER`, `UK_NATIONAL_HEALTH_SERVICE_NUMBER`, `CUSTOM`.
+
+**Do not mix label namespaces:** Local uses `PERSON` / `EMAIL_ADDRESS`; Comprehend uses `NAME` / `EMAIL`. Pick the list that matches your `pii_method`.
+
+#### Custom Presidio recognizers (Local **and** Comprehend)
+
+These are **not** generic spaCy NER labels — they are app-specific Presidio recognizers (`tools/load_spacy_model_custom_recognisers.py`). They appear in **both** Local and Comprehend entity dropdowns because `CUSTOM_ENTITIES` is merged into the Comprehend lists (Comprehend can miss titles, UK postcodes, and street fragments).
+
+| Entity | What it detects |
+|--------|-----------------|
+| `TITLES` | Honorifics/titles: Mr, Mrs, Ms, Miss, Dr, Professor, Sir, … |
+| `UKPOSTCODE` | UK postcode patterns (e.g. `SW1A 1AA`, `GIR 0AA`) |
+| `STREETNAME` | Street/road address fragments (number + street-type suffix, e.g. `… Road`, `… Lane`) |
+
+Default deployment config (`CUSTOM_ENTITIES`): `TITLES`, `UKPOSTCODE`, `STREETNAME`. Admins may extend via the `CUSTOM_ENTITIES` env var.
+
+On **`/doc_redact`**: include in `redact_entities`. On **`/redact_document`**: include in `chosen_redact_entities` (Local) **or** `chosen_redact_comprehend_entities` (Comprehend — these three labels are valid there too).
+
+#### `CUSTOM` and `CUSTOM_FUZZY` (deny-list driven)
+
+Both routes support explicit term lists via **`deny_list`** / **`allow_list`** on `/doc_redact`, or deny/allow list files on `/redact_document` / CLI.
+
+| Entity | Matching | Typical use |
+|--------|----------|-------------|
+| `CUSTOM` | Exact (literal or regex in deny list) | Always redact specific names, orgs, or regex patterns |
+| `CUSTOM_FUZZY` | Fuzzy deny-list match (spelling variants) | Same, tolerating typos; auto-included when CLI `fuzzy_mistakes > 0` |
+
+**`/doc_redact` inline lists:** pass terms directly as `deny_list=["term1", "term2"]` (not a file path). When `deny_list` is non-empty, the API **auto-appends `CUSTOM`** to `redact_entities` if missing (deny-list matching requires that entity type). If you omit `redact_entities` entirely, CLI defaults already include `CUSTOM`.
+
+For fuzzy deny-list matching via API, include `CUSTOM_FUZZY` in `redact_entities` explicitly only when the user explicitly requests fuzzy matching. Otherwise prefer `CUSTOM` with an explicit `deny_list` on `/doc_redact`, and use `/redact_document` with `max_fuzzy_spelling_mistakes_num > 0` if you need fuzzy deny-list matching.
+
+> ⚠️ **Warning:** on `/doc_redact`, `CUSTOM_FUZZY` is expensive and may cause the endpoint to return an empty path list even when the redaction job completes. Use it only when the user asks for typo-tolerant deny-list redaction.
+
+`allow_list` excludes terms from redaction even when another entity type would match.
+
+Example — Local `/doc_redact` with UK-specific recognizers + custom deny terms:
+
+```python
+client.predict(
+    api_name="/doc_redact",
+    document_file=handle_file("/local/path/document.pdf"),
+    pii_method="Local",
+    redact_entities=[
+        "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER",
+        "TITLES", "STREETNAME", "UKPOSTCODE",
+        "CUSTOM", "CUSTOM_FUZZY",
+    ],
+    deny_list=["Acme Corp", "Cora Fyller"],
+)
+```
+
+Example — Comprehend `/redact_document` with Comprehend labels **plus** custom recognizers:
+
+```python
+client.predict(
+    api_name="/redact_document",
+    file_paths=[handle_file("/local/path/document.pdf")],
+    pii_identification_method="AWS Comprehend",
+    chosen_redact_entities=[],
+    chosen_redact_comprehend_entities=[
+        "NAME", "EMAIL", "PHONE", "ADDRESS",
+        "TITLES", "UKPOSTCODE", "STREETNAME", "CUSTOM",
+    ],
+    chosen_llm_entities=["PERSON_NAME"],
+    ocr_review_files=[],
+    combined_out_message="",
+    output_folder="/home/user/app/output",
+)
+```
+
+Example — Local on `/doc_redact`:
+
+```python
+client.predict(
+    api_name="/doc_redact",
+    document_file=handle_file("/local/path/document.pdf"),
+    pii_method="Local",
+    redact_entities=["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "STREETNAME", "UKPOSTCODE", "TITLES"],
+)
+```
+
+Example — Comprehend on `/redact_document`:
+
+```python
+client.predict(
+    api_name="/redact_document",
+    file_paths=[handle_file("/local/path/document.pdf")],
+    pii_identification_method="AWS Comprehend",
+    chosen_redact_entities=[],  # unused when Comprehend is selected
+    chosen_redact_comprehend_entities=["NAME", "EMAIL", "PHONE", "ADDRESS"],
+    chosen_llm_entities=["PERSON_NAME"],
+    ocr_review_files=[],
+    combined_out_message="",
+    output_folder="/home/user/app/output",
+)
+```
 
 ### 3) `handle_file` (critical)
 
@@ -53,6 +218,7 @@ Optional **page window** (when exposed): `page_min` / `page_max` (1-based; `0` o
 - URL: `{BASE_URL}/gradio_api/file={urllib.parse.quote(path, safe="")}`. Always encode the path; spaces and special characters break naive URLs.
 - Gated HF Spaces: send **`Authorization: Bearer <HF_TOKEN>`** on download requests as well as on the client.
 - Paths may be strings or nested dicts with a `"path"` key; walk recursively if needed (see `extract_file_like_paths` in `mcp_doc_redaction/gradio_transport.py`).
+- **Windows / same-machine Pi agent:** paths look like `C:\...\output\...` or `C:\...\workspace\.gradio_uploads\...` — collectors that only accept `/` prefixes will see an **empty list**. Call **`/doc_redact`** without a custom `output_dir`, then copy into your workspace `output_redact/` with **`shutil.copy2`** when paths share a disk (`fetch_redaction_files`). HTTP `gradio_api/file=` may return **403** for `.gradio_uploads` unless the app exposes that folder in `allowed_paths`. Helpers: `agent-redact/pi/remote_redaction.py` (`resolve_redaction_output_paths`, `extract_server_paths`, `fetch_redaction_files`).
 
 ### 5) `/redact_document` gotchas (initial run)
 
@@ -60,7 +226,8 @@ Optional **page window** (when exposed): `page_min` / `page_max` (1-based; `0` o
 - `chosen_llm_entities` must contain **at least one** value even in Local PII mode (e.g. `["PERSON"]` or `["PERSON_NAME"]`).
 - **`combined_out_message=""`** and **`ocr_review_files=[]`** are required in typical apps; omitting them raises `TypeError: No value provided for required argument`.
 - Heavy **VLM / signature** jobs can run many minutes per page; use generous **`httpx.Timeout`** (e.g. `read=1800` or higher) to avoid false timeouts.
-- When picking files by name, **`…_redacted.pdf`** is the redacted artifact; **`…_redactions_for_review.pdf`** is an overlay preview, not the final black-box PDF.
+- When picking files by name, **`…_redacted.pdf`** is the redacted artifact (text stripped); **`…_redactions_for_review.pdf`** is a review copy that **retains the text layer** — not the deliverable and not for leak checks.
+- **`/review_apply`** returns both files. Download `*_redacted.pdf` for delivery and post-apply coverage; ignore `_redactions_for_review.pdf` for text-layer verification.
 
 ### 6) Client and network
 
@@ -124,9 +291,10 @@ Expand with **`client.view_api()`** for your deployment; typical extra fields in
 ```python
 kwargs = {
     "file_paths": [handle_file("/local/path/document.pdf")],
-    "chosen_redact_entities": ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"],
+    "pii_identification_method": "Local",
+    "chosen_redact_entities": ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "STREETNAME", "UKPOSTCODE", "TITLES", "CUSTOM"],
     "chosen_redact_comprehend_entities": [],
-    "chosen_llm_entities": ["PERSON"],
+    "chosen_llm_entities": ["PERSON_NAME"],
     "ocr_review_files": [],
     "combined_out_message": "",
     "output_folder": "/home/user/app/output",  # non-empty; adjust to deployment

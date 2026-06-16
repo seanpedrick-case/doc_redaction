@@ -297,15 +297,22 @@ def sanitize_markdown_text(text: str) -> str:
 CONFIG_FOLDER = get_or_create_env_var("CONFIG_FOLDER", "config/")
 CONFIG_FOLDER = ensure_folder_within_app_directory(CONFIG_FOLDER)
 
+APP_TYPE = get_or_create_env_var("APP_TYPE", "redaction-app")
+if APP_TYPE == "pi":
+    APP_CONFIG_FILE = "pi_agent.env"
+else:
+    APP_CONFIG_FILE = "app_config.env"
+
 # If you have an aws_config env file in the config folder, you can load in app variables this way, e.g. 'config/app_config.env'
 APP_CONFIG_PATH = get_or_create_env_var(
-    "APP_CONFIG_PATH", CONFIG_FOLDER + "app_config.env"
+    "APP_CONFIG_PATH", CONFIG_FOLDER + APP_CONFIG_FILE
 )  # e.g. config/app_config.env
 
 if APP_CONFIG_PATH:
     if os.path.exists(APP_CONFIG_PATH):
         print(f"Loading app variables from config file {APP_CONFIG_PATH}")
-        load_dotenv(APP_CONFIG_PATH)
+        # Do not override task/compose env (e.g. ECS ``PI_DEFAULT_PROVIDER``).
+        load_dotenv(APP_CONFIG_PATH, override=False)
 
 ###
 # AWS OPTIONS
@@ -397,23 +404,6 @@ S3_OUTPUTS_BUCKET = get_or_create_env_var(
     "S3_OUTPUTS_BUCKET", DOCUMENT_REDACTION_BUCKET
 )
 
-# Allow for files to be saved in a temporary folder for increased security in some instances - deprecated
-# if OUTPUT_FOLDER == "TEMP" or INPUT_FOLDER == "TEMP":
-#     # Use mkdtemp so the directory persists for the lifetime of the process.
-#     # TemporaryDirectory() as a context manager deletes the directory immediately on exit.
-#     import atexit
-#     import shutil
-
-#     temp_dir = tempfile.mkdtemp()
-#     print(f"Temporary directory created at: {temp_dir}")
-#     atexit.register(shutil.rmtree, temp_dir, ignore_errors=True)
-
-#     if OUTPUT_FOLDER == "TEMP":
-#         OUTPUT_FOLDER = temp_dir + "/"
-#     if INPUT_FOLDER == "TEMP":
-#         INPUT_FOLDER = temp_dir + "/"
-# else:
-#     # Ensure folders are within app directory (skip validation for TEMP as it's handled above)
 
 OUTPUT_FOLDER = ensure_folder_within_app_directory(OUTPUT_FOLDER)
 INPUT_FOLDER = ensure_folder_within_app_directory(INPUT_FOLDER)
@@ -514,6 +504,10 @@ USAGE_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var(
 )
 DYNAMODB_USAGE_LOG_HEADERS = get_or_create_env_var("DYNAMODB_USAGE_LOG_HEADERS", "")
 
+PI_USAGE_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var(
+    "PI_USAGE_LOG_DYNAMODB_TABLE_NAME", "redaction_usage"
+)
+
 # Report logging to console?
 LOGGING = convert_string_to_boolean(get_or_create_env_var("LOGGING", "False"))
 
@@ -526,6 +520,19 @@ if LOGGING:
 LOG_FILE_NAME = get_or_create_env_var("LOG_FILE_NAME", "log.csv")
 USAGE_LOG_FILE_NAME = get_or_create_env_var("USAGE_LOG_FILE_NAME", LOG_FILE_NAME)
 FEEDBACK_LOG_FILE_NAME = get_or_create_env_var("FEEDBACK_LOG_FILE_NAME", LOG_FILE_NAME)
+PI_USAGE_LOG_FILE_NAME = get_or_create_env_var(
+    "PI_USAGE_LOG_FILE_NAME", "pi_usage_log.csv"
+)
+PI_LOG_CHAT_USAGE = convert_string_to_boolean(
+    get_or_create_env_var("PI_LOG_CHAT_USAGE", "False")
+)
+CSV_PI_USAGE_LOG_HEADERS = get_or_create_env_var(
+    "CSV_PI_USAGE_LOG_HEADERS",
+    '["session_hash", "event", "document_name", "duration_seconds", "provider", "model", "host_name", "deployment_profile"]',
+)
+DYNAMODB_PI_USAGE_LOG_HEADERS = get_or_create_env_var(
+    "DYNAMODB_PI_USAGE_LOG_HEADERS", ""
+)
 
 
 ###
@@ -640,7 +647,7 @@ AZURE_OPENAI_VLM_TEXT_EXTRACT_OPTION = get_or_create_env_var(
 # When True, use a two-step OCR process for PDFs: try selectable text extraction per page first;
 # only run OCR (Tesseract/Textract/VLM) on pages where no text could be extracted. Saves cost/time.
 EFFICIENT_OCR = convert_string_to_boolean(
-    get_or_create_env_var("EFFICIENT_OCR", "False")
+    get_or_create_env_var("EFFICIENT_OCR", "True")
 )
 # Minimum number of extractable words on a page to use text-only route; below this use OCR.
 EFFICIENT_OCR_MIN_WORDS = int(get_or_create_env_var("EFFICIENT_OCR_MIN_WORDS", "20"))
@@ -1040,7 +1047,7 @@ if VLM_MAX_ASPECT_RATIO < 1.0:
 
 USE_FLASH_ATTENTION = convert_string_to_boolean(
     get_or_create_env_var("USE_FLASH_ATTENTION", "False")
-)  # Whether to use flash attention for the VLM
+)  # Requires a flash-attn wheel matching torch/CUDA/Python; otherwise sdpa is used.
 
 QUANTISE_VLM_MODELS = convert_string_to_boolean(
     get_or_create_env_var("QUANTISE_VLM_MODELS", "False")
@@ -1329,9 +1336,110 @@ CONVERT_LINE_TO_WORD_LEVEL = convert_string_to_boolean(
     get_or_create_env_var("CONVERT_LINE_TO_WORD_LEVEL", "True")
 )  # Whether to convert paddle line-level OCR results to word-level for better precision
 
+# Local OCR reading order:
+# - "column": multi-column aware ordering + our line grouping heuristics (word->line)
+# - "legacy": global top-left sort + legacy y-threshold line grouping
+# - "paddle_native": when using Paddle OCR, preserve Paddle's native line boxes and
+#   assign line numbers directly from them (still column-aware ordering).
+LOCAL_OCR_READING_ORDER = (
+    get_or_create_env_var("LOCAL_OCR_READING_ORDER", "column").strip().lower()
+)
+if LOCAL_OCR_READING_ORDER not in ("column", "legacy", "paddle_native"):
+    LOCAL_OCR_READING_ORDER = "column"
+
+OCR_FULL_SPAN_WIDTH_RATIO = float(
+    get_or_create_env_var("OCR_FULL_SPAN_WIDTH_RATIO", "0.6")
+)  # Box width / page width above this is treated as a full-width line (header/footer).
+
+OCR_COLUMN_GAP_MIN_FRACTION = float(
+    get_or_create_env_var("OCR_COLUMN_GAP_MIN_FRACTION", "0.08")  # was 0.04
+)  # Minimum horizontal gap (fraction of page width) between x-center clusters.
+
+OCR_COLUMN_GUTTER_MIN_FRACTION = float(
+    get_or_create_env_var("OCR_COLUMN_GUTTER_MIN_FRACTION", "0.08")  # was 0.04
+)  # Min horizontal gap between boxes on the same text row to treat as multi-column.
+
+OCR_COLUMN_MIN_GUTTER_ROWS = int(
+    get_or_create_env_var("OCR_COLUMN_MIN_GUTTER_ROWS", "3")
+)  # Min number of text rows that must each show a side-by-side gutter before the page
+# is classified as multi-column.  A single header band (logo left, title right) has
+# only 1 gutter row and must not trigger column mode for the whole page body.
+
+OCR_COLUMN_MAX_BOX_HEIGHT_RATIO = float(
+    get_or_create_env_var("OCR_COLUMN_MAX_BOX_HEIGHT_RATIO", "4.0")
+)  # A box is excluded from gutter detection if its height exceeds this multiple of the
+# median box height on the page.  Image regions / city-seal placeholders misdetected
+# as text typically have heights 10-20× the median and would otherwise create false
+# gutter rows that trigger column mode on single-column pages.
+
+OCR_COLUMN_MAX_CONSECUTIVE_GUTTER_GAP = float(
+    get_or_create_env_var("OCR_COLUMN_MAX_CONSECUTIVE_GUTTER_GAP", "0.1")  # was 0.06
+)  # Maximum y-gap (as fraction of page height) between adjacent gutter rows that are
+# still considered part of the same consecutive cluster.  Gutter rows separated by more
+# than this gap (e.g. a header at y=0.07 and signatures at y=0.81) belong to distinct
+# layout regions and must not be counted together against min_gutter_rows.
+
+OCR_COLUMN_FOOTER_ZONE_FRACTION = float(
+    get_or_create_env_var("OCR_COLUMN_FOOTER_ZONE_FRACTION", "0.75")
+)  # A cluster of gutter rows whose topmost row starts at or beyond this fraction of page
+# height is treated as a footer/signature block and must not trigger column mode on its
+# own.  Prevents two side-by-side signature blocks from forcing column-major reading
+# order on the single-column body text above them.
+
+OCR_COLUMN_SUBGUTTER_MIN_FRACTION = float(
+    get_or_create_env_var("OCR_COLUMN_SUBGUTTER_MIN_FRACTION", "0.03")  # was 0.015
+)  # Fine-grained gutter threshold used inside assign_layout_boxes (after the page is already
+# confirmed multi-column) to detect narrow sub-column boundaries that the standard
+# OCR_COLUMN_GUTTER_MIN_FRACTION (0.04) would miss (e.g. a 1.9 % gutter on a two-page spread).
+
+OCR_LINE_SPLIT_GAP_FRACTION = float(
+    get_or_create_env_var("OCR_LINE_SPLIT_GAP_FRACTION", "0.1")  # was 0.025
+)  # When merging word-level boxes into lines, a horizontal gap between adjacent boxes
+# that exceeds this fraction of page width forces a new line (build-time rightward gap)
+# or triggers a post-processing split (_finalize_line) even when both boxes share the
+# same y-band.  Prevents words from different columns or side-by-side elements from
+# being concatenated into one line.
+# Typical inter-word spacing is 0.005–0.015 (well below this threshold).
+# The threshold must be smaller than the narrowest real column gutter (~0.030 for the
+# Lambeth foreword two-page spread) yet large enough to avoid splitting normal text.
+# Typical inter-word spacing for OCR word-level boxes is 0.003–0.010; the next
+# threshold tier is the narrowest column gutter observed (~0.020–0.030).
+# 0.025 (2.5 %) provides safe headroom above word spacing and catches the ~0.030+
+# gutters in multi-column documents.
+
+OCR_LINE_Y_THRESHOLD_FRACTION = float(
+    get_or_create_env_var("OCR_LINE_Y_THRESHOLD_FRACTION", "0.013")  # was 0.013
+)  # Vertical alignment tolerance as a fraction of page height.  Two word-level boxes
+# whose tops differ by less than this fraction are treated as belonging to the same
+# logical text row.  0.013 (1.3 %) is chosen to stay below the ~0.014 row spacing of
+# tightly-set 10 pt body text while still
+# being well above typical within-row top jitter (< 0.005).  For normalised 0-1
+# coordinates page_height=1.0, so the fraction doubles as the absolute threshold.
+
+OCR_LINE_Y_THRESHOLD_MIN_PX = float(
+    get_or_create_env_var("OCR_LINE_Y_THRESHOLD_MIN_PX", "12")
+)  # Minimum vertical alignment tolerance in pixels.
+
+PADDLE_PRESERVE_LINE_BOXES = convert_string_to_boolean(
+    get_or_create_env_var("PADDLE_PRESERVE_LINE_BOXES", "False")
+)  # Keep Paddle line boxes (skip word split + regrouping) when using Paddle OCR.
+
+SPACES_ZERO_GPU = convert_string_to_boolean(
+    get_or_create_env_var("SPACES_ZERO_GPU", "False")
+)  # Set by Hugging Face ZeroGPU runtime.
+
 LOAD_PADDLE_AT_STARTUP = convert_string_to_boolean(
-    get_or_create_env_var("LOAD_PADDLE_AT_STARTUP", "False")
-)  # Whether to load the PaddleOCR model at startup.
+    get_or_create_env_var(
+        "LOAD_PADDLE_AT_STARTUP",
+        "True" if os.environ.get("SPACES_ZERO_GPU") else "False",
+    )
+)  # Eager PaddleOCR init at import (skipped on ZeroGPU main process; loads in @spaces.GPU worker).
+
+# PaddleOCR device for transformers backend, e.g. cpu, gpu, gpu:0 (default gpu:0 on ZeroGPU / CUDA).
+PADDLE_DEVICE = get_or_create_env_var(
+    "PADDLE_DEVICE",
+    "gpu:0" if os.environ.get("SPACES_ZERO_GPU") else "",
+).strip()
 
 PADDLE_USE_TEXTLINE_ORIENTATION = convert_string_to_boolean(
     get_or_create_env_var("PADDLE_USE_TEXTLINE_ORIENTATION", "False")
@@ -1499,6 +1607,16 @@ QWEN35_27B_BNB_4BIT_REPO_ID = get_or_create_env_var(
 QWEN35_35B_A3B_REPO_ID = get_or_create_env_var(
     "QWEN35_35B_A3B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-35B-A3B"
 )
+QWEN36_27B_REPO_ID = get_or_create_env_var(
+    "QWEN36_27B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.6-27B"
+)
+QWEN36_27B_BNB_4BIT_REPO_ID = get_or_create_env_var(
+    "QWEN36_27B_BNB_4BIT_REPO_TRANSFORMERS_ID", "samajlouis/Qwen3.6-27B-bnb-nf4"
+)
+QWEN36_35B_A3B_REPO_ID = get_or_create_env_var(
+    "QWEN36_35B_A3B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-35B-A3B"
+)
+
 QWEN35_122B_A10B_REPO_ID = get_or_create_env_var(
     "QWEN35_122B_A10B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-122B-A10B"
 )
@@ -1597,6 +1715,26 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_35B_A3B_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 35B-A3B"
     elif (
+        "qwen3.6-27b-bnb" in model_choice_lower
+        or QWEN36_27B_BNB_4BIT_REPO_ID in model_choice_lower
+        or "qwen3.6-27b-4bit" in model_choice_lower
+    ):
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN36_27B_BNB_4BIT_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.6 27B (4-bit)"
+    elif (
+        "qwen3.6-27b" in model_choice_lower
+        or "qwen-3.6-27b"
+        or QWEN36_27B_REPO_ID in model_choice_lower
+    ):
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN36_27B_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.6 27B"
+    elif (
+        "qwen3.6-35b-a3b" in model_choice_lower
+        or QWEN36_35B_A3B_REPO_ID in model_choice_lower
+    ):
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN36_35B_A3B_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.6 35B-A3B"
+    elif (
         "qwen3.5-122b" in model_choice_lower
         or "qwen-3.5-122b"
         or QWEN35_122B_A10B_REPO_ID in model_choice_lower
@@ -1640,6 +1778,9 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE in [
     "Qwen 3.5 27B (4-bit)",
     "Qwen 3.5 27B",
     "Qwen 3.5 35B-A3B",
+    "Qwen 3.6 27B (4-bit)",
+    "Qwen 3.6 27B",
+    "Qwen 3.6 35B-A3B",
     "Qwen 3.5 122B-A10B",
     "Gemma 4 31B bnb",
 ]:
@@ -1688,13 +1829,11 @@ if SHOW_AWS_BEDROCK_LLM_MODELS:
     )
     model_source.extend(["AWS"] * len(amazon_models))
 
-gemini_models = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"]
+gemini_models = ["gemini-flash-lite-latest", "gemini-flash-latest", "gemini-pro-latest"]
 
 if SHOW_GEMINI_LLM_MODELS:
     model_full_names.extend(gemini_models)
-    model_short_names.extend(
-        ["gemini_flash_lite_2.5", "gemini_flash_2.5", "gemini_pro"]
-    )
+    model_short_names.extend(["gemini_flash_lite", "gemini_flash", "gemini_pro"])
     model_source.extend(["Gemini"] * len(gemini_models))
 
 azure_models = ["gpt-5-mini", "gpt-4o-mini"]
@@ -2139,6 +2278,30 @@ RETURN_REDACTED_PDF = convert_string_to_boolean(
     get_or_create_env_var("RETURN_REDACTED_PDF", "True")
 )  # Return a redacted PDF at the end of the redaction task. Could be useful to set this to "False" if you want to ensure that the user always goes to the 'Review Redactions' tab before getting the final redacted PDF product.
 
+# Optional Pass 1 sanity QA after initial redaction (coverage report + optional sibling pruned CSV).
+# Does not auto-apply review edits or run VLM — see tools/post_redaction_pass1_qa.py.
+POST_REDACT_PASS1_QA = convert_string_to_boolean(
+    get_or_create_env_var("POST_REDACT_PASS1_QA", "False")
+)
+POST_REDACT_PASS1_AUTO_PRUNE = convert_string_to_boolean(
+    get_or_create_env_var("POST_REDACT_PASS1_AUTO_PRUNE", "False")
+)
+POST_REDACT_PASS1_USE_DENY_ALLOW_LISTS = convert_string_to_boolean(
+    get_or_create_env_var("POST_REDACT_PASS1_USE_DENY_ALLOW_LISTS", "True")
+)
+POST_REDACT_PASS1_MUST_REDACT_PATH = get_or_create_env_var(
+    "POST_REDACT_PASS1_MUST_REDACT_PATH", ""
+)
+POST_REDACT_PASS1_MUST_NOT_REDACT_PATH = get_or_create_env_var(
+    "POST_REDACT_PASS1_MUST_NOT_REDACT_PATH", ""
+)
+POST_REDACT_PASS1_MIN_WORD_LENGTH = int(
+    get_or_create_env_var("POST_REDACT_PASS1_MIN_WORD_LENGTH", "3")
+)
+POST_REDACT_PASS1_INCLUDE_IN_OUTPUTS = convert_string_to_boolean(
+    get_or_create_env_var("POST_REDACT_PASS1_INCLUDE_IN_OUTPUTS", "True")
+)
+
 COMPRESS_REDACTED_PDF = convert_string_to_boolean(
     get_or_create_env_var("COMPRESS_REDACTED_PDF", "False")
 )  # On low memory systems, the compression options in pymupdf can cause the app to crash if the PDF is longer than 500 pages or so. Setting this to False will save the PDF only with a basic cleaning option enabled
@@ -2271,35 +2434,45 @@ To start, upload a document below (or click on an example), then click 'Extract 
 
 NOTE: The app is not 100% accurate, and it will miss some personal information. It is essential that all outputs are reviewed **by a human** before using the final outputs."""
 
-INTRO_TEXT = get_or_create_env_var("INTRO_TEXT", DEFAULT_INTRO_TEXT)
 
-# Read in intro text from a text file if it is a path to a text file
-if INTRO_TEXT.endswith(".txt"):
-    # Validate the path is safe (with base path for relative paths)
-    if validate_path_safety(INTRO_TEXT, base_path="."):
-        try:
-            # Use secure file read with explicit encoding
-            INTRO_TEXT = secure_file_read(".", INTRO_TEXT, encoding="utf-8")
-            # Format the text to replace {USER_GUIDE_URL} with the actual value
-            INTRO_TEXT = INTRO_TEXT.format(USER_GUIDE_URL=USER_GUIDE_URL)
-        except FileNotFoundError:
-            print(f"Warning: Intro text file not found: {INTRO_TEXT}")
-            INTRO_TEXT = DEFAULT_INTRO_TEXT
-        except Exception as e:
-            print(f"Error reading intro text file: {e}")
-            # Fallback to default
-            INTRO_TEXT = DEFAULT_INTRO_TEXT
-    else:
-        print(f"Warning: Unsafe file path detected for INTRO_TEXT: {INTRO_TEXT}")
-        INTRO_TEXT = DEFAULT_INTRO_TEXT
+def _load_intro_text(
+    env_var_name: str,
+    default_text: str,
+    *,
+    format_kwargs: dict | None = None,
+) -> str:
+    """Load intro markdown from env or a ``.txt`` file (same rules as ``INTRO_TEXT``)."""
+    format_kwargs = format_kwargs or {}
+    text = get_or_create_env_var(env_var_name, default_text)
+    if text.endswith(".txt"):
+        if validate_path_safety(text, base_path="."):
+            try:
+                text = secure_file_read(".", text, encoding="utf-8")
+                text = text.format(**format_kwargs)
+            except FileNotFoundError:
+                print(f"Warning: Intro text file not found for {env_var_name}: {text}")
+                text = default_text
+            except Exception as e:
+                print(f"Error reading intro text file for {env_var_name}: {e}")
+                text = default_text
+        else:
+            print(f"Warning: Unsafe file path detected for {env_var_name}: {text}")
+            text = default_text
+    text = sanitize_markdown_text(text.strip('"').strip("'"))
+    if not text or not text.strip():
+        print(
+            f"Warning: {env_var_name} is empty after sanitisation, using default intro text"
+        )
+        text = sanitize_markdown_text(default_text)
+    return text
 
-# Sanitize the text
-INTRO_TEXT = sanitize_markdown_text(INTRO_TEXT.strip('"').strip("'"))
 
-# Ensure we have valid content after sanitization
-if not INTRO_TEXT or not INTRO_TEXT.strip():
-    print("Warning: Intro text is empty after sanitisation, using default intro text")
-    INTRO_TEXT = sanitize_markdown_text(DEFAULT_INTRO_TEXT)
+INTRO_TEXT = _load_intro_text(
+    "INTRO_TEXT",
+    DEFAULT_INTRO_TEXT,
+    format_kwargs={"USER_GUIDE_URL": USER_GUIDE_URL},
+)
+
 
 # App fills screen width or not
 FILL_SCREEN_WIDTH = convert_string_to_boolean(
@@ -2636,6 +2809,118 @@ DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS = int(
     get_or_create_env_var("DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS", "7")
 )  # How many days into the past should whole document Textract jobs be displayed? After that, the data is not deleted from the Textract jobs csv, but it is just filtered out. Included to align with S3 buckets where the file outputs will be automatically deleted after X days.
 
+###
+# Pi agent options
+###
+PI_GRADIO_TITLE = get_or_create_env_var("PI_GRADIO_TITLE", "Agentic Document Redaction")
+
+DEFAULT_PI_INTRO_TEXT = f"""# {PI_GRADIO_TITLE}
+
+Upload a document, add redaction requirements, and start a task. The Pi agent orchestrates redaction using skills in this repository. See the [User Guide]({USER_GUIDE_URL}) for the further information about the underlying Document Redaction App.
+
+NOTE: Outputs are not guaranteed complete — review all redacted material **by a human** before use."""
+
+PI_INTRO_TEXT = _load_intro_text(
+    "PI_INTRO_TEXT",
+    DEFAULT_PI_INTRO_TEXT,
+    format_kwargs={
+        "USER_GUIDE_URL": USER_GUIDE_URL,
+        "PI_GRADIO_TITLE": PI_GRADIO_TITLE,
+    },
+)
+
+
+# Pi workspace: set by bootstrap_pi_config, compose, or HF Dockerfile — not a global default here.
+PI_WORKSPACE_DIR = get_or_create_env_var("PI_WORKSPACE_DIR", "")
+
+
+def resolve_pi_default_provider_fallback() -> str:
+    """Fallback when ``PI_DEFAULT_PROVIDER`` is unset (profile-aware)."""
+    profile = os.environ.get("PI_DEPLOYMENT_PROFILE", "local-docker").strip().lower()
+    if profile == "hf-space":
+        return "google-gemini"
+    if profile == "aws-ecs":
+        return "amazon-bedrock"
+    return "llama-cpp"
+
+
+def resolve_pi_default_model_fallback() -> str:
+    """Fallback when ``PI_DEFAULT_MODEL`` is unset (profile-aware)."""
+    profile = os.environ.get("PI_DEPLOYMENT_PROFILE", "local-docker").strip().lower()
+    if profile == "hf-space":
+        return "gemini-flash-lite-latest"
+    if profile == "aws-ecs":
+        return "anthropic.claude-sonnet-4-6"
+    return ""
+
+
+PI_DEFAULT_PROVIDER = get_or_create_env_var(
+    "PI_DEFAULT_PROVIDER", resolve_pi_default_provider_fallback()
+)  # Default Pi orchestration backend: llama-cpp | google-gemini | amazon-bedrock
+_pi_default_model = resolve_pi_default_model_fallback()
+if os.environ.get("PI_DEFAULT_MODEL") is None and _pi_default_model:
+    os.environ["PI_DEFAULT_MODEL"] = _pi_default_model
+PI_DEFAULT_MODEL = os.environ.get("PI_DEFAULT_MODEL") or ""
+PI_VLM_MODEL = get_or_create_env_var("PI_VLM_MODEL", "gemini-flash-lite-latest")
+PI_DEFAULT_OCR_METHOD = get_or_create_env_var("PI_DEFAULT_OCR_METHOD", "tesseract")
+PI_DEFAULT_PII_METHOD = get_or_create_env_var("PI_DEFAULT_PII_METHOD", "Local")
+DOC_REDACTION_GRADIO_URL = get_or_create_env_var(
+    "DOC_REDACTION_GRADIO_URL", "http://127.0.0.1:7860"
+)
+PI_UI_TITLE = PI_GRADIO_TITLE
+_pi_port_default = (
+    "7860"
+    if os.environ.get("PI_DEPLOYMENT_PROFILE", "local-docker").strip().lower()
+    == "hf-space"
+    else "7862"
+)
+PI_UI_PORT = int(os.environ.get("PI_UI_PORT", _pi_port_default))
+# Subpath when Pi sits behind ALB path routing (e.g. /pi on CloudFront). CDK sets on ECS.
+PI_ROOT_PATH = get_or_create_env_var("PI_ROOT_PATH", "")
+
+PI_UI_HOST = os.environ.get("PI_UI_HOST", "0.0.0.0")
+
+_thinking_default = (
+    "true"
+    if os.environ.get("PI_DEPLOYMENT_PROFILE", "local-docker").strip().lower()
+    == "hf-space"
+    else "false"
+)
+SHOW_THINKING = os.environ.get(
+    "PI_GRADIO_SHOW_THINKING", _thinking_default
+).lower() in {
+    "1",
+    "true",
+    "yes",
+}
+SHOW_TOOL_OUTPUT = os.environ.get("PI_GRADIO_SHOW_TOOL_OUTPUT", "true").lower() in {
+    "1",
+    "true",
+    "yes",
+}
+TOOL_OUTPUT_MAX = int(os.environ.get("PI_GRADIO_TOOL_OUTPUT_MAX", "12000"))
+ACTIVITY_MAX_LINES = int(os.environ.get("PI_GRADIO_ACTIVITY_MAX_LINES", "50"))
+THINKING_DISPLAY_MAX = int(os.environ.get("PI_GRADIO_THINKING_MAX_CHARS", "16000"))
+THINKING_PANEL_CSS = """
+.thinking-panel textarea {
+    max-height: 280px !important;
+    overflow-y: auto !important;
+}
+"""
+# Pi agent: Gemini quota / rate-limit retries (Gradio loop + Pi settings.json).
+# PI_MAX_RETRIES is the preferred name; PI_QUOTA_RETRY_ATTEMPTS is a legacy alias.
+if os.environ.get("PI_QUOTA_RETRY_ATTEMPTS") is not None:
+    QUOTA_RETRY_ATTEMPTS = int(os.environ["PI_QUOTA_RETRY_ATTEMPTS"])
+else:
+    QUOTA_RETRY_ATTEMPTS = int(get_or_create_env_var("PI_MAX_RETRIES", "5"))
+QUOTA_RETRY_DELAY_S = int(get_or_create_env_var("PI_QUOTA_RETRY_DELAY_S", "60"))
+QUOTA_CONTINUE_PROMPT = (
+    "Continue the redaction task from where you left off. "
+    "Do not re-read skills or repeat completed tool steps unless required."
+)
+EMPTY_SEND_WITH_FILE_HINT = (
+    "To start redaction, click **Start redaction task** below the chat."
+)
 
 ###
 # Config vars output format
@@ -2648,6 +2933,8 @@ CSV_USAGE_LOG_HEADERS = _get_env_list(CSV_USAGE_LOG_HEADERS)
 
 DYNAMODB_ACCESS_LOG_HEADERS = _get_env_list(DYNAMODB_ACCESS_LOG_HEADERS)
 DYNAMODB_FEEDBACK_LOG_HEADERS = _get_env_list(DYNAMODB_FEEDBACK_LOG_HEADERS)
+DYNAMODB_PI_USAGE_LOG_HEADERS = _get_env_list(DYNAMODB_PI_USAGE_LOG_HEADERS)
+CSV_PI_USAGE_LOG_HEADERS = _get_env_list(CSV_PI_USAGE_LOG_HEADERS)
 DYNAMODB_USAGE_LOG_HEADERS = _get_env_list(DYNAMODB_USAGE_LOG_HEADERS)
 if CHOSEN_COMPREHEND_ENTITIES:
     CHOSEN_COMPREHEND_ENTITIES = _get_env_list(CHOSEN_COMPREHEND_ENTITIES)

@@ -1,0 +1,7 @@
+{
+  "app": "python app.py",
+  "output": "cdk.out",
+  "context": {
+    "@aws-cdk/aws-ec2:restrictDefaultSecurityGroup": false
+  }
+}

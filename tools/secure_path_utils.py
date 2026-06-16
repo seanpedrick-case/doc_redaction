@@ -8,10 +8,14 @@ and sanitize file paths to prevent directory traversal and other path-based atta
 import logging
 import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Optional, Union
 
 logger = logging.getLogger(__name__)
+
+# Repo root (parent of ``tools/``) for resolving relative IO paths.
+_REDACTION_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def sanitize_filename(filename: str, max_length: int = 255) -> str:
@@ -406,6 +410,84 @@ def secure_join(*paths: str) -> str:
     else:
         # Use normal path joining for safe paths
         return str(Path(*paths))
+
+
+def redaction_allowed_io_roots() -> list[str]:
+    """
+    Trusted roots for agent/CLI redaction file IO.
+
+    Includes repo root, configured INPUT/OUTPUT folders, and the system temp
+    directory (pytest ``tmp_path`` and ephemeral outputs).
+    """
+    from tools.config import INPUT_FOLDER, OUTPUT_FOLDER
+
+    roots: list[str] = [str(_REDACTION_REPO_ROOT)]
+    for folder in (INPUT_FOLDER, OUTPUT_FOLDER):
+        if folder:
+            roots.append(str(folder))
+    roots.append(tempfile.gettempdir())
+    return roots
+
+
+def _candidate_abs_io_path(path: str) -> str:
+    """Expand and realpath a user path; relative paths are under the repo root."""
+    raw = str(path or "").strip()
+    if not raw:
+        raise ValueError("Path must not be empty.")
+    if "\x00" in raw:
+        raise ValueError("Path contains invalid null byte.")
+    expanded = os.path.expanduser(raw)
+    if os.path.isabs(expanded):
+        return os.path.realpath(os.path.abspath(expanded))
+    return os.path.realpath(
+        os.path.abspath(os.path.join(str(_REDACTION_REPO_ROOT), expanded))
+    )
+
+
+def _is_under_allowed_io_root(candidate: str) -> bool:
+    for root in redaction_allowed_io_roots():
+        root_real = os.path.realpath(str(root))
+        try:
+            if os.path.commonpath([candidate, root_real]) == root_real:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def resolve_existing_io_path(path: Union[str, Path]) -> str:
+    """
+    Resolve a readable file path under allowed redaction IO roots.
+
+    Do not call ``Path.resolve()`` on untrusted input before this helper
+    (CodeQL py/path-injection); this function uses ``os.path.realpath``.
+    """
+    candidate = _candidate_abs_io_path(str(path))
+    if not os.path.isfile(candidate):
+        raise ValueError(f"Not a file or missing: {candidate}")
+    if not _is_under_allowed_io_root(candidate):
+        raise ValueError(
+            "Path must be under the app repo, INPUT_FOLDER, OUTPUT_FOLDER, "
+            "or system temp"
+        )
+    return candidate
+
+
+def resolve_writable_io_path(path: Union[str, Path]) -> str:
+    """
+    Resolve an output path whose parent directory is under allowed IO roots.
+
+    The file may not exist yet. See :func:`resolve_existing_io_path` for
+    path-normalization notes.
+    """
+    candidate = _candidate_abs_io_path(str(path))
+    parent = os.path.realpath(os.path.dirname(candidate))
+    if not _is_under_allowed_io_root(parent):
+        raise ValueError(
+            "Path must be under the app repo, INPUT_FOLDER, OUTPUT_FOLDER, "
+            "or system temp"
+        )
+    return candidate
 
 
 def secure_basename(path: str) -> str:

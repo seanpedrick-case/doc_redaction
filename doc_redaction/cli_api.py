@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -33,8 +34,128 @@ def _snapshot_files(folder: str) -> set[str]:
     return out
 
 
+def _snapshot_files_newer_than(folder: str, since: float) -> list[str]:
+    """
+    Return existing files under *folder* whose mtime is at or after *since*.
+
+    Used when ``SESSION_OUTPUT_FOLDER`` writes to stable per-user paths: a
+    re-run overwrites the same filenames, so a plain before/after set diff is empty.
+    """
+    root = Path(folder)
+    if not root.exists():
+        return []
+    threshold = since - 0.5
+    kept: list[str] = []
+    for dirpath, _, filenames in os.walk(root):
+        for name in filenames:
+            path = Path(dirpath) / name
+            try:
+                if path.stat().st_mtime >= threshold:
+                    kept.append(str(path.resolve()))
+            except OSError:
+                continue
+    return sorted(kept)
+
+
+def _effective_output_dir(merged: dict[str, Any]) -> str:
+    """Mirror ``cli_redact.main`` session-folder expansion for *merged* CLI args."""
+    from cli_redact import get_username_and_folders
+    from tools.config import (
+        INPUT_FOLDER,
+        OUTPUT_FOLDER,
+        SESSION_OUTPUT_FOLDER,
+        TEXTRACT_JOBS_LOCAL_LOC,
+        TEXTRACT_JOBS_S3_LOC,
+        TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER,
+        TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER,
+        convert_string_to_boolean,
+    )
+
+    out_base = str(merged.get("output_dir") or OUTPUT_FOLDER)
+    in_base = str(merged.get("input_dir") or INPUT_FOLDER)
+    save = merged.get("save_to_user_folders", SESSION_OUTPUT_FOLDER)
+    if not isinstance(save, bool):
+        save = convert_string_to_boolean(str(save))
+
+    _, effective_out, _, _, _, _, _, _ = get_username_and_folders(
+        username=str(merged.get("username") or ""),
+        output_folder_textbox=out_base,
+        input_folder_textbox=in_base,
+        session_output_folder=save,
+        textract_document_upload_input_folder=str(
+            merged.get("textract_input_prefix")
+            or TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER
+        ),
+        textract_document_upload_output_folder=str(
+            merged.get("textract_output_prefix")
+            or TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER
+        ),
+        s3_textract_document_logs_subfolder=str(
+            merged.get("s3_textract_document_logs_subfolder") or TEXTRACT_JOBS_S3_LOC
+        ),
+        local_textract_document_logs_subfolder=str(
+            merged.get("local_textract_document_logs_subfolder")
+            or TEXTRACT_JOBS_LOCAL_LOC
+        ),
+    )
+    return effective_out
+
+
 def _default_output_dir(prefix: str) -> str:
     return tempfile.mkdtemp(prefix=f"doc_redaction_{prefix}_")
+
+
+def _pin_session_username_if_needed(merged: dict[str, Any]) -> None:
+    """
+    Pin one session hash for stateless API/CLI runs when per-user output folders are on.
+
+    ``get_username_and_folders`` generates a random hash when ``username`` is empty.
+    ``_run_cli`` must use the same hash for output discovery and ``cli_main`` writes;
+    otherwise files land in a different subfolder and callers see ``[]`` paths.
+    """
+    if str(merged.get("username") or "").strip():
+        return
+
+    from cli_redact import get_username_and_folders
+    from tools.config import (
+        INPUT_FOLDER,
+        OUTPUT_FOLDER,
+        SESSION_OUTPUT_FOLDER,
+        TEXTRACT_JOBS_LOCAL_LOC,
+        TEXTRACT_JOBS_S3_LOC,
+        TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER,
+        TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER,
+        convert_string_to_boolean,
+    )
+
+    save = merged.get("save_to_user_folders", SESSION_OUTPUT_FOLDER)
+    if not isinstance(save, bool):
+        save = convert_string_to_boolean(str(save))
+    if not save:
+        return
+
+    session_hash, _, _, _, _, _, _, _ = get_username_and_folders(
+        username="",
+        output_folder_textbox=str(merged.get("output_dir") or OUTPUT_FOLDER),
+        input_folder_textbox=str(merged.get("input_dir") or INPUT_FOLDER),
+        session_output_folder=save,
+        textract_document_upload_input_folder=str(
+            merged.get("textract_input_prefix")
+            or TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER
+        ),
+        textract_document_upload_output_folder=str(
+            merged.get("textract_output_prefix")
+            or TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER
+        ),
+        s3_textract_document_logs_subfolder=str(
+            merged.get("s3_textract_document_logs_subfolder") or TEXTRACT_JOBS_S3_LOC
+        ),
+        local_textract_document_logs_subfolder=str(
+            merged.get("local_textract_document_logs_subfolder")
+            or TEXTRACT_JOBS_LOCAL_LOC
+        ),
+    )
+    merged["username"] = session_hash
 
 
 def _run_cli(
@@ -44,7 +165,11 @@ def _run_cli(
     output_dir: str | None,
 ) -> list[str]:
     """
-    Run cli_redact.main with merged defaults and return newly created files.
+    Run cli_redact.main with merged defaults and return output files from the run.
+
+    Prefers files touched during this invocation (mtime), then falls back to a
+    path set diff under the effective output directory (after session-folder
+    expansion).
     """
     from cli_redact import get_cli_default_args_dict
     from cli_redact import main as cli_main
@@ -56,11 +181,15 @@ def _run_cli(
         output_dir = _default_output_dir(gradio_api_name)
     merged["output_dir"] = str(output_dir)
 
-    before = _snapshot_files(str(output_dir))
+    _pin_session_username_if_needed(merged)
+    effective_dir = _effective_output_dir(merged)
+    started_at = time.time()
+    before = _snapshot_files(effective_dir)
     cli_main(direct_mode_args=merged)
-    after = _snapshot_files(str(output_dir))
 
-    created = sorted(after - before)
+    created = _snapshot_files_newer_than(effective_dir, started_at)
+    if not created:
+        created = sorted(_snapshot_files(effective_dir) - before)
     return created
 
 
@@ -337,10 +466,55 @@ def apply_review_redactions(
     return list(r.get("output_paths") or [])
 
 
-def word_level_ocr_text_search(*args: Any, **kwargs: Any) -> list[str]:
-    raise NotImplementedError(
-        "word_level_ocr_text_search is Gradio-session-state driven; no CLI-first equivalent is currently provided."
+def word_level_ocr_text_search(
+    ocr_words_csv_path: str,
+    search_text: str,
+    *,
+    similarity_threshold: float = 1.0,
+    use_regex: bool = False,
+    review_csv_path: str | None = None,
+) -> dict:
+    """Headless word-level OCR search against ``*_ocr_results_with_words_*.csv``."""
+    from tools.verify_redaction_coverage import run_word_level_ocr_text_search
+
+    return run_word_level_ocr_text_search(
+        ocr_words_csv_path,
+        search_text,
+        similarity_threshold=similarity_threshold,
+        use_regex=use_regex,
+        review_csv_path=review_csv_path,
     )
+
+
+def verify_redaction_coverage(
+    review_csv_path: str,
+    ocr_words_csv_path: str,
+    *,
+    must_redact: list[str] | None = None,
+    must_not_redact: list[str] | None = None,
+    redacted_pdf_path: str | None = None,
+    total_pages: int | None = None,
+    min_word_length: int = 3,
+    sample_pixels: bool = False,
+    auto_prune_suspicious: bool = False,
+    pruned_output_path: str | None = None,
+) -> dict:
+    """Pass 1 programmatic coverage report (no VLM)."""
+    from tools.simplified_api import run_verify_redaction_coverage
+
+    report, _, _ = run_verify_redaction_coverage(
+        review_csv_path,
+        ocr_words_csv_path,
+        must_redact=must_redact,
+        must_not_redact=must_not_redact,
+        redacted_pdf_path=redacted_pdf_path,
+        total_pages=total_pages,
+        min_word_length=min_word_length,
+        sample_pixels=sample_pixels,
+        auto_prune_suspicious=auto_prune_suspicious,
+        pruned_output_path=pruned_output_path,
+    )
+    return report
 
 
 __all__ = [
@@ -350,6 +524,7 @@ __all__ = [
     "export_review_page_ocr_visualisation",
     "export_review_redaction_overlay",
     "word_level_ocr_text_search",
+    "verify_redaction_coverage",
     "redact_data",
     "find_duplicate_pages",
     "find_duplicate_tabular",

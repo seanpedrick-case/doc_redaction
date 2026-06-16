@@ -1,5 +1,6 @@
 import os
 import tempfile
+from typing import List
 
 from dotenv import load_dotenv
 
@@ -16,6 +17,18 @@ def convert_string_to_boolean(value: str) -> bool:
         return False
     else:
         raise ValueError(f"Invalid boolean value: {value}")
+
+
+def parse_comma_separated_list(value: str) -> List[str]:
+    """Parse a comma-separated env value into a list of non-empty strings."""
+    if not value or not str(value).strip():
+        return []
+    cleaned = str(value).strip().strip("[]")
+    return [
+        part.strip().strip('"').strip("'")
+        for part in cleaned.split(",")
+        if part.strip()
+    ]
 
 
 def get_or_create_env_var(var_name: str, default_value: str, print_val: bool = False):
@@ -84,7 +97,9 @@ CDK_CONFIG_PATH = get_or_create_env_var(
 if CDK_CONFIG_PATH:
     if os.path.exists(CDK_CONFIG_PATH):
         print(f"Loading CDK variables from config file {CDK_CONFIG_PATH}")
-        load_dotenv(CDK_CONFIG_PATH)
+        # override=True: stale empty defaults from an earlier cdk_config import in the
+        # same shell (e.g. cdk_install wizard calling cdk_functions) must not win.
+        load_dotenv(CDK_CONFIG_PATH, override=True)
     else:
         print("CDK config file not found at location:", CDK_CONFIG_PATH)
 
@@ -98,12 +113,65 @@ AWS_ACCOUNT_ID = get_or_create_env_var("AWS_ACCOUNT_ID", "")
 # CDK OPTIONS
 ###
 CDK_PREFIX = get_or_create_env_var("CDK_PREFIX", "")
-CONTEXT_FILE = get_or_create_env_var(
-    "CONTEXT_FILE", "cdk.context.json"
-)  # Define the CDK output context file name
+
+# When True (default): CloudFormation stack termination protection, AWS
+# deletion_protection on ALB/DynamoDB/Cognito, RemovalPolicy.RETAIN, and no S3
+# auto-delete on stack-created resources. Set False for dev sandboxes where
+# cdk destroy should remove resources cleanly.
+ENABLE_RESOURCE_DELETE_PROTECTION = get_or_create_env_var(
+    "ENABLE_RESOURCE_DELETE_PROTECTION", "True"
+)
+
+# AWS Console myApplications (Service Catalog AppRegistry)
+ENABLE_APPREGISTRY = get_or_create_env_var("ENABLE_APPREGISTRY", "True")
+APPREGISTRY_APPLICATION_NAME = get_or_create_env_var(
+    "APPREGISTRY_APPLICATION_NAME", f"{CDK_PREFIX}doc-redaction"
+)
+APPREGISTRY_DESCRIPTION = get_or_create_env_var(
+    "APPREGISTRY_DESCRIPTION",
+    "PII document redaction app (ALB, ECS Fargate, Cognito, S3)",
+)
+APPREGISTRY_STACK_NAME = get_or_create_env_var(
+    "APPREGISTRY_STACK_NAME", f"{CDK_PREFIX}AppRegistryStack"
+)
+APPREGISTRY_ATTRIBUTE_GROUP_NAME = get_or_create_env_var(
+    "APPREGISTRY_ATTRIBUTE_GROUP_NAME",
+    f"{APPREGISTRY_APPLICATION_NAME}-metadata",
+)
+APPREGISTRY_REPOSITORY_URL = get_or_create_env_var(
+    "APPREGISTRY_REPOSITORY_URL",
+    "https://github.com/seanpedrick-case/doc_redaction",
+)
+
+_precheck_context_file = get_or_create_env_var("CONTEXT_FILE", "precheck.context.json")
+# Never write boto3 pre-check output into CDK's lookup cache file (causes stale
+# vpc-provider / load-balancer entries and wrong-account lookup validation errors).
+if os.path.basename(_precheck_context_file.replace("\\", "/")) == "cdk.context.json":
+    print(
+        "WARNING: CONTEXT_FILE must not be 'cdk.context.json' (that file is CDK's "
+        "lookup cache). Using 'precheck.context.json' instead. Update "
+        "config/cdk_config.env and remove CONTEXT_FILE=cdk.context.json if set."
+    )
+    _precheck_context_file = "precheck.context.json"
+CONTEXT_FILE = _precheck_context_file
+CDK_CONTEXT_FILE = get_or_create_env_var("CDK_CONTEXT_FILE", "cdk.context.json")
 CDK_FOLDER = get_or_create_env_var(
     "CDK_FOLDER", ""
 )  # FULL_PATH_TO_CDK_FOLDER_HERE (with forward slash)
+
+# App runtime config (uploaded to S3 for legacy Fargate; inlined for ECS Express Mode)
+APP_CONFIG_ENV_BASENAME = "app_config.env"
+_app_config_rel = os.path.join(CONFIG_FOLDER, APP_CONFIG_ENV_BASENAME).replace(
+    "\\", "/"
+)
+APP_CONFIG_ENV_FILE = get_or_create_env_var(
+    "APP_CONFIG_ENV_FILE",
+    (
+        os.path.normpath(os.path.join(CDK_FOLDER, _app_config_rel))
+        if CDK_FOLDER
+        else os.path.normpath(_app_config_rel)
+    ),
+)
 RUN_USEAST_STACK = get_or_create_env_var("RUN_USEAST_STACK", "False")
 
 ### VPC and connections
@@ -112,6 +180,7 @@ NEW_VPC_DEFAULT_NAME = get_or_create_env_var("NEW_VPC_DEFAULT_NAME", f"{CDK_PREF
 NEW_VPC_CIDR = get_or_create_env_var("NEW_VPC_CIDR", "")  # "10.0.0.0/24"
 
 
+# Internet Gateway for legacy VPC public subnets (attach + 0.0.0.0/0 routes via CDK when missing).
 EXISTING_IGW_ID = get_or_create_env_var("EXISTING_IGW_ID", "")
 SINGLE_NAT_GATEWAY_ID = get_or_create_env_var("SINGLE_NAT_GATEWAY_ID", "")
 
@@ -144,15 +213,43 @@ NAT_GATEWAY_EIP_NAME = get_or_create_env_var(
 )
 NAT_GATEWAY_NAME = get_or_create_env_var("NAT_GATEWAY_NAME", f"{CDK_PREFIX}NatGateway")
 
-# IAM roles
+# IAM roles — managed policy *names* (AWS managed) and JSON policy *files* (inline statements)
 AWS_MANAGED_TASK_ROLES_LIST = get_or_create_env_var(
     "AWS_MANAGED_TASK_ROLES_LIST",
-    '["AmazonCognitoReadOnly", "service-role/AmazonECSTaskExecutionRolePolicy", "AmazonS3FullAccess", "AmazonTextractFullAccess", "ComprehendReadOnly", "AmazonDynamoDBFullAccess", "service-role/AWSAppSyncPushToCloudWatchLogs", "AmazonBedrockFullAccess"]',
+    '["AmazonCognitoReadOnly", "service-role/AmazonECSTaskExecutionRolePolicy", "AmazonS3FullAccess", "AmazonDynamoDBFullAccess", "service-role/AWSAppSyncPushToCloudWatchLogs", "AmazonBedrockLimitedAccess"]',
 )
+ECS_EXECUTION_ROLE_MANAGED_POLICIES = get_or_create_env_var(
+    "ECS_EXECUTION_ROLE_MANAGED_POLICIES",
+    '["service-role/AmazonECSTaskExecutionRolePolicy"]',
+)
+# JSON IAM policy document paths (relative to CDK_FOLDER or absolute). Task role = app runtime.
 POLICY_FILE_LOCATIONS = get_or_create_env_var(
-    "POLICY_FILE_LOCATIONS", ""
-)  # e.g. '["config/sts_permissions.json"]'
+    "POLICY_FILE_LOCATIONS",
+    '["policies/textract_policy.json", "policies/comprehend_policy.json"]',
+)
+# Optional extra JSON policies for the ECS task *execution* role (image pull / logs / secrets).
+ECS_EXECUTION_ROLE_POLICY_FILES = get_or_create_env_var(
+    "ECS_EXECUTION_ROLE_POLICY_FILES",
+    "",
+)
+# Customer-managed policy ARNs (full ARN per entry), attached in addition to the lists above.
 POLICY_FILE_ARNS = get_or_create_env_var("POLICY_FILE_ARNS", "")
+ECS_EXECUTION_ROLE_POLICY_ARNS = get_or_create_env_var(
+    "ECS_EXECUTION_ROLE_POLICY_ARNS", ""
+)
+
+AWS_MANAGED_TASK_ROLES_LIST = parse_comma_separated_list(AWS_MANAGED_TASK_ROLES_LIST)
+ECS_EXECUTION_ROLE_MANAGED_POLICIES = parse_comma_separated_list(
+    ECS_EXECUTION_ROLE_MANAGED_POLICIES
+)
+POLICY_FILE_LOCATIONS = parse_comma_separated_list(POLICY_FILE_LOCATIONS)
+ECS_EXECUTION_ROLE_POLICY_FILES = parse_comma_separated_list(
+    ECS_EXECUTION_ROLE_POLICY_FILES
+)
+POLICY_FILE_ARNS = parse_comma_separated_list(POLICY_FILE_ARNS)
+ECS_EXECUTION_ROLE_POLICY_ARNS = parse_comma_separated_list(
+    ECS_EXECUTION_ROLE_POLICY_ARNS
+)
 
 # GITHUB REPO
 GITHUB_REPO_USERNAME = get_or_create_env_var("GITHUB_REPO_USERNAME", "seanpedrick-case")
@@ -175,12 +272,32 @@ ECR_CDK_REPO_NAME = get_or_create_env_var(
     "ECR_CDK_REPO_NAME", f"{CDK_PREFIX}{ECR_REPO_NAME}".lower()
 )
 
+
 ### S3
-S3_LOG_CONFIG_BUCKET_NAME = get_or_create_env_var(
-    "S3_LOG_CONFIG_BUCKET_NAME", f"{CDK_PREFIX}s3-logs".lower()
+def _resolve_s3_bucket_name(env_key: str, suffix: str) -> str:
+    """
+    Bucket name default is ``{CDK_PREFIX}{suffix}`` (lowercase).
+
+    If an earlier import cached a bare ``suffix`` in ``os.environ`` before
+    ``CDK_PREFIX`` was loaded from dotenv, upgrade it to the prefixed name.
+    """
+    prefix = (os.environ.get("CDK_PREFIX") or "").lower()
+    default = f"{prefix}{suffix}"
+    value = get_or_create_env_var(env_key, default)
+    if prefix and value == suffix:
+        os.environ[env_key] = default
+        return default
+    return value
+
+
+S3_LOG_CONFIG_BUCKET_NAME = _resolve_s3_bucket_name(
+    "S3_LOG_CONFIG_BUCKET_NAME", "s3-logs"
 )  # S3 bucket names need to be lower case
-S3_OUTPUT_BUCKET_NAME = get_or_create_env_var(
-    "S3_OUTPUT_BUCKET_NAME", f"{CDK_PREFIX}s3-output".lower()
+S3_OUTPUT_BUCKET_NAME = _resolve_s3_bucket_name("S3_OUTPUT_BUCKET_NAME", "s3-output")
+
+### VPC endpoints for ECS tasks in private subnets (ECR image pull, logs, secrets)
+ENABLE_ECS_VPC_INTERFACE_ENDPOINTS = get_or_create_env_var(
+    "ENABLE_ECS_VPC_INTERFACE_ENDPOINTS", "True"
 )
 
 ### KMS KEYS FOR S3 AND SECRETS MANAGER
@@ -199,6 +316,10 @@ TASK_DEFINITION_FILE_LOCATION = get_or_create_env_var(
 
 CLUSTER_NAME = get_or_create_env_var("CLUSTER_NAME", f"{CDK_PREFIX}Cluster")
 ECS_SERVICE_NAME = get_or_create_env_var("ECS_SERVICE_NAME", f"{CDK_PREFIX}ECSService")
+# Second Fargate service when ENABLE_PI_AGENT_ECS_SERVICE=True (legacy path only).
+ECS_PI_SERVICE_NAME = get_or_create_env_var(
+    "ECS_PI_SERVICE_NAME", f"{CDK_PREFIX}PiAgentService"
+)
 ECS_TASK_ROLE_NAME = get_or_create_env_var(
     "ECS_TASK_ROLE_NAME", f"{CDK_PREFIX}TaskRole"
 )
@@ -216,6 +337,15 @@ ECS_TASK_CPU_SIZE = get_or_create_env_var("ECS_TASK_CPU_SIZE", "1024")
 ECS_TASK_MEMORY_SIZE = get_or_create_env_var("ECS_TASK_MEMORY_SIZE", "4096")
 ECS_USE_FARGATE_SPOT = get_or_create_env_var("USE_FARGATE_SPOT", "False")
 ECS_READ_ONLY_FILE_SYSTEM = get_or_create_env_var("ECS_READ_ONLY_FILE_SYSTEM", "True")
+# ECS service AZ rebalancing (AWS defaults new services to ENABLED if omitted).
+ECS_AVAILABILITY_ZONE_REBALANCING = get_or_create_env_var(
+    "ECS_AVAILABILITY_ZONE_REBALANCING", "DISABLED"
+)
+if ECS_AVAILABILITY_ZONE_REBALANCING not in ("ENABLED", "DISABLED"):
+    raise ValueError(
+        "ECS_AVAILABILITY_ZONE_REBALANCING must be ENABLED or DISABLED "
+        f"(got {ECS_AVAILABILITY_ZONE_REBALANCING!r})."
+    )
 
 ### Cognito
 COGNITO_USER_POOL_NAME = get_or_create_env_var(
@@ -253,7 +383,7 @@ ALB_TARGET_GROUP_NAME = get_or_create_env_var(
 )  # Max 32 characters
 EXISTING_LOAD_BALANCER_ARN = get_or_create_env_var("EXISTING_LOAD_BALANCER_ARN", "")
 EXISTING_LOAD_BALANCER_DNS = get_or_create_env_var(
-    "EXISTING_LOAD_BALANCER_ARN", "placeholder_load_balancer_dns.net"
+    "EXISTING_LOAD_BALANCER_DNS", "placeholder_load_balancer_dns.net"
 )
 
 ## CLOUDFRONT
@@ -270,6 +400,12 @@ CLOUDFRONT_DISTRIBUTION_NAME = get_or_create_env_var(
 CLOUDFRONT_DOMAIN = get_or_create_env_var(
     "CLOUDFRONT_DOMAIN", "cloudfront_placeholder.net"
 )
+# Attach CSP / security response headers to the CDK CloudFront distribution (us-east-1 stack).
+CLOUDFRONT_ENABLE_SECURE_RESPONSE_HEADERS = get_or_create_env_var(
+    "CLOUDFRONT_ENABLE_SECURE_RESPONSE_HEADERS", "True"
+)
+# Optional override for manifest-src (Cognito hosted UI). Default: https://{COGNITO_USER_POOL_DOMAIN_PREFIX}.auth.{AWS_REGION}.amazoncognito.com
+COGNITO_USER_POOL_LOGIN_URL = get_or_create_env_var("COGNITO_USER_POOL_LOGIN_URL", "")
 
 
 # Certificate for Application load balancer (optional, for HTTPS and logins through the ALB)
@@ -277,6 +413,75 @@ ACM_SSL_CERTIFICATE_ARN = get_or_create_env_var("ACM_SSL_CERTIFICATE_ARN", "")
 SSL_CERTIFICATE_DOMAIN = get_or_create_env_var(
     "SSL_CERTIFICATE_DOMAIN", ""
 )  # e.g. example.com or www.example.com
+
+# ECS Express Mode (opt-in HTTPS ingress without supplying ACM_SSL_CERTIFICATE_ARN).
+# Pilot/dev: Express PrimaryContainer does not support S3 environmentFiles or Fargate mount points.
+USE_ECS_EXPRESS_MODE = get_or_create_env_var("USE_ECS_EXPRESS_MODE", "False")
+ECS_EXPRESS_SERVICE_NAME = get_or_create_env_var(
+    "ECS_EXPRESS_SERVICE_NAME", ECS_SERVICE_NAME
+)
+ECS_EXPRESS_HEALTH_CHECK_PATH = get_or_create_env_var(
+    "ECS_EXPRESS_HEALTH_CHECK_PATH", "/"
+)
+ECS_EXPRESS_INFRASTRUCTURE_ROLE_NAME = get_or_create_env_var(
+    "ECS_EXPRESS_INFRASTRUCTURE_ROLE_NAME", f"{CDK_PREFIX}ExpressInfraRole"
+)
+# After first deploy, set to ExpressServiceEndpoint output (https://...) if not using CloudFront.
+# The installer updates Cognito callback URLs via API (no second CDK deploy).
+ECS_EXPRESS_COGNITO_REDIRECT_BASE = get_or_create_env_var(
+    "ECS_EXPRESS_COGNITO_REDIRECT_BASE", ""
+)
+# Express networkConfiguration.subnets drives both tasks and the managed ALB.
+# Public subnets (IGW route) → internet-facing ALB; private → internal ALB only.
+ECS_EXPRESS_USE_PUBLIC_SUBNETS = get_or_create_env_var(
+    "ECS_EXPRESS_USE_PUBLIC_SUBNETS", "True"
+)
+
+if USE_ECS_EXPRESS_MODE == "True" and ACM_SSL_CERTIFICATE_ARN:
+    raise ValueError(
+        "USE_ECS_EXPRESS_MODE=True cannot be used with ACM_SSL_CERTIFICATE_ARN set. "
+        "Clear ACM_SSL_CERTIFICATE_ARN or set USE_ECS_EXPRESS_MODE=False."
+    )
+
+# ECS Service Connect (legacy Fargate only): VPC service-to-service HTTP to Gradio/FastAPI.
+ENABLE_ECS_SERVICE_CONNECT = get_or_create_env_var(
+    "ENABLE_ECS_SERVICE_CONNECT", "False"
+)
+ECS_SERVICE_CONNECT_NAMESPACE = get_or_create_env_var(
+    "ECS_SERVICE_CONNECT_NAMESPACE",
+    (f"{CDK_PREFIX}local".lower().replace("_", "-").strip("-") or "redaction-local"),
+)
+ECS_SERVICE_CONNECT_DISCOVERY_NAME = get_or_create_env_var(
+    "ECS_SERVICE_CONNECT_DISCOVERY_NAME", "redaction"
+)
+# Optional friendly DNS label; defaults to discovery name when empty.
+ECS_SERVICE_CONNECT_DNS_NAME = get_or_create_env_var("ECS_SERVICE_CONNECT_DNS_NAME", "")
+# Client task security groups (at least one of IDs, names, or CDK prefixes required when SC on).
+ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_IDS = get_or_create_env_var(
+    "ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_IDS", ""
+)
+ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_IDS_LIST = parse_comma_separated_list(
+    ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_IDS
+)
+ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_NAMES = get_or_create_env_var(
+    "ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_NAMES", ""
+)
+ECS_SERVICE_CONNECT_CLIENT_CDK_PREFIXES = get_or_create_env_var(
+    "ECS_SERVICE_CONNECT_CLIENT_CDK_PREFIXES", ""
+)
+
+
+def normalize_https_redirect_url(url: str) -> str:
+    """Ensure Cognito/OAuth redirect bases use an explicit https:// scheme."""
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("https://"):
+        return raw.rstrip("/")
+    if raw.startswith("http://"):
+        return ("https://" + raw[len("http://") :]).rstrip("/")
+    return ("https://" + raw.lstrip("/")).rstrip("/")
+
 
 # This should be the CloudFront domain, the domain linked to your ACM certificate, or the DNS of your application load balancer in console afterwards
 if USE_CLOUDFRONT == "True":
@@ -287,9 +492,22 @@ elif SSL_CERTIFICATE_DOMAIN:
     COGNITO_REDIRECTION_URL = get_or_create_env_var(
         "COGNITO_REDIRECTION_URL", "https://" + SSL_CERTIFICATE_DOMAIN
     )
+elif USE_ECS_EXPRESS_MODE == "True":
+    _express_redirect_default = ECS_EXPRESS_COGNITO_REDIRECT_BASE or (
+        "https://" + EXISTING_LOAD_BALANCER_DNS
+    )
+    COGNITO_REDIRECTION_URL = get_or_create_env_var(
+        "COGNITO_REDIRECTION_URL", _express_redirect_default
+    )
 else:
     COGNITO_REDIRECTION_URL = get_or_create_env_var(
         "COGNITO_REDIRECTION_URL", "https://" + EXISTING_LOAD_BALANCER_DNS
+    )
+
+COGNITO_REDIRECTION_URL = normalize_https_redirect_url(COGNITO_REDIRECTION_URL)
+if ECS_EXPRESS_COGNITO_REDIRECT_BASE:
+    ECS_EXPRESS_COGNITO_REDIRECT_BASE = normalize_https_redirect_url(
+        ECS_EXPRESS_COGNITO_REDIRECT_BASE
     )
 
 # Custom headers e.g. if routing traffic through Cloudfront
@@ -349,9 +567,198 @@ USAGE_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var(
 ###
 
 # Get some environment variables and Launch the Gradio app
-COGNITO_AUTH = get_or_create_env_var("COGNITO_AUTH", "0")
+COGNITO_AUTH = get_or_create_env_var("COGNITO_AUTH", "False")
 
 GRADIO_SERVER_PORT = int(get_or_create_env_var("GRADIO_SERVER_PORT", "7860"))
+
+# Must match the named port mapping on the Fargate container (see cdk_stack.py).
+ECS_SERVICE_CONNECT_PORT_MAPPING_NAME = get_or_create_env_var(
+    "ECS_SERVICE_CONNECT_PORT_MAPPING_NAME", f"port-{GRADIO_SERVER_PORT}"
+)
+
+# Suffix used with ECS_SERVICE_CONNECT_CLIENT_CDK_PREFIXES (matches this stack's ECS SG name).
+if ECS_SECURITY_GROUP_NAME.startswith(CDK_PREFIX):
+    _default_sc_client_sg_suffix = ECS_SECURITY_GROUP_NAME[len(CDK_PREFIX) :]
+else:
+    _default_sc_client_sg_suffix = "SecurityGroupECS"
+ECS_SERVICE_CONNECT_CLIENT_SG_NAME_SUFFIX = get_or_create_env_var(
+    "ECS_SERVICE_CONNECT_CLIENT_SG_NAME_SUFFIX", _default_sc_client_sg_suffix
+)
+
+ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_NAMES_LIST = parse_comma_separated_list(
+    ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_NAMES
+)
+ECS_SERVICE_CONNECT_CLIENT_CDK_PREFIXES_LIST = parse_comma_separated_list(
+    ECS_SERVICE_CONNECT_CLIENT_CDK_PREFIXES
+)
+
+
+def build_service_connect_client_security_group_names() -> List[str]:
+    """Explicit SG names plus {prefix}{suffix} for each client CDK_PREFIX."""
+    names: List[str] = list(ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_NAMES_LIST)
+    for prefix in ECS_SERVICE_CONNECT_CLIENT_CDK_PREFIXES_LIST:
+        names.append(f"{prefix}{ECS_SERVICE_CONNECT_CLIENT_SG_NAME_SUFFIX}")
+    deduped: List[str] = []
+    seen = set()
+    for name in names:
+        if name and name not in seen:
+            seen.add(name)
+            deduped.append(name)
+    return deduped
+
+
+ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_NAMES_TO_LOOKUP = (
+    build_service_connect_client_security_group_names()
+)
+
+if ENABLE_ECS_SERVICE_CONNECT == "True" and USE_ECS_EXPRESS_MODE == "True":
+    raise ValueError(
+        "ENABLE_ECS_SERVICE_CONNECT=True is only supported on the legacy Fargate "
+        "service path. Set USE_ECS_EXPRESS_MODE=False or disable Service Connect."
+    )
+
+# Headless deployment: S3 job .env -> Lambda -> one-shot ECS Fargate (RUN_DIRECT_MODE).
+# No ALB, CloudFront, or always-on ECS service.
+ENABLE_HEADLESS_DEPLOYMENT = get_or_create_env_var(
+    "ENABLE_HEADLESS_DEPLOYMENT", "False"
+)
+
+# S3-uploaded job .env files trigger one-shot ECS Fargate tasks (direct mode / cli_redact).
+ENABLE_S3_BATCH_ECS_TRIGGER = get_or_create_env_var(
+    "ENABLE_S3_BATCH_ECS_TRIGGER", "False"
+)
+S3_BATCH_ENV_PREFIX = get_or_create_env_var("S3_BATCH_ENV_PREFIX", "input/config/")
+S3_BATCH_ENV_SUFFIX = get_or_create_env_var("S3_BATCH_ENV_SUFFIX", ".env")
+S3_BATCH_INPUT_PREFIX = get_or_create_env_var("S3_BATCH_INPUT_PREFIX", "input/")
+S3_BATCH_CONFIG_PREFIX = get_or_create_env_var("S3_BATCH_CONFIG_PREFIX", "")
+S3_BATCH_DEFAULT_PARAMS_KEY = get_or_create_env_var(
+    "S3_BATCH_DEFAULT_PARAMS_KEY", "general-config/batch_defaults.env"
+)
+S3_BATCH_LAMBDA_FUNCTION_NAME = get_or_create_env_var(
+    "S3_BATCH_LAMBDA_FUNCTION_NAME", f"{CDK_PREFIX}S3BatchEcsTrigger"
+)
+
+if ENABLE_S3_BATCH_ECS_TRIGGER == "True" and USE_ECS_EXPRESS_MODE == "True":
+    raise ValueError(
+        "ENABLE_S3_BATCH_ECS_TRIGGER=True requires the legacy Fargate task definition "
+        "for ecs.run_task. Set USE_ECS_EXPRESS_MODE=False or disable the batch trigger."
+    )
+
+if ENABLE_HEADLESS_DEPLOYMENT == "True":
+    if ENABLE_S3_BATCH_ECS_TRIGGER != "True":
+        raise ValueError(
+            "ENABLE_HEADLESS_DEPLOYMENT=True requires ENABLE_S3_BATCH_ECS_TRIGGER=True."
+        )
+    if USE_ECS_EXPRESS_MODE == "True":
+        raise ValueError(
+            "ENABLE_HEADLESS_DEPLOYMENT=True requires USE_ECS_EXPRESS_MODE=False."
+        )
+    if USE_CLOUDFRONT == "True":
+        raise ValueError(
+            "ENABLE_HEADLESS_DEPLOYMENT=True is incompatible with USE_CLOUDFRONT=True."
+        )
+
+# Pi agent Gradio UI (second Fargate service; shared legacy ALB + Service Connect to main app).
+ENABLE_PI_AGENT_ECS_SERVICE = get_or_create_env_var(
+    "ENABLE_PI_AGENT_ECS_SERVICE", "False"
+)
+ECR_PI_REPO_NAME = get_or_create_env_var(
+    "ECR_PI_REPO_NAME", f"{CDK_PREFIX}pi-agent".lower()
+)
+CODEBUILD_PI_PROJECT_NAME = get_or_create_env_var(
+    "CODEBUILD_PI_PROJECT_NAME", f"{CDK_PREFIX}CodeBuildPiAgent"
+)
+ECS_PI_TASK_DEFINITION_NAME = get_or_create_env_var(
+    "ECS_PI_TASK_DEFINITION_NAME", f"{CDK_PREFIX}PiAgentTaskDefinition"
+)
+ECS_PI_SECURITY_GROUP_NAME = get_or_create_env_var(
+    "ECS_PI_SECURITY_GROUP_NAME", f"{CDK_PREFIX}SecurityGroupPiAgent"
+)
+ECS_PI_LOG_GROUP_NAME = get_or_create_env_var(
+    "ECS_PI_LOG_GROUP_NAME", f"/ecs/{ECS_PI_SERVICE_NAME}-logs".lower()
+)
+ECS_PI_TASK_CPU_SIZE = get_or_create_env_var("ECS_PI_TASK_CPU_SIZE", "1024")
+ECS_PI_TASK_MEMORY_SIZE = get_or_create_env_var("ECS_PI_TASK_MEMORY_SIZE", "2048")
+PI_GRADIO_PORT = get_or_create_env_var("PI_GRADIO_PORT", "7862")
+# Pi ALB routing: path (default /pi on shared host e.g. CloudFront), host, or both.
+PI_ALB_ROUTING = get_or_create_env_var("PI_ALB_ROUTING", "path").strip().lower()
+PI_ALB_PATH_PREFIX = get_or_create_env_var("PI_ALB_PATH_PREFIX", "/pi")
+PI_ALB_HOST_HEADER = get_or_create_env_var("PI_ALB_HOST_HEADER", "")
+PI_ALB_TARGET_GROUP_NAME = get_or_create_env_var(
+    "PI_ALB_TARGET_GROUP_NAME", f"{CDK_PREFIX}PiAgentTG"[-32:]
+)
+PI_ALB_LISTENER_RULE_PRIORITY = int(
+    get_or_create_env_var("PI_ALB_LISTENER_RULE_PRIORITY", "3")
+)
+PI_AGENT_ENV_S3_KEY = get_or_create_env_var("PI_AGENT_ENV_S3_KEY", "pi_agent.env")
+
+
+def _normalize_pi_alb_path_prefix(raw: str) -> str:
+    segment = (raw or "pi").strip().strip("/")
+    return f"/{segment}" if segment else "/pi"
+
+
+PI_ALB_PATH_PREFIX_NORMALIZED = _normalize_pi_alb_path_prefix(PI_ALB_PATH_PREFIX)
+_PI_ALB_ROUTING_MODES = frozenset({"path", "host", "both"})
+
+
+def _validate_pi_alb_routing_for_enabled_pi() -> None:
+    if PI_ALB_ROUTING not in _PI_ALB_ROUTING_MODES:
+        raise ValueError(
+            f"PI_ALB_ROUTING must be one of {sorted(_PI_ALB_ROUTING_MODES)}; got '{PI_ALB_ROUTING}'."
+        )
+    if PI_ALB_ROUTING in ("host", "both") and not PI_ALB_HOST_HEADER.strip():
+        raise ValueError(
+            "PI_ALB_HOST_HEADER is required when PI_ALB_ROUTING is 'host' or 'both' "
+            "(dedicated hostname on the shared ALB)."
+        )
+    if PI_ALB_ROUTING in ("path", "both") and not PI_ALB_PATH_PREFIX_NORMALIZED:
+        raise ValueError("PI_ALB_PATH_PREFIX must resolve to a non-empty path segment.")
+
+
+# Pi on ECS Express Mode (second Express service on shared ALB; SC via ecs:UpdateService).
+ENABLE_PI_AGENT_EXPRESS_SERVICE = get_or_create_env_var(
+    "ENABLE_PI_AGENT_EXPRESS_SERVICE", "False"
+)
+ECS_PI_EXPRESS_SERVICE_NAME = get_or_create_env_var(
+    "ECS_PI_EXPRESS_SERVICE_NAME", f"{CDK_PREFIX}PiExpressService"
+)
+ECS_PI_EXPRESS_HEALTH_CHECK_PATH = get_or_create_env_var(
+    "ECS_PI_EXPRESS_HEALTH_CHECK_PATH", "/health"
+)
+ECS_PI_EXPRESS_SECURITY_GROUP_NAME = get_or_create_env_var(
+    "ECS_PI_EXPRESS_SECURITY_GROUP_NAME", f"{CDK_PREFIX}SecurityGroupPiExpress"
+)
+# Service Connect port names for Express services (applied in post_cdk_build_quickstart.py).
+ECS_EXPRESS_SC_PORT_NAME = get_or_create_env_var(
+    "ECS_EXPRESS_SC_PORT_NAME", ECS_SERVICE_CONNECT_PORT_MAPPING_NAME
+)
+ECS_PI_EXPRESS_SC_PORT_NAME = get_or_create_env_var(
+    "ECS_PI_EXPRESS_SC_PORT_NAME", f"port-{PI_GRADIO_PORT}"
+)
+
+if ENABLE_PI_AGENT_ECS_SERVICE == "True" and ENABLE_PI_AGENT_EXPRESS_SERVICE == "True":
+    raise ValueError(
+        "Enable at most one Pi deployment mode: ENABLE_PI_AGENT_ECS_SERVICE (legacy Fargate) "
+        "or ENABLE_PI_AGENT_EXPRESS_SERVICE (Express), not both."
+    )
+if ENABLE_PI_AGENT_EXPRESS_SERVICE == "True" and USE_ECS_EXPRESS_MODE != "True":
+    raise ValueError(
+        "ENABLE_PI_AGENT_EXPRESS_SERVICE=True requires USE_ECS_EXPRESS_MODE=True "
+        "(no ACM_SSL_CERTIFICATE_ARN)."
+    )
+if ENABLE_PI_AGENT_ECS_SERVICE == "True" and USE_ECS_EXPRESS_MODE == "True":
+    raise ValueError(
+        "ENABLE_PI_AGENT_ECS_SERVICE=True requires legacy Fargate (USE_ECS_EXPRESS_MODE=False). "
+        "For Pi on Express, use ENABLE_PI_AGENT_EXPRESS_SERVICE=True instead."
+    )
+if ENABLE_PI_AGENT_ECS_SERVICE == "True" and ENABLE_ECS_SERVICE_CONNECT != "True":
+    raise ValueError(
+        "ENABLE_PI_AGENT_ECS_SERVICE=True requires ENABLE_ECS_SERVICE_CONNECT=True "
+        "so the Pi task can reach the main app at http://<discovery>:7860."
+    )
+if ENABLE_PI_AGENT_ECS_SERVICE == "True":
+    _validate_pi_alb_routing_for_enabled_pi()
 
 ###
 # WHOLE DOCUMENT API OPTIONS

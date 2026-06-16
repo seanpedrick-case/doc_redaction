@@ -2,6 +2,7 @@
 *.ipynb
 *.pyc
 *.qmd
+*.json.bak.*
 _quarto.yml
 quarto_site/*
 src/*
@@ -16,9 +17,11 @@ poppler/*
 build/*
 dist/*
 docs/*
+.pi/*
 build_deps/*
 user_guide/*
 _extensions/*
+workspace/*
 doc_redaction.egg-info/*
 .venv_pypi_test/*
 cdk/config/*
@@ -33,7 +36,11 @@ logs/
 output/
 input/
 feedback/
-config/
+# Exclude local secrets; allow committed *.example templates (Pi agent + main app images).
+config/*
+!config/pi_agent.env.example
+!config/app_config.env.example
+!config/docker_app_config.env.example
 usage/
 test/config/*
 test/feedback/*

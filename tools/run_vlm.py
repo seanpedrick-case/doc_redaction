@@ -27,7 +27,6 @@ from tools.config import (
     SHOW_BEDROCK_VLM_MODELS,
     SHOW_INFERENCE_SERVER_VLM_OPTIONS,
     SHOW_VLM_MODEL_OPTIONS,
-    USE_FLASH_ATTENTION,
     VLM_DEFAULT_DO_SAMPLE,
     VLM_DEFAULT_MIN_P,
     VLM_DEFAULT_PRESENCE_PENALTY,
@@ -42,7 +41,11 @@ from tools.config import (
     VLM_QWEN3_5_NOTHINK_SUFFIX,
     VLM_SEED,
 )
-from tools.helper_functions import get_system_font_path
+from tools.helper_functions import get_system_font_path, strip_vlm_thinking_tags
+from tools.inference_attention import (
+    log_attn_implementation_choice,
+    resolve_attn_implementation,
+)
 
 text_read_default_prompt = """Read the main line of text in the image, and return JSON with keys "text" (string) and "conf" (number 0–1) for confidence in your identification, e.g. {"text": "read text", "conf": 0.95}. Do not include any other keys in the JSON. Ignore any words that are not part of the main line of text closest to the center of the image. Ensure that spaces between words and upper/lower cases are preserved. If you can't read the text, return an empty string ""."""
 
@@ -86,6 +89,9 @@ if LOAD_PADDLE_AT_STARTUP:
         # Default paddle configuration if none provided
         if paddle_kwargs is None:
             paddle_kwargs = {
+                "text_detection_model_name": "PP-OCRv6_medium_det",
+                "text_recognition_model_name": "PP-OCRv6_medium_rec",
+                "engine": "transformers",
                 "det_db_unclip_ratio": PADDLE_DET_DB_UNCLIP_RATIO,
                 "use_textline_orientation": PADDLE_USE_TEXTLINE_ORIENTATION,
                 "use_doc_orientation_classify": False,
@@ -197,7 +203,6 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         OVERRIDE_VLM_REPO_ID,
         QUANTISE_VLM_MODELS,
         SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL,
-        USE_FLASH_ATTENTION,
         VLM_DEFAULT_DO_SAMPLE,
         VLM_DEFAULT_MIN_P,
         VLM_DEFAULT_PRESENCE_PENALTY,
@@ -251,10 +256,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     model_supports_presence_penalty = False
     model_default_seed = VLM_SEED if VLM_SEED is not None else None
 
-    if USE_FLASH_ATTENTION is True:
-        attn_implementation = "flash_attention_2"
-    else:
-        attn_implementation = "eager"
+    attn_implementation = resolve_attn_implementation()
+    log_attn_implementation_choice()
 
     # Setup quantisation config if enabled
     quantization_config = None
@@ -787,6 +790,87 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             model_default_prompt = text_read_default_prompt
             _apply_generation_family_defaults(_QWEN3_5_FAMILY_DEFAULTS)
 
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.6-27B":
+            from transformers import (
+                AutoProcessor,
+                Qwen3_5ForConditionalGeneration,
+            )
+
+            MODEL_ID = "Qwen/Qwen3.6-27B"
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "attn_implementation": attn_implementation,
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["dtype"] = "auto"
+            model = Qwen3_5ForConditionalGeneration.from_pretrained(
+                MODEL_ID, **load_kwargs
+            )
+
+            model_default_prompt = text_read_default_prompt
+            _apply_generation_family_defaults(_QWEN3_5_FAMILY_DEFAULTS)
+
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.6-27B-bnb-4bit":
+            from transformers import (
+                AutoProcessor,
+                Qwen3_5ForConditionalGeneration,
+            )
+
+            MODEL_ID = "samajlouis/Qwen3.6-27B-bnb-nf4"
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "attn_implementation": attn_implementation,
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["dtype"] = "auto"
+            model = Qwen3_5ForConditionalGeneration.from_pretrained(
+                MODEL_ID, **load_kwargs
+            )
+
+            model_default_prompt = text_read_default_prompt
+            _apply_generation_family_defaults(_QWEN3_5_FAMILY_DEFAULTS)
+
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.6-35B-A3B":
+            from transformers import (
+                AutoProcessor,
+                Qwen3_5MoeForConditionalGeneration,
+            )
+
+            MODEL_ID = "Qwen/Qwen3.6-35B-A3B"
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "attn_implementation": attn_implementation,
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["dtype"] = "auto"
+            model = Qwen3_5MoeForConditionalGeneration.from_pretrained(
+                MODEL_ID, **load_kwargs
+            )
+
+            model_default_prompt = text_read_default_prompt
+            _apply_generation_family_defaults(_QWEN3_5_FAMILY_DEFAULTS)
+
         elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.5-122B-A10B":
             from transformers import (
                 AutoProcessor,
@@ -1274,6 +1358,8 @@ def extract_text_from_image_vlm(
     print(f"Time taken: {duration:.2f} seconds")
     print(f"Generated tokens: {output_tokens}")
     print(f"Tokens per second: {tokens_per_second:.2f}")
+
+    buffer = strip_vlm_thinking_tags(buffer)
 
     # Return the complete text and token estimates
     return buffer, input_tokens, output_tokens

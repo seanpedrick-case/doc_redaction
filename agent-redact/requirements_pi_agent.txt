@@ -1,0 +1,34 @@
+# Python stack for the pi-agent Docker image (orchestration + Pi Gradio UI).
+#
+# Excludes spaCy, Presidio, and OCR stacks — heavy redaction runs in redaction-app-llama.
+# Includes full Gradio for agent-redact/pi/gradio_app.py (chat frontend over Pi RPC mode).
+#
+# Version caps align with requirements_lightweight.txt where packages overlap.
+
+# --- Gradio UI + API client ---
+gradio==6.10.0
+gradio-pdf-redaction<=0.0.25
+httpx<=0.28.1
+requests<=2.34.2
+
+# --- Config ---
+python-dotenv<=1.2.2
+
+# --- CSV / tabular review (skills, page-review merge) ---
+numpy<=2.4.4
+pandas<=2.3.3
+openpyxl<=3.1.5
+
+# --- PDF helpers (verify_redaction_coverage, preview scripts) ---
+pymupdf<=1.27.1
+
+# --- General utilities ---
+tabulate<=0.10.0
+rapidfuzz<=3.14.5
+defusedxml<=0.7.1
+
+# --- Shared platform features (logging, Cognito, S3 via tools/) ---
+boto3<=1.42.61
+bleach<=6.3.0
+fastapi>=0.115.0
+uvicorn>=0.34.0

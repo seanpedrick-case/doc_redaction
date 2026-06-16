@@ -1,0 +1,31 @@
+{
+  "providers": {
+    "llama-cpp": {
+      "baseUrl": "http://llama-inference:8080/v1",
+      "api": "openai-completions",
+      "apiKey": "llama-cpp",
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false,
+        "supportsUsageInStreaming": false,
+        "maxTokensField": "max_tokens"
+      },
+      "models": [
+        {
+          "id": "unsloth/Qwen3.6-27B-MTP-GGUF",
+          "name": "Qwen 3.6 27B (local)",
+          "reasoning": false,
+          "input": ["text", "image"],
+          "contextWindow": 114688,
+          "maxTokens": 32768,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        }
+      ]
+    }
+  }
+}

@@ -36,6 +36,7 @@ from tools.aws_textract import (
     convert_question_answer_to_dataframe,
     json_to_ocrresult,
     load_and_convert_textract_json,
+    textract_prioritizes_signature_extraction,
 )
 from tools.config import (
     APPLY_REDACTIONS_GRAPHICS,
@@ -134,10 +135,13 @@ from tools.file_conversion import (
     word_level_ocr_output_to_dataframe,
 )
 from tools.helper_functions import (
+    LINE_LEVEL_OCR_DF_COLUMNS,
     clean_unicode_text,
     get_file_name_without_type,
     get_ocr_visualisation_font_path,
     get_textract_file_suffix,
+    line_level_ocr_row,
+    normalize_line_level_ocr_df,
 )
 from tools.load_spacy_model_custom_recognisers import (
     CustomWordFuzzyRecognizer,
@@ -147,6 +151,10 @@ from tools.load_spacy_model_custom_recognisers import (
     load_spacy_model,
     nlp_analyser,
     score_threshold,
+)
+from tools.ocr_reading_order import (
+    reorder_structured_text_lines,
+    should_preserve_paddle_line_boxes,
 )
 from tools.redaction_types import (
     RedactionContext,
@@ -207,7 +215,7 @@ def reverse_y_coords(df: pd.DataFrame, column: str):
     df[column] = df[column]
     df[column] = 1 - df[column].astype(float)
 
-    df[column] = df[column].round(6)
+    df[column] = df[column].round(4)
 
     return df[column]
 
@@ -727,6 +735,7 @@ def run_custom_vlm_only_pass(
     page_max: int = 0,
     progress=None,
     inference_server_vlm_model: str = "",
+    text_extraction_method: str = LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION,
 ) -> tuple:
     """
     Run only the CUSTOM_VLM (face, signature) detection on page images and apply
@@ -922,6 +931,8 @@ def run_custom_vlm_only_pass(
             page_sizes_df=page_sizes_df,
             input_folder=input_folder,
             image_dimensions_override=image_dimensions_override,
+            text_extraction_method=text_extraction_method,
+            custom_vlm_enabled=True,
         )
         # In dual-output mode, capture the final redacted page copy so _redacted.pdf
         # merge includes CUSTOM_VLM pages (signature/face post-pass as well).
@@ -1070,6 +1081,8 @@ def _choose_and_run_redactor_impl(
     prepare_images: bool = True,
     RETURN_REDACTED_PDF: bool = RETURN_REDACTED_PDF,
     RETURN_PDF_FOR_REVIEW: bool = RETURN_PDF_FOR_REVIEW,
+    post_redact_pass1_qa: bool | None = None,
+    post_redact_pass1_auto_prune: bool | None = None,
     progress=gr.Progress(track_tqdm=True),
 ):
     """
@@ -1188,13 +1201,16 @@ def _choose_and_run_redactor_impl(
             0, int(efficient_ocr_min_embedded_image_px)
         )
 
+    if efficient_ocr is None:
+        efficient_ocr = EFFICIENT_OCR
+
     # CLI mode may provide options to enter method names in a different format
     print("Text extraction method requested:", text_extraction_method)
     if text_extraction_method == "AWS Textract":
         text_extraction_method = TEXTRACT_TEXT_EXTRACT_OPTION
     if text_extraction_method == "Local OCR":
         text_extraction_method = LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
-        print("Performing local OCR with" + chosen_local_ocr_model + " model.")
+        print("Performing local OCR with " + chosen_local_ocr_model + " model.")
     if text_extraction_method == "Local text":
         text_extraction_method = SELECTABLE_TEXT_EXTRACT_OPTION
 
@@ -2150,9 +2166,7 @@ def _choose_and_run_redactor_impl(
             "id",
         ]
     )
-    all_page_line_level_ocr_results_df = pd.DataFrame(
-        columns=["page", "text", "left", "top", "width", "height", "line", "conf"]
-    )
+    all_page_line_level_ocr_results_df = pd.DataFrame(columns=LINE_LEVEL_OCR_DF_COLUMNS)
 
     # Run through file loop, redact each file at a time
     for file in file_paths_loop:
@@ -2750,7 +2764,22 @@ def _choose_and_run_redactor_impl(
                         entities_for_vlm.append("CUSTOM_VLM_FACES")
 
                     _vlm_wants_person = "CUSTOM_VLM_FACES" in entities_for_vlm
-                    _vlm_wants_signature = "CUSTOM_VLM_SIGNATURE" in entities_for_vlm
+                    _vlm_wants_signature = (
+                        "CUSTOM_VLM_SIGNATURE" in entities_for_vlm
+                        and not textract_prioritizes_signature_extraction(
+                            text_extraction_method, handwrite_signature_checkbox
+                        )
+                    )
+                    if (
+                        "CUSTOM_VLM_SIGNATURE" in entities_for_vlm
+                        and textract_prioritizes_signature_extraction(
+                            text_extraction_method, handwrite_signature_checkbox
+                        )
+                    ):
+                        print(
+                            "Textract Extract signatures enabled — skipping "
+                            "CUSTOM_VLM_SIGNATURE VLM pass (Textract signatures take priority)."
+                        )
 
                     _vlm_rounds = []
                     if _vlm_wants_signature:
@@ -2865,6 +2894,7 @@ def _choose_and_run_redactor_impl(
                             page_max=page_max if page_max > 0 else num_pages,
                             progress=progress,
                             inference_server_vlm_model=inference_server_vlm_model,
+                            text_extraction_method=text_extraction_method,
                         )
                         vlm_total_input_tokens += vlm_in
                         vlm_total_output_tokens += vlm_out
@@ -3099,6 +3129,7 @@ def _choose_and_run_redactor_impl(
                     page_max=page_max if page_max > 0 else number_of_pages,
                     progress=progress,
                     inference_server_vlm_model=inference_server_vlm_model,
+                    text_extraction_method=text_extraction_method,
                 )
                 vlm_total_input_tokens += vlm_in
                 vlm_total_output_tokens += vlm_out
@@ -3437,21 +3468,12 @@ def _choose_and_run_redactor_impl(
                     #     pymupdf_doc = None
 
         if not all_page_line_level_ocr_results_df.empty:
-            all_page_line_level_ocr_results_df = all_page_line_level_ocr_results_df[
-                ["page", "text", "left", "top", "width", "height", "line", "conf"]
-            ]
+            all_page_line_level_ocr_results_df = normalize_line_level_ocr_df(
+                all_page_line_level_ocr_results_df
+            )
         else:
             all_page_line_level_ocr_results_df = pd.DataFrame(
-                columns=[
-                    "page",
-                    "text",
-                    "left",
-                    "top",
-                    "width",
-                    "height",
-                    "line",
-                    "conf",
-                ]
+                columns=LINE_LEVEL_OCR_DF_COLUMNS
             )
 
         ocr_file_path = (
@@ -3573,6 +3595,7 @@ def _choose_and_run_redactor_impl(
                 "line_x1",
                 "line_y1",
                 "line_conf",
+                "line_model",
             ]
             # Identify duplicated rows (excluding the first occurrence)
             dupes_mask = all_page_line_level_ocr_results_with_words_df.duplicated(
@@ -3774,11 +3797,43 @@ def _choose_and_run_redactor_impl(
         all_image_annotations_df = convert_annotation_data_to_dataframe(
             annotations_all_pages
         )
-        _pages_pdf_pts = (
-            set(pages_with_text_extraction_1based)
-            if pages_with_text_extraction_1based
-            else None
-        )
+        # Coordinate-space note:
+        # - In selectable-text mode, annotation boxes can be produced in PDF points (when we used
+        #   placeholder images / no real rendered PNGs) *or* in image pixels (when real images exist
+        #   and redact_page_with_pymupdf converted pikepdf rects to image coords for review overlay).
+        # - When CUSTOM_VLM_* is enabled, we often prepare page images even for selectable-text runs,
+        #   which makes text-derived boxes become pixel-based. Dividing those by MediaBox (PDF points)
+        #   inflates and shifts them (the exact symptom reported).
+        #
+        # For annotations, prefer image dimensions by default, but force mediabox division only for
+        # pages that still use placeholder images (i.e. annotations in PDF points).
+        _pages_pdf_pts = None
+        if text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION:
+            try:
+                if (
+                    isinstance(page_sizes_df, pd.DataFrame)
+                    and not page_sizes_df.empty
+                    and "page" in page_sizes_df.columns
+                    and "image_path" in page_sizes_df.columns
+                ):
+                    _pdf_pages = set()
+                    for _, _r in page_sizes_df[["page", "image_path"]].iterrows():
+                        try:
+                            p = int(float(_r["page"]))
+                        except Exception:
+                            continue
+                        imgp = str(_r.get("image_path") or "")
+                        if imgp.startswith("placeholder_image_"):
+                            _pdf_pages.add(p)
+                    _pages_pdf_pts = _pdf_pages if _pdf_pages else None
+            except Exception:
+                _pages_pdf_pts = None
+        else:
+            _pages_pdf_pts = (
+                set(pages_with_text_extraction_1based)
+                if pages_with_text_extraction_1based
+                else None
+            )
         all_image_annotations_df = divide_coordinates_by_page_sizes(
             all_image_annotations_df,
             page_sizes_df,
@@ -3786,10 +3841,9 @@ def _choose_and_run_redactor_impl(
             xmax="xmax",
             ymin="ymin",
             ymax="ymax",
-            coordinates_in_pdf_points=(
-                text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION
-                or ocr_results_use_pdf_points is True
-            ),
+            # IMPORTANT: annotation box coords are pixel-based whenever real page images exist,
+            # even in selectable-text runs. So don't force mediabox division globally here.
+            coordinates_in_pdf_points=(ocr_results_use_pdf_points is True),
             pages_in_pdf_points=_pages_pdf_pts,
         )
         annotations_all_pages_divide = create_annotation_dicts_from_annotation_df(
@@ -3850,6 +3904,42 @@ def _choose_and_run_redactor_impl(
                 out_file_paths.append(review_file_path)
             else:
                 out_file_paths.append(review_file_path[0])
+
+            _rev_csv = (
+                review_file_path
+                if isinstance(review_file_path, str)
+                else review_file_path[0]
+            )
+            _ocr_words = all_page_line_level_ocr_results_with_words_df_file_path
+            if isinstance(_ocr_words, list):
+                _ocr_words = _ocr_words[0] if _ocr_words else None
+            if _rev_csv and _ocr_words:
+                try:
+                    from tools.post_redaction_pass1_qa import (
+                        run_post_redaction_pass1_qa,
+                    )
+
+                    qa_result = run_post_redaction_pass1_qa(
+                        review_csv_path=_rev_csv,
+                        ocr_words_csv_path=_ocr_words,
+                        output_folder=output_folder,
+                        total_pages=number_of_pages,
+                        deny_list=custom_recogniser_word_list_flat,
+                        allow_list=in_allow_list_flat,
+                        enabled=post_redact_pass1_qa,
+                        auto_prune=post_redact_pass1_auto_prune,
+                    )
+                    if qa_result.get("summary"):
+                        if isinstance(combined_out_message, list):
+                            combined_out_message = "\n".join(combined_out_message)
+                        combined_out_message = (
+                            combined_out_message + " " + qa_result["summary"]
+                        )
+                    for qa_path in qa_result.get("paths_created") or []:
+                        if qa_path not in out_file_paths:
+                            out_file_paths.append(qa_path)
+                except Exception as qa_exc:
+                    print(f"Post-redaction Pass 1 QA failed: {qa_exc}")
 
         # Make a combined message for the file
         if isinstance(combined_out_message, list):
@@ -4138,6 +4228,8 @@ def choose_and_run_redactor(
     prepare_images: bool = True,
     RETURN_REDACTED_PDF: bool = RETURN_REDACTED_PDF,
     RETURN_PDF_FOR_REVIEW: bool = RETURN_PDF_FOR_REVIEW,
+    post_redact_pass1_qa: bool | None = None,
+    post_redact_pass1_auto_prune: bool | None = None,
     progress=gr.Progress(track_tqdm=True),
 ):
     """Compatibility wrapper: builds RedactionOptions/RedactionContext and calls run_redaction."""
@@ -4405,6 +4497,8 @@ def prepare_custom_image_recogniser_result_annotation_box(
     image: Image,
     page_sizes_df: pd.DataFrame,
     custom_colours: bool = USE_GUI_BOX_COLOURS_FOR_OUTPUTS,
+    text_extraction_method: str = LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION,
+    custom_vlm_enabled: bool = False,
 ):
     """
     Prepare an image annotation box and coordinates based on a CustomImageRecogniserResult, PyMuPDF page, and PIL Image.
@@ -4421,7 +4515,59 @@ def prepare_custom_image_recogniser_result_annotation_box(
 
     pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2 = 0, 0, 0, 0  # Initialize defaults
 
-    if image:
+    if (
+        image
+        and text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION
+        and not custom_vlm_enabled
+    ):
+        # When "Local text" extraction is used but CUSTOM_VLM_* is enabled, we prepare
+        # images for VLM detection. That means we can receive a *mixture* of boxes:
+        # - text-based boxes already in PDF coordinates (points)
+        # - VLM/recognizer boxes in image pixel coordinates
+        #
+        # If we always scale via convert_image_coords_to_pymupdf, PDF-point boxes get
+        # incorrectly scaled (shifted and oversized). Detect "already PDF" boxes by
+        # checking whether they fit in the page's PDF coordinate space.
+
+        # Test on looks_like_pdf_points has been deprecated for now. Assume always if an image exists and selectable text extraction is the method that we have pymupdf coordinates.
+        # looks_like_pdf_points = True
+
+        pymupdf_x1 = float(annot.left)
+        pymupdf_y1 = float(annot.top)
+        pymupdf_x2 = float(annot.left + annot.width)
+        pymupdf_y2 = float(annot.top + annot.height)
+
+        # try:
+        #     mb_w = float(page.mediabox.width)
+        #     mb_h = float(page.mediabox.height)
+        #     a_x2 = float(annot.left + annot.width)
+        #     a_y2 = float(annot.top + annot.height)
+        #     a_x1 = float(annot.left)
+        #     a_y1 = float(annot.top)
+        #     # Tolerate minor float/int noise. If bbox is plausibly within mediabox,
+        #     # assume it's already in PDF points (CropBox-local in our pipeline).
+        #     _eps = 2.0
+        #     looks_like_pdf_points = (
+        #         a_x1 >= -_eps
+        #         and a_y1 >= -_eps
+        #         and a_x2 <= (mb_w + _eps)
+        #         and a_y2 <= (mb_h + _eps)
+        #     )
+
+        # except Exception:
+        #     looks_like_pdf_points = False
+    elif (
+        image
+        and text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION
+        and custom_vlm_enabled
+    ):
+        pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2 = (
+            convert_image_coords_to_pymupdf(page, annot, image)
+        )
+
+    elif image:
+        # looks_like_pdf_points = False
+
         pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2 = (
             convert_image_coords_to_pymupdf(page, annot, image)
         )
@@ -4437,6 +4583,7 @@ def prepare_custom_image_recogniser_result_annotation_box(
             rect_height = page.rect.height
             img_w = page_info.get("image_width")
             img_h = page_info.get("image_height")
+
             if (
                 img_w is not None
                 and img_h is not None
@@ -5097,6 +5244,8 @@ def redact_page_with_pymupdf(
     input_folder: str = INPUT_FOLDER,
     image_dimensions_override: Optional[dict] = None,
     review_page: Optional[Page] = None,
+    text_extraction_method: str = LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION,
+    custom_vlm_enabled: bool = False,
 ):
     """
     Applies redactions to a single PyMuPDF page based on provided annotations.
@@ -5128,7 +5277,8 @@ def redact_page_with_pymupdf(
                                                       Defaults to RETURN_REDACTED_PDF.
         review_page (Page, optional): When provided, the same redactions are applied to this page (with text
                                       retained for review) in a single pass, avoiding a second full annotation loop.
-
+        text_extraction_method (str, optional): The method used to extract text from the page. Defaults to LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION.
+        custom_vlm_enabled (bool, optional): If True, custom VLM model is enabled. Defaults to False.
     Returns:
         Tuple[Page, dict] or Tuple[Tuple[Page, Page], dict]: A tuple containing:
             - page (Page or Tuple[Page, Page]): The PyMuPDF page object(s) with redactions applied.
@@ -5382,10 +5532,16 @@ def redact_page_with_pymupdf(
 
             # Else should be CustomImageRecognizerResult
             elif isinstance(annot, CustomImageRecognizerResult):
-                # print("annot is a CustomImageRecognizerResult")
+
                 img_annotation_box, rect = (
                     prepare_custom_image_recogniser_result_annotation_box(
-                        page, annot, image, page_sizes_df, custom_colours
+                        page,
+                        annot,
+                        image,
+                        page_sizes_df,
+                        custom_colours,
+                        text_extraction_method,
+                        custom_vlm_enabled,
                     )
                 )
 
@@ -5836,7 +5992,7 @@ def redact_image_pdf(
     page_break_return: bool = False,
     annotations_all_pages: List = list(),
     all_page_line_level_ocr_results_df: pd.DataFrame = pd.DataFrame(
-        columns=["page", "text", "left", "top", "width", "height", "line", "conf"]
+        columns=LINE_LEVEL_OCR_DF_COLUMNS
     ),
     all_pages_decision_process_table: pd.DataFrame = pd.DataFrame(
         columns=[
@@ -5973,6 +6129,14 @@ def redact_image_pdf(
     # When True, skip per-page VLM face/signature detection; run_custom_vlm_only_pass
     # (after OCR in efficient-OCR flow) handles each once per page on full images.
     _skip_inline_custom_vlm_detection = defer_inline_custom_vlm_detection_pass
+    _skip_custom_vlm_signature_textract = textract_prioritizes_signature_extraction(
+        text_extraction_method, handwrite_signature_checkbox
+    )
+    if _skip_custom_vlm_signature_textract:
+        print(
+            "Textract Extract signatures enabled — skipping inline "
+            "CUSTOM_VLM_SIGNATURE VLM detection (Textract signatures take priority)."
+        )
 
     tic = time.perf_counter()
 
@@ -6494,7 +6658,13 @@ def redact_image_pdf(
                 (
                     page_line_level_ocr_results,
                     page_line_level_ocr_results_with_words,
-                ) = combine_ocr_results(page_word_level_ocr_results, page=str(pno + 1))
+                ) = combine_ocr_results(
+                    page_word_level_ocr_results,
+                    page=str(pno + 1),
+                    preserve_line_boxes=should_preserve_paddle_line_boxes(
+                        chosen_local_ocr_model
+                    ),
+                )
 
                 return (
                     pno,
@@ -7000,7 +7170,11 @@ def redact_image_pdf(
                             page_line_level_ocr_results,
                             page_line_level_ocr_results_with_words,
                         ) = combine_ocr_results(
-                            page_word_level_ocr_results, page=reported_page_number
+                            page_word_level_ocr_results,
+                            page=reported_page_number,
+                            preserve_line_boxes=should_preserve_paddle_line_boxes(
+                                chosen_local_ocr_model
+                            ),
                         )
                     # else: line/word structures already set from parallel local OCR worker
 
@@ -7166,6 +7340,10 @@ def redact_image_pdf(
                 )
                 if (
                     not _skip_inline_custom_vlm_detection
+                    and not (
+                        _skip_custom_vlm_signature_textract
+                        and text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
+                    )
                     and (
                         text_extraction_method == BEDROCK_VLM_TEXT_EXTRACT_OPTION
                         or text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
@@ -7446,6 +7624,7 @@ def redact_image_pdf(
                 # Supports pure and hybrid VLM/inference-server local OCR models.
                 if (
                     not _skip_inline_custom_vlm_detection
+                    and not _skip_custom_vlm_signature_textract
                     and chosen_local_ocr_model
                     in [
                         "vlm",
@@ -7630,16 +7809,7 @@ def redact_image_pdf(
                             )
                             page_text_ocr_outputs = pd.DataFrame(
                                 [
-                                    {
-                                        "page": page_1based,
-                                        "text": getattr(r, "text", ""),
-                                        "left": getattr(r, "left", None),
-                                        "top": getattr(r, "top", None),
-                                        "width": getattr(r, "width", None),
-                                        "height": getattr(r, "height", None),
-                                        "line": getattr(r, "line", None),
-                                        "conf": getattr(r, "conf", None),
-                                    }
+                                    line_level_ocr_row(page_1based, r)
                                     for r in _line_results
                                 ]
                             )
@@ -7682,22 +7852,20 @@ def redact_image_pdf(
                 # To keep memory usage low on large documents, we avoid storing full image
                 # objects or image bytes here; workers will reopen the image from disk.
                 if use_ocr_parallel_textract:
-                    if not image:
-                        try:
-                            _pn, _ip, _w, _h = process_single_page_for_image_conversion(
-                                file_path, page_no
-                            )
-                            normalized_path = os.path.normpath(
-                                os.path.abspath(image_path)
-                            )
-                            if validate_path_containment(normalized_path, input_folder):
-                                image = Image.open(normalized_path)
-                                page_width, page_height = image.size
-                        except Exception as e:
+                    if not image or _is_placeholder_image_path(image_path):
+                        image, image_path = open_page_image_for_pipeline(
+                            image_path,
+                            file_path,
+                            page_no,
+                            input_folder=input_folder,
+                            page_sizes_df=page_sizes_df,
+                        )
+                        if image is None:
                             print(
-                                f"Could not load image for Textract job page {reported_page_number}: {e}"
+                                f"Could not load image for Textract job page {reported_page_number}"
                             )
                             continue
+                        page_width, page_height = image.size
                     page_exists = (
                         any(
                             pg.get("page_no") == reported_page_number
@@ -8091,6 +8259,7 @@ def redact_image_pdf(
                 # and inject [SIGNATURE] entries into the word-level OCR structure for AWS Textract.
                 if (
                     not _skip_inline_custom_vlm_detection
+                    and not _skip_custom_vlm_signature_textract
                     and text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
                     and "CUSTOM_VLM_SIGNATURE" in chosen_redact_entities
                     and isinstance(page_line_level_ocr_results_with_words, dict)
@@ -8233,16 +8402,9 @@ def redact_image_pdf(
                 ):
                     line_level_ocr_results_df = pd.DataFrame(
                         [
-                            {
-                                "page": page_line_level_ocr_results["page"],
-                                "text": result.text,
-                                "left": result.left,
-                                "top": result.top,
-                                "width": result.width,
-                                "height": result.height,
-                                "line": result.line,
-                                "conf": result.conf,
-                            }
+                            line_level_ocr_row(
+                                page_line_level_ocr_results["page"], result
+                            )
                             for result in page_line_level_ocr_results["results"]
                         ]
                     )
@@ -8280,21 +8442,14 @@ def redact_image_pdf(
                     page_line_level_ocr_results_with_words
                     and "results" in page_line_level_ocr_results_with_words
                 ):
-                    # Ensure image is set - if None, try to use image_path or file_path for image files
-                    image_for_visualization = image
-                    if image_for_visualization is None:
-                        # If image is None and input file is an image file, try to use image_path or file_path
-                        if is_pdf(file_path) is False:
-                            if isinstance(image_path, str) and image_path:
-                                # Try to use image_path if it's a valid string
-                                image_for_visualization = image_path
-                            elif isinstance(file_path, str) and file_path:
-                                # Fall back to using the original file_path for image files
-                                image_for_visualization = file_path
-                        else:
-                            # For PDF files, we need an image object or image path
-                            if isinstance(image_path, str) and image_path:
-                                image_for_visualization = image_path
+                    image_for_visualization = resolve_image_for_ocr_visualization(
+                        image,
+                        image_path,
+                        file_path,
+                        page_no,
+                        input_folder=input_folder,
+                        page_sizes_df=page_sizes_df,
+                    )
 
                     # Only proceed if we have a valid image or image path
                     if image_for_visualization is not None:
@@ -8315,6 +8470,10 @@ def redact_image_pdf(
                             chosen_local_ocr_model=chosen_local_ocr_model,
                             log_files_output_paths=log_files_output_paths,
                             textract_hybrid_bedrock_used=hybrid_textract_bedrock_vlm,
+                            file_path=file_path,
+                            page_no=page_no,
+                            input_folder=input_folder,
+                            page_sizes_df=page_sizes_df,
                         )
                         # If config is enabled and a new visualization file was added, add it to out_file_paths
                         if (
@@ -8509,14 +8668,13 @@ def redact_image_pdf(
             post_process_pbar.set_postfix_str(f"page {reported_page_number}")
             image_path = job["image_path"]
             # Reopen image on demand instead of storing it in every job to reduce memory usage.
-            try:
-                if isinstance(image_path, str) and image_path:
-                    normalized_path = os.path.normpath(os.path.abspath(image_path))
-                    image = Image.open(normalized_path)
-                else:
-                    image = None
-            except Exception:
-                image = None
+            image, image_path = open_page_image_for_pipeline(
+                image_path,
+                file_path,
+                page_no,
+                input_folder=input_folder,
+                page_sizes_df=page_sizes_df,
+            )
             page_width = job["page_width"]
             page_height = job["page_height"]
             original_cropbox = job["original_cropbox"]
@@ -8697,6 +8855,7 @@ def redact_image_pdf(
 
             if (
                 not _skip_inline_custom_vlm_detection
+                and not _skip_custom_vlm_signature_textract
                 and text_extraction_method == TEXTRACT_TEXT_EXTRACT_OPTION
                 and "CUSTOM_VLM_SIGNATURE" in chosen_redact_entities
                 and isinstance(page_line_level_ocr_results_with_words, dict)
@@ -8812,16 +8971,9 @@ def redact_image_pdf(
                 ):
                     line_level_ocr_results_df = pd.DataFrame(
                         [
-                            {
-                                "page": page_line_level_ocr_results["page"],
-                                "text": result.text,
-                                "left": result.left,
-                                "top": result.top,
-                                "width": result.width,
-                                "height": result.height,
-                                "line": result.line,
-                                "conf": result.conf,
-                            }
+                            line_level_ocr_row(
+                                page_line_level_ocr_results["page"], result
+                            )
                             for result in page_line_level_ocr_results["results"]
                         ]
                     )
@@ -8843,16 +8995,14 @@ def redact_image_pdf(
                     page_line_level_ocr_results_with_words
                     and "results" in page_line_level_ocr_results_with_words
                 ):
-                    image_for_visualization = image
-                    if image_for_visualization is None:
-                        if is_pdf(file_path) is False:
-                            if isinstance(image_path, str) and image_path:
-                                image_for_visualization = image_path
-                            elif isinstance(file_path, str) and file_path:
-                                image_for_visualization = file_path
-                        else:
-                            if isinstance(image_path, str) and image_path:
-                                image_for_visualization = image_path
+                    image_for_visualization = resolve_image_for_ocr_visualization(
+                        image,
+                        image_path,
+                        file_path,
+                        page_no,
+                        input_folder=input_folder,
+                        page_sizes_df=page_sizes_df,
+                    )
                     if image_for_visualization is not None:
                         log_files_output_paths_length_before = len(
                             log_files_output_paths
@@ -8866,6 +9016,10 @@ def redact_image_pdf(
                             chosen_local_ocr_model=chosen_local_ocr_model,
                             log_files_output_paths=log_files_output_paths,
                             textract_hybrid_bedrock_used=hybrid_textract_bedrock_vlm,
+                            file_path=file_path,
+                            page_no=page_no,
+                            input_folder=input_folder,
+                            page_sizes_df=page_sizes_df,
                         )
                         if (
                             INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES
@@ -8899,9 +9053,17 @@ def redact_image_pdf(
     # SECOND PASS: Perform PII detection on all pages using stored OCR results
     print("Second pass: Performing PII detection on all pages...")
 
-    # Optional: run PII detection in parallel for Local and AWS Comprehend (skip when CUSTOM_VLM_FACES is used).
+    # Optional: run PII detection in parallel for Local and AWS Comprehend (skip when CUSTOM_VLM_FACES or CUSTOM_FUZZY is used).
     # IMPORTANT: never parallelise PII when using inference-server or local-transformers LLM backends.
     pii_results_by_page_image = {}
+    _has_custom_fuzzy = any(
+        "CUSTOM_FUZZY" in entity_list
+        for entity_list in (
+            chosen_redact_entities or [],
+            chosen_redact_comprehend_entities or [],
+            chosen_llm_entities or [],
+        )
+    )
     _use_parallel_image_pii = (
         pii_identification_method in (LOCAL_PII_OPTION, AWS_PII_OPTION)
         and pii_identification_method
@@ -8911,7 +9073,10 @@ def redact_image_pdf(
             pii_identification_method == AWS_PII_OPTION
             and "CUSTOM_VLM_FACES" in (chosen_redact_comprehend_entities or [])
         )
+        and not _has_custom_fuzzy
     )
+    if _has_custom_fuzzy:
+        print("CUSTOM_FUZZY selected: running PII detection sequentially.")
     if _use_parallel_image_pii and ocr_results_by_page:
         _pii_pages = (
             list(page_loop_pages)
@@ -9294,6 +9459,7 @@ def redact_image_pdf(
                     # Skipped when defer_inline_custom_vlm_detection_pass: post-pass covers PDF/decision table.
                     if (
                         not _skip_inline_custom_vlm_detection
+                        and not _skip_custom_vlm_signature_textract
                         and pii_identification_method == AWS_PII_OPTION
                         and "CUSTOM_VLM_SIGNATURE" in chosen_redact_comprehend_entities
                         and isinstance(page_line_level_ocr_results_with_words, dict)
@@ -9572,6 +9738,7 @@ def redact_image_pdf(
                             "image_width": page_width,
                             "image_height": page_height,
                         },
+                        text_extraction_method=text_extraction_method,
                     )
 
                     # Handle dual page objects if returned
@@ -9801,8 +9968,8 @@ def redact_image_pdf(
                     all_pages_decision_process_list
                 )
 
-                all_line_level_ocr_results_df = pd.DataFrame(
-                    all_line_level_ocr_results_list
+                all_line_level_ocr_results_df = normalize_line_level_ocr_df(
+                    pd.DataFrame(all_line_level_ocr_results_list)
                 )
                 if selection_element_results_list:
                     selection_element_results_list_df = pd.DataFrame(
@@ -9937,8 +10104,8 @@ def redact_image_pdf(
                 all_pages_decision_process_list
             )
 
-            all_line_level_ocr_results_df = pd.DataFrame(
-                all_line_level_ocr_results_list
+            all_line_level_ocr_results_df = normalize_line_level_ocr_df(
+                pd.DataFrame(all_line_level_ocr_results_list)
             )
 
             if selection_element_results_list:
@@ -10032,17 +10199,19 @@ def redact_image_pdf(
         ]
         _ocr_rows = [x for x in all_line_level_ocr_results_list if isinstance(x, dict)]
         if _ocr_dfs and _ocr_rows:
-            all_line_level_ocr_results_df = pd.concat(
-                _ocr_dfs + [pd.DataFrame(_ocr_rows)], ignore_index=True
+            all_line_level_ocr_results_df = normalize_line_level_ocr_df(
+                pd.concat(_ocr_dfs + [pd.DataFrame(_ocr_rows)], ignore_index=True)
             )
         elif _ocr_dfs:
-            all_line_level_ocr_results_df = pd.concat(_ocr_dfs, ignore_index=True)
+            all_line_level_ocr_results_df = normalize_line_level_ocr_df(
+                pd.concat(_ocr_dfs, ignore_index=True)
+            )
         else:
-            all_line_level_ocr_results_df = pd.DataFrame(_ocr_rows)
+            all_line_level_ocr_results_df = normalize_line_level_ocr_df(
+                pd.DataFrame(_ocr_rows)
+            )
     else:
-        all_line_level_ocr_results_df = pd.DataFrame(
-            columns=["page", "text", "left", "top", "width", "height", "line", "conf"]
-        )
+        all_line_level_ocr_results_df = pd.DataFrame(columns=LINE_LEVEL_OCR_DF_COLUMNS)
 
     # Convert decision table and ocr results to relative coordinates
     _pages_pdf_pts = set(pages_in_pdf_points) if pages_in_pdf_points else None
@@ -10149,6 +10318,7 @@ def create_line_level_ocr_results_from_characters(
                             width=round(overall_bbox[2] - overall_bbox[0], 2),
                             height=round(overall_bbox[3] - overall_bbox[1], 2),
                             line=line_number,
+                            model="pdfminer",
                         )
                     )
                     line_level_characters_out.append(character_objects_out)
@@ -10187,6 +10357,7 @@ def create_line_level_ocr_results_from_characters(
             width=round(overall_bbox[2] - overall_bbox[0], 2),
             height=round(overall_bbox[3] - overall_bbox[1], 2),
             line=line_number,
+            model="pdfminer",
         )
         line_level_results_out.append(line_ocr_result)
         line_level_characters_out.append(character_objects_out)
@@ -10395,18 +10566,7 @@ def _extract_text_from_single_page(file_path: str, page_no: int) -> Tuple[
     page_ocr_results_with_words = list()
     page_text_ocr_outputs_list = list()
 
-    empty_ocr_df = pd.DataFrame(
-        columns=[
-            "page",
-            "text",
-            "left",
-            "top",
-            "width",
-            "height",
-            "line",
-            "conf",
-        ]
-    )
+    empty_ocr_df = pd.DataFrame(columns=LINE_LEVEL_OCR_DF_COLUMNS)
 
     text_line_no = 1
     for page_layout in extract_pages(file_path, page_numbers=[page_no], maxpages=1):
@@ -10433,14 +10593,9 @@ def _extract_text_from_single_page(file_path: str, page_no: int) -> Tuple[
                 line_level_text_results_df = pd.DataFrame(
                     [
                         {
-                            "page": page_no + 1,
+                            **line_level_ocr_row(page_no + 1, result),
                             "text": (result.text).strip(),
-                            "left": result.left,
-                            "top": result.top,
-                            "width": result.width,
-                            "height": result.height,
-                            "line": result.line,
-                            "conf": 100.0,
+                            "conf": getattr(result, "conf", 100.0),
                         }
                         for result in line_level_text_results_list
                     ]
@@ -10666,6 +10821,17 @@ def process_page_to_structured_ocr_pymupdf(
             lines_char_groups.append(line_chars)
             valid_line_count += 1
 
+    if line_results:
+        mediabox = page.mediabox
+        line_results, lines_char_groups, page_data = reorder_structured_text_lines(
+            line_results,
+            lines_char_groups,
+            page_data,
+            page_width=float(mediabox.width),
+            page_height=float(mediabox.height),
+            start_line_number=start_line_number,
+        )
+
     return page_data, line_results, lines_char_groups
 
 
@@ -10710,22 +10876,15 @@ def _extract_text_from_single_page_pymupdf(pdf_bytes: bytes, page_no: int) -> Tu
         page_text_ocr_outputs = pd.DataFrame(
             [
                 {
-                    "page": reported_page_number,
+                    **line_level_ocr_row(reported_page_number, result),
                     "text": result.text.strip(),
-                    "left": result.left,
-                    "top": result.top,
-                    "width": result.width,
-                    "height": result.height,
-                    "line": result.line,
-                    "conf": 100.0,
+                    "conf": getattr(result, "conf", 100.0),
                 }
                 for result in line_results
             ]
         )
     else:
-        page_text_ocr_outputs = pd.DataFrame(
-            columns=["page", "text", "left", "top", "width", "height", "line", "conf"]
-        )
+        page_text_ocr_outputs = pd.DataFrame(columns=LINE_LEVEL_OCR_DF_COLUMNS)
 
     doc.close()  # Always close for memory efficiency
 
@@ -11098,7 +11257,7 @@ def redact_text_pdf(
     page_break_return: bool = False,  # Flag to indicate if a page break should be returned
     annotations_all_pages: List[dict] = list(),  # List of annotations across all pages
     all_line_level_ocr_results_df: pd.DataFrame = pd.DataFrame(
-        columns=["page", "text", "left", "top", "width", "height", "line", "conf"]
+        columns=LINE_LEVEL_OCR_DF_COLUMNS
     ),  # DataFrame for OCR results
     all_pages_decision_process_table: pd.DataFrame = pd.DataFrame(
         columns=[
@@ -11563,6 +11722,7 @@ def redact_text_pdf(
                 image_dimensions_override=page_to_image_dimensions.get(
                     int(reported_page_number)
                 ),
+                text_extraction_method=SELECTABLE_TEXT_EXTRACT_OPTION,
             )
 
             # Handle dual page objects if returned
@@ -11608,22 +11768,9 @@ def redact_text_pdf(
 
         # Join extracted text outputs for all lines together
         if not page_text_ocr_outputs.empty:
-            page_text_ocr_outputs = page_text_ocr_outputs.sort_values(
-                ["line"]
-            ).reset_index(drop=True)
-            page_text_ocr_outputs = page_text_ocr_outputs.loc[
-                :,
-                [
-                    "page",
-                    "text",
-                    "left",
-                    "top",
-                    "width",
-                    "height",
-                    "line",
-                    "conf",
-                ],
-            ]
+            page_text_ocr_outputs = normalize_line_level_ocr_df(
+                page_text_ocr_outputs.sort_values(["line"]).reset_index(drop=True)
+            )
             all_line_level_ocr_results_list.append(page_text_ocr_outputs)
 
         toc = time.perf_counter()
@@ -11683,21 +11830,12 @@ def redact_text_pdf(
                 df for df in all_line_level_ocr_results_list if not df.empty
             ]
             if non_empty_ocr_results:
-                all_line_level_ocr_results_df = pd.concat(
-                    non_empty_ocr_results, ignore_index=True
+                all_line_level_ocr_results_df = normalize_line_level_ocr_df(
+                    pd.concat(non_empty_ocr_results, ignore_index=True)
                 )
             else:
                 all_line_level_ocr_results_df = pd.DataFrame(
-                    columns=[
-                        "page",
-                        "text",
-                        "left",
-                        "top",
-                        "width",
-                        "height",
-                        "line",
-                        "conf",
-                    ]
+                    columns=LINE_LEVEL_OCR_DF_COLUMNS
                 )
 
             current_loop_page += 1
@@ -11819,13 +11957,11 @@ def redact_text_pdf(
         df for df in all_line_level_ocr_results_list if not df.empty
     ]
     if non_empty_ocr_results:
-        all_line_level_ocr_results_df = pd.concat(
-            non_empty_ocr_results, ignore_index=True
+        all_line_level_ocr_results_df = normalize_line_level_ocr_df(
+            pd.concat(non_empty_ocr_results, ignore_index=True)
         )
     else:
-        all_line_level_ocr_results_df = pd.DataFrame(
-            columns=["page", "text", "left", "top", "width", "height", "line", "conf"]
-        )
+        all_line_level_ocr_results_df = pd.DataFrame(columns=LINE_LEVEL_OCR_DF_COLUMNS)
 
     if not all_pages_decision_process_table.empty:
 
@@ -11989,6 +12125,100 @@ def _ocr_viz_draw_position_from_left_edge(
     return draw_x, draw_y
 
 
+def _is_placeholder_image_path(image_path: object) -> bool:
+    return isinstance(image_path, str) and (
+        "placeholder_image" in image_path or "image_placeholder" in image_path
+    )
+
+
+def _page_num_from_placeholder_path(image_path: str, default_page_no: int) -> int:
+    try:
+        return int(image_path.split("_")[-1].split(".")[0])
+    except Exception:
+        return default_page_no
+
+
+def open_page_image_for_pipeline(
+    image_path: str,
+    file_path: str,
+    page_no: int,
+    *,
+    input_folder: str = INPUT_FOLDER,
+    page_sizes_df: Optional[pd.DataFrame] = None,
+    image_dpi: float = IMAGES_DPI,
+) -> Tuple[Optional[Image.Image], str]:
+    """
+    Open a page raster for OCR / visualization, materialising PNGs when only a
+    placeholder path exists (e.g. cached Textract with prepare_images_flag=False).
+    """
+    resolved_path = image_path if isinstance(image_path, str) else ""
+
+    if _is_placeholder_image_path(resolved_path) or not resolved_path:
+        page_num = (
+            _page_num_from_placeholder_path(resolved_path, page_no)
+            if _is_placeholder_image_path(resolved_path)
+            else page_no
+        )
+        try:
+            _, created_path, _, _ = process_single_page_for_image_conversion(
+                pdf_path=file_path,
+                page_num=page_num,
+                image_dpi=image_dpi,
+                create_images=True,
+                input_folder=input_folder,
+            )
+            if created_path and os.path.exists(created_path):
+                resolved_path = created_path
+                if page_sizes_df is not None and not page_sizes_df.empty:
+                    page_sizes_df.loc[
+                        page_sizes_df["page"] == (page_no + 1),
+                        "image_path",
+                    ] = created_path
+        except Exception:
+            pass
+
+    if not resolved_path or _is_placeholder_image_path(resolved_path):
+        return None, resolved_path
+
+    try:
+        normalized_path = os.path.normpath(os.path.abspath(resolved_path))
+        if validate_path_containment(normalized_path, input_folder) or os.path.isfile(
+            normalized_path
+        ):
+            return Image.open(normalized_path), normalized_path
+    except Exception:
+        pass
+    return None, resolved_path
+
+
+def resolve_image_for_ocr_visualization(
+    image: Optional[Image.Image],
+    image_path: str,
+    file_path: str,
+    page_no: int,
+    *,
+    input_folder: str = INPUT_FOLDER,
+    page_sizes_df: Optional[pd.DataFrame] = None,
+) -> Optional[Union[str, Image.Image]]:
+    """Return a PIL image or on-disk path suitable for OCR bbox visualization."""
+    if image is not None:
+        return image
+    pil_image, resolved_path = open_page_image_for_pipeline(
+        image_path,
+        file_path,
+        page_no,
+        input_folder=input_folder,
+        page_sizes_df=page_sizes_df,
+    )
+    if pil_image is not None:
+        return pil_image
+    if resolved_path and not _is_placeholder_image_path(resolved_path):
+        return resolved_path
+    if is_pdf(file_path) is False and isinstance(file_path, str) and file_path:
+        return file_path
+    return None
+
+
 def visualise_ocr_words_bounding_boxes(
     image: Union[str, Image.Image],
     ocr_results: Dict[str, Any],
@@ -12001,6 +12231,10 @@ def visualise_ocr_words_bounding_boxes(
     chosen_local_ocr_model: str = None,
     log_files_output_paths: List[str] = list(),
     textract_hybrid_bedrock_used: bool = False,
+    file_path: Optional[str] = None,
+    page_no: Optional[int] = None,
+    input_folder: str = INPUT_FOLDER,
+    page_sizes_df: Optional[pd.DataFrame] = None,
 ) -> None:
     """
     Visualizes OCR bounding boxes with confidence-based colors and a legend.
@@ -12096,6 +12330,26 @@ def visualise_ocr_words_bounding_boxes(
 
     if not ocr_results:
         return log_files_output_paths
+
+    if isinstance(image, str) and _is_placeholder_image_path(image):
+        if file_path is not None and page_no is not None:
+            resolved = resolve_image_for_ocr_visualization(
+                None,
+                image,
+                file_path,
+                page_no,
+                input_folder=input_folder,
+                page_sizes_df=page_sizes_df,
+            )
+            if resolved is None:
+                raise FileNotFoundError(
+                    f"Could not resolve placeholder page image {image!r} for visualization"
+                )
+            image = resolved
+        else:
+            raise FileNotFoundError(
+                f"Placeholder page image path cannot be opened: {image!r}"
+            )
 
     if isinstance(image, str):
         image = Image.open(image)

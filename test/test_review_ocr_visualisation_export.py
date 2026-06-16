@@ -4,6 +4,10 @@ import os
 
 os.environ.setdefault("PYTHONUTF8", "1")
 
+import pytest
+
+pytest.importorskip("gradio_image_annotation_redaction")
+
 import numpy as np
 
 from tools.redaction_review import export_review_page_ocr_visualisation_for_gradio
