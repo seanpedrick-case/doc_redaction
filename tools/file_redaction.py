@@ -1207,7 +1207,7 @@ def _choose_and_run_redactor_impl(
         text_extraction_method = TEXTRACT_TEXT_EXTRACT_OPTION
     if text_extraction_method == "Local OCR":
         text_extraction_method = LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
-        print("Performing local OCR with" + chosen_local_ocr_model + " model.")
+        print("Performing local OCR with " + chosen_local_ocr_model + " model.")
     if text_extraction_method == "Local text":
         text_extraction_method = SELECTABLE_TEXT_EXTRACT_OPTION
 

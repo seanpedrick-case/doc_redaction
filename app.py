@@ -3154,7 +3154,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                                 type="pandas",
                                 label="Click table row to select and go to page",
                                 headers=["page", "label", "text", "id"],
-                                wrap=True,
+                                column_widths=["10%", "40%", "40%", "10%"],
+                                wrap=False,
                                 max_height=400,
                                 show_search="filter",
                             )
