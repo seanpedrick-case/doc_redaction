@@ -9,7 +9,131 @@ format:
 
 # Installation with CDK
 
-This guide gives an overview of how to install the app in an AWS environment using the code in the 'cdk/' folder of this Github repo. The most important thing you need is some familiarity with AWS and how to use it via console or command line, as well as administrator access to at least one region. Then follow the below steps.
+This guide explains how to install the app in AWS using the `cdk/` folder in this repository. You need familiarity with AWS (console or CLI) and administrator access in at least one region.
+
+**Recommended:** use the interactive installer script **`cdk/cdk_install.py`**, which writes `config/cdk_config.env` and `cdk.json`, validates your choices, and can run `cdk deploy` and `post_cdk_build_quickstart.py` for you. The sections below still document manual steps, deployment modes, and post-deploy tasks in full.
+
+## Quick start with `cdk_install.py`
+
+The installer lives at `cdk/cdk_install.py`. From a terminal, `cd` into the `cdk` folder, activate a Python environment with CDK dependencies installed (`pip install -r requirements.txt`), ensure the [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) and [CDK CLI](https://docs.aws.amazon.com/cdk/v2/guide/cli.html) (`npm install -g aws-cdk`) are available, and sign in to AWS (for example `aws sso login`).
+
+### What the script does
+
+1. **Detects** a Python interpreter with `aws-cdk-lib` and writes or updates `cdk.json` (with a timestamped backup of any existing file).
+2. **Optionally checks** for existing `RedactionStack` / CloudFront / AppRegistry stacks and can delete them (`--force-delete-stacks`) before a clean install.
+3. **Runs a wizard** (or accepts CLI flags) to collect profile, VPC/subnets, TLS, optional Pi agent, headless batch, and add-on settings.
+4. **Writes** `config/cdk_config.env` (backed up before overwrite), and when enabled:
+   - `cdk/config/app_config.env` — AWS deployment keys for the redaction app (merged from `app_config.env.example`);
+   - `config/pi_agent.env` — Pi agent runtime settings when agent mode is enabled.
+5. **Validates** incompatible combinations (for example Express Mode with an ACM certificate ARN, or headless batch with Express / Pi / Service Connect).
+6. **Optionally** bootstraps CDK, runs `cdk synth`, `cdk deploy --all`, post-deploy Cognito callback / secret fixups (API, no second deploy), and `post_cdk_build_quickstart.py` (CodeBuild image build + scale ECS Express services).
+
+Run `python check_resources.py` before deploy when using existing VPC subnets, security groups, or imported resources; it writes `precheck.context.json` used at synth time. If you change **CDK prefix** or **profile** after a prior stack (for example headless → demo), re-run precheck so Cognito pools, secrets, and ECR repos are not incorrectly treated as “already exist” under an old name.
+
+Use `--config-only` to generate config files without deploying; use `--deploy-only` to redeploy from an existing `cdk_config.env`.
+
+### Deployment profiles
+
+The interactive wizard offers four base profiles. You can also pass `--profile` on the command line.
+
+| Profile | CLI | Typical use | Main defaults |
+|---------|-----|-------------|---------------|
+| **Demonstration** | `demo` | Pilots, sandboxes, Pi on Express | ECS Express Mode, public subnets, no CloudFront, no delete protection, AppRegistry on |
+| **Production** | `production` | Browser HTTPS with your domain | Legacy Fargate + ACM certificate, CloudFront (`RUN_USEAST_STACK`), delete protection |
+| **Headless batch only** | `headless` | S3-triggered jobs, no web UI | Legacy Fargate, `ENABLE_HEADLESS_DEPLOYMENT`, S3 batch Lambda, no Cognito hosted UI domain, no Express / Pi |
+| **Custom** | `custom` | Mixed settings | Wizard prompts for Express, CloudFront, delete protection, and AppRegistry individually |
+
+**Headless batch add-on** (not available on the Demonstration profile): enable on **Production** or **Custom** (with Express off) via the wizard, `--headless`, or `--profile headless` for a dedicated batch-only install. See [Headless batch deployment](#headless-batch-deployment-s3--lambda--one-shot-ecs) below.
+
+The wizard can list VPCs, subnets, and ACM certificates in your account when run interactively. Production mode requires an issued ACM certificate in your deployment region unless you choose Express (demo). Headless mode skips the Cognito hosted UI domain prompt entirely.
+
+### Common commands
+
+**Full interactive install** (prompts for profile, VPC, deploy, quickstart):
+
+```bash
+cd cdk
+python cdk_install.py
+```
+
+**Demo sandbox — config only** (no deploy):
+
+```bash
+python cdk_install.py --profile demo --config-only --yes
+```
+
+**Production — partially non-interactive** (existing VPC + ACM cert):
+
+```bash
+python cdk_install.py --profile production --vpc-name my-vpc \
+  --cert-arn arn:aws:acm:eu-west-2:123456789012:certificate/abc-123 \
+  --domain redaction.example.com --yes
+```
+
+**Redeploy** using existing `config/cdk_config.env` (skip quickstart):
+
+```bash
+python cdk_install.py --deploy-only --skip-quickstart
+```
+
+**Headless batch only** (S3 → Lambda → one-shot ECS direct mode, no always-on web UI):
+
+```bash
+python cdk_install.py --profile headless --vpc-name my-vpc --yes
+```
+
+**Production with headless batch add-on** (same stack also supports browser UI *or* batch — headless disables the always-on service; batch still works):
+
+```bash
+python cdk_install.py --profile production --headless --vpc-name my-vpc \
+  --cert-arn arn:aws:acm:eu-west-2:123456789012:certificate/abc \
+  --domain redaction.example.com --yes
+```
+
+**Demo with Pi agent on ECS Express** (dedicated Pi HTTPS URL + Service Connect to main app):
+
+```bash
+python cdk_install.py --profile demo --enable-pi --yes
+```
+
+**Production with Pi on a dedicated hostname** (legacy Fargate + Service Connect):
+
+```bash
+python cdk_install.py --profile production --enable-pi-legacy \
+  --pi-alb-routing host --pi-host-header agent.example.com --yes
+```
+
+**Clean reinstall** (delete existing doc_redaction CloudFormation stacks first):
+
+```bash
+python cdk_install.py --profile demo --force-delete-stacks --yes
+```
+
+Other useful flags:
+
+| Flag | Purpose |
+|------|---------|
+| `--synth-only` | Run `cdk synth` only |
+| `--skip-deploy` | Stop after synth |
+| `--skip-quickstart` | Skip `post_cdk_build_quickstart.py` |
+| `--skip-cdk-json` / `--refresh-cdk-json` | Leave or rewrite `cdk.json` |
+| `--skip-app-config-env` | Do not write `cdk/config/app_config.env` |
+| `--skip-pi-agent-env` | Do not write `config/pi_agent.env` |
+| `--public-subnet-mode` / `--private-subnet-mode` | `auto`, `existing`, or `create` |
+| `--python`, `--region`, `--account`, `--cdk-prefix`, `--cognito-prefix` | Non-interactive identity |
+
+Run `python cdk_install.py --help` for Pi routing flags (`--pi-alb-routing`, `--pi-path-prefix`, `--pi-host-header`, `--enable-pi-express`, `--enable-pi-legacy`, etc.).
+
+### After the installer finishes
+
+* **Express (demo), no Pi:** wait for CodeBuild (~8 minutes in quickstart), then open `ExpressServiceEndpoint`. Register a Cognito user if `COGNITO_AUTH=True` on the main app. The installer may patch `ECS_EXPRESS_COGNITO_REDIRECT_BASE` / Cognito callback URLs via API (no redeploy).
+* **Express + Pi agent:** sign in at **`PiExpressEndpoint`** (dedicated HTTPS URL). The main redaction backend runs with **`COGNITO_AUTH=False`** so the Pi agent can call it over Service Connect (`http://redaction:7860`); users authenticate on the Pi UI only. The main Express URL remains reachable but is intended as a backend / optional direct UI.
+* **Production:** point DNS at CloudFront or your ALB hostname; update Cognito callback URLs (see [Additional Manual Tasks](#additional-manual-tasks)).
+* **Headless batch:** upload job `.env` files under the stack’s batch prefix on the output S3 bucket; no Cognito user or browser URL. Quickstart builds the image but does not start an always-on ECS service.
+* **Application settings:** edit repo `config/config.env` (OCR, Bedrock models, feature flags). For AWS resource names and `COGNITO_AUTH`, the installer also maintains **`cdk/config/app_config.env`**. On **Express**, redeploy with `cdk deploy` or re-run the installer after changing `app_config.env` so variables are inlined on the task; on **legacy Fargate**, `app_config.env` is uploaded to the logs S3 bucket at quickstart.
+* **Service Connect / S3 batch / Pi:** see [Optional deployment modes](#optional-deployment-modes) for constraints (several features require legacy Fargate, not Express).
+
+If you prefer not to use the installer, continue with [Prerequisites](#prerequisites) and [Steps to install the app using CDK](#steps-to-install-the-app-using-cdk).
 
 ## Prerequisites
 
@@ -34,13 +158,228 @@ This guide gives an overview of how to install the app in an AWS environment usi
 
 ## Note on ACM Certificates
 
-To get full HTTPS data transfer through the app, you will need an SSL certificate registered with AWS Certificate Manager.
+To get full HTTPS data transfer through the app for **browser users** (CloudFront and/or Application Load Balancer with Cognito login), you need TLS termination backed by **AWS Certificate Manager (ACM)**. There are two supported approaches in this CDK stack:
 
-You can either use the SSL certificate from a domain, or import an existing certificate into Certificate Manager. If you're not sure, ask your IT admin if you need help with this. If getting an SSL certificate for an existing domain, make sure to point the certificate to `*.<domain-name>`.
+**1. Your own ACM certificate (legacy Fargate path — recommended for production)**  
+Set `ACM_SSL_CERTIFICATE_ARN` in `config/cdk_config.env`. You can request a certificate for your domain in ACM, or import an existing one. If you're not sure, ask your IT admin. For a new domain certificate, validation often uses a CNAME; for HTTPS on a subdomain such as `redaction.<domain-name>`, include that name (or `*.<domain-name>`) on the certificate.
 
-Update your DNS records to include the CNAME record given by AWS. After your stack has been created, you will also need to create a CNAME DNS record for your domain pointing to your load balancer DNS with a subdomain, e.g., `redaction.<domain-name>`.
+The stack then uses the **legacy Fargate + ALB** path: HTTPS on the load balancer, Cognito on the ALB, and (optionally) CloudFront in front. This keeps the **full** task definition (S3 `config.env` via `environmentFiles`, writable mount paths, Service Connect, S3 batch trigger, and so on).
 
-## Steps to install the app using CDK
+After deploy, update DNS: include ACM validation CNAMEs as required, and point your app subdomain (e.g. `redaction.<domain-name>`) at the load balancer or CloudFront front URL.
+
+**2. AWS-managed ACM via ECS Express Mode (pilot/dev)**  
+You can also get HTTPS **without** setting `ACM_SSL_CERTIFICATE_ARN` by enabling **`USE_ECS_EXPRESS_MODE=True`**. Express Mode provisions the load balancer and an **AWS-managed ACM certificate** for you (see stack output `ExpressServiceEndpoint`). That avoids obtaining and wiring your own certificate ARN, which can be useful for pilots or sandboxes.
+
+Express still gives you HTTPS in the browser, but you have **fewer options to change or extend the deployment later**: the Express task model does not support S3 `environmentFiles`, many ephemeral volume mounts, `readonlyRootFilesystem`, Service Connect, or the S3 batch ECS trigger; app settings from `config.env` are inlined at CDK deploy time rather than loaded from S3 on the task. You cannot combine Express with `ACM_SSL_CERTIFICATE_ARN` in the same stack. If you expect to grow into production patterns (custom domain on *your* cert, batch jobs, Service Connect, full config from S3), start on the **legacy + your own ACM certificate** path rather than Express.
+
+Details: [ECS Express Mode](#ecs-express-mode-https-without-your-own-acm-certificate) below.
+
+## Optional deployment modes
+
+The CDK stack supports additional **opt-in** modes configured in `config/cdk_config.env`. See `cdk/cdk_config.py` for all variables. Example snippets are in `cdk/config/cdk_config_express.env.example`, `cdk/config/cdk_config_service_connect.env.example`, `cdk/config/cdk_config_s3_batch.env.example`, `cdk/config/cdk_config_pi_agent.env.example`, and `cdk/config/cdk_config_pi_express.env.example`.
+
+| Mode | Main config flag | Best for |
+|------|------------------|----------|
+| Legacy + ACM (default production) | `ACM_SSL_CERTIFICATE_ARN` set | Browser access, Cognito, CloudFront, full Fargate task |
+| ECS Express Mode | `USE_ECS_EXPRESS_MODE=True`, **no** ACM ARN | Pilot/dev HTTPS without supplying your own certificate |
+| Headless batch | `ENABLE_HEADLESS_DEPLOYMENT=True` | S3-uploaded job configs → Lambda → one-shot Fargate tasks (no web UI) |
+| ECS Service Connect | `ENABLE_ECS_SERVICE_CONNECT=True` | Other ECS services in the same VPC calling the app API (legacy Fargate) |
+| S3 batch ECS trigger | `ENABLE_S3_BATCH_ECS_TRIGGER=True` | Same as headless job path; can also be enabled on production without full headless |
+| Pi agent on ECS (legacy) | `ENABLE_PI_AGENT_ECS_SERVICE=True` | Pi UI on shared **manual** ALB; Service Connect to main Fargate app |
+| Pi agent on ECS Express | `ENABLE_PI_AGENT_EXPRESS_SERVICE=True` | Pi UI on its **own** Express HTTPS endpoint; Service Connect to main Express app |
+
+Legacy `ENABLE_ECS_SERVICE_CONNECT` applies to the **Fargate** main service only. Express main + Pi Express use a **cluster Cloud Map namespace** and Service Connect applied in `post_cdk_build_quickstart.py` (not at initial `cdk deploy`). Headless and S3 batch require **legacy Fargate** (`USE_ECS_EXPRESS_MODE=False`). Do not enable legacy Pi (`ENABLE_PI_AGENT_ECS_SERVICE`) and Express Pi at the same time. Headless is incompatible with Express, Pi agent, Service Connect, and CloudFront.
+
+### ECS Express Mode (HTTPS without your own ACM certificate)
+
+[Amazon ECS Express Mode](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/express-service-overview.html) provisions a Fargate service, Application Load Balancer, and an **AWS-managed ACM certificate** from a single CDK resource. You get an HTTPS URL (stack output `ExpressServiceEndpoint`) without setting `ACM_SSL_CERTIFICATE_ARN`.
+
+**When to use:** development, pilots, or environments where obtaining a customer ACM certificate is difficult. **When not to use:** production setups that rely on S3 `environmentFiles`, many ephemeral volume mount points, or `readonlyRootFilesystem` on the task—the Express container model does not support those; stay on the legacy path with your own ACM certificate.
+
+**Requirements:**
+
+* `USE_ECS_EXPRESS_MODE=True`
+* Leave `ACM_SSL_CERTIFICATE_ARN` empty (CDK will error if both are set)
+* `USE_ECS_EXPRESS_MODE` cannot be used with `ENABLE_ECS_SERVICE_CONNECT=True`
+* Run CodeBuild and push an image to ECR **before** scaling the Express service (same as legacy)
+* `aws-cdk-lib` **2.230 or newer** (see `cdk/requirements.txt`)
+
+**Application settings:** At deploy time, CDK reads `cdk/config/app_config.env` and passes each variable as an **inline container environment variable** on the Express service (Cognito credentials still come from Secrets Manager). If you change `app_config.env` after deploy, run `cdk deploy` again to update the service. The quickstart script also uploads `app_config.env` to the logs S3 bucket for parity with the legacy path.
+
+**In-app Cognito (`COGNITO_AUTH`):** Express demo uses **in-app** Gradio/Cognito login (not ALB `authenticate-cognito`). When **Pi Express** is enabled, CDK sets **`COGNITO_AUTH=False` on the main app** so the Pi agent can call `/doc_redact` over Service Connect; users sign in on the **Pi** URL instead. Optionally, keep main auth on and supply a service-account username/password to Pi via `DOC_REDACTION_GRADIO_AUTH_USER` / `DOC_REDACTION_GRADIO_AUTH_PASSWORD` in `pi_agent.env` (see `config/pi_agent.env.example`).
+
+**Example `cdk_config.env` additions:**
+
+```ini
+USE_ECS_EXPRESS_MODE=True
+# ACM_SSL_CERTIFICATE_ARN=   # must be empty
+USE_CLOUDFRONT=True          # optional; CloudFront can still front the Express-managed ALB
+CLOUDFRONT_DOMAIN=d1234abcd.cloudfront.net
+```
+
+**Cognito:** With Express (or legacy ACM), set callback URLs to your CloudFront domain or Express endpoint, including `https://<host>/oauth2/idpresponse` when using ALB/Cognito login. After the first deploy without CloudFront, copy `ExpressServiceEndpoint` from CloudFormation outputs into `ECS_EXPRESS_COGNITO_REDIRECT_BASE` / `COGNITO_REDIRECTION_URL` if needed, then redeploy.
+
+**Do not** enable Express on an existing production stack without a migration plan (risk of duplicate load balancers/services). Prefer a new stack or tear down the manual ALB/service first.
+
+### Pi agent on ECS Express (demo: dedicated HTTPS URL + Service Connect)
+
+Deploy the Pi Gradio app as a **second** `AWS::ECS::ExpressGatewayService` on the same cluster. Each Express service gets its **own** AWS-managed HTTPS endpoint (stack outputs `ExpressServiceEndpoint` and `PiExpressEndpoint`). Pi calls the main app at `http://<ECS_SERVICE_CONNECT_DISCOVERY_NAME>:7860` (default `http://redaction:7860`) over **Service Connect**, configured in `post_cdk_build_quickstart.py` after the main and Pi images are built.
+
+**When to use:** pilots or demos where the main app is already on Express and you want a separate agentic UI without legacy Fargate or ALB path/host routing.
+
+**Installer:** on the Demonstration profile, answer **yes** to “Deploy agent mode (second Gradio app on Express…)” or use `--enable-pi` / `--enable-pi-express`. The wizard asks for Service Connect discovery name (default `redaction`) and Pi Gradio port (default **7862**). It does **not** prompt for `PI_ALB_ROUTING` (that applies to legacy Fargate Pi only).
+
+**Requirements:**
+
+* `USE_ECS_EXPRESS_MODE=True` and `ACM_SSL_CERTIFICATE_ARN` empty
+* `ENABLE_PI_AGENT_EXPRESS_SERVICE=True` (not `ENABLE_PI_AGENT_ECS_SERVICE`)
+* Build and push the Pi image before scaling `ECS_PI_EXPRESS_SERVICE_NAME`
+* `aws-cdk-lib` **2.230+**; see `cdk/docs/express_pi_service_connect_spike.md` if Service Connect is missing in the console (re-run quickstart)
+
+**Example:** `cdk/config/cdk_config_pi_express.env.example`
+
+**Stack outputs:** `PiExpressEndpoint`, `PiPublicUrl`, `PiDocRedactionBackendUrl`, `PiExpressServiceName`, `ServiceConnectNamespace`
+
+**Workspace:** Express Pi has no Fargate volume mounts; CDK sets `PI_WORKSPACE_DIR=/tmp/pi-workspace` and related paths under `/tmp`.
+
+**Cognito:** Register users in the same Cognito user pool and sign in at **`PiExpressEndpoint`**. Add that URL (and `/oauth2/idpresponse` if using hosted UI flows) to the app client callback URLs if needed. Main app in-app auth is off when Pi Express is on (see above).
+
+### ECS Service Connect (VPC service-to-service API)
+
+[ECS Service Connect](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service-connect.html) lets **other ECS services in the same cluster and namespace** call this app over HTTP using a short DNS name, without going through CloudFront or Cognito. This suits programmatic access when `RUN_FASTAPI=True` in `config.env` (Agent API under `/agent/...`) or the Gradio HTTP API under `/gradio_api/...`.
+
+**When to use:** another microservice in the same VPC needs to call redaction programmatically (e.g. `POST http://redaction:7860/agent/redact_document`).
+
+**Requirements:**
+
+* `ENABLE_ECS_SERVICE_CONNECT=True`
+* `USE_ECS_EXPRESS_MODE=False` (or unset)
+* Legacy **Fargate** service created by CDK (not an imported existing service unless you enable Service Connect on it manually in the console)
+* At least one **client security group** (see below)—traffic is allowed only from those groups, not from the whole VPC
+* **Calling services** must also use Service Connect in the **same** `ECS_SERVICE_CONNECT_NAMESPACE` (default derived from `CDK_PREFIX`, e.g. `lambeth-redaction-local`)
+
+**Client security groups** (pick one or combine; pre-check resolves names in your VPC):
+
+```ini
+ENABLE_ECS_SERVICE_CONNECT=True
+
+# (A) Recommended: CDK_PREFIX values of other apps that use the same ECS security group naming pattern
+#     ({prefix}SecurityGroupECS, matching this stack's ECS security group name)
+ECS_SERVICE_CONNECT_CLIENT_CDK_PREFIXES=Lambeth-AWS-SharedServices-Dev-OtherApp-
+
+# (B) Explicit security group names in VPC_NAME
+ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_NAMES=MyCallerService-SecurityGroupECS
+
+# (C) Explicit security group IDs (no lookup)
+ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_IDS=sg-0123456789abcdef0
+```
+
+Run `python check_resources.py` from the `cdk` folder before `cdk deploy` so security group **names** are resolved into `precheck.context.json`. CDK fails at synth if Service Connect is on but no client groups could be resolved.
+
+**Optional tuning:**
+
+```ini
+ECS_SERVICE_CONNECT_DISCOVERY_NAME=redaction   # clients use http://redaction:7860
+ECS_SERVICE_CONNECT_NAMESPACE=lambeth-redaction-local
+ECS_SERVICE_CONNECT_PORT_MAPPING_NAME=port-7860   # must match the Fargate port mapping name
+```
+
+**Stack outputs:** `ServiceConnectHttpBaseUrl`, `ServiceConnectAgentApiUrl`, `ServiceConnectNamespace`.
+
+**Important:** Service Connect traffic **bypasses** ALB Cognito. Use the Agent API with `AGENT_API_KEY` (if configured in your environment) or appropriate auth for service-to-service calls—not the browser login flow.
+
+### Pi agent on ECS (shared ALB + Service Connect backend)
+
+Deploy the [agent-redact Pi Gradio app](https://github.com/seanpedrick-case/doc_redaction/tree/main/agent-redact) as a **second Fargate service** in the same cluster. The Pi UI is exposed on the **same Application Load Balancer** as the main redaction app. By default CDK uses **path routing** (`PI_ALB_ROUTING=path`, `PI_ALB_PATH_PREFIX=/pi`) so the UI is at `https://<CLOUDFRONT_DOMAIN>/pi/` when you use the CloudFront URL — **not** `/agent/` (the main app’s FastAPI Agent API already uses `/agent/*`). Optional **host-header** routing (`PI_ALB_ROUTING=host` or `both` + `PI_ALB_HOST_HEADER`) remains available for a dedicated hostname on the ACM cert.
+
+Pi calls the main app over **Service Connect** using `gradio_client` (`/doc_redact`, `/review_apply`) — not the FastAPI `/agent/*` routes on the main service.
+
+**When to use:** agentic document redaction with **Amazon Bedrock** orchestration while keeping heavy OCR/PII on the existing main service.
+
+**Requirements:**
+
+* `ENABLE_PI_AGENT_ECS_SERVICE=True`
+* `USE_ECS_EXPRESS_MODE=False`
+* `ENABLE_ECS_SERVICE_CONNECT=True` on the main service
+* `PI_ALB_ROUTING` — `path` (default), `host`, or `both`
+* `PI_ALB_PATH_PREFIX=/pi` when routing includes `path`
+* `PI_ALB_HOST_HEADER` when routing is `host` or `both` (DNS **CNAME** → same ALB)
+* `ACM_SSL_CERTIFICATE_ARN` on the shared HTTPS listener (recommended; Pi gets Cognito-on-ALB like the main app)
+* Build and push the Pi image before scaling the Pi service
+* Upload `config/pi_agent.env` to the log/config S3 bucket (`PI_AGENT_ENV_S3_KEY`)
+
+**Example `cdk_config.env` additions:** see `cdk/config/cdk_config_pi_agent.env.example`.
+
+**Stack outputs:** `PiPublicUrl`, `PiAlbPathPrefix`, `PiDocRedactionBackendUrl` (internal `http://redaction:7860`), `ECRPiRepoUri`, `PiAgentServiceName`.
+
+**Cognito:** For path routing, use the same callback URLs as the main CloudFront host (`https://<CLOUDFRONT_DOMAIN>/oauth2/idpresponse`). For a dedicated Pi host, add `https://<PI_ALB_HOST_HEADER>/oauth2/idpresponse` too.
+
+**Note:** CDK sets `PI_ROOT_PATH` / `ROOT_PATH` on Pi tasks when path routing is enabled so Gradio assets resolve under `/pi/`.
+
+### Headless batch deployment (S3 → Lambda → one-shot ECS)
+
+**Headless** mode deploys the redaction **task definition** and supporting AWS resources **without** an always-on browser-facing ECS service, Express endpoint, or Cognito hosted UI login. Jobs are triggered when you upload a small `.env` file to the output S3 bucket under the batch prefix; a Lambda starts a **one-shot Fargate task** with `RUN_DIRECT_MODE=True` (same behaviour as `cli_redact.py` / direct mode in `app.py`).
+
+**When to use:** pipeline or batch workloads, automation, or environments where no human uses the Gradio UI.
+
+**How to enable via installer:**
+
+* **Dedicated profile:** choose **“Headless batch only”** (profile 3) or `python cdk_install.py --profile headless …`
+* **Add-on to production:** on the Production profile, answer yes to “Enable headless batch-only deployment…” or pass `--profile production --headless`
+* **Custom:** turn off ECS Express, then enable headless in the wizard or use `--headless`
+
+**Not compatible with:** Demonstration (Express) profile, `USE_ECS_EXPRESS_MODE=True`, CloudFront, Pi agent (Express or legacy), or ECS Service Connect. The installer skips Cognito domain prefix prompts and Pi agent options in headless mode.
+
+**Key `cdk_config.env` flags** (set automatically by the headless preset):
+
+```ini
+ENABLE_HEADLESS_DEPLOYMENT=True
+ENABLE_S3_BATCH_ECS_TRIGGER=True
+USE_ECS_EXPRESS_MODE=False
+USE_CLOUDFRONT=False
+COGNITO_AUTH=False
+```
+
+**After deploy:** run `post_cdk_build_quickstart.py` to build the container image in CodeBuild (it does **not** scale an always-on service). Upload job files to `s3://<output-bucket>/<S3_BATCH_ENV_PREFIX>*<suffix>` (see stack output `BatchJobEnvPrefix`). See [S3 batch ECS trigger](#s3-batch-ecs-trigger-one-shot-direct-mode-tasks) for job file format.
+
+**CDK prefix note:** resource names (including `COGNITO_USER_POOL_NAME`, e.g. `{CDK_PREFIX}UserPool`) follow `CDK_PREFIX`. If you previously deployed a **Headless-Redaction-** stack and later switch to **Demo-Redaction-**, run `python check_resources.py` again so `precheck.context.json` does not reuse stale “exists” entries from the old prefix.
+
+### S3 batch ECS trigger (one-shot direct-mode tasks)
+
+When `ENABLE_S3_BATCH_ECS_TRIGGER=True`, CDK deploys a Lambda that listens for new objects on the **output S3 bucket** under `S3_BATCH_ENV_PREFIX` (default `input/config/`) with suffix `.env`. Each upload starts an additional **Fargate task** using the same task definition as the web service, with container overrides that set `RUN_DIRECT_MODE=True` and job-specific `DIRECT_MODE_*` variables (same behaviour as `app.py` direct mode / `cli_redact.py`).
+
+This is the runtime path for **headless** deployments (`ENABLE_HEADLESS_DEPLOYMENT=True`). You can also enable the S3 batch trigger on a full production stack without enabling full headless (no always-on UI), via the installer add-on or `ENABLE_S3_BATCH_ECS_TRIGGER=True` in `cdk_config.env`.
+
+**When to use:** batch or pipeline workflows that drop a small job config next to input files in S3, without calling the Gradio UI or Agent API.
+
+**Requirements:**
+
+* `ENABLE_S3_BATCH_ECS_TRIGGER=True`
+* `USE_ECS_EXPRESS_MODE=False` (legacy Fargate task definition required for `ecs.run_task`)
+* Legacy Fargate path deployed by CDK (cluster, task definition, private subnets, ECS security group)
+* Input documents under the output bucket prefix `S3_BATCH_INPUT_PREFIX` (default `input/`)
+* Optional shared defaults at `S3_BATCH_DEFAULT_PARAMS_KEY` on the output bucket (e.g. `general-config/batch_defaults.env`)
+
+**Example job file** (`s3://<output-bucket>/input/config/case-001.env`):
+
+```ini
+DIRECT_MODE_INPUT_FILE=case-001/document.pdf
+DIRECT_MODE_TASK=redact
+DIRECT_MODE_PAGE_MIN=1
+DIRECT_MODE_PAGE_MAX=10
+```
+
+Relative paths are expanded to `s3://<output-bucket>/input/...` for input files and `s3://<log-bucket>/...` for deny/allow list paths. The long-running ECS service can stay at desired count 1; each `.env` upload spawns a **separate** task (plan capacity accordingly).
+
+**Example `cdk_config.env` additions:** see `cdk/config/cdk_config_s3_batch.env.example`.
+
+**Stack outputs:** `BatchEcsTriggerLambdaArn`, `BatchJobEnvPrefix` (full S3 URI prefix for uploads).
+
+**Note:** The task still loads `app_config.env` from the log bucket via `environmentFiles` on the legacy path; container overrides take precedence for batch keys. Do not set `RUN_DIRECT_MODE=False` in job files.
+
+## Steps to install the app using CDK manually
+
+These steps are for a **manual** install. If you used [`cdk_install.py`](#quick-start-with-cdk_installpy), steps **1.a**, **1.b**, and **2** are already done; jump to [step 3](#3-run-pre-check-and-deploy-your-aws-stack) or rely on the installer’s deploy and quickstart.
 
 ### 1.a  Create a python environment, load in packages from `requirements.txt`.
 
@@ -93,12 +432,33 @@ COGNITO_AUTH=0 # Do you want to do in-app authentication (username and password 
 USE_CLOUDFRONT=True # Recommended. If you intend to use CloudFront as the front URL to your application load balancer (ALB). This has some extra security features that you won't get with just an ALB, e.g. limiting app access by country.
 RUN_USEAST_STACK=False # Set this to True only if you have permissions to create a Cloudfront distribution and web ACL on top of it in the us-east-1 region. If you don't, the section below shows how you can create the CloudFront resource manually and map it to your application load balancer (as you should have permissions for that if you are admin in your region).
 CLOUDFRONT_DOMAIN=<example>.cloudfront.net # If you already know the domain of the CloudFront distribution that you want to use, you can add this here.
-# If you are using an SSL certificate with your ALB (highly recommended):
+# Optional: CSP and security response headers on the CDK CloudFront stack (default on when RUN_USEAST_STACK=True):
+# CLOUDFRONT_ENABLE_SECURE_RESPONSE_HEADERS=True
+# COGNITO_USER_POOL_LOGIN_URL=  # leave empty to derive from COGNITO_USER_POOL_DOMAIN_PREFIX + AWS_REGION
+# If you are using an SSL certificate with your ALB (highly recommended for production):
 ACM_SSL_CERTIFICATE_ARN=<SSL Certificate ARN> # This is the ARN of the SSL certificate that you have installed in AWS Certificate Manager
 SSL_CERTIFICATE_DOMAIN=redaction.example.com # This is the domain of the SSL certificate that you have installed in AWS Certificate Manager
+
+# Optional: ECS Express Mode instead of ACM (pilot/dev only — see "ECS Express Mode" above):
+# USE_ECS_EXPRESS_MODE=True
+
+# Optional: VPC service-to-service API for other ECS tasks (legacy Fargate only — see "ECS Service Connect" above):
+# ENABLE_ECS_SERVICE_CONNECT=True
+# ECS_SERVICE_CONNECT_CLIENT_CDK_PREFIXES=OtherApp-CDK-Prefix-
+
+# Optional: Pi agent UI on the same ALB (see "Pi agent on ECS" above):
+# ENABLE_PI_AGENT_ECS_SERVICE=True
+# PI_ALB_HOST_HEADER=pi.redaction.example.com
+
+# Optional: headless batch only (see "Headless batch deployment" above):
+# ENABLE_HEADLESS_DEPLOYMENT=True
+# ENABLE_S3_BATCH_ECS_TRIGGER=True
+# USE_ECS_EXPRESS_MODE=False
 ```
 
 **Note: If you are using an SSL certificate with Cognito login on the application load balancer (strongly advised), you can set COGNITO_AUTH to 0 above, as you don't need the second login step to get to the app**
+
+**Note: Do not set `USE_ECS_EXPRESS_MODE=True` together with `ACM_SSL_CERTIFICATE_ARN` or `ENABLE_ECS_SERVICE_CONNECT=True`.**
 
 #### In an existing VPC
 
@@ -106,7 +466,7 @@ From the above example, remove the variable 'NEW_VPC_CIDR' and replace with the 
 
 ```ini
 VPC_NAME=example-vpc-name # Name of the VPC within which all the other elements will be created
-EXISTING_IGW_ID=igw-1234567890 # (optional) The ID for an existing internet gateway that you want to use instead of creating a new one
+EXISTING_IGW_ID=igw-1234567890 # Internet Gateway for public subnets (legacy path). Pre-check verifies attachment to VPC_NAME and 0.0.0.0/0 routes; CDK attaches the IGW and adds missing routes on deploy when needed.
 SINGLE_NAT_GATEWAY_ID=nat-123456789 # (optional) The ID for an existing NAT gateway that you want to use instead of creating a new one
 ```
 ##### Subnets
@@ -132,9 +492,25 @@ PRIVATE_SUBNET_AVAILABILITY_ZONES=['eu-east-1a', 'eu-east-1b', 'eu-east-1c']
 
 If you try to create subnets in invalid CIDR blocks / availability zones, the console output will tell you and it will show you the currently occupied CIDR blocks to help find a space for new subnets you want to create.
 
-### 3.  Deploy your AWS stack using cdk deploy --all
+**Internet Gateway (legacy ALB in public subnets):** Run `python check_resources.py` before `cdk deploy`. It audits each named public subnet’s route table. If `EXISTING_IGW_ID` is set but not attached to the VPC, CDK creates `AWS::EC2::VPCGatewayAttachment`. If a subnet’s route table lacks `0.0.0.0/0` → that IGW, CDK adds `AWS::EC2::Route`. Pre-check fails if a public route table already has a conflicting default route (for example NAT or a different IGW).
 
-In command line in console, go to your `cdk` folder in the redaction app folder. Run `cdk deploy --all`. This should try to deploy the first stack in the `app.py` file.
+### 3.  Run pre-check and deploy your AWS stack
+
+In command line, go to your `cdk` folder in the redaction app folder.
+
+If you use **ECS Service Connect** or rely on security group name resolution, run the pre-check script first (writes `precheck.context.json`):
+
+```bash
+python check_resources.py
+```
+
+Then deploy:
+
+```bash
+cdk deploy --all
+```
+
+This deploys the stacks defined in `app.py` (`RedactionStack`, and optionally `RedactionStackCloudfront` and `AppRegistryStack`).
 
 Hopefully everything will deploy successfully and you will be able to see your new stacks in CloudFormation in the AWS console. There should be one called `RedactionStack` and one called `RedactionStackCloudfront` if you set `RUN_USEAST_STACK` to 'True' in `config/cdk_config.env`. You will also see a stack called `AppRegistryStack` if you set `ENABLE_APPREGISTRY` to 'True' in the same config file.
 
@@ -153,7 +529,7 @@ Optional variables (see `cdk/cdk_config.py`): `APPREGISTRY_APPLICATION_NAME`, `A
 
 ### 4.  Tasks for after CDK deployment
 
-The CDK deployment will create all the AWS resources needed to run the redaction app. However, there are some objects in AWS
+The CDK deployment creates the AWS resources needed to run the redaction app. Some steps still require manual action or a follow-up script.
 
 #### Run `post_cdk_build_quickstart.py`
 
@@ -165,13 +541,15 @@ You need to build CodeBuild project after stack has finished deploying your CDK 
 
 If you don't want to run the 'post_cdk_build_quickstart.py' file, in console, go to CodeBuild -> your project -> click Start build. Check the logs, the build should complete in about 6-7 minutes.
 
-##### Create a `config.env` file and upload to S3
+##### Create `app_config.env` and upload to S3
 
-The 'post_cdk_build_quickstart' file will upload a config file to S3, as the Fargate task definition references a `config.env` file.
+The `post_cdk_build_quickstart` script creates/updates **`cdk/config/app_config.env`** and uploads it to S3. On the **legacy Fargate** path, the task definition loads that file from S3 at runtime via `environmentFiles`.
 
-if you want to do this manually:
+On the **ECS Express Mode** path, CDK already inlined `app_config.env` variables as container environment variables at deploy time; keep the file in sync and redeploy after major config changes. Uploading to S3 is still useful for documentation and parity with the quickstart script.
 
-Create a `config.env` file to upload to the S3 bucket that has at least the following variables:
+Repo-wide OCR/PII settings remain in **`config/config.env`** at the repository root (local dev and image build); do not confuse that file with `cdk/config/app_config.env`, which carries AWS deployment keys (`COGNITO_AUTH`, bucket names, DynamoDB table names, etc.).
+
+If you want to set AWS deployment keys manually, create or edit `cdk/config/app_config.env` with at least:
 
 ```ini
 COGNITO_AUTH=False # If you are using an SSL certificate with your application load balancer, you will be logging in there. Set this to 0 to turn off the default login screen.
@@ -179,14 +557,15 @@ RUN_AWS_FUNCTIONS=True # This will enable the app to communicate with AWS servic
 SESSION_OUTPUT_FOLDER=True # This will put outputs for each user in separate output folders.
 ```
 
-* Then, go to S3 and choose the new `...-logs` bucket that you created. Upload the `config.env` file into this bucket.
+* Then, go to S3 and choose the new `...-logs` bucket that you created. Upload `app_config.env` into this bucket (same basename as `APP_CONFIG_ENV_BASENAME` in CDK config).
 
 ##### Update Elastic Container Service
 
-Now that the app container is in Elastic Container Registry, you can proceed to run the app on a Fargate server.
-The 'post_cdk_build_quickstart.py' file will do this for you, but you can also try this in Console. In ECS, go to your new cluster, your new service, and select 'Update service'.
+Now that the app container is in Elastic Container Registry, you can run the app on Fargate.
 
-Select 'Force new deployment', and then set 'Desired number of tasks' to 1.
+The `post_cdk_build_quickstart.py` file will scale the service for you. You can also do this in the console: ECS → your cluster → your service (**`{CDK_PREFIX}ECSService`** on the legacy path, or the Express service name from `ECS_EXPRESS_SERVICE_NAME`) → **Update service** → **Force new deployment** → set **Desired number of tasks** to `1`.
+
+**Service Connect:** After the service is running, other ECS services in the same Service Connect namespace can call the URLs from stack outputs (`ServiceConnectAgentApiUrl`, etc.). Ensure those client tasks use a security group you listed in `ECS_SERVICE_CONNECT_CLIENT_*` settings.
 
 ## Additional Manual Tasks
 
@@ -241,6 +620,43 @@ You can add security features to your CloudFront distribution (recommended). If 
 * Go to Rules -> `AWS-AWSManagedRulesCommonRuleSet`, click Edit.
 * Under `SizeRestrictions_BODY` choose rule action override 'Override to Allow'. This is needed to allow for file upload to the app.
 
+#### Content Security Policy (CSP) and response headers
+
+**If you deploy CloudFront with CDK** (`RUN_USEAST_STACK=True` and `USE_CLOUDFRONT=True`), the `RedactionStackCloudfront` stack can attach a **response headers policy** (CSP, HSTS, CORS, Permissions-Policy, and related headers) that matches the template in `cdk/config/response-headers-policy-config.json`. CDK substitutes URLs from your existing `cdk_config.env` values:
+
+| Placeholder in the JSON template | CDK / config source |
+|----------------------------------|-------------------|
+| `{APP-URL}` (CORS allow origin) | `COGNITO_REDIRECTION_URL` (preferred), else `https://` + `SSL_CERTIFICATE_DOMAIN`, else `https://` + `CLOUDFRONT_DOMAIN` |
+| `{APP-URL}` (CSP `connect-src` WebSocket host) | Hostname of that same app origin (`wss://…`) |
+| `{COGNITO-APP-CLIENT-LOGIN-URL}` (CSP `manifest-src`) | `COGNITO_USER_POOL_LOGIN_URL` if set, else `https://<COGNITO_USER_POOL_DOMAIN_PREFIX>.auth.<AWS_REGION>.amazoncognito.com` |
+
+Set `CLOUDFRONT_ENABLE_SECURE_RESPONSE_HEADERS=False` in `cdk_config.env` to skip this policy. After your real CloudFront domain or custom CNAME is known, set `CLOUDFRONT_DOMAIN` and `COGNITO_REDIRECTION_URL` (and Cognito callback URLs) to match, then redeploy the us-east-1 CloudFront stack so CORS/CSP origins stay correct.
+
+**If you create CloudFront manually** (console), attach the same policy yourself:
+
+1. Open `cdk/config/response-headers-policy-config.json` and replace placeholders:
+   - `{APP-URL}` in **CORS** → full browser origin, e.g. `https://d111111abcdef8.cloudfront.net` or `https://redaction.example.com` (scheme required).
+   - `{APP-URL}` in **CSP** `connect-src` → **hostname only** (no `https://`), e.g. `d111111abcdef8.cloudfront.net`, because the template already prefixes `wss://`.
+   - `{COGNITO-APP-CLIENT-LOGIN-URL}` → Cognito hosted UI base URL from **Cognito → App integration → Domain** (or the `CognitoUserPoolLoginUrl` stack output), e.g. `https://<COGNITO_USER_POOL_DOMAIN_PREFIX>.auth.<region>.amazoncognito.com`.
+2. Create the policy in the AWS CLI (global CloudFront API), using only the `ResponseHeadersPolicyConfig` object (omit `ETag` from the downloaded file):
+
+```bash
+aws cloudfront create-response-headers-policy ^
+  --response-headers-policy-config file://response-headers-policy-config-only.json
+```
+
+To build `response-headers-policy-config-only.json`, copy `ResponseHeadersPolicyConfig` from the template file and apply the substitutions above. Note the policy `Name` must be unique in your account.
+
+3. In **CloudFront → your distribution → Behaviors → Edit default behavior**, set **Response headers policy** to the policy you created.
+4. If the browser blocks Gradio WebSockets or Cognito login, open developer tools → Network, note the blocked URL, and extend `connect-src` / `manifest-src` in the policy (then update the policy with `update-response-headers-policy` and the policy ETag).
+
+You can export an existing policy for editing:
+
+```bash
+aws cloudfront list-response-headers-policies --type custom
+aws cloudfront get-response-headers-policy --id POLICY_ID --output json > policy.json
+```
+
 ### Change Cognito redirection URL to your CloudFront distribution
 
 Go to Cognito -> your user pool -> App Clients -> Login pages -> Managed login configuration.
@@ -250,6 +666,19 @@ Ensure that the callback URL is:
 *   If using an SSL certificate, you should have three:
     *   `https://<CloudFront domain name>`
     *   `https://<CloudFront domain name>/oauth2/idpresponse`
+
+### Using your custom URL as the frontend to your CloudFront distribution (and app)
+
+You may want to access your app via a custom URL. To do this:
+
+* Create an ACM certificate in us-east-1 for your custom domain (e.g. `*.<domain-name>`). This should use the same settings as the certificate set up for the application load balancer in your home region.
+* Go to CloudFront, then select your distribution. On the general settings page, click Edit.
+* Under Alternate domain names (CNAMEs) add your custom domain (e.g. `redaction.<domain-name>`).
+* Under SSL certificate, choose 'Custom SSL certificate' and select the certificate you just created in us-east-1.
+* Click save changes.
+* Ensure the Cognito callback URLs include the new custom domain (e.g. `https://redaction.<domain-name>` and `https://redaction.<domain-name>/oauth2/idpresponse`).
+* Update `COGNITO_REDIRECTION_URL` and `CLOUDFRONT_DOMAIN` in `cdk_config.env` to the custom domain, redeploy `RedactionStackCloudfront` if you use CDK-managed CSP, or edit your manual response headers policy so CORS and CSP `connect-src` / `wss://` use the new host.
+
 
 ### Force traffic to come from specific CloudFront distribution (optional)
 
