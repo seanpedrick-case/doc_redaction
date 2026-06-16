@@ -21,7 +21,7 @@ Redact personally identifiable information (PII) from documents (PDF, PNG, JPG),
 
 Follow these instructions to get the document redaction application running on your local machine.
 
-### 1. Package installation
+### 1. Installation
 
 #### Option 1 - Recommended: Install from source repo
 
@@ -35,16 +35,12 @@ pip install -e .
 
 ##### Install extras (Paddle or Transformers/Torch VLM)
 
-To install with PaddleOCR:
+To install with PaddleOCR (with a transformers backend as of v2.4.0):
 
 ```bash
 pip install -e ".[paddle]"
 ```
 
-Note that the versions of both PaddleOCR and Torch installed by default are the CPU-only versions. If you want to install the equivalent GPU versions, you will need to run the following commands:
-```bash
-pip install paddlepaddle-gpu==3.2.1 --index-url https://www.paddlepaddle.org.cn/packages/stable/cu129/
-```
 
 If you want to run VLMs / LLMs with the transformers package:
 
@@ -53,11 +49,9 @@ pip install -e ".[vlm]"
 ```
 
 
-**Note:** It is difficult to get paddlepaddle gpu working in an environment alongside torch. You may well need to reinstall the cpu version to ensure compatibility, and run paddlepaddle-gpu in a separate environment without torch installed. If you get errors related to .dll files following paddle gpu install, you may need to install the latest c++ redistributables. For Windows, you can find them [here](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170)
-
+Note that the versions of both PaddleOCR and Torch installed by default are the CPU-only versions. If you want to install the GPU-enabled version of torch, it is advised to install the following version:
 ```bash
-pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu129
-pip install torchvision --index-url https://download.pytorch.org/whl/cu129
+pip install torch==2.9.1 torchvision==0.24.1 --index-url https://download.pytorch.org/whl/cu129
 ```
 
 #### Option 2 - Install from PyPI
@@ -147,9 +141,13 @@ docker build -f agent-redact/pi-agent/Dockerfile --target runtime -t pi-agent-ru
 
 For llama.cpp + Pi together, see the compose examples at the top of [docker-compose_llama_agentic.yml](https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_llama_agentic.yml). Further detail: [agent-redact/README.md](https://github.com/seanpedrick-case/doc_redaction/blob/main/agent-redact/README.md).
 
+#### Option 4 - Installation on AWS with CDK
+
+The repo contains a [CDK folder](https://github.com/seanpedrick-case/doc_redaction/tree/main/cdk), that contains all the files you need to setup and deploy to an AWS environment with CDK. The installation wizard is [cdk_install.py](https://github.com/seanpedrick-case/doc_redaction/blob/main/cdk/cdk_install.py), which provides a number of options to deploy the Document Redaction App to AWS for demonstration or production. More details on CDK deployment can be found in the [Installation Guide](https://seanpedrick-case.github.io/doc_redaction/src/installation_guide.html).
+
 ### 2. Install prerequisites: Tesseract and Poppler
 
-This application relies on two external tools for OCR (Tesseract) and PDF processing (Poppler). Please install them on your system before proceeding. To run the Document Redaction app successfully, these tools need to be installed and either 1. added to PATH, or 2. be in a folder that is directly referenced in the config/app_config.env file with the variables TESSERACT_FOLDER and POPPLER_FOLDER (defined [here](https://github.com/seanpedrick-case/doc_redaction/blob/main/tools/config.py) if you want to see the code). The instructions below will guide you through diffferent ways to install these dependencies.
+This application relies on two external tools for OCR (Tesseract) and PDF processing (Poppler). If not using a Docker-based deployment, you will need to install them on your system before proceeding. To run the Document Redaction app successfully, these tools need to be installed and either 1. added to PATH, or 2. be in a folder that is directly referenced in the config/app_config.env file with the variables TESSERACT_FOLDER and POPPLER_FOLDER (defined [here](https://github.com/seanpedrick-case/doc_redaction/blob/main/tools/config.py) if you want to see the code). The instructions below will guide you through diffferent ways to install these dependencies.
 
 ---
 
