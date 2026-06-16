@@ -1154,7 +1154,7 @@ def print_express_mode_next_steps(
         print(
             "  - Register a Cognito user in AWS Console, change password at the login page URL, "
             " and sign in at the Pi agent URL below. The main redaction backend runs without "
-            " in-app login so the Pi agent can call it over Service Connect. You can disable 
+            " in-app login so the Pi agent can call it over Service Connect. You can disable "
             " Cognito authorisation by setting COGNITO_AUTH to False in the ECS task definition / "
             " ECS service options."
         )
