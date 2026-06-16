@@ -1614,6 +1614,11 @@ def build_app_config_env_values(values: Dict[str, str]) -> Dict[str, str]:
         "USAGE_LOG_DYNAMODB_TABLE_NAME": _name(
             "USAGE_LOG_DYNAMODB_TABLE_NAME", "dynamodb-usage-logs"
         ),
+        "SAVE_OUTPUTS_TO_S3": "True" if headless else "False",
+        "S3_OUTPUTS_BUCKET": (
+            _name("S3_OUTPUT_BUCKET_NAME", "s3-output") if headless else ""
+        ),
+        "S3_OUTPUTS_FOLDER": _name("S3_OUTPUTS_FOLDER", "") if headless else "",
     }
 
 
