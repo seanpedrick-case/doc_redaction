@@ -248,7 +248,7 @@ def should_use_column_reading_order(
     mode = (reading_order_mode or LOCAL_OCR_READING_ORDER).strip().lower()
     if mode == "legacy":
         return False
-    if mode != "column":
+    if mode not in ("column", "paddle_native"):
         return False
     return has_side_by_side_columns(
         boxes,
@@ -415,6 +415,7 @@ def assign_layout_boxes(
     page_height: float,
     full_span_width_ratio: float = OCR_FULL_SPAN_WIDTH_RATIO,
     column_gap_min_fraction: float = OCR_COLUMN_GAP_MIN_FRACTION,
+    reading_order_mode: str | None = None,
 ) -> List[_LayoutBox]:
     """Classify boxes as full-span or column and assign column indices."""
     if not boxes:
@@ -433,7 +434,11 @@ def assign_layout_boxes(
         return layout
 
     use_columns = should_use_column_reading_order(
-        boxes, page_width, page_height, full_span_width_ratio=full_span_width_ratio
+        boxes,
+        page_width,
+        page_height,
+        reading_order_mode=reading_order_mode,
+        full_span_width_ratio=full_span_width_ratio,
     )
     if not use_columns:
         for box in column_candidates:
@@ -533,6 +538,7 @@ def sort_reading_order(
     page_height: float | None = None,
     full_span_width_ratio: float = OCR_FULL_SPAN_WIDTH_RATIO,
     column_gap_min_fraction: float = OCR_COLUMN_GAP_MIN_FRACTION,
+    reading_order_mode: str | None = None,
 ) -> List[Any]:
     """
     Order boxes for human reading: full-width lines first (by top), then each text
@@ -544,7 +550,9 @@ def sort_reading_order(
     if page_width is None or page_height is None:
         page_width, page_height = infer_page_dimensions(boxes)
 
-    if not should_use_column_reading_order(boxes, page_width, page_height):
+    if not should_use_column_reading_order(
+        boxes, page_width, page_height, reading_order_mode=reading_order_mode
+    ):
         return _sort_single_column_reading_order(
             boxes, page_width, full_span_width_ratio=full_span_width_ratio
         )
@@ -555,6 +563,7 @@ def sort_reading_order(
         page_height,
         full_span_width_ratio=full_span_width_ratio,
         column_gap_min_fraction=column_gap_min_fraction,
+        reading_order_mode=reading_order_mode,
     )
 
     full_span_lbs = sorted(
@@ -728,6 +737,68 @@ def group_into_lines(
     return lines
 
 
+def group_into_lines_relaxed_columns(
+    ordered_boxes: Sequence[Any],
+    page_width: float,
+    page_height: float,
+    *,
+    y_threshold: float | None = None,
+    line_split_gap_fraction: float = OCR_LINE_SPLIT_GAP_FRACTION,
+) -> List[List[Any]]:
+    """Like group_into_lines, but ignores column_index when merging words into lines.
+
+    This is used for paddle_native fallback when word-level boxes are sometimes
+    fragmented into many micro-columns by layout assignment. We still respect the
+    'zone' (full-span vs column) and use the horizontal gap guard to avoid merging
+    side-by-side elements.
+    """
+    if not ordered_boxes:
+        return []
+
+    if y_threshold is None:
+        y_threshold = compute_y_threshold(
+            page_height, ordered_boxes, page_width=page_width
+        )
+
+    gap_threshold = line_split_gap_fraction * (page_width or 1.0)
+    layout_boxes = assign_layout_boxes(ordered_boxes, page_width, page_height)
+    layout_by_result = {id(lb.result): lb for lb in layout_boxes}
+
+    lines: List[List[Any]] = []
+    current_line: List[Any] = []
+    current_lb: _LayoutBox | None = None
+
+    for box in ordered_boxes:
+        lb = layout_by_result.get(id(box))
+        if lb is None:
+            lb = _LayoutBox(result=box, zone="column", column_index=0)
+
+        if not current_line:
+            current_line = [box]
+            current_lb = lb
+            continue
+
+        same_zone = lb.zone == current_lb.zone
+        top_aligned = abs(float(box.top) - float(current_line[0].top)) <= y_threshold
+
+        if same_zone and top_aligned:
+            prev_right = max(float(b.left) + float(b.width) for b in current_line)
+            if float(box.left) - prev_right > gap_threshold:
+                lines.extend(_finalize_line(current_line, gap_threshold))
+                current_line = [box]
+                current_lb = lb
+            else:
+                current_line.append(box)
+        else:
+            lines.extend(_finalize_line(current_line, gap_threshold))
+            current_line = [box]
+            current_lb = lb
+
+    if current_line:
+        lines.extend(_finalize_line(current_line, gap_threshold))
+    return lines
+
+
 def group_boxes_preserving_lines(ordered_boxes: Sequence[Any]) -> List[List[Any]]:
     """One input box per output line (Paddle line-level fast path)."""
     return [[box] for box in ordered_boxes]
@@ -802,6 +873,75 @@ def build_line_groups(
     page_width, page_height = infer_page_dimensions(ocr_results)
     mode = reading_order_mode or LOCAL_OCR_READING_ORDER
 
+    # Paddle-native mode: if upstream word-level conversion preserved originating
+    # line numbers, we can reconstruct line groups *exactly* instead of guessing
+    # with y-threshold heuristics.
+    mode_norm = (mode or "").strip().lower()
+    if (
+        mode_norm == "paddle_native"
+        and not preserve_line_boxes
+        and all(getattr(b, "line", None) is not None for b in ocr_results)
+    ):
+        # Only trust preserved line-ids when they *actually* represent multi-word
+        # lines. Some Paddle configs / documents yield effectively word-level boxes
+        # (one token per "line"), in which case grouping by the preserved ids would
+        # keep one-word lines and be worse than our geometry-based recombination.
+        by_line_counts: dict[int, int] = {}
+        for b in ocr_results:
+            by_line_counts[int(getattr(b, "line"))] = (
+                by_line_counts.get(int(getattr(b, "line")), 0) + 1
+            )
+        if by_line_counts:
+            counts_sorted = sorted(by_line_counts.values())
+            median_count = counts_sorted[len(counts_sorted) // 2]
+        else:
+            median_count = 0
+
+        if median_count >= 2:
+            from dataclasses import dataclass
+
+            @dataclass
+            class _LineBox:
+                line_id: int
+                left: float
+                top: float
+                width: float
+                height: float
+                text: str = ""
+
+            by_line: dict[int, list[Any]] = {}
+            for b in ocr_results:
+                by_line.setdefault(int(getattr(b, "line")), []).append(b)
+
+            line_boxes: list[_LineBox] = []
+            for lid, items in by_line.items():
+                left = min(float(x.left) for x in items)
+                top = min(float(x.top) for x in items)
+                right = max(float(x.left) + float(x.width) for x in items)
+                bottom = max(float(x.top) + float(x.height) for x in items)
+                line_boxes.append(
+                    _LineBox(
+                        line_id=lid,
+                        left=left,
+                        top=top,
+                        width=max(0.0, right - left),
+                        height=max(0.0, bottom - top),
+                        text=" ".join(str(getattr(x, "text", "")) for x in items[:3]),
+                    )
+                )
+
+            ordered_line_boxes = sort_reading_order(
+                line_boxes,
+                page_width=page_width,
+                page_height=page_height,
+                reading_order_mode="paddle_native",
+            )
+            ordered_ids = [lb.line_id for lb in ordered_line_boxes]
+            ordered_lines = [
+                sorted(by_line[lid], key=lambda b: float(b.left)) for lid in ordered_ids
+            ]
+            return ordered_lines, page_width, page_height
+
     use_columns = should_use_column_reading_order(
         ocr_results, page_width, page_height, reading_order_mode=mode
     )
@@ -819,15 +959,60 @@ def build_line_groups(
             page_height,
         )
 
-    ordered = sort_reading_order(ocr_results, page_width, page_height)
+    ordered = sort_reading_order(
+        ocr_results,
+        page_width,
+        page_height,
+        reading_order_mode=reading_order_mode,
+    )
 
     if preserve_line_boxes:
-        return group_boxes_preserving_lines(ordered), page_width, page_height
+        # Paddle sometimes emits multiple adjacent "line" boxes for what is visually
+        # one row of text (e.g. "International business" | "matters," | "Politics,").
+        # When we preserve Paddle line boxes, we still want to merge such fragments
+        # back into a single line group when they share a y-band and do not have a
+        # large physical gap between them.
+        yt = y_threshold
+        if yt is None:
+            yt = compute_y_threshold(page_height, ocr_results, page_width=page_width)
+        merged = group_into_lines_relaxed_columns(
+            ordered, page_width, page_height, y_threshold=yt
+        )
+        return merged, page_width, page_height
 
     yt = y_threshold
     if yt is None:
         yt = compute_y_threshold(page_height, ocr_results, page_width=page_width)
-    lines = group_into_lines(ordered, page_width, page_height, y_threshold=yt)
+
+    def _looks_like_paddle_boxes(items: Sequence[Any]) -> bool:
+        """Heuristic: majority of boxes came from Paddle OCR."""
+        try:
+            models = [str(getattr(b, "model", "") or "").lower() for b in items]
+            models = [m for m in models if m]
+            if not models:
+                return False
+            paddle = sum(1 for m in models if "paddle" in m)
+            return paddle / max(len(models), 1) >= 0.5
+        except Exception:
+            return False
+
+    if (mode_norm == "paddle_native") and (not preserve_line_boxes):
+        # In paddle_native fallback (word-level inputs), relax column_index checks
+        # to avoid "one word per line" when layout assignment fragments boxes into
+        # many micro-columns. Reading order is already column-major from sort_reading_order.
+        lines = group_into_lines_relaxed_columns(
+            ordered, page_width, page_height, y_threshold=yt
+        )
+    elif (mode_norm == "column") and _looks_like_paddle_boxes(ocr_results):
+        # Paddle can emit adjacent fragments on the same visual row but assign them
+        # different column indices due to incidental gutters (e.g. sidebar dot-ratings).
+        # Relax the column_index requirement while still keeping the horizontal-gap
+        # guardrail so we don't merge across true multi-column gutters.
+        lines = group_into_lines_relaxed_columns(
+            ordered, page_width, page_height, y_threshold=yt
+        )
+    else:
+        lines = group_into_lines(ordered, page_width, page_height, y_threshold=yt)
 
     # Secondary pass: re-sort the produced line groups by their left-edge cluster so
     # that sub-columns which were too narrow to split at word level are still output in
@@ -859,6 +1044,7 @@ def _order_line_boxes_for_reading(
         line_results,
         page_width=page_width,
         page_height=page_height,
+        reading_order_mode=reading_order_mode,
     )
 
 

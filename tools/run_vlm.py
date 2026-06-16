@@ -27,7 +27,6 @@ from tools.config import (
     SHOW_BEDROCK_VLM_MODELS,
     SHOW_INFERENCE_SERVER_VLM_OPTIONS,
     SHOW_VLM_MODEL_OPTIONS,
-    USE_FLASH_ATTENTION,
     VLM_DEFAULT_DO_SAMPLE,
     VLM_DEFAULT_MIN_P,
     VLM_DEFAULT_PRESENCE_PENALTY,
@@ -42,7 +41,11 @@ from tools.config import (
     VLM_QWEN3_5_NOTHINK_SUFFIX,
     VLM_SEED,
 )
-from tools.helper_functions import get_system_font_path
+from tools.helper_functions import get_system_font_path, strip_vlm_thinking_tags
+from tools.inference_attention import (
+    log_attn_implementation_choice,
+    resolve_attn_implementation,
+)
 
 text_read_default_prompt = """Read the main line of text in the image, and return JSON with keys "text" (string) and "conf" (number 0–1) for confidence in your identification, e.g. {"text": "read text", "conf": 0.95}. Do not include any other keys in the JSON. Ignore any words that are not part of the main line of text closest to the center of the image. Ensure that spaces between words and upper/lower cases are preserved. If you can't read the text, return an empty string ""."""
 
@@ -86,6 +89,9 @@ if LOAD_PADDLE_AT_STARTUP:
         # Default paddle configuration if none provided
         if paddle_kwargs is None:
             paddle_kwargs = {
+                "text_detection_model_name": "PP-OCRv6_medium_det",
+                "text_recognition_model_name": "PP-OCRv6_medium_rec",
+                "engine": "transformers",
                 "det_db_unclip_ratio": PADDLE_DET_DB_UNCLIP_RATIO,
                 "use_textline_orientation": PADDLE_USE_TEXTLINE_ORIENTATION,
                 "use_doc_orientation_classify": False,
@@ -197,7 +203,6 @@ if SHOW_VLM_MODEL_OPTIONS is True:
         OVERRIDE_VLM_REPO_ID,
         QUANTISE_VLM_MODELS,
         SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL,
-        USE_FLASH_ATTENTION,
         VLM_DEFAULT_DO_SAMPLE,
         VLM_DEFAULT_MIN_P,
         VLM_DEFAULT_PRESENCE_PENALTY,
@@ -251,10 +256,8 @@ if SHOW_VLM_MODEL_OPTIONS is True:
     model_supports_presence_penalty = False
     model_default_seed = VLM_SEED if VLM_SEED is not None else None
 
-    if USE_FLASH_ATTENTION is True:
-        attn_implementation = "flash_attention_2"
-    else:
-        attn_implementation = "eager"
+    attn_implementation = resolve_attn_implementation()
+    log_attn_implementation_choice()
 
     # Setup quantisation config if enabled
     quantization_config = None
@@ -1355,6 +1358,8 @@ def extract_text_from_image_vlm(
     print(f"Time taken: {duration:.2f} seconds")
     print(f"Generated tokens: {output_tokens}")
     print(f"Tokens per second: {tokens_per_second:.2f}")
+
+    buffer = strip_vlm_thinking_tags(buffer)
 
     # Return the complete text and token estimates
     return buffer, input_tokens, output_tokens

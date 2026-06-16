@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("pikepdf")
+
 from tools.aws_textract import textract_prioritizes_signature_extraction
 from tools.config import TEXTRACT_TEXT_EXTRACT_OPTION
 

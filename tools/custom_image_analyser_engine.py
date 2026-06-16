@@ -66,6 +66,7 @@ from tools.config import (
     MERGE_BOUNDING_BOXES,
     OUTPUT_FOLDER,
     PADDLE_DET_DB_UNCLIP_RATIO,
+    PADDLE_DEVICE,
     PADDLE_FONT_PATH,
     PADDLE_MODEL_PATH,
     PADDLE_PRESERVE_LINE_BOXES,
@@ -79,6 +80,7 @@ from tools.config import (
     SAVE_TEXTRACT_BEDROCK_HYBRID_EXAMPLES,
     SAVE_VLM_INPUT_IMAGES,
     SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL,
+    SPACES_ZERO_GPU,
     TESSERACT_SEGMENTATION_LEVEL,
     TESSERACT_WORD_LEVEL_OCR,
     USE_LLAMA_SWAP,
@@ -93,9 +95,12 @@ from tools.config import (
 )
 from tools.helper_functions import (
     clean_unicode_text,
+    extract_balanced_json_array,
     get_system_font_path,
     model_from_ocr_boxes,
+    strip_vlm_thinking_tags,
 )
+from tools.inference_attention import resolve_paddle_attn_implementation
 from tools.llm_funcs import _extract_choice_message_text
 from tools.load_spacy_model_custom_recognisers import custom_entities
 from tools.ocr_reading_order import build_line_groups
@@ -257,30 +262,6 @@ def ends_with_phrase_punctuation(word: str) -> bool:
     return any(word.rstrip().endswith(punct) for punct in PHRASE_ENDING_PUNCTUATION)
 
 
-if LOAD_PADDLE_AT_STARTUP:
-    # Set PaddleOCR font path BEFORE importing to prevent font downloads during import
-    if (
-        PADDLE_FONT_PATH
-        and PADDLE_FONT_PATH.strip()
-        and os.path.exists(PADDLE_FONT_PATH)
-    ):
-        os.environ["PADDLE_PDX_LOCAL_FONT_FILE_PATH"] = PADDLE_FONT_PATH
-    else:
-        system_font_path = get_system_font_path()
-        if system_font_path:
-            os.environ["PADDLE_PDX_LOCAL_FONT_FILE_PATH"] = system_font_path
-
-    try:
-        from paddleocr import PaddleOCR
-
-        print("PaddleOCR imported successfully")
-    except Exception as e:
-        print(f"Error importing PaddleOCR: {e}")
-        PaddleOCR = None
-else:
-    PaddleOCR = None
-
-
 # --- Language utilities ---
 def _normalize_lang(language: str) -> str:
     return language.strip().lower().replace("-", "_") if language else "en"
@@ -400,6 +381,285 @@ def _paddle_lang_code(language: str) -> str:
     }
 
     return mapping.get(lang, "en")
+
+
+_module_paddle_ocr = None
+_module_paddle_ocr_lock = threading.Lock()
+_paddleocr_class = None
+_module_paddle_kwargs_template: Optional[Dict[str, Any]] = None
+
+
+def _configure_paddle_ocr_environment() -> None:
+    """Set PaddleOCR env vars before import (fonts, model dir)."""
+    if PADDLE_MODEL_PATH and PADDLE_MODEL_PATH.strip():
+        os.environ["PADDLEOCR_MODEL_DIR"] = PADDLE_MODEL_PATH
+        print(f"Setting PaddleOCR model path to: {PADDLE_MODEL_PATH}")
+    else:
+        print("Using default PaddleOCR model storage location")
+
+    if (
+        PADDLE_FONT_PATH
+        and PADDLE_FONT_PATH.strip()
+        and os.path.exists(PADDLE_FONT_PATH)
+    ):
+        os.environ["PADDLE_PDX_LOCAL_FONT_FILE_PATH"] = PADDLE_FONT_PATH
+        print(f"Setting PaddleOCR font path to configured font: {PADDLE_FONT_PATH}")
+    else:
+        system_font_path = get_system_font_path()
+        if system_font_path:
+            os.environ["PADDLE_PDX_LOCAL_FONT_FILE_PATH"] = system_font_path
+            print(f"Setting PaddleOCR font path to system font: {system_font_path}")
+        else:
+            print(
+                "Warning: No suitable system font found. PaddleOCR may download default fonts."
+            )
+
+
+def _default_paddle_device() -> str:
+    """Resolve PaddleOCR device for the transformers inference backend."""
+    if PADDLE_DEVICE:
+        return PADDLE_DEVICE
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            return "gpu:0"
+    except ImportError:
+        pass
+    return "cpu"
+
+
+def _default_paddle_engine_config(device: Optional[str] = None) -> Dict[str, Any]:
+    """engine_config for PaddleOCR transformers backend (see PaddleOCR inference-engine docs)."""
+    device = device or _default_paddle_device()
+    use_gpu = device.startswith("gpu")
+    config: Dict[str, Any] = {"dtype": "float32"}
+    if use_gpu:
+        device_id = 0
+        if ":" in device:
+            try:
+                device_id = int(device.split(":", 1)[1])
+            except ValueError:
+                device_id = 0
+        config.update(
+            {
+                "device_type": "gpu",
+                "device_id": device_id,
+                "attn_implementation": resolve_paddle_attn_implementation(),
+            }
+        )
+    else:
+        config["device_type"] = "cpu"
+    return config
+
+
+def _default_paddle_kwargs(lang: Optional[str] = None) -> Dict[str, Any]:
+    if lang is None:
+        lang = _paddle_lang_code(DEFAULT_LANGUAGE)
+    device = _default_paddle_device()
+    return {
+        "text_detection_model_name": "PP-OCRv6_medium_det",
+        "text_recognition_model_name": "PP-OCRv6_medium_rec",
+        "engine": "transformers",
+        "device": device,
+        "engine_config": _default_paddle_engine_config(device),
+        "det_db_unclip_ratio": PADDLE_DET_DB_UNCLIP_RATIO,
+        "use_textline_orientation": PADDLE_USE_TEXTLINE_ORIENTATION,
+        "use_doc_orientation_classify": False,
+        "use_doc_unwarping": False,
+        "lang": lang,
+    }
+
+
+def _finalize_paddle_kwargs(paddle_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge caller overrides with GPU-aware defaults."""
+    kwargs = dict(paddle_kwargs)
+    defaults = _default_paddle_kwargs(kwargs.get("lang"))
+    kwargs.setdefault("engine", defaults["engine"])
+    kwargs.setdefault("device", defaults["device"])
+    default_engine_config = defaults["engine_config"]
+    if "engine_config" not in kwargs:
+        kwargs["engine_config"] = dict(default_engine_config)
+    else:
+        kwargs["engine_config"] = {
+            **default_engine_config,
+            **kwargs["engine_config"],
+        }
+    # PP-OCRv6 transformers models only support eager (not sdpa / flash_attention_2).
+    kwargs["engine_config"][
+        "attn_implementation"
+    ] = resolve_paddle_attn_implementation()
+    return kwargs
+
+
+def _log_paddle_runtime_diagnostics(device: str) -> None:
+    """Log torch/CUDA state when PaddleOCR is initialized (helps debug ZeroGPU)."""
+    try:
+        import torch
+    except ImportError:
+        print(
+            f"PaddleOCR init: device={device!r}, torch not installed "
+            "(required for engine=transformers)"
+        )
+        return
+
+    cuda_available = torch.cuda.is_available()
+    parts = [
+        f"PaddleOCR init: device={device!r}",
+        "engine=transformers",
+        f"attn_implementation={resolve_paddle_attn_implementation()!r}",
+        f"torch={torch.__version__}",
+        f"cuda_available={cuda_available}",
+        f"spaces_zero_gpu={SPACES_ZERO_GPU}",
+    ]
+    if cuda_available:
+        try:
+            parts.append(
+                f"cuda_device={torch.cuda.get_device_name(torch.cuda.current_device())}"
+            )
+        except Exception:
+            pass
+    print(", ".join(parts))
+
+
+def _import_paddleocr_class():
+    global _paddleocr_class
+    if _paddleocr_class is not None:
+        return _paddleocr_class
+    _configure_paddle_ocr_environment()
+    try:
+        from paddleocr import PaddleOCR as paddleocr_cls
+
+        print("PaddleOCR imported successfully")
+    except Exception as e:
+        raise ImportError(
+            f"Error importing PaddleOCR: {e}. Please install it using "
+            "'pip install paddleocr paddlepaddle' in your python environment and retry."
+        ) from e
+    _paddleocr_class = paddleocr_cls
+    return _paddleocr_class
+
+
+def register_module_paddle_kwargs(paddle_kwargs: Dict[str, Any]) -> None:
+    """Store Paddle kwargs for lazy init (ZeroGPU: init runs in @spaces.GPU worker)."""
+    global _module_paddle_kwargs_template
+    _module_paddle_kwargs_template = _finalize_paddle_kwargs(paddle_kwargs)
+
+
+def get_or_create_module_paddle_ocr(
+    paddle_kwargs: Optional[Dict[str, Any]] = None,
+) -> Any:
+    """Return a module-scoped PaddleOCR instance (required for ZeroGPU pickling)."""
+    global _module_paddle_ocr
+    if _module_paddle_ocr is not None:
+        return _module_paddle_ocr
+
+    with _module_paddle_ocr_lock:
+        if _module_paddle_ocr is not None:
+            return _module_paddle_ocr
+
+        PaddleOCR = _import_paddleocr_class()
+        if paddle_kwargs is not None:
+            kwargs = dict(paddle_kwargs)
+            kwargs.setdefault("lang", _paddle_lang_code(DEFAULT_LANGUAGE))
+            kwargs = _finalize_paddle_kwargs(kwargs)
+        elif _module_paddle_kwargs_template is not None:
+            kwargs = dict(_module_paddle_kwargs_template)
+        else:
+            kwargs = _default_paddle_kwargs()
+        _log_paddle_runtime_diagnostics(str(kwargs.get("device", "")))
+
+        try:
+            _module_paddle_ocr = PaddleOCR(**kwargs)
+        except Exception as e:
+            if (
+                "WinError 127" in str(e)
+                or "could not be found" in str(e).lower()
+                or "dll" in str(e).lower()
+            ):
+                print(
+                    f"Warning: GPU initialization failed (likely missing CUDA/cuDNN dependencies): {e}"
+                )
+                print("PaddleOCR will not be available. To fix GPU issues:")
+                print("1. Install Visual C++ Redistributables (latest version)")
+                print("2. Ensure CUDA runtime libraries are in your PATH")
+                print(
+                    "3. Or reinstall paddlepaddle CPU version: pip install paddlepaddle"
+                )
+            raise ImportError(
+                f"Error initializing PaddleOCR: {e}. Please install it using "
+                "'pip install paddleocr paddlepaddle' in your python environment and retry."
+            ) from e
+
+        print("Module PaddleOCR instance initialized")
+        return _module_paddle_ocr
+
+
+def _paddle_result_to_plain_dict(result: Any) -> Dict[str, Any]:
+    """Convert a PaddleOCR result object to a plain, pickle-safe dictionary."""
+    if isinstance(result, dict):
+        plain_dict = dict(result)
+    else:
+        plain_dict = {}
+        for key in ["rec_texts", "rec_scores", "rec_polys", "rec_models"]:
+            if key in result or hasattr(result, key):
+                value = (
+                    result.get(key, [])
+                    if hasattr(result, "get")
+                    else getattr(result, key, [])
+                )
+                if value is not None:
+                    plain_dict[key] = (
+                        list(value)
+                        if hasattr(value, "__iter__") and not isinstance(value, str)
+                        else value
+                    )
+        for key in ["image_width", "image_height"]:
+            if key in result or hasattr(result, key):
+                value = (
+                    result.get(key)
+                    if hasattr(result, "get")
+                    else getattr(result, key, None)
+                )
+                if value is not None:
+                    plain_dict[key] = value
+    for key in ["rec_texts", "rec_scores", "rec_polys", "rec_models"]:
+        if key in plain_dict and plain_dict[key] is not None:
+            value = plain_dict[key]
+            plain_dict[key] = (
+                list(value)
+                if hasattr(value, "__iter__") and not isinstance(value, str)
+                else value
+            )
+    return plain_dict
+
+
+def _paddle_results_to_plain_dicts(results: Any) -> List[Dict[str, Any]]:
+    if not results:
+        return results
+    return [_paddle_result_to_plain_dict(result) for result in results]
+
+
+@spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
+def paddle_predict(image: Union[np.ndarray, str]) -> List[Dict[str, Any]]:
+    """
+    Run Paddle OCR on a numpy image or file path.
+
+    Uses a module-scoped PaddleOCR instance so ZeroGPU only pickles the image
+    input (not the live transformers-backed model with forward hooks).
+    """
+    ocr = get_or_create_module_paddle_ocr()
+    paddle_results = ocr.predict(image)
+    return _paddle_results_to_plain_dicts(paddle_results)
+
+
+# ZeroGPU: the main web process has no real GPU. PaddleOCR must initialize inside
+# paddle_predict (@spaces.GPU worker) so transformers weights land on CUDA.
+if LOAD_PADDLE_AT_STARTUP and not SPACES_ZERO_GPU:
+    try:
+        get_or_create_module_paddle_ocr()
+    except Exception as e:
+        print(f"Warning: LOAD_PADDLE_AT_STARTUP failed: {e}")
 
 
 @dataclass
@@ -2119,6 +2379,7 @@ def _extract_and_combine_text_dicts_from_vlm_response(
     """
     if not raw or not isinstance(raw, str):
         return None
+    raw = strip_vlm_thinking_tags(raw)
     collected = []
     i = 0
     while i < len(raw):
@@ -4105,12 +4366,12 @@ def plot_text_bounding_boxes(
     draw = ImageDraw.Draw(img)
 
     # Parsing out the markdown fencing
-    bounding_boxes = parse_json(bounding_boxes)
+    bbox_list = _parse_vlm_bbox_dict_list(bounding_boxes)
 
     font = ImageFont.load_default()
 
     # Iterate over the bounding boxes
-    for i, bbox_dict in enumerate(ast.literal_eval(bounding_boxes)):
+    for i, bbox_dict in enumerate(bbox_list):
         color = "green"
 
         # Extract the bounding box coordinates (preserve the original dict for text extraction)
@@ -4200,7 +4461,10 @@ def plot_text_bounding_boxes(
 
 
 def parse_json(json_output):
-    # Parsing out the markdown fencing
+    # Parsing out the markdown fencing and Qwen thinking tags
+    if not isinstance(json_output, str):
+        return json_output
+    json_output = strip_vlm_thinking_tags(json_output)
     lines = json_output.splitlines()
     for i, line in enumerate(lines):
         if line == "```json":
@@ -4212,6 +4476,36 @@ def parse_json(json_output):
             ]  # Remove everything after the closing "```"
             break  # Exit the loop once "```json" is found
     return json_output
+
+
+def _parse_vlm_bbox_dict_list(bounding_boxes: str) -> List[Dict]:
+    """Parse a VLM bbox JSON/list response, ignoring thinking tags and extra prose."""
+    if not bounding_boxes or not isinstance(bounding_boxes, str):
+        return []
+    cleaned = parse_json(bounding_boxes)
+    cleaned = _preprocess_vlm_ocr_json_string(cleaned)
+    if not cleaned:
+        return []
+    for candidate in (cleaned, extract_balanced_json_array(cleaned)):
+        if not candidate:
+            continue
+        try:
+            data = json.loads(candidate)
+            if isinstance(data, list):
+                return data
+            if isinstance(data, dict):
+                return [data]
+        except json.JSONDecodeError:
+            pass
+        try:
+            data = ast.literal_eval(candidate)
+            if isinstance(data, list):
+                return data
+            if isinstance(data, dict):
+                return [data]
+        except Exception:
+            pass
+    return []
 
 
 def _fix_malformed_bbox_in_json_string(json_string):
@@ -4344,7 +4638,7 @@ def _preprocess_vlm_ocr_json_string(
     """Chain bbox fixes and stray-coordinate repair before json.loads."""
     if not raw or not isinstance(raw, str):
         return ""
-    s = raw.strip()
+    s = strip_vlm_thinking_tags(raw.strip())
     s = _fix_malformed_bbox_in_json_string(s)
     label = implied_label if implied_label else "[UNKNOWN]"
     s = _repair_vlm_json_stray_coordinate_strings(s, default_text=label)
@@ -5004,14 +5298,17 @@ def _vlm_page_ocr_predict(
             }
 
         if SAVE_VLM_INPUT_IMAGES:
-            plot_text_bounding_boxes(
-                processed_image,
-                extracted_text,
-                image_name=image_name,
-                image_folder="vlm_visualisations",
-                output_folder=output_folder,
-                task_type=task_type,
-            )
+            try:
+                plot_text_bounding_boxes(
+                    processed_image,
+                    extracted_text,
+                    image_name=image_name,
+                    image_folder="vlm_visualisations",
+                    output_folder=output_folder,
+                    task_type=task_type,
+                )
+            except Exception as viz_error:
+                print(f"Warning: VLM bbox visualization failed: {viz_error}")
 
         # Store a copy of the processed image for debug visualization (before rescaling)
         # IMPORTANT: This must be the EXACT same image that was sent to the API
@@ -6686,82 +6983,40 @@ class CustomImageAnalyzerEngine:
             or self.ocr_engine == "hybrid-paddle-vlm"
             or self.ocr_engine == "hybrid-paddle-inference-server"
         ):
-            # Set PaddleOCR environment variables BEFORE importing PaddleOCR
-            # This ensures fonts are configured before the package loads
-
-            # Set PaddleOCR model directory environment variable (only if specified).
-            if PADDLE_MODEL_PATH and PADDLE_MODEL_PATH.strip():
-                os.environ["PADDLEOCR_MODEL_DIR"] = PADDLE_MODEL_PATH
-                print(f"Setting PaddleOCR model path to: {PADDLE_MODEL_PATH}")
-            else:
-                print("Using default PaddleOCR model storage location")
-
-            # Set PaddleOCR font path to use system fonts instead of downloading simfang.ttf/PingFang-SC-Regular.ttf
-            # This MUST be set before importing PaddleOCR to prevent font downloads
-            if (
-                PADDLE_FONT_PATH
-                and PADDLE_FONT_PATH.strip()
-                and os.path.exists(PADDLE_FONT_PATH)
-            ):
-                os.environ["PADDLE_PDX_LOCAL_FONT_FILE_PATH"] = PADDLE_FONT_PATH
-                print(
-                    f"Setting PaddleOCR font path to configured font: {PADDLE_FONT_PATH}"
-                )
-            else:
-                system_font_path = get_system_font_path()
-                if system_font_path:
-                    os.environ["PADDLE_PDX_LOCAL_FONT_FILE_PATH"] = system_font_path
-                    print(
-                        f"Setting PaddleOCR font path to system font: {system_font_path}"
-                    )
-                else:
-                    print(
-                        "Warning: No suitable system font found. PaddleOCR may download default fonts."
-                    )
-
-            try:
-                from paddleocr import PaddleOCR
-            except Exception as e:
-                raise ImportError(
-                    f"Error importing PaddleOCR: {e}. Please install it using 'pip install paddleocr paddlepaddle' in your python environment and retry."
-                )
-
-            # Default paddle configuration if none provided
             if paddle_kwargs is None:
-                paddle_kwargs = {
-                    "det_db_unclip_ratio": PADDLE_DET_DB_UNCLIP_RATIO,
-                    "use_textline_orientation": PADDLE_USE_TEXTLINE_ORIENTATION,
-                    "use_doc_orientation_classify": False,
-                    "use_doc_unwarping": False,
-                    "lang": self.paddle_lang,
-                }
+                paddle_kwargs = _default_paddle_kwargs(self.paddle_lang)
             else:
-                # Enforce language if not explicitly provided
+                paddle_kwargs = dict(paddle_kwargs)
                 paddle_kwargs.setdefault("lang", self.paddle_lang)
+            paddle_kwargs = _finalize_paddle_kwargs(paddle_kwargs)
 
-            try:
-                self.paddle_ocr = PaddleOCR(**paddle_kwargs)
-            except Exception as e:
-                # Handle DLL loading errors (common on Windows with GPU version)
-                if (
-                    "WinError 127" in str(e)
-                    or "could not be found" in str(e).lower()
-                    or "dll" in str(e).lower()
-                ):
-                    print(
-                        f"Warning: GPU initialization failed (likely missing CUDA/cuDNN dependencies): {e}"
-                    )
-                    print("PaddleOCR will not be available. To fix GPU issues:")
-                    print("1. Install Visual C++ Redistributables (latest version)")
-                    print("2. Ensure CUDA runtime libraries are in your PATH")
-                    print(
-                        "3. Or reinstall paddlepaddle CPU version: pip install paddlepaddle"
-                    )
-                    raise ImportError(
-                        f"Error initializing PaddleOCR: {e}. Please install it using 'pip install paddleocr paddlepaddle' in your python environment and retry."
-                    )
-                else:
-                    raise e
+            if SPACES_ZERO_GPU:
+                register_module_paddle_kwargs(paddle_kwargs)
+                self.paddle_ocr = None
+                print(
+                    "ZeroGPU: PaddleOCR will load on GPU inside paddle_predict "
+                    f"(device={paddle_kwargs.get('device')!r}, "
+                    f"engine={paddle_kwargs.get('engine')!r})"
+                )
+            else:
+                try:
+                    self.paddle_ocr = get_or_create_module_paddle_ocr(paddle_kwargs)
+                except Exception as e:
+                    if (
+                        "WinError 127" in str(e)
+                        or "could not be found" in str(e).lower()
+                        or "dll" in str(e).lower()
+                    ):
+                        print(
+                            f"Warning: GPU initialization failed (likely missing CUDA/cuDNN dependencies): {e}"
+                        )
+                        print("PaddleOCR will not be available. To fix GPU issues:")
+                        print("1. Install Visual C++ Redistributables (latest version)")
+                        print("2. Ensure CUDA runtime libraries are in your PATH")
+                        print(
+                            "3. Or reinstall paddlepaddle CPU version: pip install paddlepaddle"
+                        )
+                    raise
 
         elif self.ocr_engine == "hybrid-vlm":
             # VLM-based hybrid OCR - no additional initialization needed
@@ -7179,6 +7434,9 @@ class CustomImageAnalyzerEngine:
             "height": [],
             "conf": [],
             "model": [],
+            # Preserve the originating line index so downstream can keep Paddle's
+            # native line grouping even after word-level conversion.
+            "line": [],
         }
         if thread_local_segmenter is not None:
             segmenter = getattr(thread_local_segmenter, "segmenter", None)
@@ -7226,6 +7484,7 @@ class CustomImageAnalyzerEngine:
                         word_dict["height"].append(line_height)
                         word_dict["conf"].append(line_conf)
                         word_dict["model"].append(line_model)
+                        word_dict["line"].append(i)
                         current_left += word_width + estimated_space_width
             return (i, word_dict)
         for j in range(len(word_output["text"])):
@@ -7236,6 +7495,7 @@ class CustomImageAnalyzerEngine:
             word_dict["height"].append(word_output["height"][j])
             word_dict["conf"].append(word_output["conf"][j])
             word_dict["model"].append(line_model)
+            word_dict["line"].append(i)
         return (i, word_dict)
 
     def _convert_line_to_word_level(
@@ -7268,6 +7528,7 @@ class CustomImageAnalyzerEngine:
             "height": list(),
             "conf": list(),
             "model": list(),
+            "line": list(),
         }
 
         if not line_data or not line_data.get("text"):
@@ -7675,7 +7936,7 @@ class CustomImageAnalyzerEngine:
             if ocr is None:
                 if hasattr(self, "paddle_ocr") and self.paddle_ocr is not None:
                     ocr = self.paddle_ocr
-                else:
+                elif not SPACES_ZERO_GPU:
                     raise ValueError(
                         "No OCR object provided and 'paddle_ocr' is not initialized."
                     )
@@ -7770,7 +8031,8 @@ class CustomImageAnalyzerEngine:
                     if len(cropped_image_np.shape) == 2:
                         cropped_image_np = np.stack([cropped_image_np] * 3, axis=-1)
 
-                    paddle_results = ocr.predict(cropped_image_np)
+                    # paddle_results = ocr.predict(cropped_image_np)
+                    paddle_results = paddle_predict(cropped_image_np)
 
                     if paddle_results and paddle_results[0]:
                         rec_texts = paddle_results[0].get("rec_texts", [])
@@ -7901,7 +8163,7 @@ class CustomImageAnalyzerEngine:
         if ocr is None:
             if hasattr(self, "paddle_ocr") and self.paddle_ocr is not None:
                 ocr = self.paddle_ocr
-            else:
+            elif not SPACES_ZERO_GPU:
                 raise ValueError(
                     "No OCR object provided and 'paddle_ocr' is not initialized."
                 )
@@ -7923,36 +8185,6 @@ class CustomImageAnalyzerEngine:
         # Convert PaddleOCR result objects to plain dictionaries for pickling
         # The @spaces.GPU decorator requires picklable arguments, but PaddleOCR
         # result objects contain CopyableWeakMethod references that can't be pickled
-        def _paddle_result_to_plain_dict(result):
-            """Convert PaddleOCR result object to a plain dictionary."""
-            plain_dict = {}
-            # Extract all standard keys as plain Python types
-            for key in ["rec_texts", "rec_scores", "rec_polys", "rec_models"]:
-                if key in result or hasattr(result, key):
-                    value = (
-                        result.get(key, [])
-                        if hasattr(result, "get")
-                        else getattr(result, key, [])
-                    )
-                    if value is not None:
-                        # Convert to list to ensure it's a plain Python type
-                        plain_dict[key] = (
-                            list(value)
-                            if hasattr(value, "__iter__") and not isinstance(value, str)
-                            else value
-                        )
-            # Also extract dimension info if present
-            for key in ["image_width", "image_height"]:
-                if key in result or hasattr(result, key):
-                    value = (
-                        result.get(key)
-                        if hasattr(result, "get")
-                        else getattr(result, key, None)
-                    )
-                    if value is not None:
-                        plain_dict[key] = value
-            return plain_dict
-
         copied_paddle_results = [
             _paddle_result_to_plain_dict(result) for result in paddle_results
         ]
@@ -8005,7 +8237,7 @@ class CustomImageAnalyzerEngine:
         if ocr is None:
             if hasattr(self, "paddle_ocr") and self.paddle_ocr is not None:
                 ocr = self.paddle_ocr
-            else:
+            elif not SPACES_ZERO_GPU:
                 raise ValueError(
                     "No OCR object provided and 'paddle_ocr' is not initialized."
                 )
@@ -8713,7 +8945,7 @@ class CustomImageAnalyzerEngine:
             if ocr is None:
                 if hasattr(self, "paddle_ocr") and self.paddle_ocr is not None:
                     ocr = self.paddle_ocr
-                else:
+                elif not SPACES_ZERO_GPU:
                     raise ValueError(
                         "No OCR object provided and 'paddle_ocr' is not initialised."
                     )
@@ -8769,7 +9001,8 @@ class CustomImageAnalyzerEngine:
                 else:
                     image_np = np.array(paddle_input_image)
 
-                paddle_results = ocr.predict(image_np)
+                # paddle_results = ocr.predict(image_np)
+                paddle_results = paddle_predict(image_np)
                 # PaddleOCR processed the prepared image (not a file-path open)
                 paddle_processed_original = False
 
@@ -8801,13 +9034,15 @@ class CustomImageAnalyzerEngine:
                     image_np = np.array(paddle_input_image)
                     if len(image_np.shape) == 2:
                         image_np = np.stack([image_np] * 3, axis=-1)
-                    paddle_results = ocr.predict(image_np)
+                    # paddle_results = ocr.predict(image_np)
+                    paddle_results = paddle_predict(image_np)
                     paddle_processed_original = False
                     paddle_processed_image = paddle_input_image.copy()
                 else:
                     # Use PaddleOCR's file-path loading (original behaviour).
                     try:
-                        paddle_results = ocr.predict(image_path)
+                        # paddle_results = ocr.predict(image_path)
+                        paddle_results = paddle_predict(image_path)
                     except Exception as ocr_path_exc:
                         # PaddleOCR's file-path path can hit OpenCV decode issues on
                         # specific pages. Retry using the already-loaded PIL image
@@ -8823,7 +9058,7 @@ class CustomImageAnalyzerEngine:
                         image_np = np.array(paddle_input_image)
                         if len(image_np.shape) == 2:
                             image_np = np.stack([image_np] * 3, axis=-1)
-                        paddle_results = ocr.predict(image_np)
+                        paddle_results = paddle_predict(image_np)
                     # PaddleOCR processed the original image from file path
                     paddle_processed_original = True
                     # Store the exact image that PaddleOCR processed (from file path)
@@ -8846,7 +9081,8 @@ class CustomImageAnalyzerEngine:
                         )
 
                     os.makedirs(paddle_viz_folder, exist_ok=True)
-                    res.save_to_img(paddle_viz_folder)
+                    if hasattr(res, "save_to_img"):
+                        res.save_to_img(paddle_viz_folder)
 
             # If we prepared/resized the page before running PaddleOCR, ensure
             # each result dict reports the correct coordinate space size.
@@ -9249,6 +9485,11 @@ class CustomImageAnalyzerEngine:
                 width=ocr_result["width"][i],
                 height=ocr_result["height"][i],
                 conf=round(float(ocr_result["conf"][i]), 0),
+                line=(
+                    ocr_result.get("line", [None] * len(ocr_result["text"]))[i]
+                    if isinstance(ocr_result, dict)
+                    else None
+                ),
                 model=get_model_name(i),
             )
             for i in valid_indices
@@ -12994,11 +13235,16 @@ def combine_ocr_results(
     if not ocr_results:
         return {"page": page, "results": []}, {"page": page, "results": {}}
 
+    mode = (reading_order_mode or LOCAL_OCR_READING_ORDER).strip().lower()
+    if mode == "paddle_native":
+        # Force Paddle's native textline boxes to be treated as final line groups.
+        preserve_line_boxes = True
+
     lines, _, _ = build_line_groups(
         ocr_results,
-        reading_order_mode=reading_order_mode or LOCAL_OCR_READING_ORDER,
+        reading_order_mode=mode,
         preserve_line_boxes=preserve_line_boxes,
-        y_threshold=y_threshold if reading_order_mode == "legacy" else None,
+        y_threshold=y_threshold if mode == "legacy" else None,
     )
 
     page_line_level_ocr_results = list()

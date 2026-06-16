@@ -111,6 +111,15 @@ def test_build_env_values_headless():
     assert values["COGNITO_AUTH"] == "False"
     assert values["ECS_EXPRESS_USE_PUBLIC_SUBNETS"] == "True"
     assert values["PRIVATE_SUBNETS_TO_USE"] == ""
+    assert values["S3_LOG_CONFIG_BUCKET_NAME"] == "headless-redaction-s3-logs"
+    assert values["S3_OUTPUT_BUCKET_NAME"] == "headless-redaction-s3-output"
+
+
+def test_validate_env_values_rejects_bare_s3_bucket_names():
+    values = inst.build_env_values(_headless_answers())
+    values["S3_LOG_CONFIG_BUCKET_NAME"] = "s3-logs"
+    errors = inst.validate_env_values(values)
+    assert any("S3_LOG_CONFIG_BUCKET_NAME" in e for e in errors)
 
 
 def test_headless_profile_uses_public_subnets_only():
@@ -153,9 +162,14 @@ def test_profile_allows_headless_add_on():
     assert inst.profile_allows_headless_add_on(custom) is False
 
 
+def test_validate_install_answers_skips_cognito_prefix_for_headless():
+    values = inst.build_env_values(_headless_answers())
+    values["COGNITO_USER_POOL_DOMAIN_PREFIX"] = ""
+    assert inst.validate_env_values(values) == []
+
+
 def test_validate_headless_rejects_pi():
     values = inst.build_env_values(_headless_answers())
-    values["ENABLE_PI_AGENT_ECS_SERVICE"] = "True"
     values["ENABLE_ECS_SERVICE_CONNECT"] = "True"
     errors = inst.validate_env_values(values)
     assert any("HEADLESS" in e for e in errors)
@@ -418,6 +432,13 @@ def test_validate_pi_host_requires_header():
     values = inst.build_env_values(answers)
     errors = inst.validate_env_values(values)
     assert any("PI_ALB_HOST_HEADER" in e for e in errors)
+
+
+def test_validate_pi_express_skips_alb_routing():
+    answers = _demo_answers()
+    answers.enable_pi_express = True
+    values = inst.build_env_values(answers)
+    assert inst.validate_env_values(values) == []
 
 
 def test_build_pi_agent_env_values():
@@ -839,3 +860,15 @@ def test_apply_post_deploy_fixup_express_syncs_cognito_secret_not_alb(monkeypatc
     assert secret_fixup_calls
     assert secret_fixup_calls[0]["main_service_name"] == "Demo-Redaction-ECSService"
     assert secret_fixup_calls[0]["cluster_name"] == "Demo-Redaction-Cluster"
+
+
+def test_jsii_import_failure_hint_detects_json_decode_error():
+    hint = inst._jsii_import_failure_hint(
+        "json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+    )
+    assert "JSII Node.js helper" in hint
+    assert "node --version" in hint
+
+
+def test_jsii_import_failure_hint_empty_for_other_errors():
+    assert inst._jsii_import_failure_hint("ModuleNotFoundError: aws_cdk") == ""

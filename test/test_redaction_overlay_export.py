@@ -8,6 +8,9 @@ os.environ.setdefault("PYTHONUTF8", "1")
 
 import numpy as np
 import pandas as pd
+import pytest
+
+pytest.importorskip("pikepdf")
 
 from tools.file_redaction import (
     add_redaction_label_legend,

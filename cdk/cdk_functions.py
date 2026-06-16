@@ -775,6 +775,21 @@ def check_s3_bucket_exists(
               For this example, let's return the boolean and the name.
     """
     s3_client = boto3.client("s3")
+
+    def _bucket_listed_in_account() -> bool:
+        token = None
+        while True:
+            kwargs: Dict[str, Any] = {}
+            if token:
+                kwargs["ContinuationToken"] = token
+            response = s3_client.list_buckets(**kwargs)
+            for entry in response.get("Buckets", []):
+                if entry.get("Name") == bucket_name:
+                    return True
+            token = response.get("NextContinuationToken")
+            if not token:
+                return False
+
     try:
         # Use head_bucket to check for existence and access
         s3_client.head_bucket(Bucket=bucket_name)
@@ -786,19 +801,21 @@ def check_s3_bucket_exists(
         # '404' means the bucket does not exist.
         # '403' means the bucket exists but you don't have permission.
         error_code = e.response["Error"]["Code"]
-        if error_code == "404":
+        if error_code in ("404", "NoSuchBucket", "NotFound"):
             print(f"Bucket '{bucket_name}' does not exist.")
             return False, None
-        elif error_code == "403":
-            # The bucket exists, but you can't access it.
-            # Depending on your requirements, this might be treated as "exists"
-            # or "not accessible for our purpose". For checking existence,
-            # we'll say it exists here, but note the permission issue.
-            # NOTE - when I tested this, it was returning 403 even for buckets that don't exist. So I will return False instead
+        if error_code in ("403", "AccessDenied"):
+            if _bucket_listed_in_account():
+                print(
+                    f"Bucket '{bucket_name}' exists in this account "
+                    "(head_bucket denied; confirmed via list_buckets)."
+                )
+                return True, bucket_name
             print(
-                f"Bucket '{bucket_name}' returned 403, which indicates it may exist but is not accessible due to permissions, or that it doesn't exist. Returning False for existence just in case."
+                f"Bucket '{bucket_name}' is not visible in this account "
+                f"(head_bucket returned {error_code})."
             )
-            return False, bucket_name  # It exists, even if not accessible
+            return False, None
         else:
             # For other errors, it's better to raise the exception
             # to indicate something unexpected happened.

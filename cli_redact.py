@@ -1148,8 +1148,9 @@ def main(direct_mode_args={}):
     parser = build_cli_argument_parser()
     # Parse arguments - either from command line or direct mode
     if direct_mode_args:
-        # Use direct mode arguments
-        args = argparse.Namespace(**direct_mode_args)
+        # Merge CLI defaults so partial direct-mode dicts (app.py, Lambda) stay valid.
+        merged_args = {**get_cli_default_args_dict(), **direct_mode_args}
+        args = argparse.Namespace(**merged_args)
     else:
         # Parse command line arguments
         args = parser.parse_args()

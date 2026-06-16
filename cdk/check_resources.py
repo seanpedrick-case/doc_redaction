@@ -467,52 +467,59 @@ def check_and_set_context():
                     "SecurityGroups"
                 ][0]
 
-    # Cognito User Pool (by name)
-    user_pool_name = COGNITO_USER_POOL_NAME
-    exists, user_pool_id, _ = check_for_existing_user_pool(user_pool_name)
-    context_data[f"exists:{user_pool_name}"] = exists
-    if exists:
-        context_data[f"id:{user_pool_name}"] = user_pool_id
+    # Cognito (web login only; headless batch mode has no Gradio/ALB ingress)
+    if ENABLE_HEADLESS_DEPLOYMENT != "True":
+        user_pool_name = COGNITO_USER_POOL_NAME
+        exists, user_pool_id, _ = check_for_existing_user_pool(user_pool_name)
+        context_data[f"exists:{user_pool_name}"] = exists
+        if exists:
+            context_data[f"id:{user_pool_name}"] = user_pool_id
 
-    # Cognito User Pool Client (by name and pool ID) - requires User Pool ID from check
-    if user_pool_id:
-        user_pool_id_for_client_check = user_pool_id  # context_data.get(f"id:{user_pool_name}") # Use ID from context
-        user_pool_client_name = COGNITO_USER_POOL_CLIENT_NAME
-        if user_pool_id_for_client_check:
-            exists, client_id, _ = check_for_existing_user_pool_client(
-                user_pool_client_name, user_pool_id_for_client_check
+        # Cognito User Pool Client (by name and pool ID) - requires User Pool ID from check
+        if user_pool_id:
+            user_pool_id_for_client_check = user_pool_id  # context_data.get(f"id:{user_pool_name}") # Use ID from context
+            user_pool_client_name = COGNITO_USER_POOL_CLIENT_NAME
+            if user_pool_id_for_client_check:
+                exists, client_id, _ = check_for_existing_user_pool_client(
+                    user_pool_client_name, user_pool_id_for_client_check
+                )
+                context_data[f"exists:{user_pool_client_name}"] = exists
+                if exists:
+                    context_data[f"id:{user_pool_client_name}"] = client_id
+                else:
+                    print(
+                        f"User pool '{user_pool_name}' exists but app client "
+                        f"'{user_pool_client_name}' does not; CDK will create a new client."
+                    )
+
+        # Secrets Manager Secret (by name)
+        secret_name = COGNITO_USER_POOL_CLIENT_SECRET_NAME
+        exists, secret_response = check_for_secret(secret_name)
+        context_data[f"exists:{secret_name}"] = exists
+        if exists:
+            secret_arn = (
+                secret_response.get("ARN")
+                if isinstance(secret_response, dict)
+                else None
             )
-            context_data[f"exists:{user_pool_client_name}"] = exists
-            if exists:
-                context_data[f"id:{user_pool_client_name}"] = client_id
+            if secret_arn:
+                context_data[f"arn:{secret_name}"] = secret_arn
+                print("Cognito secret ARN recorded for IAM grants.")
+                secret_kms_key_arn = get_secret_kms_key_arn(
+                    secret_name, region_name=AWS_REGION
+                )
+                if secret_kms_key_arn:
+                    context_data[f"kms_key_arn:{secret_name}"] = secret_kms_key_arn
+                    print("Cognito secret KMS key recorded for execution role decrypt.")
             else:
                 print(
-                    f"User pool '{user_pool_name}' exists but app client "
-                    f"'{user_pool_client_name}' does not; CDK will create a new client."
+                    "Warning: Cognito secret exists but ARN was not returned; "
+                    "CDK will use a name-based ARN wildcard in IAM policies."
                 )
-
-    # Secrets Manager Secret (by name)
-    secret_name = COGNITO_USER_POOL_CLIENT_SECRET_NAME
-    exists, secret_response = check_for_secret(secret_name)
-    context_data[f"exists:{secret_name}"] = exists
-    if exists:
-        secret_arn = (
-            secret_response.get("ARN") if isinstance(secret_response, dict) else None
+    else:
+        print(
+            "ENABLE_HEADLESS_DEPLOYMENT=True: skipping Cognito user pool and secret pre-checks."
         )
-        if secret_arn:
-            context_data[f"arn:{secret_name}"] = secret_arn
-            print("Cognito secret ARN recorded for IAM grants.")
-            secret_kms_key_arn = get_secret_kms_key_arn(
-                secret_name, region_name=AWS_REGION
-            )
-            if secret_kms_key_arn:
-                context_data[f"kms_key_arn:{secret_name}"] = secret_kms_key_arn
-                print("Cognito secret KMS key recorded for execution role decrypt.")
-        else:
-            print(
-                "Warning: Cognito secret exists but ARN was not returned; "
-                "CDK will use a name-based ARN wildcard in IAM policies."
-            )
 
     # Service Connect client security groups (by name in VPC)
     if ENABLE_ECS_SERVICE_CONNECT == "True":

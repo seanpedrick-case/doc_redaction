@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("pikepdf")
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 _PI_SRC = REPO_ROOT / "agent-redact" / "pi"
 if str(_PI_SRC) not in sys.path:

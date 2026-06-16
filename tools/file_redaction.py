@@ -3792,11 +3792,43 @@ def _choose_and_run_redactor_impl(
         all_image_annotations_df = convert_annotation_data_to_dataframe(
             annotations_all_pages
         )
-        _pages_pdf_pts = (
-            set(pages_with_text_extraction_1based)
-            if pages_with_text_extraction_1based
-            else None
-        )
+        # Coordinate-space note:
+        # - In selectable-text mode, annotation boxes can be produced in PDF points (when we used
+        #   placeholder images / no real rendered PNGs) *or* in image pixels (when real images exist
+        #   and redact_page_with_pymupdf converted pikepdf rects to image coords for review overlay).
+        # - When CUSTOM_VLM_* is enabled, we often prepare page images even for selectable-text runs,
+        #   which makes text-derived boxes become pixel-based. Dividing those by MediaBox (PDF points)
+        #   inflates and shifts them (the exact symptom reported).
+        #
+        # For annotations, prefer image dimensions by default, but force mediabox division only for
+        # pages that still use placeholder images (i.e. annotations in PDF points).
+        _pages_pdf_pts = None
+        if text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION:
+            try:
+                if (
+                    isinstance(page_sizes_df, pd.DataFrame)
+                    and not page_sizes_df.empty
+                    and "page" in page_sizes_df.columns
+                    and "image_path" in page_sizes_df.columns
+                ):
+                    _pdf_pages = set()
+                    for _, _r in page_sizes_df[["page", "image_path"]].iterrows():
+                        try:
+                            p = int(float(_r["page"]))
+                        except Exception:
+                            continue
+                        imgp = str(_r.get("image_path") or "")
+                        if imgp.startswith("placeholder_image_"):
+                            _pdf_pages.add(p)
+                    _pages_pdf_pts = _pdf_pages if _pdf_pages else None
+            except Exception:
+                _pages_pdf_pts = None
+        else:
+            _pages_pdf_pts = (
+                set(pages_with_text_extraction_1based)
+                if pages_with_text_extraction_1based
+                else None
+            )
         all_image_annotations_df = divide_coordinates_by_page_sizes(
             all_image_annotations_df,
             page_sizes_df,
@@ -3804,10 +3836,9 @@ def _choose_and_run_redactor_impl(
             xmax="xmax",
             ymin="ymin",
             ymax="ymax",
-            coordinates_in_pdf_points=(
-                text_extraction_method == SELECTABLE_TEXT_EXTRACT_OPTION
-                or ocr_results_use_pdf_points is True
-            ),
+            # IMPORTANT: annotation box coords are pixel-based whenever real page images exist,
+            # even in selectable-text runs. So don't force mediabox division globally here.
+            coordinates_in_pdf_points=(ocr_results_use_pdf_points is True),
             pages_in_pdf_points=_pages_pdf_pts,
         )
         annotations_all_pages_divide = create_annotation_dicts_from_annotation_df(
@@ -4478,9 +4509,42 @@ def prepare_custom_image_recogniser_result_annotation_box(
     pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2 = 0, 0, 0, 0  # Initialize defaults
 
     if image:
-        pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2 = (
-            convert_image_coords_to_pymupdf(page, annot, image)
-        )
+        # When "Local text" extraction is used but CUSTOM_VLM_* is enabled, we prepare
+        # images for VLM detection. That means we can receive a *mixture* of boxes:
+        # - text-based boxes already in PDF coordinates (points)
+        # - VLM/recognizer boxes in image pixel coordinates
+        #
+        # If we always scale via convert_image_coords_to_pymupdf, PDF-point boxes get
+        # incorrectly scaled (shifted and oversized). Detect "already PDF" boxes by
+        # checking whether they fit in the page's PDF coordinate space.
+        try:
+            mb_w = float(page.mediabox.width)
+            mb_h = float(page.mediabox.height)
+            a_x2 = float(annot.left + annot.width)
+            a_y2 = float(annot.top + annot.height)
+            a_x1 = float(annot.left)
+            a_y1 = float(annot.top)
+            # Tolerate minor float/int noise. If bbox is plausibly within mediabox,
+            # assume it's already in PDF points (CropBox-local in our pipeline).
+            _eps = 2.0
+            looks_like_pdf_points = (
+                a_x1 >= -_eps
+                and a_y1 >= -_eps
+                and a_x2 <= (mb_w + _eps)
+                and a_y2 <= (mb_h + _eps)
+            )
+        except Exception:
+            looks_like_pdf_points = False
+
+        if looks_like_pdf_points:
+            pymupdf_x1 = float(annot.left)
+            pymupdf_y1 = float(annot.top)
+            pymupdf_x2 = float(annot.left + annot.width)
+            pymupdf_y2 = float(annot.top + annot.height)
+        else:
+            pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2 = (
+                convert_image_coords_to_pymupdf(page, annot, image)
+            )
 
     else:
         # --- Calculate coordinates when no image is present ---

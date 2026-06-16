@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+pytest.importorskip("scipy")
+
 from tools.file_conversion import convert_annotation_data_to_dataframe
 
 

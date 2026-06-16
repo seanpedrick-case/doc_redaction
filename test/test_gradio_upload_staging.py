@@ -6,6 +6,10 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import pytest
+
+pytest.importorskip("regex")
+
 from tools.simplified_api import (
     _is_gradio_ephemeral_upload_path,
     preview_boxes_api,

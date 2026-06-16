@@ -1002,12 +1002,28 @@ class CdkStack(Stack):
             build_ecs_task_role_kms_policy(shared_kms_key_arn=shared_kms_key_arn),
             indent=4,
         )
-        execution_role_kms_policy = json.dumps(
-            build_ecs_execution_role_kms_policy(
-                secret_kms_key_arn=secret_kms_key_arn,
-            ),
-            indent=4,
-        )
+        if enable_headless:
+            execution_role_kms_policy = json.dumps(
+                {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Sid": "STSCallerIdentity",
+                            "Effect": "Allow",
+                            "Action": ["sts:GetCallerIdentity"],
+                            "Resource": "*",
+                        }
+                    ],
+                },
+                indent=4,
+            )
+        else:
+            execution_role_kms_policy = json.dumps(
+                build_ecs_execution_role_kms_policy(
+                    secret_kms_key_arn=secret_kms_key_arn,
+                ),
+                indent=4,
+            )
 
         try:
             codebuild_role_name = CODEBUILD_ROLE_NAME
@@ -1694,180 +1710,196 @@ class CdkStack(Stack):
             except Exception as e:
                 raise Exception("Could not handle application load balancer due to:", e)
 
-        # --- Cognito User Pool ---
-        try:
-            if get_context_bool(f"exists:{COGNITO_USER_POOL_NAME}"):
-                # Lookup by ID from context
-                user_pool_id = get_context_str(f"id:{COGNITO_USER_POOL_NAME}")
-                if not user_pool_id:
-                    raise ValueError(
-                        f"Context value 'id:{COGNITO_USER_POOL_NAME}' is required if User Pool exists."
-                    )
-                user_pool = cognito.UserPool.from_user_pool_id(
-                    self, "UserPool", user_pool_id=user_pool_id
-                )
-                print(f"Using existing user pool {user_pool_id}.")
-            else:
-                user_pool = cognito.UserPool(
-                    self,
-                    "UserPool",
-                    user_pool_name=COGNITO_USER_POOL_NAME,
-                    mfa=cognito.Mfa.OFF,  # Adjust as needed
-                    sign_in_aliases=cognito.SignInAliases(email=True),
-                    deletion_protection=resource_delete_protection,
-                    removal_policy=resource_removal_policy,
-                )  # Adjust as needed
-                print(f"Created new user pool {user_pool.user_pool_id}.")
-
-            # HTTPS ALB (ACM cert or Express Mode) needs oauth2/idpresponse callback URLs.
-            if ACM_SSL_CERTIFICATE_ARN or use_express_ingress:
-                redirect_uris = [
-                    COGNITO_REDIRECTION_URL,
-                    COGNITO_REDIRECTION_URL + "/oauth2/idpresponse",
-                ]
-            else:
-                redirect_uris = [COGNITO_REDIRECTION_URL]
-
-            user_pool_client_name = COGNITO_USER_POOL_CLIENT_NAME
-            if get_context_bool(f"exists:{user_pool_client_name}"):
-                # Lookup by ID from context (requires User Pool object)
-                user_pool_client_id = get_context_str(f"id:{user_pool_client_name}")
-                if not user_pool_client_id:
-                    raise ValueError(
-                        f"Context value 'id:{user_pool_client_name}' is required if User Pool Client exists."
-                    )
-                user_pool_client = cognito.UserPoolClient.from_user_pool_client_id(
-                    self, "UserPoolClient", user_pool_client_id=user_pool_client_id
-                )
-                print(f"Using existing user pool client {user_pool_client_id}.")
-            else:
-                user_pool_client = cognito.UserPoolClient(
-                    self,
-                    "UserPoolClient",
-                    auth_flows=cognito.AuthFlow(
-                        user_srp=True, user_password=True
-                    ),  # Example: enable SRP for secure sign-in
-                    user_pool=user_pool,
-                    generate_secret=True,
-                    user_pool_client_name=user_pool_client_name,
-                    supported_identity_providers=[
-                        cognito.UserPoolClientIdentityProvider.COGNITO
-                    ],
-                    o_auth=cognito.OAuthSettings(
-                        flows=cognito.OAuthFlows(authorization_code_grant=True),
-                        scopes=[
-                            cognito.OAuthScope.OPENID,
-                            cognito.OAuthScope.EMAIL,
-                            cognito.OAuthScope.PROFILE,
-                        ],
-                        callback_urls=redirect_uris,
-                    ),
-                    refresh_token_validity=Duration.minutes(
-                        COGNITO_REFRESH_TOKEN_VALIDITY
-                    ),
-                    id_token_validity=Duration.minutes(COGNITO_ID_TOKEN_VALIDITY),
-                    access_token_validity=Duration.minutes(
-                        COGNITO_ACCESS_TOKEN_VALIDITY
-                    ),
-                )
-
-            CfnOutput(
-                self, "CognitoAppClientId", value=user_pool_client.user_pool_client_id
-            )
-
+        # --- Cognito User Pool (web login; skipped for headless batch-only) ---
+        user_pool = None
+        user_pool_client = None
+        user_pool_domain = None
+        secret = None
+        if enable_headless:
             print(
-                f"Created new user pool client {user_pool_client.user_pool_client_id}."
+                "ENABLE_HEADLESS_DEPLOYMENT=True: skipping Cognito user pool, "
+                "hosted UI domain, and client secret (no web login for batch tasks)."
             )
-
-            # Add a domain to the User Pool (crucial for ALB integration)
-            user_pool_domain = user_pool.add_domain(
-                "UserPoolDomain",
-                cognito_domain=cognito.CognitoDomainOptions(
-                    domain_prefix=COGNITO_USER_POOL_DOMAIN_PREFIX
-                ),
-            )
-
-            # Apply removal_policy to the created UserPoolDomain construct
-            user_pool_domain.apply_removal_policy(policy=resource_removal_policy)
-
-            CfnOutput(
-                self, "CognitoUserPoolLoginUrl", value=user_pool_domain.base_url()
-            )
-
-        except Exception as e:
-            raise Exception("Could not handle Cognito resources due to:", e)
-
-        # --- Secrets Manager Secret ---
-        try:
-            secret_name = COGNITO_USER_POOL_CLIENT_SECRET_NAME
-            if get_context_bool(f"exists:{secret_name}"):
-                secret_arn = get_context_str(f"arn:{secret_name}")
-                if secret_arn:
-                    secret = secretsmanager.Secret.from_secret_complete_arn(
-                        self,
-                        "CognitoSecret",
-                        secret_complete_arn=secret_arn,
+        else:
+            try:
+                if get_context_bool(f"exists:{COGNITO_USER_POOL_NAME}"):
+                    # Lookup by ID from context
+                    user_pool_id = get_context_str(f"id:{COGNITO_USER_POOL_NAME}")
+                    if not user_pool_id:
+                        raise ValueError(
+                            f"Context value 'id:{COGNITO_USER_POOL_NAME}' is required if User Pool exists."
+                        )
+                    user_pool = cognito.UserPool.from_user_pool_id(
+                        self, "UserPool", user_pool_id=user_pool_id
                     )
-                    print("Using existing Secret (ARN from precheck context).")
+                    print(f"Using existing user pool {user_pool_id}.")
                 else:
-                    secret = secretsmanager.Secret.from_secret_name_v2(
-                        self, "CognitoSecret", secret_name=secret_name
-                    )
-                    print(
-                        "Using existing Secret by name (IAM grants use ARN wildcard "
-                        "suffix; re-run precheck to pin the full ARN)."
-                    )
-            else:
-                if USE_CUSTOM_KMS_KEY == "1" and isinstance(kms_key, kms.Key):
-                    secret = secretsmanager.Secret(
+                    user_pool = cognito.UserPool(
                         self,
-                        "CognitoSecret",  # Logical ID
-                        secret_name=secret_name,  # Explicit resource name
-                        secret_object_value={
-                            "REDACTION_USER_POOL_ID": SecretValue.unsafe_plain_text(
-                                user_pool.user_pool_id
-                            ),  # Use the CDK attribute
-                            "REDACTION_CLIENT_ID": SecretValue.unsafe_plain_text(
-                                user_pool_client.user_pool_client_id
-                            ),  # Use the CDK attribute
-                            "REDACTION_CLIENT_SECRET": user_pool_client.user_pool_client_secret,  # Use the CDK attribute
-                        },
-                        encryption_key=kms_key,
+                        "UserPool",
+                        user_pool_name=COGNITO_USER_POOL_NAME,
+                        mfa=cognito.Mfa.OFF,  # Adjust as needed
+                        sign_in_aliases=cognito.SignInAliases(email=True),
+                        deletion_protection=resource_delete_protection,
                         removal_policy=resource_removal_policy,
-                    )
+                    )  # Adjust as needed
+                    print(f"Created new user pool {user_pool.user_pool_id}.")
+
+                # HTTPS ALB (ACM cert or Express Mode) needs oauth2/idpresponse callback URLs.
+                if ACM_SSL_CERTIFICATE_ARN or use_express_ingress:
+                    redirect_uris = [
+                        COGNITO_REDIRECTION_URL,
+                        COGNITO_REDIRECTION_URL + "/oauth2/idpresponse",
+                    ]
                 else:
-                    secret = secretsmanager.Secret(
-                        self,
-                        "CognitoSecret",  # Logical ID
-                        secret_name=secret_name,  # Explicit resource name
-                        secret_object_value={
-                            "REDACTION_USER_POOL_ID": SecretValue.unsafe_plain_text(
-                                user_pool.user_pool_id
-                            ),  # Use the CDK attribute
-                            "REDACTION_CLIENT_ID": SecretValue.unsafe_plain_text(
-                                user_pool_client.user_pool_client_id
-                            ),  # Use the CDK attribute
-                            "REDACTION_CLIENT_SECRET": user_pool_client.user_pool_client_secret,  # Use the CDK attribute
-                        },
-                        removal_policy=resource_removal_policy,
+                    redirect_uris = [COGNITO_REDIRECTION_URL]
+
+                user_pool_client_name = COGNITO_USER_POOL_CLIENT_NAME
+                if get_context_bool(f"exists:{user_pool_client_name}"):
+                    # Lookup by ID from context (requires User Pool object)
+                    user_pool_client_id = get_context_str(f"id:{user_pool_client_name}")
+                    if not user_pool_client_id:
+                        raise ValueError(
+                            f"Context value 'id:{user_pool_client_name}' is required if User Pool Client exists."
+                        )
+                    user_pool_client = cognito.UserPoolClient.from_user_pool_client_id(
+                        self, "UserPoolClient", user_pool_client_id=user_pool_client_id
                     )
+                    print(f"Using existing user pool client {user_pool_client_id}.")
+                else:
+                    user_pool_client = cognito.UserPoolClient(
+                        self,
+                        "UserPoolClient",
+                        auth_flows=cognito.AuthFlow(
+                            user_srp=True, user_password=True
+                        ),  # Example: enable SRP for secure sign-in
+                        user_pool=user_pool,
+                        generate_secret=True,
+                        user_pool_client_name=user_pool_client_name,
+                        supported_identity_providers=[
+                            cognito.UserPoolClientIdentityProvider.COGNITO
+                        ],
+                        o_auth=cognito.OAuthSettings(
+                            flows=cognito.OAuthFlows(authorization_code_grant=True),
+                            scopes=[
+                                cognito.OAuthScope.OPENID,
+                                cognito.OAuthScope.EMAIL,
+                                cognito.OAuthScope.PROFILE,
+                            ],
+                            callback_urls=redirect_uris,
+                        ),
+                        refresh_token_validity=Duration.minutes(
+                            COGNITO_REFRESH_TOKEN_VALIDITY
+                        ),
+                        id_token_validity=Duration.minutes(COGNITO_ID_TOKEN_VALIDITY),
+                        access_token_validity=Duration.minutes(
+                            COGNITO_ACCESS_TOKEN_VALIDITY
+                        ),
+                    )
+
+                CfnOutput(
+                    self,
+                    "CognitoAppClientId",
+                    value=user_pool_client.user_pool_client_id,
+                )
 
                 print(
-                    "Created new secret in Secrets Manager for Cognito user pool and related details."
+                    f"Created new user pool client {user_pool_client.user_pool_client_id}."
                 )
 
-        except Exception as e:
-            raise Exception("Could not handle Secrets Manager secret due to:", e)
+                # Add a domain to the User Pool (crucial for ALB integration)
+                user_pool_domain = user_pool.add_domain(
+                    "UserPoolDomain",
+                    cognito_domain=cognito.CognitoDomainOptions(
+                        domain_prefix=COGNITO_USER_POOL_DOMAIN_PREFIX
+                    ),
+                )
+
+                # Apply removal_policy to the created UserPoolDomain construct
+                user_pool_domain.apply_removal_policy(policy=resource_removal_policy)
+
+                CfnOutput(
+                    self, "CognitoUserPoolLoginUrl", value=user_pool_domain.base_url()
+                )
+
+            except Exception as e:
+                raise Exception("Could not handle Cognito resources due to:", e)
+
+            # --- Secrets Manager Secret ---
+            try:
+                secret_name = COGNITO_USER_POOL_CLIENT_SECRET_NAME
+                if get_context_bool(f"exists:{secret_name}"):
+                    secret_arn = get_context_str(f"arn:{secret_name}")
+                    if secret_arn:
+                        secret = secretsmanager.Secret.from_secret_complete_arn(
+                            self,
+                            "CognitoSecret",
+                            secret_complete_arn=secret_arn,
+                        )
+                        print("Using existing Secret (ARN from precheck context).")
+                    else:
+                        secret = secretsmanager.Secret.from_secret_name_v2(
+                            self, "CognitoSecret", secret_name=secret_name
+                        )
+                        print(
+                            "Using existing Secret by name (IAM grants use ARN wildcard "
+                            "suffix; re-run precheck to pin the full ARN)."
+                        )
+                else:
+                    if USE_CUSTOM_KMS_KEY == "1" and isinstance(kms_key, kms.Key):
+                        secret = secretsmanager.Secret(
+                            self,
+                            "CognitoSecret",  # Logical ID
+                            secret_name=secret_name,  # Explicit resource name
+                            secret_object_value={
+                                "REDACTION_USER_POOL_ID": SecretValue.unsafe_plain_text(
+                                    user_pool.user_pool_id
+                                ),  # Use the CDK attribute
+                                "REDACTION_CLIENT_ID": SecretValue.unsafe_plain_text(
+                                    user_pool_client.user_pool_client_id
+                                ),  # Use the CDK attribute
+                                "REDACTION_CLIENT_SECRET": user_pool_client.user_pool_client_secret,  # Use the CDK attribute
+                            },
+                            encryption_key=kms_key,
+                            removal_policy=resource_removal_policy,
+                        )
+                    else:
+                        secret = secretsmanager.Secret(
+                            self,
+                            "CognitoSecret",  # Logical ID
+                            secret_name=secret_name,  # Explicit resource name
+                            secret_object_value={
+                                "REDACTION_USER_POOL_ID": SecretValue.unsafe_plain_text(
+                                    user_pool.user_pool_id
+                                ),  # Use the CDK attribute
+                                "REDACTION_CLIENT_ID": SecretValue.unsafe_plain_text(
+                                    user_pool_client.user_pool_client_id
+                                ),  # Use the CDK attribute
+                                "REDACTION_CLIENT_SECRET": user_pool_client.user_pool_client_secret,  # Use the CDK attribute
+                            },
+                            removal_policy=resource_removal_policy,
+                        )
+
+                    print(
+                        "Created new secret in Secrets Manager for Cognito user pool and related details."
+                    )
+
+            except Exception as e:
+                raise Exception("Could not handle Secrets Manager secret due to:", e)
+
+            try:
+                secret.grant_read(task_role)
+                secret.grant_read(execution_role)
+            except Exception as e:
+                raise Exception("Could not grant access to Secrets Manager due to:", e)
 
         try:
-            secret.grant_read(task_role)
-            secret.grant_read(execution_role)
             # ECS environmentFiles (app_config.env) are fetched by the execution role at task start.
             bucket.grant_read(execution_role, APP_CONFIG_ENV_BASENAME)
             # KMS: task role uses shared S3 CMK via build_ecs_task_role_kms_policy;
             # execution role uses the secret's CMK via build_ecs_execution_role_kms_policy.
         except Exception as e:
-            raise Exception("Could not grant access to Secrets Manager due to:", e)
+            raise Exception("Could not grant bucket read to execution role due to:", e)
 
         # --- ECS Cluster (shared by legacy Fargate and Express paths) ---
         try:
@@ -2331,18 +2363,22 @@ class CdkStack(Stack):
 
                             env_files.append(env_file)
 
-                    container = fargate_task_definition.add_container(
-                        container_def_params["name"],
-                        image=ecs.ContainerImage.from_registry(
+                    container_kwargs: Dict[str, Any] = {
+                        "image": ecs.ContainerImage.from_registry(
                             container_def_params["image"]
                         ),
-                        logging=ecs.LogDriver.aws_logs(
+                        "logging": ecs.LogDriver.aws_logs(
                             stream_prefix=container_def_params["logConfiguration"][
                                 "options"
                             ]["awslogs-stream-prefix"],
                             log_group=cdk_managed_log_group,
                         ),
-                        secrets={
+                        "environment_files": env_files if env_files else None,
+                        "readonly_root_filesystem": read_only_file_system,
+                        "user": container_def_params.get("user", "1000"),
+                    }
+                    if not enable_headless:
+                        container_kwargs["secrets"] = {
                             "AWS_USER_POOL_ID": ecs.Secret.from_secrets_manager(
                                 secret, "REDACTION_USER_POOL_ID"
                             ),
@@ -2352,10 +2388,10 @@ class CdkStack(Stack):
                             "AWS_CLIENT_SECRET": ecs.Secret.from_secrets_manager(
                                 secret, "REDACTION_CLIENT_SECRET"
                             ),
-                        },
-                        environment_files=env_files if env_files else None,
-                        readonly_root_filesystem=read_only_file_system,
-                        user=container_def_params.get("user", "1000"),
+                        }
+                    container = fargate_task_definition.add_container(
+                        container_def_params["name"],
+                        **container_kwargs,
                     )
 
                     for port_mapping in container_def_params["portMappings"]:
@@ -2901,7 +2937,8 @@ class CdkStack(Stack):
                 ),
             )
 
-        CfnOutput(self, "CognitoPoolId", value=user_pool.user_pool_id)
+        if not enable_headless and user_pool is not None:
+            CfnOutput(self, "CognitoPoolId", value=user_pool.user_pool_id)
         # Add other outputs if needed
 
         CfnOutput(self, "ECRRepoUri", value=ecr_repo.repository_uri)
