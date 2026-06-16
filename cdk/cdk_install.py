@@ -26,7 +26,7 @@ Usage examples::
     python cdk_install.py --profile headless --vpc-name my-vpc \\
         --force-delete-stacks --yes
 
-    # Demo with Agent agent (Express) at /agent/
+    # Demo with Agent agent (Express; dedicated Pi HTTPS URL)
     python cdk_install.py --profile demo --enable-pi --yes --config-only
 
     # Headless batch (S3 → Lambda → one-shot ECS direct mode)
@@ -2371,7 +2371,9 @@ def configure_pi_options(
 
     if not answers.pi_enabled and interactive:
         if use_express:
-            label = "Deploy agent mode (second Gradio app on Express, shared ALB)?"
+            label = (
+                "Deploy agent mode (second Gradio app on Express, dedicated HTTPS URL)?"
+            )
             answers.enable_pi_express = ask_yes_no(label, default=False)
         else:
             label = "Deploy agent mode (second Gradio app on legacy Fargate + Service Connect)?"
