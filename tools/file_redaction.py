@@ -4517,6 +4517,10 @@ def prepare_custom_image_recogniser_result_annotation_box(
         # If we always scale via convert_image_coords_to_pymupdf, PDF-point boxes get
         # incorrectly scaled (shifted and oversized). Detect "already PDF" boxes by
         # checking whether they fit in the page's PDF coordinate space.
+
+        # Test on looks_like_pdf_points has been deprecated for now
+        looks_like_pdf_points = False
+
         try:
             mb_w = float(page.mediabox.width)
             mb_h = float(page.mediabox.height)
@@ -4533,6 +4537,7 @@ def prepare_custom_image_recogniser_result_annotation_box(
                 and a_x2 <= (mb_w + _eps)
                 and a_y2 <= (mb_h + _eps)
             )
+
         except Exception:
             looks_like_pdf_points = False
 
@@ -4557,6 +4562,7 @@ def prepare_custom_image_recogniser_result_annotation_box(
             rect_height = page.rect.height
             img_w = page_info.get("image_width")
             img_h = page_info.get("image_height")
+
             if (
                 img_w is not None
                 and img_h is not None
@@ -5502,7 +5508,7 @@ def redact_page_with_pymupdf(
 
             # Else should be CustomImageRecognizerResult
             elif isinstance(annot, CustomImageRecognizerResult):
-                # print("annot is a CustomImageRecognizerResult")
+
                 img_annotation_box, rect = (
                     prepare_custom_image_recogniser_result_annotation_box(
                         page, annot, image, page_sizes_df, custom_colours
