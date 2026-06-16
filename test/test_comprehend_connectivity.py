@@ -5,6 +5,8 @@ from unittest.mock import MagicMock
 import botocore.exceptions
 import pytest
 
+pytest.importorskip("regex")
+
 from tools.data_anonymise import (
     _comprehend_connectivity_error_message,
     _is_non_retryable_aws_error,

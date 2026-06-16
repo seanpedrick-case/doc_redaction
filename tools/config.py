@@ -1336,11 +1336,15 @@ CONVERT_LINE_TO_WORD_LEVEL = convert_string_to_boolean(
     get_or_create_env_var("CONVERT_LINE_TO_WORD_LEVEL", "True")
 )  # Whether to convert paddle line-level OCR results to word-level for better precision
 
-# Local OCR reading order: "column" (multi-column aware) or "legacy" (global top-left sort).
+# Local OCR reading order:
+# - "column": multi-column aware ordering + our line grouping heuristics (word->line)
+# - "legacy": global top-left sort + legacy y-threshold line grouping
+# - "paddle_native": when using Paddle OCR, preserve Paddle's native line boxes and
+#   assign line numbers directly from them (still column-aware ordering).
 LOCAL_OCR_READING_ORDER = (
-    get_or_create_env_var("LOCAL_OCR_READING_ORDER", "legacy").strip().lower()
+    get_or_create_env_var("LOCAL_OCR_READING_ORDER", "paddle_native").strip().lower()
 )
-if LOCAL_OCR_READING_ORDER not in ("column", "legacy"):
+if LOCAL_OCR_READING_ORDER not in ("column", "legacy", "paddle_native"):
     LOCAL_OCR_READING_ORDER = "column"
 
 OCR_FULL_SPAN_WIDTH_RATIO = float(

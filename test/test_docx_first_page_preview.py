@@ -1,6 +1,9 @@
 """DOCX first-page preview helpers."""
 
 import docx
+import pytest
+
+pytest.importorskip("regex")
 
 from tools.data_anonymise import (
     _accumulate_text_blocks_up_to_chars,

@@ -248,7 +248,7 @@ def should_use_column_reading_order(
     mode = (reading_order_mode or LOCAL_OCR_READING_ORDER).strip().lower()
     if mode == "legacy":
         return False
-    if mode != "column":
+    if mode not in ("column", "paddle_native"):
         return False
     return has_side_by_side_columns(
         boxes,
@@ -415,6 +415,7 @@ def assign_layout_boxes(
     page_height: float,
     full_span_width_ratio: float = OCR_FULL_SPAN_WIDTH_RATIO,
     column_gap_min_fraction: float = OCR_COLUMN_GAP_MIN_FRACTION,
+    reading_order_mode: str | None = None,
 ) -> List[_LayoutBox]:
     """Classify boxes as full-span or column and assign column indices."""
     if not boxes:
@@ -433,7 +434,11 @@ def assign_layout_boxes(
         return layout
 
     use_columns = should_use_column_reading_order(
-        boxes, page_width, page_height, full_span_width_ratio=full_span_width_ratio
+        boxes,
+        page_width,
+        page_height,
+        reading_order_mode=reading_order_mode,
+        full_span_width_ratio=full_span_width_ratio,
     )
     if not use_columns:
         for box in column_candidates:
@@ -533,6 +538,7 @@ def sort_reading_order(
     page_height: float | None = None,
     full_span_width_ratio: float = OCR_FULL_SPAN_WIDTH_RATIO,
     column_gap_min_fraction: float = OCR_COLUMN_GAP_MIN_FRACTION,
+    reading_order_mode: str | None = None,
 ) -> List[Any]:
     """
     Order boxes for human reading: full-width lines first (by top), then each text
@@ -544,7 +550,9 @@ def sort_reading_order(
     if page_width is None or page_height is None:
         page_width, page_height = infer_page_dimensions(boxes)
 
-    if not should_use_column_reading_order(boxes, page_width, page_height):
+    if not should_use_column_reading_order(
+        boxes, page_width, page_height, reading_order_mode=reading_order_mode
+    ):
         return _sort_single_column_reading_order(
             boxes, page_width, full_span_width_ratio=full_span_width_ratio
         )
@@ -555,6 +563,7 @@ def sort_reading_order(
         page_height,
         full_span_width_ratio=full_span_width_ratio,
         column_gap_min_fraction=column_gap_min_fraction,
+        reading_order_mode=reading_order_mode,
     )
 
     full_span_lbs = sorted(
@@ -819,7 +828,12 @@ def build_line_groups(
             page_height,
         )
 
-    ordered = sort_reading_order(ocr_results, page_width, page_height)
+    ordered = sort_reading_order(
+        ocr_results,
+        page_width,
+        page_height,
+        reading_order_mode=reading_order_mode,
+    )
 
     if preserve_line_boxes:
         return group_boxes_preserving_lines(ordered), page_width, page_height
@@ -859,6 +873,7 @@ def _order_line_boxes_for_reading(
         line_results,
         page_width=page_width,
         page_height=page_height,
+        reading_order_mode=reading_order_mode,
     )
 
 

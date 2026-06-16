@@ -105,14 +105,18 @@ def _three_column_page_boxes():
 
 def test_detect_three_columns():
     boxes = _three_column_page_boxes()[1:]  # exclude full-span header
-    layout = assign_layout_boxes(boxes, page_width=1.0, page_height=1.0)
+    layout = assign_layout_boxes(
+        boxes, page_width=1.0, page_height=1.0, reading_order_mode="column"
+    )
     column_indices = {lb.column_index for lb in layout if lb.zone == "column"}
     assert column_indices == {0, 1, 2}
 
 
 def test_sort_reading_order_column_major():
     boxes = _three_column_page_boxes()
-    ordered = sort_reading_order(boxes, page_width=1.0, page_height=1.0)
+    ordered = sort_reading_order(
+        boxes, page_width=1.0, page_height=1.0, reading_order_mode="column"
+    )
     texts = [b.text for b in ordered]
     assert texts[0] == "04 Lambeth 2030 banner"
     assert texts[1:4] == ["left A", "left B", "left C"]
@@ -203,7 +207,9 @@ def test_foreword_interleave_regression():
         _ocr("left third", 0.05, 0.36, width=0.17, height=0.01),
         _ocr("mid third", 0.26, 0.36, width=0.18, height=0.01),
     ]
-    ordered = sort_reading_order(boxes, page_width=1.0, page_height=1.0)
+    ordered = sort_reading_order(
+        boxes, page_width=1.0, page_height=1.0, reading_order_mode="column"
+    )
     texts = [b.text for b in ordered]
     assert texts.index("left line") < texts.index("mid line")
     # Column-major: both left-column lines precede the right column.
@@ -237,7 +243,7 @@ def test_build_line_groups_secondary_sort_column_major():
         top = 0.30 + row * 0.02
         words.append(_ocr(f"G{row}", 0.05, top, width=0.05, height=0.012))
 
-    lines, _, _ = build_line_groups(words)
+    lines, _, _ = build_line_groups(words, reading_order_mode="column")
     line_texts = [" ".join(b.text for b in ln) for ln in lines]
 
     # All L* lines must precede all R* lines (column-major)
@@ -286,7 +292,9 @@ def test_foreword_word_level_no_micro_column_fragmentation():
         for _, r in page.iterrows()
     ]
 
-    layout = assign_layout_boxes(boxes, page_width=1.0, page_height=1.0)
+    layout = assign_layout_boxes(
+        boxes, page_width=1.0, page_height=1.0, reading_order_mode="column"
+    )
     num_columns = (
         max((lb.column_index for lb in layout if lb.zone == "column"), default=0) + 1
     )

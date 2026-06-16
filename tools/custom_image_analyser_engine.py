@@ -13224,11 +13224,16 @@ def combine_ocr_results(
     if not ocr_results:
         return {"page": page, "results": []}, {"page": page, "results": {}}
 
+    mode = (reading_order_mode or LOCAL_OCR_READING_ORDER).strip().lower()
+    if mode == "paddle_native":
+        # Force Paddle's native textline boxes to be treated as final line groups.
+        preserve_line_boxes = True
+
     lines, _, _ = build_line_groups(
         ocr_results,
-        reading_order_mode=reading_order_mode or LOCAL_OCR_READING_ORDER,
+        reading_order_mode=mode,
         preserve_line_boxes=preserve_line_boxes,
-        y_threshold=y_threshold if reading_order_mode == "legacy" else None,
+        y_threshold=y_threshold if mode == "legacy" else None,
     )
 
     page_line_level_ocr_results = list()
