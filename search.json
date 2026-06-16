@@ -354,7 +354,7 @@
     "href": "index.html",
     "title": "Home",
     "section": "",
-    "text": "version: 2.4.0\nWelcome to the Document Redaction App documentation. This site provides comprehensive documentation for the Document Redaction App.\nNavigate through the sections to learn how to install, use, and manage the application. Below is a brief introduction to the app, followed by complete installation instructions (PyPI, source, and Docker overview)."
+    "text": "version: 2.4.1\nWelcome to the Document Redaction App documentation. This site provides comprehensive documentation for the Document Redaction App.\nNavigate through the sections to learn how to install, use, and manage the application. Below is a brief introduction to the app, followed by complete installation instructions (PyPI, source, and Docker overview)."
   },
   {
     "objectID": "index.html#document-redaction",
