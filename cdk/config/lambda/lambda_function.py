@@ -268,7 +268,9 @@ def lambda_handler(event, context):
             _required_runtime_env(merged_for_required),
         )
 
-        print(f"Starting batch task for s3://{bucket}/{key} ({len(environment)} env vars)")
+        print(
+            f"Starting batch task for s3://{bucket}/{key} ({len(environment)} env vars)"
+        )
 
         response = ecs.run_task(
             cluster=CLUSTER,
