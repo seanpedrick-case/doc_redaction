@@ -33,6 +33,16 @@ doc_redaction.egg-info/*
 .venv_pypi_test/*
 cdk/config/*
 !cdk/config/app_config.env.example
+!cdk/config/lambda/
+cdk/config/lambda/*
+!cdk/config/lambda/lambda_function.py
+!cdk/config/headless_s3_seed/
+cdk/config/headless_s3_seed/*
+!cdk/config/headless_s3_seed/input/
+cdk/config/headless_s3_seed/input/*
+!cdk/config/headless_s3_seed/input/config/
+cdk/config/headless_s3_seed/input/config/*
+!cdk/config/headless_s3_seed/input/config/example_headless_env_file.env
 cdk/cdk.out/*
 cdk/archive/*
 tld/*
