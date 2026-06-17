@@ -147,7 +147,7 @@ The repo contains a [CDK folder](https://github.com/seanpedrick-case/doc_redacti
 
 ### 2. Install prerequisites: Tesseract and Poppler
 
-This application relies on two external tools for OCR (Tesseract) and PDF processing (Poppler). If not using a Docker-based deployment, you will need to install them on your system before proceeding. To run the Document Redaction app successfully, these tools need to be installed and either 1. added to PATH, or 2. be in a folder that is directly referenced in the config/app_config.env file with the variables TESSERACT_FOLDER and POPPLER_FOLDER (defined [here](https://github.com/seanpedrick-case/doc_redaction/blob/main/tools/config.py) if you want to see the code). The instructions below will guide you through diffferent ways to install these dependencies.
+This application relies on two external tools for OCR (Tesseract) and PDF processing (Poppler). If not using a Docker-based deployment, you will need to install them on your system before proceeding. To run the Document Redaction app successfully, these tools need to be installed and either 1. added to PATH, or 2. be in a folder that is directly referenced in the config/app_config.env file with the variables TESSERACT_FOLDER and POPPLER_FOLDER (defined [here](https://github.com/seanpedrick-case/doc_redaction/blob/main/tools/config.py) if you want to see the code). The instructions below will guide you through different ways to install these dependencies.
 
 ---
 

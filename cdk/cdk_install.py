@@ -45,6 +45,7 @@ import ipaddress
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -586,6 +587,12 @@ def list_vpc_cidr_blocks_in_region(region: str) -> List[str]:
 
 VPC_CIDR_PREFIX_LEN = 24
 SUBNET_CIDR_PREFIX_LEN = 28
+# ECS Express provisions a managed ALB in each public subnet (8+ free IPs required).
+# /28 subnets (~11 usable IPs) exhaust quickly with VPC interface endpoints and tasks.
+EXPRESS_PUBLIC_SUBNET_CIDR_PREFIX_LEN = 27
+PUBLIC_SUBNET_CIDR_PREFIX_LEN = 26
+PRIVATE_SUBNET_CIDR_PREFIX_LEN = 28
+EXPRESS_ALB_MIN_SUBNET_PREFIX_LEN = 27
 _VPC_CIDR_SEARCH_SUPERNETS = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
 
 
@@ -622,6 +629,159 @@ def suggest_vpc_cidr_block(
     )
 
 
+def validate_new_vpc_cidr_format(cidr: str) -> Optional[str]:
+    """Return an error when ``cidr`` is not a valid AWS VPC IPv4 block."""
+    raw = (cidr or "").strip()
+    if not raw:
+        return "NEW_VPC_CIDR is required when creating a new VPC."
+    try:
+        network = ipaddress.ip_network(raw, strict=False)
+    except ValueError:
+        return f"NEW_VPC_CIDR={raw!r} is not a valid IPv4 CIDR block."
+    if network.version != 4:
+        return f"NEW_VPC_CIDR must be IPv4 (got {raw!r})."
+    if network.prefixlen < 16 or network.prefixlen > 28:
+        return (
+            f"NEW_VPC_CIDR={raw!r} must use a prefix length between /16 and /28 "
+            f"(got /{network.prefixlen})."
+        )
+    if not network.is_private:
+        return (
+            f"NEW_VPC_CIDR={raw!r} should be in RFC1918 private space "
+            "(10.0.0.0/8, 172.16.0.0/12, or 192.168.0.0/16)."
+        )
+    return None
+
+
+def validate_new_vpc_cidr_no_overlap(
+    cidr: str,
+    existing_vpc_cidrs: Sequence[str],
+) -> Optional[str]:
+    """Return an error when ``cidr`` overlaps an existing VPC block in the region."""
+    format_error = validate_new_vpc_cidr_format(cidr)
+    if format_error:
+        return format_error
+    candidate = ipaddress.ip_network(cidr.strip(), strict=False)
+    for block in parse_ipv4_networks(existing_vpc_cidrs):
+        if candidate.overlaps(block):
+            return (
+                f"NEW_VPC_CIDR={candidate!s} overlaps existing VPC CIDR {block!s} "
+                "in this account/region."
+            )
+    return None
+
+
+def validate_new_vpc_cidr(
+    cidr: str,
+    existing_vpc_cidrs: Sequence[str],
+) -> Optional[str]:
+    """Validate format and regional non-overlap for a new VPC CIDR."""
+    return validate_new_vpc_cidr_no_overlap(cidr, existing_vpc_cidrs)
+
+
+def canonicalize_vpc_cidr(cidr: str) -> str:
+    """Normalize a VPC CIDR string (e.g. 10.0.0.0/24)."""
+    return str(ipaddress.ip_network(cidr.strip(), strict=False))
+
+
+def subnet_cidr_prefix_len_for_tier(answers: "InstallAnswers", tier: str) -> int:
+    """Return installer subnet sizing for public/private tiers and deployment mode."""
+    if tier == "public":
+        if answers_use_public_subnets_only(answers):
+            return EXPRESS_PUBLIC_SUBNET_CIDR_PREFIX_LEN
+        return PUBLIC_SUBNET_CIDR_PREFIX_LEN
+    return PRIVATE_SUBNET_CIDR_PREFIX_LEN
+
+
+def validate_public_subnet_cidr_for_express(cidr: str) -> Optional[str]:
+    """Return an error when a public subnet is too small for Express managed ALB."""
+    raw = (cidr or "").strip()
+    if not raw:
+        return None
+    try:
+        network = ipaddress.ip_network(raw, strict=False)
+    except ValueError:
+        return f"Public subnet CIDR {raw!r} is not valid."
+    if network.prefixlen > EXPRESS_ALB_MIN_SUBNET_PREFIX_LEN:
+        return (
+            f"Public subnet {network!s} is too small for ECS Express Mode: the managed "
+            f"ALB needs at least 8 free IP addresses per subnet. Use /"
+            f"{EXPRESS_ALB_MIN_SUBNET_PREFIX_LEN} or larger (e.g. /27 in a /24 VPC)."
+        )
+    return None
+
+
+def validate_new_vpc_cidr_env_values(values: Dict[str, str]) -> List[str]:
+    """Live regional overlap check for NEW_VPC_CIDR before deploy."""
+    new_cidr = (values.get("NEW_VPC_CIDR") or "").strip()
+    if not new_cidr or (values.get("VPC_NAME") or "").strip():
+        return []
+    region = (values.get("AWS_REGION") or "").strip()
+    if not region:
+        return ["AWS_REGION is required to validate NEW_VPC_CIDR."]
+    occupied = list_vpc_cidr_blocks_in_region(region)
+    err = validate_new_vpc_cidr(new_cidr, occupied)
+    return [err] if err else []
+
+
+def prompt_new_vpc_cidr(answers: "InstallAnswers", *, interactive: bool) -> None:
+    """Fill ``answers.new_vpc_cidr`` via auto-suggest and/or manual wizard prompt."""
+    region = answers.aws_region
+    occupied = list_vpc_cidr_blocks_in_region(region)
+
+    if answers.new_vpc_cidr:
+        err = validate_new_vpc_cidr(answers.new_vpc_cidr, occupied)
+        if err:
+            raise SystemExit(err)
+        answers.new_vpc_cidr = canonicalize_vpc_cidr(answers.new_vpc_cidr)
+        return
+
+    auto_prompt = (
+        f"Auto-select lowest available /{VPC_CIDR_PREFIX_LEN} VPC CIDR " f"in {region}?"
+    )
+
+    def _select_suggested() -> str:
+        suggested = suggest_vpc_cidr_block(occupied)
+        print(f"Selected VPC CIDR: {suggested}")
+        return suggested
+
+    def _prompt_manual(default_cidr: str) -> str:
+        while True:
+            raw = ask("New VPC CIDR", default_cidr)
+            err = validate_new_vpc_cidr(raw, occupied)
+            if err:
+                print(err)
+                continue
+            return canonicalize_vpc_cidr(raw)
+
+    if interactive:
+        try:
+            default_cidr = suggest_vpc_cidr_block(occupied)
+            can_auto_select = True
+        except ValueError as exc:
+            print(f"Warning: {exc}")
+            default_cidr = ""
+            can_auto_select = False
+
+        if can_auto_select and ask_yes_no(auto_prompt, default=True):
+            answers.new_vpc_cidr = _select_suggested()
+        else:
+            if not default_cidr:
+                print(
+                    f"Enter a non-overlapping RFC1918 VPC CIDR (/16–/28) for {region}."
+                )
+            answers.new_vpc_cidr = _prompt_manual(default_cidr)
+        return
+
+    try:
+        answers.new_vpc_cidr = _select_suggested()
+    except ValueError as exc:
+        raise SystemExit(
+            f"Could not auto-select a VPC CIDR in {region}. "
+            f"Pass --new-vpc-cidr with a non-overlapping RFC1918 /16–/28 block. {exc}"
+        ) from exc
+
+
 def suggest_subnet_cidr_blocks(
     vpc_cidr: str,
     existing_subnet_cidrs: Sequence[str],
@@ -651,43 +811,6 @@ def suggest_subnet_cidr_blocks(
         f"Only {len(suggestions)} available /{prefix_len} subnet block(s) in "
         f"{vpc_cidr}; need {count}."
     )
-
-
-def prompt_new_vpc_cidr(answers: "InstallAnswers", *, interactive: bool) -> None:
-    """Fill ``answers.new_vpc_cidr`` via auto-suggest and/or manual wizard prompt."""
-    if answers.new_vpc_cidr:
-        return
-
-    fallback = "10.0.0.0/24"
-    auto_prompt = (
-        f"Auto-select lowest available /{VPC_CIDR_PREFIX_LEN} VPC CIDR "
-        f"in {answers.aws_region}?"
-    )
-
-    def _auto_select() -> bool:
-        try:
-            occupied = list_vpc_cidr_blocks_in_region(answers.aws_region)
-            answers.new_vpc_cidr = suggest_vpc_cidr_block(occupied)
-            print(f"Selected VPC CIDR: {answers.new_vpc_cidr}")
-            return True
-        except ValueError as exc:
-            print(f"Warning: {exc}")
-            return False
-
-    if interactive:
-        if ask_yes_no(auto_prompt, default=True):
-            if not _auto_select():
-                answers.new_vpc_cidr = ask("New VPC CIDR", fallback)
-        else:
-            default_cidr = fallback
-            try:
-                occupied = list_vpc_cidr_blocks_in_region(answers.aws_region)
-                default_cidr = suggest_vpc_cidr_block(occupied)
-            except ValueError:
-                pass
-            answers.new_vpc_cidr = ask("New VPC CIDR", default_cidr)
-    elif not _auto_select():
-        answers.new_vpc_cidr = fallback
 
 
 def list_availability_zones(region: str) -> List[str]:
@@ -968,6 +1091,11 @@ def validate_subnet_answers(answers: "InstallAnswers") -> List[str]:
             errors.append(f"{label} subnets: create mode requires subnet names.")
         if mode == "create" and names and cidrs and len(names) != len(cidrs):
             errors.append(f"{label} subnets: CIDR count must match subnet name count.")
+        if label == "Public" and answers_use_express_mode(answers) and cidrs:
+            for cidr in cidrs:
+                subnet_error = validate_public_subnet_cidr_for_express(cidr)
+                if subnet_error:
+                    errors.append(subnet_error)
     return errors
 
 
@@ -1035,6 +1163,8 @@ def configure_subnet_tier(
         return
 
     n_az = len(azs)
+    prefix_label = "Public" if tier == "public" else "Private"
+    prefix_len = subnet_cidr_prefix_len_for_tier(answers, tier)
     names = [f"{answers.cdk_prefix}{prefix_label}Subnet{i + 1}" for i in range(n_az)]
     if is_public:
         answers.public_subnet_names = names
@@ -1050,7 +1180,7 @@ def configure_subnet_tier(
     if interactive:
         print(f"Suggested AZs for {label.lower()} subnets: {', '.join(azs)}")
         auto_assign = ask_yes_no(
-            f"Auto-assign lowest available /{SUBNET_CIDR_PREFIX_LEN} CIDR blocks "
+            f"Auto-assign lowest available /{prefix_len} CIDR blocks "
             f"for {label.lower()} subnets?",
             default=True,
         )
@@ -1067,6 +1197,7 @@ def configure_subnet_tier(
                 vpc_cidr,
                 existing_subnet_cidrs,
                 len(names),
+                prefix_len=prefix_len,
                 reserved_cidrs=reserved_subnet_cidrs,
             )
         except ValueError as exc:
@@ -1082,20 +1213,21 @@ def configure_subnet_tier(
             if interactive:
                 print(f"  {name}: {cidr}")
         elif interactive:
-            default_cidr = f"10.0.{cidr_base + i}.0/{SUBNET_CIDR_PREFIX_LEN}"
+            default_cidr = f"10.0.{cidr_base + i}.0/{prefix_len}"
             if vpc_cidr:
                 try:
                     default_cidr = suggest_subnet_cidr_blocks(
                         vpc_cidr,
                         existing_subnet_cidrs + cidrs_list,
                         1,
+                        prefix_len=prefix_len,
                         reserved_cidrs=reserved_subnet_cidrs,
                     )[0]
                 except ValueError:
                     pass
             cidr = ask(f"CIDR for {label.lower()} {name}", default_cidr)
         else:
-            cidr = f"10.0.{cidr_base + i}.0/{SUBNET_CIDR_PREFIX_LEN}"
+            cidr = f"10.0.{cidr_base + i}.0/{prefix_len}"
         cidrs_list.append(cidr)
         azs_list.append(azs[i % len(azs)])
 
@@ -1107,6 +1239,8 @@ class InstallAnswers:
     aws_region: str = ""
     cdk_prefix: str = ""
     cognito_domain_prefix: str = ""
+    s3_log_bucket_name: str = ""
+    s3_output_bucket_name: str = ""
     github_branch: str = "main"
     vpc_mode: str = "existing"  # new | existing
     vpc_name: str = ""
@@ -1238,6 +1372,359 @@ def derive_s3_bucket_names(cdk_prefix: str) -> Dict[str, str]:
     }
 
 
+S3_BUCKET_NAME_MAX_LEN = 63
+
+
+def normalize_s3_bucket_name(raw: str) -> str:
+    """Lowercase S3 bucket name with allowed characters only (3–63 chars)."""
+    name = re.sub(r"[^a-z0-9.-]", "-", (raw or "").lower())
+    name = re.sub(r"-{2,}", "-", name).strip("-")
+    if len(name) < 3:
+        name = f"{name}-bucket".strip("-")
+    return name[:S3_BUCKET_NAME_MAX_LEN]
+
+
+def suggest_available_s3_bucket_name(
+    preferred: str,
+    account_id: str,
+    *,
+    s3_client: Any = None,
+    max_attempts: int = 8,
+) -> str:
+    """Return a globally available S3 bucket name, preferring ``preferred``."""
+    from cdk_functions import resolve_s3_bucket_availability
+
+    account = re.sub(r"[^0-9]", "", account_id or "")
+    bases = [preferred]
+    if account:
+        bases.extend(
+            [
+                f"{account}-{preferred}",
+                f"{preferred}-{account}",
+            ]
+        )
+    seen: set[str] = set()
+    for base in bases:
+        candidate = normalize_s3_bucket_name(base)
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        status, _ = resolve_s3_bucket_availability(candidate, s3_client=s3_client)
+        if status == "available":
+            return candidate
+    for _ in range(max_attempts):
+        suffix = secrets.token_hex(3)
+        candidate = normalize_s3_bucket_name(f"{account}-{preferred}-{suffix}")
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        status, _ = resolve_s3_bucket_availability(candidate, s3_client=s3_client)
+        if status == "available":
+            return candidate
+    raise RuntimeError(
+        f"Could not find an available S3 bucket name near {preferred!r}. "
+        "Set S3_LOG_CONFIG_BUCKET_NAME / S3_OUTPUT_BUCKET_NAME manually."
+    )
+
+
+def suggest_available_cognito_domain_prefix(
+    preferred: str,
+    account_id: str,
+    region: str,
+    *,
+    cognito_client: Any = None,
+    max_attempts: int = 8,
+) -> str:
+    """Return an available Cognito hosted UI domain prefix in ``region``."""
+    from cdk_functions import resolve_cognito_domain_prefix_availability
+
+    account = re.sub(r"[^0-9]", "", account_id or "")
+    preferred_clean = sanitize_cognito_domain_prefix(preferred, max_length=63)
+    candidates = [preferred_clean]
+    if account:
+        candidates.extend(
+            [
+                sanitize_cognito_domain_prefix(
+                    f"{account}-{preferred_clean}", max_length=63
+                ),
+                sanitize_cognito_domain_prefix(
+                    f"{preferred_clean}-{account[-8:]}", max_length=63
+                ),
+            ]
+        )
+    seen: set[str] = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        if (
+            resolve_cognito_domain_prefix_availability(
+                candidate, region_name=region, cognito_client=cognito_client
+            )
+            == "available"
+        ):
+            return candidate
+    for _ in range(max_attempts):
+        suffix = secrets.token_hex(2)
+        candidate = sanitize_cognito_domain_prefix(
+            f"{account}-{preferred_clean}-{suffix}", max_length=63
+        )
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        if (
+            resolve_cognito_domain_prefix_availability(
+                candidate, region_name=region, cognito_client=cognito_client
+            )
+            == "available"
+        ):
+            return candidate
+    raise RuntimeError(
+        f"Could not find an available Cognito domain prefix near {preferred!r}. "
+        "Set COGNITO_USER_POOL_DOMAIN_PREFIX manually."
+    )
+
+
+def _prompt_globally_unique_s3_bucket(
+    label: str,
+    preferred: str,
+    account_id: str,
+    *,
+    interactive: bool,
+    assume_yes: bool,
+    cli_override: str = "",
+    s3_client: Any = None,
+) -> str:
+    from cdk_functions import resolve_s3_bucket_availability
+
+    if cli_override:
+        name = normalize_s3_bucket_name(cli_override)
+        status, _ = resolve_s3_bucket_availability(name, s3_client=s3_client)
+        if status == "globally_taken":
+            raise SystemExit(
+                f"{label}: bucket name {name!r} is taken globally by another AWS "
+                "account. Choose a different --s3-log-bucket / --s3-output-bucket."
+            )
+        return name
+
+    preferred = normalize_s3_bucket_name(preferred)
+    status, _ = resolve_s3_bucket_availability(preferred, s3_client=s3_client)
+    if status == "owned":
+        print(f"{label}: using existing bucket in this account: {preferred}")
+        return preferred
+    if status == "available":
+        print(f"{label}: bucket name available: {preferred}")
+        return preferred
+
+    suggested = suggest_available_s3_bucket_name(
+        preferred, account_id, s3_client=s3_client
+    )
+    print(
+        f"{label}: S3 bucket name {preferred!r} is taken globally by another AWS "
+        f"account (S3 names are unique worldwide)."
+    )
+    if not interactive:
+        if assume_yes:
+            print(f"{label}: using suggested name: {suggested}")
+            return suggested
+        raise SystemExit(
+            f"{label}: bucket name {preferred!r} is taken globally. "
+            f"Re-run with --yes to accept {suggested!r}, or pass an explicit bucket name."
+        )
+    if ask_yes_no(f"Use suggested bucket name {suggested!r}?", default=True):
+        return suggested
+    while True:
+        custom = ask(f"{label}: enter a globally unique bucket name", suggested)
+        custom = normalize_s3_bucket_name(custom)
+        custom_status, _ = resolve_s3_bucket_availability(custom, s3_client=s3_client)
+        if custom_status == "available":
+            return custom
+        if custom_status == "owned":
+            print(f"Bucket {custom!r} already exists in this account; will import it.")
+            return custom
+        print(f"Name {custom!r} is still taken globally. Try another name.")
+
+
+def _prompt_globally_unique_cognito_prefix(
+    preferred: str,
+    account_id: str,
+    region: str,
+    *,
+    interactive: bool,
+    assume_yes: bool,
+    cli_override: str = "",
+    cognito_client: Any = None,
+) -> str:
+    from cdk_functions import resolve_cognito_domain_prefix_availability
+
+    if cli_override:
+        override = sanitize_cognito_domain_prefix(cli_override)
+        validation_error = validate_cognito_domain_prefix(override)
+        if validation_error:
+            raise SystemExit(validation_error)
+        if (
+            resolve_cognito_domain_prefix_availability(
+                override, region_name=region, cognito_client=cognito_client
+            )
+            != "available"
+        ):
+            raise SystemExit(
+                f"Cognito domain prefix {override!r} is not available in {region} "
+                "(likely taken by another AWS account). Pass a different "
+                "--cognito-prefix."
+            )
+        return override
+
+    preferred = sanitize_cognito_domain_prefix(preferred)
+    availability = resolve_cognito_domain_prefix_availability(
+        preferred, region_name=region, cognito_client=cognito_client
+    )
+
+    if availability == "taken":
+        suggested = suggest_available_cognito_domain_prefix(
+            preferred, account_id, region, cognito_client=cognito_client
+        )
+        print(
+            f"Cognito hosted UI domain prefix {preferred!r} is not available in "
+            f"{region} (likely taken by another AWS account)."
+        )
+        if not interactive:
+            if assume_yes:
+                print(f"Using suggested Cognito domain prefix: {suggested}")
+                return suggested
+            raise SystemExit(
+                f"Cognito domain prefix {preferred!r} is not available in {region}. "
+                f"Re-run with --yes to accept {suggested!r}, or pass --cognito-prefix."
+            )
+        if ask_yes_no(
+            f"Use suggested Cognito domain prefix {suggested!r}?", default=True
+        ):
+            return suggested
+        preferred = suggested
+
+    if not interactive:
+        print(f"Cognito domain prefix available: {preferred}")
+        return preferred
+
+    while True:
+        raw = ask(
+            "Cognito hosted UI domain prefix "
+            "(must be globally unique in this region; "
+            "cannot contain aws, amazon, or cognito)",
+            preferred,
+        )
+        choice = sanitize_cognito_domain_prefix(raw)
+        validation_error = validate_cognito_domain_prefix(choice)
+        if validation_error:
+            print(validation_error)
+            continue
+        if (
+            resolve_cognito_domain_prefix_availability(
+                choice, region_name=region, cognito_client=cognito_client
+            )
+            == "available"
+        ):
+            if choice != preferred:
+                print(f"Using Cognito domain prefix: {choice}")
+            else:
+                print(f"Cognito domain prefix available: {choice}")
+            return choice
+        print(
+            f"Prefix {choice!r} is not available in {region} "
+            "(likely taken by another AWS account). Try another prefix."
+        )
+
+
+def resolve_globally_unique_install_names(
+    answers: InstallAnswers,
+    *,
+    interactive: bool,
+    assume_yes: bool,
+    args: Optional[argparse.Namespace] = None,
+) -> None:
+    """Check S3 bucket and Cognito domain names; prompt for alternatives when taken."""
+    import boto3
+
+    args = args or argparse.Namespace()
+    region = answers.aws_region
+    account_id = answers.aws_account_id
+    s3_client = boto3.client("s3", region_name=region)
+    cognito_client = boto3.client("cognito-idp", region_name=region)
+
+    defaults = derive_s3_bucket_names(answers.cdk_prefix)
+    answers.s3_log_bucket_name = _prompt_globally_unique_s3_bucket(
+        "S3 log/config bucket",
+        defaults.get("S3_LOG_CONFIG_BUCKET_NAME", ""),
+        account_id,
+        interactive=interactive,
+        assume_yes=assume_yes,
+        cli_override=getattr(args, "s3_log_bucket", "") or "",
+        s3_client=s3_client,
+    )
+    answers.s3_output_bucket_name = _prompt_globally_unique_s3_bucket(
+        "S3 output bucket",
+        defaults.get("S3_OUTPUT_BUCKET_NAME", ""),
+        account_id,
+        interactive=interactive,
+        assume_yes=assume_yes,
+        cli_override=getattr(args, "s3_output_bucket", "") or "",
+        s3_client=s3_client,
+    )
+
+    if answers_use_headless(answers):
+        answers.cognito_domain_prefix = ""
+        return
+
+    preferred_cognito = default_cognito_domain_prefix_from_cdk_prefix(
+        answers.cdk_prefix
+    )
+    answers.cognito_domain_prefix = _prompt_globally_unique_cognito_prefix(
+        preferred_cognito,
+        account_id,
+        region,
+        interactive=interactive,
+        assume_yes=assume_yes,
+        cli_override=getattr(args, "cognito_prefix", "") or "",
+        cognito_client=cognito_client,
+    )
+
+
+def validate_globally_unique_env_values(values: Dict[str, str]) -> List[str]:
+    """Live AWS checks for globally unique resource names before deploy."""
+    from cdk_functions import (
+        resolve_cognito_domain_prefix_availability,
+        resolve_s3_bucket_availability,
+    )
+
+    errors: List[str] = []
+    region = (values.get("AWS_REGION") or "").strip()
+    for env_key in ("S3_LOG_CONFIG_BUCKET_NAME", "S3_OUTPUT_BUCKET_NAME"):
+        bucket_name = (values.get(env_key) or "").strip().lower()
+        if not bucket_name:
+            continue
+        status, _ = resolve_s3_bucket_availability(bucket_name)
+        if status == "globally_taken":
+            errors.append(
+                f"{env_key}={bucket_name!r} is taken globally by another AWS account. "
+                "Re-run cdk_install.py to pick a unique name."
+            )
+    if values.get("ENABLE_HEADLESS_DEPLOYMENT") != "True":
+        cognito_prefix = (values.get("COGNITO_USER_POOL_DOMAIN_PREFIX") or "").strip()
+        if cognito_prefix and region:
+            if (
+                resolve_cognito_domain_prefix_availability(
+                    cognito_prefix, region_name=region
+                )
+                == "taken"
+            ):
+                errors.append(
+                    f"COGNITO_USER_POOL_DOMAIN_PREFIX={cognito_prefix!r} is not "
+                    f"available in {region} (taken by another AWS account or existing "
+                    "pool). Re-run cdk_install.py to pick a unique prefix."
+                )
+    return errors
+
+
 def resolve_fixup_env_values(values: Dict[str, str]) -> Dict[str, str]:
     """Fill missing ECS cluster/service keys from CDK_PREFIX for post-deploy boto3 calls."""
     resolved = dict(values)
@@ -1341,6 +1828,12 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
     if not cdk_folder.endswith("/"):
         cdk_folder += "/"
 
+    s3_bucket_names = derive_s3_bucket_names(answers.cdk_prefix)
+    if answers.s3_log_bucket_name:
+        s3_bucket_names["S3_LOG_CONFIG_BUCKET_NAME"] = answers.s3_log_bucket_name
+    if answers.s3_output_bucket_name:
+        s3_bucket_names["S3_OUTPUT_BUCKET_NAME"] = answers.s3_output_bucket_name
+
     values: Dict[str, str] = merge_preset(
         answers_preset_profile(answers), answers.custom_overrides
     )
@@ -1351,7 +1844,7 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
             "AWS_ACCOUNT_ID": answers.aws_account_id,
             "CDK_FOLDER": cdk_folder,
             **derive_ecs_resource_names(answers.cdk_prefix),
-            **derive_s3_bucket_names(answers.cdk_prefix),
+            **s3_bucket_names,
             "CONTEXT_FILE": "precheck.context.json",
             "COGNITO_USER_POOL_DOMAIN_PREFIX": sanitize_cognito_domain_prefix(
                 answers.cognito_domain_prefix
@@ -1519,6 +2012,29 @@ def validate_env_values(values: Dict[str, str]) -> List[str]:
     new_cidr = (values.get("NEW_VPC_CIDR") or "").strip()
     if not vpc_name and not new_cidr:
         errors.append("Set VPC_NAME (existing VPC) or NEW_VPC_CIDR (new VPC).")
+    elif new_cidr and not vpc_name:
+        format_error = validate_new_vpc_cidr_format(new_cidr)
+        if format_error:
+            errors.append(format_error)
+
+    if express:
+        public_cidrs_raw = (values.get("PUBLIC_SUBNET_CIDR_BLOCKS") or "").strip()
+        if public_cidrs_raw:
+            try:
+                import ast
+
+                parsed = ast.literal_eval(public_cidrs_raw)
+                public_cidrs = parsed if isinstance(parsed, list) else [str(parsed)]
+            except (SyntaxError, ValueError):
+                public_cidrs = [
+                    part.strip().strip("'\"")
+                    for part in public_cidrs_raw.split(",")
+                    if part.strip()
+                ]
+            for cidr in public_cidrs:
+                subnet_error = validate_public_subnet_cidr_for_express(str(cidr))
+                if subnet_error:
+                    errors.append(subnet_error)
 
     if values.get("USE_CLOUDFRONT") == "True" and not express:
         if not acm:
@@ -1541,11 +2057,6 @@ def validate_env_values(values: Dict[str, str]) -> List[str]:
                 f"{env_key} must include CDK_PREFIX (got bare '{bare_suffix}'; "
                 f"expected '{prefix_lower}{bare_suffix}'). Re-run cdk_install or set "
                 f"{env_key}={prefix_lower}{bare_suffix} in config/cdk_config.env."
-            )
-        elif prefix_lower and bucket_name and not bucket_name.startswith(prefix_lower):
-            errors.append(
-                f"{env_key}={bucket_name!r} should start with CDK_PREFIX "
-                f"({prefix_lower!r}) to avoid collisions with other deployments."
             )
     if values.get("ENABLE_HEADLESS_DEPLOYMENT") != "True":
         cognito_prefix_error = validate_cognito_domain_prefix(
@@ -2582,23 +3093,16 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
     if not answers.cdk_prefix.endswith("-"):
         answers.cdk_prefix += "-"
 
-    default_cognito = default_cognito_domain_prefix_from_cdk_prefix(answers.cdk_prefix)
     if answers_use_headless(answers):
         answers.cognito_domain_prefix = ""
         print("Headless batch mode: skipping Cognito hosted UI domain (no web login).")
-    else:
-        raw_cognito_prefix = args.cognito_prefix or (
-            ask(
-                "Cognito hosted UI domain prefix (must be globally unique; "
-                "cannot contain aws, amazon, or cognito)",
-                default_cognito,
-            )
-            if interactive
-            else default_cognito
-        )
-        answers.cognito_domain_prefix = sanitize_cognito_domain_prefix(
-            raw_cognito_prefix
-        )
+
+    resolve_globally_unique_install_names(
+        answers,
+        interactive=interactive,
+        assume_yes=assume_yes,
+        args=args,
+    )
 
     # VPC
     if args.new_vpc_cidr:
@@ -2844,6 +3348,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--account", help="AWS account ID")
     p.add_argument("--cdk-prefix", help="CDK resource prefix")
     p.add_argument("--cognito-prefix", help="Cognito user pool domain prefix")
+    p.add_argument(
+        "--s3-log-bucket",
+        help="S3 log/config bucket name (globally unique; skips wizard suggestion)",
+    )
+    p.add_argument(
+        "--s3-output-bucket",
+        help="S3 output bucket name (globally unique; skips wizard suggestion)",
+    )
     p.add_argument("--vpc-name", help="Existing VPC Name tag")
     p.add_argument("--new-vpc-cidr", help="CIDR for new VPC")
     p.add_argument(
@@ -2996,6 +3508,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 f"No config at {ENV_PATH}. Run without --deploy-only first."
             )
         values = read_env_file(ENV_PATH)
+        pre_deploy_errors = validate_globally_unique_env_values(
+            values
+        ) + validate_new_vpc_cidr_env_values(values)
+        if pre_deploy_errors:
+            print("Pre-deploy configuration conflicts:")
+            for err in pre_deploy_errors:
+                print(f"  - {err}")
+            return 1
         if not python_exe or not python_exe.is_file():
             python_exe = resolve_python_executable(
                 override=args.python, interactive=False, assume_yes=True

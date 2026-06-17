@@ -1,7 +1,10 @@
 import ipaddress
 import json
 import os
-from typing import Any, Dict, FrozenSet, List, Optional, Tuple, Union
+from typing import Any, Dict, FrozenSet, List, Literal, Optional, Tuple, Union
+
+S3BucketAvailability = Literal["owned", "available", "globally_taken"]
+CognitoDomainAvailability = Literal["available", "taken"]
 
 import boto3
 import pandas as pd
@@ -758,78 +761,120 @@ def add_custom_policies(
 # from aws_cdk import aws_s3 as s3
 
 
-def check_s3_bucket_exists(
+def _s3_bucket_listed_in_account(s3_client: Any, bucket_name: str) -> bool:
+    token = None
+    while True:
+        kwargs: Dict[str, Any] = {}
+        if token:
+            kwargs["ContinuationToken"] = token
+        response = s3_client.list_buckets(**kwargs)
+        for entry in response.get("Buckets", []):
+            if entry.get("Name") == bucket_name:
+                return True
+        token = response.get("NextContinuationToken")
+        if not token:
+            return False
+
+
+def resolve_s3_bucket_availability(
     bucket_name: str,
-):  # Return type hint depends on what you return
+    *,
+    s3_client: Any = None,
+) -> Tuple[S3BucketAvailability, str]:
     """
-    Checks if an S3 bucket with the given name exists and is accessible.
+    Resolve whether an S3 bucket name is owned in this account, globally free,
+    or taken by another AWS account.
 
-    Args:
-        bucket_name: The name of the S3 bucket to check.
-
-    Returns:
-        A tuple: (bool indicating existence, optional S3 Bucket object or None)
-        Note: Returning a Boto3 S3 Bucket object from here is NOT ideal
-              for direct use in CDK. You'll likely only need the boolean result
-              or the bucket name for CDK lookups/creations.
-              For this example, let's return the boolean and the name.
+    S3 names are globally unique. ``head_bucket`` returns 404 when the name is
+    free, 200 when this principal can access it, and 403 when the name is taken
+    elsewhere (or access is denied in-account).
     """
-    s3_client = boto3.client("s3")
-
-    def _bucket_listed_in_account() -> bool:
-        token = None
-        while True:
-            kwargs: Dict[str, Any] = {}
-            if token:
-                kwargs["ContinuationToken"] = token
-            response = s3_client.list_buckets(**kwargs)
-            for entry in response.get("Buckets", []):
-                if entry.get("Name") == bucket_name:
-                    return True
-            token = response.get("NextContinuationToken")
-            if not token:
-                return False
-
+    client = s3_client or boto3.client("s3")
     try:
-        # Use head_bucket to check for existence and access
-        s3_client.head_bucket(Bucket=bucket_name)
-        print(f"Bucket '{bucket_name}' exists and is accessible.")
-        return True, bucket_name  # Return True and the bucket name
-
+        client.head_bucket(Bucket=bucket_name)
+        print(f"Bucket '{bucket_name}' exists and is accessible in this account.")
+        return "owned", bucket_name
     except ClientError as e:
-        # If a ClientError occurs, check the error code.
-        # '404' means the bucket does not exist.
-        # '403' means the bucket exists but you don't have permission.
         error_code = e.response["Error"]["Code"]
         if error_code in ("404", "NoSuchBucket", "NotFound"):
-            print(f"Bucket '{bucket_name}' does not exist.")
-            return False, None
+            print(f"Bucket '{bucket_name}' is available (name not taken globally).")
+            return "available", bucket_name
         if error_code in ("403", "AccessDenied"):
-            if _bucket_listed_in_account():
+            if _s3_bucket_listed_in_account(client, bucket_name):
                 print(
                     f"Bucket '{bucket_name}' exists in this account "
                     "(head_bucket denied; confirmed via list_buckets)."
                 )
-                return True, bucket_name
+                return "owned", bucket_name
             print(
-                f"Bucket '{bucket_name}' is not visible in this account "
-                f"(head_bucket returned {error_code})."
+                f"Bucket '{bucket_name}' is taken globally by another AWS account "
+                f"(head_bucket returned {error_code}; not listed in this account)."
             )
-            return False, None
-        else:
-            # For other errors, it's better to raise the exception
-            # to indicate something unexpected happened.
-            print(
-                f"An unexpected AWS ClientError occurred checking bucket '{bucket_name}': {e}"
-            )
-            # Decide how to handle other errors - raising might be safer
-            raise  # Re-raise the original exception
+            return "globally_taken", bucket_name
+        print(
+            f"An unexpected AWS ClientError occurred checking bucket '{bucket_name}': {e}"
+        )
+        raise
     except Exception as e:
         print(
             f"An unexpected non-ClientError occurred checking bucket '{bucket_name}': {e}"
         )
-        # Decide how to handle other errors
-        raise  # Re-raise the original exception
+        raise
+
+
+def check_s3_bucket_exists(
+    bucket_name: str,
+) -> Tuple[bool, Optional[str]]:
+    """
+    Return whether the bucket exists in **this** AWS account (for CDK import).
+
+    For global availability (including cross-account collisions), use
+    ``resolve_s3_bucket_availability``.
+    """
+    status, name = resolve_s3_bucket_availability(bucket_name)
+    if status == "owned":
+        return True, name
+    return False, None
+
+
+def resolve_cognito_domain_prefix_availability(
+    domain_prefix: str,
+    *,
+    region_name: Optional[str] = None,
+    cognito_client: Any = None,
+) -> CognitoDomainAvailability:
+    """Return whether a Cognito hosted UI domain prefix is free in the region.
+
+    Cognito prefixes are unique per region across all AWS accounts. When a prefix
+    is owned elsewhere, ``describe_user_pool_domain`` raises
+    ``ResourceNotFoundException`` ("does not exist in this account") — the same
+    symptom CloudFormation reports as ``AlreadyExists`` on create.
+    """
+    prefix = (domain_prefix or "").strip().lower()
+    if not prefix:
+        return "available"
+    region = region_name or os.environ.get("AWS_REGION")
+    client = cognito_client or boto3.client("cognito-idp", region_name=region)
+    try:
+        response = client.describe_user_pool_domain(Domain=prefix)
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ResourceNotFoundException":
+            print(
+                f"Cognito domain prefix {prefix!r} is not available in {region} "
+                f"(likely taken by another AWS account; "
+                f"{e.response['Error'].get('Message', 'ResourceNotFoundException')})."
+            )
+            return "taken"
+        raise
+    description = response.get("DomainDescription") or {}
+    if description.get("UserPoolId"):
+        print(
+            f"Cognito domain prefix {prefix!r} is in use by user pool "
+            f"{description['UserPoolId']} in this account."
+        )
+        return "taken"
+    print(f"Cognito domain prefix {prefix!r} is available in {region}.")
+    return "available"
 
 
 def default_secrets_manager_kms_key_arn(region: str, account_id: str) -> str:

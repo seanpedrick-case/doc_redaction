@@ -11,6 +11,7 @@ from cdk_config import (  # Import necessary config
     CODEBUILD_ROLE_NAME,
     COGNITO_USER_POOL_CLIENT_NAME,
     COGNITO_USER_POOL_CLIENT_SECRET_NAME,
+    COGNITO_USER_POOL_DOMAIN_PREFIX,
     COGNITO_USER_POOL_NAME,
     CONTEXT_FILE,
     ECR_CDK_REPO_NAME,
@@ -45,13 +46,14 @@ from cdk_functions import (  # Import your check functions (assuming they use Bo
     check_for_existing_user_pool,
     check_for_existing_user_pool_client,
     check_for_secret,
-    check_s3_bucket_exists,
     check_subnet_exists_by_name,
     check_web_acl_exists,
     get_secret_kms_key_arn,
     get_security_group_id_by_name,
     get_vpc_id_by_name,
     list_existing_vpc_endpoint_service_names,
+    resolve_cognito_domain_prefix_availability,
+    resolve_s3_bucket_availability,
     validate_subnet_creation_parameters,
     # Add other check functions as needed
 )
@@ -394,18 +396,16 @@ def check_and_set_context():
         context_data[f"arn:{role_name}"] = role_arn
 
     # S3 Buckets
+    def _record_s3_bucket_context(name: str) -> None:
+        status, _ = resolve_s3_bucket_availability(name)
+        context_data[f"exists:{name}"] = status == "owned"
+        context_data[f"globally_taken:{name}"] = status == "globally_taken"
+
     bucket_name = S3_LOG_CONFIG_BUCKET_NAME
-    exists, _ = check_s3_bucket_exists(bucket_name)
-    context_data[f"exists:{bucket_name}"] = exists
-    if exists:
-        # You might not need the ARN if using from_bucket_name
-        pass
+    _record_s3_bucket_context(bucket_name)
 
     output_bucket_name = S3_OUTPUT_BUCKET_NAME
-    exists, _ = check_s3_bucket_exists(output_bucket_name)
-    context_data[f"exists:{output_bucket_name}"] = exists
-    if exists:
-        pass
+    _record_s3_bucket_context(output_bucket_name)
 
     # ECR Repositories
     for repo_name in (ECR_CDK_REPO_NAME, ECR_PI_REPO_NAME):
@@ -469,6 +469,15 @@ def check_and_set_context():
 
     # Cognito (web login only; headless batch mode has no Gradio/ALB ingress)
     if ENABLE_HEADLESS_DEPLOYMENT != "True":
+        domain_prefix = (COGNITO_USER_POOL_DOMAIN_PREFIX or "").strip().lower()
+        if domain_prefix:
+            availability = resolve_cognito_domain_prefix_availability(
+                domain_prefix, region_name=AWS_REGION
+            )
+            context_data[f"cognito_domain_taken:{domain_prefix}"] = (
+                availability == "taken"
+            )
+
         user_pool_name = COGNITO_USER_POOL_NAME
         exists, user_pool_id, _ = check_for_existing_user_pool(user_pool_name)
         context_data[f"exists:{user_pool_name}"] = exists
