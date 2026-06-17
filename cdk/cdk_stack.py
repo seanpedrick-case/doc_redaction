@@ -416,7 +416,9 @@ class CdkStack(Stack):
                     ec2.SubnetConfiguration(
                         name="Public",
                         subnet_type=ec2.SubnetType.PUBLIC,
-                        cidr_mask=28,
+                        # /27 (~27 usable IPs): Express managed ALB needs 8+ free IPs per
+                        # subnet alongside VPC interface endpoints and task ENIs.
+                        cidr_mask=27,
                     ),
                 ]
             else:
@@ -427,12 +429,12 @@ class CdkStack(Stack):
                     ec2.SubnetConfiguration(
                         name="Public",  # Name prefix for public subnets
                         subnet_type=ec2.SubnetType.PUBLIC,
-                        cidr_mask=28,  # Adjust CIDR mask as needed (e.g., /24 provides ~250 IPs per subnet)
+                        cidr_mask=26,
                     ),
                     ec2.SubnetConfiguration(
                         name="Private",  # Name prefix for private subnets
                         subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS,  # Ensures these subnets have NAT Gateway access
-                        cidr_mask=28,  # Adjust CIDR mask as needed
+                        cidr_mask=28,
                     ),
                     # You could also add ec2.SubnetType.PRIVATE_ISOLATED if needed
                 ]
@@ -1128,6 +1130,12 @@ class CdkStack(Stack):
         # --- S3 Buckets ---
         try:
             log_bucket_name = S3_LOG_CONFIG_BUCKET_NAME
+            if get_context_bool(f"globally_taken:{log_bucket_name}"):
+                raise ValueError(
+                    f"S3 bucket name {log_bucket_name!r} is taken globally by another "
+                    "AWS account. Set S3_LOG_CONFIG_BUCKET_NAME in cdk/config/cdk_config.env "
+                    "to a unique name (re-run cdk_install.py or check_resources.py)."
+                )
             if get_context_bool(f"exists:{log_bucket_name}"):
                 bucket = s3.Bucket.from_bucket_name(
                     self, "LogConfigBucket", bucket_name=log_bucket_name
@@ -1184,6 +1192,12 @@ class CdkStack(Stack):
             )
 
             output_bucket_name = S3_OUTPUT_BUCKET_NAME
+            if get_context_bool(f"globally_taken:{output_bucket_name}"):
+                raise ValueError(
+                    f"S3 bucket name {output_bucket_name!r} is taken globally by another "
+                    "AWS account. Set S3_OUTPUT_BUCKET_NAME in cdk/config/cdk_config.env "
+                    "to a unique name (re-run cdk_install.py or check_resources.py)."
+                )
             if get_context_bool(f"exists:{output_bucket_name}"):
                 output_bucket = s3.Bucket.from_bucket_name(
                     self, "OutputBucket", bucket_name=output_bucket_name
@@ -1808,6 +1822,15 @@ class CdkStack(Stack):
                 )
 
                 # Add a domain to the User Pool (crucial for ALB integration)
+                domain_prefix = (COGNITO_USER_POOL_DOMAIN_PREFIX or "").strip().lower()
+                if get_context_bool(f"cognito_domain_taken:{domain_prefix}"):
+                    raise ValueError(
+                        f"Cognito hosted UI domain prefix {domain_prefix!r} is not "
+                        f"available in this region (taken by another AWS account or "
+                        "an existing pool). Set COGNITO_USER_POOL_DOMAIN_PREFIX in "
+                        "cdk/config/cdk_config.env to a unique value and re-run "
+                        "cdk_install.py / check_resources.py."
+                    )
                 user_pool_domain = user_pool.add_domain(
                     "UserPoolDomain",
                     cognito_domain=cognito.CognitoDomainOptions(

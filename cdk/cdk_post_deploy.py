@@ -1152,11 +1152,12 @@ def print_express_mode_next_steps(
     pi_express = values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True"
     if pi_express:
         print(
-            "  - Register a Cognito user in AWS Console, change password at the login page URL, "
-            " and sign in at the Pi agent URL below. The main redaction backend runs without "
-            " in-app login so the Pi agent can call it over Service Connect. You can disable "
-            " Cognito authorisation by setting COGNITO_AUTH to False in the ECS task definition / "
-            " ECS service options."
+            "- Register a Cognito user in AWS Console, change password at the login page URL "
+            "(available in the Cognito AWS console -> App Clients -> Login pages -> View login page "
+            "and sign in at the Pi agent URL below. The main redaction backend runs without "
+            "in-app login so the Pi agent can call it over Service Connect. You can disable "
+            "Cognito authorisation by setting COGNITO_AUTH to False in the ECS task definition / "
+            "ECS service options."
         )
     else:
         print(
@@ -1290,9 +1291,14 @@ def print_headless_deployment_next_steps(
     example_name = "example_headless_env_file.env"
 
     print("\nDone. Next steps:")
-    print(f"  - Upload a PDF file for redaction to {input_uri}")
     print(
-        f"  - Create a .env file for submitting a task. You can use '{example_name}' "
+        f"  - Upload a PDF file for redaction to {input_uri}. You can use the example file "
+        "'example_of_emails_sent_to_a_professor_before_applying.pdf' from doc_redaction/example_data "
+        "if you want to use the example .env file below."
+    )
+    print(
+        f"  - Create a .env file for submitting a task to the folder {config_uri}."
+        "You can resubmit the file '{example_name}' in the repo at cdk\config\headless_s3_seed\input\config, "
         f"(also at {config_uri}{example_name}) and change the PDF filename inside. "
         "Further direct-mode config variables are in tools/config.py (DIRECT_MODE_*)."
     )

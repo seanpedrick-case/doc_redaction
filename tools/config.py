@@ -590,7 +590,7 @@ LOAD_REDACTION_ANNOTATIONS_FROM_PDF = convert_string_to_boolean(
 TESSERACT_FOLDER = get_or_create_env_var(
     "TESSERACT_FOLDER", ""
 )  #  # If installing for Windows, install Tesseract 5.5.0 from here: https://github.com/UB-Mannheim/tesseract/wiki. Then this environment variable should point to the Tesseract folder e.g. tesseract/
-if TESSERACT_FOLDER and not os.path.isabs(TESSERACT_FOLDER):
+if TESSERACT_FOLDER:  # and not os.path.isabs(TESSERACT_FOLDER):
     # TESSERACT_FOLDER = ensure_folder_within_app_directory(TESSERACT_FOLDER)
     add_folder_to_path(TESSERACT_FOLDER)
 
@@ -1431,7 +1431,7 @@ SPACES_ZERO_GPU = convert_string_to_boolean(
 LOAD_PADDLE_AT_STARTUP = convert_string_to_boolean(
     get_or_create_env_var(
         "LOAD_PADDLE_AT_STARTUP",
-        "True" if os.environ.get("SPACES_ZERO_GPU") else "False",
+        "True" if SPACES_ZERO_GPU is True else "False",
     )
 )  # Eager PaddleOCR init at import (skipped on ZeroGPU main process; loads in @spaces.GPU worker).
 
