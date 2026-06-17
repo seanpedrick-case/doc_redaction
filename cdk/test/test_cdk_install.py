@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 CDK_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(CDK_DIR))
 
@@ -99,6 +101,106 @@ def test_build_env_values_production():
     assert values["ACM_SSL_CERTIFICATE_ARN"].startswith("arn:aws:acm:")
     assert values["SSL_CERTIFICATE_DOMAIN"] == "redaction.example.com"
     assert values["APPREGISTRY_STACK_NAME"] == "Test-Redaction-AppRegistryStack"
+
+
+def test_build_env_values_uses_custom_s3_bucket_names():
+    answers = _demo_answers()
+    answers.s3_log_bucket_name = "063418083240-demo-redaction-s3-logs"
+    answers.s3_output_bucket_name = "063418083240-demo-redaction-s3-output"
+    values = inst.build_env_values(answers)
+    assert values["S3_LOG_CONFIG_BUCKET_NAME"] == "063418083240-demo-redaction-s3-logs"
+    assert values["S3_OUTPUT_BUCKET_NAME"] == "063418083240-demo-redaction-s3-output"
+
+
+def test_normalize_s3_bucket_name_truncates_and_sanitizes():
+    long_name = "A" * 80 + "/underscores"
+    normalized = inst.normalize_s3_bucket_name(long_name)
+    assert normalized == normalized.lower()
+    assert len(normalized) <= inst.S3_BUCKET_NAME_MAX_LEN
+    assert "_" not in normalized
+
+
+def test_suggest_available_s3_bucket_name_prefers_account_prefix(monkeypatch):
+    calls: list[str] = []
+
+    def fake_resolve(name: str, **kwargs):
+        calls.append(name)
+        if name.startswith("123456789012-"):
+            return ("available", name)
+        return ("globally_taken", name)
+
+    monkeypatch.setattr("cdk_functions.resolve_s3_bucket_availability", fake_resolve)
+    suggested = inst.suggest_available_s3_bucket_name(
+        "demo-redaction-s3-logs", "123456789012"
+    )
+    assert suggested == "123456789012-demo-redaction-s3-logs"
+    assert calls[0] == "demo-redaction-s3-logs"
+
+
+def test_validate_globally_unique_env_values_flags_taken_bucket(monkeypatch):
+    monkeypatch.setattr(
+        "cdk_functions.resolve_s3_bucket_availability",
+        lambda name, **kwargs: ("globally_taken", name),
+    )
+    values = inst.build_env_values(_demo_answers())
+    errors = inst.validate_globally_unique_env_values(values)
+    assert any("taken globally" in err for err in errors)
+
+
+def test_prompt_globally_unique_cognito_prefix_suggests_when_taken(monkeypatch):
+    monkeypatch.setattr(
+        "cdk_functions.resolve_cognito_domain_prefix_availability",
+        lambda prefix, **kwargs: "taken" if prefix == "demo-redaction" else "available",
+    )
+    monkeypatch.setattr(
+        inst,
+        "suggest_available_cognito_domain_prefix",
+        lambda preferred, account_id, region, **kwargs: "063418083240-demo-redaction",
+    )
+    monkeypatch.setattr(inst, "ask_yes_no", lambda *args, **kwargs: True)
+    result = inst._prompt_globally_unique_cognito_prefix(
+        "demo-redaction",
+        "063418083240",
+        "eu-west-2",
+        interactive=True,
+        assume_yes=False,
+    )
+    assert result == "063418083240-demo-redaction"
+
+
+def test_prompt_globally_unique_cognito_prefix_rejects_taken_cli_override(monkeypatch):
+    monkeypatch.setattr(
+        "cdk_functions.resolve_cognito_domain_prefix_availability",
+        lambda prefix, **kwargs: "taken",
+    )
+    with pytest.raises(SystemExit):
+        inst._prompt_globally_unique_cognito_prefix(
+            "demo-redaction",
+            "063418083240",
+            "eu-west-2",
+            interactive=False,
+            assume_yes=False,
+            cli_override="demo-redaction",
+        )
+
+
+def test_subnet_cidr_prefix_len_for_express_demo():
+    answers = _demo_answers()
+    assert inst.subnet_cidr_prefix_len_for_tier(answers, "public") == 27
+    assert inst.subnet_cidr_prefix_len_for_tier(answers, "private") == 28
+
+
+def test_validate_public_subnet_cidr_for_express_rejects_small_blocks():
+    assert inst.validate_public_subnet_cidr_for_express("10.0.0.0/28") is not None
+    assert inst.validate_public_subnet_cidr_for_express("10.0.0.0/27") is None
+    assert inst.validate_public_subnet_cidr_for_express("10.0.0.0/26") is None
+
+
+def test_validate_env_values_rejects_express_public_subnets_too_small():
+    values = inst.build_env_values(_demo_answers())
+    values["PUBLIC_SUBNET_CIDR_BLOCKS"] = "['10.0.0.0/28', '10.0.0.16/28']"
+    errors = inst.validate_env_values(values)
+    assert any("too small for ECS Express" in err for err in errors)
 
 
 def test_build_env_values_headless():
@@ -257,6 +359,35 @@ def test_suggest_vpc_cidr_block_empty_region():
 def test_suggest_vpc_cidr_block_skips_overlaps():
     assert inst.suggest_vpc_cidr_block(["10.0.0.0/24"]) == "10.0.1.0/24"
     assert inst.suggest_vpc_cidr_block(["10.0.0.0/16"]) == "10.1.0.0/24"
+
+
+def test_validate_new_vpc_cidr_rejects_overlap_and_public_space():
+    err = inst.validate_new_vpc_cidr("10.0.0.0/24", ["10.0.0.0/16"])
+    assert err is not None
+    assert "overlaps" in err
+    err = inst.validate_new_vpc_cidr("8.8.8.0/24", [])
+    assert err is not None
+    assert "RFC1918" in err
+
+
+def test_validate_new_vpc_cidr_accepts_available_block():
+    assert inst.validate_new_vpc_cidr("10.2.0.0/24", ["10.0.0.0/16"]) is None
+
+
+def test_prompt_new_vpc_cidr_validates_cli_override(monkeypatch):
+    answers = inst.InstallAnswers(aws_region="eu-west-2", new_vpc_cidr="10.0.0.0/24")
+    monkeypatch.setattr(
+        inst, "list_vpc_cidr_blocks_in_region", lambda _r: ["10.0.0.0/16"]
+    )
+    with pytest.raises(SystemExit):
+        inst.prompt_new_vpc_cidr(answers, interactive=False)
+
+
+def test_prompt_new_vpc_cidr_auto_select_noninteractive(monkeypatch):
+    answers = inst.InstallAnswers(aws_region="eu-west-2")
+    monkeypatch.setattr(inst, "list_vpc_cidr_blocks_in_region", lambda _r: [])
+    inst.prompt_new_vpc_cidr(answers, interactive=False)
+    assert answers.new_vpc_cidr == "10.0.0.0/24"
 
 
 def test_suggest_subnet_cidr_blocks_lowest_available():
