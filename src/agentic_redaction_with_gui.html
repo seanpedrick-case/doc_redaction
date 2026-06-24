@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 
-<title>Agents for document redaction and review tasks (open vs closed-source) – Document Redaction App</title>
+<title>Agentic Document Redaction with Qwen 3.6 27B – Document Redaction App</title>
 <style>
 /* Default styles provided by pandoc.
 ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
@@ -22,6 +22,41 @@ ul.task-list li input[type="checkbox"] {
   width: 0.8em;
   margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
   vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
 }
 </style>
 
@@ -170,25 +205,32 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
     <h2 id="toc-title">On this page</h2>
    
   <ul>
-  <li><a href="#summary" id="toc-summary" class="nav-link active" data-scroll-target="#summary">Summary</a>
+  <li><a href="#introduction" id="toc-introduction" class="nav-link active" data-scroll-target="#introduction">Introduction</a></li>
+  <li><a href="#method" id="toc-method" class="nav-link" data-scroll-target="#method">Method</a>
   <ul class="collapse">
-  <li><a href="#findings" id="toc-findings" class="nav-link" data-scroll-target="#findings">Findings</a></li>
-  <li><a href="#conclusions" id="toc-conclusions" class="nav-link" data-scroll-target="#conclusions">Conclusions</a></li>
+  <li><a href="#frontend---agentic-redaction-app" id="toc-frontend---agentic-redaction-app" class="nav-link" data-scroll-target="#frontend---agentic-redaction-app">Frontend - Agentic Redaction App</a></li>
+  <li><a href="#backend---document-redaction-app" id="toc-backend---document-redaction-app" class="nav-link" data-scroll-target="#backend---document-redaction-app">Backend - Document Redaction App</a>
+  <ul class="collapse">
+  <li><a href="#models" id="toc-models" class="nav-link" data-scroll-target="#models">Models</a></li>
   </ul></li>
-  <li><a href="#introduction" id="toc-introduction" class="nav-link" data-scroll-target="#introduction">Introduction</a>
+  <li><a href="#results" id="toc-results" class="nav-link" data-scroll-target="#results">Results</a></li>
+  <li><a href="#deployment" id="toc-deployment" class="nav-link" data-scroll-target="#deployment">Deployment</a></li>
+  <li><a href="#the-underlying-agentic-harness-and-skills" id="toc-the-underlying-agentic-harness-and-skills" class="nav-link" data-scroll-target="#the-underlying-agentic-harness-and-skills">The underlying agentic harness and skills</a></li>
+  </ul></li>
+  <li><a href="#introduction-1" id="toc-introduction-1" class="nav-link" data-scroll-target="#introduction-1">Introduction</a>
   <ul class="collapse">
   <li><a href="#redaction-using-ocr-and-pii-identification-tools" id="toc-redaction-using-ocr-and-pii-identification-tools" class="nav-link" data-scroll-target="#redaction-using-ocr-and-pii-identification-tools">Redaction using OCR and PII identification tools</a></li>
   <li><a href="#the-advent-of-agentic-ai-models" id="toc-the-advent-of-agentic-ai-models" class="nav-link" data-scroll-target="#the-advent-of-agentic-ai-models">The advent of agentic AI models</a></li>
   </ul></li>
-  <li><a href="#method" id="toc-method" class="nav-link" data-scroll-target="#method">Method</a></li>
-  <li><a href="#results" id="toc-results" class="nav-link" data-scroll-target="#results">Results</a>
+  <li><a href="#method-1" id="toc-method-1" class="nav-link" data-scroll-target="#method-1">Method</a></li>
+  <li><a href="#results-1" id="toc-results-1" class="nav-link" data-scroll-target="#results-1">Results</a>
   <ul class="collapse">
   <li><a href="#sonnet-4.6-within-cursor" id="toc-sonnet-4.6-within-cursor" class="nav-link" data-scroll-target="#sonnet-4.6-within-cursor">Sonnet 4.6 within Cursor</a></li>
   <li><a href="#qwen-3.6-27b-deployed-locally-within-hermes-agent" id="toc-qwen-3.6-27b-deployed-locally-within-hermes-agent" class="nav-link" data-scroll-target="#qwen-3.6-27b-deployed-locally-within-hermes-agent">Qwen 3.6 27B deployed locally within Hermes Agent</a></li>
   <li><a href="#kimi-2.5-within-cursor" id="toc-kimi-2.5-within-cursor" class="nav-link" data-scroll-target="#kimi-2.5-within-cursor">Kimi 2.5 within Cursor</a></li>
   <li><a href="#composer-2.0-kimi-2.5-finetuned-model-agent-within-cursor" id="toc-composer-2.0-kimi-2.5-finetuned-model-agent-within-cursor" class="nav-link" data-scroll-target="#composer-2.0-kimi-2.5-finetuned-model-agent-within-cursor">Composer 2.0 (Kimi 2.5-finetuned model) agent within Cursor</a></li>
   </ul></li>
-  <li><a href="#conclusions-1" id="toc-conclusions-1" class="nav-link" data-scroll-target="#conclusions-1">Conclusions</a>
+  <li><a href="#conclusions" id="toc-conclusions" class="nav-link" data-scroll-target="#conclusions">Conclusions</a>
   <ul class="collapse">
   <li><a href="#can-any-model-perform-a-full-end-to-end-redaction-and-review-task" id="toc-can-any-model-perform-a-full-end-to-end-redaction-and-review-task" class="nav-link" data-scroll-target="#can-any-model-perform-a-full-end-to-end-redaction-and-review-task"><strong>1. Can any model perform a full end-to-end redaction and review task?</strong></a></li>
   <li><a href="#can-small-local-models-perform-agentic-redaction-and-review-tasks" id="toc-can-small-local-models-perform-agentic-redaction-and-review-tasks" class="nav-link" data-scroll-target="#can-small-local-models-perform-agentic-redaction-and-review-tasks"><strong>2. Can small, local models perform agentic redaction and review tasks?</strong></a></li>
@@ -203,7 +245,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 
 <header id="title-block-header" class="quarto-title-block default">
 <div class="quarto-title">
-<h1 class="title">Agents for document redaction and review tasks (open vs closed-source)</h1>
+<h1 class="title">Agentic Document Redaction with Qwen 3.6 27B</h1>
 </div>
 
 
@@ -234,80 +276,83 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 .agent-prompt-box ul { margin: 0.35em 0; padding-left: 1.25em; }
 .agent-prompt-box li { margin: 0.08em 0; }
 </style>
-<p>27 April 2026</p>
-<section id="summary" class="level1">
-<h1>Summary</h1>
-<p>Document redaction tasks are tasks that involve text and vision capabilities, and long context understanding to review and redact each page of a long document. Privacy is also key, which gives a strong incentive to use local, open source models if possible.</p>
-<p>In this post, I investigate the possibility of using agent workflows to conduct end-to-end redaction and review tasks.</p>
-<p>I had three main questions that I wanted to answer for this experiment:</p>
-<p><strong>1. Can any model perform a full end-to-end redaction and review task?</strong></p>
-<p>To prove if this is at all possible, I first tried Sonnet 4.6 within Cursor.</p>
-<p><strong>2. Can small, local models perform agentic redaction and review tasks?</strong></p>
-<p>I wanted to see if small, local models could perform this task at all. If possible, this would give rise to the possibility of a fully local, private redaction and review workflow. For this, I tried Qwen 3.6 27B, and 35B A3B on a local system (quantised to 4 bit, and run on llama.cpp on a 24GB VRAM GPU) in Hermes Agent. The docker compose file used to deploy this model can be found <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_llama_long_context.yml" target="_blank">here</a>.</p>
-<p><strong>3. Can the biggest open source models stand up to closed models for redaction and review tasks?</strong> To see if a performant model based on a large open source model could be used to perform the task. For this, I tried Kimi 2.5, and Cursor Composer 2.0, <a href="https://cursor.com/blog/composer-2-technical-report" target="_blank">a fine tuned version of Kimi 2.5</a>.</p>
-<p>To do this task, a skill file was developed for <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/vlm_blog/agentic_redaction/skills/doc-redaction-app/SKILL.md" target="_blank">document redaction</a> and <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/vlm_blog/agentic_redaction/skills/doc-redaction-modifications/SKILL.md" target="_blank">modifying redaction results</a>. The skills were developed based on agentic use of the the open source <a href="https://github.com/seanpedrick-case/doc_redaction" target="_blank">Document Redactions app / package</a>. This package contains a Gradio UI app that provides a number of FastAPI endpoints for document redaction and review functions. The deployment used for this experiment can be found at this <a href="https://huggingface.co/spaces/seanpedrickcase/document_redaction" target="_blank">Hugging Face space</a>, where you can try it yourself.</p>
+<p>17 June 2026</p>
+<section id="introduction" class="level1">
+<h1>Introduction</h1>
+<p>Document redaction tasks are complex tasks that involve text and image recognition capabilities, long context understanding to review and redact long documents according to specified rules, and require a high level of accuracy and precision.</p>
+<p><a href="https://seanpedrick-case.github.io/doc_redaction/src/agentic_redaction.html" target="_blank">In a previous post</a>, I investigated the possibility of using agent workflows to conduct end-to-end redaction and review tasks. I found that Sonnet 4.6 within Cursor was able to follow the instructions given, and was mostly successful (but at high cost), but local models such as Qwen 3.6 27B struggled. In this post we will see that with a higher quantisation level (Q6 vs Q4 for the previous post), and optimised prompting and skill development within a minimal agentic harness <a href="https://github.com/earendil-works/pi" target="_blank">Pi</a>, local models can perform redaction tasks to an adequate level to save practitioners time in reviewing documents.</p>
+</section>
+<section id="method" class="level1">
+<h1>Method</h1>
+<p>The <a href="https://github.com/seanpedrick-case/doc_redaction" target="_blank">Document Redactions app / package</a> contains the code and skills to perform this agentic redaction task.</p>
+<section id="frontend---agentic-redaction-app" class="level2">
+<h2 class="anchored" data-anchor-id="frontend---agentic-redaction-app">Frontend - Agentic Redaction App</h2>
+<p>The new frontend Agentic Redaction App calls the main Redaction App as an API endpoint, using it as a tool to perform the redaction task. In this approach, a human will use the simplified Agentic Redaction App to make a request to an LLM to perform the redaction task for them. You can try this out a demonstration version yourself <a href="https://huggingface.co/spaces/seanpedrickcase/agentic_document_redaction" target="_blank">here</a>, with a Gemini API key serving as the agentic LLM in this instance. This was chosen for this example app as it is not possible to get enough free compute with Hugging Face to perform the task. With Google AI Studio you can get enough API calls with a free API key to get through the on-page examples with gemini-flash-lite-latest.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><a href="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/agentic_redaction_gui/agentic_redaction_gui_example_2.png" target="_blank"><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/agentic_redaction_gui/agentic_redaction_gui_example_2.png" class="img-fluid figure-img" width="400"></a></p>
+<figcaption>Agentic Redaction App interface close up</figcaption>
+</figure>
+</div>
+</section>
+<section id="backend---document-redaction-app" class="level2">
+<h2 class="anchored" data-anchor-id="backend---document-redaction-app">Backend - Document Redaction App</h2>
+<p>Serving as the backend in this task, the Document Redaction App is a Gradio UI app that provides a number of FastAPI endpoints for document redaction and review functions, until now used by humans. You can try this out yourself <a href="https://huggingface.co/spaces/seanpedrickcase/document_redaction" target="_blank">here</a>. The Agentic Redaction App LLM has skills that point it to the Document Redaction App API endpoints that enable it to perform the redaction task.</p>
+<section id="models" class="level3">
+<h3 class="anchored" data-anchor-id="models">Models</h3>
+<p>The Document Redaction App uses OCR models such as Tesseract and PaddleOCR to extract text locally, and PII identification models such as spaCy (with the Presidio package). It can also use AWS Textract and Comprehend to extract text and images from the document, and to identify personal information. VLM models served locally or on AWS Bedrock can be used to highlight faces and signatures in the document, or do a second pass on ‘difficult’ words.</p>
+</section>
+</section>
+<section id="results" class="level2">
+<h2 class="anchored" data-anchor-id="results">Results</h2>
+<p>The Agentic Redaction App LLM produces file outputs that are saved to a specified output workspace folder.</p>
+<p>The human operator can then take the output files from the agentic redaction process, review them, and then modify them as needed in the main Redaction App. Hopefully the simplified GUI of the Agentic process, with the ability to ask follow up questions to modify the result, will save the user time in redacting and reviewing documents.</p>
+</section>
+<section id="deployment" class="level2">
+<h2 class="anchored" data-anchor-id="deployment">Deployment</h2>
+<p>To deploy this system with Qwen 3.6 27B, I used the docker compose file <a href="https://github.com/seanpedrick-case/doc_redaction/blob/60abee2c519f173f2e39c3aaaba29d7ee8296797/docker-compose_llama_agentic.yml" target="_blank">here</a>, and the following command:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> compose <span class="at">-f</span> docker-compose_llama_agentic.yml <span class="at">--profile</span> 27b_36 up <span class="at">-d</span> pi-agent</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>This deploys Qwen 3.6 27B quantised to 6 bit with long context (114k tokens at KV cache quantised to 8bit), and runs on a local system with 40GB VRAM. I found that lower quantisations decreased code quality to the point where redaction tasks became difficult.</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">command:</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="ex">-hf</span> unsloth/Qwen3.6-27B-MTP-GGUF</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="ex">--hf-file</span> Qwen3.6-27B-UD-Q6_K_XL.gguf</span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="ex">--mmproj-url</span> https://huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF/resolve/main/mmproj-BF16.gguf</span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="ex">--n-gpu-layers</span> <span class="st">"-1"</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a><span class="ex">--ctx-size</span> <span class="st">"114688"</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a><span class="ex">-ub</span> <span class="st">"512"</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a><span class="ex">--fit</span> <span class="st">"off"</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a><span class="ex">--temp</span> <span class="st">"0.7"</span></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a><span class="ex">--top-k</span> <span class="st">"20"</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a><span class="ex">--top-p</span> <span class="st">"0.95"</span></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a><span class="ex">--min-p</span> <span class="st">"0.0"</span></span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a><span class="ex">--frequency-penalty</span> <span class="st">"1"</span></span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a><span class="ex">--presence-penalty</span> <span class="st">"0.0"</span></span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a><span class="ex">--chat-template-kwargs</span> <span class="st">"{</span><span class="dt">\"</span><span class="st">preserve_thinking</span><span class="dt">\"</span><span class="st">: true}"</span></span>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a><span class="ex">--host</span> <span class="st">"0.0.0.0"</span></span>
+<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a><span class="ex">--port</span> <span class="st">"8080"</span></span>
+<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a><span class="ex">--no-warmup</span></span>
+<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a><span class="ex">--seed</span> <span class="st">"42"</span></span>
+<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a><span class="ex">--image_min_tokens</span> <span class="st">"300"</span></span>
+<span id="cb2-21"><a href="#cb2-21" aria-hidden="true" tabindex="-1"></a><span class="ex">--parallel</span> <span class="st">"1"</span></span>
+<span id="cb2-22"><a href="#cb2-22" aria-hidden="true" tabindex="-1"></a><span class="ex">--cache-type-k</span> <span class="st">"q8_0"</span></span>
+<span id="cb2-23"><a href="#cb2-23" aria-hidden="true" tabindex="-1"></a><span class="ex">--cache-type-v</span> <span class="st">"q8_0"</span></span>
+<span id="cb2-24"><a href="#cb2-24" aria-hidden="true" tabindex="-1"></a><span class="ex">--spec-type</span> <span class="st">"draft-mtp"</span></span>
+<span id="cb2-25"><a href="#cb2-25" aria-hidden="true" tabindex="-1"></a><span class="ex">--spec-draft-n-max</span> <span class="st">"2"</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</section>
+<section id="the-underlying-agentic-harness-and-skills" class="level2">
+<h2 class="anchored" data-anchor-id="the-underlying-agentic-harness-and-skills">The underlying agentic harness and skills</h2>
+<p>F</p>
+<p>To do this task, a skill were developed for <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/vlm_blog/agentic_redaction/skills/doc-redaction-app/SKILL.md" target="_blank">document redaction</a> and <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/vlm_blog/agentic_redaction/skills/doc-redaction-modifications/SKILL.md" target="_blank">modifying redaction results</a>. The skills were developed based on agentic use of the the open source <a href="https://github.com/seanpedrick-case/doc_redaction" target="_blank">Document Redactions app / package</a>. This package contains a Gradio UI app that provides a number of FastAPI endpoints for document redaction and review functions. The deployment used for this experiment can be found at this <a href="https://huggingface.co/spaces/seanpedrickcase/document_redaction" target="_blank">Hugging Face space</a>, where you can try it yourself.</p>
 <p>The agents were instructed to redact an <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/doc_redaction/example_data/Partnership-Agreement-Toolkit_0_0.pdf" target="_blank">example document</a> according to a set of <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/vlm_blog/agentic_redaction/skills/Example%20agent%20skills%20use%20prompt.txt" target="_blank">custom instructions</a>. The agents needed to use the app to redact the document, go page by page to review and modify suggested redactions, and then to return final redacted PDFs and log files.</p>
-<section id="findings" class="level2">
-<h2 class="anchored" data-anchor-id="findings">Findings</h2>
-<p>The performance of each of the tested models is summarised in the table below.</p>
-<table class="caption-top table">
-<colgroup>
-<col style="width: 25%">
-<col style="width: 25%">
-<col style="width: 25%">
-<col style="width: 25%">
-</colgroup>
-<thead>
-<tr class="header">
-<th>Model</th>
-<th>Rating</th>
-<th>Positives</th>
-<th>Negatives</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td>Sonnet 4.6 (in Cursor)</td>
-<td>8.0</td>
-<td>Generally good quality, accurate redactions on each page</td>
-<td>Very high cost (~$1.62 for 7 pages)</td>
-</tr>
-<tr class="even">
-<td>Composer 2.0 (Kimi 2.5 fine tune in Cursor)</td>
-<td>7.5</td>
-<td>Much less lazy, and better quality redactions than Kimi 2.5. Faster and cheaper than Sonnet 4.6</td>
-<td>Unreliable - lazy on some pages, while very good on others.</td>
-</tr>
-<tr class="odd">
-<td>Qwen 3.6 27B (4 bit, in Hermes Agent)</td>
-<td>4.0</td>
-<td>Completed the workflow and correctly used tools. Potential for fully private deployment, 0 API token cost</td>
-<td>Generally lazy on following instructions. Misplaced redaction boxes, particularly signatures. Long time taken.</td>
-</tr>
-<tr class="even">
-<td>Kimi 2.5 (in Cursor)</td>
-<td>3.5</td>
-<td>Completed the workflow and correctly used tools. Cheaper than Sonnet.</td>
-<td>Very lazy, did not reliably follow instructions. Badly placed redaction boxes, particularly signatures</td>
-</tr>
-</tbody>
-</table>
-<p>I found that Sonnet 4.6 within Cursor was able to follow the instructions given, and was mostly successful (but at high cost).</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><a href="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/agentic_redaction/sonnet_46/output_final/final_Partnership-Agreement-Toolkit_0_0_redacted_5.png" target="_blank"><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/agentic_redaction/sonnet_46/output_final/final_Partnership-Agreement-Toolkit_0_0_redacted_5.png" class="img-fluid figure-img" width="400"></a></p>
 <figcaption>Partnership Agreement page 5 - Sonnet 4.6</figcaption>
 </figure>
 </div>
-<p>Qwen 3.6 27B and 35B A3B on a local system (quantised to 4 bit) completed the redaction and review task, but the quality of the output was not good. Kimi 2.5, surprisingly, performed little better than Qwen. Cursor Composer 2.0, performed much better than Kimi, but not as well as Sonnet, showing that finetuning a large model can significantly improve performance. However, redaction quality by page varied significantly.</p>
-</section>
-<section id="conclusions" class="level2">
-<h2 class="anchored" data-anchor-id="conclusions">Conclusions</h2>
-<p>I was impressed that a local model (Qwen 3.6 27B 4 bit) running on consumer hardware (24GB VRAM) could perform the full redaction-review workflow. Obviously the quality of the output could not compare to the largest models, but the fact it could do it at all gives rise to the possibility that in a relatively short time, a fully local and private redaction workflow could be within reach.</p>
-<p>In conclusion, a full end to end redaction workflow with agents at a quality level to replace a human redactor is not currently possible, even with the best models. Local models are still far from being able to perform the task to a satisfactory level. However, all the models tested were able to follow the steps in the workflow and call appropriate tools. So the skillset is there, it’s more of a question of model quality. As AI models continue to improve in general performance, I am sure that within a year or two, all local and cloud models will perform this task much better - I will continue to benchmark new models on this task as they become available.</p>
 </section>
 </section>
-<section id="introduction" class="level1">
+<section id="introduction-1" class="level1">
 <h1>Introduction</h1>
 <p>Redaction tasks are highly complex, and differ from many other types of work with documents in that it is a highly manual vision &amp; text understanding task. To successfully redact a document, currently a person needs to complete a number of tasks (for each page):</p>
 <ol type="1">
@@ -342,7 +387,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <p><strong>3. Can the biggest open source models stand up to closed models for redaction and review tasks?</strong> To see if a performant model based on a large open source model could be used to perform the task. For this, I tried Kimi 2.5, and Cursor Composer 2.0, <a href="https://cursor.com/blog/composer-2-technical-report" target="_blank">a fine tuned version of Kimi 2.5</a>.</p>
 </section>
 </section>
-<section id="method" class="level1">
+<section id="method-1" class="level1">
 <h1>Method</h1>
 <p>Our agents were given a task to redact a document using the Document Redaction app hosted on Hugging Face Spaces: <a href="https://seanpedrickcase-document-redaction.hf.space" target="_blank">seanpedrickcase-document-redaction</a>, running on version 2.2.2. The app has been adapted to have a number of API endpoints available to facilitate the use of app tools by agents. You can see these by viewing the ‘Use via API’ page accessible at the bottom of the app page, or directly <a href="https://seanpedrickcase-document-redaction.hf.space/gradio_api/info" target="_blank">here</a>.</p>
 <p>The agents were given the <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/vlm_blog/agentic_redaction/skills/Example%20agent%20skills%20use%20prompt.txt" target="_blank">following instructions</a>, which were designed to give a range of tasks to add, remove, and review redaction boxes:</p>
@@ -364,7 +409,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <p>The source document to be redacted was the Partnership Agreement Toolkit PDF from the project examples: <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/doc_redaction/example_data/Partnership-Agreement-Toolkit_0_0.pdf" target="_blank">Partnership-Agreement-Toolkit_0_0.pdf</a>. As you can see, this is a document that has a range of information including typed text, scanned ‘noisy’ document pages, and additional visual features such as signatures that would not be picked up by simple OCR models.</p>
 <p>Skill files were given to the agents for <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/vlm_blog/agentic_redaction/skills/doc-redaction-app/SKILL.md" target="_blank">document redaction</a> and <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/vlm_blog/agentic_redaction/skills/doc-redaction-modifications/SKILL.md" target="_blank">modifying redaction results</a>, based on the API endpoints available in the <a href="https://seanpedrickcase-document-redaction.hf.space" target="_blank">Document redaction Gradio app</a>. The skill files were created iteratively in discussion with agentic AI models as they attempted to access the app space. Over several days, both the app and skill files were updated until I achieved a ‘usable’ workflow.</p>
 </section>
-<section id="results" class="level1">
+<section id="results-1" class="level1">
 <h1>Results</h1>
 <p>There are seven pages in the test document, but for brevity I will give an overall score, and then focus on the result for a couple of the difficult pages, page, 5 and 6 which were referred to in custom instructions (always redact ‘London’, remove redactions for Rudy Giuliani, add redactions for Sister City) and contain a signature and some handwritten text (see below).</p>
 <div class="quarto-figure quarto-figure-center">
@@ -479,7 +524,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <p>The input in terms of input / output tokens (180,000 non-cached inputs, 35,000 output), which would mean about $0.18 to redaction and review this 7 page document, or $7.50 for a 300 page document. This is much more within the range of what would be acceptable in terms of cost to replace a human redaction task. Cursor spent 20 minutes on the task. If I ran this agent over the document as a ‘first pass’, using the Document Redaction app as a tool to redact and review the document, would it save time doing redactions? I think maybe yes, a little. Although with the variation in redaction quality by page, I’m not sure I would trust the results to be consistent throughout a document, especially a much larger one.</p>
 </section>
 </section>
-<section id="conclusions-1" class="level1">
+<section id="conclusions" class="level1">
 <h1>Conclusions</h1>
 <p>I summarised the performance of the models at this task in the table below:</p>
 <table class="caption-top table">
@@ -947,7 +992,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
   });
   </script>
 </div> <!-- /content -->
-<div class="page-columns page-rows-contents page-layout-article"><div class="social-share"><a href="https://twitter.com/share?url=https://seanpedrick-case.github.io/doc_redaction/src/agentic_redaction.html&amp;text=Agents for document redaction and review tasks (open vs closed-source)" target="_blank" class="twitter"><i class="fab fa-twitter fa-fw fa-lg"></i></a><a href="https://www.linkedin.com/shareArticle?url=https://seanpedrick-case.github.io/doc_redaction/src/agentic_redaction.html&amp;title=Agents for document redaction and review tasks (open vs closed-source)" target="_blank" class="linkedin"><i class="fa-brands fa-linkedin-in fa-fw fa-lg"></i></a>  <a href="mailto:?subject=Agents for document redaction and review tasks (open vs closed-source)&amp;body=Check out this link:https://seanpedrick-case.github.io/doc_redaction/src/agentic_redaction.html" target="_blank" class="email"><i class="fa-solid fa-envelope fa-fw fa-lg"></i></a><a href="https://www.facebook.com/sharer.php?u=https://seanpedrick-case.github.io/doc_redaction/src/agentic_redaction.html" target="_blank" class="facebook"><i class="fab fa-facebook-f fa-fw fa-lg"></i></a><a href="https://reddit.com/submit?url=https://seanpedrick-case.github.io/doc_redaction/src/agentic_redaction.html&amp;title=Agents for document redaction and review tasks (open vs closed-source)" target="_blank" class="reddit">   <i class="fa-brands fa-reddit-alien fa-fw fa-lg"></i></a><a href="https://www.stumbleupon.com/submit?url=https://seanpedrick-case.github.io/doc_redaction/src/agentic_redaction.html&amp;title=Agents for document redaction and review tasks (open vs closed-source)" target="_blank" class="stumbleupon"><i class="fa-brands fa-stumbleupon fa-fw fa-lg"></i></a><a href="https://www.tumblr.com/share/link?url=https://seanpedrick-case.github.io/doc_redaction/src/agentic_redaction.html&amp;name=Agents for document redaction and review tasks (open vs closed-source)" target="_blank" class="tumblr"><i class="fa-brands fa-tumblr fa-fw fa-lg"></i></a><a href="javascript:void(0);" onclick="var mastodon_instance=prompt('Mastodon Instance / Server Name?'); if(typeof mastodon_instance==='string' &amp;&amp; mastodon_instance.length){this.href='https://'+mastodon_instance+'/share?text=Agents for document redaction and review tasks (open vs closed-source) https://seanpedrick-case.github.io/doc_redaction/src/agentic_redaction.html'}else{return false;}" target="_blank" class="mastodon"><i class="fa-brands fa-mastodon fa-fw fa-lg"></i></a><a href="https://bsky.app/intent/compose?text=https://seanpedrick-case.github.io/doc_redaction/src/agentic_redaction.html Agents for document redaction and review tasks (open vs closed-source)" target="_blank" class="bsky"><i class="fa-brands fa-bluesky"></i></a></div></div>
+<div class="page-columns page-rows-contents page-layout-article"><div class="social-share"><a href="https://twitter.com/share?url=https://seanpedrick-case.github.io/doc_redaction/src/agentic_redaction_with_gui.html&amp;text=Agentic Document Redaction with Qwen 3.6 27B" target="_blank" class="twitter"><i class="fab fa-twitter fa-fw fa-lg"></i></a><a href="https://www.linkedin.com/shareArticle?url=https://seanpedrick-case.github.io/doc_redaction/src/agentic_redaction_with_gui.html&amp;title=Agentic Document Redaction with Qwen 3.6 27B" target="_blank" class="linkedin"><i class="fa-brands fa-linkedin-in fa-fw fa-lg"></i></a>  <a href="mailto:?subject=Agentic Document Redaction with Qwen 3.6 27B&amp;body=Check out this link:https://seanpedrick-case.github.io/doc_redaction/src/agentic_redaction_with_gui.html" target="_blank" class="email"><i class="fa-solid fa-envelope fa-fw fa-lg"></i></a><a href="https://www.facebook.com/sharer.php?u=https://seanpedrick-case.github.io/doc_redaction/src/agentic_redaction_with_gui.html" target="_blank" class="facebook"><i class="fab fa-facebook-f fa-fw fa-lg"></i></a><a href="https://reddit.com/submit?url=https://seanpedrick-case.github.io/doc_redaction/src/agentic_redaction_with_gui.html&amp;title=Agentic Document Redaction with Qwen 3.6 27B" target="_blank" class="reddit">   <i class="fa-brands fa-reddit-alien fa-fw fa-lg"></i></a><a href="https://www.stumbleupon.com/submit?url=https://seanpedrick-case.github.io/doc_redaction/src/agentic_redaction_with_gui.html&amp;title=Agentic Document Redaction with Qwen 3.6 27B" target="_blank" class="stumbleupon"><i class="fa-brands fa-stumbleupon fa-fw fa-lg"></i></a><a href="https://www.tumblr.com/share/link?url=https://seanpedrick-case.github.io/doc_redaction/src/agentic_redaction_with_gui.html&amp;name=Agentic Document Redaction with Qwen 3.6 27B" target="_blank" class="tumblr"><i class="fa-brands fa-tumblr fa-fw fa-lg"></i></a><a href="javascript:void(0);" onclick="var mastodon_instance=prompt('Mastodon Instance / Server Name?'); if(typeof mastodon_instance==='string' &amp;&amp; mastodon_instance.length){this.href='https://'+mastodon_instance+'/share?text=Agentic Document Redaction with Qwen 3.6 27B https://seanpedrick-case.github.io/doc_redaction/src/agentic_redaction_with_gui.html'}else{return false;}" target="_blank" class="mastodon"><i class="fa-brands fa-mastodon fa-fw fa-lg"></i></a><a href="https://bsky.app/intent/compose?text=https://seanpedrick-case.github.io/doc_redaction/src/agentic_redaction_with_gui.html Agentic Document Redaction with Qwen 3.6 27B" target="_blank" class="bsky"><i class="fa-brands fa-bluesky"></i></a></div></div>
 
 
 
