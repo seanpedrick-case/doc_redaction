@@ -2,16 +2,13 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
 
 <meta charset="utf-8">
-<meta name="generator" content="quarto-1.9.37">
+<meta name="generator" content="quarto-1.8.27">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 
 <title>App installation guide on AWS with CDK – Document Redaction App</title>
 <style>
-/* Default styles provided by pandoc.
-** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
-*/
 code{white-space: pre-wrap;}
 span.smallcaps{font-variant: small-caps;}
 div.columns{display: flex; gap: min(4vw, 1.5em);}
@@ -70,14 +67,15 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <meta name="quarto:offset" content="../">
 <script src="../site_libs/quarto-html/quarto.js" type="module"></script>
 <script src="../site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="../site_libs/quarto-html/axe/axe-check.js" type="module"></script>
 <script src="../site_libs/quarto-html/popper.min.js"></script>
 <script src="../site_libs/quarto-html/tippy.umd.min.js"></script>
 <script src="../site_libs/quarto-html/anchor.min.js"></script>
 <link href="../site_libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="../site_libs/quarto-html/quarto-syntax-highlighting-7f8f88aac4f3542376d5c11b86a4c14d.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<link href="../site_libs/quarto-html/quarto-syntax-highlighting-ed96de9b727972fe78a7b5d16c58bf87.css" rel="stylesheet" id="quarto-text-highlighting-styles">
 <script src="../site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="../site_libs/bootstrap/bootstrap-a0f9fd0d421825b736dc1bbcbcba2219.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<link href="../site_libs/bootstrap/bootstrap-e31584831b205ffbb2d98406f31c2a5b.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -161,6 +159,10 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
  <span class="menu-text">Blog</span>
     </a>
     <ul class="dropdown-menu" aria-labelledby="nav-menu-blog">    
+        <li>
+    <a class="dropdown-item" href="../src/agentic_redaction_with_gui.html">
+ <span class="dropdown-text">Agentic document redaction with Qwen 3.6 27B (Jun 2026)</span></a>
+  </li>  
         <li>
     <a class="dropdown-item" href="../src/agentic_redaction.html">
  <span class="dropdown-text">Agents for document redaction and review tasks (open vs closed-source) (Apr 2026)</span></a>
@@ -441,8 +443,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Bootstrap the us-east-1 region</span></span>
 <span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a><span class="ex">cdk</span> bootstrap aws://<span class="op">&lt;</span>YOUR_AWS_ACCOUNT<span class="op">&gt;</span>/us-east-1</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div></li>
-<li><p>In command line, write:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb11"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> clone https://github.com/seanpedrick-case/doc_redaction.git</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div></li>
+<li><p>In command line, write: <code>bash     git clone https://github.com/seanpedrick-case/doc_redaction.git</code></p></li>
 <li><p>If you have previously installed the Redaction stack in the same AWS environment, many issues in re-installation using the following steps can be resolved by deleting the stack and starting again. Go to CloudFormation in the AWS console, and delete the stack (you may need to manually delete some components).</p></li>
 </ul>
 </section>
@@ -528,10 +529,10 @@ You can also get HTTPS <strong>without</strong> setting <code>ACM_SSL_CERTIFICAT
 <p><strong>Application settings:</strong> At deploy time, CDK reads <code>cdk/config/app_config.env</code> and passes each variable as an <strong>inline container environment variable</strong> on the Express service (Cognito credentials still come from Secrets Manager). If you change <code>app_config.env</code> after deploy, run <code>cdk deploy</code> again to update the service. The quickstart script also uploads <code>app_config.env</code> to the logs S3 bucket for parity with the legacy path.</p>
 <p><strong>In-app Cognito (<code>COGNITO_AUTH</code>):</strong> Express demo uses <strong>in-app</strong> Gradio/Cognito login (not ALB <code>authenticate-cognito</code>). When <strong>Pi Express</strong> is enabled, CDK sets <strong><code>COGNITO_AUTH=False</code> on the main app</strong> so the Pi agent can call <code>/doc_redact</code> over Service Connect; users sign in on the <strong>Pi</strong> URL instead. Optionally, keep main auth on and supply a service-account username/password to Pi via <code>DOC_REDACTION_GRADIO_AUTH_USER</code> / <code>DOC_REDACTION_GRADIO_AUTH_PASSWORD</code> in <code>pi_agent.env</code> (see <code>config/pi_agent.env.example</code>).</p>
 <p><strong>Example <code>cdk_config.env</code> additions:</strong></p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb12"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="dt">USE_ECS_EXPRESS_MODE</span><span class="ot">=</span><span class="kw">True</span></span>
-<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a><span class="co"># ACM_SSL_CERTIFICATE_ARN=   # must be empty</span></span>
-<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a><span class="dt">USE_CLOUDFRONT</span><span class="ot">=</span><span class="st">True          # optional; CloudFront can still front the Express-managed ALB</span></span>
-<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a><span class="dt">CLOUDFRONT_DOMAIN</span><span class="ot">=</span><span class="st">d1234abcd.cloudfront.net</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb11"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="dt">USE_ECS_EXPRESS_MODE</span><span class="ot">=</span><span class="kw">True</span></span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a><span class="co"># ACM_SSL_CERTIFICATE_ARN=   # must be empty</span></span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a><span class="dt">USE_CLOUDFRONT</span><span class="ot">=</span><span class="st">True          # optional; CloudFront can still front the Express-managed ALB</span></span>
+<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a><span class="dt">CLOUDFRONT_DOMAIN</span><span class="ot">=</span><span class="st">d1234abcd.cloudfront.net</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>Cognito:</strong> With Express (or legacy ACM), set callback URLs to your CloudFront domain or Express endpoint, including <code>https://&lt;host&gt;/oauth2/idpresponse</code> when using ALB/Cognito login. After the first deploy without CloudFront, copy <code>ExpressServiceEndpoint</code> from CloudFormation outputs into <code>ECS_EXPRESS_COGNITO_REDIRECT_BASE</code> / <code>COGNITO_REDIRECTION_URL</code> if needed, then redeploy.</p>
 <p><strong>Do not</strong> enable Express on an existing production stack without a migration plan (risk of duplicate load balancers/services). Prefer a new stack or tear down the manual ALB/service first.</p>
 </section>
@@ -565,22 +566,22 @@ You can also get HTTPS <strong>without</strong> setting <code>ACM_SSL_CERTIFICAT
 <li><strong>Calling services</strong> must also use Service Connect in the <strong>same</strong> <code>ECS_SERVICE_CONNECT_NAMESPACE</code> (default derived from <code>CDK_PREFIX</code>, e.g.&nbsp;<code>lambeth-redaction-local</code>)</li>
 </ul>
 <p><strong>Client security groups</strong> (pick one or combine; pre-check resolves names in your VPC):</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb13"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="dt">ENABLE_ECS_SERVICE_CONNECT</span><span class="ot">=</span><span class="kw">True</span></span>
-<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a><span class="co"># (A) Recommended: CDK_PREFIX values of other apps that use the same ECS security group naming pattern</span></span>
-<span id="cb13-4"><a href="#cb13-4" aria-hidden="true" tabindex="-1"></a><span class="co">#     ({prefix}SecurityGroupECS, matching this stack's ECS security group name)</span></span>
-<span id="cb13-5"><a href="#cb13-5" aria-hidden="true" tabindex="-1"></a><span class="dt">ECS_SERVICE_CONNECT_CLIENT_CDK_PREFIXES</span><span class="ot">=</span><span class="st">Lambeth-AWS-SharedServices-Dev-OtherApp-</span></span>
-<span id="cb13-6"><a href="#cb13-6" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb13-7"><a href="#cb13-7" aria-hidden="true" tabindex="-1"></a><span class="co"># (B) Explicit security group names in VPC_NAME</span></span>
-<span id="cb13-8"><a href="#cb13-8" aria-hidden="true" tabindex="-1"></a><span class="dt">ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_NAMES</span><span class="ot">=</span><span class="st">MyCallerService-SecurityGroupECS</span></span>
-<span id="cb13-9"><a href="#cb13-9" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb13-10"><a href="#cb13-10" aria-hidden="true" tabindex="-1"></a><span class="co"># (C) Explicit security group IDs (no lookup)</span></span>
-<span id="cb13-11"><a href="#cb13-11" aria-hidden="true" tabindex="-1"></a><span class="dt">ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_IDS</span><span class="ot">=</span><span class="st">sg-0123456789abcdef0</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb12"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="dt">ENABLE_ECS_SERVICE_CONNECT</span><span class="ot">=</span><span class="kw">True</span></span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a><span class="co"># (A) Recommended: CDK_PREFIX values of other apps that use the same ECS security group naming pattern</span></span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a><span class="co">#     ({prefix}SecurityGroupECS, matching this stack's ECS security group name)</span></span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a><span class="dt">ECS_SERVICE_CONNECT_CLIENT_CDK_PREFIXES</span><span class="ot">=</span><span class="st">Lambeth-AWS-SharedServices-Dev-OtherApp-</span></span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-7"><a href="#cb12-7" aria-hidden="true" tabindex="-1"></a><span class="co"># (B) Explicit security group names in VPC_NAME</span></span>
+<span id="cb12-8"><a href="#cb12-8" aria-hidden="true" tabindex="-1"></a><span class="dt">ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_NAMES</span><span class="ot">=</span><span class="st">MyCallerService-SecurityGroupECS</span></span>
+<span id="cb12-9"><a href="#cb12-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-10"><a href="#cb12-10" aria-hidden="true" tabindex="-1"></a><span class="co"># (C) Explicit security group IDs (no lookup)</span></span>
+<span id="cb12-11"><a href="#cb12-11" aria-hidden="true" tabindex="-1"></a><span class="dt">ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_IDS</span><span class="ot">=</span><span class="st">sg-0123456789abcdef0</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>Run <code>python check_resources.py</code> from the <code>cdk</code> folder before <code>cdk deploy</code> so security group <strong>names</strong> are resolved into <code>precheck.context.json</code>. CDK fails at synth if Service Connect is on but no client groups could be resolved.</p>
 <p><strong>Optional tuning:</strong></p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb14"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="dt">ECS_SERVICE_CONNECT_DISCOVERY_NAME</span><span class="ot">=</span><span class="st">redaction   # clients use http://redaction:7860</span></span>
-<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a><span class="dt">ECS_SERVICE_CONNECT_NAMESPACE</span><span class="ot">=</span><span class="st">lambeth-redaction-local</span></span>
-<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a><span class="dt">ECS_SERVICE_CONNECT_PORT_MAPPING_NAME</span><span class="ot">=</span><span class="st">port-7860   # must match the Fargate port mapping name</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb13"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="dt">ECS_SERVICE_CONNECT_DISCOVERY_NAME</span><span class="ot">=</span><span class="st">redaction   # clients use http://redaction:7860</span></span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a><span class="dt">ECS_SERVICE_CONNECT_NAMESPACE</span><span class="ot">=</span><span class="st">lambeth-redaction-local</span></span>
+<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a><span class="dt">ECS_SERVICE_CONNECT_PORT_MAPPING_NAME</span><span class="ot">=</span><span class="st">port-7860   # must match the Fargate port mapping name</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>Stack outputs:</strong> <code>ServiceConnectHttpBaseUrl</code>, <code>ServiceConnectAgentApiUrl</code>, <code>ServiceConnectNamespace</code>.</p>
 <p><strong>Important:</strong> Service Connect traffic <strong>bypasses</strong> ALB Cognito. Use the Agent API with <code>AGENT_API_KEY</code> (if configured in your environment) or appropriate auth for service-to-service calls—not the browser login flow.</p>
 </section>
@@ -618,11 +619,11 @@ You can also get HTTPS <strong>without</strong> setting <code>ACM_SSL_CERTIFICAT
 </ul>
 <p><strong>Not compatible with:</strong> Demonstration (Express) profile, <code>USE_ECS_EXPRESS_MODE=True</code>, CloudFront, Pi agent (Express or legacy), or ECS Service Connect. The installer skips Cognito domain prefix prompts and Pi agent options in headless mode.</p>
 <p><strong>Key <code>cdk_config.env</code> flags</strong> (set automatically by the headless preset):</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb15"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="dt">ENABLE_HEADLESS_DEPLOYMENT</span><span class="ot">=</span><span class="kw">True</span></span>
-<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a><span class="dt">ENABLE_S3_BATCH_ECS_TRIGGER</span><span class="ot">=</span><span class="kw">True</span></span>
-<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a><span class="dt">USE_ECS_EXPRESS_MODE</span><span class="ot">=</span><span class="kw">False</span></span>
-<span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a><span class="dt">USE_CLOUDFRONT</span><span class="ot">=</span><span class="kw">False</span></span>
-<span id="cb15-5"><a href="#cb15-5" aria-hidden="true" tabindex="-1"></a><span class="dt">COGNITO_AUTH</span><span class="ot">=</span><span class="kw">False</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb14"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="dt">ENABLE_HEADLESS_DEPLOYMENT</span><span class="ot">=</span><span class="kw">True</span></span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a><span class="dt">ENABLE_S3_BATCH_ECS_TRIGGER</span><span class="ot">=</span><span class="kw">True</span></span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a><span class="dt">USE_ECS_EXPRESS_MODE</span><span class="ot">=</span><span class="kw">False</span></span>
+<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a><span class="dt">USE_CLOUDFRONT</span><span class="ot">=</span><span class="kw">False</span></span>
+<span id="cb14-5"><a href="#cb14-5" aria-hidden="true" tabindex="-1"></a><span class="dt">COGNITO_AUTH</span><span class="ot">=</span><span class="kw">False</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>After deploy:</strong> run <code>post_cdk_build_quickstart.py</code> to build the container image in CodeBuild (it does <strong>not</strong> scale an always-on service). Upload job files to <code>s3://&lt;output-bucket&gt;/&lt;S3_BATCH_ENV_PREFIX&gt;*&lt;suffix&gt;</code> (see stack output <code>BatchJobEnvPrefix</code>). See <a href="#s3-batch-ecs-trigger-one-shot-direct-mode-tasks">S3 batch ECS trigger</a> for job file format.</p>
 <p><strong>CDK prefix note:</strong> resource names (including <code>COGNITO_USER_POOL_NAME</code>, e.g.&nbsp;<code>{CDK_PREFIX}UserPool</code>) follow <code>CDK_PREFIX</code>. If you previously deployed a <strong>Headless-Redaction-</strong> stack and later switch to <strong>Demo-Redaction-</strong>, run <code>python check_resources.py</code> again so <code>precheck.context.json</code> does not reuse stale “exists” entries from the old prefix.</p>
 </section>
@@ -640,10 +641,10 @@ You can also get HTTPS <strong>without</strong> setting <code>ACM_SSL_CERTIFICAT
 <li>Optional shared defaults at <code>S3_BATCH_DEFAULT_PARAMS_KEY</code> on the output bucket (e.g.&nbsp;<code>general-config/batch_defaults.env</code>)</li>
 </ul>
 <p><strong>Example job file</strong> (<code>s3://&lt;output-bucket&gt;/input/config/case-001.env</code>):</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb16"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="dt">DIRECT_MODE_INPUT_FILE</span><span class="ot">=</span><span class="st">case-001/document.pdf</span></span>
-<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a><span class="dt">DIRECT_MODE_TASK</span><span class="ot">=</span><span class="st">redact</span></span>
-<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a><span class="dt">DIRECT_MODE_PAGE_MIN</span><span class="ot">=</span><span class="dv">1</span></span>
-<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a><span class="dt">DIRECT_MODE_PAGE_MAX</span><span class="ot">=</span><span class="dv">10</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb15"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="dt">DIRECT_MODE_INPUT_FILE</span><span class="ot">=</span><span class="st">case-001/document.pdf</span></span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a><span class="dt">DIRECT_MODE_TASK</span><span class="ot">=</span><span class="st">redact</span></span>
+<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a><span class="dt">DIRECT_MODE_PAGE_MIN</span><span class="ot">=</span><span class="dv">1</span></span>
+<span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a><span class="dt">DIRECT_MODE_PAGE_MAX</span><span class="ot">=</span><span class="dv">10</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>Relative paths are expanded to <code>s3://&lt;output-bucket&gt;/input/...</code> for input files and <code>s3://&lt;log-bucket&gt;/...</code> for deny/allow list paths. The long-running ECS service can stay at desired count 1; each <code>.env</code> upload spawns a <strong>separate</strong> task (plan capacity accordingly).</p>
 <p><strong>Example <code>cdk_config.env</code> additions:</strong> see <code>cdk/config/cdk_config_s3_batch.env.example</code>.</p>
 <p><strong>Stack outputs:</strong> <code>BatchEcsTriggerLambdaArn</code>, <code>BatchJobEnvPrefix</code> (full S3 URI prefix for uploads).</p>
@@ -660,26 +661,26 @@ You can also get HTTPS <strong>without</strong> setting <code>ACM_SSL_CERTIFICAT
 <section id="b-create-a-cdk.json-file" class="level3">
 <h3 class="anchored" data-anchor-id="b-create-a-cdk.json-file">1.b Create a cdk.json file</h3>
 <p>After this, you need a <code>cdk.json</code> in the <code>cdk</code> folder. It should contain the following:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb17"><pre class="sourceCode json code-with-copy"><code class="sourceCode json"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
-<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">"app"</span><span class="fu">:</span> <span class="st">"&lt;PATH TO PYTHON ENVIRONMENT FOLDER WHERE REQUIREMENTS HAVE BEEN LOADED&gt;/python.exe app.py"</span><span class="fu">,</span></span>
-<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">"context"</span><span class="fu">:</span> <span class="fu">{</span></span>
-<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-apigateway:usagePlanKeyOrderInsensitiveId"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/core:stackRelativeExports"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb17-6"><a href="#cb17-6" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-rds:lowercaseDbIdentifier"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb17-7"><a href="#cb17-7" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-lambda:recognizeVersionProps"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb17-8"><a href="#cb17-8" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-lambda:recognizeLayerVersion"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb17-9"><a href="#cb17-9" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-cloudfront:defaultSecurityPolicyTLSv1.2_2021"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb17-10"><a href="#cb17-10" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-ecs:arnFormatIncludesClusterName"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb17-11"><a href="#cb17-11" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/core:newStyleStackSynthesis"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb17-12"><a href="#cb17-12" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"aws-cdk:enableDiffNoFail"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb17-13"><a href="#cb17-13" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-ec2:restrictDefaultSecurityGroup"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb17-14"><a href="#cb17-14" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-apigateway:disableCloudWatchRole"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
-<span id="cb17-15"><a href="#cb17-15" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/core:target-partitions"</span><span class="fu">:</span> <span class="ot">[</span></span>
-<span id="cb17-16"><a href="#cb17-16" aria-hidden="true" tabindex="-1"></a>        <span class="st">"aws"</span><span class="ot">,</span></span>
-<span id="cb17-17"><a href="#cb17-17" aria-hidden="true" tabindex="-1"></a>        <span class="st">"aws-cn"</span></span>
-<span id="cb17-18"><a href="#cb17-18" aria-hidden="true" tabindex="-1"></a>        <span class="ot">]</span></span>
-<span id="cb17-19"><a href="#cb17-19" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
-<span id="cb17-20"><a href="#cb17-20" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb16"><pre class="sourceCode json code-with-copy"><code class="sourceCode json"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">"app"</span><span class="fu">:</span> <span class="st">"&lt;PATH TO PYTHON ENVIRONMENT FOLDER WHERE REQUIREMENTS HAVE BEEN LOADED&gt;/python.exe app.py"</span><span class="fu">,</span></span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">"context"</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-apigateway:usagePlanKeyOrderInsensitiveId"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/core:stackRelativeExports"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-rds:lowercaseDbIdentifier"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-lambda:recognizeVersionProps"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb16-8"><a href="#cb16-8" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-lambda:recognizeLayerVersion"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb16-9"><a href="#cb16-9" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-cloudfront:defaultSecurityPolicyTLSv1.2_2021"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb16-10"><a href="#cb16-10" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-ecs:arnFormatIncludesClusterName"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb16-11"><a href="#cb16-11" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/core:newStyleStackSynthesis"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb16-12"><a href="#cb16-12" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"aws-cdk:enableDiffNoFail"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb16-13"><a href="#cb16-13" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-ec2:restrictDefaultSecurityGroup"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb16-14"><a href="#cb16-14" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/aws-apigateway:disableCloudWatchRole"</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb16-15"><a href="#cb16-15" aria-hidden="true" tabindex="-1"></a>        <span class="dt">"@aws-cdk/core:target-partitions"</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb16-16"><a href="#cb16-16" aria-hidden="true" tabindex="-1"></a>        <span class="st">"aws"</span><span class="ot">,</span></span>
+<span id="cb16-17"><a href="#cb16-17" aria-hidden="true" tabindex="-1"></a>        <span class="st">"aws-cn"</span></span>
+<span id="cb16-18"><a href="#cb16-18" aria-hidden="true" tabindex="-1"></a>        <span class="ot">]</span></span>
+<span id="cb16-19"><a href="#cb16-19" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="cb16-20"><a href="#cb16-20" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </section>
 <section id="create-a-cdk_config.env-file-in-the-config-subfolder." class="level3">
 <h3 class="anchored" data-anchor-id="create-a-cdk_config.env-file-in-the-config-subfolder.">2. Create a <code>cdk_config.env</code> file in the <code>config</code> subfolder.</h3>
@@ -687,48 +688,48 @@ You can also get HTTPS <strong>without</strong> setting <code>ACM_SSL_CERTIFICAT
 <section id="deploying-the-app-an-a-brand-new-vpc" class="level4">
 <h4 class="anchored" data-anchor-id="deploying-the-app-an-a-brand-new-vpc">Deploying the app an a brand new VPC</h4>
 <p>Here as a minimum it would be useful to put the following details in the cdk_config.env file (below are all example values, other possible variables to use here can be seen in the <code>cdk</code> folder/<code>cdk_config.py</code>).</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb18"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="dt">CDK_PREFIX</span><span class="ot">=</span><span class="st">example-prefix # This prefix will be added to the name of most of the created elements in your stack</span></span>
-<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a><span class="dt">NEW_VPC_CIDR</span><span class="ot">=</span><span class="st">10.0.0.0/24 # The CIDR range for your newly created VPC</span></span>
-<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a><span class="dt">AWS_REGION</span><span class="ot">=</span><span class="st">&lt;your-region&gt; # Region where elements will be created</span></span>
-<span id="cb18-4"><a href="#cb18-4" aria-hidden="true" tabindex="-1"></a><span class="dt">AWS_ACCOUNT_ID</span><span class="ot">=</span><span class="st">1234567890 # AWS account ID that has administrator access that you will use for deploying the stack</span></span>
-<span id="cb18-5"><a href="#cb18-5" aria-hidden="true" tabindex="-1"></a><span class="dt">CDK_FOLDER</span><span class="ot">=</span><span class="st">C:/path_to_cdk_folder/ # The place where the cdk folder code is located</span></span>
-<span id="cb18-6"><a href="#cb18-6" aria-hidden="true" tabindex="-1"></a><span class="dt">CONTEXT_FILE</span><span class="ot">=</span><span class="st">C:/path_to_cdk_folder/cdk.context.json</span></span>
-<span id="cb18-7"><a href="#cb18-7" aria-hidden="true" tabindex="-1"></a><span class="dt">COGNITO_USER_POOL_DOMAIN_PREFIX</span><span class="ot">=</span><span class="st">redaction-12345 # The prefix of the login / user sign up domain that you want to use with Cognito login. Should not contain the terms amazon, aws, or cognito.</span></span>
-<span id="cb18-8"><a href="#cb18-8" aria-hidden="true" tabindex="-1"></a><span class="dt">COGNITO_AUTH</span><span class="ot">=</span><span class="st">0 # Do you want to do in-app authentication (username and password only, not necessary if you are using an SSL certificate as recommended below)  </span></span>
-<span id="cb18-9"><a href="#cb18-9" aria-hidden="true" tabindex="-1"></a><span class="dt">USE_CLOUDFRONT</span><span class="ot">=</span><span class="st">True # Recommended. If you intend to use CloudFront as the front URL to your application load balancer (ALB). This has some extra security features that you won't get with just an ALB, e.g. limiting app access by country.</span></span>
-<span id="cb18-10"><a href="#cb18-10" aria-hidden="true" tabindex="-1"></a><span class="dt">RUN_USEAST_STACK</span><span class="ot">=</span><span class="st">False # Set this to True only if you have permissions to create a Cloudfront distribution and web ACL on top of it in the us-east-1 region. If you don't, the section below shows how you can create the CloudFront resource manually and map it to your application load balancer (as you should have permissions for that if you are admin in your region).</span></span>
-<span id="cb18-11"><a href="#cb18-11" aria-hidden="true" tabindex="-1"></a><span class="dt">CLOUDFRONT_DOMAIN</span><span class="ot">=</span><span class="st">&lt;example&gt;.cloudfront.net # If you already know the domain of the CloudFront distribution that you want to use, you can add this here.</span></span>
-<span id="cb18-12"><a href="#cb18-12" aria-hidden="true" tabindex="-1"></a><span class="co"># Optional: CSP and security response headers on the CDK CloudFront stack (default on when RUN_USEAST_STACK=True):</span></span>
-<span id="cb18-13"><a href="#cb18-13" aria-hidden="true" tabindex="-1"></a><span class="co"># CLOUDFRONT_ENABLE_SECURE_RESPONSE_HEADERS=True</span></span>
-<span id="cb18-14"><a href="#cb18-14" aria-hidden="true" tabindex="-1"></a><span class="co"># COGNITO_USER_POOL_LOGIN_URL=  # leave empty to derive from COGNITO_USER_POOL_DOMAIN_PREFIX + AWS_REGION</span></span>
-<span id="cb18-15"><a href="#cb18-15" aria-hidden="true" tabindex="-1"></a><span class="co"># If you are using an SSL certificate with your ALB (highly recommended for production):</span></span>
-<span id="cb18-16"><a href="#cb18-16" aria-hidden="true" tabindex="-1"></a><span class="dt">ACM_SSL_CERTIFICATE_ARN</span><span class="ot">=</span><span class="st">&lt;SSL Certificate ARN&gt; # This is the ARN of the SSL certificate that you have installed in AWS Certificate Manager</span></span>
-<span id="cb18-17"><a href="#cb18-17" aria-hidden="true" tabindex="-1"></a><span class="dt">SSL_CERTIFICATE_DOMAIN</span><span class="ot">=</span><span class="st">redaction.example.com # This is the domain of the SSL certificate that you have installed in AWS Certificate Manager</span></span>
-<span id="cb18-18"><a href="#cb18-18" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb18-19"><a href="#cb18-19" aria-hidden="true" tabindex="-1"></a><span class="co"># Optional: ECS Express Mode instead of ACM (pilot/dev only — see "ECS Express Mode" above):</span></span>
-<span id="cb18-20"><a href="#cb18-20" aria-hidden="true" tabindex="-1"></a><span class="co"># USE_ECS_EXPRESS_MODE=True</span></span>
-<span id="cb18-21"><a href="#cb18-21" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb18-22"><a href="#cb18-22" aria-hidden="true" tabindex="-1"></a><span class="co"># Optional: VPC service-to-service API for other ECS tasks (legacy Fargate only — see "ECS Service Connect" above):</span></span>
-<span id="cb18-23"><a href="#cb18-23" aria-hidden="true" tabindex="-1"></a><span class="co"># ENABLE_ECS_SERVICE_CONNECT=True</span></span>
-<span id="cb18-24"><a href="#cb18-24" aria-hidden="true" tabindex="-1"></a><span class="co"># ECS_SERVICE_CONNECT_CLIENT_CDK_PREFIXES=OtherApp-CDK-Prefix-</span></span>
-<span id="cb18-25"><a href="#cb18-25" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb18-26"><a href="#cb18-26" aria-hidden="true" tabindex="-1"></a><span class="co"># Optional: Pi agent UI on the same ALB (see "Pi agent on ECS" above):</span></span>
-<span id="cb18-27"><a href="#cb18-27" aria-hidden="true" tabindex="-1"></a><span class="co"># ENABLE_PI_AGENT_ECS_SERVICE=True</span></span>
-<span id="cb18-28"><a href="#cb18-28" aria-hidden="true" tabindex="-1"></a><span class="co"># PI_ALB_HOST_HEADER=pi.redaction.example.com</span></span>
-<span id="cb18-29"><a href="#cb18-29" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb18-30"><a href="#cb18-30" aria-hidden="true" tabindex="-1"></a><span class="co"># Optional: headless batch only (see "Headless batch deployment" above):</span></span>
-<span id="cb18-31"><a href="#cb18-31" aria-hidden="true" tabindex="-1"></a><span class="co"># ENABLE_HEADLESS_DEPLOYMENT=True</span></span>
-<span id="cb18-32"><a href="#cb18-32" aria-hidden="true" tabindex="-1"></a><span class="co"># ENABLE_S3_BATCH_ECS_TRIGGER=True</span></span>
-<span id="cb18-33"><a href="#cb18-33" aria-hidden="true" tabindex="-1"></a><span class="co"># USE_ECS_EXPRESS_MODE=False</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb17"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="dt">CDK_PREFIX</span><span class="ot">=</span><span class="st">example-prefix # This prefix will be added to the name of most of the created elements in your stack</span></span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a><span class="dt">NEW_VPC_CIDR</span><span class="ot">=</span><span class="st">10.0.0.0/24 # The CIDR range for your newly created VPC</span></span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a><span class="dt">AWS_REGION</span><span class="ot">=</span><span class="st">&lt;your-region&gt; # Region where elements will be created</span></span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a><span class="dt">AWS_ACCOUNT_ID</span><span class="ot">=</span><span class="st">1234567890 # AWS account ID that has administrator access that you will use for deploying the stack</span></span>
+<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a><span class="dt">CDK_FOLDER</span><span class="ot">=</span><span class="st">C:/path_to_cdk_folder/ # The place where the cdk folder code is located</span></span>
+<span id="cb17-6"><a href="#cb17-6" aria-hidden="true" tabindex="-1"></a><span class="dt">CONTEXT_FILE</span><span class="ot">=</span><span class="st">C:/path_to_cdk_folder/cdk.context.json</span></span>
+<span id="cb17-7"><a href="#cb17-7" aria-hidden="true" tabindex="-1"></a><span class="dt">COGNITO_USER_POOL_DOMAIN_PREFIX</span><span class="ot">=</span><span class="st">redaction-12345 # The prefix of the login / user sign up domain that you want to use with Cognito login. Should not contain the terms amazon, aws, or cognito.</span></span>
+<span id="cb17-8"><a href="#cb17-8" aria-hidden="true" tabindex="-1"></a><span class="dt">COGNITO_AUTH</span><span class="ot">=</span><span class="st">0 # Do you want to do in-app authentication (username and password only, not necessary if you are using an SSL certificate as recommended below)  </span></span>
+<span id="cb17-9"><a href="#cb17-9" aria-hidden="true" tabindex="-1"></a><span class="dt">USE_CLOUDFRONT</span><span class="ot">=</span><span class="st">True # Recommended. If you intend to use CloudFront as the front URL to your application load balancer (ALB). This has some extra security features that you won't get with just an ALB, e.g. limiting app access by country.</span></span>
+<span id="cb17-10"><a href="#cb17-10" aria-hidden="true" tabindex="-1"></a><span class="dt">RUN_USEAST_STACK</span><span class="ot">=</span><span class="st">False # Set this to True only if you have permissions to create a Cloudfront distribution and web ACL on top of it in the us-east-1 region. If you don't, the section below shows how you can create the CloudFront resource manually and map it to your application load balancer (as you should have permissions for that if you are admin in your region).</span></span>
+<span id="cb17-11"><a href="#cb17-11" aria-hidden="true" tabindex="-1"></a><span class="dt">CLOUDFRONT_DOMAIN</span><span class="ot">=</span><span class="st">&lt;example&gt;.cloudfront.net # If you already know the domain of the CloudFront distribution that you want to use, you can add this here.</span></span>
+<span id="cb17-12"><a href="#cb17-12" aria-hidden="true" tabindex="-1"></a><span class="co"># Optional: CSP and security response headers on the CDK CloudFront stack (default on when RUN_USEAST_STACK=True):</span></span>
+<span id="cb17-13"><a href="#cb17-13" aria-hidden="true" tabindex="-1"></a><span class="co"># CLOUDFRONT_ENABLE_SECURE_RESPONSE_HEADERS=True</span></span>
+<span id="cb17-14"><a href="#cb17-14" aria-hidden="true" tabindex="-1"></a><span class="co"># COGNITO_USER_POOL_LOGIN_URL=  # leave empty to derive from COGNITO_USER_POOL_DOMAIN_PREFIX + AWS_REGION</span></span>
+<span id="cb17-15"><a href="#cb17-15" aria-hidden="true" tabindex="-1"></a><span class="co"># If you are using an SSL certificate with your ALB (highly recommended for production):</span></span>
+<span id="cb17-16"><a href="#cb17-16" aria-hidden="true" tabindex="-1"></a><span class="dt">ACM_SSL_CERTIFICATE_ARN</span><span class="ot">=</span><span class="st">&lt;SSL Certificate ARN&gt; # This is the ARN of the SSL certificate that you have installed in AWS Certificate Manager</span></span>
+<span id="cb17-17"><a href="#cb17-17" aria-hidden="true" tabindex="-1"></a><span class="dt">SSL_CERTIFICATE_DOMAIN</span><span class="ot">=</span><span class="st">redaction.example.com # This is the domain of the SSL certificate that you have installed in AWS Certificate Manager</span></span>
+<span id="cb17-18"><a href="#cb17-18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-19"><a href="#cb17-19" aria-hidden="true" tabindex="-1"></a><span class="co"># Optional: ECS Express Mode instead of ACM (pilot/dev only — see "ECS Express Mode" above):</span></span>
+<span id="cb17-20"><a href="#cb17-20" aria-hidden="true" tabindex="-1"></a><span class="co"># USE_ECS_EXPRESS_MODE=True</span></span>
+<span id="cb17-21"><a href="#cb17-21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-22"><a href="#cb17-22" aria-hidden="true" tabindex="-1"></a><span class="co"># Optional: VPC service-to-service API for other ECS tasks (legacy Fargate only — see "ECS Service Connect" above):</span></span>
+<span id="cb17-23"><a href="#cb17-23" aria-hidden="true" tabindex="-1"></a><span class="co"># ENABLE_ECS_SERVICE_CONNECT=True</span></span>
+<span id="cb17-24"><a href="#cb17-24" aria-hidden="true" tabindex="-1"></a><span class="co"># ECS_SERVICE_CONNECT_CLIENT_CDK_PREFIXES=OtherApp-CDK-Prefix-</span></span>
+<span id="cb17-25"><a href="#cb17-25" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-26"><a href="#cb17-26" aria-hidden="true" tabindex="-1"></a><span class="co"># Optional: Pi agent UI on the same ALB (see "Pi agent on ECS" above):</span></span>
+<span id="cb17-27"><a href="#cb17-27" aria-hidden="true" tabindex="-1"></a><span class="co"># ENABLE_PI_AGENT_ECS_SERVICE=True</span></span>
+<span id="cb17-28"><a href="#cb17-28" aria-hidden="true" tabindex="-1"></a><span class="co"># PI_ALB_HOST_HEADER=pi.redaction.example.com</span></span>
+<span id="cb17-29"><a href="#cb17-29" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-30"><a href="#cb17-30" aria-hidden="true" tabindex="-1"></a><span class="co"># Optional: headless batch only (see "Headless batch deployment" above):</span></span>
+<span id="cb17-31"><a href="#cb17-31" aria-hidden="true" tabindex="-1"></a><span class="co"># ENABLE_HEADLESS_DEPLOYMENT=True</span></span>
+<span id="cb17-32"><a href="#cb17-32" aria-hidden="true" tabindex="-1"></a><span class="co"># ENABLE_S3_BATCH_ECS_TRIGGER=True</span></span>
+<span id="cb17-33"><a href="#cb17-33" aria-hidden="true" tabindex="-1"></a><span class="co"># USE_ECS_EXPRESS_MODE=False</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p><strong>Note: If you are using an SSL certificate with Cognito login on the application load balancer (strongly advised), you can set COGNITO_AUTH to 0 above, as you don’t need the second login step to get to the app</strong></p>
 <p><strong>Note: Do not set <code>USE_ECS_EXPRESS_MODE=True</code> together with <code>ACM_SSL_CERTIFICATE_ARN</code> or <code>ENABLE_ECS_SERVICE_CONNECT=True</code>.</strong></p>
 </section>
 <section id="in-an-existing-vpc" class="level4">
 <h4 class="anchored" data-anchor-id="in-an-existing-vpc">In an existing VPC</h4>
 <p>From the above example, remove the variable ‘NEW_VPC_CIDR’ and replace with the below:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb19"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="dt">VPC_NAME</span><span class="ot">=</span><span class="st">example-vpc-name # Name of the VPC within which all the other elements will be created</span></span>
-<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a><span class="dt">EXISTING_IGW_ID</span><span class="ot">=</span><span class="st">igw-1234567890 # Internet Gateway for public subnets (legacy path). Pre-check verifies attachment to VPC_NAME and 0.0.0.0/0 routes; CDK attaches the IGW and adds missing routes on deploy when needed.</span></span>
-<span id="cb19-3"><a href="#cb19-3" aria-hidden="true" tabindex="-1"></a><span class="dt">SINGLE_NAT_GATEWAY_ID</span><span class="ot">=</span><span class="st">nat-123456789 # (optional) The ID for an existing NAT gateway that you want to use instead of creating a new one</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb18"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="dt">VPC_NAME</span><span class="ot">=</span><span class="st">example-vpc-name # Name of the VPC within which all the other elements will be created</span></span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a><span class="dt">EXISTING_IGW_ID</span><span class="ot">=</span><span class="st">igw-1234567890 # Internet Gateway for public subnets (legacy path). Pre-check verifies attachment to VPC_NAME and 0.0.0.0/0 routes; CDK attaches the IGW and adds missing routes on deploy when needed.</span></span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a><span class="dt">SINGLE_NAT_GATEWAY_ID</span><span class="ot">=</span><span class="st">nat-123456789 # (optional) The ID for an existing NAT gateway that you want to use instead of creating a new one</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <section id="subnets" class="level5">
 <h5 class="anchored" data-anchor-id="subnets">Subnets</h5>
 <p>If you are using an existing VPC then you may want to deploy the app within existing subnets rather than creating new ones:</p>
@@ -736,15 +737,15 @@ You can also get HTTPS <strong>without</strong> setting <code>ACM_SSL_CERTIFICAT
 <li><p>If you define no subnets in environment variables, the app will try to use existing private and public subnets. Bear in mind the app may overlap with IP addresses assigned to existing AWS resources. It is advised to at least specify existing subnets that you know are available, or create your own using one of the below methods.</p></li>
 <li><p>If you want to use existing subnets, you can list them in the following environment variables:</p></li>
 </ul>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb20"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="dt">PUBLIC_SUBNETS_TO_USE</span><span class="ot">=</span><span class="st">["PublicSubnet1", "PublicSubnet2", "PublicSubnet3"]`</span></span>
-<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a><span class="dt">PRIVATE_SUBNETS_TO_USE</span><span class="ot">=</span><span class="st">["PrivateSubnet1", "PrivateSubnet2", "PrivateSubnet3"]`</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb19"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="dt">PUBLIC_SUBNETS_TO_USE</span><span class="ot">=</span><span class="st">["PublicSubnet1", "PublicSubnet2", "PublicSubnet3"]`</span></span>
+<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a><span class="dt">PRIVATE_SUBNETS_TO_USE</span><span class="ot">=</span><span class="st">["PrivateSubnet1", "PrivateSubnet2", "PrivateSubnet3"]`</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <ul>
 <li>If you want to create new subnets, you need to also specify CIDR blocks and availability zones for the new subnets. The app will check with you upon deployment whether these CIDR blocks are available before trying to create.</li>
 </ul>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb21"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a><span class="dt">PUBLIC_SUBNET_CIDR_BLOCKS</span><span class="ot">=</span><span class="st">['10.222.333.0/28', '10.222.333.16/28', '10.222.333.32/28']</span></span>
-<span id="cb21-2"><a href="#cb21-2" aria-hidden="true" tabindex="-1"></a><span class="dt">PUBLIC_SUBNET_AVAILABILITY_ZONES</span><span class="ot">=</span><span class="st">['eu-east-1a', 'eu-east-1b', 'eu-east-1c']</span></span>
-<span id="cb21-3"><a href="#cb21-3" aria-hidden="true" tabindex="-1"></a><span class="dt">PRIVATE_SUBNET_CIDR_BLOCKS</span><span class="ot">=</span><span class="st">['10.222.333.48/28', '10.222.333.64/28', '10.222.333.80/28']</span></span>
-<span id="cb21-4"><a href="#cb21-4" aria-hidden="true" tabindex="-1"></a><span class="dt">PRIVATE_SUBNET_AVAILABILITY_ZONES</span><span class="ot">=</span><span class="st">['eu-east-1a', 'eu-east-1b', 'eu-east-1c']</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb20"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="dt">PUBLIC_SUBNET_CIDR_BLOCKS</span><span class="ot">=</span><span class="st">['10.222.333.0/28', '10.222.333.16/28', '10.222.333.32/28']</span></span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a><span class="dt">PUBLIC_SUBNET_AVAILABILITY_ZONES</span><span class="ot">=</span><span class="st">['eu-east-1a', 'eu-east-1b', 'eu-east-1c']</span></span>
+<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a><span class="dt">PRIVATE_SUBNET_CIDR_BLOCKS</span><span class="ot">=</span><span class="st">['10.222.333.48/28', '10.222.333.64/28', '10.222.333.80/28']</span></span>
+<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a><span class="dt">PRIVATE_SUBNET_AVAILABILITY_ZONES</span><span class="ot">=</span><span class="st">['eu-east-1a', 'eu-east-1b', 'eu-east-1c']</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>If you try to create subnets in invalid CIDR blocks / availability zones, the console output will tell you and it will show you the currently occupied CIDR blocks to help find a space for new subnets you want to create.</p>
 <p><strong>Internet Gateway (legacy ALB in public subnets):</strong> Run <code>python check_resources.py</code> before <code>cdk deploy</code>. It audits each named public subnet’s route table. If <code>EXISTING_IGW_ID</code> is set but not attached to the VPC, CDK creates <code>AWS::EC2::VPCGatewayAttachment</code>. If a subnet’s route table lacks <code>0.0.0.0/0</code> → that IGW, CDK adds <code>AWS::EC2::Route</code>. Pre-check fails if a public route table already has a conflicting default route (for example NAT or a different IGW).</p>
 </section>
@@ -754,9 +755,9 @@ You can also get HTTPS <strong>without</strong> setting <code>ACM_SSL_CERTIFICAT
 <h3 class="anchored" data-anchor-id="run-pre-check-and-deploy-your-aws-stack">3. Run pre-check and deploy your AWS stack</h3>
 <p>In command line, go to your <code>cdk</code> folder in the redaction app folder.</p>
 <p>If you use <strong>ECS Service Connect</strong> or rely on security group name resolution, run the pre-check script first (writes <code>precheck.context.json</code>):</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb22"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> check_resources.py</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb21"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> check_resources.py</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>Then deploy:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb23"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a><span class="ex">cdk</span> deploy <span class="at">--all</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb22"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="ex">cdk</span> deploy <span class="at">--all</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>This deploys the stacks defined in <code>app.py</code> (<code>RedactionStack</code>, and optionally <code>RedactionStackCloudfront</code> and <code>AppRegistryStack</code>).</p>
 <p>Hopefully everything will deploy successfully and you will be able to see your new stacks in CloudFormation in the AWS console. There should be one called <code>RedactionStack</code> and one called <code>RedactionStackCloudfront</code> if you set <code>RUN_USEAST_STACK</code> to ‘True’ in <code>config/cdk_config.env</code>. You will also see a stack called <code>AppRegistryStack</code> if you set <code>ENABLE_APPREGISTRY</code> to ‘True’ in the same config file.</p>
 <section id="aws-console-myapplications-optional-enabled-by-default" class="level4">
@@ -789,9 +790,9 @@ You can also get HTTPS <strong>without</strong> setting <code>ACM_SSL_CERTIFICAT
 <p>On the <strong>ECS Express Mode</strong> path, CDK already inlined <code>app_config.env</code> variables as container environment variables at deploy time; keep the file in sync and redeploy after major config changes. Uploading to S3 is still useful for documentation and parity with the quickstart script.</p>
 <p>Repo-wide OCR/PII settings remain in <strong><code>config/config.env</code></strong> at the repository root (local dev and image build); do not confuse that file with <code>cdk/config/app_config.env</code>, which carries AWS deployment keys (<code>COGNITO_AUTH</code>, bucket names, DynamoDB table names, etc.).</p>
 <p>If you want to set AWS deployment keys manually, create or edit <code>cdk/config/app_config.env</code> with at least:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb24"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a><span class="dt">COGNITO_AUTH</span><span class="ot">=</span><span class="st">False # If you are using an SSL certificate with your application load balancer, you will be logging in there. Set this to 0 to turn off the default login screen.</span></span>
-<span id="cb24-2"><a href="#cb24-2" aria-hidden="true" tabindex="-1"></a><span class="dt">RUN_AWS_FUNCTIONS</span><span class="ot">=</span><span class="st">True # This will enable the app to communicate with AWS services.</span></span>
-<span id="cb24-3"><a href="#cb24-3" aria-hidden="true" tabindex="-1"></a><span class="dt">SESSION_OUTPUT_FOLDER</span><span class="ot">=</span><span class="st">True # This will put outputs for each user in separate output folders.</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb23"><pre class="sourceCode ini code-with-copy"><code class="sourceCode ini"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a><span class="dt">COGNITO_AUTH</span><span class="ot">=</span><span class="st">False # If you are using an SSL certificate with your application load balancer, you will be logging in there. Set this to 0 to turn off the default login screen.</span></span>
+<span id="cb23-2"><a href="#cb23-2" aria-hidden="true" tabindex="-1"></a><span class="dt">RUN_AWS_FUNCTIONS</span><span class="ot">=</span><span class="st">True # This will enable the app to communicate with AWS services.</span></span>
+<span id="cb23-3"><a href="#cb23-3" aria-hidden="true" tabindex="-1"></a><span class="dt">SESSION_OUTPUT_FOLDER</span><span class="ot">=</span><span class="st">True # This will put outputs for each user in separate output folders.</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <ul>
 <li>Then, go to S3 and choose the new <code>...-logs</code> bucket that you created. Upload <code>app_config.env</code> into this bucket (same basename as <code>APP_CONFIG_ENV_BASENAME</code> in CDK config).</li>
 </ul>
@@ -911,16 +912,16 @@ You can also get HTTPS <strong>without</strong> setting <code>ACM_SSL_CERTIFICAT
 </ul></li>
 <li>Create the policy in the AWS CLI (global CloudFront API), using only the <code>ResponseHeadersPolicyConfig</code> object (omit <code>ETag</code> from the downloaded file):</li>
 </ol>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb25"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> cloudfront create-response-headers-policy ^</span>
-<span id="cb25-2"><a href="#cb25-2" aria-hidden="true" tabindex="-1"></a>  <span class="ex">--response-headers-policy-config</span> file://response-headers-policy-config-only.json</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb24"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> cloudfront create-response-headers-policy ^</span>
+<span id="cb24-2"><a href="#cb24-2" aria-hidden="true" tabindex="-1"></a>  <span class="ex">--response-headers-policy-config</span> file://response-headers-policy-config-only.json</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>To build <code>response-headers-policy-config-only.json</code>, copy <code>ResponseHeadersPolicyConfig</code> from the template file and apply the substitutions above. Note the policy <code>Name</code> must be unique in your account.</p>
 <ol start="3" type="1">
 <li>In <strong>CloudFront → your distribution → Behaviors → Edit default behavior</strong>, set <strong>Response headers policy</strong> to the policy you created.</li>
 <li>If the browser blocks Gradio WebSockets or Cognito login, open developer tools → Network, note the blocked URL, and extend <code>connect-src</code> / <code>manifest-src</code> in the policy (then update the policy with <code>update-response-headers-policy</code> and the policy ETag).</li>
 </ol>
 <p>You can export an existing policy for editing:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb26"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> cloudfront list-response-headers-policies <span class="at">--type</span> custom</span>
-<span id="cb26-2"><a href="#cb26-2" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> cloudfront get-response-headers-policy <span class="at">--id</span> POLICY_ID <span class="at">--output</span> json <span class="op">&gt;</span> policy.json</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb25"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> cloudfront list-response-headers-policies <span class="at">--type</span> custom</span>
+<span id="cb25-2"><a href="#cb25-2" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> cloudfront get-response-headers-policy <span class="at">--id</span> POLICY_ID <span class="at">--output</span> json <span class="op">&gt;</span> policy.json</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </section>
 </section>
 <section id="change-cognito-redirection-url-to-your-cloudfront-distribution" class="level3">
