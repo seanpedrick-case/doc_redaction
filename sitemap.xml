@@ -2,7 +2,7 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://seanpedrick-case.github.io/doc_redaction/src/user_guide.html</loc>
-    <lastmod>2026-04-20T11:52:52.000Z</lastmod>
+    <lastmod>2026-06-27T20:45:43.272Z</lastmod>
   </url>
   <url>
     <loc>https://seanpedrick-case.github.io/doc_redaction/src/python_package_usage.html</loc>
@@ -18,7 +18,7 @@
   </url>
   <url>
     <loc>https://seanpedrick-case.github.io/doc_redaction/src/agentic_redaction.html</loc>
-    <lastmod>2026-04-27T13:27:25.000Z</lastmod>
+    <lastmod>2026-06-27T20:45:28.403Z</lastmod>
   </url>
   <url>
     <loc>https://seanpedrick-case.github.io/doc_redaction/index.html</loc>
@@ -26,7 +26,7 @@
   </url>
   <url>
     <loc>https://seanpedrick-case.github.io/doc_redaction/src/agentic_redaction_with_gui.html</loc>
-    <lastmod>2026-06-27T11:08:57.893Z</lastmod>
+    <lastmod>2026-06-27T21:05:06.713Z</lastmod>
   </url>
   <url>
     <loc>https://seanpedrick-case.github.io/doc_redaction/src/installation_guide.html</loc>
@@ -34,10 +34,10 @@
   </url>
   <url>
     <loc>https://seanpedrick-case.github.io/doc_redaction/src/ocr_and_redaction_with_qwen35.html</loc>
-    <lastmod>2026-04-27T11:47:39.000Z</lastmod>
+    <lastmod>2026-06-27T20:46:02.816Z</lastmod>
   </url>
   <url>
     <loc>https://seanpedrick-case.github.io/doc_redaction/src/redaction_with_vlm_and_llms.html</loc>
-    <lastmod>2026-04-27T11:47:19.000Z</lastmod>
+    <lastmod>2026-06-27T20:45:52.573Z</lastmod>
   </url>
 </urlset>
