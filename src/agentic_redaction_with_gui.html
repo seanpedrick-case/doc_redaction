@@ -440,13 +440,11 @@ figure > figcaption {
 <section id="page-4" class="level2">
 <h2 class="anchored" data-anchor-id="page-4">Page 4</h2>
 <p>This is a page with a scanned image of a document. There are signatures, mentions of countries, and ‘Sister city’ mentions.</p>
-<div class="quarto-figure-center">
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><a href="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/agentic_redaction_gui/partnership_agreement_7_page_signatures/Partnership-Agreement-Toolkit_0_0_redacted_4.png" target="_blank"><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/main/vlm_blog/agentic_redaction_gui/partnership_agreement_7_page_signatures/Partnership-Agreement-Toolkit_0_0_redacted_4.png" class="img-fluid figure-img" width="400"></a></p>
 <figcaption>Partnership Agreement Toolkit redaction page 4</figcaption>
 </figure>
-</div>
 </div>
 <p>We can see that the agent successfully redacted the signatures. However, it has missed the country names. Looking at the <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/vlm_blog/agentic_redaction_gui/partnership_agreement_7_page_signatures/SUMMARY_partnership.md">summary markdown</a> produced by the model, it says ‘Reviewed all proposed boxes — no general country names were flagged for redaction by the PII model.’. This suggests to me that it trusted the initial automated redaction process to remove all countries, without doing a proper check of the text afterwards to ensure that no country names were retained by error. This could be the model getting confused or by error.</p>
 <p>7/10 for this page.</p>
@@ -471,7 +469,7 @@ figure > figcaption {
 </section>
 <section id="a-22-page-policy-document-for-residents" class="level2">
 <h2 class="anchored" data-anchor-id="a-22-page-policy-document-for-residents">3. A 22-page policy document for residents</h2>
-<p>Our final document to test is a <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/vlm_blog/agentic_redaction_gui/lambeth_plan_22_page_faces/Lambeth%202030%20FINAL%20ACC_Ver_Dec.pdf" target="_blank">22-page policy document for residents</a> with many references to places, names, and faces to redact throughout. I gave the agent the following custom instructions:</p>
+<p>The final document to test is a <a href="https://github.com/seanpedrick-case/document_redaction_examples/blob/main/vlm_blog/agentic_redaction_gui/lambeth_plan_22_page_faces/Lambeth%202030%20FINAL%20ACC_Ver_Dec.pdf" target="_blank">22-page policy document for residents</a> with many references to places, names, and faces to redact throughout. I gave the agent the following custom instructions:</p>
 <pre><code>- Redact any terms related to Lambeth, and Lambeth 2030
 - Redact any names
 - Redact any photos of faces</code></pre>
