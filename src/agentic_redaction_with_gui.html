@@ -229,7 +229,7 @@ figure > figcaption {
   <li><a href="#ocr-pii-detection-models" id="toc-ocr-pii-detection-models" class="nav-link" data-scroll-target="#ocr-pii-detection-models">OCR / PII detection models</a></li>
   </ul></li>
   <li><a href="#local-agentic-model-deployment-qwen-3.6-27b" id="toc-local-agentic-model-deployment-qwen-3.6-27b" class="nav-link" data-scroll-target="#local-agentic-model-deployment-qwen-3.6-27b">Local agentic model deployment (Qwen 3.6 27B)</a></li>
-  <li><a href="#the-documents-tested" id="toc-the-documents-tested" class="nav-link" data-scroll-target="#the-documents-tested">The documents tested</a></li>
+  <li><a href="#example-documents-to-test" id="toc-example-documents-to-test" class="nav-link" data-scroll-target="#example-documents-to-test">Example documents to test</a></li>
   </ul></li>
   <li><a href="#results" id="toc-results" class="nav-link" data-scroll-target="#results">Results</a>
   <ul class="collapse">
@@ -280,7 +280,7 @@ figure > figcaption {
 <p>27 June 2026</p>
 <section id="introduction" class="level1">
 <h1>Introduction</h1>
-<p>Document redaction tasks are complex tasks that require text and image recognition capabilities, long context understanding, and the ability to follow specific rules to redact or exclude specific information. Recent developments in LLM models have given rise to models and tools that can meet all of these criteria, and now even locally-deployed models are capable of this task. If agents, using these models, can be harnessed to perform contextual-aware redaction, this could result in significant time savings for people performing redaction tasks.</p>
+<p>Document redaction tasks are complex tasks that require text and image recognition capabilities, long context understanding, and the ability to closely followc rules to redact specific information. Recently, local models have been developed that can do this all (e.g.&nbsp;Qwen 3.6). If agents, using these models, can be harnessed to perform contextual-aware redaction, this could result in significant time savings for people performing redaction tasks.</p>
 <p><a href="https://seanpedrick-case.github.io/doc_redaction/src/agentic_redaction.html" target="_blank">In a previous post</a>, I investigated the possibility of using agentic workflows various LLMs to conduct end-to-end redaction and review. I found that Sonnet 4.6 was able to perform the tasks well, but local models such as Qwen 3.6 27B struggled.</p>
 <p>Since then I have optimised the local model settings and agentic harness. I am now getting acceptable results with agentic redaction using Qwen 3.6 27B. In this post we will see that with a higher quantisation level (Q6 vs Q4 for the previous post), and optimised prompting and skills within a minimal agentic harness <a href="https://github.com/earendil-works/pi" target="_blank">Pi</a>, local models can successfully perform redaction tasks.</p>
 <div class="quarto-figure quarto-figure-center">
@@ -384,8 +384,8 @@ figure > figcaption {
 <span id="cb2-25"><a href="#cb2-25" aria-hidden="true" tabindex="-1"></a><span class="ex">--spec-draft-n-max</span> <span class="st">"2"</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>The above compose instruction also deploys the two apps for the Qwen VLM to interact with in local Docker containers - an agentic GUI based based on the Pi agent framework that the user interacts with initially (<a href="https://huggingface.co/spaces/seanpedrickcase/agentic_document_redaction" target="_blank">example deployment here</a>), and the original Document Redaction app GUI that a human user can use to redact and review the outputs afterwards (<a href="https://huggingface.co/spaces/seanpedrickcase/document_redaction" target="_blank">example deployment here</a>). As previously mentioned, Qwen 3.6 27B is used as the agentic model, and also as the VLM model used by the main Redaction app to perform tasks such as face and signature detection.</p>
 </section>
-<section id="the-documents-tested" class="level2">
-<h2 class="anchored" data-anchor-id="the-documents-tested">The documents tested</h2>
+<section id="example-documents-to-test" class="level2">
+<h2 class="anchored" data-anchor-id="example-documents-to-test">Example documents to test</h2>
 <p>I asked the Qwen agent in Pi to redact three different documents, each following specific user instructions, described in the <a href="#results">Results</a> section below for each document. To keep the test consistent, I looked only at the initial outputs from the agent process, i.e.&nbsp;I did not ask any steering or follow up questions to the agent to modify the returned files.</p>
 <p>The documents tested were:</p>
 <ol type="1">
