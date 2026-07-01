@@ -51,7 +51,7 @@ pip install -e ".[vlm]"
 
 Note that the versions of both PaddleOCR and Torch installed by default are the CPU-only versions. If you want to install the GPU-enabled version of torch, it is advised to install the following version:
 ```bash
-pip install torch==2.9.1 torchvision==0.24.1 --index-url https://download.pytorch.org/whl/cu129
+pip install torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/cu129
 ```
 
 #### Option 2 - Install from PyPI

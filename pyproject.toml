@@ -87,17 +87,17 @@ paddle = [
     "protobuf<=7.34.0",
     "paddlepaddle>=3.0.0,<=3.2.1", 
     "paddleocr<=3.7.0",
-    "torch<=2.9.1",
-    "torchvision<=0.24.1",
+    "torch<=2.10.0",
+    "torchvision<=0.25.0",
     "transformers<=5.12.0",
     #"pycocotools<=2.0.10",
 ]
 
 # Extra dependencies for VLM models
-# The following installs the CPU compatible version of pytorch. For torch cuda support you should run manually pip install torch==2.9.1 torchvision==0.24.1 --index-url https://download.pytorch.org/whl/cu129 after installation
+# The following installs the CPU compatible version of pytorch. For torch cuda support you should run manually pip install torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/cu129 after installation
 vlm = [
-    "torch<=2.9.1",
-    "torchvision<=0.24.1",
+    "torch<=2.10.0",
+    "torchvision<=0.25.0",
     "transformers<=5.12.0",
     "accelerate<=1.13.0",
     "bitsandbytes<=0.49.2", # Needed for on the fly quantisation in transformers
