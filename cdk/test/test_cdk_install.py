@@ -426,7 +426,7 @@ def test_build_app_config_env_values_express_uses_in_app_cognito():
 
 def test_build_app_config_env_values_express_pi_disables_main_cognito():
     answers = _demo_answers()
-    answers.enable_pi_express = True
+    answers.enable_agentic_express = True
     values = inst.build_env_values(answers)
     updates = inst.build_app_config_env_values(values)
     assert updates["COGNITO_AUTH"] == "False"
@@ -523,7 +523,7 @@ def test_merge_preset_custom():
 
 def test_build_env_values_pi_express():
     answers = _demo_answers()
-    answers.enable_pi_express = True
+    answers.enable_agentic_express = True
     values = inst.build_env_values(answers)
     assert values["ENABLE_PI_AGENT_EXPRESS_SERVICE"] == "True"
     assert "PI_ALB_PATH_PREFIX" not in values
@@ -535,7 +535,7 @@ def test_build_env_values_pi_express():
 
 def test_build_pi_agent_env_values_express_skips_root_path():
     answers = _demo_answers()
-    answers.enable_pi_express = True
+    answers.enable_agentic_express = True
     env = inst.build_pi_agent_env_values(answers)
     assert env["RUN_FASTAPI"] == "True"
     assert "PI_ROOT_PATH" not in env
@@ -543,10 +543,10 @@ def test_build_pi_agent_env_values_express_skips_root_path():
 
 def test_build_env_values_pi_production_host():
     answers = _production_answers()
-    answers.enable_pi_legacy = True
+    answers.enable_agentic_legacy = True
     answers.enable_service_connect = True
-    answers.pi_alb_routing = "host"
-    answers.pi_alb_host_header = "agent.redaction.example.com"
+    answers.agentic_alb_routing = "host"
+    answers.agentic_alb_host_header = "agent.redaction.example.com"
     values = inst.build_env_values(answers)
     assert values["ENABLE_PI_AGENT_ECS_SERVICE"] == "True"
     assert values["ENABLE_ECS_SERVICE_CONNECT"] == "True"
@@ -556,10 +556,10 @@ def test_build_env_values_pi_production_host():
 
 def test_validate_pi_host_requires_header():
     answers = _production_answers()
-    answers.enable_pi_legacy = True
+    answers.enable_agentic_legacy = True
     answers.enable_service_connect = True
-    answers.pi_alb_routing = "host"
-    answers.pi_alb_host_header = ""
+    answers.agentic_alb_routing = "host"
+    answers.agentic_alb_host_header = ""
     values = inst.build_env_values(answers)
     errors = inst.validate_env_values(values)
     assert any("PI_ALB_HOST_HEADER" in e for e in errors)
@@ -567,34 +567,34 @@ def test_validate_pi_host_requires_header():
 
 def test_validate_pi_express_skips_alb_routing():
     answers = _demo_answers()
-    answers.enable_pi_express = True
+    answers.enable_agentic_express = True
     values = inst.build_env_values(answers)
     assert inst.validate_env_values(values) == []
 
 
 def test_build_pi_agent_env_values():
     answers = _demo_answers()
-    answers.enable_pi_express = False
-    answers.enable_pi_legacy = True
-    answers.pi_alb_routing = "path"
-    answers.pi_alb_path_prefix = "/pi"
+    answers.enable_agentic_express = False
+    answers.enable_agentic_legacy = True
+    answers.agentic_alb_routing = "path"
+    answers.agentic_alb_path_prefix = "/pi"
     values = inst.build_pi_agent_env_values(answers)
     assert values["PI_DEPLOYMENT_PROFILE"] == "aws-ecs"
     assert values["DOC_REDACTION_GRADIO_URL"] == "http://redaction:7860"
     assert values["PI_ROOT_PATH"] == "/pi"
 
 
-def test_apply_pi_cli_flags_enable_pi_demo():
+def test_apply_agentic_cli_flags_enable_agentic_demo():
     answers = inst.InstallAnswers(profile="demo")
     args = argparse.Namespace(
-        enable_pi=True,
-        enable_pi_express=False,
-        enable_pi_legacy=False,
-        pi_alb_routing=None,
-        pi_path_prefix="",
-        pi_host_header="",
-        pi_listener_priority="",
-        pi_gradio_port="",
+        enable_agentic=True,
+        enable_agentic_express=False,
+        enable_agentic_legacy=False,
+        agentic_alb_routing=None,
+        agentic_path_prefix="",
+        agentic_host_header="",
+        agentic_listener_priority="",
+        agentic_gradio_port="",
         sc_discovery_name="",
         pi_provider="",
         skip_pi_agent_env=False,
@@ -603,14 +603,14 @@ def test_apply_pi_cli_flags_enable_pi_demo():
         agentcore_runtime_url="",
         agentcore_api_key="",
     )
-    inst.apply_pi_cli_flags(args, answers)
-    assert answers.enable_pi_express is True
+    inst.apply_agentic_cli_flags(args, answers)
+    assert answers.enable_agentic_express is True
     assert answers.agent_orchestrator == "agentcore"
     assert answers.enable_agentcore_runtime is True
 
 
 def test_demo_default_orchestrator_is_agentcore():
-    answers = inst.InstallAnswers(profile="demo", enable_pi_express=True)
+    answers = inst.InstallAnswers(profile="demo", enable_agentic_express=True)
     assert inst.default_agent_orchestrator_for_answers(answers) == "agentcore"
     answers.profile = "production"
     assert inst.default_agent_orchestrator_for_answers(answers) == "pi"
@@ -626,7 +626,7 @@ def test_merge_policy_file_locations_adds_invoke_policy():
 
 def test_build_env_values_agentcore_includes_invoke_policy():
     answers = _demo_answers()
-    answers.enable_pi_express = True
+    answers.enable_agentic_express = True
     answers.agent_orchestrator = "agentcore"
     answers.enable_agentcore_runtime = True
     answers.agentcore_runtime_url = "https://runtime.example"
@@ -636,7 +636,7 @@ def test_build_env_values_agentcore_includes_invoke_policy():
 
 def test_validate_agentcore_allows_deferred_url():
     answers = _demo_answers()
-    answers.enable_pi_express = True
+    answers.enable_agentic_express = True
     answers.agent_orchestrator = "agentcore"
     answers.allow_empty_agentcore_url = True
     assert inst.validate_install_answers(answers) == []
@@ -646,7 +646,7 @@ def test_validate_agentcore_allows_deferred_url():
 
 def test_build_env_values_agentcore_orchestrator():
     answers = _demo_answers()
-    answers.enable_pi_express = True
+    answers.enable_agentic_express = True
     answers.agent_orchestrator = "agentcore"
     answers.enable_agentcore_runtime = True
     answers.agentcore_runtime_url = "https://runtime.example"
@@ -658,7 +658,7 @@ def test_build_env_values_agentcore_orchestrator():
 
 def test_build_pi_agent_env_values_agentcore():
     answers = _demo_answers()
-    answers.enable_pi_express = True
+    answers.enable_agentic_express = True
     answers.agent_orchestrator = "agentcore"
     answers.agentcore_runtime_url = "https://runtime.example"
     answers.agentcore_api_key = "secret-token"
@@ -685,7 +685,7 @@ def test_resolve_doc_redaction_gradio_url_agentcore_uses_express_endpoint(monkey
 
 def test_validate_agentcore_requires_runtime_url():
     answers = _demo_answers()
-    answers.enable_pi_express = True
+    answers.enable_agentic_express = True
     answers.agent_orchestrator = "agentcore"
     errors = inst.validate_install_answers(answers)
     assert any("AGENTCORE_RUNTIME_URL" in err for err in errors)
@@ -698,7 +698,7 @@ def test_validate_agentcore_requires_runtime_url():
 
 
 def test_apply_agent_orchestrator_cli_flags():
-    answers = inst.InstallAnswers(profile="demo", enable_pi_express=True)
+    answers = inst.InstallAnswers(profile="demo", enable_agentic_express=True)
     args = argparse.Namespace(
         agent_orchestrator="langgraph",
         enable_agentcore_runtime=False,
@@ -922,7 +922,7 @@ def test_handle_existing_stacks_yes_without_force_skips_delete(monkeypatch):
 
 def test_write_pi_agent_env_file_minimal(tmp_path, monkeypatch):
     answers = _demo_answers()
-    answers.enable_pi_express = True
+    answers.enable_agentic_express = True
     target = tmp_path / "pi_agent.env"
     monkeypatch.setattr(inst, "PI_AGENT_ENV_PATH", target)
     monkeypatch.setattr(inst, "PI_AGENT_ENV_EXAMPLE", tmp_path / "missing.example")

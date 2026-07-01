@@ -331,7 +331,7 @@ def test_print_express_mode_next_steps(capsys, monkeypatch):
     def fake_get_stack_output(stack_name, output_key, region):
         outputs = {
             "ExpressServiceEndpoint": "main.example.ecs.eu-west-2.on.aws",
-            "PiExpressEndpoint": "pi.example.ecs.eu-west-2.on.aws",
+            "AgenticExpressEndpoint": "pi.example.ecs.eu-west-2.on.aws",
         }
         return outputs.get(output_key)
 
@@ -344,8 +344,8 @@ def test_print_express_mode_next_steps(capsys, monkeypatch):
     )
     out = capsys.readouterr().out
     assert "Wait 10 minutes for app deployment to finish." in out
-    assert "Cognito authorisation" not in out
-    assert "sign in at the Pi agent URL" in out
+    assert "sign in at the agentic redaction URL" in out
+    assert "agentic redaction app can be accessed at" in out
     assert "https://main.example.ecs.eu-west-2.on.aws" in out
     assert "https://pi.example.ecs.eu-west-2.on.aws/" in out
     assert "pi_agent.env" not in out

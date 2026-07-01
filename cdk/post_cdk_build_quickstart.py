@@ -109,7 +109,7 @@ if _enable_pi_image_build:
             )
             print(
                 "   DOC_REDACTION_GRADIO_URL: main Express HTTPS (ExpressServiceEndpoint "
-                "or PiDocRedactionBackendUrl stack output) — set automatically on Pi "
+                "or AgenticDocRedactionBackendUrl stack output) — set automatically on agentic "
                 "Express when ENABLE_AGENTCORE_RUNTIME=True"
             )
             print(

@@ -26,23 +26,23 @@ Usage examples::
     python cdk_install.py --profile headless --vpc-name my-vpc \\
         --force-delete-stacks --yes
 
-    # Demo with agent mode (Express; AgentCore orchestrator is the demo default)
-    python cdk_install.py --profile demo --enable-pi --yes --config-only
+    # Demo with agentic redaction mode (Express; AgentCore orchestrator is the demo default)
+    python cdk_install.py --profile demo --enable-agentic --yes --config-only
 
     # Demo with AgentCore URL (deploy runtime first — see agent-redact/agentcore/README.md)
-    python cdk_install.py --profile demo --enable-pi --agent-orchestrator agentcore \\
+    python cdk_install.py --profile demo --enable-agentic --agent-orchestrator agentcore \\
         --agentcore-runtime-url https://your-runtime.example --yes --config-only
 
     # Fallback: Pi coding agent orchestrator inside the Express container
-    python cdk_install.py --profile demo --enable-pi --agent-orchestrator pi --yes --config-only
+    python cdk_install.py --profile demo --enable-agentic --agent-orchestrator pi --yes --config-only
 
     # Headless batch (S3 → Lambda → one-shot ECS direct mode)
     python cdk_install.py --profile headless --vpc-name my-vpc --yes
     python cdk_install.py --profile production --headless --vpc-name my-vpc --yes
 
-    # Production with Pi agent mode on dedicated hostname
-    python cdk_install.py --profile production --enable-pi-legacy \\
-        --pi-alb-routing host --pi-host-header agent.example.com --yes
+    # Production with agentic redaction on dedicated hostname (legacy Fargate)
+    python cdk_install.py --profile production --enable-agentic-legacy \\
+        --agentic-alb-routing host --agentic-host-header agent.example.com --yes
 """
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ APP_CONFIG_ENV_PATH = CONFIG_DIR / "app_config.env"
 APP_CONFIG_ENV_EXAMPLE = CONFIG_DIR / "app_config.env.example"
 PI_AGENT_ENV_PATH = CONFIG_DIR / "pi_agent.env"
 PI_AGENT_ENV_EXAMPLE = REPO_ROOT / "config" / "pi_agent.env.example"
-PI_ALB_ROUTING_MODES = ("path", "host", "both")
+AGENTIC_ALB_ROUTING_MODES = ("path", "host", "both")
 AGENT_ORCHESTRATOR_CHOICES = ("pi", "langgraph", "agentcore")
 
 DEFAULT_POLICY_FILE_LOCATIONS = (
@@ -86,7 +86,7 @@ AgentCore two-phase demo deploy:
   2. Deploy runtime: cd <AgentCoreProject> && agentcore deploy
   3. Copy invocationUrl from `agentcore status` (base URL, no /invocations suffix)
   4. Re-run cdk_install.py --config-only with --agentcore-runtime-url <URL>
-     or update config/pi_agent.env + upload to S3, then restart Pi Express service
+     or update config/pi_agent.env + upload to S3, then restart the agentic Express service
 """.strip()
 CDK_JSON_PATH = CDK_DIR / "cdk.json"
 CDK_JSON_EXAMPLE = CDK_DIR / "cdk.json.example"
@@ -1284,17 +1284,17 @@ class InstallAnswers:
     acm_cert_arn: str = ""
     ssl_domain: str = ""
     cloudfront_geo: str = ""
-    enable_pi_express: bool = False
-    enable_pi_legacy: bool = False
+    enable_agentic_express: bool = False
+    enable_agentic_legacy: bool = False
     enable_service_connect: bool = False
     enable_s3_batch: bool = False
     enable_headless: bool = False
     ecs_memory: str = "4096"
-    pi_alb_routing: str = "path"
-    pi_alb_path_prefix: str = "/agent"
-    pi_alb_host_header: str = ""
-    pi_alb_listener_rule_priority: str = ""
-    pi_gradio_port: str = "7862"
+    agentic_alb_routing: str = "path"
+    agentic_alb_path_prefix: str = "/agent"
+    agentic_alb_host_header: str = ""
+    agentic_alb_listener_rule_priority: str = ""
+    agentic_gradio_port: str = "7862"
     sc_discovery_name: str = "redaction"
     pi_default_provider: str = "amazon-bedrock"
     agent_orchestrator: str = "pi"
@@ -1310,8 +1310,8 @@ class InstallAnswers:
     python_path: Optional[str] = None
 
     @property
-    def pi_enabled(self) -> bool:
-        return self.enable_pi_express or self.enable_pi_legacy
+    def agentic_enabled(self) -> bool:
+        return self.enable_agentic_express or self.enable_agentic_legacy
 
 
 # Cognito hosted-UI prefix domains cannot contain these substrings (AWS docs).
@@ -1363,13 +1363,13 @@ def validate_cognito_domain_prefix(prefix: str) -> Optional[str]:
     return None
 
 
-def normalize_pi_path_prefix(raw: str) -> str:
+def normalize_agentic_path_prefix(raw: str) -> str:
     segment = (raw or "agent").strip().strip("/")
     return f"/{segment}" if segment else "/agent"
 
 
-def default_pi_listener_priority(use_cloudfront: bool = False) -> str:
-    """Default Pi path/host rule priority (1–2 reserved for CloudFront / Express rules)."""
+def default_agentic_listener_priority(use_cloudfront: bool = False) -> str:
+    """Default agentic ALB path/host rule priority (1–2 reserved for CloudFront / Express rules)."""
     del use_cloudfront  # kept for call-site compatibility
     return "3"
 
@@ -1837,7 +1837,7 @@ def normalize_agent_orchestrator(raw: str) -> str:
 
 def default_agent_orchestrator_for_answers(answers: "InstallAnswers") -> str:
     """Demo Express agent mode defaults to AgentCore; production/legacy stays on Pi."""
-    if answers.profile == "demo" and answers.enable_pi_express:
+    if answers.profile == "demo" and answers.enable_agentic_express:
         return "agentcore"
     return "pi"
 
@@ -1846,7 +1846,7 @@ def apply_demo_agentcore_orchestrator_defaults(
     answers: "InstallAnswers", args: argparse.Namespace
 ) -> None:
     """When demo + Express agent mode without an explicit orchestrator, use AgentCore."""
-    if answers.profile != "demo" or not answers.enable_pi_express:
+    if answers.profile != "demo" or not answers.enable_agentic_express:
         return
     if getattr(args, "agent_orchestrator", None):
         return
@@ -1888,7 +1888,7 @@ def validate_install_answers(answers: "InstallAnswers") -> List[str]:
             "AGENT_ORCHESTRATOR must be one of "
             f"{list(AGENT_ORCHESTRATOR_CHOICES)}; got '{answers.agent_orchestrator}'."
         )
-    if answers.pi_enabled and orchestrator == "agentcore":
+    if answers.agentic_enabled and orchestrator == "agentcore":
         if not (answers.agentcore_runtime_url or "").strip():
             if not answers.allow_empty_agentcore_url:
                 errors.append(
@@ -1949,10 +1949,10 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
             "EXISTING_LOAD_BALANCER_DNS": answers.existing_alb_dns
             or "placeholder_load_balancer_dns.net",
             "ENABLE_PI_AGENT_EXPRESS_SERVICE": (
-                "True" if answers.enable_pi_express else "False"
+                "True" if answers.enable_agentic_express else "False"
             ),
             "ENABLE_PI_AGENT_ECS_SERVICE": (
-                "True" if answers.enable_pi_legacy else "False"
+                "True" if answers.enable_agentic_legacy else "False"
             ),
             "ENABLE_ECS_SERVICE_CONNECT": (
                 "True" if answers.enable_service_connect else "False"
@@ -1984,14 +1984,14 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
         )
 
     use_cloudfront = values.get("USE_CLOUDFRONT") == "True"
-    if answers.pi_enabled:
+    if answers.agentic_enabled:
         orchestrator = normalize_agent_orchestrator(answers.agent_orchestrator)
         agentcore_enabled = (
             answers.enable_agentcore_runtime or orchestrator == "agentcore"
         )
         values.update(
             {
-                "PI_GRADIO_PORT": answers.pi_gradio_port,
+                "PI_GRADIO_PORT": answers.agentic_gradio_port,
                 "ECS_SERVICE_CONNECT_DISCOVERY_NAME": answers.sc_discovery_name,
                 "AGENT_ORCHESTRATOR": orchestrator,
                 "ENABLE_AGENTCORE_RUNTIME": "True" if agentcore_enabled else "False",
@@ -2010,15 +2010,17 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
             agentcore_enabled=agentcore_enabled,
             existing_raw=existing_policy_raw,
         )
-        if answers.enable_pi_express:
+        if answers.enable_agentic_express:
             values["ECS_EXPRESS_SC_PORT_NAME"] = "port-7860"
-            values["ECS_PI_EXPRESS_SC_PORT_NAME"] = f"port-{answers.pi_gradio_port}"
+            values["ECS_PI_EXPRESS_SC_PORT_NAME"] = (
+                f"port-{answers.agentic_gradio_port}"
+            )
         else:
-            routing = answers.pi_alb_routing.strip().lower()
-            path_prefix = normalize_pi_path_prefix(answers.pi_alb_path_prefix)
+            routing = answers.agentic_alb_routing.strip().lower()
+            path_prefix = normalize_agentic_path_prefix(answers.agentic_alb_path_prefix)
             priority = (
-                answers.pi_alb_listener_rule_priority.strip()
-                or default_pi_listener_priority(use_cloudfront)
+                answers.agentic_alb_listener_rule_priority.strip()
+                or default_agentic_listener_priority(use_cloudfront)
             )
             values.update(
                 {
@@ -2028,7 +2030,7 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
                 }
             )
             if routing in ("host", "both"):
-                values["PI_ALB_HOST_HEADER"] = answers.pi_alb_host_header.strip()
+                values["PI_ALB_HOST_HEADER"] = answers.agentic_alb_host_header.strip()
 
     if answers.profile == "production":
         values["ACM_SSL_CERTIFICATE_ARN"] = answers.acm_cert_arn
@@ -2109,15 +2111,15 @@ def validate_env_values(
                 "ENABLE_HEADLESS_DEPLOYMENT is incompatible with USE_CLOUDFRONT=True."
             )
 
-    pi_ecs = values.get("ENABLE_PI_AGENT_ECS_SERVICE") == "True"
-    pi_express = values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True"
-    if pi_ecs and pi_express:
-        errors.append("Enable at most one agent mode (ECS or Express).")
-    if pi_express and not express:
+    agentic_ecs = values.get("ENABLE_PI_AGENT_ECS_SERVICE") == "True"
+    agentic_express = values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True"
+    if agentic_ecs and agentic_express:
+        errors.append("Enable at most one agentic deployment mode (ECS or Express).")
+    if agentic_express and not express:
         errors.append(
             "ENABLE_PI_AGENT_EXPRESS_SERVICE requires USE_ECS_EXPRESS_MODE=True."
         )
-    if pi_ecs and express:
+    if agentic_ecs and express:
         errors.append(
             "ENABLE_PI_AGENT_ECS_SERVICE requires USE_ECS_EXPRESS_MODE=False."
         )
@@ -2179,7 +2181,7 @@ def validate_env_values(
         if cognito_prefix_error:
             errors.append(cognito_prefix_error)
 
-    if pi_ecs and values.get("ENABLE_ECS_SERVICE_CONNECT") != "True":
+    if agentic_ecs and values.get("ENABLE_ECS_SERVICE_CONNECT") != "True":
         errors.append(
             "ENABLE_PI_AGENT_ECS_SERVICE=True requires ENABLE_ECS_SERVICE_CONNECT=True."
         )
@@ -2191,7 +2193,7 @@ def validate_env_values(
             f"got '{values.get('AGENT_ORCHESTRATOR')}'."
         )
     agentcore_enabled = values.get("ENABLE_AGENTCORE_RUNTIME") == "True"
-    if (pi_ecs or pi_express) and orchestrator == "agentcore":
+    if (agentic_ecs or agentic_express) and orchestrator == "agentcore":
         if not (values.get("AGENTCORE_RUNTIME_URL") or "").strip():
             if not allow_empty_agentcore_url:
                 errors.append(
@@ -2203,20 +2205,22 @@ def validate_env_values(
         )
 
     if headless and (
-        pi_ecs or pi_express or values.get("ENABLE_ECS_SERVICE_CONNECT") == "True"
+        agentic_ecs
+        or agentic_express
+        or values.get("ENABLE_ECS_SERVICE_CONNECT") == "True"
     ):
         errors.append(
-            "ENABLE_HEADLESS_DEPLOYMENT is incompatible with agent mode or Service Connect."
+            "ENABLE_HEADLESS_DEPLOYMENT is incompatible with agentic redaction or Service Connect."
         )
 
-    pi_routing = (values.get("PI_ALB_ROUTING") or "").strip().lower()
-    if pi_ecs:
-        if pi_routing not in PI_ALB_ROUTING_MODES:
+    agentic_routing = (values.get("PI_ALB_ROUTING") or "").strip().lower()
+    if agentic_ecs:
+        if agentic_routing not in AGENTIC_ALB_ROUTING_MODES:
             errors.append(
-                f"PI_ALB_ROUTING must be one of {list(PI_ALB_ROUTING_MODES)}; got '{pi_routing}'."
+                f"PI_ALB_ROUTING must be one of {list(AGENTIC_ALB_ROUTING_MODES)}; got '{agentic_routing}'."
             )
         elif (
-            pi_routing in ("host", "both")
+            agentic_routing in ("host", "both")
             and not (values.get("PI_ALB_HOST_HEADER") or "").strip()
         ):
             errors.append(
@@ -2230,13 +2234,13 @@ def build_app_config_env_values(values: Dict[str, str]) -> Dict[str, str]:
     """AWS deployment keys merged into config/app_config.env for ECS tasks."""
     prefix_lower = (values.get("CDK_PREFIX") or "").lower()
     headless = values.get("ENABLE_HEADLESS_DEPLOYMENT") == "True"
-    pi_express = values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True"
+    agentic_express = values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True"
 
     def _name(env_key: str, suffix: str) -> str:
         return (values.get(env_key) or "").strip() or f"{prefix_lower}{suffix}"
 
     return {
-        "COGNITO_AUTH": "False" if headless or pi_express else "True",
+        "COGNITO_AUTH": "False" if headless or agentic_express else "True",
         "RUN_AWS_FUNCTIONS": "True",
         "DISPLAY_FILE_NAMES_IN_LOGS": "False",
         "SESSION_OUTPUT_FOLDER": "True",
@@ -2332,11 +2336,11 @@ def build_pi_agent_env_values(answers: InstallAnswers) -> Dict[str, str]:
         "DOC_REDACTION_GRADIO_URL": resolve_doc_redaction_gradio_url(answers),
         "RUN_AWS_FUNCTIONS": "True",
         "AWS_REGION": answers.aws_region,
-        "PI_GRADIO_PORT": answers.pi_gradio_port,
+        "PI_GRADIO_PORT": answers.agentic_gradio_port,
         "PI_DEFAULT_OCR_METHOD": "AWS Textract service - all PDF types",
         "PI_DEFAULT_PII_METHOD": "AWS Comprehend",
     }
-    if answers.enable_pi_express:
+    if answers.enable_agentic_express:
         values["RUN_FASTAPI"] = "True"
     orchestrator = normalize_agent_orchestrator(answers.agent_orchestrator)
     values["AGENT_ORCHESTRATOR"] = orchestrator
@@ -2344,10 +2348,10 @@ def build_pi_agent_env_values(answers: InstallAnswers) -> Dict[str, str]:
         values["AGENTCORE_RUNTIME_URL"] = answers.agentcore_runtime_url.strip()
     if answers.agentcore_api_key.strip():
         values["AGENTCORE_API_KEY"] = answers.agentcore_api_key.strip()
-    if answers.enable_pi_express:
+    if answers.enable_agentic_express:
         return values
-    path_prefix = normalize_pi_path_prefix(answers.pi_alb_path_prefix)
-    if answers.pi_alb_routing.strip().lower() in ("path", "both"):
+    path_prefix = normalize_agentic_path_prefix(answers.agentic_alb_path_prefix)
+    if answers.agentic_alb_routing.strip().lower() in ("path", "both"):
         values["PI_ROOT_PATH"] = path_prefix
         values["ROOT_PATH"] = path_prefix
         values["FASTAPI_ROOT_PATH"] = path_prefix
@@ -2359,7 +2363,7 @@ def write_pi_agent_env_file(
     *,
     overwrite: bool = False,
 ) -> Optional[Path]:
-    if not answers.pi_enabled or not answers.write_pi_agent_env:
+    if not answers.agentic_enabled or not answers.write_pi_agent_env:
         return None
 
     updates = build_pi_agent_env_values(answers)
@@ -2371,7 +2375,7 @@ def write_pi_agent_env_file(
         backup_file(PI_AGENT_ENV_PATH)
         lines = [f"{k}={v}" for k, v in existing.items()]
         PI_AGENT_ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        print(f"Updated {PI_AGENT_ENV_PATH} (AWS/Pi agent keys merged)")
+        print(f"Updated {PI_AGENT_ENV_PATH} (AWS agentic runtime keys merged)")
         return PI_AGENT_ENV_PATH
 
     if PI_AGENT_ENV_EXAMPLE.is_file() and not overwrite:
@@ -2386,7 +2390,7 @@ def write_pi_agent_env_file(
 
     backup_file(PI_AGENT_ENV_PATH) if PI_AGENT_ENV_PATH.is_file() else None
     lines = [
-        "# Generated by cdk_install.py — Pi agent runtime config for AWS ECS",
+        "# Generated by cdk_install.py — agentic runtime config for AWS ECS (pi_agent.env)",
         *[f"{k}={v}" for k, v in updates.items()],
     ]
     PI_AGENT_ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -2950,7 +2954,7 @@ def run_quickstart(python_exe: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Pi agent configuration
+# Agentic redaction configuration
 # ---------------------------------------------------------------------------
 
 
@@ -2977,8 +2981,8 @@ def configure_agent_orchestrator_options(
     interactive: bool,
     assume_yes: bool,
 ) -> None:
-    """Prompt for Pi vs LangGraph vs AgentCore orchestration when agent mode is enabled."""
-    if not answers.pi_enabled:
+    """Prompt for Pi vs LangGraph vs AgentCore orchestration when agentic redaction is enabled."""
+    if not answers.agentic_enabled:
         return
 
     apply_agent_orchestrator_cli_flags(args, answers)
@@ -2989,7 +2993,7 @@ def configure_agent_orchestrator_options(
             answers.agent_orchestrator = "agentcore"
         elif (
             answers.profile == "demo"
-            and answers.enable_pi_express
+            and answers.enable_agentic_express
             and not getattr(args, "agent_orchestrator", None)
         ):
             answers.agent_orchestrator = "agentcore"
@@ -3044,36 +3048,36 @@ def configure_agent_orchestrator_options(
         )
 
 
-def apply_pi_cli_flags(args: argparse.Namespace, answers: InstallAnswers) -> None:
+def apply_agentic_cli_flags(args: argparse.Namespace, answers: InstallAnswers) -> None:
     apply_agent_orchestrator_cli_flags(args, answers)
-    if getattr(args, "enable_pi", False):
+    if getattr(args, "enable_agentic", False):
         preset = merge_preset(answers.profile, answers.custom_overrides)
         if preset.get("USE_ECS_EXPRESS_MODE") == "True":
-            answers.enable_pi_express = True
+            answers.enable_agentic_express = True
         else:
-            answers.enable_pi_legacy = True
+            answers.enable_agentic_legacy = True
             answers.enable_service_connect = True
-    if getattr(args, "enable_pi_express", False):
-        answers.enable_pi_express = True
-    if getattr(args, "enable_pi_legacy", False):
-        answers.enable_pi_legacy = True
+    if getattr(args, "enable_agentic_express", False):
+        answers.enable_agentic_express = True
+    if getattr(args, "enable_agentic_legacy", False):
+        answers.enable_agentic_legacy = True
         answers.enable_service_connect = True
     apply_demo_agentcore_orchestrator_defaults(answers, args)
-    if args.pi_alb_routing:
-        answers.pi_alb_routing = args.pi_alb_routing
-    if args.pi_path_prefix:
-        answers.pi_alb_path_prefix = args.pi_path_prefix
-    if args.pi_host_header:
-        answers.pi_alb_host_header = args.pi_host_header
-    if args.pi_listener_priority:
-        answers.pi_alb_listener_rule_priority = args.pi_listener_priority
-    if args.pi_gradio_port:
-        answers.pi_gradio_port = args.pi_gradio_port
-    if args.sc_discovery_name:
+    if getattr(args, "agentic_alb_routing", None):
+        answers.agentic_alb_routing = args.agentic_alb_routing
+    if getattr(args, "agentic_path_prefix", None):
+        answers.agentic_alb_path_prefix = args.agentic_path_prefix
+    if getattr(args, "agentic_host_header", None):
+        answers.agentic_alb_host_header = args.agentic_host_header
+    if getattr(args, "agentic_listener_priority", None):
+        answers.agentic_alb_listener_rule_priority = args.agentic_listener_priority
+    if getattr(args, "agentic_gradio_port", None):
+        answers.agentic_gradio_port = args.agentic_gradio_port
+    if getattr(args, "sc_discovery_name", None):
         answers.sc_discovery_name = args.sc_discovery_name
-    if args.pi_provider:
+    if getattr(args, "pi_provider", None):
         answers.pi_default_provider = args.pi_provider
-    if args.skip_pi_agent_env:
+    if getattr(args, "skip_pi_agent_env", False):
         answers.write_pi_agent_env = False
 
 
@@ -3114,7 +3118,7 @@ def configure_app_config_options(
         answers.write_app_config_env = False
 
 
-def configure_pi_options(
+def configure_agentic_options(
     answers: InstallAnswers,
     args: argparse.Namespace,
     *,
@@ -3125,40 +3129,43 @@ def configure_pi_options(
     use_express = preset.get("USE_ECS_EXPRESS_MODE") == "True"
     use_cloudfront = preset.get("USE_CLOUDFRONT") == "True"
 
-    apply_pi_cli_flags(args, answers)
+    apply_agentic_cli_flags(args, answers)
 
-    if not answers.pi_enabled and interactive:
+    if not answers.agentic_enabled and interactive:
         if use_express:
-            label = (
-                "Deploy agent mode (second Gradio app on Express, dedicated HTTPS URL)?"
-            )
-            answers.enable_pi_express = ask_yes_no(label, default=False)
+            label = "Deploy agentic redaction (second Gradio app on Express, dedicated HTTPS URL)?"
+            answers.enable_agentic_express = ask_yes_no(label, default=False)
         else:
-            label = "Deploy agent mode (second Gradio app on legacy Fargate + Service Connect)?"
+            label = "Deploy agentic redaction (second Gradio app on legacy Fargate + Service Connect)?"
             if ask_yes_no(label, default=False):
-                answers.enable_pi_legacy = True
+                answers.enable_agentic_legacy = True
                 answers.enable_service_connect = True
 
-    if not answers.pi_enabled:
+    if not answers.agentic_enabled:
         return
 
     configure_agent_orchestrator_options(
         answers, args, interactive=interactive, assume_yes=assume_yes
     )
 
-    if not answers.pi_alb_listener_rule_priority and not answers.enable_pi_express:
-        answers.pi_alb_listener_rule_priority = default_pi_listener_priority(
+    if (
+        not answers.agentic_alb_listener_rule_priority
+        and not answers.enable_agentic_express
+    ):
+        answers.agentic_alb_listener_rule_priority = default_agentic_listener_priority(
             use_cloudfront
         )
 
-    if answers.enable_pi_express:
+    if answers.enable_agentic_express:
         if interactive and not assume_yes:
-            print("\n--- Agent mode (ECS Express) ---")
+            print("\n--- Agentic redaction (ECS Express) ---")
             answers.sc_discovery_name = ask(
                 "Service Connect discovery name for main app",
                 answers.sc_discovery_name,
             )
-            answers.pi_gradio_port = ask("Agent Gradio port", answers.pi_gradio_port)
+            answers.agentic_gradio_port = ask(
+                "Agent Gradio port", answers.agentic_gradio_port
+            )
             if ask_yes_no(
                 f"Write/update {PI_AGENT_ENV_PATH.name} for AWS ECS (DOC_REDACTION_GRADIO_URL, etc.)?",
                 default=True,
@@ -3172,16 +3179,19 @@ def configure_pi_options(
             else:
                 answers.write_pi_agent_env = False
         print(
-            f"Agent mode: Express (dedicated HTTPS endpoint per service); "
+            f"Agentic redaction: Express (dedicated HTTPS endpoint per service); "
             f"Service Connect discovery={answers.sc_discovery_name}; "
             f"orchestrator={normalize_agent_orchestrator(answers.agent_orchestrator)}"
         )
         return
 
     if interactive and not (
-        args.pi_alb_routing or args.pi_path_prefix or args.pi_host_header or assume_yes
+        args.agentic_alb_routing
+        or args.agentic_path_prefix
+        or args.agentic_host_header
+        or assume_yes
     ):
-        print("\n--- Agent mode ALB routing ---")
+        print("\n--- Agentic redaction ALB routing ---")
         ridx = ask_choice(
             "How should the shared ALB route traffic to the Agent UI?",
             [
@@ -3191,25 +3201,25 @@ def configure_pi_options(
             ],
             default_index=0,
         )
-        answers.pi_alb_routing = PI_ALB_ROUTING_MODES[ridx]
+        answers.agentic_alb_routing = AGENTIC_ALB_ROUTING_MODES[ridx]
 
-        if answers.pi_alb_routing in ("path", "both"):
-            answers.pi_alb_path_prefix = ask(
+        if answers.agentic_alb_routing in ("path", "both"):
+            answers.agentic_alb_path_prefix = ask(
                 "Agent path prefix",
-                answers.pi_alb_path_prefix,
+                answers.agentic_alb_path_prefix,
             )
-        if answers.pi_alb_routing in ("host", "both"):
+        if answers.agentic_alb_routing in ("host", "both"):
             default_host = ""
             if answers.ssl_domain:
                 default_host = f"agent.{answers.ssl_domain}"
-            answers.pi_alb_host_header = ask(
+            answers.agentic_alb_host_header = ask(
                 "Agent ALB host header (DNS CNAME to CloudFront/ALB)",
                 default_host,
             )
 
         if use_cloudfront:
-            default_pri = default_pi_listener_priority(True)
-            answers.pi_alb_listener_rule_priority = ask(
+            default_pri = default_agentic_listener_priority(True)
+            answers.agentic_alb_listener_rule_priority = ask(
                 "Agent ALB listener rule priority (default 3; priorities 1–2 reserved)",
                 default_pri,
             )
@@ -3218,7 +3228,9 @@ def configure_pi_options(
             "Service Connect discovery name for main app",
             answers.sc_discovery_name,
         )
-        answers.pi_gradio_port = ask("Agent Gradio port", answers.pi_gradio_port)
+        answers.agentic_gradio_port = ask(
+            "Agent Gradio port", answers.agentic_gradio_port
+        )
 
         if ask_yes_no(
             f"Write/update {PI_AGENT_ENV_PATH.name} for AWS ECS (DOC_REDACTION_GRADIO_URL, etc.)?",
@@ -3234,10 +3246,10 @@ def configure_pi_options(
             answers.write_pi_agent_env = False
 
     print(
-        f"Agent mode: "
-        f"{'Express' if answers.enable_pi_express else 'legacy Fargate'}, "
-        f"routing={answers.pi_alb_routing}, "
-        f"prefix={normalize_pi_path_prefix(answers.pi_alb_path_prefix)}, "
+        f"Agentic redaction: "
+        f"{'Express' if answers.enable_agentic_express else 'legacy Fargate'}, "
+        f"routing={answers.agentic_alb_routing}, "
+        f"prefix={normalize_agentic_path_prefix(answers.agentic_alb_path_prefix)}, "
         f"orchestrator={normalize_agent_orchestrator(answers.agent_orchestrator)}"
     )
 
@@ -3513,7 +3525,7 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
             )
 
     if not answers_use_headless(answers):
-        configure_pi_options(
+        configure_agentic_options(
             answers,
             args,
             interactive=interactive,
@@ -3522,7 +3534,7 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
     else:
         answers.enable_s3_batch = True
 
-    # Advanced add-ons (non-Pi agent)
+    # Advanced add-ons (without agentic redaction)
     is_express = use_express and not answers_use_headless(answers)
     if answers_use_headless(answers) and interactive:
         mem = ask("ECS task memory (MB)", answers.ecs_memory)
@@ -3532,7 +3544,7 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
         if not is_express:
             if not answers.enable_service_connect:
                 answers.enable_service_connect = ask_yes_no(
-                    "Enable ECS Service Connect (without agent mode)?", False
+                    "Enable ECS Service Connect (without agentic redaction)?", False
                 )
             answers.enable_s3_batch = ask_yes_no("Enable S3 batch ECS trigger?", False)
         mem = ask("ECS task memory (MB)", answers.ecs_memory)
@@ -3641,76 +3653,94 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--cert-arn", help="ACM certificate ARN (production)")
     p.add_argument("--domain", help="SSL certificate domain (production)")
-    pi = p.add_argument_group("Agent mode (second Gradio app)")
-    pi.add_argument(
+    agentic = p.add_argument_group("Agentic redaction (second Gradio app)")
+    agentic.add_argument(
+        "--enable-agentic",
         "--enable-pi",
+        dest="enable_agentic",
         action="store_true",
-        help="Enable agent mode for current profile (Express on demo, legacy on production)",
+        help="Enable agentic redaction for current profile (Express on demo, legacy on production)",
     )
-    pi.add_argument(
+    agentic.add_argument(
+        "--enable-agentic-express",
         "--enable-pi-express",
+        dest="enable_agentic_express",
         action="store_true",
-        help="Enable agent mode on ECS Express Mode (demo)",
+        help="Enable agentic redaction on ECS Express Mode (demo)",
     )
-    pi.add_argument(
+    agentic.add_argument(
+        "--enable-agentic-legacy",
         "--enable-pi-legacy",
+        dest="enable_agentic_legacy",
         action="store_true",
-        help="Enable agent mode on legacy Fargate (implies Service Connect)",
+        help="Enable agentic redaction on legacy Fargate (implies Service Connect)",
     )
-    pi.add_argument(
+    agentic.add_argument(
+        "--agentic-alb-routing",
         "--pi-alb-routing",
-        choices=PI_ALB_ROUTING_MODES,
-        help="ALB routing mode for Agent UI (default: path)",
+        dest="agentic_alb_routing",
+        choices=AGENTIC_ALB_ROUTING_MODES,
+        help="ALB routing mode for agentic UI (default: path)",
     )
-    pi.add_argument(
-        "--pi-path-prefix", default="", help="Agent path prefix (default: /agent)"
+    agentic.add_argument(
+        "--agentic-path-prefix",
+        "--pi-path-prefix",
+        dest="agentic_path_prefix",
+        default="",
+        help="Agentic UI path prefix (default: /agent)",
     )
-    pi.add_argument(
+    agentic.add_argument(
+        "--agentic-host-header",
         "--pi-host-header",
+        dest="agentic_host_header",
         default="",
-        help="Dedicated hostname for Agent mode when routing is host or both",
+        help="Dedicated hostname for agentic mode when routing is host or both",
     )
-    pi.add_argument(
+    agentic.add_argument(
+        "--agentic-listener-priority",
         "--pi-listener-priority",
+        dest="agentic_listener_priority",
         default="",
-        help="ALB listener rule priority for Agent mode (default 3; priorities 1–2 reserved)",
+        help="ALB listener rule priority for agentic mode (default 3; priorities 1–2 reserved)",
     )
-    pi.add_argument(
+    agentic.add_argument(
+        "--agentic-gradio-port",
         "--pi-gradio-port",
+        dest="agentic_gradio_port",
         default="",
-        help="Agent mode Gradio listen port (default 7862)",
+        help="Agentic Gradio listen port (default 7862)",
     )
-    pi.add_argument(
+    agentic.add_argument(
         "--sc-discovery-name",
         default="",
         help="Service Connect name for main app (default redaction)",
     )
-    pi.add_argument(
+    agentic.add_argument(
         "--pi-provider",
         default="",
         help="PI_DEFAULT_PROVIDER for pi_agent.env (default amazon-bedrock)",
     )
-    pi.add_argument(
+    agentic.add_argument(
         "--skip-pi-agent-env",
         action="store_true",
         help="Do not write config/pi_agent.env",
     )
-    pi.add_argument(
+    agentic.add_argument(
         "--agent-orchestrator",
         choices=AGENT_ORCHESTRATOR_CHOICES,
-        help="Agent orchestration backend (demo+--enable-pi default: agentcore)",
+        help="Agent orchestration backend (demo+--enable-agentic default: agentcore)",
     )
-    pi.add_argument(
+    agentic.add_argument(
         "--enable-agentcore-runtime",
         action="store_true",
         help="Use Bedrock AgentCore (sets AGENT_ORCHESTRATOR=agentcore)",
     )
-    pi.add_argument(
+    agentic.add_argument(
         "--agentcore-runtime-url",
         default="",
         help="AgentCore runtime base URL for Gradio SSE client",
     )
-    pi.add_argument(
+    agentic.add_argument(
         "--agentcore-api-key",
         default="",
         help="Optional bearer token for AgentCore runtime (written to pi_agent.env)",
@@ -3832,7 +3862,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 values,
                 overwrite=answers.overwrite_app_config_env,
             )
-        if answers.pi_enabled:
+        if answers.agentic_enabled:
             write_pi_agent_env_file(
                 answers,
                 overwrite=answers.overwrite_pi_agent_env,
@@ -3927,7 +3957,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ):
         if values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True":
             print(
-                "  - Agent UI: PiExpressEndpoint stack output (dedicated Express HTTPS URL)"
+                "  - Agent UI: AgenticExpressEndpoint stack output (dedicated Express HTTPS URL)"
             )
         else:
             routing = values.get("PI_ALB_ROUTING", "path")

@@ -1155,8 +1155,8 @@ def print_express_mode_next_steps(
         print(
             "- Register a Cognito user in AWS Console, change password at the login page URL "
             "(available in the Cognito AWS console -> App Clients -> Login pages -> View login page "
-            "and sign in at the Pi agent URL below. The main redaction backend runs without "
-            "in-app login so the Pi agent can call it over Service Connect. You can disable "
+            "and sign in at the agentic redaction URL below. The main redaction backend runs without "
+            "in-app login so the agentic app can call it over Service Connect. You can disable "
             "Cognito authorisation by setting COGNITO_AUTH to False in the ECS task definition / "
             "ECS service options."
         )
@@ -1173,17 +1173,19 @@ def print_express_mode_next_steps(
         print("  - The main redaction app URL: see ExpressServiceEndpoint stack output")
 
     if values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True":
-        pi_raw = get_stack_output(stack_name, "PiExpressEndpoint", aws_region) or ""
-        pi_url = (
-            format_express_pi_public_url(normalize_https_redirect_url(pi_raw))
-            if pi_raw
+        agentic_raw = (
+            get_stack_output(stack_name, "AgenticExpressEndpoint", aws_region) or ""
+        )
+        agentic_url = (
+            format_express_pi_public_url(normalize_https_redirect_url(agentic_raw))
+            if agentic_raw
             else ""
         )
-        if pi_url:
-            print(f"  - The Pi agentic redaction app can be accessed at {pi_url}")
+        if agentic_url:
+            print(f"  - The agentic redaction app can be accessed at {agentic_url}")
         else:
             print(
-                "  - The Pi agentic redaction app URL: see PiExpressEndpoint stack output"
+                "  - The agentic redaction app URL: see AgenticExpressEndpoint stack output"
             )
 
 

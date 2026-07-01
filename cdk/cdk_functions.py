@@ -3149,7 +3149,7 @@ def configure_express_pi_listener_rules(
         path_patterns = pi_alb_path_patterns(path_prefix)
         _express_pi_listener_rule_custom_resource(
             scope,
-            f"{logical_id_prefix}ExpressPiPathRule",
+            f"{logical_id_prefix}ExpressAgenticPathRule",
             listener_arn=listener_arn,
             priority=priority,
             conditions=[
@@ -3167,7 +3167,7 @@ def configure_express_pi_listener_rules(
     if mode in ("host", "both") and pi_host_header.strip():
         _express_pi_listener_rule_custom_resource(
             scope,
-            f"{logical_id_prefix}ExpressPiHostRule",
+            f"{logical_id_prefix}ExpressAgenticHostRule",
             listener_arn=listener_arn,
             priority=priority,
             conditions=[
