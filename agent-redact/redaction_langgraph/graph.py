@@ -29,6 +29,8 @@ explicitly asks to stop:
 6. verify_coverage again on the **post-apply** *_redacted.pdf from review_apply
 
 Do not stop after step 2 or after a failed verify_coverage — read tool errors, fix paths/CSV, and continue.
+After write_workspace_text saves a .py script, call run_workspace_python_script immediately — never rewrite the same script.
+Tool arguments must be plain strings (relative_path="fix_review.py", content="import csv...") — not nested {"relative_path": {"relative_path": ...}} objects.
 Prefer relative paths within the session workspace. Download artifacts via tool results; never assume shared disk
 with the remote doc_redaction server except files already saved in your workspace.
 """

@@ -230,7 +230,12 @@ async (...outputs) => {
 app = None
 
 
-def _agent_finish_chat_notice(*, aborted: bool = False, error: bool = False) -> str:
+def _agent_finish_chat_notice(
+    *,
+    aborted: bool = False,
+    error: bool = False,
+    incomplete: bool = False,
+) -> str:
     if aborted:
         return (
             "---\n\n"
@@ -243,6 +248,13 @@ def _agent_finish_chat_notice(*, aborted: bool = False, error: bool = False) -> 
             "**Agent stopped** — the run ended with an error. Review the activity log "
             "and send a follow-up if needed."
         )
+    if incomplete:
+        return (
+            "---\n\n"
+            "**Agent paused** — Pass 1 is not finished (`review_apply` was not run). "
+            "Send **continue** to nudge the agent (e.g. run the saved `.py` script, "
+            "then `verify_coverage` and `review_apply`), or restart the task."
+        )
     return (
         "---\n\n"
         "**Agent finished** — the task is complete. Review the outputs below or send "
@@ -250,12 +262,19 @@ def _agent_finish_chat_notice(*, aborted: bool = False, error: bool = False) -> 
     )
 
 
-def _show_agent_finish_toast(*, aborted: bool = False, error: bool = False) -> None:
+def _show_agent_finish_toast(
+    *,
+    aborted: bool = False,
+    error: bool = False,
+    incomplete: bool = False,
+) -> None:
     try:
         if aborted:
             gr.Info("Agent stopped (aborted).", duration=8)
         elif error:
             gr.Info("Agent stopped with an error.", duration=8)
+        elif incomplete:
+            gr.Info("Agent paused — Pass 1 incomplete.", duration=8)
         else:
             gr.Info("Agent finished — task complete.", duration=8)
     except Exception:
@@ -270,9 +289,14 @@ def _agent_finish_signal_value(*, aborted: bool = False, error: bool = False) ->
     return AGENT_FINISH_SIGNAL_FINISHED
 
 
-def _notify_agent_finished(*, aborted: bool = False, error: bool = False) -> str:
+def _notify_agent_finished(
+    *,
+    aborted: bool = False,
+    error: bool = False,
+    incomplete: bool = False,
+) -> str:
     """Show Gradio toast and return browser-notify signal for the finish handler."""
-    _show_agent_finish_toast(aborted=aborted, error=error)
+    _show_agent_finish_toast(aborted=aborted, error=error, incomplete=incomplete)
     return _agent_finish_signal_value(aborted=aborted, error=error)
 
 
@@ -283,8 +307,11 @@ def _append_agent_finish_notice(
     *,
     aborted: bool = False,
     error: bool = False,
+    incomplete: bool = False,
 ) -> tuple[list[dict[str, Any]], list[str], str]:
-    note = _agent_finish_chat_notice(aborted=aborted, error=error)
+    note = _agent_finish_chat_notice(
+        aborted=aborted, error=error, incomplete=incomplete
+    )
     completed_segments, streaming_text = _append_chat_segment(
         completed_segments, streaming_text, note
     )
@@ -1928,6 +1955,7 @@ def _run_pi_chat(
 
     quota_failures = 0
     finish_aborted = False
+    finish_incomplete = False
     done_event_received = False
 
     try:
@@ -1951,6 +1979,7 @@ def _run_pi_chat(
                         finish_aborted = (
                             event.text.strip().lower().startswith("agent aborted")
                         )
+                        finish_incomplete = bool(event.meta.get("workflow_incomplete"))
                         done_event_received = True
                     (
                         history,
@@ -2171,6 +2200,7 @@ def _run_pi_chat(
             completed_segments,
             streaming_text,
             aborted=finish_aborted,
+            incomplete=finish_incomplete,
         )
 
     _finalize_assistant_chat(
@@ -2181,7 +2211,9 @@ def _run_pi_chat(
         activity=activity,
     )
 
-    finish_signal = _notify_agent_finished(aborted=finish_aborted)
+    finish_signal = _notify_agent_finished(
+        aborted=finish_aborted, incomplete=finish_incomplete
+    )
     yield _chat_yield(
         history,
         client,
