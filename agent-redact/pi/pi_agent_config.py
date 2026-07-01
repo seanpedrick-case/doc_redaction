@@ -810,6 +810,20 @@ def credential_status_markdown(*, provider: str | None = None) -> str:
     Gemini and Bedrock lines appear only when that provider is selected.
     """
     active = normalize_provider(provider or get_default_provider())
+    orchestrator = (os.environ.get("AGENT_ORCHESTRATOR") or "pi").strip().lower()
+    if orchestrator in {"agentcore", "agentcore-harness"}:
+        try:
+            from redaction_prompt import doc_redaction_gradio_url
+
+            backend = doc_redaction_gradio_url()
+        except ImportError:
+            backend = (os.environ.get("DOC_REDACTION_GRADIO_URL") or "—").strip()
+        region = _bedrock_region()
+        return (
+            f"**Credentials:** AWS `{_aws_credential_status()}` · region `{region}` "
+            f"(AgentCore orchestration)  \n"
+            f"**Redaction tools call:** `{backend}` (sent to runtime each invoke)"
+        )
     if is_hf_space_profile():
         gemini = (
             "set"

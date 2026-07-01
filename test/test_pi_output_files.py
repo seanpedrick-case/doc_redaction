@@ -8,11 +8,9 @@ _PI_SRC = Path(__file__).resolve().parents[1] / "agent-redact" / "pi"
 if str(_PI_SRC) not in sys.path:
     sys.path.insert(0, str(_PI_SRC))
 
-# output_files imports gradio at module level; stub it for unit tests.
-if "gradio" not in sys.modules:
-    _gr = ModuleType("gradio")
-    _gr.FileExplorer = lambda **kwargs: kwargs  # type: ignore[misc]
-    sys.modules["gradio"] = _gr
+from pi_test_support import ensure_gradio_importable
+
+ensure_gradio_importable()
 
 if "pi_examples" not in sys.modules:
     _pi_examples = ModuleType("pi_examples")
@@ -20,6 +18,15 @@ if "pi_examples" not in sys.modules:
     sys.modules["pi_examples"] = _pi_examples
 
 import output_files as of
+
+
+def _minimal_pdf_bytes(body: bytes = b"content") -> bytes:
+    """Build a PDF blob that passes ``_is_valid_pdf_file`` (size + %%EOF)."""
+    min_bytes = 1024
+    payload = b"%PDF-1.4\n" + body + b"\n%%EOF"
+    if len(payload) < min_bytes:
+        payload += b" " * (min_bytes - len(payload))
+    return payload
 
 
 def test_resolve_under_workspace_accepts_absolute_paths(tmp_path, monkeypatch):
@@ -223,12 +230,12 @@ def test_latest_redacted_pdf_path_returns_newest_match(tmp_path, monkeypatch):
     draft_dir = session_dir / "redact" / "doc.pdf" / "output_redact"
     draft_dir.mkdir(parents=True)
     older = draft_dir / "doc_redacted.pdf"
-    older.write_bytes(b"%PDF-1.4 draft")
+    older.write_bytes(_minimal_pdf_bytes(b"draft"))
     time.sleep(0.02)
     final_dir = session_dir / "redact" / "doc.pdf" / "review" / "output_review_final"
     final_dir.mkdir(parents=True)
     newer = final_dir / "doc_redacted.pdf"
-    newer.write_bytes(b"%PDF-1.4 final content" + b" " * 48)
+    newer.write_bytes(_minimal_pdf_bytes(b"final content"))
     unrelated = session_dir / "notes.txt"
     unrelated.write_text("x")
 
@@ -240,7 +247,50 @@ def test_latest_redacted_pdf_path_returns_newest_match(tmp_path, monkeypatch):
     assert path.endswith("latest_redacted.pdf")
     staged = Path(path)
     assert staged.is_file()
-    assert staged.read_bytes().startswith(b"%PDF-1.4 final")
+    assert staged.read_bytes().startswith(b"%PDF-1.4")
+    assert "final content" in staged.read_bytes().decode("latin-1")
+
+
+def test_latest_redacted_pdf_path_prefers_final_output_over_newer_intermediate(
+    tmp_path, monkeypatch
+):
+    import time
+
+    base = tmp_path / "workspace"
+    session_dir = base / "session"
+    final_dir = session_dir / "redact" / "doc.pdf" / "review" / "output_review_final"
+    final_dir.mkdir(parents=True)
+    final_pdf = final_dir / "doc_redacted.pdf"
+    final_pdf.write_bytes(_minimal_pdf_bytes(b"final deliverable"))
+    time.sleep(0.02)
+    draft_dir = session_dir / "redact" / "doc.pdf" / "output_redact"
+    draft_dir.mkdir(parents=True)
+    draft_pdf = draft_dir / "doc_redacted.pdf"
+    draft_pdf.write_bytes(_minimal_pdf_bytes(b"intermediate draft"))
+
+    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+
+    path = of.latest_redacted_pdf_path("session")
+    assert path is not None
+    staged = Path(path)
+    assert b"final deliverable" in staged.read_bytes()
+
+
+def test_latest_redacted_pdf_path_uses_posix_separators(tmp_path, monkeypatch):
+    base = tmp_path / "workspace"
+    session_dir = base / "session"
+    out_dir = session_dir / "redact" / "doc.pdf" / "output_redact"
+    out_dir.mkdir(parents=True)
+    (out_dir / "doc_redacted.pdf").write_bytes(_minimal_pdf_bytes())
+
+    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+
+    path = of.latest_redacted_pdf_path("session")
+    assert path is not None
+    assert "\\" not in path
+    assert "/preview/latest_redacted.pdf" in path
 
 
 def test_latest_redacted_pdf_path_skips_invalid_and_review_pdfs(tmp_path, monkeypatch):
@@ -251,14 +301,14 @@ def test_latest_redacted_pdf_path_skips_invalid_and_review_pdfs(tmp_path, monkey
     (out_dir / "doc_redactions_for_review.pdf").write_bytes(b"%PDF-1.4 review")
     (out_dir / "error_redacted.pdf").write_text("<html>429 Too Many Requests</html>")
     valid = out_dir / "doc_redacted.pdf"
-    valid.write_bytes(b"%PDF-1.4 valid" + b" " * 52)
+    valid.write_bytes(_minimal_pdf_bytes(b"valid"))
 
     monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
     monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
 
     path = of.latest_redacted_pdf_path("session")
     assert path is not None
-    assert Path(path).read_bytes().startswith(b"%PDF-1.4 valid")
+    assert Path(path).read_bytes().startswith(b"%PDF-1.4")
 
 
 def test_latest_redacted_pdf_path_returns_none_when_missing(tmp_path, monkeypatch):

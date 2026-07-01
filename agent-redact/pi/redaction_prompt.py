@@ -292,11 +292,14 @@ def doc_redaction_gradio_url() -> str:
     try:
         from tools.config import DOC_REDACTION_GRADIO_URL
 
-        return str(DOC_REDACTION_GRADIO_URL).strip().rstrip("/")
+        configured = str(DOC_REDACTION_GRADIO_URL).strip().rstrip("/")
+        if configured:
+            return configured
     except ImportError:
-        return (
-            HF_DEFAULT_GRADIO_URL if is_hf_space_profile() else "http://127.0.0.1:7860"
-        )
+        pass
+    if is_hf_space_profile():
+        return HF_DEFAULT_GRADIO_URL
+    return "http://127.0.0.1:7860"
 
 
 def _default_gradio_url() -> str:
@@ -339,6 +342,58 @@ def replace_user_requirements_section(template: str, instructions: str) -> str:
         return f"{template.rstrip()}\n\n{marker} (authoritative for this task)\n\n{formatted}\n"
     head = template[:idx]
     return f"{head}{marker} (authoritative for this task)\n\n{formatted}\n"
+
+
+_TOOL_ORCHESTRATOR_SKILL_REPLACEMENT = """### Tool orchestrator workflow (LangGraph / AgentCore)
+
+This deployment uses **curated tools**, not the Pi coding agent. **Do not** read `.pi/skills/`,
+`skills/`, or `AGENTS.md` before starting — proceed immediately with `list_workspace_files` and
+`doc_redact` unless you already have the file path from `{INPUT_PATH}` in this prompt.
+
+Available tools: `list_workspace_files`, `doc_redact`, `read_workspace_text`, `write_workspace_text`,
+`run_workspace_python_script`, `verify_coverage`, `review_apply`.
+
+Complete **full Pass 1** in this turn: initial redaction → CSV policy edits → pre-apply
+`verify_coverage` until `pass_strict` → **one** `review_apply` → post-apply verify on the
+deliverable `*_redacted.pdf`. User redaction requirements at the end of this prompt define *what*
+to redact; your system instructions define *how*.
+
+"""
+
+
+def adapt_prompt_for_tool_orchestrator(prompt: str) -> str:
+    """
+    Strip Pi-only “read skills first” steps for LangGraph / AgentCore orchestrators.
+
+    The partnership task template assumes Pi skills under ``.pi/skills/``; tool agents use
+    :mod:`redaction_langgraph.tools` instead and must not block on missing skill files.
+    """
+    start = prompt.find("### Required skills")
+    end = prompt.find("### Agent anti-confusion rules")
+    if start != -1 and end != -1 and end > start:
+        prompt = prompt[:start] + _TOOL_ORCHESTRATOR_SKILL_REPLACEMENT + prompt[end:]
+
+    hf_marker = "| **0 — HF deployment (read first)** |"
+    if hf_marker in prompt:
+        prompt = "\n".join(
+            line for line in prompt.splitlines() if hf_marker not in line
+        )
+
+    for obsolete in (
+        "**Before any API calls**, read the repo skills below in order.",
+        "Do **not** skip reading `doc-redaction-modifications`",
+        "read the repo skills below",
+    ):
+        prompt = prompt.replace(obsolete, "")
+    return prompt
+
+
+def uses_tool_orchestrator_prompt() -> bool:
+    """True for LangGraph / AgentCore Runtime — not Pi RPC or AgentCore Harness."""
+    raw = (os.environ.get("AGENT_ORCHESTRATOR") or "pi").strip().lower()
+    if raw == "harness":
+        raw = "agentcore-harness"
+    return raw in {"langgraph", "agentcore"}
 
 
 def _is_textract_ocr_method(ocr_method: str) -> bool:
@@ -716,6 +771,9 @@ def build_redaction_prompt(
 
     if not _include_long_document_rules(page_range, total_pages):
         text = _strip_long_document_section(text)
+
+    if uses_tool_orchestrator_prompt():
+        text = adapt_prompt_for_tool_orchestrator(text)
 
     return replace_user_requirements_section(text, user_instructions)
 

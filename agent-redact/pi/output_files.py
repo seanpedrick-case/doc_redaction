@@ -204,9 +204,10 @@ def collect_final_output_files(
 
 _REDACTED_PDF_SUFFIX = "_redacted.pdf"
 _REVIEW_PDF_MARKER = "_redactions_for_review"
-_PREVIEW_DIRNAME = ".pi/preview"
+_PREVIEW_DIRNAME = "preview"
+_LEGACY_PREVIEW_DIRNAME = ".pi/preview"
 _PREVIEW_FILENAME = "latest_redacted.pdf"
-_MIN_PDF_BYTES = 64
+_MIN_PDF_BYTES = 1024
 
 
 def _is_redacted_pdf_candidate(path: Path) -> bool:
@@ -227,18 +228,30 @@ def _is_valid_pdf_file(path: Path, *, min_bytes: int = _MIN_PDF_BYTES) -> bool:
         if path.stat().st_size < min_bytes:
             return False
         with path.open("rb") as handle:
-            return handle.read(5).startswith(b"%PDF-")
+            header = handle.read(5)
+            if not header.startswith(b"%PDF-"):
+                return False
+            size = path.stat().st_size
+            if size < 256:
+                handle.seek(max(0, size - 32))
+                return b"%%EOF" in handle.read()
+            return True
     except OSError:
         return False
 
 
 def _find_newest_valid_redacted_pdf(session_hash: str | None) -> Path | None:
-    """Newest readable ``*_redacted.pdf`` under the session workspace."""
+    """Newest readable ``*_redacted.pdf`` under the session workspace.
+
+    Prefer deliverables under ``review/output_final`` (and aliases) over intermediate
+    ``output_redact`` copies so the preview matches the final download.
+    """
     root = workspace_root_from(session_hash)
     if not root.is_dir():
         return None
 
-    newest: tuple[float, Path] | None = None
+    final_candidates: list[tuple[float, Path]] = []
+    other_candidates: list[tuple[float, Path]] = []
     try:
         for path in root.rglob("*"):
             if not path.is_file() or not _is_redacted_pdf_candidate(path):
@@ -246,21 +259,38 @@ def _find_newest_valid_redacted_pdf(session_hash: str | None) -> Path | None:
             if not _is_valid_pdf_file(path):
                 continue
             try:
-                path.resolve(strict=False).relative_to(root.resolve())
+                relative = path.resolve(strict=False).relative_to(root.resolve())
             except ValueError:
                 continue
             timestamp = _file_created_timestamp(path)
-            if newest is None or timestamp > newest[0]:
-                newest = (timestamp, path)
+            bucket = (
+                final_candidates
+                if _is_under_final_output_dir(relative)
+                else other_candidates
+            )
+            bucket.append((timestamp, path))
     except OSError:
         return None
 
-    return newest[1] if newest else None
+    pool = final_candidates or other_candidates
+    if not pool:
+        return None
+    return max(pool, key=lambda item: item[0])[1]
 
 
 def _staged_preview_pdf_path(session_hash: str | None) -> Path:
     root = workspace_root_from(session_hash)
-    return root / ".pi" / "preview" / _PREVIEW_FILENAME
+    return root / _PREVIEW_DIRNAME / _PREVIEW_FILENAME
+
+
+def _legacy_staged_preview_pdf_path(session_hash: str | None) -> Path:
+    root = workspace_root_from(session_hash)
+    return root / _LEGACY_PREVIEW_DIRNAME / _PREVIEW_FILENAME
+
+
+def _gradio_pdf_path(path: Path) -> str:
+    """POSIX absolute path for Gradio File/PDF components (Windows-safe URLs)."""
+    return path.resolve().as_posix()
 
 
 def _stage_preview_pdf(source: Path, session_hash: str | None) -> Path:
@@ -274,7 +304,8 @@ def _stage_preview_pdf(source: Path, session_hash: str | None) -> Path:
     dest = _staged_preview_pdf_path(session_hash)
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(dest.name + ".tmp")
-    shutil.copy2(source, tmp)
+    # copyfile only: copy2/copystat can raise EPERM on OneDrive bind mounts.
+    shutil.copyfile(source, tmp)
     tmp.replace(dest)
     return dest.resolve()
 
@@ -283,14 +314,16 @@ def latest_redacted_pdf_path(session_hash: str | None = None) -> str | None:
     """
     Return the newest valid ``*_redacted.pdf`` for the Gradio PDF preview.
 
-    Copies the chosen file to ``{session}/.pi/preview/latest_redacted.pdf`` so
-    the component always receives a complete PDF under the workspace root.
+    Copies the chosen file to ``{session}/preview/latest_redacted.pdf`` so the
+    component always receives a complete PDF under the workspace root.
     """
     source = _find_newest_valid_redacted_pdf(session_hash)
     staged = _staged_preview_pdf_path(session_hash)
+    legacy_staged = _legacy_staged_preview_pdf_path(session_hash)
     if source is None:
-        if _is_valid_pdf_file(staged):
-            return str(staged.resolve())
+        for candidate in (staged, legacy_staged):
+            if _is_valid_pdf_file(candidate):
+                return _gradio_pdf_path(candidate)
         return None
 
     try:
@@ -302,11 +335,16 @@ def latest_redacted_pdf_path(session_hash: str | None = None) -> str | None:
                 and staged.stat().st_size == source.stat().st_size
                 and _is_valid_pdf_file(staged)
             ):
-                return str(staged.resolve())
+                return _gradio_pdf_path(staged)
     except OSError:
         pass
 
-    return str(_stage_preview_pdf(source, session_hash))
+    return _gradio_pdf_path(_stage_preview_pdf(source, session_hash))
+
+
+def preview_pdf_path_for_gradio(session_hash: str | None = None) -> str | None:
+    """Return a Gradio-safe preview path, or ``None`` when no valid PDF exists."""
+    return latest_redacted_pdf_path(session_hash)
 
 
 def workspace_root_from(session_hash: str | None = None) -> Path:

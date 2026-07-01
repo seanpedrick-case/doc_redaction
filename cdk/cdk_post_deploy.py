@@ -12,6 +12,7 @@ import json
 import os
 import re
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 import boto3
@@ -1184,6 +1185,54 @@ def print_express_mode_next_steps(
             print(
                 "  - The Pi agentic redaction app URL: see PiExpressEndpoint stack output"
             )
+
+
+def sync_pi_agent_doc_redaction_url_for_agentcore(
+    *,
+    stack_name: str = "RedactionStack",
+    region: Optional[str] = None,
+    pi_agent_env_path: Optional[Path] = None,
+) -> Optional[str]:
+    """
+    Set ``config/pi_agent.env`` ``DOC_REDACTION_GRADIO_URL`` to the main Express HTTPS URL.
+
+    AgentCore runtime tools cannot use ECS Service Connect DNS; Pi Express task env is
+    set at synth time, but this keeps the on-disk env file aligned for local reference
+    and S3 uploads.
+    """
+    from cdk_config import ENABLE_AGENTCORE_RUNTIME, normalize_https_redirect_url
+
+    if ENABLE_AGENTCORE_RUNTIME != "True":
+        return None
+    aws_region = region or AWS_REGION
+    endpoint = get_stack_output(stack_name, "ExpressServiceEndpoint", aws_region)
+    if not endpoint:
+        print(
+            "Warning: ExpressServiceEndpoint not found; "
+            "pi_agent.env DOC_REDACTION_GRADIO_URL not updated for AgentCore."
+        )
+        return None
+    url = normalize_https_redirect_url(endpoint)
+    env_path = pi_agent_env_path or (
+        Path(__file__).resolve().parent.parent / "config" / "pi_agent.env"
+    )
+    if not env_path.is_file():
+        print(f"Note: {env_path} not found; skipping AgentCore backend URL sync.")
+        return url
+    lines = env_path.read_text(encoding="utf-8").splitlines()
+    out: List[str] = []
+    replaced = False
+    for line in lines:
+        if line.startswith("DOC_REDACTION_GRADIO_URL="):
+            out.append(f"DOC_REDACTION_GRADIO_URL={url}")
+            replaced = True
+        else:
+            out.append(line)
+    if not replaced:
+        out.append(f"DOC_REDACTION_GRADIO_URL={url}")
+    env_path.write_text("\n".join(out) + ("\n" if out else ""), encoding="utf-8")
+    print(f"Updated {env_path} DOC_REDACTION_GRADIO_URL for AgentCore: {url}")
+    return url
 
 
 def _s3_object_exists(s3_client, bucket: str, key: str) -> bool:

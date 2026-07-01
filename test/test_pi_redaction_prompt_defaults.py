@@ -3,16 +3,14 @@
 import importlib
 import sys
 from pathlib import Path
-from types import ModuleType
 
 _PI_SRC = Path(__file__).resolve().parents[1] / "agent-redact" / "pi"
 if str(_PI_SRC) not in sys.path:
     sys.path.insert(0, str(_PI_SRC))
 
-if "gradio" not in sys.modules:
-    _gr = ModuleType("gradio")
-    _gr.FileExplorer = lambda **kwargs: kwargs  # type: ignore[misc]
-    sys.modules["gradio"] = _gr
+from pi_test_support import ensure_gradio_importable
+
+ensure_gradio_importable()
 
 import pi_agent_config
 import redaction_prompt as rp
@@ -58,6 +56,34 @@ def test_build_redaction_prompt_omits_long_document_rules_for_small_pdfs(monkeyp
     )
     assert "Specific rules for long documents" not in prompt
     assert "User redaction requirements" in prompt
+
+
+def test_tool_orchestrator_prompt_skips_skill_preread(monkeypatch):
+    monkeypatch.setenv("AGENT_ORCHESTRATOR", "agentcore")
+    module = _reload_redaction_prompt(monkeypatch)
+    prompt = module.build_redaction_prompt(
+        "short.pdf",
+        "- Redact names",
+        total_pages=5,
+        workspace_dir=Path("/workspace"),
+    )
+    assert "### Required skills" not in prompt
+    assert "Tool orchestrator workflow" in prompt
+    assert "Do not" in prompt and ".pi/skills/" in prompt
+    assert "list_workspace_files" in prompt
+
+
+def test_harness_prompt_keeps_skill_preread(monkeypatch):
+    monkeypatch.setenv("AGENT_ORCHESTRATOR", "agentcore-harness")
+    module = _reload_redaction_prompt(monkeypatch)
+    prompt = module.build_redaction_prompt(
+        "short.pdf",
+        "- Redact names",
+        total_pages=5,
+        workspace_dir=Path("/workspace"),
+    )
+    assert "### Required skills" in prompt
+    assert "Tool orchestrator workflow" not in prompt
 
 
 def test_aws_ecs_remote_guidance_forbids_workspace_output_grep(monkeypatch):

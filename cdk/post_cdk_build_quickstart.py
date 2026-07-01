@@ -86,6 +86,39 @@ if _enable_pi_image_build:
             f"Create it (from config/pi_agent.env.example) and upload to "
             f"s3://{S3_LOG_CONFIG_BUCKET_NAME}/{PI_AGENT_ENV_S3_KEY} before scaling the Pi service."
         )
+    try:
+        from cdk_config import ENABLE_AGENTCORE_RUNTIME
+
+        if ENABLE_AGENTCORE_RUNTIME == "True":
+            print(
+                "\n--- AgentCore runtime checklist (required before agent UI works) ---"
+            )
+            print(
+                "1. Package: python agent-redact/agentcore/package_runtime.py "
+                "--target <AgentCoreProject>/app/RedactionAgent"
+            )
+            print("   Windows/OneDrive: set UV_LINK_MODE=copy before agentcore deploy")
+            print("2. Deploy: cd <AgentCoreProject> && agentcore deploy")
+            print(
+                "3. URL: copy invocationUrl from `agentcore status` "
+                "(base only, no /invocations suffix)"
+            )
+            print(
+                "4. Wire: set AGENTCORE_RUNTIME_URL in config/pi_agent.env and "
+                "config/cdk_config.env, upload pi_agent.env to S3, restart Pi Express"
+            )
+            print(
+                "   DOC_REDACTION_GRADIO_URL: main Express HTTPS (ExpressServiceEndpoint "
+                "or PiDocRedactionBackendUrl stack output) — set automatically on Pi "
+                "Express when ENABLE_AGENTCORE_RUNTIME=True"
+            )
+            print(
+                "   Or re-run: python cdk/cdk_install.py --config-only "
+                "--agentcore-runtime-url <URL>"
+            )
+            print("See agent-redact/agentcore/README.md for full steps.\n")
+    except ImportError:
+        pass
 
 total_seconds = 480  # 8 minutes
 update_interval = 1  # Update every second
@@ -120,6 +153,17 @@ if ENABLE_HEADLESS_DEPLOYMENT != "True":
                 )
             except Exception as exc:
                 print("Warning: could not configure Express Service Connect: " f"{exc}")
+        try:
+            from cdk_config import ENABLE_AGENTCORE_RUNTIME
+            from cdk_post_deploy import sync_pi_agent_doc_redaction_url_for_agentcore
+
+            if ENABLE_AGENTCORE_RUNTIME == "True":
+                sync_pi_agent_doc_redaction_url_for_agentcore(
+                    stack_name="RedactionStack",
+                    region=AWS_REGION,
+                )
+        except ImportError:
+            pass
         print("Syncing Cognito app client secret for in-app authentication.")
         apply_cognito_secret_fixup_from_stack(
             stack_name="RedactionStack",

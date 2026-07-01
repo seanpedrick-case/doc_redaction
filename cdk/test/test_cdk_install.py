@@ -598,9 +598,122 @@ def test_apply_pi_cli_flags_enable_pi_demo():
         sc_discovery_name="",
         pi_provider="",
         skip_pi_agent_env=False,
+        agent_orchestrator=None,
+        enable_agentcore_runtime=False,
+        agentcore_runtime_url="",
+        agentcore_api_key="",
     )
     inst.apply_pi_cli_flags(args, answers)
     assert answers.enable_pi_express is True
+    assert answers.agent_orchestrator == "agentcore"
+    assert answers.enable_agentcore_runtime is True
+
+
+def test_demo_default_orchestrator_is_agentcore():
+    answers = inst.InstallAnswers(profile="demo", enable_pi_express=True)
+    assert inst.default_agent_orchestrator_for_answers(answers) == "agentcore"
+    answers.profile = "production"
+    assert inst.default_agent_orchestrator_for_answers(answers) == "pi"
+
+
+def test_merge_policy_file_locations_adds_invoke_policy():
+    raw = inst.merge_policy_file_locations(agentcore_enabled=False)
+    assert inst.PI_AGENTCORE_INVOKE_POLICY_FILE not in raw
+    raw_agentcore = inst.merge_policy_file_locations(agentcore_enabled=True)
+    assert inst.PI_AGENTCORE_INVOKE_POLICY_FILE in raw_agentcore
+    assert "textract_policy.json" in raw_agentcore
+
+
+def test_build_env_values_agentcore_includes_invoke_policy():
+    answers = _demo_answers()
+    answers.enable_pi_express = True
+    answers.agent_orchestrator = "agentcore"
+    answers.enable_agentcore_runtime = True
+    answers.agentcore_runtime_url = "https://runtime.example"
+    values = inst.build_env_values(answers)
+    assert inst.PI_AGENTCORE_INVOKE_POLICY_FILE in values["POLICY_FILE_LOCATIONS"]
+
+
+def test_validate_agentcore_allows_deferred_url():
+    answers = _demo_answers()
+    answers.enable_pi_express = True
+    answers.agent_orchestrator = "agentcore"
+    answers.allow_empty_agentcore_url = True
+    assert inst.validate_install_answers(answers) == []
+    values = inst.build_env_values(answers)
+    assert inst.validate_env_values(values, allow_empty_agentcore_url=True) == []
+
+
+def test_build_env_values_agentcore_orchestrator():
+    answers = _demo_answers()
+    answers.enable_pi_express = True
+    answers.agent_orchestrator = "agentcore"
+    answers.enable_agentcore_runtime = True
+    answers.agentcore_runtime_url = "https://runtime.example"
+    values = inst.build_env_values(answers)
+    assert values["AGENT_ORCHESTRATOR"] == "agentcore"
+    assert values["ENABLE_AGENTCORE_RUNTIME"] == "True"
+    assert values["AGENTCORE_RUNTIME_URL"] == "https://runtime.example"
+
+
+def test_build_pi_agent_env_values_agentcore():
+    answers = _demo_answers()
+    answers.enable_pi_express = True
+    answers.agent_orchestrator = "agentcore"
+    answers.agentcore_runtime_url = "https://runtime.example"
+    answers.agentcore_api_key = "secret-token"
+    values = inst.build_pi_agent_env_values(answers)
+    assert values["AGENT_ORCHESTRATOR"] == "agentcore"
+    assert values["AGENTCORE_RUNTIME_URL"] == "https://runtime.example"
+    assert values["AGENTCORE_API_KEY"] == "secret-token"
+    assert values["DOC_REDACTION_GRADIO_URL"] == "http://redaction:7860"
+
+
+def test_resolve_doc_redaction_gradio_url_agentcore_uses_express_endpoint(monkeypatch):
+    answers = _demo_answers()
+    answers.agent_orchestrator = "agentcore"
+    monkeypatch.setattr(
+        inst,
+        "fetch_stack_output",
+        lambda *_a, **_k: "main.example.ecs.eu-west-2.on.aws",
+    )
+    assert (
+        inst.resolve_doc_redaction_gradio_url(answers)
+        == "https://main.example.ecs.eu-west-2.on.aws"
+    )
+
+
+def test_validate_agentcore_requires_runtime_url():
+    answers = _demo_answers()
+    answers.enable_pi_express = True
+    answers.agent_orchestrator = "agentcore"
+    errors = inst.validate_install_answers(answers)
+    assert any("AGENTCORE_RUNTIME_URL" in err for err in errors)
+
+    answers.agentcore_runtime_url = "https://runtime.example"
+    assert inst.validate_install_answers(answers) == []
+
+    values = inst.build_env_values(answers)
+    assert inst.validate_env_values(values) == []
+
+
+def test_apply_agent_orchestrator_cli_flags():
+    answers = inst.InstallAnswers(profile="demo", enable_pi_express=True)
+    args = argparse.Namespace(
+        agent_orchestrator="langgraph",
+        enable_agentcore_runtime=False,
+        agentcore_runtime_url="",
+        agentcore_api_key="",
+    )
+    inst.apply_agent_orchestrator_cli_flags(args, answers)
+    assert answers.agent_orchestrator == "langgraph"
+
+    args.enable_agentcore_runtime = True
+    args.agentcore_runtime_url = "https://runtime.example"
+    inst.apply_agent_orchestrator_cli_flags(args, answers)
+    assert answers.agent_orchestrator == "agentcore"
+    assert answers.enable_agentcore_runtime is True
+    assert answers.agentcore_runtime_url == "https://runtime.example"
 
 
 def test_stacks_to_check_includes_appregistry_when_enabled():

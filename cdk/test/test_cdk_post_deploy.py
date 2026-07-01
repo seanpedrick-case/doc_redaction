@@ -351,6 +351,31 @@ def test_print_express_mode_next_steps(capsys, monkeypatch):
     assert "pi_agent.env" not in out
 
 
+def test_sync_pi_agent_doc_redaction_url_for_agentcore(tmp_path, monkeypatch):
+    env_file = tmp_path / "pi_agent.env"
+    env_file.write_text(
+        "AGENT_ORCHESTRATOR=agentcore\nDOC_REDACTION_GRADIO_URL=http://redaction:7860\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "cdk_config.ENABLE_AGENTCORE_RUNTIME",
+        "True",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        post,
+        "get_stack_output",
+        lambda *_a, **_k: "main.example.ecs.eu-west-2.on.aws",
+    )
+    url = post.sync_pi_agent_doc_redaction_url_for_agentcore(
+        pi_agent_env_path=env_file,
+    )
+    assert url == "https://main.example.ecs.eu-west-2.on.aws"
+    text = env_file.read_text(encoding="utf-8")
+    assert "DOC_REDACTION_GRADIO_URL=https://main.example.ecs.eu-west-2.on.aws" in text
+    assert "http://redaction:7860" not in text
+
+
 def test_print_headless_deployment_next_steps(capsys):
     post.print_headless_deployment_next_steps(
         {
