@@ -27,7 +27,8 @@ def test_normalize_orchestrator_defaults_to_pi():
 
 def test_orchestrator_label():
     assert orchestrator_label("langgraph") == "LangGraph"
-    assert orchestrator_label("agentcore") == "Bedrock AgentCore"
+    assert orchestrator_label("agentcore") == "Bedrock AgentCore Runtime"
+    assert orchestrator_label("agentcore-harness") == "Bedrock AgentCore Harness"
 
 
 def test_pi_event_mapping():
