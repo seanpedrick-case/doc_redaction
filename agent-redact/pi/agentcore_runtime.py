@@ -90,6 +90,10 @@ class AgentCoreAgentRuntime(AgentRuntime):
     def prompt_stream_active(self) -> bool:
         return self._prompt_stream_depth > 0
 
+    @property
+    def abort_requested(self) -> bool:
+        return self._abort_requested
+
     def start(self) -> None:
         agentcore_runtime_url()
         self._running = True
@@ -175,6 +179,11 @@ class AgentCoreAgentRuntime(AgentRuntime):
                 self._pending_workspace_files.clear()
             if self._sync_workspace_files:
                 payload["sync_workspace_files"] = True
+            from agentcore_workspace_bridge import build_agentcore_invoke_runtime_config
+
+            runtime_config = build_agentcore_invoke_runtime_config()
+            if runtime_config:
+                payload["runtime_config"] = runtime_config
             yield AgentStreamEvent(kind="status", text="AgentCore runtime started…")
             if _agentcore_api_key():
                 yield from self._prompt_events_httpx(payload)

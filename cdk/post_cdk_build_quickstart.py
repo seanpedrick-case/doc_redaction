@@ -108,6 +108,11 @@ if _enable_pi_image_build:
                 "config/cdk_config.env, upload pi_agent.env to S3, restart Pi Express"
             )
             print(
+                "   DOC_REDACTION_GRADIO_URL: main Express HTTPS (ExpressServiceEndpoint "
+                "or PiDocRedactionBackendUrl stack output) — set automatically on Pi "
+                "Express when ENABLE_AGENTCORE_RUNTIME=True"
+            )
+            print(
                 "   Or re-run: python cdk/cdk_install.py --config-only "
                 "--agentcore-runtime-url <URL>"
             )
@@ -148,6 +153,17 @@ if ENABLE_HEADLESS_DEPLOYMENT != "True":
                 )
             except Exception as exc:
                 print("Warning: could not configure Express Service Connect: " f"{exc}")
+        try:
+            from cdk_config import ENABLE_AGENTCORE_RUNTIME
+            from cdk_post_deploy import sync_pi_agent_doc_redaction_url_for_agentcore
+
+            if ENABLE_AGENTCORE_RUNTIME == "True":
+                sync_pi_agent_doc_redaction_url_for_agentcore(
+                    stack_name="RedactionStack",
+                    region=AWS_REGION,
+                )
+        except ImportError:
+            pass
         print("Syncing Cognito app client secret for in-app authentication.")
         apply_cognito_secret_fixup_from_stack(
             stack_name="RedactionStack",

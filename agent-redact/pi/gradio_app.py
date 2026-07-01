@@ -719,13 +719,20 @@ def _wait_for_llama_inference_ready(*, timeout_s: float = 120.0) -> str | None:
 
 def _prepare_llama_before_orchestration_prompt() -> str | None:
     """Pause and verify llama.cpp responds before a large orchestration prefill."""
-    if normalize_provider(get_default_provider()) != PROVIDER_LLAMA:
+    if not _uses_local_llama_orchestrator():
         return None
     delay = float(os.environ.get("PI_LLAMA_POST_RESTART_DELAY_S", "2"))
     if delay > 0:
         time.sleep(delay)
     timeout = float(os.environ.get("PI_LLAMA_READY_TIMEOUT_S", "120"))
     return _wait_for_llama_inference_ready(timeout_s=timeout)
+
+
+def _uses_local_llama_orchestrator() -> bool:
+    """True when Pi/LangGraph orchestration calls a local llama.cpp OpenAI endpoint."""
+    if normalize_orchestrator() in {"agentcore", "agentcore-harness"}:
+        return False
+    return normalize_provider(get_default_provider()) == PROVIDER_LLAMA
 
 
 def _finalize_assistant_chat(
@@ -770,7 +777,10 @@ def _finalize_assistant_chat(
         _set_last_assistant_content(history, fallback)
         return
 
-    if normalize_provider(get_default_provider()) == PROVIDER_LLAMA:
+    if (
+        normalize_provider(get_default_provider()) == PROVIDER_LLAMA
+        and _uses_local_llama_orchestrator()
+    ):
         _set_last_assistant_content(history, _silent_llama_failure_message())
         return
 
@@ -1379,11 +1389,7 @@ def _fresh_task_chat_outputs(
     """Clear chat UI and return ``chat_outputs`` values after a session reset."""
     rpc = _coerce_client(client)
     if rpc is not None and rpc.running:
-        session_md = (
-            f"{_agent_status_markdown(rpc)}  \n\n"
-            f"{_session_summary(rpc)}  \n\n"
-            f"{session_note}"
-        )
+        session_md = f"{_session_summary(rpc)}  \n\n{session_note}"
         return _chat_yield(
             [],
             rpc,
@@ -1861,7 +1867,7 @@ def _run_pi_chat(
     prompt_activity = (
         "Prompt sent." if chat_user_message is not None else "Follow-up prompt sent."
     )
-    if normalize_provider(get_default_provider()) == PROVIDER_LLAMA:
+    if _uses_local_llama_orchestrator():
         prompt_activity += " Waiting for orchestration model."
     activity = _append_activity(activity, prompt_activity)
     if initial_session_info:
@@ -2131,7 +2137,7 @@ def _run_pi_chat(
         )
         return
     except Exception:
-        if client.abort_requested:
+        if getattr(client, "abort_requested", False):
             activity = _append_activity(activity, "**Aborted.**")
             history, completed_segments, streaming_text = _append_agent_finish_notice(
                 history,

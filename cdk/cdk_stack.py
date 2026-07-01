@@ -97,6 +97,7 @@ from cdk_config import (
     ECS_TASK_MEMORY_SIZE,
     ECS_TASK_ROLE_NAME,
     ECS_USE_FARGATE_SPOT,
+    ENABLE_AGENTCORE_RUNTIME,
     ENABLE_ECS_SERVICE_CONNECT,
     ENABLE_ECS_VPC_INTERFACE_ENDPOINTS,
     ENABLE_HEADLESS_DEPLOYMENT,
@@ -178,6 +179,7 @@ from cdk_functions import (  # Only keep CDK-native functions
     express_ingress_first_load_balancer_security_group,
     express_ingress_load_balancer_arn,
     format_express_pi_public_url,
+    format_main_express_gradio_url,
     format_pi_public_urls,
     load_app_config_env_for_express,
     managed_resource_removal_policy,
@@ -2090,11 +2092,17 @@ class CdkStack(Stack):
                             description="Pi agent ECS Express tasks",
                         )
 
+                        agentcore_backend = ENABLE_AGENTCORE_RUNTIME == "True"
                         pi_express_environment = build_pi_express_container_environment(
                             service_connect_discovery_name=ECS_SERVICE_CONNECT_DISCOVERY_NAME,
                             main_app_port=int(GRADIO_SERVER_PORT),
                             pi_gradio_port=int(PI_GRADIO_PORT),
                             cognito_auth=ENABLE_HEADLESS_DEPLOYMENT != "True",
+                            doc_redaction_gradio_url=(
+                                format_main_express_gradio_url(express_alb_dns)
+                                if agentcore_backend
+                                else None
+                            ),
                         )
                         pi_primary_container = build_express_pi_primary_container(
                             image_uri=pi_ecr_image_loc + ":latest",
@@ -2156,6 +2164,20 @@ class CdkStack(Stack):
                             f"http://{ECS_SERVICE_CONNECT_DISCOVERY_NAME}:"
                             f"{GRADIO_SERVER_PORT}"
                         )
+                        pi_doc_redaction_backend = (
+                            format_main_express_gradio_url(express_alb_dns)
+                            if agentcore_backend
+                            else sc_backend
+                        )
+                        pi_doc_redaction_backend_desc = (
+                            "DOC_REDACTION_GRADIO_URL on Pi Express for AgentCore "
+                            "(main Express public HTTPS; passed to runtime via runtime_config)"
+                            if agentcore_backend
+                            else (
+                                "DOC_REDACTION_GRADIO_URL on Pi Express "
+                                "(Service Connect, no Cognito)"
+                            )
+                        )
                         CfnOutput(
                             self,
                             "PiExpressEndpoint",
@@ -2171,8 +2193,8 @@ class CdkStack(Stack):
                         CfnOutput(
                             self,
                             "PiDocRedactionBackendUrl",
-                            value=sc_backend,
-                            description="DOC_REDACTION_GRADIO_URL on Pi Express (Service Connect, no Cognito)",
+                            value=pi_doc_redaction_backend,
+                            description=pi_doc_redaction_backend_desc,
                         )
                         CfnOutput(
                             self,

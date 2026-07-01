@@ -2308,12 +2308,28 @@ def write_app_config_env_file(
     return APP_CONFIG_ENV_PATH
 
 
+def resolve_doc_redaction_gradio_url(answers: InstallAnswers) -> str:
+    """Backend URL for Pi / AgentCore runtime_config (Service Connect or main Express HTTPS)."""
+    sc_url = f"http://{answers.sc_discovery_name}:7860"
+    orchestrator = normalize_agent_orchestrator(answers.agent_orchestrator)
+    if orchestrator != "agentcore":
+        return sc_url
+    endpoint = fetch_stack_output(
+        REGIONAL_STACK, "ExpressServiceEndpoint", answers.aws_region
+    )
+    if endpoint:
+        from cdk_config import normalize_https_redirect_url
+
+        return normalize_https_redirect_url(endpoint)
+    return sc_url
+
+
 def build_pi_agent_env_values(answers: InstallAnswers) -> Dict[str, str]:
     """Runtime settings for the Pi agent Gradio app (uploaded to S3 as pi_agent.env)."""
     values = {
         "PI_DEPLOYMENT_PROFILE": "aws-ecs",
         "PI_DEFAULT_PROVIDER": answers.pi_default_provider,
-        "DOC_REDACTION_GRADIO_URL": f"http://{answers.sc_discovery_name}:7860",
+        "DOC_REDACTION_GRADIO_URL": resolve_doc_redaction_gradio_url(answers),
         "RUN_AWS_FUNCTIONS": "True",
         "AWS_REGION": answers.aws_region,
         "PI_GRADIO_PORT": answers.pi_gradio_port,

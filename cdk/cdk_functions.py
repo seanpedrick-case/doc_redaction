@@ -2881,6 +2881,13 @@ def format_express_pi_public_url(express_endpoint: str) -> str:
     return f"{base}/" if base else ""
 
 
+def format_main_express_gradio_url(express_endpoint: str) -> str:
+    """HTTPS base URL for the main doc_redaction Gradio app (ExpressServiceEndpoint)."""
+    from cdk_config import normalize_https_redirect_url
+
+    return normalize_https_redirect_url(express_endpoint)
+
+
 def format_pi_public_urls(
     *,
     routing_mode: str,
@@ -2917,16 +2924,20 @@ def build_pi_express_container_environment(
     main_app_port: Union[str, int],
     pi_gradio_port: Union[str, int],
     cognito_auth: bool = True,
+    doc_redaction_gradio_url: Optional[str] = None,
 ) -> Dict[str, str]:
     """Inline env for Pi on Express (no volume mounts; workspace under /tmp)."""
     port = int(main_app_port)
     pi_port = int(pi_gradio_port)
+    backend_url = (doc_redaction_gradio_url or "").strip().rstrip("/")
+    if not backend_url:
+        backend_url = f"http://{service_connect_discovery_name}:{port}"
     env = {
         "APP_TYPE": "pi",
         "APP_CONFIG_PATH": "/workspace/doc_redaction/config/pi_agent.env.example",
         "PI_DEPLOYMENT_PROFILE": "aws-ecs",
         "PI_DEFAULT_PROVIDER": "amazon-bedrock",
-        "DOC_REDACTION_GRADIO_URL": f"http://{service_connect_discovery_name}:{port}",
+        "DOC_REDACTION_GRADIO_URL": backend_url,
         "PI_GRADIO_PORT": str(pi_port),
         "GRADIO_SERVER_PORT": str(pi_port),
         "GRADIO_SERVER_NAME": "0.0.0.0",

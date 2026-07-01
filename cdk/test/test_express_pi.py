@@ -47,6 +47,33 @@ def test_build_pi_express_container_environment():
     assert env["RUN_FASTAPI"] == "True"
 
 
+def test_build_pi_express_container_environment_agentcore_public_url():
+    from cdk_functions import build_pi_express_container_environment
+
+    env = build_pi_express_container_environment(
+        service_connect_discovery_name="redaction",
+        main_app_port=7860,
+        pi_gradio_port=7862,
+        doc_redaction_gradio_url="https://main.example.ecs.eu-west-2.on.aws",
+    )
+    assert (
+        env["DOC_REDACTION_GRADIO_URL"] == "https://main.example.ecs.eu-west-2.on.aws"
+    )
+
+
+def test_format_main_express_gradio_url():
+    from cdk_functions import format_main_express_gradio_url
+
+    assert (
+        format_main_express_gradio_url("main.example.ecs.eu-west-2.on.aws")
+        == "https://main.example.ecs.eu-west-2.on.aws"
+    )
+    assert (
+        format_main_express_gradio_url("https://main.example.ecs.eu-west-2.on.aws/")
+        == "https://main.example.ecs.eu-west-2.on.aws"
+    )
+
+
 def test_build_express_pi_primary_container_includes_cognito_secrets():
     from aws_cdk import App, Stack
     from aws_cdk import aws_secretsmanager as sm

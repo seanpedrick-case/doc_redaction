@@ -666,6 +666,21 @@ def test_build_pi_agent_env_values_agentcore():
     assert values["AGENT_ORCHESTRATOR"] == "agentcore"
     assert values["AGENTCORE_RUNTIME_URL"] == "https://runtime.example"
     assert values["AGENTCORE_API_KEY"] == "secret-token"
+    assert values["DOC_REDACTION_GRADIO_URL"] == "http://redaction:7860"
+
+
+def test_resolve_doc_redaction_gradio_url_agentcore_uses_express_endpoint(monkeypatch):
+    answers = _demo_answers()
+    answers.agent_orchestrator = "agentcore"
+    monkeypatch.setattr(
+        inst,
+        "fetch_stack_output",
+        lambda *_a, **_k: "main.example.ecs.eu-west-2.on.aws",
+    )
+    assert (
+        inst.resolve_doc_redaction_gradio_url(answers)
+        == "https://main.example.ecs.eu-west-2.on.aws"
+    )
 
 
 def test_validate_agentcore_requires_runtime_url():

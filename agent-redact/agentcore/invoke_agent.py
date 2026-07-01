@@ -68,6 +68,38 @@ def bootstrap_runtime_env(app_root: Path) -> None:
     Path(os.environ["PI_WORKSPACE_DIR"]).mkdir(parents=True, exist_ok=True)
 
 
+INVOKE_RUNTIME_CONFIG_KEYS = frozenset(
+    {
+        "DOC_REDACTION_GRADIO_URL",
+        "DOC_REDACTION_GRADIO_AUTH_USER",
+        "DOC_REDACTION_GRADIO_AUTH_PASSWORD",
+        "PI_DEFAULT_OCR_METHOD",
+        "PI_DEFAULT_PII_METHOD",
+        "HF_TOKEN",
+        "DOC_REDACTION_HF_TOKEN",
+    }
+)
+
+
+def apply_invoke_runtime_config(request: dict) -> None:
+    """
+      Apply per-invoke backend settings from the Gradio UI (overrides agentcore.env).
+
+      The AgentCore runtime on AWS has its own ``agentcore.env``; without this, a
+    deployed HF Space URL can win over the operator's local ``pi_agent.env``.
+    """
+    raw = request.get("runtime_config") or request.get("runtime_env") or {}
+    if not isinstance(raw, dict):
+        return
+    for key in INVOKE_RUNTIME_CONFIG_KEYS:
+        value = raw.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            os.environ[key] = text
+
+
 async def invoke_redaction_agent(request: dict) -> AsyncIterator[dict]:
     """Stream LangGraph agent events for one user prompt (multi-turn per session_hash)."""
     from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -75,6 +107,8 @@ async def invoke_redaction_agent(request: dict) -> AsyncIterator[dict]:
         apply_workspace_files,
         collect_workspace_files_for_sync,
     )
+
+    apply_invoke_runtime_config(request)
 
     prompt = str(request.get("prompt") or request.get("message") or "").strip()
     session_hash = str(request.get("session_hash") or "").strip() or None
@@ -93,6 +127,13 @@ async def invoke_redaction_agent(request: dict) -> AsyncIterator[dict]:
                 "type": "status",
                 "message": f"Synced {len(written)} file(s) into AgentCore workspace.",
             }
+
+    backend_url = (os.environ.get("DOC_REDACTION_GRADIO_URL") or "").strip().rstrip("/")
+    if backend_url:
+        yield {
+            "type": "status",
+            "message": f"Redaction backend for this turn: {backend_url}",
+        }
 
     from redaction_langgraph.graph import build_redaction_agent, graph_recursion_limit
 

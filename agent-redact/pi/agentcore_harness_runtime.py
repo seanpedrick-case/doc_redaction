@@ -139,6 +139,10 @@ class AgentCoreHarnessRuntime(AgentRuntime):
     def prompt_stream_active(self) -> bool:
         return self._prompt_stream_depth > 0
 
+    @property
+    def abort_requested(self) -> bool:
+        return self._abort_requested
+
     def start(self) -> None:
         agentcore_harness_arn()
         self._running = True

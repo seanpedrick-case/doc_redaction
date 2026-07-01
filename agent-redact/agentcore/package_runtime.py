@@ -201,6 +201,7 @@ def package_runtime(
     env_local = target / "agentcore.env"
     example_text = """# Loaded at runtime startup when present in the CodeZip (see invoke_agent.bootstrap_runtime_env).
 # Also set these on the AgentCore runtime in AWS if you prefer console/config-bundle env.
+# CDK + AgentCore: use main Express HTTPS (ExpressServiceEndpoint), not Service Connect.
 DOC_REDACTION_GRADIO_URL=https://your-doc-redaction-host.example
 PI_DEFAULT_PROVIDER=amazon-bedrock
 PI_DEFAULT_MODEL=anthropic.claude-sonnet-4-6

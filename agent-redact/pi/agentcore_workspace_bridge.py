@@ -217,3 +217,34 @@ def _format_history_excerpt(
         chunks.append(line)
         total += len(line)
     return "\n".join(chunks)
+
+
+def build_agentcore_invoke_runtime_config() -> dict[str, str]:
+    """
+    Backend settings from the local Gradio process for each AgentCore invoke.
+
+    Overrides ``agentcore.env`` on the AWS runtime so the remote agent uses the same
+    ``DOC_REDACTION_GRADIO_URL`` shown in the Pi UI (not a baked-in HF Space default).
+    """
+    from redaction_prompt import doc_redaction_gradio_url
+
+    url = doc_redaction_gradio_url().strip().rstrip("/")
+    config: dict[str, str] = {}
+    if url:
+        config["DOC_REDACTION_GRADIO_URL"] = url
+    for key in (
+        "DOC_REDACTION_GRADIO_AUTH_USER",
+        "DOC_REDACTION_GRADIO_AUTH_PASSWORD",
+        "PI_DEFAULT_OCR_METHOD",
+        "PI_DEFAULT_PII_METHOD",
+    ):
+        value = (os.environ.get(key) or "").strip()
+        if value:
+            config[key] = value
+    if "hf.space" in url.lower():
+        token = (
+            os.environ.get("HF_TOKEN") or os.environ.get("DOC_REDACTION_HF_TOKEN") or ""
+        ).strip()
+        if token:
+            config["HF_TOKEN"] = token
+    return config

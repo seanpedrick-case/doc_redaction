@@ -13,7 +13,10 @@ You do **not** define `AGENTCORE_RUNTIME_URL` manually in the AWS console before
 | **AgentCore Runtime** | [AgentCore CLI](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-cli.html) (`agentcore deploy`) | Runs the LangGraph agent (`entrypoint.py`) |
 | **Gradio agent UI** | doc_redaction CDK / `cdk_install.py` (Pi Express or legacy) | Browser UI; streams to AgentCore when `AGENT_ORCHESTRATOR=agentcore` or `agentcore-harness` |
 
-The main **doc_redaction** app (OCR, PII, `/doc_redact`, `/review_apply`) is unchanged. AgentCore tools call it over Service Connect (`http://redaction:7860`) the same way the Pi agent does today.
+The main **doc_redaction** app (OCR, PII, `/doc_redact`, `/review_apply`) is unchanged.
+
+- **Pi / LangGraph in the Pi Express container** can call the main app over ECS Service Connect (`http://redaction:7860`).
+- **Bedrock AgentCore Runtime** (separate AWS service) uses the **main Express public HTTPS URL** (`ExpressServiceEndpoint` stack output). CDK sets that on Pi Express when `ENABLE_AGENTCORE_RUNTIME=True`; Gradio passes it to AgentCore on each invoke via `runtime_config`.
 
 ## Runtime vs Harness
 
@@ -203,16 +206,21 @@ agentcore deploy
 | Runtime deps | merged into `pyproject.toml` |
 | `agentcore.env.example` | env vars to set on the **AWS runtime** |
 
-**After deploy — runtime environment (AWS, not `pi_agent.env`)**
+**After deploy — runtime environment (AWS)**
 
-Set on the AgentCore runtime so the agent can reach doc_redaction and Bedrock:
+Bedrock model settings (`PI_DEFAULT_PROVIDER`, `AWS_REGION`, …) belong in `agentcore.env` on the runtime bundle.
+
+**`DOC_REDACTION_GRADIO_URL`:** the Gradio Pi UI sends this on **every invoke** in `runtime_config`, taken from your local `config/pi_agent.env`. That overrides any URL baked into `agentcore.env` (for example an old HF Space default). You should see `Redaction backend for this turn: …` in the activity log with the same URL as the session info panel.
+
+For AWS CDK + AgentCore, `DOC_REDACTION_GRADIO_URL` is the **main Express HTTPS endpoint** (`ExpressServiceEndpoint` / `PiDocRedactionBackendUrl` stack output). Service Connect (`http://redaction:7860`) is only for in-container `pi` / `langgraph` orchestrators. For local Docker dev, set `DOC_REDACTION_GRADIO_URL=http://host.docker.internal:7861` in `pi_agent.env`.
 
 ```bash
-DOC_REDACTION_GRADIO_URL=https://your-public-doc-redaction-url
 PI_DEFAULT_PROVIDER=amazon-bedrock
 PI_DEFAULT_MODEL=anthropic.claude-sonnet-4-6
 AWS_REGION=eu-west-2
 PI_WORKSPACE_DIR=/tmp/agentcore-workspace
+# Optional fallback if Gradio does not send runtime_config:
+# DOC_REDACTION_GRADIO_URL=https://<ExpressServiceEndpoint>  # CDK + AgentCore
 ```
 
 **Session / follow-up chat:** [`session_store.py`](session_store.py) keeps conversation history per `session_hash` inside the running runtime process. Gradio passes the same `session_hash` for follow-ups. History is lost on cold start until [AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/) is configured.
@@ -286,7 +294,7 @@ agentcore deploy
 agentcore status   # copy invocationUrl (base only, no /invocations)
 ```
 
-Set runtime env on AWS so tools reach doc_redaction (Service Connect hostname `http://redaction:7860` on ECS).
+Set runtime env on AWS so tools reach doc_redaction. For CDK + AgentCore use the **main Express HTTPS URL** (`ExpressServiceEndpoint`); `agentcore.env` is only a fallback — Gradio overrides via `runtime_config` each invoke.
 
 **Phase 2 — CDK demo stack**
 
@@ -347,7 +355,7 @@ CDK writes `ENABLE_AGENTCORE_RUNTIME=True` and the URL into `config/cdk_config.e
 
 ### Typical deployment order
 
-1. Deploy **doc_redaction** main app (CDK) so Service Connect DNS `http://redaction:7860` exists.  
+1. Deploy **doc_redaction** main app (CDK) and note **ExpressServiceEndpoint** (main Express HTTPS URL).  
 2. Deploy **AgentCore** runtime (`agentcore deploy`) and note the URL.  
 3. Set `AGENTCORE_RUNTIME_URL` in `pi_agent.env` / installer and deploy or restart the **Pi Express** agent UI service.
 
@@ -376,7 +384,7 @@ If invoke returns **401** or **403**, check AgentCore inbound auth configuration
 |-------|----------------|
 | Runtime init timeout / `RuntimeClientError: initialization time exceeded` | Container failed to import `main.py` within 30s. Check CloudWatch `/aws/bedrock-agentcore/runtimes/RedactionAgent_RedactionAgent-ye5Jfw7gKj/` **runtime-logs**. Common cause: packaged bootstrap calling Pi-only modules (`pi_workspace_skills`). Re-run `package_runtime.py` and redeploy. |
 | 403 on `/invocations` | Runtime uses **AWS IAM**; Gradio must call via SigV4 (`boto3` `invoke_agent_runtime`) or set `AGENTCORE_API_KEY` for CUSTOM_JWT. Ensure `PI_AWS_PROFILE` / `~/.aws` in the pi-agent container and `bedrock-agentcore:InvokeAgentRuntime` on the runtime ARN. |
-| Agent cannot reach doc_redaction | Service Connect / `DOC_REDACTION_GRADIO_URL=http://redaction:7860` on runtime env |
+| Agent cannot reach doc_redaction | `DOC_REDACTION_GRADIO_URL` must be the **main Express HTTPS URL** for AgentCore (not Service Connect). Check `PiDocRedactionBackendUrl` stack output and activity log `Redaction backend for this turn: …` |
 | CDK deploy fails | `cdk bootstrap`; `agentcore deploy -v` for verbose AgentCore errors |
 | `Failed to parse: \`-\`` during **Synthesize CloudFormation** | Windows + path with spaces (e.g. `OneDrive - Lambeth Council`). AgentCore CDK runs `uv` with `shell: true` and unquoted paths; the `-` in the folder name is passed to `uv` as a bogus package. See below. |
 | `hardlink` / `os error 396` during synth | Project on OneDrive; set `UV_LINK_MODE=copy` before deploy |

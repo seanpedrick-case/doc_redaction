@@ -292,11 +292,14 @@ def doc_redaction_gradio_url() -> str:
     try:
         from tools.config import DOC_REDACTION_GRADIO_URL
 
-        return str(DOC_REDACTION_GRADIO_URL).strip().rstrip("/")
+        configured = str(DOC_REDACTION_GRADIO_URL).strip().rstrip("/")
+        if configured:
+            return configured
     except ImportError:
-        return (
-            HF_DEFAULT_GRADIO_URL if is_hf_space_profile() else "http://127.0.0.1:7860"
-        )
+        pass
+    if is_hf_space_profile():
+        return HF_DEFAULT_GRADIO_URL
+    return "http://127.0.0.1:7860"
 
 
 def _default_gradio_url() -> str:

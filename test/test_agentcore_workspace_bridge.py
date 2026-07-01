@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import os
 import sys
 from pathlib import Path
 
@@ -100,3 +101,49 @@ def test_collect_upload_skips_oversized_files(tmp_path, monkeypatch):
     assert skipped["relative_path"] == ".agentcore_upload_skipped.txt"
     note = base64.b64decode(skipped["content_base64"]).decode("utf-8")
     assert "big.bin" in note
+
+
+def test_build_agentcore_invoke_runtime_config_uses_pi_env(monkeypatch):
+    monkeypatch.setenv("DOC_REDACTION_GRADIO_URL", "http://host.docker.internal:7861")
+    monkeypatch.setenv("PI_DEFAULT_OCR_METHOD", "paddle")
+    monkeypatch.setenv("HF_TOKEN", "should-not-pass")
+    config = bridge.build_agentcore_invoke_runtime_config()
+    assert config["DOC_REDACTION_GRADIO_URL"] == "http://host.docker.internal:7861"
+    assert config["PI_DEFAULT_OCR_METHOD"] == "paddle"
+    assert "HF_TOKEN" not in config
+
+
+def test_build_agentcore_invoke_runtime_config_includes_hf_token_for_space(
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "DOC_REDACTION_GRADIO_URL",
+        "https://seanpedrickcase-document-redaction.hf.space",
+    )
+    monkeypatch.setenv("HF_TOKEN", "hf-secret")
+    config = bridge.build_agentcore_invoke_runtime_config()
+    assert config["HF_TOKEN"] == "hf-secret"
+
+
+def test_apply_invoke_runtime_config_overrides_agentcore_env(monkeypatch):
+    pytest = __import__("pytest")
+    pytest.importorskip("langchain_core")
+    _AGENTCORE = Path(__file__).resolve().parents[1] / "agent-redact" / "agentcore"
+    if str(_AGENTCORE) not in sys.path:
+        sys.path.insert(0, str(_AGENTCORE))
+    from invoke_agent import apply_invoke_runtime_config
+
+    monkeypatch.setenv(
+        "DOC_REDACTION_GRADIO_URL",
+        "https://seanpedrickcase-document-redaction.hf.space",
+    )
+    apply_invoke_runtime_config(
+        {
+            "runtime_config": {
+                "DOC_REDACTION_GRADIO_URL": "http://host.docker.internal:7861",
+            }
+        }
+    )
+    assert (
+        os.environ.get("DOC_REDACTION_GRADIO_URL") == "http://host.docker.internal:7861"
+    )
