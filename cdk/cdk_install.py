@@ -26,8 +26,15 @@ Usage examples::
     python cdk_install.py --profile headless --vpc-name my-vpc \\
         --force-delete-stacks --yes
 
-    # Demo with Agent agent (Express; dedicated Pi HTTPS URL)
+    # Demo with agent mode (Express; AgentCore orchestrator is the demo default)
     python cdk_install.py --profile demo --enable-pi --yes --config-only
+
+    # Demo with AgentCore URL (deploy runtime first — see agent-redact/agentcore/README.md)
+    python cdk_install.py --profile demo --enable-pi --agent-orchestrator agentcore \\
+        --agentcore-runtime-url https://your-runtime.example --yes --config-only
+
+    # Fallback: Pi coding agent orchestrator inside the Express container
+    python cdk_install.py --profile demo --enable-pi --agent-orchestrator pi --yes --config-only
 
     # Headless batch (S3 → Lambda → one-shot ECS direct mode)
     python cdk_install.py --profile headless --vpc-name my-vpc --yes
@@ -63,6 +70,24 @@ APP_CONFIG_ENV_EXAMPLE = CONFIG_DIR / "app_config.env.example"
 PI_AGENT_ENV_PATH = CONFIG_DIR / "pi_agent.env"
 PI_AGENT_ENV_EXAMPLE = REPO_ROOT / "config" / "pi_agent.env.example"
 PI_ALB_ROUTING_MODES = ("path", "host", "both")
+AGENT_ORCHESTRATOR_CHOICES = ("pi", "langgraph", "agentcore")
+
+DEFAULT_POLICY_FILE_LOCATIONS = (
+    "policies/textract_policy.json",
+    "policies/comprehend_policy.json",
+)
+PI_AGENTCORE_INVOKE_POLICY_FILE = "policies/pi_agentcore_invoke_policy.json"
+
+AGENTCORE_DEPLOY_CHECKLIST = """
+AgentCore two-phase demo deploy:
+  1. Package runtime: python agent-redact/agentcore/package_runtime.py \\
+       --target <AgentCoreProject>/app/RedactionAgent
+     (Windows/OneDrive: set UV_LINK_MODE=copy before agentcore deploy)
+  2. Deploy runtime: cd <AgentCoreProject> && agentcore deploy
+  3. Copy invocationUrl from `agentcore status` (base URL, no /invocations suffix)
+  4. Re-run cdk_install.py --config-only with --agentcore-runtime-url <URL>
+     or update config/pi_agent.env + upload to S3, then restart Pi Express service
+""".strip()
 CDK_JSON_PATH = CDK_DIR / "cdk.json"
 CDK_JSON_EXAMPLE = CDK_DIR / "cdk.json.example"
 QUICKSTART_SCRIPT = CDK_DIR / "post_cdk_build_quickstart.py"
@@ -1272,6 +1297,11 @@ class InstallAnswers:
     pi_gradio_port: str = "7862"
     sc_discovery_name: str = "redaction"
     pi_default_provider: str = "amazon-bedrock"
+    agent_orchestrator: str = "pi"
+    enable_agentcore_runtime: bool = False
+    agentcore_runtime_url: str = ""
+    agentcore_api_key: str = ""
+    allow_empty_agentcore_url: bool = False
     write_pi_agent_env: bool = True
     overwrite_pi_agent_env: bool = False
     write_app_config_env: bool = True
@@ -1798,11 +1828,74 @@ def headless_profile_error(answers: "InstallAnswers") -> Optional[str]:
     return None
 
 
+def normalize_agent_orchestrator(raw: str) -> str:
+    value = (raw or "pi").strip().lower()
+    if value in AGENT_ORCHESTRATOR_CHOICES:
+        return value
+    return "pi"
+
+
+def default_agent_orchestrator_for_answers(answers: "InstallAnswers") -> str:
+    """Demo Express agent mode defaults to AgentCore; production/legacy stays on Pi."""
+    if answers.profile == "demo" and answers.enable_pi_express:
+        return "agentcore"
+    return "pi"
+
+
+def apply_demo_agentcore_orchestrator_defaults(
+    answers: "InstallAnswers", args: argparse.Namespace
+) -> None:
+    """When demo + Express agent mode without an explicit orchestrator, use AgentCore."""
+    if answers.profile != "demo" or not answers.enable_pi_express:
+        return
+    if getattr(args, "agent_orchestrator", None):
+        return
+    answers.agent_orchestrator = "agentcore"
+    answers.enable_agentcore_runtime = True
+
+
+def merge_policy_file_locations(
+    *,
+    agentcore_enabled: bool,
+    existing_raw: str = "",
+) -> str:
+    """ECS task-role JSON policy paths written to POLICY_FILE_LOCATIONS in cdk_config.env."""
+    try:
+        from cdk_config import parse_comma_separated_list
+    except ImportError:
+        parse_comma_separated_list = lambda value: [  # noqa: E731
+            part.strip() for part in (value or "").split(",") if part.strip()
+        ]
+
+    policies: List[str] = []
+    if existing_raw.strip():
+        policies = list(parse_comma_separated_list(existing_raw))
+    if not policies:
+        policies = list(DEFAULT_POLICY_FILE_LOCATIONS)
+    if agentcore_enabled and PI_AGENTCORE_INVOKE_POLICY_FILE not in policies:
+        policies.append(PI_AGENTCORE_INVOKE_POLICY_FILE)
+    return json.dumps(policies)
+
+
 def validate_install_answers(answers: "InstallAnswers") -> List[str]:
     errors: List[str] = []
     msg = headless_profile_error(answers)
     if msg:
         errors.append(msg)
+    orchestrator = normalize_agent_orchestrator(answers.agent_orchestrator)
+    if orchestrator not in AGENT_ORCHESTRATOR_CHOICES:
+        errors.append(
+            "AGENT_ORCHESTRATOR must be one of "
+            f"{list(AGENT_ORCHESTRATOR_CHOICES)}; got '{answers.agent_orchestrator}'."
+        )
+    if answers.pi_enabled and orchestrator == "agentcore":
+        if not (answers.agentcore_runtime_url or "").strip():
+            if not answers.allow_empty_agentcore_url:
+                errors.append(
+                    "AGENTCORE_RUNTIME_URL is required when AGENT_ORCHESTRATOR=agentcore. "
+                    "Deploy the runtime first (see agent-redact/agentcore/README.md) or pass "
+                    "--agentcore-runtime-url. Non-interactive installs must include the URL."
+                )
     return errors
 
 
@@ -1892,11 +1985,30 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
 
     use_cloudfront = values.get("USE_CLOUDFRONT") == "True"
     if answers.pi_enabled:
+        orchestrator = normalize_agent_orchestrator(answers.agent_orchestrator)
+        agentcore_enabled = (
+            answers.enable_agentcore_runtime or orchestrator == "agentcore"
+        )
         values.update(
             {
                 "PI_GRADIO_PORT": answers.pi_gradio_port,
                 "ECS_SERVICE_CONNECT_DISCOVERY_NAME": answers.sc_discovery_name,
+                "AGENT_ORCHESTRATOR": orchestrator,
+                "ENABLE_AGENTCORE_RUNTIME": "True" if agentcore_enabled else "False",
             }
+        )
+        if answers.agentcore_runtime_url.strip():
+            values["AGENTCORE_RUNTIME_URL"] = answers.agentcore_runtime_url.strip()
+        if answers.agentcore_api_key.strip():
+            values["AGENTCORE_API_KEY"] = answers.agentcore_api_key.strip()
+        existing_policy_raw = ""
+        if ENV_PATH.is_file():
+            existing_policy_raw = (
+                read_env_file(ENV_PATH).get("POLICY_FILE_LOCATIONS") or ""
+            )
+        values["POLICY_FILE_LOCATIONS"] = merge_policy_file_locations(
+            agentcore_enabled=agentcore_enabled,
+            existing_raw=existing_policy_raw,
         )
         if answers.enable_pi_express:
             values["ECS_EXPRESS_SC_PORT_NAME"] = "port-7860"
@@ -1959,7 +2071,9 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
     return values
 
 
-def validate_env_values(values: Dict[str, str]) -> List[str]:
+def validate_env_values(
+    values: Dict[str, str], *, allow_empty_agentcore_url: bool = False
+) -> List[str]:
     errors: List[str] = []
 
     express = values.get("USE_ECS_EXPRESS_MODE") == "True"
@@ -2068,6 +2182,24 @@ def validate_env_values(values: Dict[str, str]) -> List[str]:
     if pi_ecs and values.get("ENABLE_ECS_SERVICE_CONNECT") != "True":
         errors.append(
             "ENABLE_PI_AGENT_ECS_SERVICE=True requires ENABLE_ECS_SERVICE_CONNECT=True."
+        )
+
+    orchestrator = normalize_agent_orchestrator(values.get("AGENT_ORCHESTRATOR", "pi"))
+    if orchestrator not in AGENT_ORCHESTRATOR_CHOICES:
+        errors.append(
+            f"AGENT_ORCHESTRATOR must be one of {list(AGENT_ORCHESTRATOR_CHOICES)}; "
+            f"got '{values.get('AGENT_ORCHESTRATOR')}'."
+        )
+    agentcore_enabled = values.get("ENABLE_AGENTCORE_RUNTIME") == "True"
+    if (pi_ecs or pi_express) and orchestrator == "agentcore":
+        if not (values.get("AGENTCORE_RUNTIME_URL") or "").strip():
+            if not allow_empty_agentcore_url:
+                errors.append(
+                    "AGENTCORE_RUNTIME_URL is required when AGENT_ORCHESTRATOR=agentcore."
+                )
+    if agentcore_enabled and orchestrator != "agentcore":
+        errors.append(
+            "ENABLE_AGENTCORE_RUNTIME=True requires AGENT_ORCHESTRATOR=agentcore."
         )
 
     if headless and (
@@ -2190,6 +2322,13 @@ def build_pi_agent_env_values(answers: InstallAnswers) -> Dict[str, str]:
     }
     if answers.enable_pi_express:
         values["RUN_FASTAPI"] = "True"
+    orchestrator = normalize_agent_orchestrator(answers.agent_orchestrator)
+    values["AGENT_ORCHESTRATOR"] = orchestrator
+    if answers.agentcore_runtime_url.strip():
+        values["AGENTCORE_RUNTIME_URL"] = answers.agentcore_runtime_url.strip()
+    if answers.agentcore_api_key.strip():
+        values["AGENTCORE_API_KEY"] = answers.agentcore_api_key.strip()
+    if answers.enable_pi_express:
         return values
     path_prefix = normalize_pi_path_prefix(answers.pi_alb_path_prefix)
     if answers.pi_alb_routing.strip().lower() in ("path", "both"):
@@ -2799,7 +2938,98 @@ def run_quickstart(python_exe: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def apply_agent_orchestrator_cli_flags(
+    args: argparse.Namespace, answers: InstallAnswers
+) -> None:
+    if getattr(args, "agent_orchestrator", None):
+        answers.agent_orchestrator = normalize_agent_orchestrator(
+            args.agent_orchestrator
+        )
+    if getattr(args, "enable_agentcore_runtime", False):
+        answers.enable_agentcore_runtime = True
+        answers.agent_orchestrator = "agentcore"
+    if getattr(args, "agentcore_runtime_url", None):
+        answers.agentcore_runtime_url = str(args.agentcore_runtime_url).strip()
+    if getattr(args, "agentcore_api_key", None):
+        answers.agentcore_api_key = str(args.agentcore_api_key).strip()
+
+
+def configure_agent_orchestrator_options(
+    answers: InstallAnswers,
+    args: argparse.Namespace,
+    *,
+    interactive: bool,
+    assume_yes: bool,
+) -> None:
+    """Prompt for Pi vs LangGraph vs AgentCore orchestration when agent mode is enabled."""
+    if not answers.pi_enabled:
+        return
+
+    apply_agent_orchestrator_cli_flags(args, answers)
+    apply_demo_agentcore_orchestrator_defaults(answers, args)
+
+    if not interactive or assume_yes:
+        if answers.enable_agentcore_runtime:
+            answers.agent_orchestrator = "agentcore"
+        elif (
+            answers.profile == "demo"
+            and answers.enable_pi_express
+            and not getattr(args, "agent_orchestrator", None)
+        ):
+            answers.agent_orchestrator = "agentcore"
+            answers.enable_agentcore_runtime = True
+        return
+
+    if args.agent_orchestrator:
+        return
+
+    demo_default_idx = 2 if answers.profile == "demo" else 0
+    print("\n--- Agent orchestration backend ---")
+    idx = ask_choice(
+        "Which backend should power the agent Gradio UI?",
+        [
+            "Pi coding agent (bash + skills; HF Space compatible)",
+            "LangGraph (curated Python tools only; no shell)",
+            "Bedrock AgentCore (demo default — Gradio proxies to AgentCore runtime URL)",
+        ],
+        default_index=demo_default_idx,
+    )
+    answers.agent_orchestrator = AGENT_ORCHESTRATOR_CHOICES[idx]
+
+    if answers.agent_orchestrator == "agentcore":
+        answers.enable_agentcore_runtime = True
+        answers.agentcore_runtime_url = ask(
+            "AgentCore runtime URL (base URL from agentcore status; no trailing slash)",
+            answers.agentcore_runtime_url,
+        ).strip()
+        if not answers.agentcore_runtime_url:
+            print(
+                "\nNo runtime URL yet — CDK can proceed, but the agent UI will not work "
+                "until you deploy the runtime and set AGENTCORE_RUNTIME_URL."
+            )
+            print(AGENTCORE_DEPLOY_CHECKLIST)
+            if ask_yes_no(
+                "Continue without AGENTCORE_RUNTIME_URL for now?",
+                default=answers.profile == "demo",
+            ):
+                answers.allow_empty_agentcore_url = True
+        if ask_yes_no(
+            "Set AGENTCORE_API_KEY for the Gradio UI → AgentCore client?",
+            default=bool(answers.agentcore_api_key),
+        ):
+            answers.agentcore_api_key = ask(
+                "AgentCore API key (optional bearer token)",
+                answers.agentcore_api_key,
+            ).strip()
+    elif answers.agent_orchestrator == "langgraph":
+        print(
+            "LangGraph: orchestration runs inside the agent container using curated tools "
+            "(PI_DEFAULT_PROVIDER / Bedrock still applies for the LLM)."
+        )
+
+
 def apply_pi_cli_flags(args: argparse.Namespace, answers: InstallAnswers) -> None:
+    apply_agent_orchestrator_cli_flags(args, answers)
     if getattr(args, "enable_pi", False):
         preset = merge_preset(answers.profile, answers.custom_overrides)
         if preset.get("USE_ECS_EXPRESS_MODE") == "True":
@@ -2812,6 +3042,7 @@ def apply_pi_cli_flags(args: argparse.Namespace, answers: InstallAnswers) -> Non
     if getattr(args, "enable_pi_legacy", False):
         answers.enable_pi_legacy = True
         answers.enable_service_connect = True
+    apply_demo_agentcore_orchestrator_defaults(answers, args)
     if args.pi_alb_routing:
         answers.pi_alb_routing = args.pi_alb_routing
     if args.pi_path_prefix:
@@ -2895,6 +3126,10 @@ def configure_pi_options(
     if not answers.pi_enabled:
         return
 
+    configure_agent_orchestrator_options(
+        answers, args, interactive=interactive, assume_yes=assume_yes
+    )
+
     if not answers.pi_alb_listener_rule_priority and not answers.enable_pi_express:
         answers.pi_alb_listener_rule_priority = default_pi_listener_priority(
             use_cloudfront
@@ -2922,7 +3157,8 @@ def configure_pi_options(
                 answers.write_pi_agent_env = False
         print(
             f"Agent mode: Express (dedicated HTTPS endpoint per service); "
-            f"Service Connect discovery={answers.sc_discovery_name}"
+            f"Service Connect discovery={answers.sc_discovery_name}; "
+            f"orchestrator={normalize_agent_orchestrator(answers.agent_orchestrator)}"
         )
         return
 
@@ -2985,7 +3221,8 @@ def configure_pi_options(
         f"Agent mode: "
         f"{'Express' if answers.enable_pi_express else 'legacy Fargate'}, "
         f"routing={answers.pi_alb_routing}, "
-        f"prefix={normalize_pi_path_prefix(answers.pi_alb_path_prefix)}"
+        f"prefix={normalize_pi_path_prefix(answers.pi_alb_path_prefix)}, "
+        f"orchestrator={normalize_agent_orchestrator(answers.agent_orchestrator)}"
     )
 
 
@@ -3442,6 +3679,26 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Do not write config/pi_agent.env",
     )
+    pi.add_argument(
+        "--agent-orchestrator",
+        choices=AGENT_ORCHESTRATOR_CHOICES,
+        help="Agent orchestration backend (demo+--enable-pi default: agentcore)",
+    )
+    pi.add_argument(
+        "--enable-agentcore-runtime",
+        action="store_true",
+        help="Use Bedrock AgentCore (sets AGENT_ORCHESTRATOR=agentcore)",
+    )
+    pi.add_argument(
+        "--agentcore-runtime-url",
+        default="",
+        help="AgentCore runtime base URL for Gradio SSE client",
+    )
+    pi.add_argument(
+        "--agentcore-api-key",
+        default="",
+        help="Optional bearer token for AgentCore runtime (written to pi_agent.env)",
+    )
     p.add_argument(
         "--skip-app-config-env",
         action="store_true",
@@ -3526,7 +3783,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         errors.extend(validate_subnet_answers(answers))
         errors.extend(enrich_existing_subnet_details_from_aws(answers))
         values = build_env_values(answers)
-        errors.extend(validate_env_values(values))
+        errors.extend(
+            validate_env_values(
+                values,
+                allow_empty_agentcore_url=answers.allow_empty_agentcore_url,
+            )
+        )
         if errors:
             print("Configuration errors:")
             for err in errors:

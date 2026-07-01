@@ -2942,6 +2942,14 @@ def build_pi_express_container_environment(
         "RUN_AWS_FUNCTIONS": "True",
         "COGNITO_AUTH": "True" if cognito_auth else "False",
     }
+    try:
+        from cdk_config import AGENTCORE_RUNTIME_URL, ENABLE_AGENTCORE_RUNTIME
+
+        if ENABLE_AGENTCORE_RUNTIME == "True" and AGENTCORE_RUNTIME_URL:
+            env["AGENT_ORCHESTRATOR"] = "agentcore"
+            env["AGENTCORE_RUNTIME_URL"] = AGENTCORE_RUNTIME_URL
+    except ImportError:
+        pass
     return env
 
 

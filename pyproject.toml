@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc_redaction"
-version = "2.4.2"
+version = "2.5.0"
 description = "Redact PDF/image-based documents, Word, or CSV/XLSX files using a Gradio-based GUI interface"
 readme = "README_PYPI.md"
 authors = [
@@ -41,7 +41,7 @@ dependencies = [
     "pdfminer.six<=20260107",
     "pdf2image<=1.17.0",
     "pymupdf<=1.27.1",
-    "bleach<=6.3.0",
+    "bleach<=6.4.0",
     "opencv-python<=4.13.0.92",
     "presidio_analyzer<=2.2.362",
     "presidio_anonymizer<=2.2.362",
@@ -52,7 +52,7 @@ dependencies = [
     "spacy<=3.8.14",
     "gradio==6.10.0",
     "gradio-pdf-redaction<=0.0.25",
-    "boto3<=1.42.91",
+    "boto3<=1.43.36",
     "pyarrow<=24.0.0",
     "openpyxl<=3.1.5",
     "Faker<=40.8.0",
@@ -68,7 +68,7 @@ dependencies = [
     "numpy<=2.4.4",
     "spaces",
     "google-genai<=1.73.0",
-    "openai<=2.31.0",
+    "openai<=2.44.0",
     "markdown<=3.10.2",
     "tabulate<=0.10.0"
 ]

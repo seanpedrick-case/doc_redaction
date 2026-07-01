@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-Gradio chat UI for Pi (RPC mode).
+Gradio chat UI for agentic redaction.
 
-Streams Pi RPC events into a chatbot, activity log, tool output panel, and
+Streams events into a chatbot, activity log, tool output panel, and
 optional thinking trace. Includes a redaction task panel driven by the
 partnership prompt template.
 """
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
 import queue
@@ -43,10 +44,21 @@ from bootstrap_pi_config import ensure_pi_config_env
 ensure_pi_config_env(_REPO_ROOT)
 
 import gradio as gr
+from agent_runtime import (
+    AgentRuntime,
+    AgentRuntimeError,
+    AgentStreamEvent,
+    coerce_agent_runtime,
+    create_agent_runtime,
+    normalize_orchestrator,
+    orchestrator_label,
+    start_agent_prompt_event_worker,
+)
 from output_files import (
     collect_final_output_files,
     gradio_allowed_paths,
     latest_redacted_pdf_path,
+    preview_pdf_path_for_gradio,
     refresh_workspace_output_files_stub,
     refresh_workspace_panel,
     workspace_files_download_fn,
@@ -73,15 +85,11 @@ from pi_agent_config import (
 )
 from pi_examples import example_rows, examples_status_markdown
 from pi_rpc_client import (
-    PiRpcClient,
     PiRpcError,
-    PiStreamEvent,
     assistant_text_since_last_user,
-    default_client,
     format_tool_chat_line,
     is_rate_limit_error,
     last_assistant_turn_error,
-    start_pi_prompt_event_worker,
 )
 from redaction_prompt import (
     DEFAULT_OCR_METHOD,
@@ -185,10 +193,10 @@ async (...outputs) => {
   const isError = finishSignal === "error";
   const title = isAborted ? "Agent stopped" : (isError ? "Agent error" : "Agent finished");
   const body = isAborted
-    ? "The Pi agent run was aborted."
+    ? "The agent run was aborted."
     : (isError
-      ? "The Pi agent run ended with an error."
-      : "The Pi agent has finished its task. Review the chat for results.");
+      ? "The agent run ended with an error."
+      : "The agent has finished its task. Review the chat for results.");
   const originalTitle = document.title;
   let flashOn = true;
   const flashInterval = setInterval(() => {
@@ -336,7 +344,7 @@ def _passthrough_chat_outputs_for_notify(*non_file_outputs: Any) -> tuple[Any, .
     return tuple(full)
 
 
-def _client_provider_model(client: PiRpcClient | None) -> tuple[str, str]:
+def _client_provider_model(client: AgentRuntime | None) -> tuple[str, str]:
     if client is None:
         return "", ""
     try:
@@ -349,7 +357,7 @@ def _client_provider_model(client: PiRpcClient | None) -> tuple[str, str]:
     return provider, model_label
 
 
-def _llm_model_label(client: PiRpcClient | None) -> str:
+def _llm_model_label(client: AgentRuntime | None) -> str:
     provider, model = _client_provider_model(client)
     if provider and model:
         return f"{provider}/{model}"
@@ -359,7 +367,7 @@ def _llm_model_label(client: PiRpcClient | None) -> str:
 def _schedule_post_pi_task(
     *,
     session_hash: str,
-    client: PiRpcClient | None,
+    client: AgentRuntime | None,
     s3_output_folder: str,
     save_outputs_to_s3: bool,
     document_name: str = "",
@@ -415,7 +423,7 @@ def _schedule_post_pi_task(
 def _after_pi_task(
     *,
     session_hash: str,
-    client: PiRpcClient | None,
+    client: AgentRuntime | None,
     s3_output_folder: str,
     save_outputs_to_s3: bool,
     document_name: str = "",
@@ -566,7 +574,7 @@ def _append_user_steer_notice(
 
 def _integrate_pending_chat_notices(
     history: list[dict[str, Any]],
-    client: PiRpcClient,
+    client: AgentRuntime,
     completed_segments: list[str],
     streaming_text: str,
 ) -> tuple[list[dict[str, Any]], list[str], str]:
@@ -652,7 +660,7 @@ def _is_agent_finish_notice_only(content: str) -> bool:
 
 def _silent_llama_failure_message() -> str:
     return (
-        f"**Pi LLM:** no response from the orchestration model.  \n\n"
+        f"**LLM:** no response from the orchestration model.  \n\n"
         f"Configured endpoint: `{LLAMA_BASE_URL}` · model `{llama_model_id()}`.  \n\n"
         f"Set **`PI_LLAMA_BASE_URL`** in `config/pi_agent.env` (OpenAI-compatible URL "
         f"including `/v1`, e.g. `http://192.168.0.220:8080/v1`), confirm the model id "
@@ -664,15 +672,15 @@ def _silent_llama_failure_message() -> str:
 
 def _llama_terminated_message() -> str:
     return (
-        f"**Pi LLM:** llama.cpp closed the connection (`terminated`).  \n\n"
+        f"**LLM:** llama.cpp closed the connection (`terminated`).  \n\n"
         f"This usually means the **llama server process was killed** during prompt "
         f"prefill (common causes: GPU out-of-memory, or the model is still loading/unloading). "
         f"The server often exits **without an error line** when the OS kills it.  \n\n"
         f"Endpoint: `{LLAMA_BASE_URL}` · model `{llama_model_id()}`.  \n\n"
         f"Wait until `GET {LLAMA_BASE_URL.rstrip('/')}/models` responds, ensure no other "
         f"client is hitting the same endpoint (doc_redaction local PII shares it), then "
-        f"retry **Start redaction task**. After changing skills sync, set "
-        f"`PI_SKILLS_RESYNC=true` once and restart the Pi UI."
+        f"retry **Start redaction task**. If using Pi, after changing skills sync, set "
+        f"`PI_SKILLS_RESYNC=true` once and restart the Gradio UI."
     )
 
 
@@ -721,7 +729,7 @@ def _prepare_llama_before_orchestration_prompt() -> str | None:
 
 
 def _finalize_assistant_chat(
-    client: PiRpcClient,
+    client: AgentRuntime,
     history: list[dict[str, Any]],
     *,
     completed_segments: list[str],
@@ -753,8 +761,8 @@ def _finalize_assistant_chat(
 
     if turn_error:
         content = _format_llama_turn_error(turn_error)
-        if not content.startswith("**Pi LLM:"):
-            content = f"**Pi LLM error:** {turn_error}"
+        if not content.startswith("**LLM:"):
+            content = f"**LLM error:** {turn_error}"
         _set_last_assistant_content(history, content)
         return
 
@@ -786,15 +794,15 @@ def _gemini_key_error() -> str | None:
 
 
 def _ensure_client(
-    client: PiRpcClient | None,
+    client: AgentRuntime | None,
     session_hash: str = "",
-) -> PiRpcClient:
+) -> AgentRuntime:
     key_error = _gemini_key_error()
     if key_error:
         raise PiRpcError(key_error)
-    if isinstance(client, PiRpcClient) and client.running:
+    if isinstance(client, AgentRuntime) and client.running:
         return client
-    client = default_client(session_hash or None)
+    client = create_agent_runtime(session_hash or None)
     client.start()
     provider = normalize_provider(get_default_provider())
     model = resolved_default_model(provider)
@@ -805,8 +813,8 @@ def _ensure_client(
     return client
 
 
-def _coerce_client(client: Any) -> PiRpcClient | None:
-    return client if isinstance(client, PiRpcClient) else None
+def _coerce_client(client: Any) -> AgentRuntime | None:
+    return coerce_agent_runtime(client)
 
 
 def _truncate(text: str, limit: int = TOOL_OUTPUT_MAX) -> str:
@@ -841,7 +849,7 @@ def _chat_segment_tool_label(segment: str) -> str | None:
 
 
 def _is_empty_tool_chat_segment(segment: str) -> bool:
-    """Skip ephemeral Pi snapshots before tool arguments are populated."""
+    """Skip ephemeral snapshots before tool arguments are populated."""
     label = _chat_segment_tool_label(segment)
     if label is None:
         return False
@@ -923,7 +931,7 @@ def _append_chat_segment(
 
 
 def _apply_event(
-    event: PiStreamEvent,
+    event: AgentStreamEvent,
     *,
     history: list[dict[str, Any]],
     activity: list[str],
@@ -1061,7 +1069,7 @@ def _format_tool_panel(heading: str, body: str) -> str:
     return heading + body
 
 
-def _active_pi_provider(client: PiRpcClient | None) -> str:
+def _active_pi_provider(client: AgentRuntime | None) -> str:
     """Resolved Pi provider from the running RPC client, else configured default."""
     if client is not None and client.running:
         try:
@@ -1075,7 +1083,7 @@ def _active_pi_provider(client: PiRpcClient | None) -> str:
     return normalize_provider(get_default_provider())
 
 
-def _pi_agent_model_label(client: PiRpcClient | None) -> str:
+def _pi_agent_model_label(client: AgentRuntime | None) -> str:
     """Active Pi orchestration model, or configured defaults before Apply backend."""
     if client is not None and client.running:
         try:
@@ -1093,34 +1101,49 @@ def _pi_agent_model_label(client: PiRpcClient | None) -> str:
     return f"{provider_label(provider)} / {model} (default until backend applied)"
 
 
-def _agent_status_markdown(client: PiRpcClient | None = None) -> str:
-    """Redaction backend URL, Pi model, and credentials — shown at top of the UI."""
+def _agent_status_markdown(client: AgentRuntime | None = None) -> str:
+    """Redaction backend URL, agent model, and credentials — shown at top of the UI."""
     from redaction_prompt import doc_redaction_gradio_url
 
+    orchestrator = normalize_orchestrator()
+    agent_label = orchestrator_label(orchestrator)
     lines = [
         f"**Redaction backend:** `{doc_redaction_gradio_url()}`",
-        f"**Pi agent model:** `{_pi_agent_model_label(client)}`",
+        f"**Orchestrator:** `{agent_label}`",
     ]
+    if orchestrator == "agentcore-harness":
+        harness_arn = (
+            os.environ.get("AGENTCORE_HARNESS_ARN") or ""
+        ).strip() or "(not set)"
+        lines.append(f"**Harness ARN:** `{harness_arn}`")
+    elif orchestrator == "agentcore":
+        runtime_url = (
+            os.environ.get("AGENTCORE_RUNTIME_URL") or ""
+        ).strip() or "(not set)"
+        lines.append(f"**AgentCore runtime:** `{runtime_url}`")
+    else:
+        lines.append(f"**Agent model:** `{_pi_agent_model_label(client)}`")
     if (
-        not is_hf_space_profile()
+        orchestrator not in {"agentcore", "agentcore-harness"}
+        and not is_hf_space_profile()
         and normalize_provider(get_default_provider()) == PROVIDER_LLAMA
     ):
-        lines.append(f"**Pi LLM endpoint:** `{LLAMA_BASE_URL}`")
+        lines.append(f"**LLM endpoint:** `{LLAMA_BASE_URL}`")
     if client is None or not client.running:
         lines.insert(0, "**Status:** Ready")
         lines.append("")
         lines.append(
             "_Set `DOC_REDACTION_GRADIO_URL` in `config/pi_agent.env` if the doc_redaction "
-            "app is not at the URL above. Apply **Agent backend** to start Pi._"
+            "app is not at the URL above. Apply **Agent backend** to start the agent._"
         )
     else:
-        lines.insert(0, "**Status:** Pi agent connected")
+        lines.insert(0, f"**Status:** {agent_label} connected")
     lines.append("")
     lines.append(credential_status_markdown(provider=_active_pi_provider(client)))
     return "  \n".join(lines)
 
 
-def _pi_agent_is_streaming(client: PiRpcClient | None) -> bool:
+def _pi_agent_is_streaming(client: AgentRuntime | None) -> bool:
     """True while Pi RPC reports an active agent turn (authoritative vs Gradio state)."""
     rpc = _coerce_client(client)
     if rpc is None or not rpc.running:
@@ -1137,14 +1160,14 @@ _PI_IDLE_MAX_WAIT_S = float(os.environ.get("PI_IDLE_MAX_WAIT_S", "5"))
 
 
 def _pi_wait_until_idle(
-    client: PiRpcClient | None,
+    client: AgentRuntime | None,
     *,
     max_wait_s: float | None = None,
 ) -> bool:
     """
     Wait briefly for Pi ``isStreaming`` to clear after a run ends.
 
-    Skips while :attr:`PiRpcClient.prompt_stream_active` — the active
+    Skips while :attr:`AgentRuntime.prompt_stream_active` — the active
     ``prompt_events`` consumer owns stdout and ``get_state`` would steal lines.
     """
     rpc = _coerce_client(client)
@@ -1168,7 +1191,7 @@ def _pi_wait_until_idle(
         return True
 
 
-def _refresh_pi_client_model(client: PiRpcClient) -> None:
+def _refresh_pi_client_model(client: AgentRuntime) -> None:
     """Re-apply provider/model on the live RPC client (no session reset)."""
     provider = normalize_provider(get_default_provider())
     model = resolved_default_model(provider)
@@ -1178,26 +1201,35 @@ def _refresh_pi_client_model(client: PiRpcClient) -> None:
         pass
 
 
-def _build_pi_prompt_message(session_hash: str, message: str) -> str:
+def _build_pi_prompt_message(
+    session_hash: str,
+    message: str,
+    *,
+    history: list[dict[str, Any]] | None = None,
+    is_followup: bool = False,
+) -> str:
     """Prefix a user message the same way as **Start redaction task**."""
     from pi_workspace_skills import workspace_boundary_prefix
 
-    return (
-        workspace_boundary_prefix(session_hash)
-        + workspace_context_prefix(session_hash)
-        + message.strip()
+    prefix = workspace_boundary_prefix(session_hash) + workspace_context_prefix(
+        session_hash
     )
+    if is_followup and normalize_orchestrator() == "agentcore":
+        from agentcore_workspace_bridge import build_agentcore_followup_context
+
+        prefix += build_agentcore_followup_context(session_hash, history)
+    return prefix + message.strip()
 
 
 def _should_queue_agent_message(
-    client: PiRpcClient | None,
+    client: AgentRuntime | None,
     *,
     message: str,
 ) -> bool:
     """
     Route Send to steer only while this UI owns an active prompt stream.
 
-    Uses :attr:`PiRpcClient.prompt_stream_active` (authoritative) plus Pi
+    Uses :attr:`AgentRuntime.prompt_stream_active` (authoritative) plus Pi
     ``isStreaming``. After the agent is finished, Send goes through the normal
     chat path instead of queuing a follow-up event. Gradio ``agent_running`` and
     stale ``isStreaming`` alone are not reliable after llama.cpp runs.
@@ -1210,11 +1242,11 @@ def _should_queue_agent_message(
     return _pi_agent_is_streaming(client)
 
 
-def _session_summary(client: PiRpcClient) -> str:
+def _session_summary(client: AgentRuntime) -> str:
     try:
         state = client.get_state()
     except PiRpcError as exc:
-        return f"{_agent_status_markdown(client)}  \n\n_Could not read Pi state: {exc}_"
+        return f"{_agent_status_markdown(client)}  \n\n_Could not read session state: {exc}_"
     session_file = state.get("sessionFile") or "—"
     streaming = state.get("isStreaming")
     compacting = state.get("isCompacting")
@@ -1240,7 +1272,7 @@ def apply_backend(
     aws_access_key_id: str,
     aws_secret_access_key: str,
     aws_session_token: str,
-    client: PiRpcClient | None,
+    client: AgentRuntime | None,
     session_hash: str,
 ):
     normalized = normalize_provider(provider)
@@ -1273,7 +1305,7 @@ def apply_backend(
             gr.update(value=""),
         )
 
-    rpc = default_client(session_hash or None)
+    rpc = create_agent_runtime(session_hash or None)
     try:
         rpc.start()
         rpc.set_model(normalized, model)
@@ -1282,7 +1314,7 @@ def apply_backend(
             f"**Backend applied:** `{provider_label(normalized)}` / `{model}`  \n\n"
             f"{_session_summary(rpc)}"
         )
-    except (PiRpcError, FileNotFoundError, OSError) as exc:
+    except (PiRpcError, AgentRuntimeError, FileNotFoundError, OSError) as exc:
         rpc.close()
         rpc = None
         summary = (
@@ -1301,9 +1333,9 @@ def apply_backend(
 
 
 def _reset_pi_rpc_client(
-    client: PiRpcClient | None,
+    client: AgentRuntime | None,
     session_hash: str,
-) -> PiRpcClient | None:
+) -> AgentRuntime | None:
     """
     Stop and recreate the Pi RPC subprocess for a clean orchestration context.
 
@@ -1330,21 +1362,21 @@ def _reset_pi_rpc_client(
 
 
 def _reset_pi_on_page_load(
-    client: PiRpcClient | None,
+    client: AgentRuntime | None,
     session_hash: str,
-) -> PiRpcClient | None:
+) -> AgentRuntime | None:
     """Alias for :func:`_reset_pi_rpc_client` (page-load handler)."""
     return _reset_pi_rpc_client(client, session_hash)
 
 
 def _fresh_task_chat_outputs(
-    client: PiRpcClient | None,
+    client: AgentRuntime | None,
     session_hash: str,
     *,
     activity_line: str,
     session_note: str,
 ) -> tuple[Any, ...]:
-    """Clear chat UI and return ``chat_outputs`` values after a Pi session reset."""
+    """Clear chat UI and return ``chat_outputs`` values after a session reset."""
     rpc = _coerce_client(client)
     if rpc is not None and rpc.running:
         session_md = (
@@ -1385,23 +1417,23 @@ def _fresh_task_chat_outputs(
 
 
 def _initial_chat_outputs_on_page_load(
-    client: PiRpcClient | None,
+    client: AgentRuntime | None,
     session_hash: str,
 ) -> tuple[Any, ...]:
     """Clear chat UI and return ``chat_outputs`` values after a page load."""
     return _fresh_task_chat_outputs(
         client,
         session_hash,
-        activity_line="Page loaded — Pi agent session reset.",
+        activity_line="Page loaded — agent session reset.",
         session_note=(
-            "_Page reload — Pi agent process and chat history reset "
+            "_Page reload — agent process and chat history reset "
             "(workspace files kept)._"
         ),
     )
 
 
 def _init_session_ui(
-    client: PiRpcClient | None,
+    client: AgentRuntime | None,
     request: gr.Request,
 ) -> tuple[Any, ...]:
     session_hash, explorer, status, s3_prefix = init_session_workspace(request)
@@ -1418,7 +1450,7 @@ def _init_session_ui(
 
 def _chat_yield(
     history: list[dict[str, Any]],
-    client: PiRpcClient,
+    client: AgentRuntime,
     activity: list[str],
     thinking: str,
     tool_heading: str,
@@ -1446,7 +1478,7 @@ def _chat_yield(
         session_log = gr.skip()
 
     if refresh_pdf_preview or refresh_final_files:
-        path = latest_redacted_pdf_path(session_hash)
+        path = preview_pdf_path_for_gradio(session_hash)
         # Avoid pushing ``None`` into the PDF component (clears/breaks the viewer).
         pdf_preview = path if path else gr.skip()
     else:
@@ -1505,11 +1537,11 @@ def _steer_yield(
 def _steer_agent_message_sync(
     message: str,
     history: list[dict[str, Any]] | None,
-    client: PiRpcClient | None,
+    client: AgentRuntime | None,
     *,
     session_hash: str,
 ) -> tuple[Any, ...]:
-    """Steer Pi during an active run without starting a new prompt stream."""
+    """Steer agentduring an active run without starting a new prompt stream."""
     if not message or not message.strip():
         return _steer_yield()
 
@@ -1553,11 +1585,11 @@ def _steer_agent_message_sync(
 def _queue_agent_message(
     message: str,
     history: list[dict[str, Any]] | None,
-    client: PiRpcClient | None,
+    client: AgentRuntime | None,
     *,
     session_hash: str,
 ):
-    """Steer Pi during an active run without starting a new prompt stream."""
+    """Steer agent during an active run without starting a new prompt stream."""
     yield _steer_agent_message_sync(
         message,
         history,
@@ -1589,7 +1621,7 @@ def _followup_queued_skip_yield() -> tuple[Any, ...]:
 
 def _log_followup_diagnostics(
     message: str,
-    client: PiRpcClient | None,
+    client: AgentRuntime | None,
     *,
     session_hash: str,
 ) -> None:
@@ -1648,7 +1680,7 @@ def _log_followup_branch(
 def route_followup_message(
     message: str,
     history: list[dict[str, Any]] | None,
-    client: PiRpcClient | None,
+    client: AgentRuntime | None,
     session_hash: str,
     s3_output_folder: str,
     save_outputs_to_s3: bool,
@@ -1685,7 +1717,7 @@ def route_followup_message(
 def submit_followup_chat_queued(
     pending_message: str,
     history: list[dict[str, Any]] | None,
-    client: PiRpcClient | None,
+    client: AgentRuntime | None,
     session_hash: str,
     s3_output_folder: str,
     save_outputs_to_s3: bool,
@@ -1707,7 +1739,7 @@ def submit_followup_chat_queued(
 def _run_pi_chat(
     message: str,
     history: list[dict[str, Any]] | None,
-    client: PiRpcClient | None,
+    client: AgentRuntime | None,
     *,
     chat_user_message: str | None = None,
     session_hash: str = "",
@@ -1771,13 +1803,13 @@ def _run_pi_chat(
         history.append(
             {
                 "role": "assistant",
-                "content": f"**Pi LLM:** {llama_ready_err}",
+                "content": f"**LLM:** {llama_ready_err}",
             }
         )
         yield _chat_yield(
             history,
             client,
-            [f"**Pi LLM:** {llama_ready_err}"],
+            [f"**LLM:** {llama_ready_err}"],
             "",
             "",
             "",
@@ -1862,7 +1894,12 @@ def _run_pi_chat(
         sys.stderr.write(
             f"DEBUG-FOLLOWUP resume: session_hash={session_hash} message_len={len(message or '')}\n"
         )
-    prompt_to_send = _build_pi_prompt_message(session_hash, message)
+    prompt_to_send = _build_pi_prompt_message(
+        session_hash,
+        message,
+        history=history,
+        is_followup=not bool(document_name.strip()),
+    )
     if os.environ.get("PI_RPC_DEBUG"):
         try:
             preview = (message or "").strip()[:400]
@@ -1877,8 +1914,11 @@ def _run_pi_chat(
             f"DEBUG-FOLLOWUP send_prompt: session_hash={session_hash} preview={preview!r}\n"
         )
 
-    event_queue: queue.Queue[PiStreamEvent | None] = queue.Queue()
-    start_pi_prompt_event_worker(client, event_queue, prompt_to_send)
+    _stage_agentcore_workspace_upload(client, session_hash, document_name)
+    _stage_harness_input(client, session_hash, document_name)
+
+    event_queue: queue.Queue[AgentStreamEvent | None] = queue.Queue()
+    start_agent_prompt_event_worker(client, event_queue, prompt_to_send)
 
     quota_failures = 0
     finish_aborted = False
@@ -1938,7 +1978,8 @@ def _run_pi_chat(
                         agent_running=True,
                         session_info=session_info,
                         session_hash=session_hash,
-                        refresh_pdf_preview=event.kind == "turn_end",
+                        refresh_pdf_preview=event.kind
+                        in ("turn_end", "workspace_sync"),
                         refresh_final_files=event.kind == "done",
                     )
                 turn_error = last_assistant_turn_error(client.get_messages())
@@ -1949,8 +1990,8 @@ def _run_pi_chat(
 
             if turn_error and not is_rate_limit_error(turn_error):
                 err_text = _format_llama_turn_error(turn_error)
-                if not err_text.startswith("**Pi LLM:"):
-                    err_text = f"**Pi LLM error:** {turn_error}"
+                if not err_text.startswith("**LLM:"):
+                    err_text = f"**LLM error:** {turn_error}"
                 _set_last_assistant_content(history, err_text)
                 activity = _append_activity(activity, err_text)
                 history, completed_segments, streaming_text = (
@@ -2058,13 +2099,13 @@ def _run_pi_chat(
                 done_event_received = False
                 finish_aborted = False
                 event_queue = queue.Queue()
-                start_pi_prompt_event_worker(client, event_queue, prompt_to_send)
+                start_agent_prompt_event_worker(client, event_queue, prompt_to_send)
                 continue
 
             break
     except PiRpcError as exc:
-        _set_last_assistant_content(history, f"**Pi error:** {exc}")
-        activity = _append_activity(activity, f"**Pi error:** {exc}")
+        _set_last_assistant_content(history, f"**Error:** {exc}")
+        activity = _append_activity(activity, f"**Error:** {exc}")
         history, completed_segments, streaming_text = _append_agent_finish_notice(
             history,
             completed_segments,
@@ -2171,13 +2212,13 @@ def _run_pi_chat(
 def submit_followup_message(
     message: str,
     history: list[dict[str, Any]] | None,
-    client: PiRpcClient | None,
+    client: AgentRuntime | None,
     session_hash: str,
     s3_output_folder: str,
     save_outputs_to_s3: bool,
 ):
     """
-    Send a user message to Pi (programmatic / legacy single-handler API).
+    Send a user message to agent (programmatic / legacy single-handler API).
 
     The Gradio UI uses :func:`route_followup_message` (``queue=False``) plus
     :func:`submit_followup_chat_queued` (queued generator) instead.
@@ -2209,7 +2250,7 @@ def submit_followup_message(
 def chat_respond(
     message: str,
     history: list[dict[str, Any]] | None,
-    client: PiRpcClient | None,
+    client: AgentRuntime | None,
     agent_running: bool,
     session_hash: str,
     s3_output_folder: str,
@@ -2240,8 +2281,8 @@ def _redaction_page_count(upload_file: str | None, page_range: str) -> int:
 def _restart_pi_rpc_client(
     session_hash: str,
     *,
-    prior: PiRpcClient | None = None,
-) -> PiRpcClient:
+    prior: AgentRuntime | None = None,
+) -> AgentRuntime:
     """Stop and recreate the Pi RPC subprocess with the configured provider/model."""
     if prior is not None:
         try:
@@ -2250,22 +2291,117 @@ def _restart_pi_rpc_client(
             pass
     provider = normalize_provider(get_default_provider())
     model = resolved_default_model(provider)
-    rpc = default_client(session_hash or None)
+    rpc = create_agent_runtime(session_hash or None)
     rpc.start()
     rpc.set_model(provider, model)
     rpc.new_session()
     return rpc
 
 
-def _ensure_pi_client_for_redaction(
-    client: PiRpcClient | None,
+def _stage_agentcore_workspace_upload(
+    client: AgentRuntime,
     session_hash: str,
-) -> PiRpcClient:
+    document_name: str,
+) -> None:
+    """Upload session workspace files into the remote AgentCore workspace."""
+    if normalize_orchestrator() != "agentcore":
+        return
+    from agentcore_runtime import AgentCoreAgentRuntime
+    from agentcore_workspace_bridge import (
+        collect_session_files_for_agentcore_upload,
+        discover_session_document_name,
+    )
+
+    if not isinstance(client, AgentCoreAgentRuntime):
+        return
+
+    doc = (document_name or "").strip() or (
+        discover_session_document_name(session_hash) or ""
+    )
+    staged = collect_session_files_for_agentcore_upload(
+        session_hash,
+        document_name=doc or None,
+    )
+    max_bytes = int(os.environ.get("AGENTCORE_MAX_UPLOAD_BYTES", str(8 * 1024 * 1024)))
+
+    repo_root = Path(__file__).resolve().parents[2]
+    skill_names = (
+        "doc-redaction-app",
+        "doc-redaction-modifications",
+    )
+    for skill_name in skill_names:
+        skill_path = repo_root / "skills" / skill_name / "SKILL.md"
+        if not skill_path.is_file():
+            continue
+        payload = skill_path.read_bytes()
+        if len(payload) > max_bytes:
+            continue
+        staged.append(
+            {
+                "relative_path": f".pi/skills/{skill_name}/SKILL.md",
+                "content_base64": base64.b64encode(payload).decode("ascii"),
+            }
+        )
+
+    if not staged and doc:
+        root = session_workspace_dir(session_hash)
+        src = root / doc
+        if src.is_file():
+            size = src.stat().st_size
+            if size > max_bytes:
+                client.stage_ui_chat_notice(
+                    "AgentCore",
+                    f"Could not sync `{doc}` ({size:,} bytes exceeds {max_bytes:,} byte limit). "
+                    "Set AGENTCORE_MAX_UPLOAD_BYTES or use a smaller file.",
+                )
+            else:
+                staged.append(
+                    {
+                        "relative_path": doc,
+                        "content_base64": base64.b64encode(src.read_bytes()).decode(
+                            "ascii"
+                        ),
+                    }
+                )
+
+    if staged:
+        client.stage_workspace_files(staged)
+        if not document_name and doc:
+            client.stage_ui_chat_notice(
+                "AgentCore",
+                f"Synced {len(staged)} workspace file(s) for follow-up (document `{doc}`).",
+            )
+    client.set_sync_workspace_files(True)
+
+
+def _stage_harness_input(
+    client: AgentRuntime,
+    session_hash: str,
+    document_name: str,
+) -> None:
+    """Upload task PDF to S3 and prepend fetch instructions for AgentCore Harness."""
+    orch = normalize_orchestrator()
+    if orch not in {"agentcore-harness", "harness"} or not document_name:
+        return
+    from agentcore_harness_runtime import AgentCoreHarnessRuntime
+    from harness_input_bridge import build_harness_document_prompt_prefix
+
+    if not isinstance(client, AgentCoreHarnessRuntime):
+        return
+    prefix = build_harness_document_prompt_prefix(session_hash, document_name)
+    if prefix:
+        client.stage_prompt_prefix(prefix)
+
+
+def _ensure_pi_client_for_redaction(
+    client: AgentRuntime | None,
+    session_hash: str,
+) -> AgentRuntime:
     """
     Apply the same Pi reset as page load, then ensure a running client for the task.
     """
     client = _reset_pi_rpc_client(client, session_hash)
-    if isinstance(client, PiRpcClient) and client.running:
+    if isinstance(client, AgentRuntime) and client.running:
         return client
     return _ensure_client(client, session_hash)
 
@@ -2288,7 +2424,7 @@ def submit_redaction_task(
     encourage_vlm_faces: bool,
     encourage_vlm_signatures: bool,
     history: list[dict[str, Any]] | None,
-    client: PiRpcClient | None,
+    client: AgentRuntime | None,
     session_hash: str,
     s3_output_folder: str,
     save_outputs_to_s3: bool,
@@ -2389,10 +2525,10 @@ def submit_redaction_task(
     reset_outputs = _fresh_task_chat_outputs(
         client,
         session_hash,
-        activity_line="Starting redaction task — Pi agent session reset.",
+        activity_line="Starting redaction task — agent session reset.",
         session_note=(
             f"{workspace_status}\n\n"
-            "_Pi agent process and chat history reset before this redaction task "
+            "_agent process and chat history reset before this redaction task "
             "(workspace files kept)._"
         ),
     )
@@ -2400,7 +2536,7 @@ def submit_redaction_task(
 
     session_info = (
         f"{workspace_status}\n\n"
-        "_Pi agent process and chat history reset before this redaction task "
+        "_agent process and chat history reset before this redaction task "
         "(workspace files kept)._"
     )
     yield from _run_pi_chat(
@@ -2421,7 +2557,7 @@ def submit_redaction_task(
     )
 
 
-def abort_agent(client: PiRpcClient | None):
+def abort_agent(client: AgentRuntime | None):
     rpc = _coerce_client(client)
     if rpc is not None and rpc.running:
         try:
@@ -2437,7 +2573,7 @@ def abort_agent(client: PiRpcClient | None):
 
 def new_chat(
     _history,
-    client: PiRpcClient | None,
+    client: AgentRuntime | None,
     session_hash: str,
 ):
     if client is not None:
@@ -2445,10 +2581,10 @@ def new_chat(
             client.new_session()
         except PiRpcError:
             client.close()
-            client = default_client(session_hash or None)
+            client = create_agent_runtime(session_hash or None)
             client.start()
     else:
-        client = default_client(session_hash or None)
+        client = create_agent_runtime(session_hash or None)
         client.start()
     return _chat_yield(
         [],
@@ -2491,12 +2627,12 @@ def build_ui():
         )
     )
     backend_blurb = (
-        "Gemini powers the Pi agent on this Space. Paste your **Gemini API key** "
+        "Gemini powers the agent on this Space. Paste your **Gemini API key** "
         "(session-only, not stored on disk). Optionally override the **HF token** used "
         "to reach the private redaction backend."
         if IS_HF_SPACE
         else (
-            "Choose which LLM powers the Pi agent (chat and redaction orchestration). "
+            "Choose which LLM powers the agent (chat and redaction orchestration). "
             "Credentials from the UI apply **for this container session only**; "
             "defaults can be set via `config/pi_agent.env` or compose environment."
         )
@@ -2576,7 +2712,7 @@ def build_ui():
                         with settings_accordion:
                             gr.Markdown(
                                 "These values are injected into the task prompt under "
-                                "**Technical constraints** — they suggest defaults to Pi for "
+                                "**Technical constraints** — they suggest defaults to the agent for "
                                 "`/doc_redact`, not hard-coded app settings."
                             )
                             ocr_method = gr.Dropdown(
@@ -2811,12 +2947,12 @@ def build_ui():
 
         with gr.Accordion("Session log outputs", open=False):
             gr.Markdown(
-                "Pi writes a **JSONL** transcript for the active agent session under "
+                "If using Pi as the agent, it writes a **JSONL** transcript for the active agent session under "
                 "its `sessions/` directory. The file refreshes after each chat message "
                 "or redaction task completes."
             )
             session_log_download = gr.File(
-                label="Pi session log (JSONL)",
+                label="Session log (JSONL)",
                 file_count="single",
                 file_types=[".jsonl"],
                 interactive=False,
@@ -3000,7 +3136,7 @@ def build_ui():
             outputs=[workspace_output_explorer, workspace_output_explorer_download],
             api_visibility="undocumented",
         ).success(
-            fn=latest_redacted_pdf_path,
+            fn=preview_pdf_path_for_gradio,
             inputs=[session_hash_state],
             outputs=pdf_preview,
             api_visibility="undocumented",

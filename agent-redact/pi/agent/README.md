@@ -16,6 +16,31 @@ The Pi agent (chat + redaction orchestration) can use:
 
 This is separate from doc_redaction **Pass 2 VLM** (`{VLM_BASE_URL}` in redaction prompts), which still targets local llama-inference by default.
 
+## Orchestration backends (`AGENT_ORCHESTRATOR`)
+
+The Gradio UI can drive four orchestration backends (see [`agent_runtime.py`](../agent_runtime.py)):
+
+| Value | Runtime | Notes |
+|-------|---------|-------|
+| `pi` (default) | Pi coding agent (`pi --mode rpc`) | Full bash + skills; retained for HF Space and gradual migration |
+| `langgraph` | LangGraph ReAct agent | Curated Python tools only (no shell); local llama.cpp / Bedrock / Gemini |
+| `agentcore` | Bedrock AgentCore **Runtime** | LangGraph bundle via `AGENTCORE_RUNTIME_URL`; see **[AgentCore install guide](../../agentcore/README.md)** |
+| `agentcore-harness` (alias `harness`) | Bedrock AgentCore **Harness** | `InvokeHarness` via `AGENTCORE_HARNESS_ARN`; Pi-like partnership prompt; S3 file bridge |
+
+Set in `config/pi_agent.env` or compose:
+
+```bash
+AGENT_ORCHESTRATOR=langgraph
+# AGENT_ORCHESTRATOR=agentcore
+# AGENTCORE_RUNTIME_URL=https://...
+# AGENT_ORCHESTRATOR=agentcore-harness
+# AGENTCORE_HARNESS_ARN=arn:aws:bedrock-agentcore:...
+# AGENTCORE_HARNESS_S3_INPUT_PREFIX=s3://bucket/harness-inputs/
+# LANGGRAPH_REQUIRE_REVIEW_APPROVAL=true   # gate review_apply until approve_review_apply tool
+```
+
+Headless LangGraph spike: `python agent-redact/redaction_langgraph/headless_pass1.py --pdf path/to.pdf --direct-tool`
+
 ### Environment variables
 
 Copy [`config/pi_agent.env.example`](../../../config/pi_agent.env.example) to `config/pi_agent.env` (gitignored) or set on the host before `docker compose up`:

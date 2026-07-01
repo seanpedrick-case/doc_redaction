@@ -761,6 +761,25 @@ if ENABLE_PI_AGENT_ECS_SERVICE == "True":
     _validate_pi_alb_routing_for_enabled_pi()
 
 ###
+# AgentCore runtime (optional AWS managed orchestration for Gradio UI)
+###
+
+ENABLE_AGENTCORE_RUNTIME = get_or_create_env_var("ENABLE_AGENTCORE_RUNTIME", "False")
+AGENTCORE_RUNTIME_URL = get_or_create_env_var("AGENTCORE_RUNTIME_URL", "")
+AGENTCORE_API_KEY = get_or_create_env_var("AGENTCORE_API_KEY", "")
+AGENT_ORCHESTRATOR_DEFAULT = get_or_create_env_var("AGENT_ORCHESTRATOR", "pi")
+# Optional JSON policies for the AgentCore *runtime* task role (Bedrock invoke, secrets, logs).
+# Not used by CDK stack synthesis — attach manually when deploying the runtime via agentcore CLI.
+# Gradio ECS invoke permissions use policies/pi_agentcore_invoke_policy.json via POLICY_FILE_LOCATIONS.
+AGENTCORE_TASK_ROLE_POLICY_FILES = get_or_create_env_var(
+    "AGENTCORE_TASK_ROLE_POLICY_FILES",
+    '["policies/agentcore_task_policy.json"]',
+)
+AGENTCORE_TASK_ROLE_POLICY_FILES = parse_comma_separated_list(
+    AGENTCORE_TASK_ROLE_POLICY_FILES
+)
+
+###
 # WHOLE DOCUMENT API OPTIONS
 ###
 

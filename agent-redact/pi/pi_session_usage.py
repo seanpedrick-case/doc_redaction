@@ -7,7 +7,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from pi_rpc_client import PiRpcClient, PiRpcError
+from pi_rpc_client import PiRpcClient, PiRpcError  # noqa: E402
+
+try:
+    from agent_runtime import AgentRuntime
+except ImportError:
+    AgentRuntime = PiRpcClient  # type: ignore[misc,assignment]
 
 
 @dataclass(frozen=True)
@@ -125,7 +130,7 @@ def sum_usage_from_jsonl(path: Path) -> TokenUsageTotals:
     return total
 
 
-def resolve_session_token_usage(client: PiRpcClient | None) -> TokenUsageTotals:
+def resolve_session_token_usage(client: AgentRuntime | None) -> TokenUsageTotals:
     """
     Best-effort session usage from Pi RPC ``get_session_stats``, live messages, or JSONL.
     """
@@ -157,7 +162,7 @@ def resolve_session_token_usage(client: PiRpcClient | None) -> TokenUsageTotals:
 
 
 def usage_for_completed_turn(
-    client: PiRpcClient | None,
+    client: AgentRuntime | None,
     baseline: TokenUsageTotals | None,
 ) -> TokenUsageTotals:
     """

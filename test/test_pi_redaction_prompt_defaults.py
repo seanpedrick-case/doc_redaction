@@ -60,6 +60,34 @@ def test_build_redaction_prompt_omits_long_document_rules_for_small_pdfs(monkeyp
     assert "User redaction requirements" in prompt
 
 
+def test_tool_orchestrator_prompt_skips_skill_preread(monkeypatch):
+    monkeypatch.setenv("AGENT_ORCHESTRATOR", "agentcore")
+    module = _reload_redaction_prompt(monkeypatch)
+    prompt = module.build_redaction_prompt(
+        "short.pdf",
+        "- Redact names",
+        total_pages=5,
+        workspace_dir=Path("/workspace"),
+    )
+    assert "### Required skills" not in prompt
+    assert "Tool orchestrator workflow" in prompt
+    assert "Do not" in prompt and ".pi/skills/" in prompt
+    assert "list_workspace_files" in prompt
+
+
+def test_harness_prompt_keeps_skill_preread(monkeypatch):
+    monkeypatch.setenv("AGENT_ORCHESTRATOR", "agentcore-harness")
+    module = _reload_redaction_prompt(monkeypatch)
+    prompt = module.build_redaction_prompt(
+        "short.pdf",
+        "- Redact names",
+        total_pages=5,
+        workspace_dir=Path("/workspace"),
+    )
+    assert "### Required skills" in prompt
+    assert "Tool orchestrator workflow" not in prompt
+
+
 def test_aws_ecs_remote_guidance_forbids_workspace_output_grep(monkeypatch):
     monkeypatch.setenv("DOC_REDACTION_GRADIO_URL", "http://redaction:7860")
     module = _reload_redaction_prompt(monkeypatch, profile="aws-ecs")
