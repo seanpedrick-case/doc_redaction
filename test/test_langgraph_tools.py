@@ -10,12 +10,9 @@ _AGENT_REDACT = Path(__file__).resolve().parents[1] / "agent-redact"
 if str(_AGENT_REDACT) not in sys.path:
     sys.path.insert(0, str(_AGENT_REDACT))
 
-from types import ModuleType
+from pi_test_support import ensure_gradio_importable
 
-if "gradio" not in sys.modules:
-    _gr = ModuleType("gradio")
-    _gr.FileExplorer = lambda **kwargs: kwargs  # type: ignore[misc]
-    sys.modules["gradio"] = _gr
+ensure_gradio_importable()
 
 from redaction_langgraph.tools import (  # noqa: E402
     _discover_ocr_words_csv,
