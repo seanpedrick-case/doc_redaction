@@ -3,8 +3,10 @@
 Interactive CDK installer for doc_redaction.
 
 Walks through demo vs production deployment profiles, writes config/cdk_config.env
-and cdk.json, optionally runs cdk deploy, post-deploy Cognito callback fixups (API,
-no second deploy), and post_cdk_build_quickstart.py.
+and cdk.json, optionally runs cdk deploy, post-deploy Cognito callback fixups (API),
+and post_cdk_build_quickstart.py. When CloudFront is enabled, a one-off refresh deploy
+of the regional stack runs after the domain is discovered so the response-headers policy
+(CSP/CORS) and app config use the real *.cloudfront.net domain instead of the placeholder.
 
 Usage examples::
 
@@ -19,17 +21,20 @@ Usage examples::
         --cert-arn arn:aws:acm:eu-west-2:123:certificate/abc \\
         --domain redaction.example.com --yes
 
-    # Redeploy using existing config, skip quickstart
+    # Initial deploy using existing config, skip quickstart
+    # (cdk_install performs initial deploys only; if a stack already exists it
+    # aborts — remove the stack yourself first, or run post_cdk_build_quickstart.py
+    # for post-deploy tasks that don't need a stack change)
     python cdk_install.py --deploy-only --skip-quickstart
 
-    # Remove existing stacks before a clean install (non-interactive)
+    # Remove existing stacks first, then do a clean initial install (non-interactive)
     python cdk_install.py --profile headless --vpc-name my-vpc \\
         --force-delete-stacks --yes
 
-    # Demo with agentic redaction mode (Express; AgentCore orchestrator is the demo default)
-    python cdk_install.py --profile demo --enable-agentic --yes --config-only
+    # Demo with agentic redaction (AgentCore CDK two-phase deploy is automatic)
+    python cdk_install.py --profile demo --enable-agentic --yes
 
-    # Demo with AgentCore URL (deploy runtime first — see agent-redact/agentcore/README.md)
+    # Demo with AgentCore URL (manual CLI deploy — see agent-redact/agentcore/README.md)
     python cdk_install.py --profile demo --enable-agentic --agent-orchestrator agentcore \\
         --agentcore-runtime-url https://your-runtime.example --yes --config-only
 
@@ -78,8 +83,14 @@ DEFAULT_POLICY_FILE_LOCATIONS = (
 )
 PI_AGENTCORE_INVOKE_POLICY_FILE = "policies/pi_agentcore_invoke_policy.json"
 
-AGENTCORE_DEPLOY_CHECKLIST = """
-AgentCore two-phase demo deploy:
+AGENTCORE_CDK_DEPLOY_SUMMARY = (
+    "AgentCore CDK deploy: CodeBuild pushes the runtime image to ECR (phase 1), "
+    "then the installer creates the Bedrock runtime and sets AGENTCORE_RUNTIME_URL "
+    "automatically (phase 2)."
+)
+
+AGENTCORE_MANUAL_DEPLOY_CHECKLIST = """
+AgentCore manual CLI deploy:
   1. Package runtime: python agent-redact/agentcore/package_runtime.py \\
        --target <AgentCoreProject>/app/RedactionAgent
      (Windows/OneDrive: set UV_LINK_MODE=copy before agentcore deploy)
@@ -88,6 +99,11 @@ AgentCore two-phase demo deploy:
   4. Re-run cdk_install.py --config-only with --agentcore-runtime-url <URL>
      or update config/pi_agent.env + upload to S3, then restart the agentic Express service
 """.strip()
+
+# Kept for backwards compatibility (tests / docs may reference the name).
+AGENTCORE_DEPLOY_CHECKLIST = (
+    f"{AGENTCORE_CDK_DEPLOY_SUMMARY}\n\n{AGENTCORE_MANUAL_DEPLOY_CHECKLIST}"
+)
 CDK_JSON_PATH = CDK_DIR / "cdk.json"
 CDK_JSON_EXAMPLE = CDK_DIR / "cdk.json.example"
 QUICKSTART_SCRIPT = CDK_DIR / "post_cdk_build_quickstart.py"
@@ -101,7 +117,9 @@ DEMO_PRESET: Dict[str, str] = {
     "USE_ECS_EXPRESS_MODE": "True",
     "ECS_EXPRESS_USE_PUBLIC_SUBNETS": "True",
     "ENABLE_ECS_VPC_INTERFACE_ENDPOINTS": "True",
-    "USE_CLOUDFRONT": "False",
+    "USE_CLOUDFRONT": "True",
+    "CLOUDFRONT_AUTH_MODE": "magic-link",
+    "ENABLE_CLOUDFRONT_WAF": "False",
     "RUN_USEAST_STACK": "False",
     "ENABLE_RESOURCE_DELETE_PROTECTION": "False",
     "ENABLE_APPREGISTRY": "True",
@@ -112,7 +130,9 @@ DEMO_PRESET: Dict[str, str] = {
 PRODUCTION_PRESET: Dict[str, str] = {
     "USE_ECS_EXPRESS_MODE": "False",
     "USE_CLOUDFRONT": "True",
-    "RUN_USEAST_STACK": "True",
+    "CLOUDFRONT_AUTH_MODE": "cognito",
+    "ENABLE_CLOUDFRONT_WAF": "False",
+    "RUN_USEAST_STACK": "False",
     "ENABLE_RESOURCE_DELETE_PROTECTION": "True",
     "ENABLE_APPREGISTRY": "True",
 }
@@ -1299,6 +1319,8 @@ class InstallAnswers:
     pi_default_provider: str = "amazon-bedrock"
     agent_orchestrator: str = "pi"
     enable_agentcore_runtime: bool = False
+    enable_agentcore_cdk_deploy: bool = False
+    enable_agentcore_cdk_runtime: bool = False
     agentcore_runtime_url: str = ""
     agentcore_api_key: str = ""
     allow_empty_agentcore_url: bool = False
@@ -1383,11 +1405,11 @@ def derive_ecs_resource_names(cdk_prefix: str) -> Dict[str, str]:
         "CLUSTER_NAME": f"{prefix}Cluster",
         "ECS_SERVICE_NAME": f"{prefix}ECSService",
         "ECS_EXPRESS_SERVICE_NAME": f"{prefix}ECSService",
-        "ECS_PI_EXPRESS_SERVICE_NAME": f"{prefix}PiExpressService",
-        "ECS_PI_SERVICE_NAME": f"{prefix}PiAgentService",
+        "ECS_PI_EXPRESS_SERVICE_NAME": f"{prefix}AgentExpressService",
+        "ECS_PI_SERVICE_NAME": f"{prefix}AgentService",
         "COGNITO_USER_POOL_CLIENT_SECRET_NAME": f"{prefix}ParamCognitoSecret",
         "CODEBUILD_PROJECT_NAME": f"{prefix}CodeBuildProject",
-        "CODEBUILD_PI_PROJECT_NAME": f"{prefix}CodeBuildPiProject",
+        "CODEBUILD_PI_PROJECT_NAME": f"{prefix}CodeBuildAgentProject",
     }
 
 
@@ -1835,6 +1857,13 @@ def normalize_agent_orchestrator(raw: str) -> str:
     return "pi"
 
 
+def normalize_agentcore_runtime_url(raw: str) -> str:
+    """Base runtime URL only — strip trailing slash and accidental /invocations suffix."""
+    from cdk_functions import normalize_agentcore_runtime_url as _normalize
+
+    return _normalize(raw)
+
+
 def default_agent_orchestrator_for_answers(answers: "InstallAnswers") -> str:
     """Demo Express agent mode defaults to AgentCore; production/legacy stays on Pi."""
     if answers.profile == "demo" and answers.enable_agentic_express:
@@ -1852,6 +1881,8 @@ def apply_demo_agentcore_orchestrator_defaults(
         return
     answers.agent_orchestrator = "agentcore"
     answers.enable_agentcore_runtime = True
+    if not getattr(args, "agentcore_runtime_url", None):
+        answers.enable_agentcore_cdk_deploy = True
 
 
 def merge_policy_file_locations(
@@ -1890,11 +1921,16 @@ def validate_install_answers(answers: "InstallAnswers") -> List[str]:
         )
     if answers.agentic_enabled and orchestrator == "agentcore":
         if not (answers.agentcore_runtime_url or "").strip():
-            if not answers.allow_empty_agentcore_url:
+            if not answers.allow_empty_agentcore_url and not (
+                answers.enable_agentcore_cdk_deploy
+                or answers.enable_agentcore_cdk_runtime
+            ):
                 errors.append(
                     "AGENTCORE_RUNTIME_URL is required when AGENT_ORCHESTRATOR=agentcore. "
-                    "Deploy the runtime first (see agent-redact/agentcore/README.md) or pass "
-                    "--agentcore-runtime-url. Non-interactive installs must include the URL."
+                    "Deploy the runtime first (see agent-redact/agentcore/README.md), pass "
+                    "--agentcore-runtime-url, or use --enable-agentcore-cdk-deploy for the "
+                    "CDK-native ECR path. Non-interactive installs must include the URL or "
+                    "enable the CDK deploy flags."
                 )
     return errors
 
@@ -1998,9 +2034,18 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
             }
         )
         if answers.agentcore_runtime_url.strip():
-            values["AGENTCORE_RUNTIME_URL"] = answers.agentcore_runtime_url.strip()
+            values["AGENTCORE_RUNTIME_URL"] = normalize_agentcore_runtime_url(
+                answers.agentcore_runtime_url
+            )
         if answers.agentcore_api_key.strip():
             values["AGENTCORE_API_KEY"] = answers.agentcore_api_key.strip()
+        if answers.enable_agentcore_cdk_deploy:
+            values["AGENTCORE_CDK_DEPLOY"] = "True"
+            values["ENABLE_AGENTCORE_RUNTIME"] = "True"
+        if answers.enable_agentcore_cdk_runtime:
+            values["ENABLE_AGENTCORE_CDK_RUNTIME"] = "True"
+            values["AGENTCORE_CDK_DEPLOY"] = "True"
+            values["ENABLE_AGENTCORE_RUNTIME"] = "True"
         existing_policy_raw = ""
         if ENV_PATH.is_file():
             existing_policy_raw = (
@@ -2195,9 +2240,11 @@ def validate_env_values(
     agentcore_enabled = values.get("ENABLE_AGENTCORE_RUNTIME") == "True"
     if (agentic_ecs or agentic_express) and orchestrator == "agentcore":
         if not (values.get("AGENTCORE_RUNTIME_URL") or "").strip():
-            if not allow_empty_agentcore_url:
+            cdk_deploy = values.get("AGENTCORE_CDK_DEPLOY") == "True"
+            if not allow_empty_agentcore_url and not cdk_deploy:
                 errors.append(
-                    "AGENTCORE_RUNTIME_URL is required when AGENT_ORCHESTRATOR=agentcore."
+                    "AGENTCORE_RUNTIME_URL is required when AGENT_ORCHESTRATOR=agentcore "
+                    "unless AGENTCORE_CDK_DEPLOY=True (CDK-native ECR/runtime path)."
                 )
     if agentcore_enabled and orchestrator != "agentcore":
         errors.append(
@@ -2329,7 +2376,7 @@ def resolve_doc_redaction_gradio_url(answers: InstallAnswers) -> str:
 
 
 def build_pi_agent_env_values(answers: InstallAnswers) -> Dict[str, str]:
-    """Runtime settings for the Pi agent Gradio app (uploaded to S3 as pi_agent.env)."""
+    """Runtime settings for the Agent Gradio app (uploaded to S3 as pi_agent.env)."""
     values = {
         "PI_DEPLOYMENT_PROFILE": "aws-ecs",
         "PI_DEFAULT_PROVIDER": answers.pi_default_provider,
@@ -2345,7 +2392,9 @@ def build_pi_agent_env_values(answers: InstallAnswers) -> Dict[str, str]:
     orchestrator = normalize_agent_orchestrator(answers.agent_orchestrator)
     values["AGENT_ORCHESTRATOR"] = orchestrator
     if answers.agentcore_runtime_url.strip():
-        values["AGENTCORE_RUNTIME_URL"] = answers.agentcore_runtime_url.strip()
+        values["AGENTCORE_RUNTIME_URL"] = normalize_agentcore_runtime_url(
+            answers.agentcore_runtime_url
+        )
     if answers.agentcore_api_key.strip():
         values["AGENTCORE_API_KEY"] = answers.agentcore_api_key.strip()
     if answers.enable_agentic_express:
@@ -2490,16 +2539,11 @@ class ExistingStack:
 def _should_check_cloudfront_stack(
     config_values: Optional[Dict[str, str]] = None,
 ) -> bool:
-    """Skip us-east-1 CloudFront stack lookup when config disables that path."""
+    """Skip legacy us-east-1 CloudFront stack lookup (CloudFront is in RedactionStack)."""
     if not config_values:
-        return True
-    use_cloudfront = config_values.get("USE_CLOUDFRONT")
+        return False
     run_useast = config_values.get("RUN_USEAST_STACK")
-    if use_cloudfront is not None and use_cloudfront != "True":
-        return False
-    if run_useast is not None and run_useast != "True":
-        return False
-    return True
+    return run_useast == "True"
 
 
 def _stack_check_skippable_error(exc: Exception) -> bool:
@@ -2743,36 +2787,25 @@ def handle_existing_stacks_at_start(
             line += " [termination protection ON]"
         print(line)
 
+    # cdk_install performs INITIAL deploys only. It never updates an existing
+    # stack in place (repeated in-place updates caused imported-resource drift,
+    # e.g. deleted CodeBuild roles/projects) and never interactively offers to
+    # delete a stack. If the caller explicitly passes --force-delete-stacks we
+    # honour it; otherwise abort with guidance so the operator can tear the
+    # stack(s) down themselves and re-run for a clean initial deploy.
     if args.force_delete_stacks:
-        should_delete = True
-    elif args.yes:
-        print(
-            "\nStacks already exist in this account/region. "
-            "Pass --force-delete-stacks to remove them before deploy, "
-            "or omit it to update in place."
-        )
-        return
-    else:
-        should_delete = ask_yes_no(
-            "Force-delete these stacks before continuing? "
-            "(disables termination protection and deletes all stack resources)",
-            default=False,
-        )
-
-    if not should_delete:
-        print("Keeping existing stacks (deploy will update them in place).\n")
+        force_delete_cloudformation_stacks(existing)
+        print("Existing stacks deleted.\n")
         return
 
-    if not args.force_delete_stacks and not args.yes:
-        if not ask_yes_no(
-            "This permanently deletes AWS resources in these stacks. Proceed?",
-            default=False,
-        ):
-            print("Stack deletion cancelled.\n")
-            return
-
-    force_delete_cloudformation_stacks(existing)
-    print("Existing stacks deleted.\n")
+    raise SystemExit(
+        "\ncdk_install only performs initial deploys; it will not update the "
+        "existing stack(s) above in place. To deploy cleanly, remove the "
+        "stack(s) yourself (CloudFormation console or your own tooling) and "
+        "re-run cdk_install.py. For post-deploy tasks that don't require a "
+        "stack change (CodeBuild images, ECS scaling, Cognito callback and "
+        "Service Connect fixups), run post_cdk_build_quickstart.py instead."
+    )
 
 
 def fetch_stack_output(
@@ -2868,7 +2901,7 @@ def apply_post_deploy_fixup(values: Dict[str, str], assume_yes: bool) -> bool:
 
     elif cloudfront:
         cf_domain = fetch_stack_output(
-            CLOUDFRONT_STACK, "CloudFrontDistributionURL", CLOUDFRONT_STACK_REGION
+            REGIONAL_STACK, "CloudFrontDistributionURL", region
         )
         if not cf_domain:
             print(
@@ -2953,6 +2986,88 @@ def run_quickstart(python_exe: Path) -> None:
     subprocess.run(cmd, cwd=str(CDK_DIR), env=_deploy_env(), check=True)
 
 
+def maybe_complete_agentcore_cdk_deploy(
+    values: Dict[str, str],
+    args: argparse.Namespace,
+    *,
+    assume_yes: bool,
+) -> None:
+    """Phase 2: create CfnRuntime after the AgentCore ECR image exists, then sync URL."""
+    if values.get("AGENTCORE_CDK_DEPLOY") != "True":
+        return
+    if values.get("ENABLE_AGENTCORE_CDK_RUNTIME") == "True":
+        try:
+            from cdk_post_deploy import sync_agentcore_runtime_url_from_stack
+
+            sync_agentcore_runtime_url_from_stack(stack_name=REGIONAL_STACK)
+        except ImportError:
+            pass
+        return
+
+    print("\n--- AgentCore CDK phase 2 (create runtime from ECR image) ---")
+    try:
+        from cdk_config import (
+            CODEBUILD_AGENTCORE_PROJECT_NAME,
+            ECR_AGENTCORE_REPO_NAME,
+        )
+        from cdk_post_deploy import wait_for_agentcore_ecr_image
+    except ImportError as exc:
+        print(f"Skipping AgentCore phase 2: {exc}")
+        return
+
+    build_id = (values.get("AGENTCORE_LAST_CODEBUILD_ID") or "").strip() or None
+    image_ready = wait_for_agentcore_ecr_image(
+        repository_name=ECR_AGENTCORE_REPO_NAME,
+        codebuild_project=CODEBUILD_AGENTCORE_PROJECT_NAME,
+        build_id=build_id,
+    )
+    if not image_ready:
+        print(
+            "\nAgentCore ECR image is not ready yet. When CodeBuild finishes, re-run "
+            "cdk_install.py (no extra flags needed) — phase 2 will run automatically."
+        )
+        return
+
+    if not assume_yes and values.get("USE_ECS_EXPRESS_MODE") != "True":
+        proceed = ask_yes_no(
+            "Create the Bedrock AgentCore Runtime from the ECR image now?",
+            default=True,
+        )
+        if not proceed:
+            print(
+                "Skipped AgentCore runtime creation. Re-run cdk_install.py when ready "
+                "(phase 2 will run automatically once the ECR image exists)."
+            )
+            return
+
+    patch_env_file(
+        ENV_PATH,
+        {
+            "ENABLE_AGENTCORE_CDK_RUNTIME": "True",
+            "AGENTCORE_CDK_DEPLOY": "True",
+            "ENABLE_AGENTCORE_RUNTIME": "True",
+        },
+    )
+    if args.config_only:
+        print(
+            "Config updated for AgentCore phase 2. Re-run without --config-only to deploy "
+            f"{REGIONAL_STACK}."
+        )
+        return
+
+    print("AgentCore ECR image ready — creating Bedrock AgentCore Runtime...")
+    run_cdk_command(
+        ["deploy", REGIONAL_STACK, "--require-approval", "broadening"],
+        check=True,
+    )
+    try:
+        from cdk_post_deploy import sync_agentcore_runtime_url_from_stack
+
+        sync_agentcore_runtime_url_from_stack(stack_name=REGIONAL_STACK)
+    except ImportError:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Agentic redaction configuration
 # ---------------------------------------------------------------------------
@@ -2968,8 +3083,21 @@ def apply_agent_orchestrator_cli_flags(
     if getattr(args, "enable_agentcore_runtime", False):
         answers.enable_agentcore_runtime = True
         answers.agent_orchestrator = "agentcore"
+    if getattr(args, "enable_agentcore_cdk_deploy", False):
+        answers.enable_agentcore_cdk_deploy = True
+        answers.enable_agentcore_runtime = True
+        answers.agent_orchestrator = "agentcore"
+        answers.allow_empty_agentcore_url = True
+    if getattr(args, "enable_agentcore_cdk_runtime", False):
+        answers.enable_agentcore_cdk_runtime = True
+        answers.enable_agentcore_cdk_deploy = True
+        answers.enable_agentcore_runtime = True
+        answers.agent_orchestrator = "agentcore"
+        answers.allow_empty_agentcore_url = True
     if getattr(args, "agentcore_runtime_url", None):
-        answers.agentcore_runtime_url = str(args.agentcore_runtime_url).strip()
+        answers.agentcore_runtime_url = normalize_agentcore_runtime_url(
+            str(args.agentcore_runtime_url)
+        )
     if getattr(args, "agentcore_api_key", None):
         answers.agentcore_api_key = str(args.agentcore_api_key).strip()
 
@@ -2998,19 +3126,32 @@ def configure_agent_orchestrator_options(
         ):
             answers.agent_orchestrator = "agentcore"
             answers.enable_agentcore_runtime = True
+        if (
+            answers.agent_orchestrator == "agentcore"
+            and not (answers.agentcore_runtime_url or "").strip()
+            and (
+                answers.enable_agentcore_cdk_deploy
+                or (
+                    answers.profile == "demo"
+                    and not getattr(args, "agentcore_runtime_url", None)
+                )
+            )
+        ):
+            answers.enable_agentcore_cdk_deploy = True
+            answers.allow_empty_agentcore_url = True
         return
 
     if args.agent_orchestrator:
         return
 
-    demo_default_idx = 2 if answers.profile == "demo" else 0
+    demo_default_idx = 2 if answers.profile == "demo" else 2
     print("\n--- Agent orchestration backend ---")
     idx = ask_choice(
-        "Which backend should power the agent Gradio UI?",
+        "Which backend should power the agentic Gradio UI?",
         [
-            "Pi coding agent (bash + skills; HF Space compatible)",
-            "LangGraph (curated Python tools only; no shell)",
-            "Bedrock AgentCore (demo default — Gradio proxies to AgentCore runtime URL)",
+            "Pi coding agent (bash + skills; most open with tools and file access in container)",
+            "LangGraph (curated Python tools only; no shell; less agent freedom but more secure)",
+            "Bedrock AgentCore (demo default — Gradio proxies to AgentCore runtime URL; most secure)",
         ],
         default_index=demo_default_idx,
     )
@@ -3018,27 +3159,58 @@ def configure_agent_orchestrator_options(
 
     if answers.agent_orchestrator == "agentcore":
         answers.enable_agentcore_runtime = True
-        answers.agentcore_runtime_url = ask(
-            "AgentCore runtime URL (base URL from agentcore status; no trailing slash)",
-            answers.agentcore_runtime_url,
-        ).strip()
-        if not answers.agentcore_runtime_url:
-            print(
-                "\nNo runtime URL yet — CDK can proceed, but the agent UI will not work "
-                "until you deploy the runtime and set AGENTCORE_RUNTIME_URL."
+        use_cdk_native = False
+        if getattr(args, "enable_agentcore_cdk_deploy", False) or getattr(
+            args, "enable_agentcore_cdk_runtime", False
+        ):
+            use_cdk_native = True
+        elif not getattr(args, "agentcore_runtime_url", None):
+            if answers.profile == "demo":
+                use_cdk_native = True
+                print("\n--- AgentCore runtime (demo) ---")
+                print(AGENTCORE_CDK_DEPLOY_SUMMARY)
+            else:
+                print("\n--- AgentCore runtime deployment ---")
+                use_cdk_native = ask_yes_no(
+                    "Deploy the AgentCore runtime via CDK (CodeBuild -> ECR -> Runtime)? "
+                    "(recommended; no local agentcore CLI required)",
+                    default=False,
+                )
+        if use_cdk_native:
+            answers.enable_agentcore_cdk_deploy = True
+            answers.allow_empty_agentcore_url = True
+            if getattr(args, "enable_agentcore_cdk_runtime", False):
+                answers.enable_agentcore_cdk_runtime = True
+        else:
+            answers.agentcore_runtime_url = normalize_agentcore_runtime_url(
+                ask(
+                    "AgentCore runtime URL (from `agentcore status` invocationUrl — "
+                    "base URL only; do not include /invocations or a trailing slash)",
+                    answers.agentcore_runtime_url,
+                )
             )
-            print(AGENTCORE_DEPLOY_CHECKLIST)
-            if ask_yes_no(
-                "Continue without AGENTCORE_RUNTIME_URL for now?",
-                default=answers.profile == "demo",
-            ):
-                answers.allow_empty_agentcore_url = True
+            if not answers.agentcore_runtime_url:
+                print(
+                    "\nNo runtime URL yet — CDK can proceed, but the agent UI will not work "
+                    "until you deploy the runtime and set AGENTCORE_RUNTIME_URL."
+                )
+                print(AGENTCORE_MANUAL_DEPLOY_CHECKLIST)
+                if ask_yes_no(
+                    "Continue without AGENTCORE_RUNTIME_URL for now?",
+                    default=answers.profile == "demo",
+                ):
+                    answers.allow_empty_agentcore_url = True
+        print(
+            "On AWS ECS the task role uses IAM SigV4 for AgentCore — "
+            "AGENTCORE_API_KEY is usually not needed unless the runtime uses "
+            "CUSTOM_JWT bearer auth."
+        )
         if ask_yes_no(
-            "Set AGENTCORE_API_KEY for the Gradio UI → AgentCore client?",
+            "Set AGENTCORE_API_KEY bearer token in config?",
             default=bool(answers.agentcore_api_key),
         ):
             answers.agentcore_api_key = ask(
-                "AgentCore API key (optional bearer token)",
+                "AgentCore API key (paste token; not auto-generated — leave blank to skip)",
                 answers.agentcore_api_key,
             ).strip()
     elif answers.agent_orchestrator == "langgraph":
@@ -3304,14 +3476,7 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
         answers.custom_overrides["USE_CLOUDFRONT"] = (
             "True" if ask_yes_no("Use CloudFront?", True) else "False"
         )
-        answers.custom_overrides["RUN_USEAST_STACK"] = (
-            "True"
-            if answers.custom_overrides.get("USE_CLOUDFRONT") == "True"
-            and ask_yes_no(
-                "Deploy us-east-1 CloudFront stack (RUN_USEAST_STACK)?", True
-            )
-            else "False"
-        )
+        answers.custom_overrides["RUN_USEAST_STACK"] = "False"
         answers.custom_overrides["ENABLE_RESOURCE_DELETE_PROTECTION"] = (
             "True" if ask_yes_no("Enable delete protection?", True) else "False"
         )
@@ -3331,6 +3496,30 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
                 "no always-on web UI)?",
                 default=False,
             )
+
+    # Delete/termination protection. The production preset defaults this ON, but
+    # let the user opt out interactively (custom already prompts above). This
+    # single flag drives stack termination protection and every resource-level
+    # deletion protection / RETAIN removal policy via
+    # ENABLE_RESOURCE_DELETE_PROTECTION.
+    if interactive and answers.profile == "production":
+        answers.custom_overrides["ENABLE_RESOURCE_DELETE_PROTECTION"] = (
+            "True"
+            if ask_yes_no(
+                "Enable delete/termination protection for the stack and its "
+                "resources (recommended for production)?",
+                default=True,
+            )
+            else "False"
+        )
+
+    # A --delete-protection flag overrides the profile default (and any prompt),
+    # so non-interactive runs can select the behaviour explicitly.
+    delete_protection_cli = getattr(args, "delete_protection", None)
+    if delete_protection_cli in ("on", "off"):
+        answers.custom_overrides["ENABLE_RESOURCE_DELETE_PROTECTION"] = (
+            "True" if delete_protection_cli == "on" else "False"
+        )
 
     headless_err = headless_profile_error(answers)
     if headless_err:
@@ -3599,8 +3788,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--force-delete-stacks",
         action="store_true",
-        help="If doc_redaction stacks already exist, delete them before continuing "
-        "(disables termination protection; implies consent in non-interactive mode)",
+        help="Explicit opt-in: if doc_redaction stacks already exist, delete them "
+        "before a clean initial deploy (disables termination protection). Without "
+        "this flag cdk_install aborts when a stack exists (it never updates in place).",
     )
     p.add_argument(
         "--skip-cdk-json", action="store_true", help="Do not update cdk.json"
@@ -3653,6 +3843,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--cert-arn", help="ACM certificate ARN (production)")
     p.add_argument("--domain", help="SSL certificate domain (production)")
+    p.add_argument(
+        "--delete-protection",
+        choices=("on", "off"),
+        help="Override stack termination + resource deletion protection "
+        "(default: on for production, off for demo/headless). Applies to all "
+        "resources governed by ENABLE_RESOURCE_DELETE_PROTECTION.",
+    )
     agentic = p.add_argument_group("Agentic redaction (second Gradio app)")
     agentic.add_argument(
         "--enable-agentic",
@@ -3731,6 +3928,23 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Agent orchestration backend (demo+--enable-agentic default: agentcore)",
     )
     agentic.add_argument(
+        "--enable-agentcore-cdk-deploy",
+        action="store_true",
+        help=(
+            "CDK-native AgentCore phase 1 only (ARM64 CodeBuild + ECR). "
+            "Demo + --enable-agentic sets this automatically; phase 2 runs after "
+            "the image build without this flag."
+        ),
+    )
+    agentic.add_argument(
+        "--enable-agentcore-cdk-runtime",
+        action="store_true",
+        help=(
+            "Force AgentCore phase 2 immediately (Bedrock runtime from ECR). "
+            "Usually unnecessary — re-run cdk_install.py after the image build instead."
+        ),
+    )
+    agentic.add_argument(
         "--enable-agentcore-runtime",
         action="store_true",
         help="Use Bedrock AgentCore (sets AGENT_ORCHESTRATOR=agentcore)",
@@ -3738,12 +3952,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     agentic.add_argument(
         "--agentcore-runtime-url",
         default="",
-        help="AgentCore runtime base URL for Gradio SSE client",
+        help=(
+            "AgentCore runtime base URL from `agentcore status` invocationUrl "
+            "(no /invocations suffix, no trailing slash)"
+        ),
     )
     agentic.add_argument(
         "--agentcore-api-key",
         default="",
-        help="Optional bearer token for AgentCore runtime (written to pi_agent.env)",
+        help=(
+            "Optional bearer token for CUSTOM_JWT AgentCore auth (not auto-generated; "
+            "usually omitted on AWS ECS where IAM SigV4 is used)"
+        ),
     )
     p.add_argument(
         "--skip-app-config-env",
@@ -3907,7 +4127,38 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     run_cdk_command(["deploy", "--all", "--require-approval", "broadening"], check=True)
 
     values = read_env_file(ENV_PATH)
+    cloudfront_enabled = values.get("USE_CLOUDFRONT") == "True"
+    cf_domain_before = (values.get("CLOUDFRONT_DOMAIN") or "").strip().lower()
     apply_post_deploy_fixup(values, assume_yes=args.yes)
+
+    # The initial deploy bakes the placeholder domain into the CloudFront
+    # response-headers policy (CSP/CORS) because the real *.cloudfront.net domain
+    # is only known after the distribution exists (a self-reference would be a
+    # circular dependency). The boto3 fixup above already wrote the real domain
+    # into the env file and updated the Cognito callback URLs (no stack change).
+    #
+    # cdk_install intentionally does NOT re-deploy the stack a second time to
+    # push the resolved domain into the response-headers policy: in-place stack
+    # updates have repeatedly caused imported-resource drift, so this installer
+    # performs a single initial deploy only. If the CSP/response-headers policy
+    # must reflect the real domain, delete and redeploy the stack fresh (with
+    # CLOUDFRONT_DOMAIN already set) rather than updating in place.
+    values = read_env_file(ENV_PATH)
+    cf_domain_after = (values.get("CLOUDFRONT_DOMAIN") or "").strip().lower()
+    cloudfront_domain_resolved = (
+        cloudfront_enabled
+        and bool(cf_domain_after)
+        and "placeholder" not in cf_domain_after
+        and cf_domain_after != cf_domain_before
+    )
+    if cloudfront_domain_resolved:
+        print(
+            f"CloudFront domain resolved to {cf_domain_after}. Cognito callback "
+            "URLs were updated via the post-deploy fixup. The stack's "
+            "response-headers policy (CSP/CORS) keeps the value baked in at the "
+            "initial deploy — cdk_install does not update the stack in place. "
+            "Redeploy the stack fresh if the CSP/CORS domain must change."
+        )
 
     run_qs = False
     if args.skip_quickstart:
@@ -3933,6 +4184,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     assume_yes=True, interactive=False
                 )
             run_quickstart(python_exe)
+            values = read_env_file(ENV_PATH)
+            maybe_complete_agentcore_cdk_deploy(values, args, assume_yes=args.yes)
 
     values = read_env_file(ENV_PATH)
     is_headless = values.get("ENABLE_HEADLESS_DEPLOYMENT") == "True"
@@ -3978,6 +4231,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         cf = values.get("CLOUDFRONT_DOMAIN", "")
         if domain and cf and cf != "cloudfront_placeholder.net":
             print(f"  - Point DNS CNAME {domain} -> {cf}")
+        if values.get("CLOUDFRONT_AUTH_MODE") == "magic-link":
+            print(
+                "  - After deploy: open RedactionLoginUrl from stack outputs "
+                "(?key= unlock), then browse via RedactionUrl / CloudFrontDistributionURL"
+            )
     elif values.get("USE_ECS_EXPRESS_MODE") == "True":
         ep = values.get("ECS_EXPRESS_COGNITO_REDIRECT_BASE", "")
         if ep:

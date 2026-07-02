@@ -24,7 +24,7 @@ from cdk_functions import (
     log_aws_credential_context,
     purge_cdk_lookup_context,
 )
-from cdk_stack import CdkStack, CdkStackCloudfront  # , CdkStackMain
+from cdk_stack import CdkStack
 from check_resources import CONTEXT_FILE, check_and_set_context
 
 # Initialize the CDK app
@@ -104,18 +104,10 @@ if ENABLE_APPREGISTRY == "True":
     appregistry_stack.termination_protection = _stack_delete_protection
 
 if USE_CLOUDFRONT == "True" and RUN_USEAST_STACK == "True":
-    aws_env_us_east_1 = Environment(account=AWS_ACCOUNT_ID, region="us-east-1")
-
-    cloudfront_stack = CdkStackCloudfront(
-        app,
-        "RedactionStackCloudfront",
-        env=aws_env_us_east_1,
-        alb_arn=regional_stack.params["alb_arn_output"],
-        alb_sec_group_id=regional_stack.params["alb_security_group_id"],
-        alb_dns_name=regional_stack.params["alb_dns_name"],
-        cross_region_references=True,
+    raise RuntimeError(
+        "RUN_USEAST_STACK=True is deprecated: CloudFront is deployed in RedactionStack. "
+        "Set RUN_USEAST_STACK=False and remove RedactionStackCloudfront if it still exists."
     )
-    cloudfront_stack.termination_protection = _stack_delete_protection
 
 # CDK CLI invokes this script and expects a cloud assembly in cdk.out.
 # Without app.synth(), Python defines constructs but never writes manifest.json

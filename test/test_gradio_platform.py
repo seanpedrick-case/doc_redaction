@@ -129,3 +129,27 @@ def test_create_fastapi_app_exposes_health():
 def test_gradio_head_html_sets_base_href():
     html = gradio_platform.gradio_head_html("pi-agent")
     assert "<base href='/pi-agent/'>" in html
+
+
+def test_mount_or_launch_subpath_serves_200_not_404(monkeypatch):
+    """Regression: mounting Gradio at /pi must not double-apply the prefix as FastAPI
+    root_path (which strips /pi before routing and returns 404 for GET /pi/)."""
+    import gradio as gr
+    from starlette.testclient import TestClient
+
+    monkeypatch.setattr(gradio_platform, "RUN_FASTAPI", True)
+    monkeypatch.setattr(gradio_platform, "COGNITO_AUTH", False)
+
+    with gr.Blocks() as demo:
+        gr.Markdown("hi")
+
+    app = gradio_platform.mount_or_launch(
+        demo,
+        root_path="/pi",
+        fastapi_root_path="/pi",
+    )
+    client = TestClient(app)
+    assert client.get("/pi/").status_code == 200
+    assert client.get("/pi/config").status_code == 200
+    # Health endpoint on the parent app is unaffected by the subpath mount.
+    assert client.get("/health").status_code == 200

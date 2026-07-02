@@ -59,7 +59,7 @@ x-pi-agent-common: &pi-agent-common
     - redaction-net-llama
 
 x-pi-agent-env: &pi-agent-env
-  APP_TYPE: pi
+  APP_TYPE: agent
   APP_CONFIG_PATH: /workspace/doc_redaction/config/pi_agent.env
   HOME: /home/user
   PI_SKIP_VERSION_CHECK: "1"
@@ -166,7 +166,7 @@ services:
       - --fit
       - "off"
       - --temp
-      - "0.7"
+      - "0.6"
       - --top-k
       - "20"
       - --top-p

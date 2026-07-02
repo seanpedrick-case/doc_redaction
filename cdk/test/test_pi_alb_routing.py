@@ -27,7 +27,7 @@ def test_normalize_pi_alb_path_prefix():
 
     assert normalize_pi_alb_path_prefix("/pi") == "/pi"
     assert normalize_pi_alb_path_prefix("pi") == "/pi"
-    assert normalize_pi_alb_path_prefix("") == "/pi"
+    assert normalize_pi_alb_path_prefix("") == "/agent"
 
 
 def test_pi_alb_path_patterns():

@@ -50,7 +50,7 @@ def test_aws_ecs_profile_agent_dir_under_tmp(monkeypatch):
 
     importlib.reload(pac)
 
-    assert pac.resolve_agent_dir() == Path("/tmp/pi-agent")
+    assert pac.resolve_agent_dir() == Path("/tmp/agent-coding")
 
 
 def test_hf_profile_agent_dir_under_tmp(monkeypatch):
@@ -61,7 +61,7 @@ def test_hf_profile_agent_dir_under_tmp(monkeypatch):
 
     importlib.reload(pac)
 
-    assert pac.resolve_agent_dir() == Path("/tmp/pi-agent")
+    assert pac.resolve_agent_dir() == Path("/tmp/agent-coding")
 
 
 def test_hf_profile_defaults_session_dir_to_tmp(tmp_path, monkeypatch, pi_workspace):
@@ -70,7 +70,9 @@ def test_hf_profile_defaults_session_dir_to_tmp(tmp_path, monkeypatch, pi_worksp
     monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
 
     settings = pac.build_settings_config()
-    assert Path(settings["sessionDir"]).resolve() == Path("/tmp/pi-sessions").resolve()
+    assert (
+        Path(settings["sessionDir"]).resolve() == Path("/tmp/agent-sessions").resolve()
+    )
     assert Path(settings["sessionDir"]).is_dir()
     assert settings["retry"]["baseDelayMs"] == 60000
     assert settings["retry"]["maxRetries"] == 5

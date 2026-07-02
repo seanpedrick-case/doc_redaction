@@ -360,7 +360,7 @@ def log_platform_access(session_hash: str, host_name: str = HOST_NAME) -> None:
     except OSError as exc:
         logger.warning(
             "Access log write failed (%s); session UI continues. "
-            "On ECS/HF Pi images set ACCESS_LOGS_FOLDER=/tmp/pi-logs/ "
+            "On ECS/HF agent images set ACCESS_LOGS_FOLDER=/tmp/agent-logs/ "
             "(see agent-redact/pi/bootstrap_pi_config.py).",
             exc,
         )
@@ -498,7 +498,15 @@ def mount_or_launch(
 
     if RUN_FASTAPI:
         if fastapi_app is None:
-            fastapi_app = create_fastapi_app(root_path=fastapi_root_path)
+            # When Gradio is mounted at a subpath (mount_path != ""), the upstream proxy
+            # (e.g. CloudFront) forwards that prefix *unstripped*, so the request path
+            # already contains it. FastAPI/Starlette ``root_path`` is meant for a prefix
+            # the proxy has *already* stripped: setting it to the mount prefix makes
+            # Starlette strip it again before routing, so ``/pi/`` becomes ``/`` and never
+            # matches the sub-mount at ``/pi`` -> 404. Only honour ``fastapi_root_path``
+            # when serving at the app root ("/").
+            effective_fastapi_root = "" if mount_path else fastapi_root_path
+            fastapi_app = create_fastapi_app(root_path=effective_fastapi_root)
         return gr.mount_gradio_app(
             fastapi_app,
             demo,

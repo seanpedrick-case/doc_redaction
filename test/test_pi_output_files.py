@@ -110,6 +110,86 @@ def test_workspace_files_download_fn_returns_absolute_paths(tmp_path, monkeypatc
     assert result == [str(pdf.resolve())]
 
 
+def test_workspace_files_download_fn_blocks_other_session_files(tmp_path, monkeypatch):
+    """A session may not download files that live under another session's folder."""
+    base = tmp_path / "workspace"
+    base.mkdir()
+    mine = base / "user1"
+    mine.mkdir()
+    my_pdf = mine / "mine.pdf"
+    my_pdf.write_bytes(b"%PDF")
+    theirs = base / "user2"
+    theirs.mkdir()
+    their_pdf = theirs / "secret.pdf"
+    their_pdf.write_bytes(b"%PDF")
+
+    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+
+    # As user1: own file resolves, other session's absolute path is rejected.
+    result = of.workspace_files_download_fn(
+        [str(my_pdf), str(their_pdf)],
+        "user1",
+    )
+    assert result == [str(my_pdf.resolve())]
+
+
+def test_workspace_files_download_fn_denies_when_session_missing(tmp_path, monkeypatch):
+    """With isolation on and no resolvable session, nothing under base is served."""
+    base = tmp_path / "workspace"
+    base.mkdir()
+    session_dir = base / "user1"
+    session_dir.mkdir()
+    pdf = session_dir / "out.pdf"
+    pdf.write_bytes(b"%PDF")
+
+    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+
+    # Empty session hash + no request must NOT fall back to the shared base.
+    assert of.workspace_files_download_fn([str(pdf)], "") is None
+    assert of.workspace_files_download_fn([str(pdf)], "default") is None
+
+
+def test_session_browse_root_scopes_and_denies(tmp_path, monkeypatch):
+    base = tmp_path / "workspace"
+    base.mkdir()
+    (base / "user1").mkdir()
+
+    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+
+    assert of.session_browse_root("user1") == (base / "user1").resolve()
+    # No session resolves -> empty stub dir, never the shared base.
+    stub = of.session_browse_root("")
+    assert stub == of.fileexplorer_stub_dir()
+    assert stub != base.resolve()
+    assert list(stub.iterdir()) == []
+
+
+def test_session_browse_root_shared_when_isolation_disabled(tmp_path, monkeypatch):
+    base = tmp_path / "workspace"
+    base.mkdir()
+    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("PI_SESSION_WORKSPACE", "false")
+
+    assert of.session_browse_root("") == base.resolve()
+
+
+def test_fileexplorer_stub_dir_is_empty_and_not_base(tmp_path, monkeypatch):
+    base = tmp_path / "workspace"
+    base.mkdir()
+    (base / "user1").mkdir()
+    monkeypatch.delenv("PI_FILEEXPLORER_STUB_DIR", raising=False)
+    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
+
+    stub = of.fileexplorer_stub_dir()
+    assert stub.is_dir()
+    assert stub != base.resolve()
+    # Stub sits under the base's hidden .pi area and lists nothing.
+    assert list(stub.iterdir()) == []
+
+
 def test_collect_final_output_files_finds_review_final_folder(tmp_path, monkeypatch):
     base = tmp_path / "workspace"
     session_dir = base / "session"

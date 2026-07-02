@@ -56,6 +56,7 @@ from agent_runtime import (
 )
 from output_files import (
     collect_final_output_files,
+    fileexplorer_stub_dir,
     gradio_allowed_paths,
     latest_redacted_pdf_path,
     preview_pdf_path_for_gradio,
@@ -113,7 +114,6 @@ from session_workspace import (
     init_session_workspace,
     prepare_session_workspace,
     session_workspace_dir,
-    workspace_base_dir,
     workspace_context_prefix,
 )
 
@@ -145,7 +145,6 @@ from tools.config import (
 write_runtime_config()
 
 from tools.gradio_platform import (
-    create_fastapi_app,
     log_agent_usage_event,
     log_platform_access,
     mount_or_launch,
@@ -2955,7 +2954,10 @@ def build_ui():
             )
             with gr.Accordion("Download other files from workspace", open=False):
                 workspace_output_explorer = gr.FileExplorer(
-                    root_dir=str(workspace_base_dir()),
+                    # Start on an empty stub dir (never the shared workspace base) so
+                    # no cross-session files are exposed before demo.load scopes the
+                    # explorer to this user's session folder.
+                    root_dir=str(fileexplorer_stub_dir()),
                     label="Browse session workspace",
                     file_count="multiple",
                     interactive=True,
@@ -3218,9 +3220,12 @@ def launch_pi_ui() -> FastAPI | None:
     demo.queue(default_concurrency_limit=1)
     pi_root = (PI_ROOT_PATH or "").strip()
     fastapi_root = pi_root or FASTAPI_ROOT_PATH
+    # Let mount_or_launch build the FastAPI app so it reconciles the mount subpath with
+    # root_path: mounting Gradio at ``/pi`` (CloudFront forwards the prefix unstripped)
+    # requires an *empty* FastAPI root_path, otherwise Starlette strips ``/pi`` before
+    # routing and ``GET /pi/`` returns 404 (see mount_or_launch).
     return mount_or_launch(
         demo,
-        fastapi_app=create_fastapi_app(root_path=fastapi_root) if RUN_FASTAPI else None,
         allowed_paths=gradio_allowed_paths(),
         css=THINKING_PANEL_CSS,
         head_extra=PI_AGENT_FINISH_HEAD_HTML,

@@ -12,10 +12,10 @@ sys.path.insert(0, str(CDK_DIR))
 def test_pi_express_mutual_exclusion_with_legacy_pi():
     legacy = "True"
     express = "True"
-    with pytest.raises(ValueError, match="at most one Pi deployment"):
+    with pytest.raises(ValueError, match="at most one agent deployment"):
         if legacy == "True" and express == "True":
             raise ValueError(
-                "Enable at most one Pi deployment mode: ENABLE_PI_AGENT_ECS_SERVICE (legacy Fargate) "
+                "Enable at most one agent deployment mode: ENABLE_PI_AGENT_ECS_SERVICE (legacy Fargate) "
                 "or ENABLE_PI_AGENT_EXPRESS_SERVICE (Express), not both."
             )
 
@@ -40,7 +40,7 @@ def test_build_pi_express_container_environment():
         pi_gradio_port=7862,
     )
     assert env["DOC_REDACTION_GRADIO_URL"] == "http://redaction:7860"
-    assert env["PI_WORKSPACE_DIR"] == "/tmp/pi-workspace"
+    assert env["PI_WORKSPACE_DIR"] == "/tmp/agent-workspace"
     assert env["PI_UPLOAD_ROOT"] == "/tmp/gradio"
     assert env["PI_DEPLOYMENT_PROFILE"] == "aws-ecs"
     assert env["COGNITO_AUTH"] == "True"
@@ -552,7 +552,7 @@ def test_dual_express_gateway_services_synth():
         container_port=7862,
         log_group_name="/ecs/pi-logs",
         aws_region="eu-west-2",
-        environment={"PI_WORKSPACE_DIR": "/tmp/pi-workspace"},
+        environment={"PI_WORKSPACE_DIR": "/tmp/agent-workspace"},
     )
     pi = create_express_gateway_service(
         stack,

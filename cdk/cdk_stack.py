@@ -2,14 +2,8 @@ import json  # You might still need json if loading task_definition.json
 import os
 from typing import Any, Dict, List
 
-from aws_cdk import (
-    CfnOutput,  # <-- Import CfnOutput directly
-    Duration,
-    SecretValue,
-    Stack,
-)
-from aws_cdk import aws_cloudfront as cloudfront
-from aws_cdk import aws_cloudfront_origins as origins
+from aws_cdk import CfnOutput, Duration, SecretValue, Stack
+from aws_cdk import aws_bedrockagentcore as bedrockagentcore
 from aws_cdk import aws_codebuild as codebuild
 from aws_cdk import aws_cognito as cognito
 from aws_cdk import aws_dynamodb as dynamodb  # Import the DynamoDB module
@@ -23,13 +17,15 @@ from aws_cdk import aws_logs as logs
 from aws_cdk import aws_s3 as s3
 from aws_cdk import aws_secretsmanager as secretsmanager
 from aws_cdk import aws_wafv2 as wafv2
-from cdk_cloudfront_headers import (
-    create_secure_cloudfront_response_headers_policy,
-    resolve_cloudfront_csp_urls,
-)
+from cdk_cloudfront_distribution import create_redaction_cloudfront_distribution
 from cdk_config import (
     ACCESS_LOG_DYNAMODB_TABLE_NAME,
     ACM_SSL_CERTIFICATE_ARN,
+    AGENTCORE_CDK_DEPLOY,
+    AGENTCORE_NETWORK_MODE,
+    AGENTCORE_RUNTIME_NAME,
+    AGENTCORE_RUNTIME_ROLE_ARN,
+    AGENTCORE_TASK_ROLE_POLICY_FILES,
     ALB_NAME,
     ALB_NAME_SECURITY_GROUP_NAME,
     ALB_TARGET_GROUP_NAME,
@@ -40,12 +36,17 @@ from cdk_config import (
     AWS_REGION,
     CDK_FOLDER,
     CDK_PREFIX,
+    CLOUDFRONT_ATTACH_SECURE_RESPONSE_HEADERS,
+    CLOUDFRONT_AUTH_MODE,
     CLOUDFRONT_DISTRIBUTION_NAME,
     CLOUDFRONT_DOMAIN,
     CLOUDFRONT_ENABLE_SECURE_RESPONSE_HEADERS,
     CLOUDFRONT_GEO_RESTRICTION,
+    CLOUDFRONT_MAGIC_LINK_COOKIE_MAX_AGE_SEC,
+    CLOUDFRONT_MAGIC_LINK_COOKIE_NAME,
     CLOUDFRONT_PREFIX_LIST_ID,
     CLUSTER_NAME,
+    CODEBUILD_AGENTCORE_PROJECT_NAME,
     CODEBUILD_PI_PROJECT_NAME,
     CODEBUILD_PROJECT_NAME,
     CODEBUILD_ROLE_NAME,
@@ -62,8 +63,9 @@ from cdk_config import (
     CUSTOM_HEADER_VALUE,
     CUSTOM_KMS_KEY_NAME,
     DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS,
+    ECR_AGENT_REPO_NAME,
+    ECR_AGENTCORE_REPO_NAME,
     ECR_CDK_REPO_NAME,
-    ECR_PI_REPO_NAME,
     ECS_AVAILABILITY_ZONE_REBALANCING,
     ECS_EXECUTION_ROLE_MANAGED_POLICIES,
     ECS_EXECUTION_ROLE_POLICY_ARNS,
@@ -97,7 +99,9 @@ from cdk_config import (
     ECS_TASK_MEMORY_SIZE,
     ECS_TASK_ROLE_NAME,
     ECS_USE_FARGATE_SPOT,
+    ENABLE_AGENTCORE_CDK_RUNTIME,
     ENABLE_AGENTCORE_RUNTIME,
+    ENABLE_CLOUDFRONT_WAF,
     ENABLE_ECS_SERVICE_CONNECT,
     ENABLE_ECS_VPC_INTERFACE_ENDPOINTS,
     ENABLE_HEADLESS_DEPLOYMENT,
@@ -196,6 +200,10 @@ from cdk_functions import (  # Only keep CDK-native functions
 )
 from constructs import Construct
 
+# Amazon Linux 2023 x86_64 standard image (AL2023 host kernel; Docker privileged builds).
+_CODEBUILD_DOCKER_IMAGE = codebuild.LinuxBuildImage.AMAZON_LINUX_2023_5
+_CODEBUILD_ARM_IMAGE = codebuild.LinuxArmBuildImage.AMAZON_LINUX_2023_STANDARD_3_0
+
 
 def _get_env_list(env_var_name: str) -> List[str]:
     """Parses a comma-separated environment variable into a list of strings."""
@@ -286,6 +294,15 @@ class CdkStack(Stack):
             ENABLE_PI_AGENT_EXPRESS_SERVICE == "True" and use_express_ingress
         )
         enable_agentic_build = enable_agentic_legacy or enable_agentic_express
+        enable_agentcore_cdk_deploy = (
+            AGENTCORE_CDK_DEPLOY == "True" or ENABLE_AGENTCORE_CDK_RUNTIME == "True"
+        )
+        cloudfront_magic_link = (
+            USE_CLOUDFRONT == "True" and CLOUDFRONT_AUTH_MODE == "magic-link"
+        )
+        express_cognito_auth = (
+            ENABLE_HEADLESS_DEPLOYMENT != "True" and not cloudfront_magic_link
+        )
         if enable_headless:
             print(
                 "ENABLE_HEADLESS_DEPLOYMENT=True: S3 batch trigger + one-shot Fargate "
@@ -1298,18 +1315,16 @@ class CdkStack(Stack):
         # --- CODEBUILD ---
         try:
             codebuild_project_name = CODEBUILD_PROJECT_NAME
-            if get_context_bool(f"exists:{codebuild_project_name}"):
-                # Lookup CodeBuild project by ARN from context
-                project_arn = get_context_str(f"arn:{codebuild_project_name}")
-                if not project_arn:
-                    raise ValueError(
-                        f"Context value 'arn:{codebuild_project_name}' is required if project exists."
-                    )
-                codebuild.Project.from_project_arn(
-                    self, "CodeBuildProject", project_arn=project_arn
-                )
-                print("Using existing CodeBuild project")
-            else:
+            # CodeBuild projects are ALWAYS managed by this stack — never imported.
+            # Importing an existing project (from_project_arn) emits no
+            # CloudFormation resource, so a project that was previously
+            # stack-managed gets DELETED by CloudFormation on the next deploy.
+            # Because cdk_install.py deploys twice (initial + CloudFront refresh)
+            # and each deploy re-runs the precheck, an exists->import switch would
+            # silently delete the project between the two deploys (this is what
+            # removed the main app project). Creating under a stable logical ID
+            # makes both deploys update the same resource in place.
+            if codebuild_project_name:
                 main_codebuild_project = codebuild.Project(
                     self,
                     "CodeBuildProject",  # Logical ID
@@ -1321,7 +1336,7 @@ class CdkStack(Stack):
                         branch_or_ref=GITHUB_REPO_BRANCH,
                     ),
                     environment=codebuild.BuildEnvironment(
-                        build_image=codebuild.LinuxBuildImage.STANDARD_7_0,
+                        build_image=_CODEBUILD_DOCKER_IMAGE,
                         privileged=True,
                         environment_variables={
                             "ECR_REPO_NAME": codebuild.BuildEnvironmentVariable(
@@ -1372,35 +1387,15 @@ class CdkStack(Stack):
                 )
                 print("Successfully created CodeBuild project", codebuild_project_name)
 
-            # Imported projects have role=undefined in CDK; use the actual service
-            # role from context (existing project) or the managed codebuild_role (new).
-            if get_context_bool(f"exists:{codebuild_project_name}"):
-                project_service_role_arn = get_context_str(
-                    f"service_role_arn:{codebuild_project_name}"
-                )
-                if project_service_role_arn:
-                    ecr_grantee = iam.Role.from_role_arn(
-                        self,
-                        "CodeBuildProjectServiceRole",
-                        role_arn=project_service_role_arn,
-                        mutable=True,
-                    )
-                else:
-                    ecr_grantee = codebuild_role
-            else:
-                ecr_grantee = codebuild_role
+            # All CodeBuild projects are stack-managed and share codebuild_role.
+            ecr_grantee = codebuild_role
             ecr_repo.grant_pull_push(ecr_grantee)
 
             if enable_agentic_build:
                 agentic_codebuild_name = CODEBUILD_PI_PROJECT_NAME
-                if get_context_bool(f"exists:{agentic_codebuild_name}"):
-                    project_arn = get_context_str(f"arn:{agentic_codebuild_name}")
-                    if project_arn:
-                        codebuild.Project.from_project_arn(
-                            self, "CodeBuildAgenticProject", project_arn=project_arn
-                        )
-                    print("Using existing agentic redaction CodeBuild project")
-                else:
+                # Always stack-managed (see main CodeBuild note above): never
+                # import, or a previously created project is deleted on redeploy.
+                if agentic_codebuild_name:
                     agentic_codebuild_project = codebuild.Project(
                         self,
                         "CodeBuildAgenticProject",
@@ -1412,11 +1407,11 @@ class CdkStack(Stack):
                             branch_or_ref=GITHUB_REPO_BRANCH,
                         ),
                         environment=codebuild.BuildEnvironment(
-                            build_image=codebuild.LinuxBuildImage.STANDARD_7_0,
+                            build_image=_CODEBUILD_DOCKER_IMAGE,
                             privileged=True,
                             environment_variables={
                                 "ECR_REPO_NAME": codebuild.BuildEnvironmentVariable(
-                                    value=ECR_PI_REPO_NAME
+                                    value=ECR_AGENT_REPO_NAME
                                 ),
                                 "AWS_DEFAULT_REGION": codebuild.BuildEnvironmentVariable(
                                     value=AWS_REGION
@@ -1463,7 +1458,7 @@ class CdkStack(Stack):
                         agentic_codebuild_name,
                     )
 
-                agentic_ecr_repo_name = ECR_PI_REPO_NAME
+                agentic_ecr_repo_name = ECR_AGENT_REPO_NAME
                 if get_context_bool(f"exists:{agentic_ecr_repo_name}"):
                     agentic_ecr_repo = ecr.Repository.from_repository_name(
                         self, "ECRAgenticRepo", repository_name=agentic_ecr_repo_name
@@ -1481,6 +1476,154 @@ class CdkStack(Stack):
                 CfnOutput(
                     self, "ECRAgenticRepoUri", value=agentic_ecr_repo.repository_uri
                 )
+
+            if enable_agentcore_cdk_deploy:
+                agentcore_ecr_repo_name = ECR_AGENTCORE_REPO_NAME
+                if get_context_bool(f"exists:{agentcore_ecr_repo_name}"):
+                    agentcore_ecr_repo = ecr.Repository.from_repository_name(
+                        self,
+                        "ECRAgentCoreRuntimeRepo",
+                        repository_name=agentcore_ecr_repo_name,
+                    )
+                else:
+                    agentcore_ecr_repo = ecr.Repository(
+                        self,
+                        "ECRAgentCoreRuntimeRepo",
+                        repository_name=agentcore_ecr_repo_name,
+                        removal_policy=resource_removal_policy,
+                        empty_on_delete=ecr_empty_on_delete(),
+                    )
+                agentcore_ecr_repo.grant_pull_push(ecr_grantee)
+                CfnOutput(
+                    self,
+                    "ECRAgentCoreRuntimeRepoUri",
+                    value=agentcore_ecr_repo.repository_uri,
+                )
+
+                agentcore_codebuild_name = CODEBUILD_AGENTCORE_PROJECT_NAME
+                # Always stack-managed (see main CodeBuild note above): never
+                # import, or a previously created project is deleted on redeploy.
+                if agentcore_codebuild_name:
+                    agentcore_codebuild_project = codebuild.Project(
+                        self,
+                        "CodeBuildAgentCoreProject",
+                        project_name=agentcore_codebuild_name,
+                        role=codebuild_role,
+                        source=public_github_codebuild_source(
+                            owner=GITHUB_REPO_USERNAME,
+                            repo=GITHUB_REPO_NAME,
+                            branch_or_ref=GITHUB_REPO_BRANCH,
+                        ),
+                        environment=codebuild.BuildEnvironment(
+                            build_image=_CODEBUILD_ARM_IMAGE,
+                            privileged=True,
+                            environment_variables={
+                                "ECR_REPO_NAME": codebuild.BuildEnvironmentVariable(
+                                    value=agentcore_ecr_repo_name
+                                ),
+                                "AWS_DEFAULT_REGION": codebuild.BuildEnvironmentVariable(
+                                    value=AWS_REGION
+                                ),
+                                "AWS_ACCOUNT_ID": codebuild.BuildEnvironmentVariable(
+                                    value=AWS_ACCOUNT_ID
+                                ),
+                            },
+                        ),
+                        build_spec=codebuild.BuildSpec.from_object(
+                            {
+                                "version": "0.2",
+                                "phases": {
+                                    "pre_build": {
+                                        "commands": [
+                                            "echo Logging in to Amazon ECR",
+                                            "aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com",
+                                            "test -f agent-redact/agentcore/Dockerfile.runtime",
+                                        ]
+                                    },
+                                    "build": {
+                                        "commands": [
+                                            "docker build -f agent-redact/agentcore/Dockerfile.runtime -t $ECR_REPO_NAME:latest .",
+                                            "docker tag $ECR_REPO_NAME:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPO_NAME:latest",
+                                        ]
+                                    },
+                                    "post_build": {
+                                        "commands": [
+                                            "docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPO_NAME:latest",
+                                        ]
+                                    },
+                                },
+                            }
+                        ),
+                    )
+                    configure_public_github_codebuild_source(
+                        agentcore_codebuild_project,
+                        GITHUB_REPO_USERNAME,
+                        GITHUB_REPO_NAME,
+                    )
+                    print(
+                        "Created AgentCore runtime CodeBuild project",
+                        agentcore_codebuild_name,
+                    )
+
+                external_agentcore_role_arn = (AGENTCORE_RUNTIME_ROLE_ARN or "").strip()
+                if external_agentcore_role_arn:
+                    agentcore_exec_role = iam.Role.from_role_arn(
+                        self,
+                        "AgentCoreRuntimeExecutionRole",
+                        role_arn=external_agentcore_role_arn,
+                        mutable=True,
+                    )
+                else:
+                    agentcore_exec_role = iam.Role(
+                        self,
+                        "AgentCoreRuntimeExecutionRole",
+                        role_name=f"{CDK_PREFIX}AgentCoreRuntimeRole"[:64],
+                        assumed_by=iam.ServicePrincipal(
+                            "bedrock-agentcore.amazonaws.com"
+                        ),
+                    )
+                    agentcore_exec_role = add_custom_policies(
+                        self,
+                        agentcore_exec_role,
+                        policy_file_locations=list(AGENTCORE_TASK_ROLE_POLICY_FILES),
+                    )
+                    agentcore_ecr_repo.grant_pull(agentcore_exec_role)
+
+                if ENABLE_AGENTCORE_CDK_RUNTIME == "True":
+                    runtime_name = (AGENTCORE_RUNTIME_NAME or "RedactionAgent").strip()[
+                        :48
+                    ]
+                    agentcore_runtime = bedrockagentcore.CfnRuntime(
+                        self,
+                        "RedactionAgentCoreRuntime",
+                        agent_runtime_name=runtime_name,
+                        agent_runtime_artifact=bedrockagentcore.CfnRuntime.AgentRuntimeArtifactProperty(
+                            container_configuration=bedrockagentcore.CfnRuntime.ContainerConfigurationProperty(
+                                container_uri=f"{agentcore_ecr_repo.repository_uri}:latest",
+                            ),
+                        ),
+                        role_arn=agentcore_exec_role.role_arn,
+                        network_configuration=bedrockagentcore.CfnRuntime.NetworkConfigurationProperty(
+                            network_mode=(AGENTCORE_NETWORK_MODE or "PUBLIC").upper(),
+                        ),
+                        environment_variables={
+                            "PI_DEFAULT_PROVIDER": "amazon-bedrock",
+                            "AWS_REGION": AWS_REGION,
+                            "AWS_DEFAULT_REGION": AWS_REGION,
+                            "PI_WORKSPACE_DIR": "/tmp/agentcore-workspace",
+                        },
+                    )
+                    CfnOutput(
+                        self,
+                        "AgentCoreRuntimeArn",
+                        value=agentcore_runtime.attr_agent_runtime_arn,
+                    )
+                    print(
+                        "Created Bedrock AgentCore Runtime",
+                        runtime_name,
+                        "from ECR image",
+                        f"{agentcore_ecr_repo.repository_uri}:latest",
+                    )
 
         except Exception as e:
             raise Exception("Could not handle Codebuild project due to:", e)
@@ -1830,7 +1973,13 @@ class CdkStack(Stack):
 
                 # Add a domain to the User Pool (crucial for ALB integration)
                 domain_prefix = (COGNITO_USER_POOL_DOMAIN_PREFIX or "").strip().lower()
-                if get_context_bool(f"cognito_domain_taken:{domain_prefix}"):
+                domain_exists_on_pool = get_context_bool(
+                    f"cognito_domain_exists_on_pool:{domain_prefix}"
+                )
+                if (
+                    get_context_bool(f"cognito_domain_taken:{domain_prefix}")
+                    and not domain_exists_on_pool
+                ):
                     raise ValueError(
                         f"Cognito hosted UI domain prefix {domain_prefix!r} is not "
                         f"available in this region (taken by another AWS account or "
@@ -1838,19 +1987,36 @@ class CdkStack(Stack):
                         "cdk/config/cdk_config.env to a unique value and re-run "
                         "cdk_install.py / check_resources.py."
                     )
-                user_pool_domain = user_pool.add_domain(
-                    "UserPoolDomain",
-                    cognito_domain=cognito.CognitoDomainOptions(
-                        domain_prefix=COGNITO_USER_POOL_DOMAIN_PREFIX
-                    ),
-                )
 
-                # Apply removal_policy to the created UserPoolDomain construct
-                user_pool_domain.apply_removal_policy(policy=resource_removal_policy)
+                if domain_exists_on_pool:
+                    # The hosted UI domain is already attached to the reused user
+                    # pool. Re-creating it with add_domain would fail at deploy
+                    # time (AlreadyExists), so import the existing domain instead.
+                    user_pool_domain = cognito.UserPoolDomain.from_domain_name(
+                        self, "UserPoolDomain", user_pool_domain_name=domain_prefix
+                    )
+                    login_url = (
+                        f"https://{domain_prefix}.auth.{self.region}.amazoncognito.com"
+                    )
+                    print(
+                        f"Using existing Cognito hosted UI domain {domain_prefix!r} "
+                        "on the reused user pool (imported, not re-created)."
+                    )
+                else:
+                    user_pool_domain = user_pool.add_domain(
+                        "UserPoolDomain",
+                        cognito_domain=cognito.CognitoDomainOptions(
+                            domain_prefix=COGNITO_USER_POOL_DOMAIN_PREFIX
+                        ),
+                    )
 
-                CfnOutput(
-                    self, "CognitoUserPoolLoginUrl", value=user_pool_domain.base_url()
-                )
+                    # Apply removal_policy to the created UserPoolDomain construct
+                    user_pool_domain.apply_removal_policy(
+                        policy=resource_removal_policy
+                    )
+                    login_url = user_pool_domain.base_url()
+
+                CfnOutput(self, "CognitoUserPoolLoginUrl", value=login_url)
 
             except Exception as e:
                 raise Exception("Could not handle Cognito resources due to:", e)
@@ -1973,9 +2139,10 @@ class CdkStack(Stack):
                 express_app_overrides: Dict[str, str] = {}
                 if ENABLE_HEADLESS_DEPLOYMENT == "True":
                     express_app_overrides["COGNITO_AUTH"] = "False"
-                elif enable_agentic_express:
+                elif enable_agentic_express or cloudfront_magic_link:
                     # Agentic Gradio app calls main over Service Connect; Gradio auth blocks
                     # gradio_client unless credentials are passed on every call.
+                    # Magic-link edge auth replaces in-app Cognito on demo.
                     express_app_overrides["COGNITO_AUTH"] = "False"
                 express_app_environment = load_app_config_env_for_express(
                     APP_CONFIG_ENV_FILE,
@@ -2017,7 +2184,6 @@ class CdkStack(Stack):
                         "(internal managed ALB)."
                     )
 
-                # MinTaskCount=0 until post_cdk_build_quickstart builds/pushes :latest.
                 express_service = create_express_gateway_service(
                     self,
                     "ExpressGatewayService",
@@ -2078,6 +2244,7 @@ class CdkStack(Stack):
                     value=express_service.attr_ecs_managed_resource_arns_ingress_path_certificate_arn,
                 )
 
+                express_agentic_service = None
                 if enable_agentic_express:
                     try:
                         agentic_express_log_group = logs.LogGroup(
@@ -2102,7 +2269,7 @@ class CdkStack(Stack):
                             service_connect_discovery_name=ECS_SERVICE_CONNECT_DISCOVERY_NAME,
                             main_app_port=int(GRADIO_SERVER_PORT),
                             pi_gradio_port=int(PI_GRADIO_PORT),
-                            cognito_auth=ENABLE_HEADLESS_DEPLOYMENT != "True",
+                            cognito_auth=express_cognito_auth,
                             doc_redaction_gradio_url=(
                                 format_main_express_gradio_url(express_alb_dns)
                                 if agentcore_backend
@@ -2117,7 +2284,7 @@ class CdkStack(Stack):
                                 aws_region=AWS_REGION,
                                 environment=agentic_express_environment,
                                 secret=secret,
-                                cognito_auth=ENABLE_HEADLESS_DEPLOYMENT != "True",
+                                cognito_auth=express_cognito_auth,
                             )
                         )
 
@@ -2149,11 +2316,13 @@ class CdkStack(Stack):
                             container_port=int(PI_GRADIO_PORT),
                         )
 
-                        agentic_express_security_group.add_egress_rule(
-                            peer=ecs_security_group,
-                            connection=ec2.Port.tcp(int(GRADIO_SERVER_PORT)),
-                            description="Agentic Express (Service Connect) to main redaction app",
-                        )
+                        # The agentic Express SG is created with the CDK default
+                        # allow_all_outbound=True, so egress to the main app (and to
+                        # ECR/Secrets/KMS/Logs/internet needed by the task) is already
+                        # permitted. An explicit egress rule would be ignored by CDK
+                        # (emitting the ipv4IgnoreEgressRule annotation), so only the
+                        # ingress rule on the main app SG — which actually gates the
+                        # connection — is defined here.
                         ecs_security_group.add_ingress_rule(
                             peer=agentic_express_security_group,
                             connection=ec2.Port.tcp(int(GRADIO_SERVER_PORT)),
@@ -2222,6 +2391,42 @@ class CdkStack(Stack):
                         raise Exception(
                             "Could not handle ECS Express agentic redaction due to:", e
                         )
+
+                if USE_CLOUDFRONT == "True":
+                    agentic_endpoint = ""
+                    if enable_agentic_express and express_agentic_service is not None:
+                        agentic_endpoint = express_agentic_service.attr_endpoint
+                    create_redaction_cloudfront_distribution(
+                        self,
+                        "RedactionCloudFront",
+                        distribution_comment=CLOUDFRONT_DISTRIBUTION_NAME,
+                        cognito_redirection_url=COGNITO_REDIRECTION_URL,
+                        cloudfront_domain=CLOUDFRONT_DOMAIN,
+                        cognito_user_pool_domain_prefix=COGNITO_USER_POOL_DOMAIN_PREFIX,
+                        aws_region=AWS_REGION,
+                        cognito_user_pool_login_url=COGNITO_USER_POOL_LOGIN_URL,
+                        ssl_certificate_domain=SSL_CERTIFICATE_DOMAIN,
+                        enable_secure_response_headers=(
+                            CLOUDFRONT_ENABLE_SECURE_RESPONSE_HEADERS == "True"
+                        ),
+                        attach_secure_response_headers=(
+                            CLOUDFRONT_ATTACH_SECURE_RESPONSE_HEADERS == "True"
+                        ),
+                        geo_restriction_raw=CLOUDFRONT_GEO_RESTRICTION,
+                        enable_cloudfront_waf=ENABLE_CLOUDFRONT_WAF == "True",
+                        web_acl_name=WEB_ACL_NAME,
+                        auth_mode=CLOUDFRONT_AUTH_MODE,
+                        magic_link_cookie_name=CLOUDFRONT_MAGIC_LINK_COOKIE_NAME,
+                        magic_link_cookie_max_age_sec=CLOUDFRONT_MAGIC_LINK_COOKIE_MAX_AGE_SEC,
+                        custom_header_name=CUSTOM_HEADER,
+                        custom_header_value=CUSTOM_HEADER_VALUE,
+                        cdk_prefix=CDK_PREFIX,
+                        resource_removal_policy=resource_removal_policy,
+                        main_express_endpoint=express_service.attr_endpoint,
+                        agentic_express_endpoint=agentic_endpoint,
+                        agentic_path_prefix=PI_ALB_PATH_PREFIX_NORMALIZED,
+                    )
+                    print("CloudFront distribution defined for Express ingress.")
 
                 print("ECS Express Gateway service defined.")
             except Exception as e:
@@ -2571,7 +2776,7 @@ class CdkStack(Stack):
                         cluster=cluster,
                         private_subnets=self.private_subnets,
                         pi_ecr_image_uri=agentic_ecr_image_loc,
-                        container_name=ECR_PI_REPO_NAME,
+                        container_name=ECR_AGENT_REPO_NAME,
                         task_role=task_role,
                         execution_role=execution_role,
                         config_bucket=bucket,
@@ -2679,7 +2884,37 @@ class CdkStack(Stack):
                 # If they might pre-exist outside the stack, you need lookups.
                 cookie_duration = Duration.hours(8)
                 target_group_name = ALB_TARGET_GROUP_NAME  # Explicit resource name
-                cloudfront_distribution_url = "cloudfront_placeholder.net"  # Need to replace this afterwards with the actual cloudfront_distribution.domain_name
+                cloudfront_distribution_url = CLOUDFRONT_DOMAIN
+                if USE_CLOUDFRONT == "True":
+                    cf_resources = create_redaction_cloudfront_distribution(
+                        self,
+                        "RedactionCloudFront",
+                        distribution_comment=CLOUDFRONT_DISTRIBUTION_NAME,
+                        cognito_redirection_url=COGNITO_REDIRECTION_URL,
+                        cloudfront_domain=CLOUDFRONT_DOMAIN,
+                        cognito_user_pool_domain_prefix=COGNITO_USER_POOL_DOMAIN_PREFIX,
+                        aws_region=AWS_REGION,
+                        cognito_user_pool_login_url=COGNITO_USER_POOL_LOGIN_URL,
+                        ssl_certificate_domain=SSL_CERTIFICATE_DOMAIN,
+                        enable_secure_response_headers=(
+                            CLOUDFRONT_ENABLE_SECURE_RESPONSE_HEADERS == "True"
+                        ),
+                        attach_secure_response_headers=(
+                            CLOUDFRONT_ATTACH_SECURE_RESPONSE_HEADERS == "True"
+                        ),
+                        geo_restriction_raw=CLOUDFRONT_GEO_RESTRICTION,
+                        enable_cloudfront_waf=ENABLE_CLOUDFRONT_WAF == "True",
+                        web_acl_name=WEB_ACL_NAME,
+                        auth_mode=CLOUDFRONT_AUTH_MODE,
+                        magic_link_cookie_name=CLOUDFRONT_MAGIC_LINK_COOKIE_NAME,
+                        magic_link_cookie_max_age_sec=CLOUDFRONT_MAGIC_LINK_COOKIE_MAX_AGE_SEC,
+                        custom_header_name=CUSTOM_HEADER,
+                        custom_header_value=CUSTOM_HEADER_VALUE,
+                        cdk_prefix=CDK_PREFIX,
+                        resource_removal_policy=resource_removal_policy,
+                        alb=alb,
+                    )
+                    cloudfront_distribution_url = cf_resources.distribution.domain_name
                 cloudfront_http_rule_priority = (
                     PI_ALB_LISTENER_RULE_PRIORITY
                     + (
@@ -3027,139 +3262,3 @@ class CdkStack(Stack):
                 "ServiceConnectNamespace",
                 value=ECS_SERVICE_CONNECT_NAMESPACE,
             )
-
-
-# --- CLOUDFRONT DISTRIBUTION in separate stack (us-east-1 required) ---
-class CdkStackCloudfront(Stack):
-
-    def __init__(
-        self,
-        scope: Construct,
-        construct_id: str,
-        alb_arn: str,
-        alb_sec_group_id: str,
-        alb_dns_name: str,
-        **kwargs,
-    ) -> None:
-        super().__init__(scope, construct_id, **kwargs)
-
-        # --- Helper to get context values ---
-        def get_context_bool(key: str, default: bool = False) -> bool:
-            return self.node.try_get_context(key) or default
-
-        def get_context_str(key: str, default: str = None) -> str:
-            return self.node.try_get_context(key) or default
-
-        def get_context_dict(scope: Construct, key: str, default: dict = None) -> dict:
-            return scope.node.try_get_context(key) or default
-
-        resource_removal_policy = managed_resource_removal_policy()
-
-        print(f"CloudFront Stack: Received ALB ARN: {alb_arn}")
-        print(f"CloudFront Stack: Received ALB Security Group ID: {alb_sec_group_id}")
-
-        if not alb_arn:
-            raise ValueError("ALB ARN must be provided to CloudFront stack")
-        if not alb_sec_group_id:
-            raise ValueError(
-                "ALB Security Group ID must be provided to CloudFront stack"
-            )
-
-        # 2. Import the ALB using its ARN
-        # This imports an existing ALB as a construct in the CloudFront stack's context.
-        # CloudFormation will understand this reference at deploy time.
-        alb = elbv2.ApplicationLoadBalancer.from_application_load_balancer_attributes(
-            self,
-            "ImportedAlb",
-            load_balancer_arn=alb_arn,
-            security_group_id=alb_sec_group_id,
-            load_balancer_dns_name=alb_dns_name,
-        )
-
-        try:
-            web_acl_name = WEB_ACL_NAME
-            if get_context_bool(f"exists:{web_acl_name}"):
-                # Lookup WAF ACL by ARN from context
-                web_acl_arn = get_context_str(f"arn:{web_acl_name}")
-                if not web_acl_arn:
-                    raise ValueError(
-                        f"Context value 'arn:{web_acl_name}' is required if Web ACL exists."
-                    )
-
-                web_acl = create_web_acl_with_common_rules(
-                    self, web_acl_name
-                )  # Assuming it takes scope and name
-                print(f"Handled Cloudfront WAF web ACL {web_acl_name}.")
-            else:
-                web_acl = create_web_acl_with_common_rules(
-                    self, web_acl_name
-                )  # Assuming it takes scope and name
-                print(f"Created Cloudfront WAF web ACL {web_acl_name}.")
-
-            # Add ALB as CloudFront Origin
-            origin = origins.LoadBalancerV2Origin(
-                alb,  # Use the created or looked-up ALB object
-                custom_headers={CUSTOM_HEADER: CUSTOM_HEADER_VALUE},
-                origin_shield_enabled=False,
-                protocol_policy=cloudfront.OriginProtocolPolicy.HTTP_ONLY,
-            )
-
-            if CLOUDFRONT_GEO_RESTRICTION:
-                geo_restrict = cloudfront.GeoRestriction.allowlist(
-                    CLOUDFRONT_GEO_RESTRICTION
-                )
-            else:
-                geo_restrict = None
-
-            response_headers_policy = None
-            if CLOUDFRONT_ENABLE_SECURE_RESPONSE_HEADERS == "True":
-                app_origin, cognito_login_url = resolve_cloudfront_csp_urls(
-                    cognito_redirection_url=COGNITO_REDIRECTION_URL,
-                    cloudfront_domain=CLOUDFRONT_DOMAIN,
-                    cognito_user_pool_domain_prefix=COGNITO_USER_POOL_DOMAIN_PREFIX,
-                    aws_region=AWS_REGION,
-                    cognito_user_pool_login_url=COGNITO_USER_POOL_LOGIN_URL,
-                    ssl_certificate_domain=SSL_CERTIFICATE_DOMAIN,
-                )
-                policy_name = f"{CDK_PREFIX}SecureResponseHeaders"[:128]
-                response_headers_policy = (
-                    create_secure_cloudfront_response_headers_policy(
-                        self,
-                        "SecureResponseHeadersPolicy",
-                        policy_name=policy_name,
-                        app_origin=app_origin,
-                        cognito_login_url=cognito_login_url,
-                    )
-                )
-                print(
-                    "CloudFront secure response headers: "
-                    f"app_origin={app_origin}, cognito_login_url={cognito_login_url}"
-                )
-
-            default_behavior = cloudfront.BehaviorOptions(
-                origin=origin,
-                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-                allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
-                cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
-                origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER,
-                response_headers_policy=response_headers_policy,
-            )
-
-            cloudfront_distribution = cloudfront.Distribution(
-                self,
-                "CloudFrontDistribution",  # Logical ID
-                comment=CLOUDFRONT_DISTRIBUTION_NAME,  # Use name as comment for easier identification
-                geo_restriction=geo_restrict,
-                default_behavior=default_behavior,
-                web_acl_id=web_acl.attr_arn,
-            )
-            cloudfront_distribution.apply_removal_policy(resource_removal_policy)
-            print(f"Cloudfront distribution {CLOUDFRONT_DISTRIBUTION_NAME} defined.")
-
-        except Exception as e:
-            raise Exception("Could not handle Cloudfront distribution due to:", e)
-
-        # --- Outputs ---
-        CfnOutput(
-            self, "CloudFrontDistributionURL", value=cloudfront_distribution.domain_name
-        )

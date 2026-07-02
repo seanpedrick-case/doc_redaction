@@ -396,8 +396,16 @@ def add_statement_to_policy(role: iam.IRole, policy_document: Dict[str, Any]):
             # Create a CDK PolicyStatement from the dictionary
             cdk_policy_statement = iam.PolicyStatement.from_json(statement_dict)
 
-            # Add the policy statement to the role
-            role.add_to_policy(cdk_policy_statement)
+            # Add the policy statement to the role. Imported roles (the IRole
+            # proxy returned by Role.from_role_arn) do not expose add_to_policy,
+            # but they do support add_to_principal_policy, which attaches an
+            # inline policy when the role was imported as mutable (the default).
+            # Concrete iam.Role constructs support add_to_principal_policy too,
+            # so prefer it and fall back to add_to_policy only if unavailable.
+            if hasattr(role, "add_to_principal_policy"):
+                role.add_to_principal_policy(cdk_policy_statement)
+            else:
+                role.add_to_policy(cdk_policy_statement)
             print(f"  - Added statement: {statement_dict.get('Sid', 'No Sid')}")
         except Exception as e:
             print(
@@ -875,6 +883,35 @@ def resolve_cognito_domain_prefix_availability(
         return "taken"
     print(f"Cognito domain prefix {prefix!r} is available in {region}.")
     return "available"
+
+
+def get_cognito_domain_owner_pool_id(
+    domain_prefix: str,
+    *,
+    region_name: Optional[str] = None,
+    cognito_client: Any = None,
+) -> Optional[str]:
+    """Return the user pool ID that owns a Cognito hosted UI domain prefix.
+
+    Returns ``None`` when the prefix is free in this account, or when it is taken
+    by another AWS account (``describe_user_pool_domain`` raises
+    ``ResourceNotFoundException`` and exposes no owner). When the prefix is owned
+    by a pool in this account, the owning ``UserPoolId`` is returned so callers
+    can tell whether it belongs to a pool they intend to reuse.
+    """
+    prefix = (domain_prefix or "").strip().lower()
+    if not prefix:
+        return None
+    region = region_name or os.environ.get("AWS_REGION")
+    client = cognito_client or boto3.client("cognito-idp", region_name=region)
+    try:
+        response = client.describe_user_pool_domain(Domain=prefix)
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ResourceNotFoundException":
+            return None
+        raise
+    description = response.get("DomainDescription") or {}
+    return description.get("UserPoolId") or None
 
 
 def default_secrets_manager_kms_key_arn(region: str, account_id: str) -> str:
@@ -2830,10 +2867,32 @@ def _dict_env_to_express_key_value_pairs(
     ]
 
 
-def normalize_pi_alb_path_prefix(raw: str, *, default: str = "pi") -> str:
-    """Return a leading-slash path prefix (no trailing slash), e.g. '/pi'."""
+def normalize_pi_alb_path_prefix(raw: str, *, default: str = "agent") -> str:
+    """Return a leading-slash path prefix (no trailing slash), e.g. '/agent'."""
     segment = (raw or default).strip().strip("/")
     return f"/{segment}" if segment else f"/{default}"
+
+
+def derive_agentcore_runtime_url(runtime_arn: str, region: str) -> str:
+    """Build the HTTP base URL for a Bedrock AgentCore runtime from its ARN."""
+    from urllib.parse import quote
+
+    arn = (runtime_arn or "").strip()
+    if not arn:
+        return ""
+    encoded_arn = quote(arn, safe="")
+    aws_region = (region or "").strip() or "eu-west-2"
+    return (
+        f"https://bedrock-agentcore.{aws_region}.amazonaws.com/runtimes/{encoded_arn}"
+    )
+
+
+def normalize_agentcore_runtime_url(raw: str) -> str:
+    """Base runtime URL only — strip trailing slash and accidental /invocations suffix."""
+    url = (raw or "").strip().rstrip("/")
+    if url.lower().endswith("/invocations"):
+        url = url[: -len("/invocations")].rstrip("/")
+    return url
 
 
 def normalize_pi_alb_routing_mode(raw: str) -> str:
@@ -2933,7 +2992,7 @@ def build_pi_express_container_environment(
     if not backend_url:
         backend_url = f"http://{service_connect_discovery_name}:{port}"
     env = {
-        "APP_TYPE": "pi",
+        "APP_TYPE": "agent",
         "APP_CONFIG_PATH": "/workspace/doc_redaction/config/pi_agent.env.example",
         "PI_DEPLOYMENT_PROFILE": "aws-ecs",
         "PI_DEFAULT_PROVIDER": "amazon-bedrock",
@@ -2941,14 +3000,14 @@ def build_pi_express_container_environment(
         "PI_GRADIO_PORT": str(pi_port),
         "GRADIO_SERVER_PORT": str(pi_port),
         "GRADIO_SERVER_NAME": "0.0.0.0",
-        "PI_WORKSPACE_DIR": "/tmp/pi-workspace",
+        "PI_WORKSPACE_DIR": "/tmp/agent-workspace",
         "PI_WORKDIR": "/workspace/doc_redaction",
         "PI_UPLOAD_ROOT": "/tmp/gradio",
-        "PI_SESSION_DIR": "/tmp/pi-sessions",
-        "PI_CODING_AGENT_DIR": "/tmp/pi-agent",
-        "ACCESS_LOGS_FOLDER": "/tmp/pi-logs/",
-        "USAGE_LOGS_FOLDER": "/tmp/pi-usage/",
-        "FEEDBACK_LOGS_FOLDER": "/tmp/pi-feedback/",
+        "PI_SESSION_DIR": "/tmp/agent-sessions",
+        "PI_CODING_AGENT_DIR": "/tmp/agent-coding",
+        "ACCESS_LOGS_FOLDER": "/tmp/agent-logs/",
+        "USAGE_LOGS_FOLDER": "/tmp/agent-usage/",
+        "FEEDBACK_LOGS_FOLDER": "/tmp/agent-feedback/",
         "RUN_FASTAPI": "True",
         "RUN_AWS_FUNCTIONS": "True",
         "COGNITO_AUTH": "True" if cognito_auth else "False",
@@ -3002,11 +3061,17 @@ def build_express_pi_primary_container(
         container_port=container_port,
         aws_logs_configuration=ecs.CfnExpressGatewayService.ExpressGatewayServiceAwsLogsConfigurationProperty(
             log_group=log_group_name,
-            log_stream_prefix="ecs-pi",
+            log_stream_prefix="ecs-agent",
         ),
         environment=env_pairs,
         secrets=secrets,
     )
+
+
+# Agentic Express service (alias for Pi harness container builder).
+build_express_agentic_primary_container = build_express_pi_primary_container
+format_agentic_public_urls = format_pi_public_urls
+format_express_agentic_public_url = format_express_pi_public_url
 
 
 _ELBV2_RULE_DELETE_IGNORE = (
@@ -3398,7 +3463,7 @@ def build_pi_agent_container_environment(
     port = int(main_app_port)
     pi_port = int(pi_gradio_port)
     env = {
-        "APP_TYPE": "pi",
+        "APP_TYPE": "agent",
         "APP_CONFIG_PATH": "/workspace/doc_redaction/config/pi_agent.env",
         "PI_DEPLOYMENT_PROFILE": "aws-ecs",
         "PI_DEFAULT_PROVIDER": "amazon-bedrock",
@@ -3409,11 +3474,11 @@ def build_pi_agent_container_environment(
         "PI_WORKSPACE_DIR": "/home/user/app/workspace",
         "PI_WORKDIR": "/workspace/doc_redaction",
         "PI_UPLOAD_ROOT": "/tmp/gradio",
-        "PI_SESSION_DIR": "/tmp/pi-sessions",
-        "PI_CODING_AGENT_DIR": "/tmp/pi-agent",
-        "ACCESS_LOGS_FOLDER": "/tmp/pi-logs/",
-        "USAGE_LOGS_FOLDER": "/tmp/pi-usage/",
-        "FEEDBACK_LOGS_FOLDER": "/tmp/pi-feedback/",
+        "PI_SESSION_DIR": "/tmp/agent-sessions",
+        "PI_CODING_AGENT_DIR": "/tmp/agent-coding",
+        "ACCESS_LOGS_FOLDER": "/tmp/agent-logs/",
+        "USAGE_LOGS_FOLDER": "/tmp/agent-usage/",
+        "FEEDBACK_LOGS_FOLDER": "/tmp/agent-feedback/",
         "RUN_FASTAPI": "True",
         "RUN_AWS_FUNCTIONS": "True",
         "SAVE_OUTPUTS_TO_S3": "True",
@@ -3442,10 +3507,10 @@ PI_ECS_CONTAINER_COMMAND = [
 PI_ECS_CONTAINER_COMMAND_FALLBACK = [
     "bash",
     "-c",
-    "mkdir -p /tmp/pi-agent /tmp/pi-logs /tmp/pi-usage /tmp/pi-feedback "
-    "/home/user/app/workspace /tmp/gradio /tmp/pi-sessions && "
-    "chown -R user:user /tmp/pi-agent /tmp/pi-logs /tmp/pi-usage /tmp/pi-feedback "
-    "/home/user/app/workspace /tmp/gradio /tmp/pi-sessions && "
+    "mkdir -p /tmp/agent-coding /tmp/agent-logs /tmp/agent-usage /tmp/agent-feedback "
+    "/home/user/app/workspace /tmp/gradio /tmp/agent-sessions && "
+    "chown -R user:user /tmp/agent-coding /tmp/agent-logs /tmp/agent-usage /tmp/agent-feedback "
+    "/home/user/app/workspace /tmp/gradio /tmp/agent-sessions && "
     "cd /workspace/doc_redaction && "
     f"exec su -s /bin/bash user -c '{PI_ECS_APP_START_CMD}'",
 ]
@@ -3521,7 +3586,7 @@ def create_pi_agent_ecs_resources(
         container_name,
         image=ecs.ContainerImage.from_registry(f"{pi_ecr_image_uri}:latest"),
         logging=ecs.LogDriver.aws_logs(
-            stream_prefix="ecs-pi",
+            stream_prefix="ecs-agent",
             log_group=pi_log_group,
         ),
         environment_files=env_files if env_files else None,
@@ -3549,7 +3614,7 @@ def create_pi_agent_ecs_resources(
         ),
         ecs.MountPoint(
             source_volume=pi_volume.name,
-            container_path="/tmp/pi-sessions",
+            container_path="/tmp/agent-sessions",
             read_only=False,
         ),
     )

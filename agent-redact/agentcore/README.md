@@ -212,7 +212,7 @@ Bedrock model settings (`PI_DEFAULT_PROVIDER`, `AWS_REGION`, …) belong in `age
 
 **`DOC_REDACTION_GRADIO_URL`:** the Gradio Pi UI sends this on **every invoke** in `runtime_config`, taken from your local `config/pi_agent.env`. That overrides any URL baked into `agentcore.env` (for example an old HF Space default). You should see `Redaction backend for this turn: …` in the activity log with the same URL as the session info panel.
 
-For AWS CDK + AgentCore, `DOC_REDACTION_GRADIO_URL` is the **main Express HTTPS endpoint** (`ExpressServiceEndpoint` / `AgenticDocRedactionBackendUrl` stack output). Service Connect (`http://redaction:7860`) is only for in-container `pi` / `langgraph` orchestrators. For local Docker dev, set `DOC_REDACTION_GRADIO_URL=http://host.docker.internal:7861` in `pi_agent.env`.
+For AWS CDK + AgentCore, `DOC_REDACTION_GRADIO_URL` is the **main app HTTPS URL** (`CloudFrontDistributionURL` when `USE_CLOUDFRONT=True`, otherwise `ExpressServiceEndpoint` / `AgenticDocRedactionBackendUrl` stack output). Service Connect (`http://redaction:7860`) is only for in-container `pi` / `langgraph` orchestrators. For local Docker dev, set `DOC_REDACTION_GRADIO_URL=http://host.docker.internal:7861` in `pi_agent.env`.
 
 ```bash
 PI_DEFAULT_PROVIDER=amazon-bedrock
@@ -279,7 +279,45 @@ Programmatic invoke uses the AWS SDK `InvokeAgentRuntime` API with the runtime A
 
 The [CDK installer](../../cdk/cdk_install.py) demo profile (`--profile demo --enable-pi`) defaults to **AgentCore orchestration** for the Express agent Gradio UI. The Pi coding-agent CLI remains in the container image but is unused when `AGENT_ORCHESTRATOR=agentcore`.
 
-Deploy is **two-phase** — the runtime URL does not exist until after `agentcore deploy`:
+#### Option C — CDK-native runtime from ECR (recommended for demo)
+
+The installer can build an **ARM64** runtime image from this monorepo (CodeBuild → ECR) and create a **Bedrock AgentCore Runtime** via CDK (`aws_bedrockagentcore.CfnRuntime`) — no local `agentcore deploy` CLI required.
+
+**Phase 1 — infra + runtime image**
+
+```powershell
+python cdk/cdk_install.py --profile demo --enable-agentic `
+  --enable-agentcore-cdk-deploy --yes
+```
+
+This sets `AGENTCORE_CDK_DEPLOY=True`, creates an ARM CodeBuild project and ECR repo (`agent-redact/agentcore/Dockerfile.runtime`), and runs `post_cdk_build_quickstart.py` to push the image.
+
+**Phase 2 — create runtime + wire URL**
+
+After the AgentCore CodeBuild push completes, re-run (or let the installer prompt after quickstart):
+
+```powershell
+python cdk/cdk_install.py --profile demo --enable-agentic `
+  --enable-agentcore-cdk-runtime --yes
+```
+
+This sets `ENABLE_AGENTCORE_CDK_RUNTIME=True`, deploys `CfnRuntime` pointing at the ECR image, reads `AgentCoreRuntimeArn` from stack outputs, derives `AGENTCORE_RUNTIME_URL`, patches `config/pi_agent.env` / `cdk/config/cdk_config.env`, re-uploads to S3, and recycles the agent Express service.
+
+Config keys (also in `cdk/config/cdk_config.env`):
+
+| Variable | Role |
+|----------|------|
+| `AGENTCORE_CDK_DEPLOY` | Phase 1: CodeBuild + ECR + execution IAM role |
+| `ENABLE_AGENTCORE_CDK_RUNTIME` | Phase 2: create `AWS::BedrockAgentCore::Runtime` |
+| `ECR_AGENTCORE_REPO_NAME` | ECR repository for the runtime image |
+| `CODEBUILD_AGENTCORE_PROJECT_NAME` | ARM64 CodeBuild project |
+| `AGENTCORE_RUNTIME_NAME` | Runtime resource name (default `{CDK_PREFIX}RedactionAgent`) |
+
+The runtime image is built from the **doc_redaction monorepo** (`GITHUB_REPO_*`); it copies `agent-redact/`, `redaction_langgraph/`, and `pi/` helpers — no separate GitHub repo required.
+
+#### Option A/B — manual CLI deploy (alternative)
+
+Deploy is **two-phase** when using the AgentCore CLI — the runtime URL does not exist until after `agentcore deploy`:
 
 **Phase 1 — AgentCore runtime (before or after CDK; URL required before the agent UI works)**
 
@@ -384,7 +422,7 @@ If invoke returns **401** or **403**, check AgentCore inbound auth configuration
 |-------|----------------|
 | Runtime init timeout / `RuntimeClientError: initialization time exceeded` | Container failed to import `main.py` within 30s. Check CloudWatch `/aws/bedrock-agentcore/runtimes/RedactionAgent_RedactionAgent-ye5Jfw7gKj/` **runtime-logs**. Common cause: packaged bootstrap calling Pi-only modules (`pi_workspace_skills`). Re-run `package_runtime.py` and redeploy. |
 | 403 on `/invocations` | Runtime uses **AWS IAM**; Gradio must call via SigV4 (`boto3` `invoke_agent_runtime`) or set `AGENTCORE_API_KEY` for CUSTOM_JWT. Ensure `PI_AWS_PROFILE` / `~/.aws` in the pi-agent container and `bedrock-agentcore:InvokeAgentRuntime` on the runtime ARN. |
-| Agent cannot reach doc_redaction | `DOC_REDACTION_GRADIO_URL` must be the **main Express HTTPS URL** for AgentCore (not Service Connect). Check `AgenticDocRedactionBackendUrl` stack output and activity log `Redaction backend for this turn: …` |
+| Agent cannot reach doc_redaction | `DOC_REDACTION_GRADIO_URL` must be the **main app HTTPS URL** for AgentCore (not Service Connect). Check `CloudFrontDistributionURL` (when CloudFront is enabled) or `AgenticDocRedactionBackendUrl` stack output and activity log `Redaction backend for this turn: …` |
 | CDK deploy fails | `cdk bootstrap`; `agentcore deploy -v` for verbose AgentCore errors |
 | `Failed to parse: \`-\`` during **Synthesize CloudFormation** | Windows + path with spaces (e.g. `OneDrive - Lambeth Council`). AgentCore CDK runs `uv` with `shell: true` and unquoted paths; the `-` in the folder name is passed to `uv` as a bogus package. See below. |
 | `hardlink` / `os error 396` during synth | Project on OneDrive; set `UV_LINK_MODE=copy` before deploy |
