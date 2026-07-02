@@ -143,7 +143,7 @@ For llama.cpp + Pi together, see the compose examples at the top of [docker-comp
 
 #### Option 4 - Installation on AWS with CDK
 
-The repo contains a [CDK folder](https://github.com/seanpedrick-case/doc_redaction/tree/main/cdk), that contains all the files you need to setup and deploy to an AWS environment with CDK. The installation wizard is [cdk_install.py](https://github.com/seanpedrick-case/doc_redaction/blob/main/cdk/cdk_install.py), which provides a number of options to deploy the Document Redaction App to AWS for demonstration or production. More details on CDK deployment can be found in the [Installation Guide](https://seanpedrick-case.github.io/doc_redaction/src/installation_guide.html).
+The repo contains a [CDK folder](https://github.com/seanpedrick-case/doc_redaction/tree/main/cdk), that contains all the files you need to setup and deploy to an AWS environment with CDK. The installation wizard is [cdk_install.py](https://github.com/seanpedrick-case/doc_redaction/blob/main/cdk/cdk_install.py), which provides a number of options to deploy the Document Redaction App to AWS for demonstration or production. CDK-specific notes (including CloudFront CSP/CORS and the post-deploy refresh deploy) are in [cdk/README.md](cdk/README.md). More details on CDK deployment can be found in the [Installation Guide](https://seanpedrick-case.github.io/doc_redaction/src/installation_guide.html).
 
 ### 2. Install prerequisites: Tesseract and Poppler
 

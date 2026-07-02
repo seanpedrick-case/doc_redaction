@@ -318,7 +318,7 @@ CLUSTER_NAME = get_or_create_env_var("CLUSTER_NAME", f"{CDK_PREFIX}Cluster")
 ECS_SERVICE_NAME = get_or_create_env_var("ECS_SERVICE_NAME", f"{CDK_PREFIX}ECSService")
 # Second Fargate service when ENABLE_PI_AGENT_ECS_SERVICE=True (legacy path only).
 ECS_PI_SERVICE_NAME = get_or_create_env_var(
-    "ECS_PI_SERVICE_NAME", f"{CDK_PREFIX}PiAgentService"
+    "ECS_PI_SERVICE_NAME", f"{CDK_PREFIX}AgentService"
 )
 ECS_TASK_ROLE_NAME = get_or_create_env_var(
     "ECS_TASK_ROLE_NAME", f"{CDK_PREFIX}TaskRole"
@@ -400,10 +400,35 @@ CLOUDFRONT_DISTRIBUTION_NAME = get_or_create_env_var(
 CLOUDFRONT_DOMAIN = get_or_create_env_var(
     "CLOUDFRONT_DOMAIN", "cloudfront_placeholder.net"
 )
-# Attach CSP / security response headers to the CDK CloudFront distribution (us-east-1 stack).
+# Create the CSP / security response headers policy resource (appears in the account's
+# CloudFront policy list so it can be attached manually later).
 CLOUDFRONT_ENABLE_SECURE_RESPONSE_HEADERS = get_or_create_env_var(
     "CLOUDFRONT_ENABLE_SECURE_RESPONSE_HEADERS", "True"
 )
+# Attach that policy to the distribution's behaviors. Off by default: attaching the CSP
+# headers tends to break demonstration mode (Cognito redirects, mixed Express origins),
+# so the policy is created but left detached unless explicitly enabled.
+CLOUDFRONT_ATTACH_SECURE_RESPONSE_HEADERS = get_or_create_env_var(
+    "CLOUDFRONT_ATTACH_SECURE_RESPONSE_HEADERS", "False"
+)
+# CloudFront-scoped WAF (requires us-east-1 wafv2). Off by default; distribution lives in RedactionStack.
+ENABLE_CLOUDFRONT_WAF = get_or_create_env_var("ENABLE_CLOUDFRONT_WAF", "False")
+# Edge auth: magic-link (demo), cognito (production ALB flow), or none.
+CLOUDFRONT_AUTH_MODE = (
+    get_or_create_env_var("CLOUDFRONT_AUTH_MODE", "cognito").strip().lower()
+)
+CLOUDFRONT_MAGIC_LINK_COOKIE_NAME = get_or_create_env_var(
+    "CLOUDFRONT_MAGIC_LINK_COOKIE_NAME", "doc-redaction-auth"
+)
+CLOUDFRONT_MAGIC_LINK_COOKIE_MAX_AGE_SEC = int(
+    get_or_create_env_var("CLOUDFRONT_MAGIC_LINK_COOKIE_MAX_AGE_SEC", "604800")
+)
+_CLOUDFRONT_AUTH_MODES = frozenset({"magic-link", "cognito", "none"})
+if CLOUDFRONT_AUTH_MODE not in _CLOUDFRONT_AUTH_MODES:
+    raise ValueError(
+        f"CLOUDFRONT_AUTH_MODE must be one of {sorted(_CLOUDFRONT_AUTH_MODES)}; "
+        f"got '{CLOUDFRONT_AUTH_MODE}'."
+    )
 # Optional override for manifest-src (Cognito hosted UI). Default: https://{COGNITO_USER_POOL_DOMAIN_PREFIX}.auth.{AWS_REGION}.amazoncognito.com
 COGNITO_USER_POOL_LOGIN_URL = get_or_create_env_var("COGNITO_USER_POOL_LOGIN_URL", "")
 
@@ -662,17 +687,17 @@ if ENABLE_HEADLESS_DEPLOYMENT == "True":
 ENABLE_PI_AGENT_ECS_SERVICE = get_or_create_env_var(
     "ENABLE_PI_AGENT_ECS_SERVICE", "False"
 )
-ECR_PI_REPO_NAME = get_or_create_env_var(
-    "ECR_PI_REPO_NAME", f"{CDK_PREFIX}pi-agent".lower()
+ECR_AGENT_REPO_NAME = get_or_create_env_var(
+    "ECR_AGENT_REPO_NAME", f"{CDK_PREFIX}agent".lower()
 )
 CODEBUILD_PI_PROJECT_NAME = get_or_create_env_var(
-    "CODEBUILD_PI_PROJECT_NAME", f"{CDK_PREFIX}CodeBuildPiAgent"
+    "CODEBUILD_PI_PROJECT_NAME", f"{CDK_PREFIX}CodeBuildAgentProject"
 )
 ECS_PI_TASK_DEFINITION_NAME = get_or_create_env_var(
-    "ECS_PI_TASK_DEFINITION_NAME", f"{CDK_PREFIX}PiAgentTaskDefinition"
+    "ECS_PI_TASK_DEFINITION_NAME", f"{CDK_PREFIX}AgentTaskDefinition"
 )
 ECS_PI_SECURITY_GROUP_NAME = get_or_create_env_var(
-    "ECS_PI_SECURITY_GROUP_NAME", f"{CDK_PREFIX}SecurityGroupPiAgent"
+    "ECS_PI_SECURITY_GROUP_NAME", f"{CDK_PREFIX}SecurityGroupAgent"
 )
 ECS_PI_LOG_GROUP_NAME = get_or_create_env_var(
     "ECS_PI_LOG_GROUP_NAME", f"/ecs/{ECS_PI_SERVICE_NAME}-logs".lower()
@@ -680,12 +705,12 @@ ECS_PI_LOG_GROUP_NAME = get_or_create_env_var(
 ECS_PI_TASK_CPU_SIZE = get_or_create_env_var("ECS_PI_TASK_CPU_SIZE", "1024")
 ECS_PI_TASK_MEMORY_SIZE = get_or_create_env_var("ECS_PI_TASK_MEMORY_SIZE", "2048")
 PI_GRADIO_PORT = get_or_create_env_var("PI_GRADIO_PORT", "7862")
-# Pi ALB routing: path (default /pi on shared host e.g. CloudFront), host, or both.
+# Pi ALB routing: path (default /agent on shared host e.g. CloudFront), host, or both.
 PI_ALB_ROUTING = get_or_create_env_var("PI_ALB_ROUTING", "path").strip().lower()
-PI_ALB_PATH_PREFIX = get_or_create_env_var("PI_ALB_PATH_PREFIX", "/pi")
+PI_ALB_PATH_PREFIX = get_or_create_env_var("PI_ALB_PATH_PREFIX", "/agent")
 PI_ALB_HOST_HEADER = get_or_create_env_var("PI_ALB_HOST_HEADER", "")
 PI_ALB_TARGET_GROUP_NAME = get_or_create_env_var(
-    "PI_ALB_TARGET_GROUP_NAME", f"{CDK_PREFIX}PiAgentTG"[-32:]
+    "PI_ALB_TARGET_GROUP_NAME", f"{CDK_PREFIX}AgentTG"[-32:]
 )
 PI_ALB_LISTENER_RULE_PRIORITY = int(
     get_or_create_env_var("PI_ALB_LISTENER_RULE_PRIORITY", "3")
@@ -694,8 +719,8 @@ PI_AGENT_ENV_S3_KEY = get_or_create_env_var("PI_AGENT_ENV_S3_KEY", "pi_agent.env
 
 
 def _normalize_pi_alb_path_prefix(raw: str) -> str:
-    segment = (raw or "pi").strip().strip("/")
-    return f"/{segment}" if segment else "/pi"
+    segment = (raw or "agent").strip().strip("/")
+    return f"/{segment}" if segment else "/agent"
 
 
 PI_ALB_PATH_PREFIX_NORMALIZED = _normalize_pi_alb_path_prefix(PI_ALB_PATH_PREFIX)
@@ -721,13 +746,13 @@ ENABLE_PI_AGENT_EXPRESS_SERVICE = get_or_create_env_var(
     "ENABLE_PI_AGENT_EXPRESS_SERVICE", "False"
 )
 ECS_PI_EXPRESS_SERVICE_NAME = get_or_create_env_var(
-    "ECS_PI_EXPRESS_SERVICE_NAME", f"{CDK_PREFIX}PiExpressService"
+    "ECS_PI_EXPRESS_SERVICE_NAME", f"{CDK_PREFIX}AgentExpressService"
 )
 ECS_PI_EXPRESS_HEALTH_CHECK_PATH = get_or_create_env_var(
     "ECS_PI_EXPRESS_HEALTH_CHECK_PATH", "/health"
 )
 ECS_PI_EXPRESS_SECURITY_GROUP_NAME = get_or_create_env_var(
-    "ECS_PI_EXPRESS_SECURITY_GROUP_NAME", f"{CDK_PREFIX}SecurityGroupPiExpress"
+    "ECS_PI_EXPRESS_SECURITY_GROUP_NAME", f"{CDK_PREFIX}SecurityGroupAgentExpress"
 )
 # Service Connect port names for Express services (applied in post_cdk_build_quickstart.py).
 ECS_EXPRESS_SC_PORT_NAME = get_or_create_env_var(
@@ -739,7 +764,7 @@ ECS_PI_EXPRESS_SC_PORT_NAME = get_or_create_env_var(
 
 if ENABLE_PI_AGENT_ECS_SERVICE == "True" and ENABLE_PI_AGENT_EXPRESS_SERVICE == "True":
     raise ValueError(
-        "Enable at most one Pi deployment mode: ENABLE_PI_AGENT_ECS_SERVICE (legacy Fargate) "
+        "Enable at most one agent deployment mode: ENABLE_PI_AGENT_ECS_SERVICE (legacy Fargate) "
         "or ENABLE_PI_AGENT_EXPRESS_SERVICE (Express), not both."
     )
 if ENABLE_PI_AGENT_EXPRESS_SERVICE == "True" and USE_ECS_EXPRESS_MODE != "True":
@@ -750,7 +775,7 @@ if ENABLE_PI_AGENT_EXPRESS_SERVICE == "True" and USE_ECS_EXPRESS_MODE != "True":
 if ENABLE_PI_AGENT_ECS_SERVICE == "True" and USE_ECS_EXPRESS_MODE == "True":
     raise ValueError(
         "ENABLE_PI_AGENT_ECS_SERVICE=True requires legacy Fargate (USE_ECS_EXPRESS_MODE=False). "
-        "For Pi on Express, use ENABLE_PI_AGENT_EXPRESS_SERVICE=True instead."
+        "For the agent on Express, use ENABLE_PI_AGENT_EXPRESS_SERVICE=True instead."
     )
 if ENABLE_PI_AGENT_ECS_SERVICE == "True" and ENABLE_ECS_SERVICE_CONNECT != "True":
     raise ValueError(
@@ -767,6 +792,22 @@ if ENABLE_PI_AGENT_ECS_SERVICE == "True":
 ENABLE_AGENTCORE_RUNTIME = get_or_create_env_var("ENABLE_AGENTCORE_RUNTIME", "False")
 AGENTCORE_RUNTIME_URL = get_or_create_env_var("AGENTCORE_RUNTIME_URL", "")
 AGENTCORE_API_KEY = get_or_create_env_var("AGENTCORE_API_KEY", "")
+# CDK-native AgentCore: CodeBuild (arm64) + ECR image + optional CfnRuntime (two-phase deploy).
+AGENTCORE_CDK_DEPLOY = get_or_create_env_var("AGENTCORE_CDK_DEPLOY", "False")
+ENABLE_AGENTCORE_CDK_RUNTIME = get_or_create_env_var(
+    "ENABLE_AGENTCORE_CDK_RUNTIME", "False"
+)
+ECR_AGENTCORE_REPO_NAME = get_or_create_env_var(
+    "ECR_AGENTCORE_REPO_NAME", f"{CDK_PREFIX}agentcore-runtime".lower()
+)
+CODEBUILD_AGENTCORE_PROJECT_NAME = get_or_create_env_var(
+    "CODEBUILD_AGENTCORE_PROJECT_NAME", f"{CDK_PREFIX}CodeBuildAgentCoreProject"
+)
+AGENTCORE_RUNTIME_ROLE_ARN = get_or_create_env_var("AGENTCORE_RUNTIME_ROLE_ARN", "")
+AGENTCORE_NETWORK_MODE = get_or_create_env_var("AGENTCORE_NETWORK_MODE", "PUBLIC")
+AGENTCORE_RUNTIME_NAME = get_or_create_env_var(
+    "AGENTCORE_RUNTIME_NAME", f"{CDK_PREFIX}RedactionAgent"
+)
 AGENT_ORCHESTRATOR_DEFAULT = get_or_create_env_var("AGENT_ORCHESTRATOR", "pi")
 # Optional JSON policies for the AgentCore *runtime* task role (Bedrock invoke, secrets, logs).
 # Not used by CDK stack synthesis — attach manually when deploying the runtime via agentcore CLI.

@@ -298,7 +298,8 @@ CONFIG_FOLDER = get_or_create_env_var("CONFIG_FOLDER", "config/")
 CONFIG_FOLDER = ensure_folder_within_app_directory(CONFIG_FOLDER)
 
 APP_TYPE = get_or_create_env_var("APP_TYPE", "redaction-app")
-if APP_TYPE == "pi":
+# "agent" is the current agentic UI app type; "pi" is accepted for backward compatibility.
+if APP_TYPE.strip().lower() in ("agent", "pi"):
     APP_CONFIG_FILE = "pi_agent.env"
 else:
     APP_CONFIG_FILE = "app_config.env"

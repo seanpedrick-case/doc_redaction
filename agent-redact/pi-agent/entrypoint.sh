@@ -4,13 +4,13 @@ set -e
 echo "Starting Pi agent (profile=${PI_DEPLOYMENT_PROFILE:-unknown})"
 
 for dir in \
-    "${PI_CODING_AGENT_DIR:-/tmp/pi-agent}" \
+    "${PI_CODING_AGENT_DIR:-/tmp/agent-coding}" \
     "${PI_WORKSPACE_DIR:-/home/user/app/workspace}" \
     "${PI_UPLOAD_ROOT:-/tmp/gradio}" \
-    "${PI_SESSION_DIR:-/tmp/pi-sessions}" \
-    "${ACCESS_LOGS_FOLDER:-/tmp/pi-logs}" \
-    "${USAGE_LOGS_FOLDER:-/tmp/pi-usage}" \
-    "${FEEDBACK_LOGS_FOLDER:-/tmp/pi-feedback}" \
+    "${PI_SESSION_DIR:-/tmp/agent-sessions}" \
+    "${ACCESS_LOGS_FOLDER:-/tmp/agent-logs}" \
+    "${USAGE_LOGS_FOLDER:-/tmp/agent-usage}" \
+    "${FEEDBACK_LOGS_FOLDER:-/tmp/agent-feedback}" \
     "${MPLCONFIGDIR:-/tmp/matplotlib_cache}" \
     "${XDG_CACHE_HOME:-/tmp/xdg_cache/user_1000}"; do
     mkdir -p "$dir" 2>/dev/null || true

@@ -94,14 +94,14 @@ ENV DOC_REDACTION_GRADIO_URL=https://seanpedrickcase-document-redaction.hf.space
 ENV HOME=${APP_HOME}
 ENV PI_WORKDIR=/workspace/doc_redaction
 # Fargate uses volume mounts under ${APP_HOME}/app/workspace (CDK chown entrypoint).
-# ECS Express has no mounts — CDK sets PI_WORKSPACE_DIR=/tmp/pi-workspace at deploy.
+# ECS Express has no mounts — CDK sets PI_WORKSPACE_DIR=/tmp/agent-workspace at deploy.
 ENV PI_WORKSPACE_DIR=${APP_HOME}/app/workspace
 ENV PI_UPLOAD_ROOT=/tmp/gradio
-ENV PI_SESSION_DIR=/tmp/pi-sessions
-ENV PI_CODING_AGENT_DIR=/tmp/pi-agent
-ENV ACCESS_LOGS_FOLDER=/tmp/pi-logs/
-ENV USAGE_LOGS_FOLDER=/tmp/pi-usage/
-ENV FEEDBACK_LOGS_FOLDER=/tmp/pi-feedback/
+ENV PI_SESSION_DIR=/tmp/agent-sessions
+ENV PI_CODING_AGENT_DIR=/tmp/agent-coding
+ENV ACCESS_LOGS_FOLDER=/tmp/agent-logs/
+ENV USAGE_LOGS_FOLDER=/tmp/agent-usage/
+ENV FEEDBACK_LOGS_FOLDER=/tmp/agent-feedback/
 ENV PI_OFFLINE=1
 ENV PI_SKIP_VERSION_CHECK=1
 ENV PI_GRADIO_SHOW_EXAMPLES=true
@@ -134,18 +134,18 @@ RUN useradd -m -u 1000 user \
         ${APP_HOME}/app/workspace \
         ${APP_HOME}/.pi/agent \
         /tmp/gradio \
-        /tmp/pi-sessions \
+        /tmp/agent-sessions \
         /tmp/matplotlib_cache \
         ${XDG_CACHE_HOME} \
     && chown user:user \
         ${APP_HOME}/app/workspace \
         ${APP_HOME}/.pi \
         /tmp/gradio \
-        /tmp/pi-sessions \
+        /tmp/agent-sessions \
         /tmp/matplotlib_cache \
         ${XDG_CACHE_HOME} \
     && chmod 755 ${APP_HOME}/app/workspace ${APP_HOME}/.pi \
-    && chmod 1777 /tmp/gradio /tmp/pi-sessions /tmp/matplotlib_cache \
+    && chmod 1777 /tmp/gradio /tmp/agent-sessions /tmp/matplotlib_cache \
     && chmod 700 ${XDG_CACHE_HOME} \
     && chown -R root:root ${PI_WORKDIR} \
     && find ${PI_WORKDIR} -type d -exec chmod 755 {} \; \
@@ -161,7 +161,7 @@ RUN sed -i 's/\r$//' /usr/local/bin/entrypoint-ecs.sh ${APP_HOME}/app/entrypoint
 # Writable paths only via runtime mounts (read-only root FS friendly).
 VOLUME ["${APP_HOME}/app/workspace"]
 VOLUME ["/tmp/gradio"]
-VOLUME ["/tmp/pi-sessions"]
+VOLUME ["/tmp/agent-sessions"]
 VOLUME ["/tmp/matplotlib_cache"]
 VOLUME ["${XDG_CACHE_HOME}"]
 VOLUME ["/tmp"]

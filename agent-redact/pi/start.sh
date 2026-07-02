@@ -8,7 +8,7 @@ export PYTHONPATH="${PI_WORKDIR}:${PI_WORKDIR}/agent-redact/pi:${PYTHONPATH:-}"
 
 cd "$PI_WORKDIR"
 
-export APP_TYPE="${APP_TYPE:-pi}"
+export APP_TYPE="${APP_TYPE:-agent}"
 export APP_CONFIG_PATH="${APP_CONFIG_PATH:-$PI_WORKDIR/config/pi_agent.env}"
 
 mkdir -p "${PI_WORKSPACE_DIR:-/home/user/app/workspace}"

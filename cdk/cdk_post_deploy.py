@@ -56,8 +56,10 @@ _CONTAINER_REGISTER_OMIT_KEYS = frozenset(
 )
 
 
-def start_codebuild_build(project_name: str, aws_region: str = AWS_REGION) -> None:
-    """Start an existing CodeBuild project build."""
+def start_codebuild_build(
+    project_name: str, aws_region: str = AWS_REGION
+) -> Optional[str]:
+    """Start an existing CodeBuild project build. Returns the build ID, or None on failure."""
     client = boto3.client("codebuild", region_name=aws_region)
 
     try:
@@ -70,10 +72,127 @@ def start_codebuild_build(project_name: str, aws_region: str = AWS_REGION) -> No
             f"https://{aws_region}.console.aws.amazon.com/codesuite/codebuild/projects/"
             f"{project_name}/build/{build_id.split(':')[-1]}/detail"
         )
+        return build_id
     except client.exceptions.ResourceNotFoundException:
         print(f"Error: Project '{project_name}' not found in region '{aws_region}'.")
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
+    return None
+
+
+_CODEBUILD_TERMINAL_STATUSES = frozenset(
+    {"SUCCEEDED", "FAILED", "FAULT", "STOPPED", "TIMED_OUT"}
+)
+
+
+def wait_for_codebuild_build(
+    build_id: str,
+    *,
+    aws_region: str = AWS_REGION,
+    poll_interval_sec: int = 15,
+    timeout_sec: int = 3600,
+) -> bool:
+    """Poll a CodeBuild build until it finishes. Returns True if it succeeded."""
+    client = boto3.client("codebuild", region_name=aws_region)
+    deadline = time.time() + timeout_sec
+    short_id = build_id.split(":")[-1]
+
+    while time.time() < deadline:
+        builds = client.batch_get_builds(ids=[build_id]).get("builds") or []
+        if not builds:
+            print(f"  CodeBuild build {short_id} not found.")
+            return False
+        status = builds[0]["buildStatus"]
+        print(f"  CodeBuild {short_id}: {status}")
+        if status in _CODEBUILD_TERMINAL_STATUSES:
+            return status == "SUCCEEDED"
+        time.sleep(poll_interval_sec)
+
+    print(f"  Timed out waiting for CodeBuild build {short_id}.")
+    return False
+
+
+def get_latest_codebuild_build_id(
+    project_name: str,
+    *,
+    aws_region: str = AWS_REGION,
+) -> Optional[str]:
+    """Return the most recent build ID for a CodeBuild project, if any."""
+    client = boto3.client("codebuild", region_name=aws_region)
+    try:
+        resp = client.list_builds_for_project(
+            projectName=project_name,
+            sortOrder="DESCENDING",
+        )
+        ids = resp.get("ids") or []
+        return ids[0] if ids else None
+    except client.exceptions.ResourceNotFoundException:
+        return None
+
+
+def ecr_image_with_tag_exists(
+    repository_name: str,
+    tag: str = "latest",
+    *,
+    aws_region: str = AWS_REGION,
+) -> bool:
+    """Return True when the ECR repository has an image with the given tag."""
+    client = boto3.client("ecr", region_name=aws_region)
+    try:
+        resp = client.describe_images(
+            repositoryName=repository_name,
+            imageIds=[{"imageTag": tag}],
+        )
+        return bool(resp.get("imageDetails"))
+    except client.exceptions.RepositoryNotFoundException:
+        return False
+    except Exception as exc:
+        if exc.__class__.__name__ == "ImageNotFoundException":
+            return False
+        raise
+
+
+def wait_for_agentcore_ecr_image(
+    *,
+    repository_name: str,
+    codebuild_project: str,
+    build_id: Optional[str] = None,
+    aws_region: str = AWS_REGION,
+    timeout_sec: int = 3600,
+) -> bool:
+    """
+    Wait for the AgentCore runtime image in ECR.
+
+    If the image is not present yet, polls the given (or latest) CodeBuild build
+    until it succeeds, then re-checks ECR.
+    """
+    if ecr_image_with_tag_exists(repository_name, aws_region=aws_region):
+        print(f"  AgentCore ECR image already present in {repository_name}:latest")
+        return True
+
+    resolved_build_id = build_id or get_latest_codebuild_build_id(
+        codebuild_project,
+        aws_region=aws_region,
+    )
+    if not resolved_build_id:
+        print(
+            f"  No CodeBuild history for {codebuild_project}; "
+            "cannot wait for AgentCore image."
+        )
+        return False
+
+    print(f"  Waiting for AgentCore CodeBuild ({codebuild_project})...")
+    if not wait_for_codebuild_build(
+        resolved_build_id,
+        aws_region=aws_region,
+        timeout_sec=timeout_sec,
+    ):
+        return False
+
+    ready = ecr_image_with_tag_exists(repository_name, aws_region=aws_region)
+    if not ready:
+        print(f"  CodeBuild finished but {repository_name}:latest is not in ECR yet.")
+    return ready
 
 
 def upload_file_to_s3(
@@ -1140,8 +1259,16 @@ def print_express_mode_next_steps(
     from cdk_functions import format_express_pi_public_url
 
     aws_region = region or values.get("AWS_REGION") or AWS_REGION
+    use_cloudfront = values.get("USE_CLOUDFRONT") == "True"
+    magic_link = values.get("CLOUDFRONT_AUTH_MODE") == "magic-link"
 
     main_raw = (values.get("ECS_EXPRESS_COGNITO_REDIRECT_BASE") or "").strip()
+    if use_cloudfront:
+        cf_domain = (
+            get_stack_output(stack_name, "CloudFrontDistributionURL", aws_region) or ""
+        )
+        if cf_domain:
+            main_raw = f"https://{cf_domain.strip()}"
     if not main_raw:
         main_raw = (
             get_stack_output(stack_name, "ExpressServiceEndpoint", aws_region) or ""
@@ -1150,8 +1277,24 @@ def print_express_mode_next_steps(
 
     print("\nDone. Next steps:")
     print("  - Wait 10 minutes for app deployment to finish.")
-    pi_express = values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True"
-    if pi_express:
+    if magic_link:
+        login_url = get_stack_output(stack_name, "RedactionLoginUrl", aws_region) or ""
+        if login_url:
+            print(
+                "  - Open RedactionLoginUrl from stack outputs once (sets a 7-day cookie), "
+                "then use RedactionUrl for normal browsing."
+            )
+            print(f"  - RedactionLoginUrl: {login_url}")
+        else:
+            print(
+                "  - Magic-link auth: see RedactionLoginUrl and RedactionAuthToken stack outputs."
+            )
+        prefix = (values.get("PI_ALB_PATH_PREFIX") or "/agent").strip()
+        if not prefix.startswith("/"):
+            prefix = f"/{prefix}"
+        if values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True" and main_url:
+            print(f"  - Agentic UI (after unlock): {main_url.rstrip('/')}{prefix}/")
+    elif values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True":
         print(
             "- Register a Cognito user in AWS Console, change password at the login page URL "
             "(available in the Cognito AWS console -> App Clients -> Login pages -> View login page "
@@ -1168,11 +1311,14 @@ def print_express_mode_next_steps(
             "False in the ECS task definition / ECS service options."
         )
     if main_url:
-        print(f"  - The main redaction app can be accessed at {main_url}")
+        label = "CloudFront URL" if use_cloudfront else "main redaction app"
+        print(f"  - The {label} can be accessed at {main_url}")
+    elif use_cloudfront:
+        print("  - App URL: see CloudFrontDistributionURL stack output")
     else:
         print("  - The main redaction app URL: see ExpressServiceEndpoint stack output")
 
-    if values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True":
+    if values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True" and not magic_link:
         agentic_raw = (
             get_stack_output(stack_name, "AgenticExpressEndpoint", aws_region) or ""
         )
@@ -1202,19 +1348,31 @@ def sync_pi_agent_doc_redaction_url_for_agentcore(
     set at synth time, but this keeps the on-disk env file aligned for local reference
     and S3 uploads.
     """
-    from cdk_config import ENABLE_AGENTCORE_RUNTIME, normalize_https_redirect_url
+    from cdk_config import (
+        ENABLE_AGENTCORE_RUNTIME,
+        USE_CLOUDFRONT,
+        normalize_https_redirect_url,
+    )
 
     if ENABLE_AGENTCORE_RUNTIME != "True":
         return None
     aws_region = region or AWS_REGION
-    endpoint = get_stack_output(stack_name, "ExpressServiceEndpoint", aws_region)
-    if not endpoint:
-        print(
-            "Warning: ExpressServiceEndpoint not found; "
-            "pi_agent.env DOC_REDACTION_GRADIO_URL not updated for AgentCore."
+    url = ""
+    if USE_CLOUDFRONT == "True":
+        cf_domain = get_stack_output(
+            stack_name, "CloudFrontDistributionURL", aws_region
         )
-        return None
-    url = normalize_https_redirect_url(endpoint)
+        if cf_domain:
+            url = normalize_https_redirect_url(f"https://{cf_domain.strip()}")
+    if not url:
+        endpoint = get_stack_output(stack_name, "ExpressServiceEndpoint", aws_region)
+        if not endpoint:
+            print(
+                "Warning: ExpressServiceEndpoint / CloudFrontDistributionURL not found; "
+                "pi_agent.env DOC_REDACTION_GRADIO_URL not updated for AgentCore."
+            )
+            return None
+        url = normalize_https_redirect_url(endpoint)
     env_path = pi_agent_env_path or (
         Path(__file__).resolve().parent.parent / "config" / "pi_agent.env"
     )
@@ -1234,6 +1392,111 @@ def sync_pi_agent_doc_redaction_url_for_agentcore(
         out.append(f"DOC_REDACTION_GRADIO_URL={url}")
     env_path.write_text("\n".join(out) + ("\n" if out else ""), encoding="utf-8")
     print(f"Updated {env_path} DOC_REDACTION_GRADIO_URL for AgentCore: {url}")
+    return url
+
+
+def _patch_env_key_values(path: Union[str, Path], updates: Dict[str, str]) -> None:
+    """Merge key=value pairs into a dotenv-style file (creates keys if missing)."""
+    path = Path(path)
+    lines: List[str] = []
+    seen: set[str] = set()
+    if path.is_file():
+        lines = path.read_text(encoding="utf-8").splitlines()
+    out: List[str] = []
+    for line in lines:
+        if "=" in line and not line.lstrip().startswith("#"):
+            key = line.split("=", 1)[0].strip()
+            if key in updates:
+                out.append(f"{key}={updates[key]}")
+                seen.add(key)
+                continue
+        out.append(line)
+    for key, value in updates.items():
+        if key not in seen:
+            out.append(f"{key}={value}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(out) + ("\n" if out else ""), encoding="utf-8")
+
+
+def sync_agentcore_runtime_url_from_stack(
+    *,
+    stack_name: str = "RedactionStack",
+    region: Optional[str] = None,
+    pi_agent_env_path: Optional[Path] = None,
+    cdk_env_path: Optional[Path] = None,
+    recycle_agent_service: bool = True,
+) -> Optional[str]:
+    """
+    Read ``AgentCoreRuntimeArn`` from the stack, derive ``AGENTCORE_RUNTIME_URL``,
+    patch local env files, re-upload ``pi_agent.env`` to S3, and recycle the agent
+    Express service so the new URL is picked up.
+    """
+    from cdk_config import (
+        CLUSTER_NAME,
+        ECS_PI_EXPRESS_SERVICE_NAME,
+        ENABLE_AGENTCORE_CDK_RUNTIME,
+        ENABLE_PI_AGENT_EXPRESS_SERVICE,
+        S3_LOG_CONFIG_BUCKET_NAME,
+    )
+    from cdk_functions import (
+        derive_agentcore_runtime_url,
+        normalize_agentcore_runtime_url,
+    )
+
+    if ENABLE_AGENTCORE_CDK_RUNTIME != "True":
+        return None
+
+    aws_region = region or AWS_REGION
+    runtime_arn = get_stack_output(stack_name, "AgentCoreRuntimeArn", aws_region)
+    if not runtime_arn:
+        print(
+            "Warning: AgentCoreRuntimeArn stack output not found; "
+            "AGENTCORE_RUNTIME_URL not updated."
+        )
+        return None
+
+    url = normalize_agentcore_runtime_url(
+        derive_agentcore_runtime_url(runtime_arn, aws_region)
+    )
+    if not url:
+        print("Warning: could not derive AGENTCORE_RUNTIME_URL from runtime ARN.")
+        return None
+
+    repo_root = Path(__file__).resolve().parent.parent
+    pi_env = pi_agent_env_path or (repo_root / "config" / "pi_agent.env")
+    cdk_env = cdk_env_path or (repo_root / "cdk" / "config" / "cdk_config.env")
+    updates = {
+        "AGENTCORE_RUNTIME_URL": url,
+        "AGENT_ORCHESTRATOR": "agentcore",
+        "ENABLE_AGENTCORE_RUNTIME": "True",
+    }
+    if pi_env.is_file() or pi_agent_env_path is not None:
+        _patch_env_key_values(pi_env, updates)
+        print(f"Updated {pi_env} AGENTCORE_RUNTIME_URL={url}")
+    if cdk_env.is_file() or cdk_env_path is not None:
+        _patch_env_key_values(
+            cdk_env,
+            {
+                **updates,
+                "ENABLE_AGENTCORE_CDK_RUNTIME": "True",
+            },
+        )
+        print(f"Updated {cdk_env} AGENTCORE_RUNTIME_URL={url}")
+
+    if pi_env.is_file() and S3_LOG_CONFIG_BUCKET_NAME:
+        upload_file_to_s3(
+            local_file_paths=str(pi_env),
+            s3_key="",
+            s3_bucket=S3_LOG_CONFIG_BUCKET_NAME,
+        )
+
+    if recycle_agent_service and ENABLE_PI_AGENT_EXPRESS_SERVICE == "True":
+        recycle_express_gateway_tasks(
+            CLUSTER_NAME,
+            ECS_PI_EXPRESS_SERVICE_NAME,
+            aws_region=aws_region,
+        )
+
     return url
 
 

@@ -20,7 +20,7 @@ def resolve_agent_dir() -> Path:
     profile = os.environ.get("PI_DEPLOYMENT_PROFILE", DEPLOYMENT_LOCAL).strip().lower()
     # HF Space and ECS often use a read-only root FS; only mounted paths (or /tmp) are writable.
     if profile in (DEPLOYMENT_HF_SPACE, DEPLOYMENT_AWS_ECS):
-        return Path("/tmp/pi-agent")
+        return Path("/tmp/agent-coding")
     return Path.home() / ".pi" / "agent"
 
 
@@ -651,7 +651,7 @@ def resolve_session_dir() -> str:
     if explicit:
         return explicit
     if is_hf_space_profile():
-        return "/tmp/pi-sessions"
+        return "/tmp/agent-sessions"
     return "sessions"
 
 

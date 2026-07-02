@@ -11,9 +11,9 @@ _DOCKER_WORKSPACE = Path("/home/user/app/workspace")
 _DOCKER_UPLOAD_ROOT = Path("/tmp/gradio")
 _DOCKER_PI_WORKDIR = Path("/workspace/doc_redaction")
 # CSV log dirs must not live under read-only PI_WORKDIR (ECS/HF runtime images).
-_DOCKER_ACCESS_LOGS = Path("/tmp/pi-logs")
-_DOCKER_USAGE_LOGS = Path("/tmp/pi-usage")
-_DOCKER_FEEDBACK_LOGS = Path("/tmp/pi-feedback")
+_DOCKER_ACCESS_LOGS = Path("/tmp/agent-logs")
+_DOCKER_USAGE_LOGS = Path("/tmp/agent-usage")
+_DOCKER_FEEDBACK_LOGS = Path("/tmp/agent-feedback")
 _PARTNERSHIP_TEMPLATE = Path("skills") / "Example prompt partnership.txt"
 
 
@@ -178,7 +178,7 @@ def ensure_pi_config_env(repo_root: Path | None = None) -> str:
     existing environment variables.
     """
     root = (repo_root or Path(__file__).resolve().parents[2]).resolve()
-    os.environ.setdefault("APP_TYPE", "pi")
+    os.environ.setdefault("APP_TYPE", "agent")
     if not os.environ.get("APP_CONFIG_PATH", "").strip():
         os.environ["APP_CONFIG_PATH"] = str(root / "config" / "pi_agent.env")
     load_pi_agent_env_file()

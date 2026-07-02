@@ -13,12 +13,29 @@ from bootstrap_pi_config import pi_repo_root_path
 from pi_examples import gradio_example_allowed_paths
 from session_logs import gradio_session_log_allowed_paths
 from session_workspace import (
+    effective_session_hash,
     sanitize_session_id,
     session_workspace_dir,
+    session_workspace_enabled,
     workspace_base_dir,
 )
 
-REFRESH_STUB_DIR = Path(os.environ.get("PI_FILEEXPLORER_STUB_DIR", "/tmp"))
+
+def fileexplorer_stub_dir() -> Path:
+    """Empty directory used as a safe FileExplorer root (never the shared base).
+
+    Used as the initial explorer root before a session is known, and as the
+    transient "stub" root that forces Gradio to re-fetch the explorer listing.
+    Kept empty so no cross-session files are ever listed, even momentarily.
+    """
+    raw = (os.environ.get("PI_FILEEXPLORER_STUB_DIR") or "").strip()
+    if raw:
+        stub = Path(raw)
+    else:
+        stub = workspace_base_dir().resolve() / ".pi" / "_fileexplorer_stub"
+    stub.mkdir(parents=True, exist_ok=True)
+    return stub.resolve()
+
 
 # Folder names under ``.../review/`` where Pass 1 deliverables are saved (see partnership prompt).
 _DEFAULT_FINAL_OUTPUT_FOLDER_NAMES = ("output_review_final", "output_final")
@@ -348,10 +365,35 @@ def preview_pdf_path_for_gradio(session_hash: str | None = None) -> str | None:
 
 
 def workspace_root_from(session_hash: str | None = None) -> Path:
-    """Resolve the session workspace from a sanitized Gradio session hash only."""
+    """Resolve the session workspace from a sanitized Gradio session hash only.
+
+    Internal/server-side use (preview staging, final-deliverable collection). For
+    anything a user can browse or download, use :func:`session_browse_root`, which
+    never falls back to the shared base.
+    """
     if not session_hash or not str(session_hash).strip():
         return workspace_base_dir().resolve()
     return session_workspace_dir(str(session_hash).strip())
+
+
+def session_browse_root(
+    session_hash: str | None = None,
+    request: gr.Request | None = None,
+) -> Path:
+    """Strictly session-scoped root for user-facing browse/download.
+
+    Resolves the session id from state, falling back to the active request. When
+    per-session workspaces are enabled and no real session resolves, returns an
+    empty stub directory instead of the shared workspace base, so a user can never
+    see or download another session's files (even if the session state is missing).
+    """
+    resolved = effective_session_hash(session_hash or "", request)
+    if session_workspace_enabled():
+        if not resolved or resolved == "default":
+            return fileexplorer_stub_dir()
+        return session_workspace_dir(resolved)
+    # Per-session isolation explicitly disabled: single shared workspace by config.
+    return workspace_base_dir().resolve()
 
 
 def _is_file_path(path: str) -> bool:
@@ -399,14 +441,17 @@ def _resolve_under_workspace(
     return resolved if resolved.is_file() else None
 
 
-def load_workspace_output_files(session_hash: str = ""):
-    root = workspace_root_from(session_hash or None)
+def load_workspace_output_files(
+    session_hash: str = "",
+    request: gr.Request | None = None,
+):
+    root = session_browse_root(session_hash, request)
     root.mkdir(parents=True, exist_ok=True)
     return gr.FileExplorer(root_dir=str(root))
 
 
 def refresh_workspace_output_files_stub():
-    return gr.FileExplorer(root_dir=str(REFRESH_STUB_DIR.resolve()))
+    return gr.FileExplorer(root_dir=str(fileexplorer_stub_dir()))
 
 
 def gradio_allowed_paths() -> list[str]:
@@ -415,7 +460,7 @@ def gradio_allowed_paths() -> list[str]:
     for raw in (
         workspace_base_dir(),
         str(pi_repo_root_path()),
-        REFRESH_STUB_DIR,
+        fileexplorer_stub_dir(),
         "/tmp",
     ):
         try:
@@ -435,22 +480,30 @@ def gradio_allowed_paths() -> list[str]:
 
 def refresh_workspace_panel(
     session_hash: str = "",
+    request: gr.Request | None = None,
 ) -> tuple[Any, list[str] | None]:
     """Refresh file explorer and auto-detected final deliverables."""
+    resolved = effective_session_hash(session_hash or "", request)
     return (
-        load_workspace_output_files(session_hash),
-        collect_final_output_files(session_hash),
+        load_workspace_output_files(resolved, request),
+        collect_final_output_files(resolved),
     )
 
 
 def workspace_files_download_fn(
     selected: list[str] | None,
     session_hash: str = "",
+    request: gr.Request | None = None,
 ) -> list[str] | None:
-    """Return only file paths under the session workspace (for gr.File download)."""
+    """Return only file paths under the session workspace (for gr.File download).
+
+    The download root is strictly the current session's folder (with a request
+    fallback when session state is missing), so a user cannot download files that
+    belong to another session even if the client submits arbitrary paths.
+    """
     if not selected:
         return None
-    root = workspace_root_from(session_hash or None)
+    root = session_browse_root(session_hash, request)
     downloads: list[str] = []
     for raw in selected:
         if not _is_file_path(raw):

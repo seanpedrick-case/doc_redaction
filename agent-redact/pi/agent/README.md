@@ -181,7 +181,7 @@ Skills are synced from the repo `skills/` tree into **`{PI_WORKSPACE_DIR}/.pi/sk
 
 Sessions persist in the **`pi-agent-sessions`** Docker volume at **`~/.pi/agent/sessions/`** (Pi’s default session location inside the container). Override with `PI_SESSION_DIR` if needed.
 
-On **HF Space** (`PI_DEPLOYMENT_PROFILE=hf-space`), sessions go to **`/tmp/pi-sessions`** instead (ephemeral; lost on restart).
+On **HF Space** (`PI_DEPLOYMENT_PROFILE=hf-space`), sessions go to **`/tmp/agent-sessions`** instead (ephemeral; lost on restart).
 
 ## Python dependencies
 
@@ -205,7 +205,7 @@ Set `PI_DEPLOYMENT_PROFILE=hf-space` to run the Pi Gradio UI as a **Hugging Face
 | Text extraction / PII | Locked to `Local model - selectable text` + `Local` |
 | VLM faces / signatures | Disabled |
 | Port | `7860` |
-| Pi session logs | `/tmp/pi-sessions` (`PI_SESSION_DIR`; ephemeral) |
+| Pi session logs | `/tmp/agent-sessions` (`PI_SESSION_DIR`; ephemeral) |
 
 Package and Dockerfile: [`agent-redact/pi-agent/`](../../pi-agent/). Pushes to [agentic_document_redaction](https://huggingface.co/spaces/seanpedrickcase/agentic_document_redaction) on **`dev`** branch via [`.github/workflows/sync-pi-agent-space.yml`](../../../.github/workflows/sync-pi-agent-space.yml) (GitHub secrets: `HF_TOKEN`, `HF_USERNAME`, `HF_EMAIL`).
 

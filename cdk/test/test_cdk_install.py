@@ -85,7 +85,9 @@ def test_build_env_values_demo():
     assert values["USE_ECS_EXPRESS_MODE"] == "True"
     assert values["ECS_EXPRESS_USE_PUBLIC_SUBNETS"] == "True"
     assert values["PRIVATE_SUBNETS_TO_USE"] == ""
-    assert values["USE_CLOUDFRONT"] == "False"
+    assert values["USE_CLOUDFRONT"] == "True"
+    assert values["CLOUDFRONT_AUTH_MODE"] == "magic-link"
+    assert values["RUN_USEAST_STACK"] == "False"
     assert values["ENABLE_RESOURCE_DELETE_PROTECTION"] == "False"
     assert values["VPC_NAME"] == "test-vpc"
     assert values["CONTEXT_FILE"] == "precheck.context.json"
@@ -96,7 +98,7 @@ def test_build_env_values_production():
     values = inst.build_env_values(_production_answers())
     assert values["USE_ECS_EXPRESS_MODE"] == "False"
     assert values["USE_CLOUDFRONT"] == "True"
-    assert values["RUN_USEAST_STACK"] == "True"
+    assert values["RUN_USEAST_STACK"] == "False"
     assert values["ENABLE_RESOURCE_DELETE_PROTECTION"] == "True"
     assert values["ACM_SSL_CERTIFICATE_ARN"].startswith("arn:aws:acm:")
     assert values["SSL_CERTIFICATE_DOMAIN"] == "redaction.example.com"
@@ -118,6 +120,21 @@ def test_normalize_s3_bucket_name_truncates_and_sanitizes():
     assert normalized == normalized.lower()
     assert len(normalized) <= inst.S3_BUCKET_NAME_MAX_LEN
     assert "_" not in normalized
+
+
+def test_normalize_agentcore_runtime_url_strips_invocations_suffix():
+    assert (
+        inst.normalize_agentcore_runtime_url("https://runtime.example/invocations")
+        == "https://runtime.example"
+    )
+    assert (
+        inst.normalize_agentcore_runtime_url("https://runtime.example/invocations/")
+        == "https://runtime.example"
+    )
+    assert (
+        inst.normalize_agentcore_runtime_url("https://runtime.example/")
+        == "https://runtime.example"
+    )
 
 
 def test_suggest_available_s3_bucket_name_prefers_account_prefix(monkeypatch):
@@ -726,18 +743,15 @@ def test_stacks_to_check_includes_appregistry_when_enabled():
     )
     names = [name for name, _ in checks]
     assert names == [
-        inst.CLOUDFRONT_STACK,
         "Demo-Redaction-AppRegistryStack",
         inst.REGIONAL_STACK,
     ]
-    assert checks[0][1] == inst.CLOUDFRONT_STACK_REGION
     assert checks[-1] == (inst.REGIONAL_STACK, "eu-west-2")
 
 
 def test_stacks_to_check_without_appregistry():
     checks = inst.stacks_to_check("eu-west-2", {"ENABLE_APPREGISTRY": "False"})
     assert [name for name, _ in checks] == [
-        inst.CLOUDFRONT_STACK,
         inst.REGIONAL_STACK,
     ]
 
@@ -784,22 +798,11 @@ def test_discover_existing_doc_redaction_stacks_order(monkeypatch):
                 region=region,
                 status="UPDATE_COMPLETE",
             )
-        if (
-            stack_name == inst.CLOUDFRONT_STACK
-            and region == inst.CLOUDFRONT_STACK_REGION
-        ):
-            return inst.ExistingStack(
-                name=stack_name,
-                region=region,
-                status="CREATE_COMPLETE",
-                termination_protection=True,
-            )
         return None
 
     monkeypatch.setattr(inst, "describe_existing_stack", fake_describe)
     found = inst.discover_existing_doc_redaction_stacks("eu-west-2")
-    assert [s.name for s in found] == [inst.CLOUDFRONT_STACK, inst.REGIONAL_STACK]
-    assert found[0].termination_protection is True
+    assert [s.name for s in found] == [inst.REGIONAL_STACK]
 
 
 def test_discover_existing_stacks_continues_after_access_denied(monkeypatch):
@@ -892,7 +895,10 @@ def test_handle_existing_stacks_force_delete(monkeypatch):
     assert deleted == stacks
 
 
-def test_handle_existing_stacks_yes_without_force_skips_delete(monkeypatch):
+def test_handle_existing_stacks_without_force_aborts_no_update(monkeypatch):
+    """Without --force-delete-stacks an existing stack aborts (never updates in place)."""
+    import pytest
+
     monkeypatch.setattr(
         inst,
         "discover_existing_doc_redaction_stacks",
@@ -917,7 +923,8 @@ def test_handle_existing_stacks_yes_without_force_skips_delete(monkeypatch):
         force_delete_stacks=False,
         yes=True,
     )
-    inst.handle_existing_stacks_at_start(args, "eu-west-2")
+    with pytest.raises(SystemExit):
+        inst.handle_existing_stacks_at_start(args, "eu-west-2")
 
 
 def test_write_pi_agent_env_file_minimal(tmp_path, monkeypatch):
@@ -1051,7 +1058,9 @@ def test_resolve_fixup_env_values_derives_service_from_prefix():
     resolved = inst.resolve_fixup_env_values(values)
     assert resolved["ECS_EXPRESS_SERVICE_NAME"] == "Demo-Redaction-ECSService"
     assert resolved["CLUSTER_NAME"] == "Demo-Redaction-Cluster"
-    assert resolved["ECS_PI_EXPRESS_SERVICE_NAME"] == "Demo-Redaction-PiExpressService"
+    assert (
+        resolved["ECS_PI_EXPRESS_SERVICE_NAME"] == "Demo-Redaction-AgentExpressService"
+    )
 
 
 def test_apply_post_deploy_fixup_express_syncs_cognito_secret_not_alb(monkeypatch):

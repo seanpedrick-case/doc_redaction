@@ -10,6 +10,7 @@ CDK_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(CDK_DIR))
 
 from cdk_functions import (  # noqa: E402
+    get_cognito_domain_owner_pool_id,
     resolve_cognito_domain_prefix_availability,
     resolve_s3_bucket_availability,
 )
@@ -89,3 +90,40 @@ def test_resolve_cognito_domain_taken_when_user_pool_present():
         )
         == "taken"
     )
+
+
+def test_domain_owner_pool_id_returns_owning_pool_in_account():
+    cognito = MagicMock()
+    cognito.describe_user_pool_domain.return_value = {
+        "DomainDescription": {"UserPoolId": "eu-west-2_abc"}
+    }
+    assert (
+        get_cognito_domain_owner_pool_id(
+            "demo-redaction", region_name="eu-west-2", cognito_client=cognito
+        )
+        == "eu-west-2_abc"
+    )
+
+
+def test_domain_owner_pool_id_none_when_owned_elsewhere():
+    cognito = MagicMock()
+    cognito.describe_user_pool_domain.side_effect = _client_error(
+        "ResourceNotFoundException"
+    )
+    assert (
+        get_cognito_domain_owner_pool_id(
+            "demo-redaction", region_name="eu-west-2", cognito_client=cognito
+        )
+        is None
+    )
+
+
+def test_domain_owner_pool_id_none_when_prefix_empty():
+    cognito = MagicMock()
+    assert (
+        get_cognito_domain_owner_pool_id(
+            "", region_name="eu-west-2", cognito_client=cognito
+        )
+        is None
+    )
+    cognito.describe_user_pool_domain.assert_not_called()
