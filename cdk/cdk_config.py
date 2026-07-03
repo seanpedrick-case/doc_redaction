@@ -138,6 +138,28 @@ AWS_ACCOUNT_ID = get_or_create_env_var("AWS_ACCOUNT_ID", "")
 ###
 CDK_PREFIX = get_or_create_env_var("CDK_PREFIX", "")
 
+
+def _default_stack_tag_value(cdk_prefix: str) -> str:
+    """Lowercased, dash-normalised tag value derived from CDK_PREFIX.
+
+    e.g. ``Demo-Redaction-`` -> ``demo-redaction``. Returns "" when no prefix is
+    set so the stack-wide tag is simply not applied.
+    """
+    lowered = (cdk_prefix or "").lower()
+    normalised = []
+    for ch in lowered:
+        normalised.append(ch if (ch.isalnum() or ch == "-") else "-")
+    return "".join(normalised).strip("-")
+
+
+# Stack-wide tag applied to every taggable resource (Tags.of(app)). Key defaults
+# to "Project"; value defaults to CDK_PREFIX lowercased (e.g. "demo-redaction").
+# Set STACK_TAG_VALUE="" to disable the stack-wide tag entirely.
+STACK_TAG_KEY = get_or_create_env_var("STACK_TAG_KEY", "Project")
+STACK_TAG_VALUE = get_or_create_env_var(
+    "STACK_TAG_VALUE", _default_stack_tag_value(CDK_PREFIX)
+)
+
 # When True (default): CloudFormation stack termination protection, AWS
 # deletion_protection on ALB/DynamoDB/Cognito, RemovalPolicy.RETAIN, and no S3
 # auto-delete on stack-created resources. Set False for dev sandboxes where

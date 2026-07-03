@@ -1336,6 +1336,7 @@ class InstallAnswers:
     enable_s3_batch: bool = False
     enable_headless: bool = False
     ecs_memory: str = "8192"
+    ecs_cpu: str = "2048"
     agentic_alb_routing: str = "path"
     agentic_alb_path_prefix: str = "/agent"
     agentic_alb_host_header: str = ""
@@ -2229,6 +2230,7 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
                 answers.cognito_domain_prefix
             ),
             "GITHUB_REPO_BRANCH": answers.github_branch,
+            "ECS_TASK_CPU_SIZE": answers.ecs_cpu,
             "ECS_TASK_MEMORY_SIZE": answers.ecs_memory,
             "EXISTING_IGW_ID": answers.existing_igw_id,
             "EXISTING_LOAD_BALANCER_ARN": answers.existing_alb_arn,
@@ -2551,6 +2553,11 @@ def build_app_config_env_values(values: Dict[str, str]) -> Dict[str, str]:
         "SHOW_COSTS": "True",
         "SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS": "True",
         "LOAD_PREVIOUS_TEXTRACT_JOBS_S3": "True",
+        "RUN_ALL_EXAMPLES_THROUGH_AWS": "True",
+        "SHOW_EXAMPLES": "True",
+        "CUSTOM_VLM_BACKEND": "bedrock_vlm",
+        "INCLUDE_FACE_IDENTIFICATION_TEXTRACT_OPTION": "True",
+        "SHOW_SUMMARISATION": "True",
         "DOCUMENT_REDACTION_BUCKET": _name("S3_LOG_CONFIG_BUCKET_NAME", "s3-logs"),
         "TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET": _name(
             "S3_OUTPUT_BUCKET_NAME", "s3-output"
@@ -4038,6 +4045,9 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
     # Advanced add-ons (without agentic redaction)
     is_express = use_express and not answers_use_headless(answers)
     if answers_use_headless(answers) and interactive:
+        cpu = ask("ECS task CPU (units; 1024 = 1 vCPU)", answers.ecs_cpu)
+        if cpu:
+            answers.ecs_cpu = cpu
         mem = ask("ECS task memory (MB)", answers.ecs_memory)
         if mem:
             answers.ecs_memory = mem
@@ -4048,6 +4058,9 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
                     "Enable ECS Service Connect (without agentic redaction)?", False
                 )
             answers.enable_s3_batch = ask_yes_no("Enable S3 batch ECS trigger?", False)
+        cpu = ask("ECS task CPU (units; 1024 = 1 vCPU)", answers.ecs_cpu)
+        if cpu:
+            answers.ecs_cpu = cpu
         mem = ask("ECS task memory (MB)", answers.ecs_memory)
         if mem:
             answers.ecs_memory = mem

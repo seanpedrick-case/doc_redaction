@@ -1,6 +1,6 @@
 import os
 
-from aws_cdk import App, Environment
+from aws_cdk import App, Environment, Tags
 from cdk_appregistry import register_doc_redaction_application
 from cdk_config import (
     ALB_NAME,
@@ -15,6 +15,8 @@ from cdk_config import (
     CDK_PREFIX,
     ENABLE_APPREGISTRY,
     RUN_USEAST_STACK,
+    STACK_TAG_KEY,
+    STACK_TAG_VALUE,
     USE_CLOUDFRONT,
 )
 from cdk_functions import (
@@ -29,6 +31,13 @@ from check_resources import CONTEXT_FILE, check_and_set_context
 
 # Initialize the CDK app
 app = App()
+
+# Apply a single stack-wide tag (default key "Project", value derived from
+# CDK_PREFIX, e.g. "demo-redaction") to every taggable resource across all stacks.
+# CDK Tags are applied via aspects at synth time, so this covers RedactionStack and
+# the optional AppRegistry stack regardless of where it is called before synth.
+if STACK_TAG_KEY and STACK_TAG_VALUE:
+    Tags.of(app).add(STACK_TAG_KEY, STACK_TAG_VALUE)
 
 log_aws_credential_context(
     expected_account_id=AWS_ACCOUNT_ID,

@@ -454,6 +454,22 @@ def test_build_app_config_env_values_express_uses_in_app_cognito():
     assert updates["DOCUMENT_REDACTION_BUCKET"].endswith("s3-logs")
 
 
+def test_build_app_config_env_values_feature_defaults():
+    values = inst.build_env_values(_demo_answers())
+    updates = inst.build_app_config_env_values(values)
+    assert updates["RUN_ALL_EXAMPLES_THROUGH_AWS"] == "True"
+    assert updates["SHOW_EXAMPLES"] == "True"
+    assert updates["CUSTOM_VLM_BACKEND"] == "bedrock_vlm"
+    assert updates["INCLUDE_FACE_IDENTIFICATION_TEXTRACT_OPTION"] == "True"
+    assert updates["SHOW_SUMMARISATION"] == "True"
+    assert updates["SAVE_LOGS_TO_DYNAMODB"] == "True"
+
+
+def test_build_env_values_defaults_ecs_cpu_to_two_vcpu():
+    values = inst.build_env_values(_demo_answers())
+    assert values["ECS_TASK_CPU_SIZE"] == "2048"
+
+
 def test_build_app_config_env_values_express_pi_disables_main_cognito():
     answers = _demo_answers()
     answers.enable_agentic_express = True
