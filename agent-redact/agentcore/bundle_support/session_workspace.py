@@ -10,7 +10,7 @@ _SESSION_ID_RE = re.compile(r"[^a-zA-Z0-9_@.+-]+")
 
 
 def workspace_base_dir() -> Path:
-    raw = (os.environ.get("PI_WORKSPACE_DIR") or "").strip()
+    raw = (os.environ.get("AGENT_WORKSPACE_DIR") or "").strip()
     if raw:
         path = Path(raw)
     else:
@@ -20,7 +20,7 @@ def workspace_base_dir() -> Path:
 
 
 def session_workspace_enabled() -> bool:
-    raw = os.environ.get("PI_SESSION_WORKSPACE", "").strip().lower()
+    raw = os.environ.get("AGENT_SESSION_WORKSPACE", "").strip().lower()
     if raw in {"0", "false", "no", "off"}:
         return False
     return True

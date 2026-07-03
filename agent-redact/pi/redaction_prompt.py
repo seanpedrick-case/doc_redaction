@@ -14,7 +14,7 @@ from session_workspace import workspace_base_dir
 
 def upload_root() -> Path:
     """Gradio upload directory (created by ``bootstrap_pi_config.ensure_pi_upload_root``)."""
-    raw = (os.environ.get("PI_UPLOAD_ROOT") or "").strip()
+    raw = (os.environ.get("AGENT_UPLOAD_ROOT") or "").strip()
     if not raw:
         from bootstrap_pi_config import ensure_pi_upload_root
 
@@ -102,13 +102,13 @@ HF_DEFAULT_OCR = "Local model - selectable text"
 HF_DEFAULT_PII = "Local"
 HF_DEFAULT_GRADIO_URL = "https://seanpedrickcase-document-redaction.hf.space"
 
-# Used only when PI_DEFAULT_OCR_METHOD / PI_DEFAULT_PII_METHOD are unset (local-docker profile).
+# Used only when AGENT_DEFAULT_OCR_METHOD / AGENT_DEFAULT_PII_METHOD are unset (local-docker profile).
 _FALLBACK_LOCAL_OCR = "hybrid-paddle-inference-server"
 _FALLBACK_LOCAL_PII = "Local"
 
 
 def _env_default(key: str, *, hf_default: str, local_fallback: str) -> str:
-    """Resolve Pi redaction defaults from env (e.g. config/pi_agent.env) with profile fallbacks."""
+    """Resolve Pi redaction defaults from env (e.g. config/agent.env) with profile fallbacks."""
     explicit = (os.environ.get(key) or "").strip()
     if explicit:
         return explicit
@@ -118,12 +118,12 @@ def _env_default(key: str, *, hf_default: str, local_fallback: str) -> str:
 
 
 DEFAULT_OCR_METHOD = _env_default(
-    "PI_DEFAULT_OCR_METHOD",
+    "AGENT_DEFAULT_OCR_METHOD",
     hf_default=HF_DEFAULT_OCR,
     local_fallback=_FALLBACK_LOCAL_OCR,
 )
 DEFAULT_PII_METHOD = _env_default(
-    "PI_DEFAULT_PII_METHOD",
+    "AGENT_DEFAULT_PII_METHOD",
     hf_default=HF_DEFAULT_PII,
     local_fallback=_FALLBACK_LOCAL_PII,
 )
@@ -157,9 +157,9 @@ def max_pages_limit() -> int:
     """
     Maximum PDF pages allowed for a Pi redaction task.
 
-    Resolution order: ``PI_MAX_PAGES`` → ``MAX_PAGES`` → ``MAX_DOC_PAGES`` → 3000.
+    Resolution order: ``AGENT_MAX_PAGES`` → ``MAX_PAGES`` → ``MAX_DOC_PAGES`` → 3000.
     """
-    for key in ("PI_MAX_PAGES", "MAX_PAGES", "MAX_DOC_PAGES"):
+    for key in ("AGENT_MAX_PAGES", "MAX_PAGES", "MAX_DOC_PAGES"):
         raw = (os.environ.get(key) or "").strip()
         if raw:
             value = int(raw)
@@ -282,7 +282,7 @@ def doc_redaction_gradio_url() -> str:
     """
     Base URL of the doc_redaction Gradio app used for ``/doc_redact`` and review APIs.
 
-    Set ``DOC_REDACTION_GRADIO_URL`` in ``config/pi_agent.env`` (or the process environment).
+    Set ``DOC_REDACTION_GRADIO_URL`` in ``config/agent.env`` (or the process environment).
     Reads the environment on each call so runtime overrides apply before ``tools.config``
     is imported (e.g. HF Space Docker ``ENV``, tests, and late ``load_dotenv``).
     """
@@ -308,11 +308,11 @@ def _default_gradio_url() -> str:
 
 
 def _default_vlm_base_url() -> str:
-    return os.environ.get("PI_VLM_BASE_URL", "http://llama-inference:8080")
+    return os.environ.get("AGENT_VLM_BASE_URL", "http://llama-inference:8080")
 
 
 def _default_vlm_model() -> str:
-    return os.environ.get("PI_VLM_MODEL", "unsloth/Qwen3.6-27B-MTP-GGUF")
+    return os.environ.get("AGENT_VLM_MODEL", "unsloth/Qwen3.6-27B-MTP-GGUF")
 
 
 def load_template(path: Path | None = None) -> str:
@@ -458,7 +458,7 @@ def build_local_redaction_client_guidance(
         helpers = (
             f"{workspace_root.rstrip('/')}/.pi/helpers/remote_redaction.py"
             if workspace_root.strip()
-            else "`.pi/helpers/remote_redaction.py` (under `PI_WORKSPACE_DIR`)"
+            else "`.pi/helpers/remote_redaction.py` (under `AGENT_WORKSPACE_DIR`)"
         )
     doc_output_hint = ""
     try:

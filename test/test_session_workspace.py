@@ -33,18 +33,18 @@ from session_workspace import (  # noqa: E402
 def workspace_base(tmp_path, monkeypatch):
     base = tmp_path / "workspace"
     base.mkdir()
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
-    monkeypatch.delenv("PI_DEPLOYMENT_PROFILE", raising=False)
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "true")
+    monkeypatch.delenv("AGENT_DEPLOYMENT_PROFILE", raising=False)
     return base
 
 
 def test_session_workspace_enabled_by_default_local(tmp_path, monkeypatch):
-    """Local-docker profile: session subfolders unless PI_SESSION_WORKSPACE=false."""
+    """Local-docker profile: session subfolders unless AGENT_SESSION_WORKSPACE=false."""
     base = tmp_path / "workspace"
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
-    monkeypatch.delenv("PI_SESSION_WORKSPACE", raising=False)
-    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "local-docker")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+    monkeypatch.delenv("AGENT_SESSION_WORKSPACE", raising=False)
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "local-docker")
     import session_workspace as sw
 
     monkeypatch.delenv("SESSION_OUTPUT_FOLDER", raising=False)
@@ -55,8 +55,8 @@ def test_session_workspace_enabled_by_default_local(tmp_path, monkeypatch):
 
 def test_session_workspace_disabled_when_env_false(tmp_path, monkeypatch):
     base = tmp_path / "workspace"
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "false")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "false")
     import session_workspace as sw
 
     monkeypatch.delenv("SESSION_OUTPUT_FOLDER", raising=False)
@@ -103,8 +103,8 @@ def test_effective_session_hash_uses_request_when_state_empty(
 def test_pi_session_workspace_env_true(monkeypatch, tmp_path):
     ws = tmp_path / "workspace"
     ws.mkdir()
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(ws))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(ws))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "true")
     monkeypatch.delenv("SESSION_OUTPUT_FOLDER", raising=False)
     import importlib
 

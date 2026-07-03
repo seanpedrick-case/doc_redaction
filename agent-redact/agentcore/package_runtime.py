@@ -203,12 +203,12 @@ def package_runtime(
 # Also set these on the AgentCore runtime in AWS if you prefer console/config-bundle env.
 # CDK + AgentCore: use main Express HTTPS (ExpressServiceEndpoint), not Service Connect.
 DOC_REDACTION_GRADIO_URL=https://your-doc-redaction-host.example
-PI_DEFAULT_PROVIDER=amazon-bedrock
-PI_DEFAULT_MODEL=anthropic.claude-sonnet-4-6
+AGENT_DEFAULT_PROVIDER=amazon-bedrock
+AGENT_DEFAULT_MODEL=anthropic.claude-sonnet-4-6
 AWS_REGION=eu-west-2
-PI_WORKSPACE_DIR=/tmp/agentcore-workspace
-PI_DEFAULT_OCR_METHOD=paddle
-PI_DEFAULT_PII_METHOD=Local
+AGENT_WORKSPACE_DIR=/tmp/agentcore-workspace
+AGENT_DEFAULT_OCR_METHOD=paddle
+AGENT_DEFAULT_PII_METHOD=Local
 """
     if dry_run:
         log(f"  write {env_example}")

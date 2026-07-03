@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 
 def _import_session_logs(monkeypatch, tmp_path: Path):
-    monkeypatch.setenv("PI_SESSION_DIR", str(tmp_path / "sessions"))
+    monkeypatch.setenv("AGENT_SESSION_DIR", str(tmp_path / "sessions"))
     import importlib
     import sys
 

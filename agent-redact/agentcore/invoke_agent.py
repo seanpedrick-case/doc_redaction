@@ -57,15 +57,15 @@ def bootstrap_runtime_env(app_root: Path) -> None:
         if env_file.is_file():
             load_dotenv(env_file, override=False)
 
-    os.environ.setdefault("PI_WORKSPACE_DIR", "/tmp/agentcore-workspace")
-    os.environ.setdefault("PI_REDACTION_SPLIT_BACKEND", "true")
-    os.environ.setdefault("PI_DEFAULT_PROVIDER", "amazon-bedrock")
-    os.environ.setdefault("PI_DEFAULT_MODEL", "anthropic.claude-sonnet-4-6")
+    os.environ.setdefault("AGENT_WORKSPACE_DIR", "/tmp/agentcore-workspace")
+    os.environ.setdefault("AGENT_REDACTION_SPLIT_BACKEND", "true")
+    os.environ.setdefault("AGENT_DEFAULT_PROVIDER", "amazon-bedrock")
+    os.environ.setdefault("AGENT_DEFAULT_MODEL", "anthropic.claude-sonnet-4-6")
     os.environ.setdefault(
         "AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "eu-west-2")
     )
     os.environ.setdefault("AWS_DEFAULT_REGION", os.environ["AWS_REGION"])
-    Path(os.environ["PI_WORKSPACE_DIR"]).mkdir(parents=True, exist_ok=True)
+    Path(os.environ["AGENT_WORKSPACE_DIR"]).mkdir(parents=True, exist_ok=True)
 
 
 INVOKE_RUNTIME_CONFIG_KEYS = frozenset(
@@ -73,8 +73,8 @@ INVOKE_RUNTIME_CONFIG_KEYS = frozenset(
         "DOC_REDACTION_GRADIO_URL",
         "DOC_REDACTION_GRADIO_AUTH_USER",
         "DOC_REDACTION_GRADIO_AUTH_PASSWORD",
-        "PI_DEFAULT_OCR_METHOD",
-        "PI_DEFAULT_PII_METHOD",
+        "AGENT_DEFAULT_OCR_METHOD",
+        "AGENT_DEFAULT_PII_METHOD",
         "HF_TOKEN",
         "DOC_REDACTION_HF_TOKEN",
     }
@@ -86,7 +86,7 @@ def apply_invoke_runtime_config(request: dict) -> None:
       Apply per-invoke backend settings from the Gradio UI (overrides agentcore.env).
 
       The AgentCore runtime on AWS has its own ``agentcore.env``; without this, a
-    deployed HF Space URL can win over the operator's local ``pi_agent.env``.
+    deployed HF Space URL can win over the operator's local ``agent.env``.
     """
     raw = request.get("runtime_config") or request.get("runtime_env") or {}
     if not isinstance(raw, dict):

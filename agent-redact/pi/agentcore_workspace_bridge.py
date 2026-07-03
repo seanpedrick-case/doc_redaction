@@ -219,6 +219,76 @@ def _format_history_excerpt(
     return "\n".join(chunks)
 
 
+_CLOUDFRONT_OVERLAY_KEYS = (
+    "DOC_REDACTION_GRADIO_URL",
+    "DOC_REDACTION_AUTH_TOKEN",
+    "DOC_REDACTION_AUTH_COOKIE_NAME",
+)
+_cloudfront_overlay_applied = False
+
+
+def apply_agentcore_cloudfront_config_overlay() -> dict[str, str]:
+    """Overlay backend URL + magic-link token from S3 into ``os.environ`` (AgentCore only).
+
+    The Pi Express task definition is fixed at synth time and cannot carry the
+    (later-created) CloudFront domain/token, and CloudFront can't be injected into
+    the task env without a dependency cycle. So when running as the AgentCore
+    orchestrator, we fetch the post-deploy ``agent.env`` from S3 and override the
+    CloudFront-related keys, so ``build_agentcore_invoke_runtime_config`` tells the
+    runtime to reach doc_redaction through CloudFront with the token cookie.
+
+    Controlled by ``DOC_REDACTION_CONFIG_S3_BUCKET`` / ``DOC_REDACTION_CONFIG_S3_KEY``
+    (set by CDK). No-op unless ``AGENT_ORCHESTRATOR=agentcore``. Best-effort and
+    idempotent; returns the keys it overrode.
+    """
+    global _cloudfront_overlay_applied
+    applied: dict[str, str] = {}
+    if _cloudfront_overlay_applied:
+        return applied
+    if (os.environ.get("AGENT_ORCHESTRATOR") or "").strip().lower() != "agentcore":
+        return applied
+    bucket = (os.environ.get("DOC_REDACTION_CONFIG_S3_BUCKET") or "").strip()
+    if not bucket:
+        return applied
+    key = (os.environ.get("DOC_REDACTION_CONFIG_S3_KEY") or "agent.env").strip()
+
+    try:
+        import boto3
+
+        region = (
+            os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or None
+        )
+        body = (
+            boto3.client("s3", region_name=region)
+            .get_object(Bucket=bucket, Key=key)["Body"]
+            .read()
+            .decode("utf-8", "replace")
+        )
+    except Exception as exc:  # noqa: BLE001 - best effort, keep the UI booting
+        print(f"AgentCore CloudFront config overlay skipped ({bucket}/{key}): {exc}")
+        _cloudfront_overlay_applied = True
+        return applied
+
+    for raw_line in body.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, _, value = line.partition("=")
+        name = name.strip()
+        value = value.strip().strip('"').strip("'")
+        if name in _CLOUDFRONT_OVERLAY_KEYS and value:
+            os.environ[name] = value
+            applied[name] = value
+
+    _cloudfront_overlay_applied = True
+    if applied:
+        print(
+            "Applied AgentCore CloudFront config overlay for: "
+            + ", ".join(sorted(applied))
+        )
+    return applied
+
+
 def build_agentcore_invoke_runtime_config() -> dict[str, str]:
     """
     Backend settings from the local Gradio process for each AgentCore invoke.
@@ -235,8 +305,13 @@ def build_agentcore_invoke_runtime_config() -> dict[str, str]:
     for key in (
         "DOC_REDACTION_GRADIO_AUTH_USER",
         "DOC_REDACTION_GRADIO_AUTH_PASSWORD",
-        "PI_DEFAULT_OCR_METHOD",
-        "PI_DEFAULT_PII_METHOD",
+        # CloudFront magic-link: the AgentCore runtime runs outside the VPC and
+        # reaches doc_redaction through CloudFront, so it must send the token
+        # cookie on every request (Service Connect is not reachable from it).
+        "DOC_REDACTION_AUTH_TOKEN",
+        "DOC_REDACTION_AUTH_COOKIE_NAME",
+        "AGENT_DEFAULT_OCR_METHOD",
+        "AGENT_DEFAULT_PII_METHOD",
     ):
         value = (os.environ.get(key) or "").strip()
         if value:

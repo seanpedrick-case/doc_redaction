@@ -40,9 +40,9 @@ def test_build_pi_express_container_environment():
         pi_gradio_port=7862,
     )
     assert env["DOC_REDACTION_GRADIO_URL"] == "http://redaction:7860"
-    assert env["PI_WORKSPACE_DIR"] == "/tmp/agent-workspace"
-    assert env["PI_UPLOAD_ROOT"] == "/tmp/gradio"
-    assert env["PI_DEPLOYMENT_PROFILE"] == "aws-ecs"
+    assert env["AGENT_WORKSPACE_DIR"] == "/tmp/agent-workspace"
+    assert env["AGENT_UPLOAD_ROOT"] == "/tmp/gradio"
+    assert env["AGENT_DEPLOYMENT_PROFILE"] == "aws-ecs"
     assert env["COGNITO_AUTH"] == "True"
     assert env["RUN_FASTAPI"] == "True"
 
@@ -552,7 +552,7 @@ def test_dual_express_gateway_services_synth():
         container_port=7862,
         log_group_name="/ecs/pi-logs",
         aws_region="eu-west-2",
-        environment={"PI_WORKSPACE_DIR": "/tmp/agent-workspace"},
+        environment={"AGENT_WORKSPACE_DIR": "/tmp/agent-workspace"},
     )
     pi = create_express_gateway_service(
         stack,

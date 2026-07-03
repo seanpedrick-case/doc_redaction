@@ -20,7 +20,7 @@ import redaction_prompt as rp
 
 
 def _reload_redaction_prompt(monkeypatch):
-    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "local-docker")
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "local-docker")
     return importlib.reload(rp)
 
 
@@ -56,7 +56,7 @@ def test_workspace_filename_from_upload(monkeypatch, original, expected, renamed
 
 def test_copy_upload_to_workspace_preserves_permissive_names(monkeypatch, tmp_path):
     module = _reload_redaction_prompt(monkeypatch)
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(tmp_path))
     upload_root = tmp_path / "uploads"
     upload_root.mkdir()
     workspace = tmp_path / "workspace"
@@ -77,7 +77,7 @@ def test_copy_upload_to_workspace_preserves_permissive_names(monkeypatch, tmp_pa
 
 def test_copy_upload_to_workspace_reports_minimal_rename(monkeypatch, tmp_path):
     module = _reload_redaction_prompt(monkeypatch)
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(tmp_path))
     upload_root = tmp_path / "uploads"
     upload_root.mkdir()
     workspace = tmp_path / "workspace"

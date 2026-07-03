@@ -30,8 +30,8 @@ def test_discover_session_document_name_picks_newest_pdf(tmp_path, monkeypatch):
     newer = session / "new.pdf"
     newer.write_bytes(b"%PDF-1.4 new")
 
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "true")
 
     assert bridge.discover_session_document_name("sess") == "new.pdf"
 
@@ -52,8 +52,8 @@ def test_collect_session_files_for_agentcore_upload_includes_redact_tree(
     preview.parent.mkdir(parents=True)
     preview.write_bytes(b"%PDF-1.4 preview")
 
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "true")
 
     staged = bridge.collect_session_files_for_agentcore_upload("sess")
     paths = {item["relative_path"] for item in staged}
@@ -70,8 +70,8 @@ def test_build_agentcore_followup_context_mentions_review_csv(tmp_path, monkeypa
     (session / "doc.pdf").write_bytes(b"%PDF")
     csv.write_text("id\n", encoding="utf-8-sig")
 
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "true")
 
     text = bridge.build_agentcore_followup_context(
         "sess",
@@ -91,8 +91,8 @@ def test_collect_upload_skips_oversized_files(tmp_path, monkeypatch):
     small = session / "redact" / "doc.pdf" / "output_redact" / "notes.txt"
     small.write_text("ok")
 
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "true")
     monkeypatch.setenv("AGENTCORE_MAX_UPLOAD_BYTES", "10")
 
     staged = bridge.collect_session_files_for_agentcore_upload("sess")
@@ -105,11 +105,11 @@ def test_collect_upload_skips_oversized_files(tmp_path, monkeypatch):
 
 def test_build_agentcore_invoke_runtime_config_uses_pi_env(monkeypatch):
     monkeypatch.setenv("DOC_REDACTION_GRADIO_URL", "http://host.docker.internal:7861")
-    monkeypatch.setenv("PI_DEFAULT_OCR_METHOD", "paddle")
+    monkeypatch.setenv("AGENT_DEFAULT_OCR_METHOD", "paddle")
     monkeypatch.setenv("HF_TOKEN", "should-not-pass")
     config = bridge.build_agentcore_invoke_runtime_config()
     assert config["DOC_REDACTION_GRADIO_URL"] == "http://host.docker.internal:7861"
-    assert config["PI_DEFAULT_OCR_METHOD"] == "paddle"
+    assert config["AGENT_DEFAULT_OCR_METHOD"] == "paddle"
     assert "HF_TOKEN" not in config
 
 

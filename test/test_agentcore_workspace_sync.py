@@ -17,8 +17,8 @@ from workspace_sync import (  # noqa: E402
 
 
 def test_apply_and_collect_workspace_files(tmp_path, monkeypatch):
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(tmp_path))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "1")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "1")
     payload = base64.b64encode(b"pdf-bytes").decode("ascii")
     written = apply_workspace_files(
         "sess-1",

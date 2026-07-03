@@ -31,6 +31,27 @@ def parse_comma_separated_list(value: str) -> List[str]:
     ]
 
 
+# Env vars owned by the external ``pi`` coding-agent CLI (not renamed to AGENT_*).
+_EXTERNAL_PI_ENV_VARS = frozenset({"PI_OFFLINE", "PI_SKIP_VERSION_CHECK"})
+
+
+def migrate_legacy_pi_env_vars() -> None:
+    """
+    Backward-compat: mirror legacy ``PI_*`` env vars onto the new ``AGENT_*`` names.
+
+    Historic ``PI_*`` config keys were renamed to ``AGENT_*``. Copy any legacy
+    value onto the new key when the new key is unset. ``PI_AGENT_*`` collapses to
+    ``AGENT_*``; external ``pi`` CLI vars are left untouched. Safe to call twice.
+    """
+    for key in list(os.environ.keys()):
+        if not key.startswith("PI_") or key in _EXTERNAL_PI_ENV_VARS:
+            continue
+        rest = key[3:]
+        new_key = rest if rest.startswith("AGENT") else "AGENT_" + rest
+        if new_key not in os.environ:
+            os.environ[new_key] = os.environ[key]
+
+
 def get_or_create_env_var(var_name: str, default_value: str, print_val: bool = False):
     """
     Get an environmental variable, and set it to a default value if it doesn't exist
@@ -102,6 +123,9 @@ if CDK_CONFIG_PATH:
         load_dotenv(CDK_CONFIG_PATH, override=True)
     else:
         print("CDK config file not found at location:", CDK_CONFIG_PATH)
+
+# Honour legacy PI_* config names by mirroring them onto the new AGENT_* keys.
+migrate_legacy_pi_env_vars()
 
 ###
 # AWS OPTIONS
@@ -334,7 +358,7 @@ ECS_LOG_GROUP_NAME = get_or_create_env_var(
 )
 
 ECS_TASK_CPU_SIZE = get_or_create_env_var("ECS_TASK_CPU_SIZE", "1024")
-ECS_TASK_MEMORY_SIZE = get_or_create_env_var("ECS_TASK_MEMORY_SIZE", "4096")
+ECS_TASK_MEMORY_SIZE = get_or_create_env_var("ECS_TASK_MEMORY_SIZE", "8192")
 ECS_USE_FARGATE_SPOT = get_or_create_env_var("USE_FARGATE_SPOT", "False")
 ECS_READ_ONLY_FILE_SYSTEM = get_or_create_env_var("ECS_READ_ONLY_FILE_SYSTEM", "True")
 # ECS service AZ rebalancing (AWS defaults new services to ENABLED if omitted).
@@ -704,18 +728,18 @@ ECS_PI_LOG_GROUP_NAME = get_or_create_env_var(
 )
 ECS_PI_TASK_CPU_SIZE = get_or_create_env_var("ECS_PI_TASK_CPU_SIZE", "1024")
 ECS_PI_TASK_MEMORY_SIZE = get_or_create_env_var("ECS_PI_TASK_MEMORY_SIZE", "2048")
-PI_GRADIO_PORT = get_or_create_env_var("PI_GRADIO_PORT", "7862")
+AGENT_GRADIO_PORT = get_or_create_env_var("AGENT_GRADIO_PORT", "7862")
 # Pi ALB routing: path (default /agent on shared host e.g. CloudFront), host, or both.
-PI_ALB_ROUTING = get_or_create_env_var("PI_ALB_ROUTING", "path").strip().lower()
-PI_ALB_PATH_PREFIX = get_or_create_env_var("PI_ALB_PATH_PREFIX", "/agent")
-PI_ALB_HOST_HEADER = get_or_create_env_var("PI_ALB_HOST_HEADER", "")
-PI_ALB_TARGET_GROUP_NAME = get_or_create_env_var(
-    "PI_ALB_TARGET_GROUP_NAME", f"{CDK_PREFIX}AgentTG"[-32:]
+AGENT_ALB_ROUTING = get_or_create_env_var("AGENT_ALB_ROUTING", "path").strip().lower()
+AGENT_ALB_PATH_PREFIX = get_or_create_env_var("AGENT_ALB_PATH_PREFIX", "/agent")
+AGENT_ALB_HOST_HEADER = get_or_create_env_var("AGENT_ALB_HOST_HEADER", "")
+AGENT_ALB_TARGET_GROUP_NAME = get_or_create_env_var(
+    "AGENT_ALB_TARGET_GROUP_NAME", f"{CDK_PREFIX}AgentTG"[-32:]
 )
-PI_ALB_LISTENER_RULE_PRIORITY = int(
-    get_or_create_env_var("PI_ALB_LISTENER_RULE_PRIORITY", "3")
+AGENT_ALB_LISTENER_RULE_PRIORITY = int(
+    get_or_create_env_var("AGENT_ALB_LISTENER_RULE_PRIORITY", "3")
 )
-PI_AGENT_ENV_S3_KEY = get_or_create_env_var("PI_AGENT_ENV_S3_KEY", "pi_agent.env")
+AGENT_ENV_S3_KEY = get_or_create_env_var("AGENT_ENV_S3_KEY", "agent.env")
 
 
 def _normalize_pi_alb_path_prefix(raw: str) -> str:
@@ -723,22 +747,24 @@ def _normalize_pi_alb_path_prefix(raw: str) -> str:
     return f"/{segment}" if segment else "/agent"
 
 
-PI_ALB_PATH_PREFIX_NORMALIZED = _normalize_pi_alb_path_prefix(PI_ALB_PATH_PREFIX)
+AGENT_ALB_PATH_PREFIX_NORMALIZED = _normalize_pi_alb_path_prefix(AGENT_ALB_PATH_PREFIX)
 _PI_ALB_ROUTING_MODES = frozenset({"path", "host", "both"})
 
 
 def _validate_pi_alb_routing_for_enabled_pi() -> None:
-    if PI_ALB_ROUTING not in _PI_ALB_ROUTING_MODES:
+    if AGENT_ALB_ROUTING not in _PI_ALB_ROUTING_MODES:
         raise ValueError(
-            f"PI_ALB_ROUTING must be one of {sorted(_PI_ALB_ROUTING_MODES)}; got '{PI_ALB_ROUTING}'."
+            f"AGENT_ALB_ROUTING must be one of {sorted(_PI_ALB_ROUTING_MODES)}; got '{AGENT_ALB_ROUTING}'."
         )
-    if PI_ALB_ROUTING in ("host", "both") and not PI_ALB_HOST_HEADER.strip():
+    if AGENT_ALB_ROUTING in ("host", "both") and not AGENT_ALB_HOST_HEADER.strip():
         raise ValueError(
-            "PI_ALB_HOST_HEADER is required when PI_ALB_ROUTING is 'host' or 'both' "
+            "AGENT_ALB_HOST_HEADER is required when AGENT_ALB_ROUTING is 'host' or 'both' "
             "(dedicated hostname on the shared ALB)."
         )
-    if PI_ALB_ROUTING in ("path", "both") and not PI_ALB_PATH_PREFIX_NORMALIZED:
-        raise ValueError("PI_ALB_PATH_PREFIX must resolve to a non-empty path segment.")
+    if AGENT_ALB_ROUTING in ("path", "both") and not AGENT_ALB_PATH_PREFIX_NORMALIZED:
+        raise ValueError(
+            "AGENT_ALB_PATH_PREFIX must resolve to a non-empty path segment."
+        )
 
 
 # Pi on ECS Express Mode (second Express service on shared ALB; SC via ecs:UpdateService).
@@ -759,7 +785,7 @@ ECS_EXPRESS_SC_PORT_NAME = get_or_create_env_var(
     "ECS_EXPRESS_SC_PORT_NAME", ECS_SERVICE_CONNECT_PORT_MAPPING_NAME
 )
 ECS_PI_EXPRESS_SC_PORT_NAME = get_or_create_env_var(
-    "ECS_PI_EXPRESS_SC_PORT_NAME", f"port-{PI_GRADIO_PORT}"
+    "ECS_PI_EXPRESS_SC_PORT_NAME", f"port-{AGENT_GRADIO_PORT}"
 )
 
 if ENABLE_PI_AGENT_ECS_SERVICE == "True" and ENABLE_PI_AGENT_EXPRESS_SERVICE == "True":
@@ -807,6 +833,11 @@ AGENTCORE_RUNTIME_ROLE_ARN = get_or_create_env_var("AGENTCORE_RUNTIME_ROLE_ARN",
 AGENTCORE_NETWORK_MODE = get_or_create_env_var("AGENTCORE_NETWORK_MODE", "PUBLIC")
 AGENTCORE_RUNTIME_NAME = get_or_create_env_var(
     "AGENTCORE_RUNTIME_NAME", f"{CDK_PREFIX}RedactionAgent"
+)
+# Bedrock model the AgentCore runtime uses (fixed at runtime creation via the
+# AGENT_DEFAULT_MODEL env var; cannot be changed from the Gradio UI). Default Sonnet 4.6.
+AGENTCORE_BEDROCK_MODEL = get_or_create_env_var(
+    "AGENTCORE_BEDROCK_MODEL", "anthropic.claude-sonnet-4-6"
 )
 AGENT_ORCHESTRATOR_DEFAULT = get_or_create_env_var("AGENT_ORCHESTRATOR", "pi")
 # Optional JSON policies for the AgentCore *runtime* task role (Bedrock invoke, secrets, logs).

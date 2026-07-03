@@ -11,8 +11,8 @@ from redaction_prompt import HF_DEFAULT_OCR
 
 
 def _show_examples_from_env() -> bool:
-    """True unless PI_GRADIO_SHOW_EXAMPLES or SHOW_PI_EXAMPLES is explicitly false."""
-    for key in ("PI_GRADIO_SHOW_EXAMPLES", "SHOW_PI_EXAMPLES"):
+    """True unless AGENT_GRADIO_SHOW_EXAMPLES or SHOW_PI_EXAMPLES is explicitly false."""
+    for key in ("AGENT_GRADIO_SHOW_EXAMPLES", "SHOW_PI_EXAMPLES"):
         raw = os.environ.get(key)
         if raw is None:
             continue
@@ -162,7 +162,7 @@ def examples_status_markdown() -> str:
     if not SHOW_PI_EXAMPLES:
         return (
             "_Examples are disabled. Set Space variable "
-            "`PI_GRADIO_SHOW_EXAMPLES=true` (or `SHOW_PI_EXAMPLES=true`) and restart._"
+            "`AGENT_GRADIO_SHOW_EXAMPLES=true` (or `SHOW_PI_EXAMPLES=true`) and restart._"
         )
     root = resolve_example_data_dir()
     if root is None:

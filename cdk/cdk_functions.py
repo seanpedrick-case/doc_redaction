@@ -2900,7 +2900,7 @@ def normalize_pi_alb_routing_mode(raw: str) -> str:
     allowed = frozenset({"path", "host", "both"})
     if mode not in allowed:
         raise ValueError(
-            f"PI_ALB_ROUTING must be one of {sorted(allowed)}; got '{raw}'."
+            f"AGENT_ALB_ROUTING must be one of {sorted(allowed)}; got '{raw}'."
         )
     return mode
 
@@ -2972,7 +2972,7 @@ def format_pi_public_urls(
 
 def _apply_pi_root_path_env(env: Dict[str, str], pi_root_path: str) -> None:
     if pi_root_path:
-        env["PI_ROOT_PATH"] = pi_root_path
+        env["AGENT_ROOT_PATH"] = pi_root_path
         env["ROOT_PATH"] = pi_root_path
         env["FASTAPI_ROOT_PATH"] = pi_root_path
 
@@ -2984,8 +2984,14 @@ def build_pi_express_container_environment(
     pi_gradio_port: Union[str, int],
     cognito_auth: bool = True,
     doc_redaction_gradio_url: Optional[str] = None,
+    pi_root_path: str = "",
 ) -> Dict[str, str]:
-    """Inline env for Pi on Express (no volume mounts; workspace under /tmp)."""
+    """Inline env for Pi on Express (no volume mounts; workspace under /tmp).
+
+    ``pi_root_path`` (e.g. ``/agent``) sets the Gradio/FastAPI root path so the
+    app serves correctly behind a CloudFront/ALB path prefix that is *not*
+    stripped before reaching the origin.
+    """
     port = int(main_app_port)
     pi_port = int(pi_gradio_port)
     backend_url = (doc_redaction_gradio_url or "").strip().rstrip("/")
@@ -2993,18 +2999,18 @@ def build_pi_express_container_environment(
         backend_url = f"http://{service_connect_discovery_name}:{port}"
     env = {
         "APP_TYPE": "agent",
-        "APP_CONFIG_PATH": "/workspace/doc_redaction/config/pi_agent.env.example",
-        "PI_DEPLOYMENT_PROFILE": "aws-ecs",
-        "PI_DEFAULT_PROVIDER": "amazon-bedrock",
+        "APP_CONFIG_PATH": "/workspace/doc_redaction/config/agent.env.example",
+        "AGENT_DEPLOYMENT_PROFILE": "aws-ecs",
+        "AGENT_DEFAULT_PROVIDER": "amazon-bedrock",
         "DOC_REDACTION_GRADIO_URL": backend_url,
-        "PI_GRADIO_PORT": str(pi_port),
+        "AGENT_GRADIO_PORT": str(pi_port),
         "GRADIO_SERVER_PORT": str(pi_port),
         "GRADIO_SERVER_NAME": "0.0.0.0",
-        "PI_WORKSPACE_DIR": "/tmp/agent-workspace",
-        "PI_WORKDIR": "/workspace/doc_redaction",
-        "PI_UPLOAD_ROOT": "/tmp/gradio",
-        "PI_SESSION_DIR": "/tmp/agent-sessions",
-        "PI_CODING_AGENT_DIR": "/tmp/agent-coding",
+        "AGENT_WORKSPACE_DIR": "/tmp/agent-workspace",
+        "AGENT_WORKDIR": "/workspace/doc_redaction",
+        "AGENT_UPLOAD_ROOT": "/tmp/gradio",
+        "AGENT_SESSION_DIR": "/tmp/agent-sessions",
+        "AGENT_CODING_AGENT_DIR": "/tmp/agent-coding",
         "ACCESS_LOGS_FOLDER": "/tmp/agent-logs/",
         "USAGE_LOGS_FOLDER": "/tmp/agent-usage/",
         "FEEDBACK_LOGS_FOLDER": "/tmp/agent-feedback/",
@@ -3020,6 +3026,18 @@ def build_pi_express_container_environment(
             env["AGENTCORE_RUNTIME_URL"] = AGENTCORE_RUNTIME_URL
     except ImportError:
         pass
+    # AgentCore-only: lets the container fetch the post-deploy agent.env from S3
+    # and overlay the CloudFront backend URL + magic-link token at startup (the task
+    # env is fixed at synth time and can't carry the later-created CloudFront domain).
+    try:
+        from cdk_config import AGENT_ENV_S3_KEY, S3_LOG_CONFIG_BUCKET_NAME
+
+        if S3_LOG_CONFIG_BUCKET_NAME:
+            env["DOC_REDACTION_CONFIG_S3_BUCKET"] = S3_LOG_CONFIG_BUCKET_NAME
+            env["DOC_REDACTION_CONFIG_S3_KEY"] = AGENT_ENV_S3_KEY or "agent.env"
+    except ImportError:
+        pass
+    _apply_pi_root_path_env(env, (pi_root_path or "").strip())
     return env
 
 
@@ -3464,18 +3482,18 @@ def build_pi_agent_container_environment(
     pi_port = int(pi_gradio_port)
     env = {
         "APP_TYPE": "agent",
-        "APP_CONFIG_PATH": "/workspace/doc_redaction/config/pi_agent.env",
-        "PI_DEPLOYMENT_PROFILE": "aws-ecs",
-        "PI_DEFAULT_PROVIDER": "amazon-bedrock",
+        "APP_CONFIG_PATH": "/workspace/doc_redaction/config/agent.env",
+        "AGENT_DEPLOYMENT_PROFILE": "aws-ecs",
+        "AGENT_DEFAULT_PROVIDER": "amazon-bedrock",
         "DOC_REDACTION_GRADIO_URL": f"http://{service_connect_discovery_name}:{port}",
-        "PI_GRADIO_PORT": str(pi_port),
+        "AGENT_GRADIO_PORT": str(pi_port),
         "GRADIO_SERVER_PORT": str(pi_port),
         "GRADIO_SERVER_NAME": "0.0.0.0",
-        "PI_WORKSPACE_DIR": "/home/user/app/workspace",
-        "PI_WORKDIR": "/workspace/doc_redaction",
-        "PI_UPLOAD_ROOT": "/tmp/gradio",
-        "PI_SESSION_DIR": "/tmp/agent-sessions",
-        "PI_CODING_AGENT_DIR": "/tmp/agent-coding",
+        "AGENT_WORKSPACE_DIR": "/home/user/app/workspace",
+        "AGENT_WORKDIR": "/workspace/doc_redaction",
+        "AGENT_UPLOAD_ROOT": "/tmp/gradio",
+        "AGENT_SESSION_DIR": "/tmp/agent-sessions",
+        "AGENT_CODING_AGENT_DIR": "/tmp/agent-coding",
         "ACCESS_LOGS_FOLDER": "/tmp/agent-logs/",
         "USAGE_LOGS_FOLDER": "/tmp/agent-usage/",
         "FEEDBACK_LOGS_FOLDER": "/tmp/agent-feedback/",
@@ -3490,21 +3508,21 @@ def build_pi_agent_container_environment(
 
 
 # Gradio mounted on FastAPI (tools.gradio_platform.mount_or_launch); matches agent-redact/pi/start.sh.
-PI_ECS_APP_START_CMD = (
+AGENT_ECS_APP_START_CMD = (
     "python3 agent-redact/pi/pi_agent_config.py && "
     "exec uvicorn gradio_app:app --app-dir agent-redact/pi "
-    "--host 0.0.0.0 --port ${PI_GRADIO_PORT:-7862} "
+    "--host 0.0.0.0 --port ${AGENT_GRADIO_PORT:-7862} "
     '--proxy-headers --forwarded-allow-ips "*"'
 )
 
 # Fargate volume mounts are root-owned; chown as root, then run the app as user (see entrypoint-ecs.sh).
-PI_ECS_CONTAINER_USER = "root"
-PI_ECS_CONTAINER_COMMAND = [
+AGENT_ECS_CONTAINER_USER = "root"
+AGENT_ECS_CONTAINER_COMMAND = [
     "/usr/local/bin/entrypoint-ecs.sh",
-    PI_ECS_APP_START_CMD,
+    AGENT_ECS_APP_START_CMD,
 ]
 # Inline fallback when the image predates entrypoint-ecs.sh (same behaviour via bash).
-PI_ECS_CONTAINER_COMMAND_FALLBACK = [
+AGENT_ECS_CONTAINER_COMMAND_FALLBACK = [
     "bash",
     "-c",
     "mkdir -p /tmp/agent-coding /tmp/agent-logs /tmp/agent-usage /tmp/agent-feedback "
@@ -3512,7 +3530,7 @@ PI_ECS_CONTAINER_COMMAND_FALLBACK = [
     "chown -R user:user /tmp/agent-coding /tmp/agent-logs /tmp/agent-usage /tmp/agent-feedback "
     "/home/user/app/workspace /tmp/gradio /tmp/agent-sessions && "
     "cd /workspace/doc_redaction && "
-    f"exec su -s /bin/bash user -c '{PI_ECS_APP_START_CMD}'",
+    f"exec su -s /bin/bash user -c '{AGENT_ECS_APP_START_CMD}'",
 ]
 
 
@@ -3596,8 +3614,8 @@ def create_pi_agent_ecs_resources(
             pi_gradio_port=pi_gradio_port,
             pi_root_path=pi_root_path,
         ),
-        command=PI_ECS_CONTAINER_COMMAND_FALLBACK,
-        user=PI_ECS_CONTAINER_USER,
+        command=AGENT_ECS_CONTAINER_COMMAND_FALLBACK,
+        user=AGENT_ECS_CONTAINER_USER,
         essential=True,
     )
 

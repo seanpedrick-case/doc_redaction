@@ -7,4 +7,5 @@
 workspace
 output
 input
+config/agent.env
 config/pi_agent.env

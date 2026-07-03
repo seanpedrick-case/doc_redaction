@@ -21,6 +21,14 @@ from cdk_cloudfront_distribution import create_redaction_cloudfront_distribution
 from cdk_config import (
     ACCESS_LOG_DYNAMODB_TABLE_NAME,
     ACM_SSL_CERTIFICATE_ARN,
+    AGENT_ALB_HOST_HEADER,
+    AGENT_ALB_LISTENER_RULE_PRIORITY,
+    AGENT_ALB_PATH_PREFIX_NORMALIZED,
+    AGENT_ALB_ROUTING,
+    AGENT_ALB_TARGET_GROUP_NAME,
+    AGENT_ENV_S3_KEY,
+    AGENT_GRADIO_PORT,
+    AGENTCORE_BEDROCK_MODEL,
     AGENTCORE_CDK_DEPLOY,
     AGENTCORE_NETWORK_MODE,
     AGENTCORE_RUNTIME_NAME,
@@ -121,13 +129,6 @@ from cdk_config import (
     NAT_GATEWAY_NAME,
     NEW_VPC_CIDR,
     NEW_VPC_DEFAULT_NAME,
-    PI_AGENT_ENV_S3_KEY,
-    PI_ALB_HOST_HEADER,
-    PI_ALB_LISTENER_RULE_PRIORITY,
-    PI_ALB_PATH_PREFIX_NORMALIZED,
-    PI_ALB_ROUTING,
-    PI_ALB_TARGET_GROUP_NAME,
-    PI_GRADIO_PORT,
     POLICY_FILE_ARNS,
     POLICY_FILE_LOCATIONS,
     PRIVATE_SUBNET_AVAILABILITY_ZONES,
@@ -1429,7 +1430,7 @@ class CdkStack(Stack):
                                         "commands": [
                                             "echo Logging in to Amazon ECR",
                                             "aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com",
-                                            "test -f config/pi_agent.env.example",
+                                            "test -f config/agent.env.example",
                                             "test -f agent-redact/pi-agent/Dockerfile",
                                         ]
                                     },
@@ -1607,10 +1608,13 @@ class CdkStack(Stack):
                             network_mode=(AGENTCORE_NETWORK_MODE or "PUBLIC").upper(),
                         ),
                         environment_variables={
-                            "PI_DEFAULT_PROVIDER": "amazon-bedrock",
+                            "AGENT_DEFAULT_PROVIDER": "amazon-bedrock",
+                            "AGENT_DEFAULT_MODEL": (
+                                AGENTCORE_BEDROCK_MODEL or "anthropic.claude-sonnet-4-6"
+                            ),
                             "AWS_REGION": AWS_REGION,
                             "AWS_DEFAULT_REGION": AWS_REGION,
-                            "PI_WORKSPACE_DIR": "/tmp/agentcore-workspace",
+                            "AGENT_WORKSPACE_DIR": "/tmp/agentcore-workspace",
                         },
                     )
                     CfnOutput(
@@ -2268,18 +2272,28 @@ class CdkStack(Stack):
                         agentic_express_environment = build_pi_express_container_environment(
                             service_connect_discovery_name=ECS_SERVICE_CONNECT_DISCOVERY_NAME,
                             main_app_port=int(GRADIO_SERVER_PORT),
-                            pi_gradio_port=int(PI_GRADIO_PORT),
+                            pi_gradio_port=int(AGENT_GRADIO_PORT),
                             cognito_auth=express_cognito_auth,
                             doc_redaction_gradio_url=(
                                 format_main_express_gradio_url(express_alb_dns)
                                 if agentcore_backend
                                 else None
                             ),
+                            # With CloudFront (demo route) the '/agent' prefix is
+                            # forwarded to this origin without being stripped, so Pi
+                            # must serve under that root path. Without CloudFront the
+                            # agentic service is reached at the root of its own
+                            # Express endpoint, so no root path is applied.
+                            pi_root_path=(
+                                AGENT_ALB_PATH_PREFIX_NORMALIZED
+                                if USE_CLOUDFRONT == "True"
+                                else ""
+                            ),
                         )
                         agentic_primary_container = (
                             build_express_agentic_primary_container(
                                 image_uri=agentic_ecr_image_loc + ":latest",
-                                container_port=int(PI_GRADIO_PORT),
+                                container_port=int(AGENT_GRADIO_PORT),
                                 log_group_name=agentic_express_log_group.log_group_name,
                                 aws_region=AWS_REGION,
                                 environment=agentic_express_environment,
@@ -2313,7 +2327,7 @@ class CdkStack(Stack):
                             "ExpressAlbToAgenticExpressIngress",
                             express_service=express_agentic_service,
                             ecs_security_group=agentic_express_security_group,
-                            container_port=int(PI_GRADIO_PORT),
+                            container_port=int(AGENT_GRADIO_PORT),
                         )
 
                         # The agentic Express SG is created with the CDK default
@@ -2424,7 +2438,7 @@ class CdkStack(Stack):
                         resource_removal_policy=resource_removal_policy,
                         main_express_endpoint=express_service.attr_endpoint,
                         agentic_express_endpoint=agentic_endpoint,
-                        agentic_path_prefix=PI_ALB_PATH_PREFIX_NORMALIZED,
+                        agentic_path_prefix=AGENT_ALB_PATH_PREFIX_NORMALIZED,
                     )
                     print("CloudFront distribution defined for Express ingress.")
 
@@ -2780,20 +2794,20 @@ class CdkStack(Stack):
                         task_role=task_role,
                         execution_role=execution_role,
                         config_bucket=bucket,
-                        pi_agent_env_s3_key=PI_AGENT_ENV_S3_KEY,
+                        pi_agent_env_s3_key=AGENT_ENV_S3_KEY,
                         service_name=ECS_PI_SERVICE_NAME,
                         task_family=ECS_PI_TASK_DEFINITION_NAME,
                         security_group_name=ECS_PI_SECURITY_GROUP_NAME,
                         log_group_name=ECS_PI_LOG_GROUP_NAME,
                         cpu=int(ECS_PI_TASK_CPU_SIZE),
                         memory_mib=int(ECS_PI_TASK_MEMORY_SIZE),
-                        pi_gradio_port=int(PI_GRADIO_PORT),
+                        pi_gradio_port=int(AGENT_GRADIO_PORT),
                         service_connect_namespace=ECS_SERVICE_CONNECT_NAMESPACE,
                         service_connect_discovery_name=ECS_SERVICE_CONNECT_DISCOVERY_NAME,
                         main_app_port=int(GRADIO_SERVER_PORT),
                         use_fargate_spot=use_fargate_spot,
                         pi_root_path=pi_alb_root_path_for_container(
-                            PI_ALB_PATH_PREFIX_NORMALIZED, PI_ALB_ROUTING
+                            AGENT_ALB_PATH_PREFIX_NORMALIZED, AGENT_ALB_ROUTING
                         ),
                     )
                     ecs_security_group.add_ingress_rule(
@@ -2916,9 +2930,9 @@ class CdkStack(Stack):
                     )
                     cloudfront_distribution_url = cf_resources.distribution.domain_name
                 cloudfront_http_rule_priority = (
-                    PI_ALB_LISTENER_RULE_PRIORITY
+                    AGENT_ALB_LISTENER_RULE_PRIORITY
                     + (
-                        pi_listener_rule_count(PI_ALB_ROUTING)
+                        pi_listener_rule_count(AGENT_ALB_ROUTING)
                         if enable_agentic_legacy
                         else 0
                     )
@@ -3065,14 +3079,14 @@ class CdkStack(Stack):
                         and agentic_ecs_service
                         and alb_security_group
                     ):
-                        agentic_tg_name = PI_ALB_TARGET_GROUP_NAME
+                        agentic_tg_name = AGENT_ALB_TARGET_GROUP_NAME
                         if len(agentic_tg_name) > 32:
                             agentic_tg_name = agentic_tg_name[-32:]
 
                         _agentic_public_urls = format_agentic_public_urls(
-                            routing_mode=PI_ALB_ROUTING,
-                            path_prefix=PI_ALB_PATH_PREFIX_NORMALIZED,
-                            host_header=PI_ALB_HOST_HEADER,
+                            routing_mode=AGENT_ALB_ROUTING,
+                            path_prefix=AGENT_ALB_PATH_PREFIX_NORMALIZED,
+                            host_header=AGENT_ALB_HOST_HEADER,
                             cloudfront_domain=(
                                 CLOUDFRONT_DOMAIN if USE_CLOUDFRONT == "True" else ""
                             ),
@@ -3085,11 +3099,11 @@ class CdkStack(Stack):
                             alb_security_group=alb_security_group,
                             pi_security_group=agentic_ecs_security_group,
                             pi_service=agentic_ecs_service,
-                            pi_port=int(PI_GRADIO_PORT),
-                            routing_mode=PI_ALB_ROUTING,
-                            path_prefix=PI_ALB_PATH_PREFIX_NORMALIZED,
-                            pi_host_header=PI_ALB_HOST_HEADER.strip(),
-                            listener_rule_priority=PI_ALB_LISTENER_RULE_PRIORITY,
+                            pi_port=int(AGENT_GRADIO_PORT),
+                            routing_mode=AGENT_ALB_ROUTING,
+                            path_prefix=AGENT_ALB_PATH_PREFIX_NORMALIZED,
+                            pi_host_header=AGENT_ALB_HOST_HEADER.strip(),
+                            listener_rule_priority=AGENT_ALB_LISTENER_RULE_PRIORITY,
                             target_group_name=agentic_tg_name,
                             stickiness_cookie_duration=cookie_duration,
                             https_listener=https_listener,
@@ -3119,8 +3133,8 @@ class CdkStack(Stack):
                         CfnOutput(
                             self,
                             "AgenticAlbPathPrefix",
-                            value=PI_ALB_PATH_PREFIX_NORMALIZED,
-                            description="ALB path prefix for agentic UI when PI_ALB_ROUTING includes path",
+                            value=AGENT_ALB_PATH_PREFIX_NORMALIZED,
+                            description="ALB path prefix for agentic UI when AGENT_ALB_ROUTING includes path",
                         )
                         CfnOutput(
                             self,
@@ -3139,7 +3153,7 @@ class CdkStack(Stack):
                         )
                         print(
                             "Agentic redaction attached to shared ALB "
-                            f"(routing={PI_ALB_ROUTING}, urls={', '.join(_agentic_public_urls)})."
+                            f"(routing={AGENT_ALB_ROUTING}, urls={', '.join(_agentic_public_urls)})."
                         )
 
                 except Exception as e:

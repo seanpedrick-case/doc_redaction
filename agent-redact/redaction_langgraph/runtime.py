@@ -137,10 +137,10 @@ class LangGraphAgentRuntime(AgentRuntime):
         self._abort_requested = False
 
     def set_model(self, provider: str, model_id: str) -> dict[str, Any]:
-        os.environ["PI_DEFAULT_PROVIDER"] = provider
-        os.environ["PI_DEFAULT_MODEL"] = model_id
+        os.environ["AGENT_DEFAULT_PROVIDER"] = provider
+        os.environ["AGENT_DEFAULT_MODEL"] = model_id
         if provider == "llama-cpp":
-            os.environ["PI_LLAMA_MODEL_ID"] = model_id
+            os.environ["AGENT_LLAMA_MODEL_ID"] = model_id
         self._graph = None
         self.start()
         return {"provider": provider, "model": model_id}
@@ -153,11 +153,11 @@ class LangGraphAgentRuntime(AgentRuntime):
         return {
             "isStreaming": self.prompt_stream_active,
             "isCompacting": False,
-            "provider": os.environ.get("PI_DEFAULT_PROVIDER"),
+            "provider": os.environ.get("AGENT_DEFAULT_PROVIDER"),
             "model": {
-                "provider": os.environ.get("PI_DEFAULT_PROVIDER"),
-                "id": os.environ.get("PI_DEFAULT_MODEL")
-                or os.environ.get("PI_LLAMA_MODEL_ID"),
+                "provider": os.environ.get("AGENT_DEFAULT_PROVIDER"),
+                "id": os.environ.get("AGENT_DEFAULT_MODEL")
+                or os.environ.get("AGENT_LLAMA_MODEL_ID"),
             },
         }
 

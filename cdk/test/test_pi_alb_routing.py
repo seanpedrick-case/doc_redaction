@@ -49,6 +49,33 @@ def test_format_pi_public_urls_path_on_cloudfront():
     assert urls == ["https://d123.cloudfront.net/pi/"]
 
 
+def test_pi_express_container_env_sets_root_path():
+    from cdk_functions import build_pi_express_container_environment
+
+    env = build_pi_express_container_environment(
+        service_connect_discovery_name="redaction",
+        main_app_port=7860,
+        pi_gradio_port=7862,
+        pi_root_path="/agent",
+    )
+    assert env["AGENT_ROOT_PATH"] == "/agent"
+    assert env["ROOT_PATH"] == "/agent"
+    assert env["FASTAPI_ROOT_PATH"] == "/agent"
+
+
+def test_pi_express_container_env_no_root_path_when_empty():
+    from cdk_functions import build_pi_express_container_environment
+
+    env = build_pi_express_container_environment(
+        service_connect_discovery_name="redaction",
+        main_app_port=7860,
+        pi_gradio_port=7862,
+    )
+    assert "AGENT_ROOT_PATH" not in env
+    assert "ROOT_PATH" not in env
+    assert "FASTAPI_ROOT_PATH" not in env
+
+
 def test_pi_listener_rule_count():
     from cdk_functions import pi_listener_rule_count
 

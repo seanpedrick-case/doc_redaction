@@ -82,7 +82,7 @@ def test_validate_install_answers_allows_cdk_deploy_without_url():
 def test_patch_env_key_values_merges_updates(tmp_path):
     from cdk_post_deploy import _patch_env_key_values
 
-    env_file = tmp_path / "pi_agent.env"
+    env_file = tmp_path / "agent.env"
     env_file.write_text(
         "AGENT_ORCHESTRATOR=pi\nDOC_REDACTION_GRADIO_URL=https://old.example\n",
         encoding="utf-8",
@@ -157,7 +157,7 @@ def test_maybe_complete_agentcore_skips_when_image_not_ready(monkeypatch, tmp_pa
 def test_sync_agentcore_runtime_url_from_stack_patches_env(tmp_path, monkeypatch):
     import cdk_post_deploy as post
 
-    pi_env = tmp_path / "pi_agent.env"
+    pi_env = tmp_path / "agent.env"
     cdk_env = tmp_path / "cdk_config.env"
     pi_env.write_text("AGENT_ORCHESTRATOR=pi\n", encoding="utf-8")
     cdk_env.write_text("ENABLE_AGENTCORE_RUNTIME=False\n", encoding="utf-8")

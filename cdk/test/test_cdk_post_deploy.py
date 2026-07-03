@@ -348,11 +348,11 @@ def test_print_express_mode_next_steps(capsys, monkeypatch):
     assert "agentic redaction app can be accessed at" in out
     assert "https://main.example.ecs.eu-west-2.on.aws" in out
     assert "https://pi.example.ecs.eu-west-2.on.aws/" in out
-    assert "pi_agent.env" not in out
+    assert "agent.env" not in out
 
 
 def test_sync_pi_agent_doc_redaction_url_for_agentcore(tmp_path, monkeypatch):
-    env_file = tmp_path / "pi_agent.env"
+    env_file = tmp_path / "agent.env"
     env_file.write_text(
         "AGENT_ORCHESTRATOR=agentcore\nDOC_REDACTION_GRADIO_URL=http://redaction:7860\n",
         encoding="utf-8",

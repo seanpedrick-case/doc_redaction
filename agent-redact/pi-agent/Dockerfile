@@ -29,8 +29,8 @@ ENV NPM_CONFIG_LOGLEVEL=warn
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV APP_HOME=/home/user
-ENV PI_WORKDIR=/workspace/doc_redaction
-ENV PYTHONPATH=${PI_WORKDIR}:${PI_WORKDIR}/agent-redact/pi
+ENV AGENT_WORKDIR=/workspace/doc_redaction
+ENV PYTHONPATH=${AGENT_WORKDIR}:${AGENT_WORKDIR}/agent-redact/pi
 ENV GRADIO_SERVER_NAME=0.0.0.0
 ENV MPLCONFIGDIR=/tmp/matplotlib_cache/
 ENV XDG_CACHE_HOME=/tmp/xdg_cache/user_1000
@@ -57,24 +57,24 @@ RUN pip install --no-cache-dir -r /tmp/requirements_pi_agent.txt \
 FROM pi-base AS dev
 
 ENV HOME=${APP_HOME}
-ENV PI_WORKSPACE_DIR=${APP_HOME}/app/workspace
-ENV PI_UPLOAD_ROOT=/tmp/gradio
-ENV PI_SESSION_DIR=${APP_HOME}/.pi/agent/sessions
+ENV AGENT_WORKSPACE_DIR=${APP_HOME}/app/workspace
+ENV AGENT_UPLOAD_ROOT=/tmp/gradio
+ENV AGENT_SESSION_DIR=${APP_HOME}/.pi/agent/sessions
 
 RUN useradd -m -u 1000 user \
     && mkdir -p \
         ${APP_HOME}/app/workspace \
         ${APP_HOME}/.pi/agent/sessions \
-        ${PI_WORKDIR} \
+        ${AGENT_WORKDIR} \
         /tmp/gradio \
         /tmp/matplotlib_cache \
         ${XDG_CACHE_HOME} \
-    && chown -R user:user ${APP_HOME} ${PI_WORKDIR} \
+    && chown -R user:user ${APP_HOME} ${AGENT_WORKDIR} \
     && chown user:user /tmp/gradio /tmp/matplotlib_cache ${XDG_CACHE_HOME} \
     && chmod 1777 /tmp/gradio /tmp/matplotlib_cache \
     && chmod 700 ${XDG_CACHE_HOME}
 
-WORKDIR ${PI_WORKDIR}
+WORKDIR ${AGENT_WORKDIR}
 
 USER user
 
@@ -87,39 +87,39 @@ RUN pi --version
 # ===================================================================
 FROM pi-base AS runtime
 
-ENV PI_DEPLOYMENT_PROFILE=hf-space
-ENV PI_DEFAULT_PROVIDER=google-gemini
-ENV PI_DEFAULT_MODEL=gemini-flash-lite-latest
+ENV AGENT_DEPLOYMENT_PROFILE=hf-space
+ENV AGENT_DEFAULT_PROVIDER=google-gemini
+ENV AGENT_DEFAULT_MODEL=gemini-flash-lite-latest
 ENV DOC_REDACTION_GRADIO_URL=https://seanpedrickcase-document-redaction.hf.space
 ENV HOME=${APP_HOME}
-ENV PI_WORKDIR=/workspace/doc_redaction
+ENV AGENT_WORKDIR=/workspace/doc_redaction
 # Fargate uses volume mounts under ${APP_HOME}/app/workspace (CDK chown entrypoint).
-# ECS Express has no mounts — CDK sets PI_WORKSPACE_DIR=/tmp/agent-workspace at deploy.
-ENV PI_WORKSPACE_DIR=${APP_HOME}/app/workspace
-ENV PI_UPLOAD_ROOT=/tmp/gradio
-ENV PI_SESSION_DIR=/tmp/agent-sessions
-ENV PI_CODING_AGENT_DIR=/tmp/agent-coding
+# ECS Express has no mounts — CDK sets AGENT_WORKSPACE_DIR=/tmp/agent-workspace at deploy.
+ENV AGENT_WORKSPACE_DIR=${APP_HOME}/app/workspace
+ENV AGENT_UPLOAD_ROOT=/tmp/gradio
+ENV AGENT_SESSION_DIR=/tmp/agent-sessions
+ENV AGENT_CODING_AGENT_DIR=/tmp/agent-coding
 ENV ACCESS_LOGS_FOLDER=/tmp/agent-logs/
 ENV USAGE_LOGS_FOLDER=/tmp/agent-usage/
 ENV FEEDBACK_LOGS_FOLDER=/tmp/agent-feedback/
 ENV PI_OFFLINE=1
 ENV PI_SKIP_VERSION_CHECK=1
-ENV PI_GRADIO_SHOW_EXAMPLES=true
-ENV PI_UI_HOST=0.0.0.0
-ENV PI_UI_PORT=7860
-ENV PI_GRADIO_PORT=7860
+ENV AGENT_GRADIO_SHOW_EXAMPLES=true
+ENV AGENT_UI_HOST=0.0.0.0
+ENV AGENT_UI_PORT=7860
+ENV AGENT_GRADIO_PORT=7860
 ENV GRADIO_SERVER_NAME=0.0.0.0
 ENV GRADIO_SERVER_PORT=7860
 ENV GRADIO_ANALYTICS_ENABLED=False
 ENV RUN_FASTAPI=False
 
-WORKDIR ${PI_WORKDIR}
+WORKDIR ${AGENT_WORKDIR}
 
 COPY agent-redact/pi agent-redact/pi
 COPY skills skills
 COPY tools tools
 # Committed template only (see sync-manifest.txt); runtime secrets come from S3/env on ECS.
-COPY config/pi_agent.env.example config/pi_agent.env.example
+COPY config/agent.env.example config/agent.env.example
 COPY intros intros
 COPY AGENTS.md AGENTS.md
 COPY doc_redaction/example_data doc_redaction/example_data
@@ -147,9 +147,9 @@ RUN useradd -m -u 1000 user \
     && chmod 755 ${APP_HOME}/app/workspace ${APP_HOME}/.pi \
     && chmod 1777 /tmp/gradio /tmp/agent-sessions /tmp/matplotlib_cache \
     && chmod 700 ${XDG_CACHE_HOME} \
-    && chown -R root:root ${PI_WORKDIR} \
-    && find ${PI_WORKDIR} -type d -exec chmod 755 {} \; \
-    && find ${PI_WORKDIR} -type f -exec chmod 644 {} \; \
+    && chown -R root:root ${AGENT_WORKDIR} \
+    && find ${AGENT_WORKDIR} -type d -exec chmod 755 {} \; \
+    && find ${AGENT_WORKDIR} -type f -exec chmod 644 {} \; \
     && mkdir -p ${APP_HOME}/app \
     && chown user:user ${APP_HOME}/app
 

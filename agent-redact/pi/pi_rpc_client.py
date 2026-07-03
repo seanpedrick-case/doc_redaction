@@ -33,7 +33,7 @@ _PI_SUBPROCESS_ENCODING_ERRORS = "replace"
 _PI_INSTALL_HINT = (
     "Install the Pi coding agent CLI, then restart the Gradio app:  \n"
     "`npm install -g @earendil-works/pi-coding-agent`  \n"
-    "On Windows, ensure Node.js/npm are on PATH (or set `PI_EXECUTABLE` to the "
+    "On Windows, ensure Node.js/npm are on PATH (or set `AGENT_EXECUTABLE` to the "
     "full path to `pi.cmd`, e.g. `%APPDATA%\\npm\\pi.cmd`).  \n"
     "Docker users: run the Pi UI via `docker compose` (`pi-agent` service) instead "
     "of `python gradio_app.py` on the host."
@@ -42,12 +42,12 @@ _PI_INSTALL_HINT = (
 
 def resolve_pi_executable() -> str:
     """Return a path to the ``pi`` RPC executable (raises ``PiRpcError`` if missing)."""
-    override = os.environ.get("PI_EXECUTABLE", "").strip()
+    override = os.environ.get("AGENT_EXECUTABLE", "").strip()
     if override:
         if os.path.isfile(override) or shutil.which(override):
             return override
         raise PiRpcError(
-            f"PI_EXECUTABLE is set but not found: `{override}`  \n\n{_PI_INSTALL_HINT}"
+            f"AGENT_EXECUTABLE is set but not found: `{override}`  \n\n{_PI_INSTALL_HINT}"
         )
     for name in ("pi", "pi.cmd"):
         found = shutil.which(name)
@@ -533,7 +533,7 @@ class PiRpcClient:
     def _dispatch_message(self, message: Any) -> None:
         if not isinstance(message, dict):
             return
-        if os.environ.get("PI_RPC_DEBUG", "").strip() == "1":
+        if os.environ.get("AGENT_RPC_DEBUG", "").strip() == "1":
             try:
                 stripped = _strip_rpc_payload_for_debug(message)
                 sys.stderr.write(
@@ -576,7 +576,7 @@ class PiRpcClient:
     def _write_command(self, command: dict[str, Any]) -> None:
         proc = self._ensure_running()
         assert proc.stdin is not None
-        if os.environ.get("PI_RPC_DEBUG", "").strip() == "1":
+        if os.environ.get("AGENT_RPC_DEBUG", "").strip() == "1":
             try:
                 stripped = _strip_rpc_payload_for_debug(command)
                 sys.stderr.write(
@@ -977,7 +977,7 @@ def default_client(session_hash: str | None = None) -> PiRpcClient:
     env.setdefault("PYTHONIOENCODING", "utf-8")
     from session_workspace import workspace_base_dir
 
-    env.setdefault("PI_WORKSPACE_DIR", str(workspace_base_dir()))
+    env.setdefault("AGENT_WORKSPACE_DIR", str(workspace_base_dir()))
     if not env.get("GEMINI_API_KEY") and env.get("GOOGLE_API_KEY"):
         env["GEMINI_API_KEY"] = env["GOOGLE_API_KEY"]
     if not env.get("HF_TOKEN") and env.get("DOC_REDACTION_HF_TOKEN"):
