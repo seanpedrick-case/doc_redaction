@@ -427,6 +427,12 @@ CLOUDFRONT_PREFIX_LIST_ID = get_or_create_env_var(
 RESTRICT_ALB_INGRESS_TO_CLOUDFRONT = get_or_create_env_var(
     "RESTRICT_ALB_INGRESS_TO_CLOUDFRONT", "False"
 )
+# When the CloudFront prefix list does not fit the per-security-group rule quota,
+# automatically request a Service Quotas increase (needs AWS approval; re-run the
+# lockdown once granted). Off by default to avoid surprising quota requests.
+RESTRICT_ALB_AUTORAISE_SG_QUOTA = get_or_create_env_var(
+    "RESTRICT_ALB_AUTORAISE_SG_QUOTA", "False"
+)
 CLOUDFRONT_GEO_RESTRICTION = get_or_create_env_var(
     "CLOUDFRONT_GEO_RESTRICTION", ""
 )  # A country that Cloudfront restricts access to. See here: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/georestrictions.html

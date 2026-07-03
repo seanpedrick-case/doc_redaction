@@ -10,18 +10,24 @@ from aws_cdk import aws_lambda as lambda_
 from aws_cdk import custom_resources as cr
 from constructs import Construct
 
-# CloudFront (viewer-request) snippet: forward the real viewer host/proto to the
-# origin so Gradio builds asset URLs (config.root, theme.css, custom components)
-# against the CloudFront domain instead of the origin's own *.ecs.on.aws host.
+# CloudFront (viewer-request) snippet: forward the real viewer host to the origin so
+# Gradio builds asset URLs (config.root, theme.css, custom components) against the
+# CloudFront domain instead of the origin's own *.ecs.on.aws host.
 # Needed because the origin request policy is ALL_VIEWER_EXCEPT_HOST_HEADER — the
 # Host header is stripped so ECS Express can route on its own hostname, which would
 # otherwise make Gradio emit absolute origin URLs the browser can't reach once the
-# origin is locked to CloudFront-only. These x-forwarded-* headers are NOT stripped.
+# origin is locked to CloudFront-only. ``x-forwarded-host`` is NOT stripped.
+#
+# NOTE: ``x-forwarded-proto`` is a CloudFront-disallowed header for edge functions —
+# adding it here makes CloudFront reject the request with HTTP 502 ("tried to add a
+# disallowed header"). The https scheme is instead supplied to the origin via a static
+# ``X-Forwarded-Proto: https`` custom origin header on the distribution (see
+# cdk_cloudfront_distribution.py), which is safe because viewers always reach
+# CloudFront over HTTPS (REDIRECT_TO_HTTPS).
 _FORWARDED_HOST_INJECTION_JS = (
     "if (request.headers.host && request.headers.host.value) {\n"
     "      request.headers['x-forwarded-host'] = "
     "{ value: request.headers.host.value };\n"
-    "      request.headers['x-forwarded-proto'] = { value: 'https' };\n"
     "    }"
 )
 

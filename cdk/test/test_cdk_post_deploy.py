@@ -351,6 +351,33 @@ def test_print_express_mode_next_steps(capsys, monkeypatch):
     assert "agent.env" not in out
 
 
+def test_print_express_mode_next_steps_magic_link_uses_cloudfront(capsys, monkeypatch):
+    outputs = {
+        "CloudFrontDistributionURL": "d123.cloudfront.net",
+        "RedactionLoginUrl": "https://d123.cloudfront.net/?key=secret",
+        "ExpressServiceEndpoint": "main.example.ecs.eu-west-2.on.aws",
+        "AgenticExpressEndpoint": "pi.example.ecs.eu-west-2.on.aws",
+    }
+    monkeypatch.setattr(post, "get_stack_output", lambda _s, key, _r: outputs.get(key))
+    post.print_express_mode_next_steps(
+        {
+            "AWS_REGION": "eu-west-2",
+            "ENABLE_PI_AGENT_EXPRESS_SERVICE": "True",
+            "USE_CLOUDFRONT": "True",
+            "CLOUDFRONT_AUTH_MODE": "magic-link",
+            "AGENT_ALB_PATH_PREFIX": "/agent",
+        }
+    )
+    out = capsys.readouterr().out
+    # Magic-link guidance must point at the CloudFront URL (with ?key= unlock), not the
+    # direct ECS endpoints.
+    assert "https://d123.cloudfront.net/?key=secret" in out
+    assert "https://d123.cloudfront.net" in out
+    assert "/agent/" in out
+    assert "main.example.ecs.eu-west-2.on.aws" not in out
+    assert "pi.example.ecs.eu-west-2.on.aws" not in out
+
+
 def test_sync_pi_agent_doc_redaction_url_for_agentcore(tmp_path, monkeypatch):
     env_file = tmp_path / "agent.env"
     env_file.write_text(
@@ -445,10 +472,19 @@ def _sg_with_open_ingress(sg_id="sg-abc", port=443):
 
 
 def test_restrict_single_alb_sg_replaces_open_ingress_with_prefix_list():
+    order = []
     ec2 = MagicMock()
     ec2.describe_security_groups.return_value = _sg_with_open_ingress("sg-abc", 443)
+    ec2.revoke_security_group_ingress.side_effect = lambda **_k: order.append("revoke")
+    ec2.authorize_security_group_ingress.side_effect = lambda **_k: order.append(
+        "authorize"
+    )
 
-    post._restrict_single_alb_sg_to_cloudfront(ec2, "sg-abc", "pl-cloudfront")
+    status = post._restrict_single_alb_sg_to_cloudfront(ec2, "sg-abc", "pl-cloudfront")
+
+    assert status == "ok"
+    # Open rules are revoked BEFORE the prefix list is authorized (frees rule quota).
+    assert order == ["revoke", "authorize"]
 
     auth = ec2.authorize_security_group_ingress.call_args
     assert auth.kwargs["GroupId"] == "sg-abc"
@@ -463,6 +499,47 @@ def test_restrict_single_alb_sg_replaces_open_ingress_with_prefix_list():
     revoke_perm = revoke.kwargs["IpPermissions"][0]
     assert revoke_perm["IpRanges"] == [{"CidrIp": "0.0.0.0/0"}]
     assert revoke_perm["Ipv6Ranges"] == [{"CidrIpv6": "::/0"}]
+
+
+def test_restrict_single_alb_sg_restores_open_when_rules_limit_exceeded():
+    from botocore.exceptions import ClientError
+
+    limit_err = ClientError(
+        {
+            "Error": {
+                "Code": "RulesPerSecurityGroupLimitExceeded",
+                "Message": "The maximum number of rules per security group has been reached.",
+            }
+        },
+        "AuthorizeSecurityGroupIngress",
+    )
+
+    calls = {"n": 0}
+
+    def _authorize(**_kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:  # first authorize = prefix list attempt -> fails
+            raise limit_err
+        return {}  # second authorize = restore open ingress -> succeeds
+
+    ec2 = MagicMock()
+    ec2.describe_security_groups.return_value = _sg_with_open_ingress("sg-abc", 443)
+    ec2.authorize_security_group_ingress.side_effect = _authorize
+    ec2.describe_managed_prefix_lists.return_value = {
+        "PrefixLists": [{"PrefixListId": "pl-cloudfront", "MaxEntries": 55}]
+    }
+
+    status = post._restrict_single_alb_sg_to_cloudfront(ec2, "sg-abc", "pl-cloudfront")
+
+    assert status == "quota"
+    # Revoked open, tried prefix (failed), then restored the open ingress.
+    assert ec2.revoke_security_group_ingress.call_count == 1
+    assert ec2.authorize_security_group_ingress.call_count == 2
+    restore_perm = ec2.authorize_security_group_ingress.call_args_list[1].kwargs[
+        "IpPermissions"
+    ][0]
+    assert restore_perm["IpRanges"] == [{"CidrIp": "0.0.0.0/0"}]
+    assert restore_perm["Ipv6Ranges"] == [{"CidrIpv6": "::/0"}]
 
 
 def test_restrict_single_alb_sg_is_idempotent_when_already_locked_down():
@@ -485,17 +562,136 @@ def test_restrict_single_alb_sg_is_idempotent_when_already_locked_down():
         ]
     }
 
-    post._restrict_single_alb_sg_to_cloudfront(ec2, "sg-abc", "pl-cloudfront")
+    status = post._restrict_single_alb_sg_to_cloudfront(ec2, "sg-abc", "pl-cloudfront")
 
+    assert status == "noop"
     ec2.authorize_security_group_ingress.assert_not_called()
     ec2.revoke_security_group_ingress.assert_not_called()
 
 
-def test_restrict_express_albs_reads_both_stack_outputs(monkeypatch):
-    ec2 = MagicMock()
-    ec2.describe_security_groups.side_effect = lambda GroupIds: _sg_with_open_ingress(
-        GroupIds[0], 443
+def _mock_aws_for_split(sg_to_arn, *, authorize_side_effect=None, cf_prefix="sg-cf"):
+    """MagicMock serving both the ec2 and elbv2 clients for the split lockdown flow."""
+    m = MagicMock()
+    counter = {"n": 0}
+
+    def _describe_sgs(**kwargs):
+        if "GroupIds" in kwargs:  # managed SG lookup (has open ingress + VpcId)
+            gid = kwargs["GroupIds"][0]
+            data = _sg_with_open_ingress(gid, 443)
+            data["SecurityGroups"][0]["VpcId"] = "vpc-123"
+            return data
+        return {"SecurityGroups": []}  # dedicated-SG reuse lookup -> none exists yet
+
+    m.describe_security_groups.side_effect = _describe_sgs
+
+    def _create_sg(**_kwargs):
+        counter["n"] += 1
+        return {"GroupId": f"{cf_prefix}-{counter['n']}"}
+
+    m.create_security_group.side_effect = _create_sg
+    if authorize_side_effect is not None:
+        m.authorize_security_group_ingress.side_effect = authorize_side_effect
+
+    lbs = [
+        {
+            "LoadBalancerArn": arn,
+            "VpcId": "vpc-123",
+            "SecurityGroups": [sg_id],
+        }
+        for sg_id, arn in sg_to_arn.items()
+    ]
+    paginator = MagicMock()
+    paginator.paginate.return_value = [{"LoadBalancers": lbs}]
+    m.get_paginator.return_value = paginator
+    m.describe_managed_prefix_lists.return_value = {
+        "PrefixLists": [{"PrefixListId": "pl-cloudfront", "MaxEntries": 55}]
+    }
+    return m
+
+
+def test_restrict_express_albs_auto_raises_quota_on_limit(monkeypatch):
+    from botocore.exceptions import ClientError
+
+    limit_err = ClientError(
+        {
+            "Error": {
+                "Code": "RulesPerSecurityGroupLimitExceeded",
+                "Message": "The maximum number of rules per security group has been reached.",
+            }
+        },
+        "AuthorizeSecurityGroupIngress",
     )
+    # Even a single dedicated per-port SG can't fit the prefix list -> quota fallback.
+    m = _mock_aws_for_split(
+        {"sg-main": "arn-main"},
+        authorize_side_effect=lambda **_k: (_ for _ in ()).throw(limit_err),
+    )
+
+    outputs = {"AlbSecurityGroupIdOutput": "sg-main"}
+    monkeypatch.setattr(post, "get_stack_output", lambda _s, key, _r: outputs.get(key))
+    monkeypatch.setattr(post, "get_security_group_rules_quota", lambda _r: 60.0)
+
+    requested = {}
+
+    def _request(region, desired_value):
+        requested["region"] = region
+        requested["desired"] = desired_value
+        return True
+
+    monkeypatch.setattr(post, "request_security_group_rules_quota_increase", _request)
+
+    with patch("cdk_post_deploy.boto3.client", return_value=m):
+        post.restrict_express_albs_to_cloudfront(
+            stack_name="RedactionStack",
+            region="eu-west-2",
+            prefix_list_id="pl-cloudfront",
+            auto_raise_quota=True,
+        )
+
+    assert requested["region"] == "eu-west-2"
+    assert requested["desired"] >= 65
+    m.set_security_groups.assert_not_called()
+
+
+def test_restrict_express_albs_no_quota_request_when_disabled(monkeypatch):
+    from botocore.exceptions import ClientError
+
+    limit_err = ClientError(
+        {"Error": {"Code": "RulesPerSecurityGroupLimitExceeded", "Message": "x"}},
+        "AuthorizeSecurityGroupIngress",
+    )
+    m = _mock_aws_for_split(
+        {"sg-main": "arn-main"},
+        authorize_side_effect=lambda **_k: (_ for _ in ()).throw(limit_err),
+    )
+
+    monkeypatch.setattr(
+        post,
+        "get_stack_output",
+        lambda _s, key, _r: {"AlbSecurityGroupIdOutput": "sg-main"}.get(key),
+    )
+
+    requested = {"called": False}
+
+    def _request(region, desired_value):
+        requested["called"] = True
+        return True
+
+    monkeypatch.setattr(post, "request_security_group_rules_quota_increase", _request)
+
+    with patch("cdk_post_deploy.boto3.client", return_value=m):
+        post.restrict_express_albs_to_cloudfront(
+            stack_name="RedactionStack",
+            region="eu-west-2",
+            prefix_list_id="pl-cloudfront",
+            auto_raise_quota=False,
+        )
+
+    assert requested["called"] is False
+
+
+def test_restrict_express_albs_reads_both_stack_outputs(monkeypatch):
+    m = _mock_aws_for_split({"sg-main": "arn-main", "sg-agent": "arn-agent"})
 
     outputs = {
         "AlbSecurityGroupIdOutput": "sg-main",
@@ -508,13 +704,84 @@ def test_restrict_express_albs_reads_both_stack_outputs(monkeypatch):
         lambda *_a, **_k: "pl-cloudfront",
     )
 
-    with patch("cdk_post_deploy.boto3.client", return_value=ec2):
+    with patch("cdk_post_deploy.boto3.client", return_value=m):
         processed = post.restrict_express_albs_to_cloudfront(
             stack_name="RedactionStack", region="eu-west-2"
         )
 
     assert processed == ["sg-main", "sg-agent"]
-    assert ec2.authorize_security_group_ingress.call_count == 2
+    # One dedicated CloudFront SG created per ALB (one open port each) and attached.
+    assert m.create_security_group.call_count == 2
+    assert m.set_security_groups.call_count == 2
+    # Open internet ingress revoked from each managed SG after CF SGs are attached.
+    assert m.revoke_security_group_ingress.call_count == 2
+
+
+def test_restrict_single_alb_split_attaches_then_revokes(monkeypatch):
+    """The dedicated CF SG must be attached to the LB BEFORE open ingress is revoked
+    (union semantics => no downtime window)."""
+    order = []
+    m = _mock_aws_for_split({"sg-main": "arn-main"})
+    m.set_security_groups.side_effect = lambda **_k: order.append("attach")
+    m.revoke_security_group_ingress.side_effect = lambda **_k: order.append("revoke")
+
+    status = post._restrict_single_alb_to_cloudfront_split(
+        m, m, "sg-main", "pl-cloudfront"
+    )
+
+    assert status == "ok"
+    assert order == ["attach", "revoke"]
+    attached = m.set_security_groups.call_args.kwargs["SecurityGroups"]
+    assert "sg-main" in attached and any(s.startswith("sg-cf") for s in attached)
+
+
+def test_restrict_single_alb_split_noop_when_already_locked():
+    """No open ingress + extra SG already attached => idempotent no-op."""
+    m = MagicMock()
+    m.describe_security_groups.side_effect = lambda **kw: (
+        {
+            "SecurityGroups": [
+                {"GroupId": kw["GroupIds"][0], "VpcId": "vpc-1", "IpPermissions": []}
+            ]
+        }
+        if "GroupIds" in kw
+        else {"SecurityGroups": []}
+    )
+    paginator = MagicMock()
+    paginator.paginate.return_value = [
+        {
+            "LoadBalancers": [
+                {
+                    "LoadBalancerArn": "arn-main",
+                    "VpcId": "vpc-1",
+                    "SecurityGroups": ["sg-main", "sg-cf-1"],
+                }
+            ]
+        }
+    ]
+    m.get_paginator.return_value = paginator
+
+    status = post._restrict_single_alb_to_cloudfront_split(
+        m, m, "sg-main", "pl-cloudfront"
+    )
+
+    assert status == "noop"
+    m.set_security_groups.assert_not_called()
+    m.create_security_group.assert_not_called()
+
+
+def test_restrict_single_alb_split_errors_when_no_load_balancer():
+    m = MagicMock()
+    paginator = MagicMock()
+    paginator.paginate.return_value = [{"LoadBalancers": []}]
+    m.get_paginator.return_value = paginator
+
+    status = post._restrict_single_alb_to_cloudfront_split(
+        m, m, "sg-main", "pl-cloudfront"
+    )
+
+    assert status == "error"
+    m.set_security_groups.assert_not_called()
 
 
 def test_restrict_express_albs_skips_when_no_sg_outputs(monkeypatch, capsys):

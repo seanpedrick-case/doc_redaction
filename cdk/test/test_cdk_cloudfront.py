@@ -46,21 +46,25 @@ def test_magic_link_viewer_request_js_embeds_token_and_cookie():
 
 
 def test_magic_link_viewer_request_js_forwards_viewer_host():
-    """Authorized requests must forward viewer host/proto so Gradio builds
-    asset URLs against the CloudFront domain, not the *.on.aws origin host."""
+    """Authorized requests must forward the viewer host so Gradio builds asset URLs
+    against the CloudFront domain, not the *.on.aws origin host. The proto is NOT set
+    here: x-forwarded-proto is a CloudFront-disallowed edge-function header (HTTP 502).
+    """
     js = build_magic_link_viewer_request_js(
         token="a1b2c3d4e5f6789012345678901234ab",
         cookie_name="doc-redaction-auth",
         cookie_max_age_sec=604800,
     )
     assert "x-forwarded-host" in js
-    assert "x-forwarded-proto" in js
+    assert "x-forwarded-proto" not in js
 
 
 def test_forwarded_host_viewer_request_js_sets_headers():
     js = build_forwarded_host_viewer_request_js()
     assert "x-forwarded-host" in js
-    assert "x-forwarded-proto" in js
+    # x-forwarded-proto is CloudFront-disallowed for edge functions; supplied via a
+    # static custom origin header instead (see distribution config).
+    assert "x-forwarded-proto" not in js
     assert "request.headers.host.value" in js
     assert "return request;" in js
 
@@ -132,6 +136,60 @@ def test_express_cloudfront_synth_no_waf():
     )
     for behavior in behaviors:
         assert behavior["OriginRequestPolicyId"] == all_viewer_except_host
+
+
+def test_express_origins_set_static_forwarded_proto_header():
+    """Every Express origin must carry a static X-Forwarded-Proto: https custom header
+    so Gradio emits https asset URLs (the edge function can't set this header)."""
+    from aws_cdk import App, Environment, Stack, assertions
+    from cdk_cloudfront_distribution import create_redaction_cloudfront_distribution
+    from cdk_functions import managed_resource_removal_policy
+
+    app = App()
+    stack = Stack(
+        app,
+        "ExpressFwdProtoTest",
+        env=Environment(account="123456789012", region="eu-west-2"),
+    )
+    create_redaction_cloudfront_distribution(
+        stack,
+        "Cf",
+        distribution_comment="test-dist",
+        cognito_redirection_url="https://main.example.on.aws",
+        cloudfront_domain="d111.cloudfront.net",
+        cognito_user_pool_domain_prefix="demo",
+        aws_region="eu-west-2",
+        cognito_user_pool_login_url="",
+        ssl_certificate_domain="",
+        enable_secure_response_headers=False,
+        geo_restriction_raw="GB",
+        enable_cloudfront_waf=False,
+        web_acl_name="test-waf",
+        auth_mode="magic-link",
+        magic_link_cookie_name="doc-redaction-auth",
+        magic_link_cookie_max_age_sec=604800,
+        custom_header_name="",
+        custom_header_value="",
+        cdk_prefix="Test",
+        resource_removal_policy=managed_resource_removal_policy(),
+        main_express_endpoint="https://main.example.on.aws",
+        agentic_express_endpoint="https://agentic.example.on.aws",
+        agentic_path_prefix="/agent",
+    )
+    template = assertions.Template.from_stack(stack)
+    dist = next(
+        r
+        for r in template.to_json()["Resources"].values()
+        if r["Type"] == "AWS::CloudFront::Distribution"
+    )
+    origins_cfg = dist["Properties"]["DistributionConfig"]["Origins"]
+    assert origins_cfg, "expected at least one origin"
+    for origin in origins_cfg:
+        header_pairs = {
+            h["HeaderName"]: h["HeaderValue"]
+            for h in origin.get("OriginCustomHeaders", [])
+        }
+        assert header_pairs.get("X-Forwarded-Proto") == "https"
 
 
 def _synth_cloudfront_with_headers(attach: bool):

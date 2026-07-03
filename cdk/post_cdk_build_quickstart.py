@@ -26,6 +26,7 @@ from cdk_config import (
     ENABLE_PI_AGENT_ECS_SERVICE,
     ENABLE_PI_AGENT_EXPRESS_SERVICE,
     GRADIO_SERVER_PORT,
+    RESTRICT_ALB_AUTORAISE_SG_QUOTA,
     RESTRICT_ALB_INGRESS_TO_CLOUDFRONT,
     S3_BATCH_ENV_PREFIX,
     S3_BATCH_INPUT_PREFIX,
@@ -257,6 +258,7 @@ if (
         restrict_express_albs_to_cloudfront(
             stack_name="RedactionStack",
             region=AWS_REGION,
+            auto_raise_quota=(RESTRICT_ALB_AUTORAISE_SG_QUOTA == "True"),
         )
     except Exception as exc:
         print(
@@ -265,6 +267,7 @@ if (
         )
 
 if USE_ECS_EXPRESS_MODE == "True" and ENABLE_HEADLESS_DEPLOYMENT != "True":
+    from cdk_config import AGENT_ALB_PATH_PREFIX, CLOUDFRONT_AUTH_MODE
     from cdk_post_deploy import print_express_mode_next_steps
 
     print_express_mode_next_steps(
@@ -272,5 +275,10 @@ if USE_ECS_EXPRESS_MODE == "True" and ENABLE_HEADLESS_DEPLOYMENT != "True":
             "AWS_REGION": AWS_REGION,
             "ECS_EXPRESS_COGNITO_REDIRECT_BASE": ECS_EXPRESS_COGNITO_REDIRECT_BASE,
             "ENABLE_PI_AGENT_EXPRESS_SERVICE": ENABLE_PI_AGENT_EXPRESS_SERVICE,
+            # Needed so magic-link/CloudFront guidance points at the CloudFront URL
+            # (with ?key= unlock) instead of the direct ECS endpoints.
+            "USE_CLOUDFRONT": USE_CLOUDFRONT,
+            "CLOUDFRONT_AUTH_MODE": CLOUDFRONT_AUTH_MODE,
+            "AGENT_ALB_PATH_PREFIX": AGENT_ALB_PATH_PREFIX,
         }
     )

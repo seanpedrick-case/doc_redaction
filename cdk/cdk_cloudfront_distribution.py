@@ -161,6 +161,12 @@ def create_redaction_cloudfront_distribution(
     custom_headers: Dict[str, str] = {}
     if custom_header_name and custom_header_value:
         custom_headers[custom_header_name] = custom_header_value
+    # Supply the viewer protocol to the origin as a static header. CloudFront edge
+    # functions are not allowed to set x-forwarded-proto (doing so returns HTTP 502),
+    # so it is injected here instead. Viewers always reach CloudFront over HTTPS
+    # (REDIRECT_TO_HTTPS), so a constant "https" is correct and lets Gradio emit
+    # https:// asset URLs (see cdk_cloudfront_auth._FORWARDED_HOST_INJECTION_JS).
+    custom_headers["X-Forwarded-Proto"] = "https"
 
     additional_behaviors: Dict[str, cloudfront.BehaviorOptions] = {}
 
