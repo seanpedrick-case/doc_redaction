@@ -148,14 +148,17 @@ def make_redaction_client(
     if not force_new and cache_key in _CLIENT_CACHE:
         return _CLIENT_CACHE[cache_key]
 
-    httpx_kwargs: dict[str, Any] = {"timeout": httpx_timeout()}
-    if cookie:
-        # CloudFront magic-link: send the token cookie on every backend request.
-        httpx_kwargs["headers"] = {"Cookie": cookie}
+    # Keep custom headers out of ``httpx_kwargs``: gradio_client spreads
+    # ``httpx_kwargs`` into httpx.get()/post() calls that already pass ``headers=``,
+    # which raises "got multiple values for keyword argument 'headers'". The
+    # dedicated ``headers=`` Client param is merged into the client's headers safely.
     client_kwargs: dict[str, Any] = {
-        "httpx_kwargs": httpx_kwargs,
+        "httpx_kwargs": {"timeout": httpx_timeout()},
         "verbose": verbose,
     }
+    if cookie:
+        # CloudFront magic-link: send the token cookie on every backend request.
+        client_kwargs["headers"] = {"Cookie": cookie}
     max_attempts = _quota_retry_attempts()
     delay_s = _quota_retry_delay_s()
     last_error: BaseException | None = None

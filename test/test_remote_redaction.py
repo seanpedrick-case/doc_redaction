@@ -54,6 +54,27 @@ def test_make_redaction_client_uses_gradio_auth(monkeypatch):
     ]
 
 
+def test_make_redaction_client_sends_cookie_via_headers_kwarg(monkeypatch):
+    """CloudFront magic-link cookie must go through the dedicated ``headers=`` Client
+    param, not ``httpx_kwargs`` (which collides with gradio_client's own headers=)."""
+    captured: dict[str, object] = {}
+
+    class _FakeClient:
+        def __init__(self, url, token=None, auth=None, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("remote_redaction.Client", _FakeClient)
+    monkeypatch.setenv("DOC_REDACTION_GRADIO_URL", "https://example.cloudfront.net")
+    monkeypatch.setenv("DOC_REDACTION_AUTH_TOKEN", "magic-token")
+    monkeypatch.delenv("DOC_REDACTION_AUTH_COOKIE_NAME", raising=False)
+    clear_redaction_client_cache()
+    make_redaction_client()
+
+    assert captured.get("headers") == {"Cookie": "doc-redaction-auth=magic-token"}
+    # The cookie must NOT be nested inside httpx_kwargs (the collision source).
+    assert "headers" not in captured.get("httpx_kwargs", {})
+
+
 def test_make_redaction_client_retries_rate_limit(monkeypatch):
     attempts = {"n": 0}
 
