@@ -88,6 +88,7 @@ def test_build_env_values_demo():
     assert values["USE_CLOUDFRONT"] == "True"
     assert values["CLOUDFRONT_AUTH_MODE"] == "magic-link"
     assert values["RESTRICT_ALB_INGRESS_TO_CLOUDFRONT"] == "True"
+    assert values["ENABLE_APPREGISTRY"] == "False"
     assert values["RUN_USEAST_STACK"] == "False"
     assert values["ENABLE_RESOURCE_DELETE_PROTECTION"] == "False"
     assert values["VPC_NAME"] == "test-vpc"
@@ -103,6 +104,17 @@ def test_build_env_values_production():
     assert values["ENABLE_RESOURCE_DELETE_PROTECTION"] == "True"
     assert values["ACM_SSL_CERTIFICATE_ARN"].startswith("arn:aws:acm:")
     assert values["SSL_CERTIFICATE_DOMAIN"] == "redaction.example.com"
+    # AppRegistry defaults OFF (AWS is retiring new Application creation); the stack
+    # name is only derived when explicitly enabled.
+    assert values["ENABLE_APPREGISTRY"] == "False"
+    assert "APPREGISTRY_STACK_NAME" not in values
+
+
+def test_build_env_values_appregistry_opt_in_sets_stack_name():
+    answers = _production_answers()
+    answers.custom_overrides["ENABLE_APPREGISTRY"] = "True"
+    values = inst.build_env_values(answers)
+    assert values["ENABLE_APPREGISTRY"] == "True"
     assert values["APPREGISTRY_STACK_NAME"] == "Test-Redaction-AppRegistryStack"
 
 

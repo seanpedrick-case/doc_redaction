@@ -145,7 +145,8 @@ DEMO_PRESET: Dict[str, str] = {
     "RESTRICT_ALB_INGRESS_TO_CLOUDFRONT": "True",
     "RUN_USEAST_STACK": "False",
     "ENABLE_RESOURCE_DELETE_PROTECTION": "False",
-    "ENABLE_APPREGISTRY": "True",
+    # Default OFF: AWS is retiring creation of new AppRegistry Applications.
+    "ENABLE_APPREGISTRY": "False",
     "ACM_SSL_CERTIFICATE_ARN": "",
     "SSL_CERTIFICATE_DOMAIN": "",
 }
@@ -157,7 +158,8 @@ PRODUCTION_PRESET: Dict[str, str] = {
     "ENABLE_CLOUDFRONT_WAF": "False",
     "RUN_USEAST_STACK": "False",
     "ENABLE_RESOURCE_DELETE_PROTECTION": "True",
-    "ENABLE_APPREGISTRY": "True",
+    # Default OFF: AWS is retiring creation of new AppRegistry Applications.
+    "ENABLE_APPREGISTRY": "False",
 }
 
 HEADLESS_PRESET: Dict[str, str] = {
@@ -166,7 +168,8 @@ HEADLESS_PRESET: Dict[str, str] = {
     "USE_CLOUDFRONT": "False",
     "RUN_USEAST_STACK": "False",
     "ENABLE_RESOURCE_DELETE_PROTECTION": "False",
-    "ENABLE_APPREGISTRY": "True",
+    # Default OFF: AWS is retiring creation of new AppRegistry Applications.
+    "ENABLE_APPREGISTRY": "False",
     "ENABLE_HEADLESS_DEPLOYMENT": "True",
     "ENABLE_S3_BATCH_ECS_TRIGGER": "True",
     "COGNITO_AUTH": "False",
@@ -2758,6 +2761,7 @@ def print_summary(values: Dict[str, str], python_exe: Optional[Path] = None) -> 
         "ENABLE_HEADLESS_DEPLOYMENT",
         "ENABLE_S3_BATCH_ECS_TRIGGER",
         "ENABLE_RESOURCE_DELETE_PROTECTION",
+        "ENABLE_APPREGISTRY",
         "VPC_NAME",
         "NEW_VPC_CIDR",
         "ACM_SSL_CERTIFICATE_ARN",
@@ -3759,7 +3763,14 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
             "True" if ask_yes_no("Enable delete protection?", True) else "False"
         )
         answers.custom_overrides["ENABLE_APPREGISTRY"] = (
-            "True" if ask_yes_no("Enable AppRegistry?", True) else "False"
+            "True"
+            if ask_yes_no(
+                "Enable AppRegistry (AWS Console myApplications)? AWS is retiring "
+                "creation of new AppRegistry Applications, so this may fail on new "
+                "accounts",
+                default=False,
+            )
+            else "False"
         )
         if getattr(args, "headless", False):
             if answers.custom_overrides.get("USE_ECS_EXPRESS_MODE") == "True":
@@ -3797,6 +3808,29 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
     if delete_protection_cli in ("on", "off"):
         answers.custom_overrides["ENABLE_RESOURCE_DELETE_PROTECTION"] = (
             "True" if delete_protection_cli == "on" else "False"
+        )
+
+    # AppRegistry (AWS Console myApplications). Default OFF because AWS is retiring
+    # creation of new AppRegistry Applications; offer to opt in interactively for the
+    # demo/production profiles (custom already prompts above).
+    if interactive and answers.profile in ("demo", "production"):
+        answers.custom_overrides["ENABLE_APPREGISTRY"] = (
+            "True"
+            if ask_yes_no(
+                "Enable AppRegistry (AWS Console myApplications)? AWS is retiring "
+                "creation of new AppRegistry Applications, so leave this off unless "
+                "your account can still create them",
+                default=False,
+            )
+            else "False"
+        )
+
+    # A --appregistry flag overrides the profile default (and any prompt), so
+    # non-interactive runs can select the behaviour explicitly.
+    appregistry_cli = getattr(args, "appregistry", None)
+    if appregistry_cli in ("on", "off"):
+        answers.custom_overrides["ENABLE_APPREGISTRY"] = (
+            "True" if appregistry_cli == "on" else "False"
         )
 
     headless_err = headless_profile_error(answers)
@@ -4135,6 +4169,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Override stack termination + resource deletion protection "
         "(default: on for production, off for demo/headless). Applies to all "
         "resources governed by ENABLE_RESOURCE_DELETE_PROTECTION.",
+    )
+    p.add_argument(
+        "--appregistry",
+        choices=("on", "off"),
+        help="Override AWS Console myApplications (AppRegistry) creation "
+        "(default: off). AWS is retiring creation of new AppRegistry "
+        "Applications; sets ENABLE_APPREGISTRY.",
     )
     agentic = p.add_argument_group("Agentic redaction (second Gradio app)")
     agentic.add_argument(

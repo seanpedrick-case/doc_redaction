@@ -146,8 +146,11 @@ ENABLE_RESOURCE_DELETE_PROTECTION = get_or_create_env_var(
     "ENABLE_RESOURCE_DELETE_PROTECTION", "True"
 )
 
-# AWS Console myApplications (Service Catalog AppRegistry)
-ENABLE_APPREGISTRY = get_or_create_env_var("ENABLE_APPREGISTRY", "True")
+# AWS Console myApplications (Service Catalog AppRegistry).
+# Default OFF: AWS is retiring the ability to create new AppRegistry Applications
+# (see AWS console notice), so new deployments should not depend on it. Set to
+# "True" only if your account can still create AppRegistry Applications.
+ENABLE_APPREGISTRY = get_or_create_env_var("ENABLE_APPREGISTRY", "False")
 APPREGISTRY_APPLICATION_NAME = get_or_create_env_var(
     "APPREGISTRY_APPLICATION_NAME", f"{CDK_PREFIX}doc-redaction"
 )
