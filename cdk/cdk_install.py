@@ -141,6 +141,8 @@ DEMO_PRESET: Dict[str, str] = {
     "USE_CLOUDFRONT": "True",
     "CLOUDFRONT_AUTH_MODE": "magic-link",
     "ENABLE_CLOUDFRONT_WAF": "False",
+    # Lock the Express managed ALB SG(s) to CloudFront after deploy (boto3 quickstart step).
+    "RESTRICT_ALB_INGRESS_TO_CLOUDFRONT": "True",
     "RUN_USEAST_STACK": "False",
     "ENABLE_RESOURCE_DELETE_PROTECTION": "False",
     "ENABLE_APPREGISTRY": "True",

@@ -223,32 +223,49 @@ _CLOUDFRONT_OVERLAY_KEYS = (
     "DOC_REDACTION_GRADIO_URL",
     "DOC_REDACTION_AUTH_TOKEN",
     "DOC_REDACTION_AUTH_COOKIE_NAME",
+    # AgentCore runtime URL + model are created/finalised in deploy phase 2 and
+    # re-uploaded to agent.env in S3; the container's task env is fixed at synth,
+    # so pick them up here on (re)start rather than requiring a stack update.
+    "AGENTCORE_RUNTIME_URL",
+    "AGENT_DEFAULT_MODEL",
+    "AGENT_DEFAULT_PROVIDER",
 )
 _cloudfront_overlay_applied = False
 
 
 def apply_agentcore_cloudfront_config_overlay() -> dict[str, str]:
-    """Overlay backend URL + magic-link token from S3 into ``os.environ`` (AgentCore only).
+    """Overlay post-deploy AgentCore settings from S3 into ``os.environ`` (AgentCore only).
 
-    The Pi Express task definition is fixed at synth time and cannot carry the
-    (later-created) CloudFront domain/token, and CloudFront can't be injected into
-    the task env without a dependency cycle. So when running as the AgentCore
-    orchestrator, we fetch the post-deploy ``agent.env`` from S3 and override the
-    CloudFront-related keys, so ``build_agentcore_invoke_runtime_config`` tells the
-    runtime to reach doc_redaction through CloudFront with the token cookie.
+    The Pi Express task definition is fixed at synth time and cannot carry values
+    that only exist after deploy phase 2 — the (later-created) CloudFront
+    domain/magic-link token and the AgentCore runtime URL/model — and injecting
+    them into the task env would create a dependency cycle. So when running as the
+    AgentCore orchestrator, we fetch the post-deploy ``agent.env`` from S3 and
+    override those keys (see ``_CLOUDFRONT_OVERLAY_KEYS``): the CloudFront backend
+    URL + token cookie for ``build_agentcore_invoke_runtime_config``, plus
+    ``AGENTCORE_RUNTIME_URL`` / ``AGENT_DEFAULT_MODEL`` so the running container
+    reaches the runtime and shows the correct model without a stack update.
 
     Controlled by ``DOC_REDACTION_CONFIG_S3_BUCKET`` / ``DOC_REDACTION_CONFIG_S3_KEY``
-    (set by CDK). No-op unless ``AGENT_ORCHESTRATOR=agentcore``. Best-effort and
-    idempotent; returns the keys it overrode.
+    (set by CDK on every Express deploy). The overlay runs whenever that S3 config
+    source is present and will **promote** the container to ``AGENT_ORCHESTRATOR=agentcore``
+    if the S3 ``agent.env`` says so — this lets deploy phase 2 (which re-uploads
+    ``agent.env`` and recycles the service) flip an already-running container to
+    AgentCore without a stack update. It never demotes an already-agentcore
+    container and is a no-op when the S3 config does not select AgentCore.
+    Best-effort and idempotent; returns the keys it overrode.
     """
     global _cloudfront_overlay_applied
     applied: dict[str, str] = {}
     if _cloudfront_overlay_applied:
         return applied
-    if (os.environ.get("AGENT_ORCHESTRATOR") or "").strip().lower() != "agentcore":
-        return applied
+    already_agentcore = (
+        os.environ.get("AGENT_ORCHESTRATOR") or ""
+    ).strip().lower() == "agentcore"
     bucket = (os.environ.get("DOC_REDACTION_CONFIG_S3_BUCKET") or "").strip()
     if not bucket:
+        # No post-deploy S3 config source; rely solely on the task env.
+        _cloudfront_overlay_applied = True
         return applied
     key = (os.environ.get("DOC_REDACTION_CONFIG_S3_KEY") or "agent.env").strip()
 
@@ -265,25 +282,42 @@ def apply_agentcore_cloudfront_config_overlay() -> dict[str, str]:
             .decode("utf-8", "replace")
         )
     except Exception as exc:  # noqa: BLE001 - best effort, keep the UI booting
-        print(f"AgentCore CloudFront config overlay skipped ({bucket}/{key}): {exc}")
+        print(f"AgentCore config overlay skipped ({bucket}/{key}): {exc}")
         _cloudfront_overlay_applied = True
         return applied
 
+    parsed: dict[str, str] = {}
     for raw_line in body.splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         name, _, value = line.partition("=")
-        name = name.strip()
-        value = value.strip().strip('"').strip("'")
-        if name in _CLOUDFRONT_OVERLAY_KEYS and value:
+        parsed[name.strip()] = value.strip().strip('"').strip("'")
+
+    # Only act when this deployment actually selects AgentCore (task env already
+    # says so, or the S3 config does). This keeps the overlay a no-op for pi /
+    # langgraph deployments that share the same config bucket.
+    s3_agentcore = (
+        parsed.get("AGENT_ORCHESTRATOR") or ""
+    ).strip().lower() == "agentcore"
+    if not (already_agentcore or s3_agentcore):
+        _cloudfront_overlay_applied = True
+        return applied
+
+    if s3_agentcore and not already_agentcore:
+        os.environ["AGENT_ORCHESTRATOR"] = "agentcore"
+        applied["AGENT_ORCHESTRATOR"] = "agentcore"
+
+    for name in _CLOUDFRONT_OVERLAY_KEYS:
+        value = parsed.get(name)
+        if value:
             os.environ[name] = value
             applied[name] = value
 
     _cloudfront_overlay_applied = True
     if applied:
         print(
-            "Applied AgentCore CloudFront config overlay for: "
+            "Applied AgentCore config overlay from S3 for: "
             + ", ".join(sorted(applied))
         )
     return applied

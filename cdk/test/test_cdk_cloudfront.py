@@ -6,7 +6,10 @@ from pathlib import Path
 CDK_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(CDK_DIR))
 
-from cdk_cloudfront_auth import build_magic_link_viewer_request_js
+from cdk_cloudfront_auth import (
+    build_forwarded_host_viewer_request_js,
+    build_magic_link_viewer_request_js,
+)
 from cdk_cloudfront_distribution import (
     express_endpoint_hostname,
     parse_geo_restriction_locations,
@@ -40,6 +43,33 @@ def test_magic_link_viewer_request_js_embeds_token_and_cookie():
     assert "604800" in js
     assert "statusCode: 302" in js
     assert "statusCode: 401" in js
+
+
+def test_magic_link_viewer_request_js_forwards_viewer_host():
+    """Authorized requests must forward viewer host/proto so Gradio builds
+    asset URLs against the CloudFront domain, not the *.on.aws origin host."""
+    js = build_magic_link_viewer_request_js(
+        token="a1b2c3d4e5f6789012345678901234ab",
+        cookie_name="doc-redaction-auth",
+        cookie_max_age_sec=604800,
+    )
+    assert "x-forwarded-host" in js
+    assert "x-forwarded-proto" in js
+
+
+def test_forwarded_host_viewer_request_js_sets_headers():
+    js = build_forwarded_host_viewer_request_js()
+    assert "x-forwarded-host" in js
+    assert "x-forwarded-proto" in js
+    assert "request.headers.host.value" in js
+    assert "return request;" in js
+
+
+def test_cloudfront_without_magic_link_still_forwards_host():
+    """auth_mode='none' must still attach a viewer-request function that forwards
+    the viewer host (otherwise Gradio assets 404/time out behind CloudFront)."""
+    template = _synth_cloudfront_with_headers(attach=False)
+    template.resource_count_is("AWS::CloudFront::Function", 1)
 
 
 def test_express_cloudfront_synth_no_waf():

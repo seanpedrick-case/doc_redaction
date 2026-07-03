@@ -3019,11 +3019,32 @@ def build_pi_express_container_environment(
         "COGNITO_AUTH": "True" if cognito_auth else "False",
     }
     try:
-        from cdk_config import AGENTCORE_RUNTIME_URL, ENABLE_AGENTCORE_RUNTIME
+        from cdk_config import (
+            AGENT_ORCHESTRATOR_DEFAULT,
+            AGENTCORE_BEDROCK_MODEL,
+            AGENTCORE_RUNTIME_URL,
+            ENABLE_AGENTCORE_RUNTIME,
+        )
 
-        if ENABLE_AGENTCORE_RUNTIME == "True" and AGENTCORE_RUNTIME_URL:
+        # Set the orchestrator from *intent* (wizard choice), not from whether the
+        # runtime URL is known yet: with the two-phase AgentCore deploy the URL is
+        # only created in phase 2, so gating on it here would leave the container
+        # stuck on the "pi" default. The runtime URL is supplied later by the S3
+        # config overlay (see apply_agentcore_cloudfront_config_overlay) once
+        # phase 2 has re-uploaded agent.env and recycled this service.
+        agentcore_intended = (
+            ENABLE_AGENTCORE_RUNTIME == "True"
+            or (AGENT_ORCHESTRATOR_DEFAULT or "").strip().lower() == "agentcore"
+        )
+        if agentcore_intended:
             env["AGENT_ORCHESTRATOR"] = "agentcore"
-            env["AGENTCORE_RUNTIME_URL"] = AGENTCORE_RUNTIME_URL
+            # Pin the model so the UI/agent match what the runtime was created with,
+            # even before phase 2 supplies the runtime URL.
+            env["AGENT_DEFAULT_PROVIDER"] = "amazon-bedrock"
+            if (AGENTCORE_BEDROCK_MODEL or "").strip():
+                env["AGENT_DEFAULT_MODEL"] = AGENTCORE_BEDROCK_MODEL.strip()
+            if (AGENTCORE_RUNTIME_URL or "").strip():
+                env["AGENTCORE_RUNTIME_URL"] = AGENTCORE_RUNTIME_URL.strip()
     except ImportError:
         pass
     # AgentCore-only: lets the container fetch the post-deploy agent.env from S3

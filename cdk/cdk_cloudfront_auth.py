@@ -10,6 +10,35 @@ from aws_cdk import aws_lambda as lambda_
 from aws_cdk import custom_resources as cr
 from constructs import Construct
 
+# CloudFront (viewer-request) snippet: forward the real viewer host/proto to the
+# origin so Gradio builds asset URLs (config.root, theme.css, custom components)
+# against the CloudFront domain instead of the origin's own *.ecs.on.aws host.
+# Needed because the origin request policy is ALL_VIEWER_EXCEPT_HOST_HEADER — the
+# Host header is stripped so ECS Express can route on its own hostname, which would
+# otherwise make Gradio emit absolute origin URLs the browser can't reach once the
+# origin is locked to CloudFront-only. These x-forwarded-* headers are NOT stripped.
+_FORWARDED_HOST_INJECTION_JS = (
+    "if (request.headers.host && request.headers.host.value) {\n"
+    "      request.headers['x-forwarded-host'] = "
+    "{ value: request.headers.host.value };\n"
+    "      request.headers['x-forwarded-proto'] = { value: 'https' };\n"
+    "    }"
+)
+
+
+def build_forwarded_host_viewer_request_js() -> str:
+    """CloudFront Function (viewer-request) JS: forward viewer host/proto only.
+
+    Used on CloudFront deployments *without* magic-link auth (a behavior can only
+    have one viewer-request function; magic-link injects the same headers itself).
+    """
+    return f"""function handler(event) {{
+  var request = event.request;
+  {_FORWARDED_HOST_INJECTION_JS}
+  return request;
+}}
+"""
+
 
 def build_magic_link_viewer_request_js(
     *,
@@ -48,6 +77,7 @@ def build_magic_link_viewer_request_js(
 
   var cookies = request.cookies || {{}};
   if (cookies[COOKIE_NAME] && cookies[COOKIE_NAME].value === TOKEN) {{
+    {_FORWARDED_HOST_INJECTION_JS}
     return request;
   }}
 
@@ -143,6 +173,25 @@ def magic_link_function_association(
     return cloudfront.FunctionAssociation(
         function=auth_function,
         event_type=cloudfront.FunctionEventType.VIEWER_REQUEST,
+    )
+
+
+def create_forwarded_host_function(
+    scope: Construct,
+    construct_id: str,
+) -> cloudfront.Function:
+    """Viewer-request function that forwards the viewer host/proto to the origin.
+
+    For CloudFront deployments without magic-link auth, so Gradio still builds
+    asset URLs against the CloudFront domain (see ``_FORWARDED_HOST_INJECTION_JS``).
+    """
+    return cloudfront.Function(
+        scope,
+        f"{construct_id}ForwardedHostFunction",
+        code=cloudfront.FunctionCode.from_inline(
+            build_forwarded_host_viewer_request_js()
+        ),
+        comment="Forward viewer host/proto to origin for doc_redaction",
     )
 
 

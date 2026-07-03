@@ -1264,6 +1264,202 @@ def get_stack_output(
     return None
 
 
+def resolve_cloudfront_origin_prefix_list_id(
+    region: str,
+    fallback: Optional[str] = None,
+) -> Optional[str]:
+    """Resolve the region's CloudFront origin-facing managed prefix list id.
+
+    The managed prefix list ``com.amazonaws.global.cloudfront.origin-facing`` has a
+    different id per region, so it is resolved dynamically. Falls back to the supplied
+    value (e.g. ``CLOUDFRONT_PREFIX_LIST_ID``) if the lookup fails.
+    """
+    ec2 = boto3.client("ec2", region_name=region)
+    try:
+        response = ec2.describe_managed_prefix_lists(
+            Filters=[
+                {
+                    "Name": "prefix-list-name",
+                    "Values": ["com.amazonaws.global.cloudfront.origin-facing"],
+                }
+            ]
+        )
+        for prefix_list in response.get("PrefixLists", []):
+            pl_id = prefix_list.get("PrefixListId")
+            if pl_id:
+                return pl_id
+    except Exception as exc:  # pragma: no cover - network/permission dependent
+        print(f"  Warning: could not resolve CloudFront prefix list: {exc}")
+    return fallback
+
+
+def _restrict_single_alb_sg_to_cloudfront(
+    ec2_client: Any,
+    sg_id: str,
+    prefix_list_id: str,
+) -> None:
+    """Replace open (0.0.0.0/0, ::/0) ingress on ``sg_id`` with the CloudFront prefix list.
+
+    Idempotent: the prefix-list rule is authorized first (so CloudFront is never cut
+    off), then the matching open CIDR ranges are revoked on the same ports. Re-running
+    is safe because duplicate authorizations and missing revocations are ignored.
+    """
+    from botocore.exceptions import ClientError
+
+    try:
+        response = ec2_client.describe_security_groups(GroupIds=[sg_id])
+    except ClientError as exc:
+        print(f"  Warning: cannot describe SG {sg_id}: {exc}")
+        return
+
+    groups = response.get("SecurityGroups", [])
+    if not groups:
+        print(f"  SG {sg_id} not found; skipping.")
+        return
+
+    permissions = groups[0].get("IpPermissions", [])
+    revoke_permissions: List[Dict[str, Any]] = []
+    authorize_permissions: List[Dict[str, Any]] = []
+    existing_prefix_ports = set()
+
+    for perm in permissions:
+        proto = perm.get("IpProtocol")
+        from_port = perm.get("FromPort")
+        to_port = perm.get("ToPort")
+        port_key = (proto, from_port, to_port)
+
+        for pl in perm.get("PrefixListIds", []):
+            if pl.get("PrefixListId") == prefix_list_id:
+                existing_prefix_ports.add(port_key)
+
+        open_v4 = [
+            {"CidrIp": r["CidrIp"]}
+            for r in perm.get("IpRanges", [])
+            if r.get("CidrIp") == "0.0.0.0/0"
+        ]
+        open_v6 = [
+            {"CidrIpv6": r["CidrIpv6"]}
+            for r in perm.get("Ipv6Ranges", [])
+            if r.get("CidrIpv6") == "::/0"
+        ]
+        if not (open_v4 or open_v6):
+            continue
+
+        revoke_perm: Dict[str, Any] = {"IpProtocol": proto}
+        if from_port is not None:
+            revoke_perm["FromPort"] = from_port
+        if to_port is not None:
+            revoke_perm["ToPort"] = to_port
+        if open_v4:
+            revoke_perm["IpRanges"] = open_v4
+        if open_v6:
+            revoke_perm["Ipv6Ranges"] = open_v6
+        revoke_permissions.append(revoke_perm)
+
+        if port_key not in existing_prefix_ports:
+            auth_perm: Dict[str, Any] = {"IpProtocol": proto}
+            if from_port is not None:
+                auth_perm["FromPort"] = from_port
+            if to_port is not None:
+                auth_perm["ToPort"] = to_port
+            auth_perm["PrefixListIds"] = [
+                {
+                    "PrefixListId": prefix_list_id,
+                    "Description": "CloudFront origin-facing",
+                }
+            ]
+            authorize_permissions.append(auth_perm)
+            existing_prefix_ports.add(port_key)
+
+    if not revoke_permissions:
+        print(f"  SG {sg_id}: no open (0.0.0.0/0 or ::/0) ingress to lock down.")
+        return
+
+    if authorize_permissions:
+        try:
+            ec2_client.authorize_security_group_ingress(
+                GroupId=sg_id, IpPermissions=authorize_permissions
+            )
+            print(f"  SG {sg_id}: authorized CloudFront prefix list {prefix_list_id}.")
+        except ClientError as exc:
+            if "InvalidPermission.Duplicate" in str(exc):
+                print(f"  SG {sg_id}: CloudFront prefix list rule already present.")
+            else:
+                print(f"  Warning: could not authorize prefix list on {sg_id}: {exc}")
+                return
+
+    try:
+        ec2_client.revoke_security_group_ingress(
+            GroupId=sg_id, IpPermissions=revoke_permissions
+        )
+        print(f"  SG {sg_id}: revoked open internet ingress.")
+    except ClientError as exc:
+        if "InvalidPermission.NotFound" in str(exc):
+            print(f"  SG {sg_id}: open ingress already removed.")
+        else:
+            print(f"  Warning: could not revoke open ingress on {sg_id}: {exc}")
+
+
+def restrict_express_albs_to_cloudfront(
+    stack_name: str = "RedactionStack",
+    region: Optional[str] = None,
+    *,
+    prefix_list_id: Optional[str] = None,
+    output_keys: Optional[List[str]] = None,
+) -> List[str]:
+    """Lock the Express-managed ALB security group(s) down to CloudFront only.
+
+    Discovers the Express managed ALB security group ids from stack outputs
+    (``AlbSecurityGroupIdOutput`` for the main service, ``AgenticAlbSecurityGroupIdOutput``
+    for the agentic service), then replaces the default open internet ingress with the
+    CloudFront origin-facing managed prefix list.
+
+    NOTE: The Express ALB SG is created and owned by ECS Express Mode. If ECS reconciles
+    the managed SG it may revert these edits; re-run the quickstart to re-apply.
+
+    Returns the list of security group ids that were processed.
+    """
+    region = region or AWS_REGION
+    if prefix_list_id is None:
+        from cdk_config import CLOUDFRONT_PREFIX_LIST_ID
+
+        prefix_list_id = resolve_cloudfront_origin_prefix_list_id(
+            region, fallback=CLOUDFRONT_PREFIX_LIST_ID
+        )
+    if not prefix_list_id:
+        print(
+            "Skipping Express ALB CloudFront lockdown: no CloudFront prefix list id "
+            "resolved (set CLOUDFRONT_PREFIX_LIST_ID)."
+        )
+        return []
+
+    keys = output_keys or [
+        "AlbSecurityGroupIdOutput",
+        "AgenticAlbSecurityGroupIdOutput",
+    ]
+    sg_ids: List[str] = []
+    for key in keys:
+        value = (get_stack_output(stack_name, key, region) or "").strip()
+        if value.startswith("sg-") and value not in sg_ids:
+            sg_ids.append(value)
+
+    if not sg_ids:
+        print(
+            "Skipping Express ALB CloudFront lockdown: no ALB security group ids "
+            f"found in stack outputs {keys}."
+        )
+        return []
+
+    print(
+        f"Restricting Express ALB security group(s) to CloudFront "
+        f"(prefix list {prefix_list_id}): {', '.join(sg_ids)}"
+    )
+    ec2_client = boto3.client("ec2", region_name=region)
+    for sg_id in sg_ids:
+        _restrict_single_alb_sg_to_cloudfront(ec2_client, sg_id, prefix_list_id)
+    return sg_ids
+
+
 def print_express_mode_next_steps(
     values: Dict[str, str],
     *,

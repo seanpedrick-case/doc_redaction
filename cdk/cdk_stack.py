@@ -2376,6 +2376,17 @@ class CdkStack(Stack):
                         )
                         CfnOutput(
                             self,
+                            "AgenticAlbSecurityGroupIdOutput",
+                            value=express_ingress_first_load_balancer_security_group(
+                                express_agentic_service
+                            ),
+                            description=(
+                                "ID of the agentic Express-managed ALB Security Group "
+                                "(post-deploy CloudFront lockdown target)"
+                            ),
+                        )
+                        CfnOutput(
+                            self,
                             "AgenticPublicUrl",
                             value=agentic_public_url,
                             description="Public URL for agentic Express UI (managed HTTPS endpoint)",

@@ -415,6 +415,15 @@ USE_CLOUDFRONT = get_or_create_env_var("USE_CLOUDFRONT", "True")
 CLOUDFRONT_PREFIX_LIST_ID = get_or_create_env_var(
     "CLOUDFRONT_PREFIX_LIST_ID", "pl-93a247fa"
 )
+# When True (default in the demonstration profile), the post-deploy quickstart locks
+# the ECS Express managed ALB security group(s) down to the CloudFront origin-facing
+# managed prefix list on 443 and removes the default open (0.0.0.0/0, ::/0) ingress.
+# Only applies to Express mode + CloudFront (the non-Express ALB path already gates
+# ingress to CloudFront at synth time). This is a boto3 post-deploy step because the
+# Express ALB SG is created and owned by ECS, not by CDK.
+RESTRICT_ALB_INGRESS_TO_CLOUDFRONT = get_or_create_env_var(
+    "RESTRICT_ALB_INGRESS_TO_CLOUDFRONT", "False"
+)
 CLOUDFRONT_GEO_RESTRICTION = get_or_create_env_var(
     "CLOUDFRONT_GEO_RESTRICTION", ""
 )  # A country that Cloudfront restricts access to. See here: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/georestrictions.html

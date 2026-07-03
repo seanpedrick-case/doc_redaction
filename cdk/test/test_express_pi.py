@@ -61,6 +61,59 @@ def test_build_pi_express_container_environment_agentcore_public_url():
     )
 
 
+def test_build_pi_express_env_agentcore_intent_without_runtime_url(monkeypatch):
+    """AGENT_ORCHESTRATOR must be set from intent even before phase 2 creates the URL."""
+    import cdk_config
+    from cdk_functions import build_pi_express_container_environment
+
+    monkeypatch.setattr(cdk_config, "ENABLE_AGENTCORE_RUNTIME", "True", raising=False)
+    monkeypatch.setattr(cdk_config, "AGENTCORE_RUNTIME_URL", "", raising=False)
+    monkeypatch.setattr(
+        cdk_config, "AGENT_ORCHESTRATOR_DEFAULT", "agentcore", raising=False
+    )
+    monkeypatch.setattr(
+        cdk_config,
+        "AGENTCORE_BEDROCK_MODEL",
+        "mistral.mistral-large-2407",
+        raising=False,
+    )
+
+    env = build_pi_express_container_environment(
+        service_connect_discovery_name="redaction",
+        main_app_port=7860,
+        pi_gradio_port=7862,
+    )
+    assert env["AGENT_ORCHESTRATOR"] == "agentcore"
+    assert env["AGENT_DEFAULT_PROVIDER"] == "amazon-bedrock"
+    assert env["AGENT_DEFAULT_MODEL"] == "mistral.mistral-large-2407"
+    # URL not known yet at synth; supplied later by the S3 overlay after phase 2.
+    assert "AGENTCORE_RUNTIME_URL" not in env
+
+
+def test_build_pi_express_env_agentcore_with_runtime_url(monkeypatch):
+    import cdk_config
+    from cdk_functions import build_pi_express_container_environment
+
+    monkeypatch.setattr(cdk_config, "ENABLE_AGENTCORE_RUNTIME", "True", raising=False)
+    monkeypatch.setattr(
+        cdk_config,
+        "AGENTCORE_RUNTIME_URL",
+        "https://runtime.example.amazonaws.com",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cdk_config, "AGENT_ORCHESTRATOR_DEFAULT", "agentcore", raising=False
+    )
+
+    env = build_pi_express_container_environment(
+        service_connect_discovery_name="redaction",
+        main_app_port=7860,
+        pi_gradio_port=7862,
+    )
+    assert env["AGENT_ORCHESTRATOR"] == "agentcore"
+    assert env["AGENTCORE_RUNTIME_URL"] == "https://runtime.example.amazonaws.com"
+
+
 def test_format_main_express_gradio_url():
     from cdk_functions import format_main_express_gradio_url
 

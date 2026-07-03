@@ -26,11 +26,13 @@ from cdk_config import (
     ENABLE_PI_AGENT_ECS_SERVICE,
     ENABLE_PI_AGENT_EXPRESS_SERVICE,
     GRADIO_SERVER_PORT,
+    RESTRICT_ALB_INGRESS_TO_CLOUDFRONT,
     S3_BATCH_ENV_PREFIX,
     S3_BATCH_INPUT_PREFIX,
     S3_BATCH_LAMBDA_FUNCTION_NAME,
     S3_LOG_CONFIG_BUCKET_NAME,
     S3_OUTPUT_BUCKET_NAME,
+    USE_CLOUDFRONT,
     USE_ECS_EXPRESS_MODE,
 )
 from cdk_functions import create_basic_config_env
@@ -40,6 +42,7 @@ from cdk_post_deploy import (
     apply_cognito_secret_fixup_from_stack,
     configure_express_pi_service_connect,
     print_headless_deployment_next_steps,
+    restrict_express_albs_to_cloudfront,
     seed_headless_batch_s3_layout,
     start_codebuild_build,
     start_ecs_task,
@@ -242,6 +245,24 @@ if ENABLE_PI_AGENT_EXPRESS_SERVICE == "True":
     start_express_gateway_service(
         cluster_name=CLUSTER_NAME, service_name=ECS_PI_EXPRESS_SERVICE_NAME
     )
+
+if (
+    USE_ECS_EXPRESS_MODE == "True"
+    and USE_CLOUDFRONT == "True"
+    and RESTRICT_ALB_INGRESS_TO_CLOUDFRONT == "True"
+    and ENABLE_HEADLESS_DEPLOYMENT != "True"
+):
+    print("Restricting Express managed ALB security group(s) to CloudFront ingress.")
+    try:
+        restrict_express_albs_to_cloudfront(
+            stack_name="RedactionStack",
+            region=AWS_REGION,
+        )
+    except Exception as exc:
+        print(
+            "Warning: could not restrict Express ALB security group(s) to CloudFront: "
+            f"{exc}"
+        )
 
 if USE_ECS_EXPRESS_MODE == "True" and ENABLE_HEADLESS_DEPLOYMENT != "True":
     from cdk_post_deploy import print_express_mode_next_steps

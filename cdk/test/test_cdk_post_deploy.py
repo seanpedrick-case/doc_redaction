@@ -422,3 +422,112 @@ def test_seed_headless_batch_s3_layout_creates_prefixes(tmp_path):
     assert "input/" in keys
     assert "input/config/" in keys
     assert "input/config/example_headless_env_file.env" in keys
+
+
+def _sg_with_open_ingress(sg_id="sg-abc", port=443):
+    return {
+        "SecurityGroups": [
+            {
+                "GroupId": sg_id,
+                "IpPermissions": [
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": port,
+                        "ToPort": port,
+                        "IpRanges": [{"CidrIp": "0.0.0.0/0"}],
+                        "Ipv6Ranges": [{"CidrIpv6": "::/0"}],
+                        "PrefixListIds": [],
+                    }
+                ],
+            }
+        ]
+    }
+
+
+def test_restrict_single_alb_sg_replaces_open_ingress_with_prefix_list():
+    ec2 = MagicMock()
+    ec2.describe_security_groups.return_value = _sg_with_open_ingress("sg-abc", 443)
+
+    post._restrict_single_alb_sg_to_cloudfront(ec2, "sg-abc", "pl-cloudfront")
+
+    auth = ec2.authorize_security_group_ingress.call_args
+    assert auth.kwargs["GroupId"] == "sg-abc"
+    auth_perm = auth.kwargs["IpPermissions"][0]
+    assert auth_perm["FromPort"] == 443
+    assert auth_perm["PrefixListIds"] == [
+        {"PrefixListId": "pl-cloudfront", "Description": "CloudFront origin-facing"}
+    ]
+
+    revoke = ec2.revoke_security_group_ingress.call_args
+    assert revoke.kwargs["GroupId"] == "sg-abc"
+    revoke_perm = revoke.kwargs["IpPermissions"][0]
+    assert revoke_perm["IpRanges"] == [{"CidrIp": "0.0.0.0/0"}]
+    assert revoke_perm["Ipv6Ranges"] == [{"CidrIpv6": "::/0"}]
+
+
+def test_restrict_single_alb_sg_is_idempotent_when_already_locked_down():
+    ec2 = MagicMock()
+    ec2.describe_security_groups.return_value = {
+        "SecurityGroups": [
+            {
+                "GroupId": "sg-abc",
+                "IpPermissions": [
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": 443,
+                        "ToPort": 443,
+                        "IpRanges": [],
+                        "Ipv6Ranges": [],
+                        "PrefixListIds": [{"PrefixListId": "pl-cloudfront"}],
+                    }
+                ],
+            }
+        ]
+    }
+
+    post._restrict_single_alb_sg_to_cloudfront(ec2, "sg-abc", "pl-cloudfront")
+
+    ec2.authorize_security_group_ingress.assert_not_called()
+    ec2.revoke_security_group_ingress.assert_not_called()
+
+
+def test_restrict_express_albs_reads_both_stack_outputs(monkeypatch):
+    ec2 = MagicMock()
+    ec2.describe_security_groups.side_effect = lambda GroupIds: _sg_with_open_ingress(
+        GroupIds[0], 443
+    )
+
+    outputs = {
+        "AlbSecurityGroupIdOutput": "sg-main",
+        "AgenticAlbSecurityGroupIdOutput": "sg-agent",
+    }
+    monkeypatch.setattr(post, "get_stack_output", lambda _s, key, _r: outputs.get(key))
+    monkeypatch.setattr(
+        post,
+        "resolve_cloudfront_origin_prefix_list_id",
+        lambda *_a, **_k: "pl-cloudfront",
+    )
+
+    with patch("cdk_post_deploy.boto3.client", return_value=ec2):
+        processed = post.restrict_express_albs_to_cloudfront(
+            stack_name="RedactionStack", region="eu-west-2"
+        )
+
+    assert processed == ["sg-main", "sg-agent"]
+    assert ec2.authorize_security_group_ingress.call_count == 2
+
+
+def test_restrict_express_albs_skips_when_no_sg_outputs(monkeypatch, capsys):
+    monkeypatch.setattr(post, "get_stack_output", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        post,
+        "resolve_cloudfront_origin_prefix_list_id",
+        lambda *_a, **_k: "pl-cloudfront",
+    )
+
+    with patch("cdk_post_deploy.boto3.client", return_value=MagicMock()) as client:
+        processed = post.restrict_express_albs_to_cloudfront(region="eu-west-2")
+
+    assert processed == []
+    client.assert_not_called()
+    assert "no ALB security group ids" in capsys.readouterr().out

@@ -125,6 +125,94 @@ def test_build_agentcore_invoke_runtime_config_includes_hf_token_for_space(
     assert config["HF_TOKEN"] == "hf-secret"
 
 
+class _FakeS3Body:
+    def __init__(self, data: bytes):
+        self._data = data
+
+    def read(self):
+        return self._data
+
+
+class _FakeS3Client:
+    def __init__(self, data: bytes):
+        self._data = data
+        self.calls = []
+
+    def get_object(self, Bucket: str, Key: str):  # noqa: N803 - boto3 kwarg name
+        self.calls.append((Bucket, Key))
+        return {"Body": _FakeS3Body(self._data)}
+
+
+def _install_fake_s3(monkeypatch, body: str):
+    import boto3
+
+    client = _FakeS3Client(body.encode("utf-8"))
+    monkeypatch.setattr(boto3, "client", lambda *a, **k: client)
+    return client
+
+
+def _reset_overlay(monkeypatch):
+    monkeypatch.setattr(bridge, "_cloudfront_overlay_applied", False, raising=False)
+    for key in (
+        "AGENT_ORCHESTRATOR",
+        "AGENTCORE_RUNTIME_URL",
+        "AGENT_DEFAULT_MODEL",
+        "DOC_REDACTION_GRADIO_URL",
+        "DOC_REDACTION_AUTH_TOKEN",
+        "DOC_REDACTION_CONFIG_S3_BUCKET",
+        "DOC_REDACTION_CONFIG_S3_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+
+def test_overlay_promotes_orchestrator_from_s3(monkeypatch):
+    """Phase-2 recycle: S3 agent.env flips an un-set container to AgentCore."""
+    _reset_overlay(monkeypatch)
+    monkeypatch.setenv("DOC_REDACTION_CONFIG_S3_BUCKET", "cfg-bucket")
+    monkeypatch.setenv("DOC_REDACTION_CONFIG_S3_KEY", "agent.env")
+    _install_fake_s3(
+        monkeypatch,
+        "AGENT_ORCHESTRATOR=agentcore\n"
+        "AGENTCORE_RUNTIME_URL=https://runtime.example.amazonaws.com\n"
+        "AGENT_DEFAULT_MODEL=mistral.mistral-large-2407\n"
+        "DOC_REDACTION_GRADIO_URL=https://cf.example.cloudfront.net/agent\n",
+    )
+
+    applied = bridge.apply_agentcore_cloudfront_config_overlay()
+
+    assert os.environ["AGENT_ORCHESTRATOR"] == "agentcore"
+    assert (
+        os.environ["AGENTCORE_RUNTIME_URL"] == "https://runtime.example.amazonaws.com"
+    )
+    assert os.environ["AGENT_DEFAULT_MODEL"] == "mistral.mistral-large-2407"
+    assert applied["AGENT_ORCHESTRATOR"] == "agentcore"
+
+
+def test_overlay_noop_for_pi_deploy(monkeypatch):
+    """A pi deploy sharing the config bucket must not be promoted."""
+    _reset_overlay(monkeypatch)
+    monkeypatch.setenv("DOC_REDACTION_CONFIG_S3_BUCKET", "cfg-bucket")
+    _install_fake_s3(
+        monkeypatch,
+        "AGENT_ORCHESTRATOR=pi\nDOC_REDACTION_GRADIO_URL=http://redaction:7860\n",
+    )
+
+    applied = bridge.apply_agentcore_cloudfront_config_overlay()
+
+    assert applied == {}
+    assert "AGENT_ORCHESTRATOR" not in os.environ
+    assert "AGENTCORE_RUNTIME_URL" not in os.environ
+
+
+def test_overlay_noop_without_config_bucket(monkeypatch):
+    _reset_overlay(monkeypatch)
+    monkeypatch.setenv("AGENT_ORCHESTRATOR", "agentcore")
+
+    applied = bridge.apply_agentcore_cloudfront_config_overlay()
+
+    assert applied == {}
+
+
 def test_apply_invoke_runtime_config_overrides_agentcore_env(monkeypatch):
     pytest = __import__("pytest")
     pytest.importorskip("langchain_core")

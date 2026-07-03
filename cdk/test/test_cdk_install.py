@@ -87,6 +87,7 @@ def test_build_env_values_demo():
     assert values["PRIVATE_SUBNETS_TO_USE"] == ""
     assert values["USE_CLOUDFRONT"] == "True"
     assert values["CLOUDFRONT_AUTH_MODE"] == "magic-link"
+    assert values["RESTRICT_ALB_INGRESS_TO_CLOUDFRONT"] == "True"
     assert values["RUN_USEAST_STACK"] == "False"
     assert values["ENABLE_RESOURCE_DELETE_PROTECTION"] == "False"
     assert values["VPC_NAME"] == "test-vpc"

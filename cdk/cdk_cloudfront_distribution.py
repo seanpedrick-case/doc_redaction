@@ -12,6 +12,7 @@ from aws_cdk import aws_cloudfront_origins as origins
 from aws_cdk import aws_elasticloadbalancingv2 as elbv2
 from cdk_cloudfront_auth import (
     MagicLinkAuthResources,
+    create_forwarded_host_function,
     create_magic_link_auth,
     emit_magic_link_outputs,
     magic_link_function_association,
@@ -139,8 +140,22 @@ def create_redaction_cloudfront_distribution(
             cookie_name=magic_link_cookie_name,
             cookie_max_age_sec=magic_link_cookie_max_age_sec,
         )
+        # The magic-link viewer-request function also forwards viewer host/proto.
         function_associations.append(
             magic_link_function_association(magic_link.auth_function)
+        )
+    else:
+        # No magic-link function on this behavior, so attach a lightweight
+        # viewer-request function that forwards the viewer host/proto to the
+        # origin. Without it, CloudFront (ALL_VIEWER_EXCEPT_HOST_HEADER) presents
+        # the origin's own *.ecs.on.aws host and Gradio emits absolute origin URLs
+        # for its assets — which the browser can't reach once the origin SG is
+        # locked to CloudFront-only.
+        forwarded_host_function = create_forwarded_host_function(
+            scope, f"{construct_id}Fwd"
+        )
+        function_associations.append(
+            magic_link_function_association(forwarded_host_function)
         )
 
     custom_headers: Dict[str, str] = {}
