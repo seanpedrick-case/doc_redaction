@@ -7,6 +7,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 _PI_SRC = Path(__file__).resolve().parents[1] / "agent-redact" / "pi"
 if str(_PI_SRC) not in sys.path:
     sys.path.insert(0, str(_PI_SRC))
@@ -151,17 +153,41 @@ def _install_fake_s3(monkeypatch, body: str):
     return client
 
 
+_OVERLAY_ENV_KEYS = (
+    "AGENT_ORCHESTRATOR",
+    "AGENTCORE_RUNTIME_URL",
+    "AGENT_DEFAULT_MODEL",
+    "DOC_REDACTION_GRADIO_URL",
+    "DOC_REDACTION_AUTH_TOKEN",
+    "DOC_REDACTION_CONFIG_S3_BUCKET",
+    "DOC_REDACTION_CONFIG_S3_KEY",
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_overlay_env():
+    """Snapshot/restore overlay env vars around every test.
+
+    ``apply_agentcore_cloudfront_config_overlay`` writes directly to ``os.environ``
+    (not via monkeypatch), and ``monkeypatch.delenv(raising=False)`` records no undo
+    entry when a key is absent. Without this fixture those direct writes leak into
+    later tests (e.g. flipping the llama/pi credential + finalize tests into the
+    AgentCore branch). Restore the exact pre-test state, including deletions.
+    """
+    saved = {key: os.environ.get(key) for key in _OVERLAY_ENV_KEYS}
+    try:
+        yield
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
 def _reset_overlay(monkeypatch):
     monkeypatch.setattr(bridge, "_cloudfront_overlay_applied", False, raising=False)
-    for key in (
-        "AGENT_ORCHESTRATOR",
-        "AGENTCORE_RUNTIME_URL",
-        "AGENT_DEFAULT_MODEL",
-        "DOC_REDACTION_GRADIO_URL",
-        "DOC_REDACTION_AUTH_TOKEN",
-        "DOC_REDACTION_CONFIG_S3_BUCKET",
-        "DOC_REDACTION_CONFIG_S3_KEY",
-    ):
+    for key in _OVERLAY_ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
 
 

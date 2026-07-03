@@ -310,6 +310,9 @@ def test_build_settings_config_compaction_uses_template_when_env_unset(
 
 def test_credential_status_markdown_llama_shows_endpoint_not_aws(monkeypatch):
     monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "local-docker")
+    # Pin the orchestrator so ambient AGENT_ORCHESTRATOR=agentcore (dev config or a
+    # leaked overlay) cannot flip this into the AgentCore credential branch.
+    monkeypatch.setenv("AGENT_ORCHESTRATOR", "pi")
     monkeypatch.setenv("AGENT_DEFAULT_PROVIDER", "llama-cpp")
     monkeypatch.setenv("AGENT_LLAMA_BASE_URL", "http://192.168.0.220:8000/v1")
     monkeypatch.setenv("AGENT_AWS_PROFILE", "AWSAdministratorAccess-460501890304")

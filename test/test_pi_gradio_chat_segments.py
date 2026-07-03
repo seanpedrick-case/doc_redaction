@@ -319,6 +319,9 @@ def test_pi_wait_until_idle_waits_for_streaming_to_clear(monkeypatch):
 def test_finalize_assistant_chat_llama_shows_failure_when_only_finish_banner(
     monkeypatch,
 ):
+    # Local llama orchestration requires a non-AgentCore orchestrator; pin it so ambient
+    # AGENT_ORCHESTRATOR=agentcore cannot flip this into the tools-only branch.
+    monkeypatch.setenv("AGENT_ORCHESTRATOR", "pi")
     monkeypatch.setattr("gradio_app.normalize_provider", lambda _p: "llama-cpp")
 
     class _Client:
