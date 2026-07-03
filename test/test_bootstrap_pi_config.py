@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def _import_bootstrap(monkeypatch, tmp_path: Path):
-    monkeypatch.delenv("PI_WORKSPACE_DIR", raising=False)
+    monkeypatch.delenv("AGENT_WORKSPACE_DIR", raising=False)
     import importlib
     import sys
 
@@ -28,7 +28,7 @@ def test_ensure_pi_workspace_dir_defaults_to_repo_workspace(monkeypatch, tmp_pat
 
     assert resolved == str((repo / "workspace").resolve())
     assert (repo / "workspace").is_dir()
-    assert os.environ["PI_WORKSPACE_DIR"] == resolved
+    assert os.environ["AGENT_WORKSPACE_DIR"] == resolved
 
 
 def test_ensure_pi_upload_root_defaults_to_repo_workspace_gradio(monkeypatch, tmp_path):
@@ -36,7 +36,7 @@ def test_ensure_pi_upload_root_defaults_to_repo_workspace_gradio(monkeypatch, tm
     repo = tmp_path / "repo"
     repo.mkdir()
 
-    monkeypatch.delenv("PI_UPLOAD_ROOT", raising=False)
+    monkeypatch.delenv("AGENT_UPLOAD_ROOT", raising=False)
     monkeypatch.delenv("GRADIO_TEMP_DIR", raising=False)
 
     resolved = bootstrap.ensure_pi_upload_root(repo)
@@ -44,63 +44,93 @@ def test_ensure_pi_upload_root_defaults_to_repo_workspace_gradio(monkeypatch, tm
     expected = repo / "workspace" / ".gradio_uploads"
     assert resolved == str(expected.resolve())
     assert expected.is_dir()
-    assert os.environ["PI_UPLOAD_ROOT"] == resolved
+    assert os.environ["AGENT_UPLOAD_ROOT"] == resolved
     assert os.environ["GRADIO_TEMP_DIR"] == resolved
 
 
 def test_pi_default_provider_fallback_local_is_llama_not_gemini(monkeypatch):
-    """Unset PI_DEFAULT_PROVIDER must default to llama-cpp outside HF Space."""
+    """Unset AGENT_DEFAULT_PROVIDER must default to llama-cpp outside HF Space."""
     from tools.config import resolve_pi_default_provider_fallback
 
-    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "local-docker")
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "local-docker")
     assert resolve_pi_default_provider_fallback() == "llama-cpp"
 
 
 def test_pi_default_provider_fallback_aws_ecs_is_bedrock(monkeypatch):
     from tools.config import resolve_pi_default_provider_fallback
 
-    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "aws-ecs")
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "aws-ecs")
     assert resolve_pi_default_provider_fallback() == "amazon-bedrock"
 
 
 def test_pi_default_model_fallback_aws_ecs_is_claude_sonnet(monkeypatch):
     from tools.config import resolve_pi_default_model_fallback
 
-    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "aws-ecs")
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "aws-ecs")
     assert resolve_pi_default_model_fallback() == "anthropic.claude-sonnet-4-6"
 
 
 def test_pi_default_provider_fallback_hf_space_is_gemini(monkeypatch):
     from tools.config import resolve_pi_default_provider_fallback
 
-    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "hf-space")
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "hf-space")
     assert resolve_pi_default_provider_fallback() == "google-gemini"
 
 
 def test_pi_default_model_fallback_local_is_empty(monkeypatch):
     from tools.config import resolve_pi_default_model_fallback
 
-    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "local-docker")
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "local-docker")
     assert resolve_pi_default_model_fallback() == ""
 
 
-def test_ensure_pi_config_env_loads_pi_agent_env_before_imports(monkeypatch, tmp_path):
+def test_ensure_pi_config_env_loads_agent_env_before_imports(monkeypatch, tmp_path):
     bootstrap = _import_bootstrap(monkeypatch, tmp_path)
     repo = tmp_path / "repo"
     config_dir = repo / "config"
     config_dir.mkdir(parents=True)
-    (config_dir / "pi_agent.env").write_text(
-        "PI_DEFAULT_PROVIDER=google-gemini\nPI_DEFAULT_MODEL=gemini-flash-latest\n",
+    (config_dir / "agent.env").write_text(
+        "AGENT_DEFAULT_PROVIDER=google-gemini\nAGENT_DEFAULT_MODEL=gemini-flash-latest\n",
         encoding="utf-8",
     )
-    monkeypatch.delenv("PI_DEFAULT_PROVIDER", raising=False)
-    monkeypatch.delenv("PI_DEFAULT_MODEL", raising=False)
+    monkeypatch.delenv("AGENT_DEFAULT_PROVIDER", raising=False)
+    monkeypatch.delenv("AGENT_DEFAULT_MODEL", raising=False)
     monkeypatch.delenv("APP_CONFIG_PATH", raising=False)
 
     bootstrap.ensure_pi_config_env(repo)
 
-    assert os.environ.get("PI_DEFAULT_PROVIDER") == "google-gemini"
-    assert os.environ.get("PI_DEFAULT_MODEL") == "gemini-flash-latest"
+    assert os.environ.get("AGENT_DEFAULT_PROVIDER") == "google-gemini"
+    assert os.environ.get("AGENT_DEFAULT_MODEL") == "gemini-flash-latest"
+
+
+def test_ensure_pi_config_env_falls_back_to_legacy_pi_agent_env(monkeypatch, tmp_path):
+    bootstrap = _import_bootstrap(monkeypatch, tmp_path)
+    repo = tmp_path / "repo"
+    config_dir = repo / "config"
+    config_dir.mkdir(parents=True)
+    # Only the legacy file exists — it must still be loaded.
+    (config_dir / "pi_agent.env").write_text(
+        "AGENT_DEFAULT_PROVIDER=google-gemini\nAGENT_DEFAULT_MODEL=gemini-flash-latest\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("AGENT_DEFAULT_PROVIDER", raising=False)
+    monkeypatch.delenv("AGENT_DEFAULT_MODEL", raising=False)
+    monkeypatch.delenv("APP_CONFIG_PATH", raising=False)
+
+    bootstrap.ensure_pi_config_env(repo)
+
+    assert os.environ.get("AGENT_DEFAULT_PROVIDER") == "google-gemini"
+    assert os.environ.get("AGENT_DEFAULT_MODEL") == "gemini-flash-latest"
+
+
+def test_resolve_agent_env_file_prefers_new_name(monkeypatch, tmp_path):
+    bootstrap = _import_bootstrap(monkeypatch, tmp_path)
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "agent.env").write_text("A=1\n", encoding="utf-8")
+    (config_dir / "pi_agent.env").write_text("A=2\n", encoding="utf-8")
+
+    assert bootstrap.resolve_agent_env_file(config_dir) == config_dir / "agent.env"
 
 
 def test_ensure_pi_workdir_defaults_to_repo_when_unset(monkeypatch, tmp_path):
@@ -109,12 +139,12 @@ def test_ensure_pi_workdir_defaults_to_repo_when_unset(monkeypatch, tmp_path):
     skills = repo / "skills"
     skills.mkdir(parents=True)
     (skills / "Example prompt partnership.txt").write_text("template", encoding="utf-8")
-    monkeypatch.delenv("PI_WORKDIR", raising=False)
+    monkeypatch.delenv("AGENT_WORKDIR", raising=False)
 
     resolved = bootstrap.ensure_pi_workdir(repo)
 
     assert resolved == str(repo.resolve())
-    assert os.environ["PI_WORKDIR"] == resolved
+    assert os.environ["AGENT_WORKDIR"] == resolved
 
 
 def test_ensure_pi_workspace_dir_ignores_docker_path_outside_container(
@@ -149,7 +179,7 @@ def test_ensure_pi_workspace_dir_uses_docker_mount_in_container(monkeypatch, tmp
 
 def test_ensure_pi_writable_log_dirs_overrides_logs_on_aws_ecs(monkeypatch, tmp_path):
     bootstrap = _import_bootstrap(monkeypatch, tmp_path)
-    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "aws-ecs")
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "aws-ecs")
     monkeypatch.setenv("ACCESS_LOGS_FOLDER", "logs/")
     monkeypatch.setattr(bootstrap, "_pi_running_in_container", lambda: True)
     access = tmp_path / "pi-logs"
@@ -188,7 +218,7 @@ def test_ensure_pi_writable_log_dirs_uses_tmp_in_container(monkeypatch, tmp_path
 def test_ensure_pi_workspace_dir_honours_explicit_env(monkeypatch, tmp_path):
     bootstrap = _import_bootstrap(monkeypatch, tmp_path)
     custom = tmp_path / "custom_ws"
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(custom))
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(custom))
 
     resolved = bootstrap.ensure_pi_workspace_dir(tmp_path / "repo")
 

@@ -28,7 +28,7 @@ def fileexplorer_stub_dir() -> Path:
     transient "stub" root that forces Gradio to re-fetch the explorer listing.
     Kept empty so no cross-session files are ever listed, even momentarily.
     """
-    raw = (os.environ.get("PI_FILEEXPLORER_STUB_DIR") or "").strip()
+    raw = (os.environ.get("AGENT_FILEEXPLORER_STUB_DIR") or "").strip()
     if raw:
         stub = Path(raw)
     else:
@@ -44,7 +44,7 @@ _DEFAULT_GRADIO_PREFIX_MIN_LEN = 16
 
 
 def final_output_folder_names() -> frozenset[str]:
-    raw = os.environ.get("PI_FINAL_OUTPUT_FOLDER_NAMES", "").strip()
+    raw = os.environ.get("AGENT_FINAL_OUTPUT_FOLDER_NAMES", "").strip()
     if raw:
         names = {part.strip() for part in raw.split(",") if part.strip()}
         if names:
@@ -63,7 +63,7 @@ def _is_under_final_output_dir(relative_path: Path) -> bool:
 
 
 def final_download_folder_name() -> str:
-    raw = os.environ.get("PI_FINAL_DOWNLOAD_FOLDER", _DEFAULT_FINAL_DOWNLOAD_FOLDER)
+    raw = os.environ.get("AGENT_FINAL_DOWNLOAD_FOLDER", _DEFAULT_FINAL_DOWNLOAD_FOLDER)
     stripped = raw.strip() if raw else ""
     return stripped or _DEFAULT_FINAL_DOWNLOAD_FOLDER
 
@@ -72,8 +72,8 @@ def final_download_dir(session_hash: str | None = None) -> Path:
     """
     Per-session staging folder for ``gr.File`` downloads.
 
-    Always ``{PI_WORKSPACE_DIR}/{session_id}/output_final_download/`` when a session
-    id is known, even if the broader workspace is shared (``PI_SESSION_WORKSPACE=false``).
+    Always ``{AGENT_WORKSPACE_DIR}/{session_id}/output_final_download/`` when a session
+    id is known, even if the broader workspace is shared (``AGENT_SESSION_WORKSPACE=false``).
     """
     base = workspace_base_dir().resolve()
     folder = final_download_folder_name()
@@ -112,7 +112,7 @@ def _reset_download_dir(download_dir: Path) -> None:
 
 def _gradio_prefix_min_len() -> int:
     raw = os.environ.get(
-        "PI_GRADIO_FILENAME_PREFIX_MIN_LEN",
+        "AGENT_GRADIO_FILENAME_PREFIX_MIN_LEN",
         str(_DEFAULT_GRADIO_PREFIX_MIN_LEN),
     )
     try:

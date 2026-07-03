@@ -46,16 +46,16 @@ def test_discover_ocr_words_csv(tmp_path):
 
 
 def test_read_workspace_text_missing_file(tmp_path, monkeypatch):
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(tmp_path))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "1")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "1")
     out = read_workspace_text("missing.csv", session_hash="sess")
     payload = json.loads(out)
     assert "error" in payload
 
 
 def test_workspace_text_roundtrip(tmp_path, monkeypatch):
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(tmp_path))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "1")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "1")
     out = write_workspace_text("a.txt", "hello", session_hash="sess")
     assert json.loads(out)["written"] == "a.txt"
     assert read_workspace_text("a.txt", session_hash="sess") == "hello"
@@ -105,8 +105,8 @@ def test_coerce_relative_path_from_nested_dict():
 
 
 def test_resolve_workspace_path_accepts_dict_path(tmp_path, monkeypatch):
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(tmp_path))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "1")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "1")
     resolved = _resolve_workspace_path(
         "sess",
         {"pdf_relative_path": "uploads/doc.pdf"},
@@ -115,8 +115,8 @@ def test_resolve_workspace_path_accepts_dict_path(tmp_path, monkeypatch):
 
 
 def test_run_doc_redact_accepts_merged_tool_args_dict(tmp_path, monkeypatch):
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(tmp_path))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "1")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "1")
     session = tmp_path / "sess"
     pdf = session / "uploads" / "doc.pdf"
     pdf.parent.mkdir(parents=True)
@@ -175,8 +175,8 @@ def test_default_dest_for_pdf():
 
 
 def test_resolve_workspace_pdf_by_basename(tmp_path, monkeypatch):
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(tmp_path))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "1")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "1")
     session = tmp_path / "sess"
     pdf = session / "nested" / "doc.pdf"
     pdf.parent.mkdir(parents=True)
@@ -186,8 +186,8 @@ def test_resolve_workspace_pdf_by_basename(tmp_path, monkeypatch):
 
 
 def test_read_workspace_text_nested_relative_path(tmp_path, monkeypatch):
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(tmp_path))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "1")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "1")
     session = tmp_path / "sess"
     csv_path = session / "redact" / "doc_review_file.csv"
     csv_path.parent.mkdir(parents=True)
@@ -201,8 +201,8 @@ def test_read_workspace_text_nested_relative_path(tmp_path, monkeypatch):
 
 
 def test_read_workspace_text_csv_preview(tmp_path, monkeypatch):
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(tmp_path))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "1")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "1")
     monkeypatch.setenv("LANGGRAPH_READ_CSV_MAX_LINES", "2")
     session = tmp_path / "sess"
     csv_path = session / "big.csv"
@@ -221,8 +221,8 @@ def test_coerce_tool_text_content_extension_key_dict():
 
 
 def test_write_workspace_text_messy_local_model_args(tmp_path, monkeypatch):
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(tmp_path))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "1")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "1")
     script = "import csv\nprint('ok')\n"
     messy = {
         "relative_path": {
@@ -274,8 +274,8 @@ def test_parse_write_workspace_text_input_doubly_nested():
 
 
 def test_write_workspace_text_python_next_step(tmp_path, monkeypatch):
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(tmp_path))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "1")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "1")
     script = "import csv\nprint('ok')\n"
     out = write_workspace_text(
         {
@@ -303,8 +303,8 @@ def test_write_workspace_text_python_next_step(tmp_path, monkeypatch):
 
 
 def test_write_workspace_text_script_content_dict(tmp_path, monkeypatch):
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(tmp_path))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "1")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "1")
     script = "import csv\nprint('ok')\n"
     out = write_workspace_text(
         {"script": "fix_policy.py", "content": script},
@@ -330,8 +330,8 @@ def test_default_review_apply_dest_for_review_csv():
 
 
 def test_ensure_workspace_output_dir_repairs_pdf_dest(tmp_path, monkeypatch):
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(tmp_path))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "1")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "1")
     session = tmp_path / "sess"
     pdf_name = "example_of_emails_sent_to_a_professor_before_applying.pdf"
     pdf = session / pdf_name
@@ -362,8 +362,8 @@ def test_ensure_workspace_output_dir_repairs_pdf_dest(tmp_path, monkeypatch):
 
 
 def test_run_review_apply_repairs_pdf_dest(tmp_path, monkeypatch):
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(tmp_path))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "1")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "1")
     session = tmp_path / "sess"
     pdf_name = "example_of_emails_sent_to_a_professor_before_applying.pdf"
     pdf = session / pdf_name

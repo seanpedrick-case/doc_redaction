@@ -2,6 +2,7 @@ import os
 import time
 
 from cdk_config import (
+    AGENT_ENV_S3_KEY,
     AGENTCORE_CDK_DEPLOY,
     AWS_REGION,
     CDK_PREFIX,
@@ -25,7 +26,6 @@ from cdk_config import (
     ENABLE_PI_AGENT_ECS_SERVICE,
     ENABLE_PI_AGENT_EXPRESS_SERVICE,
     GRADIO_SERVER_PORT,
-    PI_AGENT_ENV_S3_KEY,
     S3_BATCH_ENV_PREFIX,
     S3_BATCH_INPUT_PREFIX,
     S3_BATCH_LAMBDA_FUNCTION_NAME,
@@ -91,10 +91,15 @@ upload_file_to_s3(
 )
 
 if _enable_pi_image_build:
-    pi_env_local = os.path.join("config", "pi_agent.env")
+    # Config file renamed agent.env (legacy: pi_agent.env). Prefer the new name.
+    pi_env_local = os.path.join("config", "agent.env")
+    if not os.path.isfile(pi_env_local) and os.path.isfile(
+        os.path.join("config", "pi_agent.env")
+    ):
+        pi_env_local = os.path.join("config", "pi_agent.env")
     if os.path.isfile(pi_env_local):
         print(
-            f"Uploading {pi_env_local} to s3://{S3_LOG_CONFIG_BUCKET_NAME}/{PI_AGENT_ENV_S3_KEY}"
+            f"Uploading {pi_env_local} to s3://{S3_LOG_CONFIG_BUCKET_NAME}/{AGENT_ENV_S3_KEY}"
         )
         upload_file_to_s3(
             local_file_paths=pi_env_local,
@@ -104,8 +109,8 @@ if _enable_pi_image_build:
     else:
         print(
             f"Skipping Pi env upload: {pi_env_local} not found. "
-            f"Create it (from config/pi_agent.env.example) and upload to "
-            f"s3://{S3_LOG_CONFIG_BUCKET_NAME}/{PI_AGENT_ENV_S3_KEY} before scaling the Pi service."
+            f"Create it (from config/agent.env.example) and upload to "
+            f"s3://{S3_LOG_CONFIG_BUCKET_NAME}/{AGENT_ENV_S3_KEY} before scaling the Pi service."
         )
     try:
         from cdk_config import ENABLE_AGENTCORE_RUNTIME

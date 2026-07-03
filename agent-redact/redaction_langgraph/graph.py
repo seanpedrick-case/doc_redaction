@@ -39,12 +39,12 @@ with the remote doc_redaction server except files already saved in your workspac
 def _build_llm():
     from langchain_openai import ChatOpenAI
 
-    provider = (os.environ.get("PI_DEFAULT_PROVIDER") or "llama-cpp").strip().lower()
+    provider = (os.environ.get("AGENT_DEFAULT_PROVIDER") or "llama-cpp").strip().lower()
     if provider in {"amazon-bedrock", "bedrock"}:
         from langchain_aws import ChatBedrockConverse
 
         model_id = (
-            os.environ.get("PI_DEFAULT_MODEL") or "anthropic.claude-sonnet-4-6"
+            os.environ.get("AGENT_DEFAULT_MODEL") or "anthropic.claude-sonnet-4-6"
         ).strip()
         return ChatBedrockConverse(
             model=model_id, region_name=os.environ.get("AWS_REGION")
@@ -52,17 +52,19 @@ def _build_llm():
     if provider in {"google-gemini", "gemini"}:
         from langchain_google_genai import ChatGoogleGenerativeAI
 
-        model_id = (os.environ.get("PI_DEFAULT_MODEL") or "gemini-flash-latest").strip()
+        model_id = (
+            os.environ.get("AGENT_DEFAULT_MODEL") or "gemini-flash-latest"
+        ).strip()
         return ChatGoogleGenerativeAI(
             model=model_id, google_api_key=os.environ.get("GEMINI_API_KEY")
         )
 
     base_url = (
-        os.environ.get("PI_LLAMA_BASE_URL") or "http://127.0.0.1:8080/v1"
+        os.environ.get("AGENT_LLAMA_BASE_URL") or "http://127.0.0.1:8080/v1"
     ).rstrip("/")
     model_id = (
-        os.environ.get("PI_LLAMA_MODEL_ID")
-        or os.environ.get("PI_DEFAULT_MODEL")
+        os.environ.get("AGENT_LLAMA_MODEL_ID")
+        or os.environ.get("AGENT_DEFAULT_MODEL")
         or "local"
     ).strip()
     return ChatOpenAI(

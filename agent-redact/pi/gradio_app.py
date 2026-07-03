@@ -19,14 +19,14 @@ import time
 from pathlib import Path
 from typing import Any
 
-# Enable debug-level logging and stderr output from this module when PI_RPC_DEBUG is set
-if os.environ.get("PI_RPC_DEBUG"):
+# Enable debug-level logging and stderr output from this module when AGENT_RPC_DEBUG is set
+if os.environ.get("AGENT_RPC_DEBUG"):
     logging.basicConfig(level=logging.DEBUG)
     logging.getLogger("matplotlib").setLevel(logging.INFO)
     logging.getLogger("matplotlib.pyplot").setLevel(logging.INFO)
 _logger = logging.getLogger(__name__)
 
-if os.environ.get("PI_RPC_DEBUG") and not _logger.handlers:
+if os.environ.get("AGENT_RPC_DEBUG") and not _logger.handlers:
     handler = logging.StreamHandler(sys.stderr)
     handler.setLevel(logging.DEBUG)
     _logger.addHandler(handler)
@@ -109,6 +109,15 @@ from session_logs import collect_session_log_download, persist_session_log
 mirror_hf_token_from_env()
 configure_aws_credentials()
 
+# AgentCore + CloudFront: overlay the post-deploy backend URL + magic-link token
+# from S3 (task env is fixed at synth time and can't carry the CloudFront domain).
+try:
+    from agentcore_workspace_bridge import apply_agentcore_cloudfront_config_overlay
+
+    apply_agentcore_cloudfront_config_overlay()
+except Exception:  # noqa: BLE001 - never block UI startup on the overlay
+    pass
+
 from pi_session_usage import resolve_session_token_usage, usage_for_completed_turn
 from session_workspace import (
     init_session_workspace,
@@ -120,14 +129,14 @@ from session_workspace import (
 from tools.aws_functions import export_outputs_to_s3, s3_outputs_upload_ready
 from tools.config import (
     ACTIVITY_MAX_LINES,
+    AGENT_INTRO_TEXT,
+    AGENT_ROOT_PATH,
+    AGENT_UI_HOST,
+    AGENT_UI_PORT,
+    AGENT_UI_TITLE,
     EMPTY_SEND_WITH_FILE_HINT,
     FASTAPI_ROOT_PATH,
     HOST_NAME,
-    PI_INTRO_TEXT,
-    PI_ROOT_PATH,
-    PI_UI_HOST,
-    PI_UI_PORT,
-    PI_UI_TITLE,
     QUOTA_CONTINUE_PROMPT,
     QUOTA_RETRY_ATTEMPTS,
     QUOTA_RETRY_DELAY_S,
@@ -140,7 +149,7 @@ from tools.config import (
     TOOL_OUTPUT_MAX,
 )
 
-# After ``tools.config`` import: it may set ``PI_DEFAULT_PROVIDER`` / ``PI_DEFAULT_MODEL``
+# After ``tools.config`` import: it may set ``AGENT_DEFAULT_PROVIDER`` / ``AGENT_DEFAULT_MODEL``
 # when unset (must match ``pi_agent_config.get_default_provider``, not always Gemini).
 write_runtime_config()
 
@@ -483,7 +492,7 @@ def _after_pi_task(
         ocr_method=ocr_method,
         pii_method=pii_method,
         llm_model_name=llm_model_label or "",
-        vlm_model_name=vlm_model_name or os.environ.get("PI_VLM_MODEL", ""),
+        vlm_model_name=vlm_model_name or os.environ.get("AGENT_VLM_MODEL", ""),
         llm_input_tokens=llm_input_tokens,
         llm_output_tokens=llm_output_tokens,
         task="agent",
@@ -688,7 +697,7 @@ def _silent_llama_failure_message() -> str:
     return (
         f"**LLM:** no response from the orchestration model.  \n\n"
         f"Configured endpoint: `{LLAMA_BASE_URL}` · model `{llama_model_id()}`.  \n\n"
-        f"Set **`PI_LLAMA_BASE_URL`** in `config/pi_agent.env` (OpenAI-compatible URL "
+        f"Set **`AGENT_LLAMA_BASE_URL`** in `config/agent.env` (OpenAI-compatible URL "
         f"including `/v1`, e.g. `http://192.168.0.220:8080/v1`), confirm the model id "
         f"matches your server (`GET …/v1/models`), then click **Apply backend** or "
         f"restart this UI.  \n\n"
@@ -706,7 +715,7 @@ def _llama_terminated_message() -> str:
         f"Wait until `GET {LLAMA_BASE_URL.rstrip('/')}/models` responds, ensure no other "
         f"client is hitting the same endpoint (doc_redaction local PII shares it), then "
         f"retry **Start redaction task**. If using Pi, after changing skills sync, set "
-        f"`PI_SKILLS_RESYNC=true` once and restart the Gradio UI."
+        f"`AGENT_SKILLS_RESYNC=true` once and restart the Gradio UI."
     )
 
 
@@ -747,10 +756,10 @@ def _prepare_llama_before_orchestration_prompt() -> str | None:
     """Pause and verify llama.cpp responds before a large orchestration prefill."""
     if not _uses_local_llama_orchestrator():
         return None
-    delay = float(os.environ.get("PI_LLAMA_POST_RESTART_DELAY_S", "2"))
+    delay = float(os.environ.get("AGENT_LLAMA_POST_RESTART_DELAY_S", "2"))
     if delay > 0:
         time.sleep(delay)
-    timeout = float(os.environ.get("PI_LLAMA_READY_TIMEOUT_S", "120"))
+    timeout = float(os.environ.get("AGENT_LLAMA_READY_TIMEOUT_S", "120"))
     return _wait_for_llama_inference_ready(timeout_s=timeout)
 
 
@@ -1169,7 +1178,7 @@ def _agent_status_markdown(client: AgentRuntime | None = None) -> str:
         lines.insert(0, "**Status:** Ready")
         lines.append("")
         lines.append(
-            "_Set `DOC_REDACTION_GRADIO_URL` in `config/pi_agent.env` if the doc_redaction "
+            "_Set `DOC_REDACTION_GRADIO_URL` in `config/agent.env` if the doc_redaction "
             "app is not at the URL above. Apply **Agent backend** to start the agent._"
         )
     else:
@@ -1192,7 +1201,7 @@ def _pi_agent_is_streaming(client: AgentRuntime | None) -> bool:
 
 
 _PI_IDLE_POLL_INTERVAL_S = 0.25
-_PI_IDLE_MAX_WAIT_S = float(os.environ.get("PI_IDLE_MAX_WAIT_S", "5"))
+_PI_IDLE_MAX_WAIT_S = float(os.environ.get("AGENT_IDLE_MAX_WAIT_S", "5"))
 
 
 def _pi_wait_until_idle(
@@ -1583,7 +1592,7 @@ def _steer_agent_message_sync(
 
     try:
         rpc.steer(message.strip())
-        if os.environ.get("PI_RPC_DEBUG"):
+        if os.environ.get("AGENT_RPC_DEBUG"):
             preview = (message or "").strip()[:200]
             _logger.debug(
                 "_steer_agent_message_sync: queued steer for session_hash=%s preview=%s",
@@ -1595,7 +1604,7 @@ def _steer_agent_message_sync(
             )
     except (PiRpcError, OSError, ValueError) as exc:
         gr.Warning(f"Could not queue message for Pi: {exc}")
-        if os.environ.get("PI_RPC_DEBUG"):
+        if os.environ.get("AGENT_RPC_DEBUG"):
             _logger.exception(
                 "_steer_agent_message_sync: could not queue steer for session_hash=%s",
                 session_hash,
@@ -1657,7 +1666,7 @@ def _log_followup_diagnostics(
     *,
     session_hash: str,
 ) -> None:
-    if os.environ.get("PI_RPC_DEBUG"):
+    if os.environ.get("AGENT_RPC_DEBUG"):
         sys.stderr.write(
             f"DEBUG-FOLLOWUP ENTER: session_hash={session_hash} message_len={len(message or '')}\n"
         )
@@ -1670,7 +1679,7 @@ def _log_followup_diagnostics(
         except Exception:
             pi_is_streaming = False
         msg_present = bool(message and message.strip())
-        if os.environ.get("PI_RPC_DEBUG"):
+        if os.environ.get("AGENT_RPC_DEBUG"):
             preview = (message or "").strip()[:200]
             _logger.debug(
                 "submit_followup_message diagnostics: client_running=%s prompt_stream_active=%s pi_is_streaming=%s message_present=%s",
@@ -1692,7 +1701,7 @@ def _log_followup_branch(
     *,
     session_hash: str,
 ) -> None:
-    if not os.environ.get("PI_RPC_DEBUG"):
+    if not os.environ.get("AGENT_RPC_DEBUG"):
         return
     try:
         preview = (message or "").strip()[:200]
@@ -1922,7 +1931,7 @@ def _run_pi_chat(
         refresh_pdf_preview=True,
     )
 
-    if os.environ.get("PI_RPC_DEBUG"):
+    if os.environ.get("AGENT_RPC_DEBUG"):
         sys.stderr.write(
             f"DEBUG-FOLLOWUP resume: session_hash={session_hash} message_len={len(message or '')}\n"
         )
@@ -1932,7 +1941,7 @@ def _run_pi_chat(
         history=history,
         is_followup=not bool(document_name.strip()),
     )
-    if os.environ.get("PI_RPC_DEBUG"):
+    if os.environ.get("AGENT_RPC_DEBUG"):
         try:
             preview = (message or "").strip()[:400]
         except Exception:
@@ -2590,7 +2599,7 @@ def submit_redaction_task(
         ocr_method=settings.ocr_method,
         pii_method=settings.pii_method,
         total_page_count=page_count,
-        vlm_model_name=os.environ.get("PI_VLM_MODEL"),
+        vlm_model_name=os.environ.get("AGENT_VLM_MODEL"),
     )
 
 
@@ -2671,7 +2680,7 @@ def build_ui():
         else (
             "Choose which LLM powers the agent (chat and redaction orchestration). "
             "Credentials from the UI apply **for this container session only**; "
-            "defaults can be set via `config/pi_agent.env` or compose environment."
+            "defaults can be set via `config/agent.env` or compose environment."
         )
     )
     hf_locked_settings_md = (
@@ -2684,10 +2693,10 @@ def build_ui():
     )
 
     with gr.Blocks(
-        title=PI_UI_TITLE,
+        title=AGENT_UI_TITLE,
         fill_height=True,
     ) as demo:
-        gr.Markdown(PI_INTRO_TEXT)
+        gr.Markdown(AGENT_INTRO_TEXT)
         client_state = gr.State(None)
         session_hash_state = gr.State("")
         s3_output_folder_state = gr.State("")
@@ -2808,7 +2817,18 @@ def build_ui():
                     elif settings_accordion is not None:
                         settings_accordion.render()
 
-                    with gr.Accordion("Agent backend/API keys", open=IS_HF_SPACE):
+                    # AgentCore runs the agent on a separately deployed Bedrock runtime
+                    # whose model/credentials are fixed at deploy time and are not
+                    # forwarded from the Pi UI, so hide the entire backend accordion.
+                    _agentcore_backend = normalize_orchestrator() in {
+                        "agentcore",
+                        "agentcore-harness",
+                    }
+                    with gr.Accordion(
+                        "Agent backend/API keys",
+                        open=IS_HF_SPACE,
+                        visible=not _agentcore_backend,
+                    ):
                         gr.Markdown(backend_blurb)
                         backend_provider = gr.Radio(
                             label="Provider",
@@ -3218,7 +3238,7 @@ def launch_pi_ui() -> FastAPI | None:
     """Build UI and mount on FastAPI or launch Gradio directly."""
     demo = build_ui()
     demo.queue(default_concurrency_limit=1)
-    pi_root = (PI_ROOT_PATH or "").strip()
+    pi_root = (AGENT_ROOT_PATH or "").strip()
     fastapi_root = pi_root or FASTAPI_ROOT_PATH
     # Let mount_or_launch build the FastAPI app so it reconciles the mount subpath with
     # root_path: mounting Gradio at ``/pi`` (CloudFront forwards the prefix unstripped)
@@ -3229,8 +3249,8 @@ def launch_pi_ui() -> FastAPI | None:
         allowed_paths=gradio_allowed_paths(),
         css=THINKING_PANEL_CSS,
         head_extra=PI_AGENT_FINISH_HEAD_HTML,
-        server_name=PI_UI_HOST,
-        server_port=PI_UI_PORT,
+        server_name=AGENT_UI_HOST,
+        server_port=AGENT_UI_PORT,
         root_path=pi_root,
         fastapi_root_path=fastapi_root,
     )
@@ -3248,8 +3268,8 @@ if __name__ == "__main__":
 
         uvicorn.run(
             "gradio_app:app",
-            host=PI_UI_HOST,
-            port=PI_UI_PORT,
+            host=AGENT_UI_HOST,
+            port=AGENT_UI_PORT,
             factory=False,
         )
     else:

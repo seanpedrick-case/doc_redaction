@@ -108,8 +108,8 @@ class AgentCoreAgentRuntime(AgentRuntime):
         self._abort_requested = False
 
     def set_model(self, provider: str, model_id: str) -> dict[str, Any]:
-        os.environ["PI_DEFAULT_PROVIDER"] = provider
-        os.environ["PI_DEFAULT_MODEL"] = model_id
+        os.environ["AGENT_DEFAULT_PROVIDER"] = provider
+        os.environ["AGENT_DEFAULT_MODEL"] = model_id
         return {"provider": provider, "model": model_id}
 
     def get_state(self) -> dict[str, Any]:

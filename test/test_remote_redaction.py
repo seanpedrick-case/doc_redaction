@@ -108,7 +108,7 @@ def test_extract_server_paths_nested_windows(tmp_path):
 
 
 def test_discover_redaction_outputs_skips_split_backend(monkeypatch, tmp_path):
-    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "aws-ecs")
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "aws-ecs")
     assert discover_redaction_outputs("example_doc", since=None) == []
 
 

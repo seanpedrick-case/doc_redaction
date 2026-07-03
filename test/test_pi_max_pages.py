@@ -29,7 +29,7 @@ def tiny_pdf(tmp_path):
 
 
 def test_max_pages_limit_prefers_pi_env(monkeypatch):
-    monkeypatch.setenv("PI_MAX_PAGES", "42")
+    monkeypatch.setenv("AGENT_MAX_PAGES", "42")
     monkeypatch.setenv("MAX_DOC_PAGES", "999")
     assert rp.max_pages_limit() == 42
 

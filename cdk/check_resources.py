@@ -447,7 +447,7 @@ def check_and_set_context():
     if ENABLE_PI_AGENT_ECS_SERVICE == "True":
         print(
             "ENABLE_PI_AGENT_ECS_SERVICE=True: requires legacy Fargate, Service Connect, "
-            "and PI_ALB_ROUTING (default path=/agent on shared ALB; host mode needs PI_ALB_HOST_HEADER)."
+            "and AGENT_ALB_ROUTING (default path=/agent on shared ALB; host mode needs AGENT_ALB_HOST_HEADER)."
         )
     elif ENABLE_HEADLESS_DEPLOYMENT == "True":
         print(

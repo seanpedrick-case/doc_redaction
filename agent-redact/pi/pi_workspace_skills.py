@@ -48,7 +48,7 @@ def _env_flag(name: str) -> bool:
 _SKILLS_SKIP_DIR_NAMES = frozenset({"archive_attempts"})
 _SKILLS_SKIP_SUFFIXES = (".b64.txt",)
 _SKILLS_MAX_FILE_BYTES = int(
-    os.environ.get("PI_SKILLS_MAX_FILE_BYTES", str(512 * 1024))
+    os.environ.get("AGENT_SKILLS_MAX_FILE_BYTES", str(512 * 1024))
 )
 
 
@@ -65,7 +65,7 @@ def _should_skip_skill_relpath(rel: Path, *, size_bytes: int | None = None) -> b
 
 
 def _should_resync(dest: Path, src: Path) -> bool:
-    if _env_flag("PI_SKILLS_RESYNC"):
+    if _env_flag("AGENT_SKILLS_RESYNC"):
         return True
     if not dest.is_dir():
         return True
@@ -150,7 +150,7 @@ def _make_writable(path: Path) -> None:
 
 
 def _make_readonly(path: Path) -> None:
-    if _env_flag("PI_SKILLS_WRITABLE"):
+    if _env_flag("AGENT_SKILLS_WRITABLE"):
         return
     _chmod_tree(path, writable=False)
 
@@ -180,7 +180,7 @@ def sync_repo_skills_to_workspace(*, force: bool = False) -> Path:
     """
     Copy ``{repo}/skills/`` → ``{workspace}/.pi/skills/`` (read-only for the agent).
 
-    Re-sync when the repo tree is newer or ``PI_SKILLS_RESYNC=true``.
+    Re-sync when the repo tree is newer or ``AGENT_SKILLS_RESYNC=true``.
     """
     src = repo_skills_dir()
     dest = workspace_skills_dir()
@@ -207,7 +207,7 @@ def sync_repo_skills_to_workspace(*, force: bool = False) -> Path:
             _copy_tree_item_filtered(item, dest / item.name, src_root=src)
 
     write_workspace_pi_settings()
-    os.environ["PI_WORKSPACE_SKILLS_DIR"] = str(dest.resolve())
+    os.environ["AGENT_WORKSPACE_SKILLS_DIR"] = str(dest.resolve())
     return dest.resolve()
 
 
@@ -235,7 +235,7 @@ def write_hf_space_deployment_skill(*, force: bool = False) -> Path | None:
     """
     Write a deployment-specific skill that overrides Docker URLs in generic skills.
 
-    Only active when ``PI_DEPLOYMENT_PROFILE=hf-space``.
+    Only active when ``AGENT_DEPLOYMENT_PROFILE=hf-space``.
     """
     try:
         from pi_agent_config import is_hf_space_profile

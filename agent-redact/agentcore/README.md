@@ -208,24 +208,24 @@ agentcore deploy
 
 **After deploy — runtime environment (AWS)**
 
-Bedrock model settings (`PI_DEFAULT_PROVIDER`, `AWS_REGION`, …) belong in `agentcore.env` on the runtime bundle.
+Bedrock model settings (`AGENT_DEFAULT_PROVIDER`, `AWS_REGION`, …) belong in `agentcore.env` on the runtime bundle.
 
-**`DOC_REDACTION_GRADIO_URL`:** the Gradio Pi UI sends this on **every invoke** in `runtime_config`, taken from your local `config/pi_agent.env`. That overrides any URL baked into `agentcore.env` (for example an old HF Space default). You should see `Redaction backend for this turn: …` in the activity log with the same URL as the session info panel.
+**`DOC_REDACTION_GRADIO_URL`:** the Gradio Pi UI sends this on **every invoke** in `runtime_config`, taken from your local `config/agent.env`. That overrides any URL baked into `agentcore.env` (for example an old HF Space default). You should see `Redaction backend for this turn: …` in the activity log with the same URL as the session info panel.
 
-For AWS CDK + AgentCore, `DOC_REDACTION_GRADIO_URL` is the **main app HTTPS URL** (`CloudFrontDistributionURL` when `USE_CLOUDFRONT=True`, otherwise `ExpressServiceEndpoint` / `AgenticDocRedactionBackendUrl` stack output). Service Connect (`http://redaction:7860`) is only for in-container `pi` / `langgraph` orchestrators. For local Docker dev, set `DOC_REDACTION_GRADIO_URL=http://host.docker.internal:7861` in `pi_agent.env`.
+For AWS CDK + AgentCore, `DOC_REDACTION_GRADIO_URL` is the **main app HTTPS URL** (`CloudFrontDistributionURL` when `USE_CLOUDFRONT=True`, otherwise `ExpressServiceEndpoint` / `AgenticDocRedactionBackendUrl` stack output). Service Connect (`http://redaction:7860`) is only for in-container `pi` / `langgraph` orchestrators. For local Docker dev, set `DOC_REDACTION_GRADIO_URL=http://host.docker.internal:7861` in `agent.env`.
 
 ```bash
-PI_DEFAULT_PROVIDER=amazon-bedrock
-PI_DEFAULT_MODEL=anthropic.claude-sonnet-4-6
+AGENT_DEFAULT_PROVIDER=amazon-bedrock
+AGENT_DEFAULT_MODEL=anthropic.claude-sonnet-4-6
 AWS_REGION=eu-west-2
-PI_WORKSPACE_DIR=/tmp/agentcore-workspace
+AGENT_WORKSPACE_DIR=/tmp/agentcore-workspace
 # Optional fallback if Gradio does not send runtime_config:
 # DOC_REDACTION_GRADIO_URL=https://<ExpressServiceEndpoint>  # CDK + AgentCore
 ```
 
 **Session / follow-up chat:** [`session_store.py`](session_store.py) keeps conversation history per `session_hash` inside the running runtime process. Gradio passes the same `session_hash` for follow-ups. History is lost on cold start until [AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/) is configured.
 
-**Workspace file sync (Gradio ↔ AgentCore):** AgentCore runs on AWS with its own filesystem (`PI_WORKSPACE_DIR`). When you **Start redaction task** from the Gradio UI, the uploaded PDF is base64-encoded in the invoke payload (`workspace_files`) and written into the remote session workspace before the LangGraph agent runs. After the turn completes, artifacts under `redact/` are streamed back as `workspace_file` events and saved into the local Gradio session workspace so the **Outputs** panel can refresh. Default per-file limit: 8 MB (`AGENTCORE_MAX_UPLOAD_BYTES`). Re-deploy the runtime after upgrading `invoke_agent.py` / `workspace_sync.py`.
+**Workspace file sync (Gradio ↔ AgentCore):** AgentCore runs on AWS with its own filesystem (`AGENT_WORKSPACE_DIR`). When you **Start redaction task** from the Gradio UI, the uploaded PDF is base64-encoded in the invoke payload (`workspace_files`) and written into the remote session workspace before the LangGraph agent runs. After the turn completes, artifacts under `redact/` are streamed back as `workspace_file` events and saved into the local Gradio session workspace so the **Outputs** panel can refresh. Default per-file limit: 8 MB (`AGENTCORE_MAX_UPLOAD_BYTES`). Re-deploy the runtime after upgrading `invoke_agent.py` / `workspace_sync.py`.
 
 #### Alternative: Container build
 
@@ -292,16 +292,17 @@ python cdk/cdk_install.py --profile demo --enable-agentic `
 
 This sets `AGENTCORE_CDK_DEPLOY=True`, creates an ARM CodeBuild project and ECR repo (`agent-redact/agentcore/Dockerfile.runtime`), and runs `post_cdk_build_quickstart.py` to push the image.
 
-**Phase 2 — create runtime + wire URL**
+**Phase 2 — create runtime + wire URL (no stack update)**
 
-After the AgentCore CodeBuild push completes, re-run (or let the installer prompt after quickstart):
+Phase 1 runs `post_cdk_build_quickstart.py`, which triggers the AgentCore CodeBuild and, if the image is ready before quickstart finishes, completes phase 2 automatically. If the image is **not** ready yet (or CodeBuild failed and you pushed the image manually), complete phase 2 once `agent-redact/agentcore/Dockerfile.runtime` has produced `…-agentcore-runtime:latest` in ECR:
 
 ```powershell
-python cdk/cdk_install.py --profile demo --enable-agentic `
-  --enable-agentcore-cdk-runtime --yes
+python cdk/cdk_install.py --complete-agentcore
 ```
 
-This sets `ENABLE_AGENTCORE_CDK_RUNTIME=True`, deploys `CfnRuntime` pointing at the ECR image, reads `AgentCoreRuntimeArn` from stack outputs, derives `AGENTCORE_RUNTIME_URL`, patches `config/pi_agent.env` / `cdk/config/cdk_config.env`, re-uploads to S3, and recycles the agent Express service.
+`--complete-agentcore` uses the existing `cdk/config/cdk_config.env`, skips the wizard, and **does not run `cdk deploy`**. It calls the `bedrock-agentcore-control` API directly (boto3) to create the runtime from the ECR image + the phase-1 execution role (`AgentCoreRuntimeExecutionRole`, mirroring the CDK `CfnRuntime` parameters), then derives `AGENTCORE_RUNTIME_URL`, patches `config/agent.env` / `cdk/config/cdk_config.env`, re-uploads to S3, and recycles the agent Express service. It is idempotent — reuses an existing runtime of the same name.
+
+> **Why not a second `cdk deploy`?** `cdk_install.py` performs **initial deploys only** and aborts rather than update an existing stack. This is deliberate: `app.py` re-runs the precheck on every `cdk` invocation, and a second deploy would find the stack's now-existing roles/buckets/pool, flip them from *managed* to *imported*, and CloudFormation would then **delete** them (removal policy `DESTROY` on the demo profile). So phase 2 creates the runtime out-of-band via the API instead — no stack mutation, no footgun. If you later tear down the stack, delete the AgentCore runtime separately (it is not tracked by CloudFormation).
 
 Config keys (also in `cdk/config/cdk_config.env`):
 
@@ -343,7 +344,7 @@ python cdk/cdk_install.py --profile demo --enable-pi `
 
 # Or config-only first; add URL after runtime deploy
 python cdk/cdk_install.py --profile demo --enable-pi --yes --config-only
-# then re-run with --agentcore-runtime-url or edit config/pi_agent.env
+# then re-run with --agentcore-runtime-url or edit config/agent.env
 ```
 
 The installer adds `policies/pi_agentcore_invoke_policy.json` to the ECS task role so the Gradio container can call `InvokeAgentRuntime` (SigV4, no `AGENTCORE_API_KEY` required on ECS).
@@ -354,7 +355,7 @@ The installer adds `policies/pi_agentcore_invoke_policy.json` to the ECS task ro
 
 ---
 
-Set in [`config/pi_agent.env`](../../config/pi_agent.env) (or via the CDK installer):
+Set in [`config/agent.env`](../../config/agent.env.example) (or via the CDK installer):
 
 ```bash
 AGENT_ORCHESTRATOR=agentcore
@@ -389,13 +390,13 @@ python cdk/cdk_install.py --profile demo --enable-pi \
 
 Interactive wizard: enable agent mode, then choose **Bedrock AgentCore** when prompted for the orchestration backend.
 
-CDK writes `ENABLE_AGENTCORE_RUNTIME=True` and the URL into `config/cdk_config.env`; `pi_agent.env` gets `AGENT_ORCHESTRATOR` and `AGENTCORE_RUNTIME_URL` for the Pi Express container.
+CDK writes `ENABLE_AGENTCORE_RUNTIME=True` and the URL into `config/cdk_config.env`; `agent.env` gets `AGENT_ORCHESTRATOR` and `AGENTCORE_RUNTIME_URL` for the Pi Express container.
 
 ### Typical deployment order
 
 1. Deploy **doc_redaction** main app (CDK) and note **ExpressServiceEndpoint** (main Express HTTPS URL).  
 2. Deploy **AgentCore** runtime (`agentcore deploy`) and note the URL.  
-3. Set `AGENTCORE_RUNTIME_URL` in `pi_agent.env` / installer and deploy or restart the **Pi Express** agent UI service.
+3. Set `AGENTCORE_RUNTIME_URL` in `agent.env` / installer and deploy or restart the **Pi Express** agent UI service.
 
 You can deploy the Gradio UI first with `AGENT_ORCHESTRATOR=pi` or `langgraph` and switch to `agentcore` once the runtime URL is known.
 
@@ -421,7 +422,7 @@ If invoke returns **401** or **403**, check AgentCore inbound auth configuration
 | Issue | What to check |
 |-------|----------------|
 | Runtime init timeout / `RuntimeClientError: initialization time exceeded` | Container failed to import `main.py` within 30s. Check CloudWatch `/aws/bedrock-agentcore/runtimes/RedactionAgent_RedactionAgent-ye5Jfw7gKj/` **runtime-logs**. Common cause: packaged bootstrap calling Pi-only modules (`pi_workspace_skills`). Re-run `package_runtime.py` and redeploy. |
-| 403 on `/invocations` | Runtime uses **AWS IAM**; Gradio must call via SigV4 (`boto3` `invoke_agent_runtime`) or set `AGENTCORE_API_KEY` for CUSTOM_JWT. Ensure `PI_AWS_PROFILE` / `~/.aws` in the pi-agent container and `bedrock-agentcore:InvokeAgentRuntime` on the runtime ARN. |
+| 403 on `/invocations` | Runtime uses **AWS IAM**; Gradio must call via SigV4 (`boto3` `invoke_agent_runtime`) or set `AGENTCORE_API_KEY` for CUSTOM_JWT. Ensure `AGENT_AWS_PROFILE` / `~/.aws` in the pi-agent container and `bedrock-agentcore:InvokeAgentRuntime` on the runtime ARN. |
 | Agent cannot reach doc_redaction | `DOC_REDACTION_GRADIO_URL` must be the **main app HTTPS URL** for AgentCore (not Service Connect). Check `CloudFrontDistributionURL` (when CloudFront is enabled) or `AgenticDocRedactionBackendUrl` stack output and activity log `Redaction backend for this turn: …` |
 | CDK deploy fails | `cdk bootstrap`; `agentcore deploy -v` for verbose AgentCore errors |
 | `Failed to parse: \`-\`` during **Synthesize CloudFormation** | Windows + path with spaces (e.g. `OneDrive - Lambeth Council`). AgentCore CDK runs `uv` with `shell: true` and unquoted paths; the `-` in the folder name is passed to `uv` as a bogus package. See below. |

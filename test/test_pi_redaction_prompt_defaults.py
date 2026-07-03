@@ -17,30 +17,30 @@ import redaction_prompt as rp
 
 
 def _reload_redaction_prompt(monkeypatch, *, profile: str = "local-docker"):
-    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", profile)
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", profile)
     importlib.reload(pi_agent_config)
     return importlib.reload(rp)
 
 
 def test_default_ocr_and_pii_from_pi_agent_env(monkeypatch):
-    monkeypatch.setenv("PI_DEFAULT_OCR_METHOD", "hybrid-paddle-vlm")
-    monkeypatch.setenv("PI_DEFAULT_PII_METHOD", "LLM (AWS Bedrock)")
+    monkeypatch.setenv("AGENT_DEFAULT_OCR_METHOD", "hybrid-paddle-vlm")
+    monkeypatch.setenv("AGENT_DEFAULT_PII_METHOD", "LLM (AWS Bedrock)")
     module = _reload_redaction_prompt(monkeypatch)
     assert module.DEFAULT_OCR_METHOD == "hybrid-paddle-vlm"
     assert module.DEFAULT_PII_METHOD == "LLM (AWS Bedrock)"
 
 
 def test_local_fallback_when_env_unset(monkeypatch):
-    monkeypatch.delenv("PI_DEFAULT_OCR_METHOD", raising=False)
-    monkeypatch.delenv("PI_DEFAULT_PII_METHOD", raising=False)
+    monkeypatch.delenv("AGENT_DEFAULT_OCR_METHOD", raising=False)
+    monkeypatch.delenv("AGENT_DEFAULT_PII_METHOD", raising=False)
     module = _reload_redaction_prompt(monkeypatch)
     assert module.DEFAULT_OCR_METHOD == "hybrid-paddle-inference-server"
     assert module.DEFAULT_PII_METHOD == "Local"
 
 
 def test_hf_space_defaults_when_env_unset(monkeypatch):
-    monkeypatch.delenv("PI_DEFAULT_OCR_METHOD", raising=False)
-    monkeypatch.delenv("PI_DEFAULT_PII_METHOD", raising=False)
+    monkeypatch.delenv("AGENT_DEFAULT_OCR_METHOD", raising=False)
+    monkeypatch.delenv("AGENT_DEFAULT_PII_METHOD", raising=False)
     module = _reload_redaction_prompt(monkeypatch, profile="hf-space")
     assert module.DEFAULT_OCR_METHOD == module.HF_DEFAULT_OCR
     assert module.DEFAULT_PII_METHOD == module.HF_DEFAULT_PII
@@ -112,8 +112,8 @@ def test_hf_space_remote_guidance_uses_workspace_base_helpers(tmp_path, monkeypa
     helpers.mkdir(parents=True)
     (helpers / "remote_redaction.py").write_text("# helper\n", encoding="utf-8")
 
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "true")
     monkeypatch.setenv("DOC_REDACTION_GRADIO_URL", "https://example-redaction.hf.space")
     module = _reload_redaction_prompt(monkeypatch, profile="hf-space")
     guidance = module.build_remote_backend_guidance(

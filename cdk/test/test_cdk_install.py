@@ -543,8 +543,8 @@ def test_build_env_values_pi_express():
     answers.enable_agentic_express = True
     values = inst.build_env_values(answers)
     assert values["ENABLE_PI_AGENT_EXPRESS_SERVICE"] == "True"
-    assert "PI_ALB_PATH_PREFIX" not in values
-    assert "PI_ALB_ROUTING" not in values
+    assert "AGENT_ALB_PATH_PREFIX" not in values
+    assert "AGENT_ALB_ROUTING" not in values
     assert values["ECS_SERVICE_CONNECT_DISCOVERY_NAME"] == "redaction"
     assert values["ECS_PI_EXPRESS_SC_PORT_NAME"] == "port-7862"
     assert values["ECS_EXPRESS_SC_PORT_NAME"] == "port-7860"
@@ -555,7 +555,7 @@ def test_build_pi_agent_env_values_express_skips_root_path():
     answers.enable_agentic_express = True
     env = inst.build_pi_agent_env_values(answers)
     assert env["RUN_FASTAPI"] == "True"
-    assert "PI_ROOT_PATH" not in env
+    assert "AGENT_ROOT_PATH" not in env
 
 
 def test_build_env_values_pi_production_host():
@@ -567,8 +567,8 @@ def test_build_env_values_pi_production_host():
     values = inst.build_env_values(answers)
     assert values["ENABLE_PI_AGENT_ECS_SERVICE"] == "True"
     assert values["ENABLE_ECS_SERVICE_CONNECT"] == "True"
-    assert values["PI_ALB_HOST_HEADER"] == "agent.redaction.example.com"
-    assert values["PI_ALB_LISTENER_RULE_PRIORITY"] == "3"
+    assert values["AGENT_ALB_HOST_HEADER"] == "agent.redaction.example.com"
+    assert values["AGENT_ALB_LISTENER_RULE_PRIORITY"] == "3"
 
 
 def test_validate_pi_host_requires_header():
@@ -579,7 +579,7 @@ def test_validate_pi_host_requires_header():
     answers.agentic_alb_host_header = ""
     values = inst.build_env_values(answers)
     errors = inst.validate_env_values(values)
-    assert any("PI_ALB_HOST_HEADER" in e for e in errors)
+    assert any("AGENT_ALB_HOST_HEADER" in e for e in errors)
 
 
 def test_validate_pi_express_skips_alb_routing():
@@ -596,9 +596,9 @@ def test_build_pi_agent_env_values():
     answers.agentic_alb_routing = "path"
     answers.agentic_alb_path_prefix = "/pi"
     values = inst.build_pi_agent_env_values(answers)
-    assert values["PI_DEPLOYMENT_PROFILE"] == "aws-ecs"
+    assert values["AGENT_DEPLOYMENT_PROFILE"] == "aws-ecs"
     assert values["DOC_REDACTION_GRADIO_URL"] == "http://redaction:7860"
-    assert values["PI_ROOT_PATH"] == "/pi"
+    assert values["AGENT_ROOT_PATH"] == "/pi"
 
 
 def test_apply_agentic_cli_flags_enable_agentic_demo():
@@ -673,7 +673,11 @@ def test_build_env_values_agentcore_orchestrator():
     assert values["AGENTCORE_RUNTIME_URL"] == "https://runtime.example"
 
 
-def test_build_pi_agent_env_values_agentcore():
+def test_build_pi_agent_env_values_agentcore(monkeypatch):
+    # Keep hermetic: resolve_doc_redaction_gradio_url() otherwise calls
+    # fetch_stack_output (live AWS) when agent_orchestrator == "agentcore",
+    # which returns the deployed Express endpoint on a machine with a live stack.
+    monkeypatch.setattr(inst, "fetch_stack_output", lambda *_a, **_k: None)
     answers = _demo_answers()
     answers.enable_agentic_express = True
     answers.agent_orchestrator = "agentcore"
@@ -684,6 +688,79 @@ def test_build_pi_agent_env_values_agentcore():
     assert values["AGENTCORE_RUNTIME_URL"] == "https://runtime.example"
     assert values["AGENTCORE_API_KEY"] == "secret-token"
     assert values["DOC_REDACTION_GRADIO_URL"] == "http://redaction:7860"
+
+
+def test_normalize_agentcore_bedrock_model_defaults_to_sonnet():
+    assert (
+        inst.normalize_agentcore_bedrock_model("")
+        == inst.AGENTCORE_DEFAULT_BEDROCK_MODEL
+    )
+    assert inst.normalize_agentcore_bedrock_model("  amazon.nova-pro-v1:0  ") == (
+        "amazon.nova-pro-v1:0"
+    )
+
+
+def test_build_env_values_sets_agentcore_bedrock_model_default():
+    answers = _demo_answers()
+    answers.enable_agentic_express = True
+    answers.agent_orchestrator = "agentcore"
+    answers.enable_agentcore_runtime = True
+    answers.agentcore_runtime_url = "https://runtime.example"
+    values = inst.build_env_values(answers)
+    assert values["AGENTCORE_BEDROCK_MODEL"] == inst.AGENTCORE_DEFAULT_BEDROCK_MODEL
+
+
+def test_build_env_values_honours_selected_bedrock_model():
+    answers = _demo_answers()
+    answers.enable_agentic_express = True
+    answers.agent_orchestrator = "agentcore"
+    answers.enable_agentcore_runtime = True
+    answers.agentcore_runtime_url = "https://runtime.example"
+    answers.agentcore_bedrock_model = "amazon.nova-pro-v1:0"
+    values = inst.build_env_values(answers)
+    assert values["AGENTCORE_BEDROCK_MODEL"] == "amazon.nova-pro-v1:0"
+
+
+def test_build_pi_agent_env_values_agentcore_sets_bedrock_model(monkeypatch):
+    monkeypatch.setattr(inst, "fetch_stack_output", lambda *_a, **_k: None)
+    answers = _demo_answers()
+    answers.enable_agentic_express = True
+    answers.agent_orchestrator = "agentcore"
+    answers.agentcore_runtime_url = "https://runtime.example"
+    answers.agentcore_bedrock_model = "amazon.nova-pro-v1:0"
+    values = inst.build_pi_agent_env_values(answers)
+    assert values["AGENT_DEFAULT_PROVIDER"] == "amazon-bedrock"
+    assert values["AGENT_DEFAULT_MODEL"] == "amazon.nova-pro-v1:0"
+
+
+def test_apply_agent_orchestrator_cli_flags_applies_model():
+    answers = inst.InstallAnswers(profile="demo", enable_agentic_express=True)
+    args = argparse.Namespace(
+        agent_orchestrator="agentcore",
+        enable_agentcore_runtime=True,
+        agentcore_runtime_url="",
+        agentcore_api_key="",
+        agentcore_model="amazon.nova-pro-v1:0",
+    )
+    inst.apply_agent_orchestrator_cli_flags(args, answers)
+    assert answers.agentcore_bedrock_model == "amazon.nova-pro-v1:0"
+
+
+def test_report_bedrock_model_access_proceeds_on_unknown(monkeypatch):
+    monkeypatch.setattr(
+        inst,
+        "validate_bedrock_model_access",
+        lambda *_a, **_k: (None, "inconclusive"),
+    )
+    assert (
+        inst.report_bedrock_model_access(
+            "anthropic.claude-sonnet-4-6",
+            "eu-west-2",
+            interactive=False,
+            assume_yes=True,
+        )
+        is True
+    )
 
 
 def test_resolve_doc_redaction_gradio_url_agentcore_uses_express_endpoint(monkeypatch):
@@ -930,12 +1007,13 @@ def test_handle_existing_stacks_without_force_aborts_no_update(monkeypatch):
 def test_write_pi_agent_env_file_minimal(tmp_path, monkeypatch):
     answers = _demo_answers()
     answers.enable_agentic_express = True
-    target = tmp_path / "pi_agent.env"
+    target = tmp_path / "agent.env"
     monkeypatch.setattr(inst, "PI_AGENT_ENV_PATH", target)
     monkeypatch.setattr(inst, "PI_AGENT_ENV_EXAMPLE", tmp_path / "missing.example")
+    monkeypatch.setattr(inst, "PI_AGENT_ENV_LEGACY_PATH", tmp_path / "pi_agent.env")
     inst.write_pi_agent_env_file(answers)
     text = target.read_text(encoding="utf-8")
-    assert "PI_DEPLOYMENT_PROFILE=aws-ecs" in text
+    assert "AGENT_DEPLOYMENT_PROFILE=aws-ecs" in text
     assert "DOC_REDACTION_GRADIO_URL=http://redaction:7860" in text
 
 

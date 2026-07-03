@@ -195,6 +195,22 @@ def wait_for_agentcore_ecr_image(
     return ready
 
 
+def resolve_agent_env_path(override: Optional[Path], repo_root: Path) -> Path:
+    """
+    Resolve the agent config file, preferring ``agent.env`` over legacy ``pi_agent.env``.
+
+    Returns *override* when provided; otherwise ``config/agent.env`` unless it is
+    absent and the legacy ``config/pi_agent.env`` exists.
+    """
+    if override is not None:
+        return override
+    new_path = repo_root / "config" / "agent.env"
+    legacy_path = repo_root / "config" / "pi_agent.env"
+    if not new_path.is_file() and legacy_path.is_file():
+        return legacy_path
+    return new_path
+
+
 def upload_file_to_s3(
     local_file_paths: Union[str, List[str]],
     s3_key: str,
@@ -1289,7 +1305,7 @@ def print_express_mode_next_steps(
             print(
                 "  - Magic-link auth: see RedactionLoginUrl and RedactionAuthToken stack outputs."
             )
-        prefix = (values.get("PI_ALB_PATH_PREFIX") or "/agent").strip()
+        prefix = (values.get("AGENT_ALB_PATH_PREFIX") or "/agent").strip()
         if not prefix.startswith("/"):
             prefix = f"/{prefix}"
         if values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True" and main_url:
@@ -1335,63 +1351,116 @@ def print_express_mode_next_steps(
             )
 
 
-def sync_pi_agent_doc_redaction_url_for_agentcore(
-    *,
-    stack_name: str = "RedactionStack",
-    region: Optional[str] = None,
-    pi_agent_env_path: Optional[Path] = None,
-) -> Optional[str]:
-    """
-    Set ``config/pi_agent.env`` ``DOC_REDACTION_GRADIO_URL`` to the main Express HTTPS URL.
+def resolve_agentcore_backend_env(stack_name: str, aws_region: str) -> Dict[str, str]:
+    """Backend env for the AgentCore runtime: CloudFront (or Express) URL + magic-link token.
 
-    AgentCore runtime tools cannot use ECS Service Connect DNS; Pi Express task env is
-    set at synth time, but this keeps the on-disk env file aligned for local reference
-    and S3 uploads.
+    Returns a dict with ``DOC_REDACTION_GRADIO_URL`` and, when the backend is fronted by
+    CloudFront magic-link, ``DOC_REDACTION_AUTH_TOKEN`` (+ ``DOC_REDACTION_AUTH_COOKIE_NAME``
+    if non-default). Empty dict if no endpoint can be resolved.
     """
     from cdk_config import (
-        ENABLE_AGENTCORE_RUNTIME,
+        CLOUDFRONT_AUTH_MODE,
+        CLOUDFRONT_MAGIC_LINK_COOKIE_NAME,
         USE_CLOUDFRONT,
         normalize_https_redirect_url,
     )
 
-    if ENABLE_AGENTCORE_RUNTIME != "True":
-        return None
-    aws_region = region or AWS_REGION
     url = ""
+    via_cloudfront = False
     if USE_CLOUDFRONT == "True":
         cf_domain = get_stack_output(
             stack_name, "CloudFrontDistributionURL", aws_region
         )
         if cf_domain:
             url = normalize_https_redirect_url(f"https://{cf_domain.strip()}")
+            via_cloudfront = True
     if not url:
         endpoint = get_stack_output(stack_name, "ExpressServiceEndpoint", aws_region)
         if not endpoint:
-            print(
-                "Warning: ExpressServiceEndpoint / CloudFrontDistributionURL not found; "
-                "pi_agent.env DOC_REDACTION_GRADIO_URL not updated for AgentCore."
-            )
-            return None
+            return {}
         url = normalize_https_redirect_url(endpoint)
-    env_path = pi_agent_env_path or (
-        Path(__file__).resolve().parent.parent / "config" / "pi_agent.env"
+
+    result: Dict[str, str] = {"DOC_REDACTION_GRADIO_URL": url}
+    if via_cloudfront and str(CLOUDFRONT_AUTH_MODE).strip().lower() == "magic-link":
+        token = get_stack_output(stack_name, "RedactionAuthToken", aws_region)
+        if token and token.strip():
+            result["DOC_REDACTION_AUTH_TOKEN"] = token.strip()
+            cookie_name = (CLOUDFRONT_MAGIC_LINK_COOKIE_NAME or "").strip()
+            if cookie_name and cookie_name != "doc-redaction-auth":
+                result["DOC_REDACTION_AUTH_COOKIE_NAME"] = cookie_name
+        else:
+            print(
+                "Warning: RedactionAuthToken output not found; AgentCore requests "
+                "through CloudFront magic-link will be blocked without the token."
+            )
+    return result
+
+
+def sync_pi_agent_doc_redaction_url_for_agentcore(
+    *,
+    stack_name: str = "RedactionStack",
+    region: Optional[str] = None,
+    pi_agent_env_path: Optional[Path] = None,
+    upload_and_recycle: bool = True,
+) -> Optional[str]:
+    """
+    Set ``config/agent.env`` ``DOC_REDACTION_GRADIO_URL`` to the CloudFront (or main
+    Express HTTPS) URL, plus the magic-link token when CloudFront magic-link is on.
+
+    AgentCore runtime tools cannot use ECS Service Connect DNS. When ``upload_and_recycle``
+    is set, the updated ``agent.env`` is uploaded to S3 and the Pi Express service is
+    recycled so its startup S3 overlay picks up the new backend URL + token.
+    """
+    from cdk_config import ENABLE_AGENTCORE_RUNTIME
+
+    if ENABLE_AGENTCORE_RUNTIME != "True":
+        return None
+    aws_region = region or AWS_REGION
+    updates = resolve_agentcore_backend_env(stack_name, aws_region)
+    if not updates:
+        print(
+            "Warning: ExpressServiceEndpoint / CloudFrontDistributionURL not found; "
+            "agent.env DOC_REDACTION_GRADIO_URL not updated for AgentCore."
+        )
+        return None
+    url = updates["DOC_REDACTION_GRADIO_URL"]
+    env_path = resolve_agent_env_path(
+        pi_agent_env_path, Path(__file__).resolve().parent.parent
     )
     if not env_path.is_file():
         print(f"Note: {env_path} not found; skipping AgentCore backend URL sync.")
         return url
-    lines = env_path.read_text(encoding="utf-8").splitlines()
-    out: List[str] = []
-    replaced = False
-    for line in lines:
-        if line.startswith("DOC_REDACTION_GRADIO_URL="):
-            out.append(f"DOC_REDACTION_GRADIO_URL={url}")
-            replaced = True
-        else:
-            out.append(line)
-    if not replaced:
-        out.append(f"DOC_REDACTION_GRADIO_URL={url}")
-    env_path.write_text("\n".join(out) + ("\n" if out else ""), encoding="utf-8")
-    print(f"Updated {env_path} DOC_REDACTION_GRADIO_URL for AgentCore: {url}")
+
+    _patch_env_key_values(env_path, updates)
+    print(
+        f"Updated {env_path} DOC_REDACTION_GRADIO_URL for AgentCore: {url}"
+        + (
+            " (CloudFront + magic-link token)"
+            if "DOC_REDACTION_AUTH_TOKEN" in updates
+            else ""
+        )
+    )
+
+    if upload_and_recycle:
+        from cdk_config import (
+            CLUSTER_NAME,
+            ECS_PI_EXPRESS_SERVICE_NAME,
+            ENABLE_PI_AGENT_EXPRESS_SERVICE,
+            S3_LOG_CONFIG_BUCKET_NAME,
+        )
+
+        if S3_LOG_CONFIG_BUCKET_NAME:
+            upload_file_to_s3(
+                local_file_paths=str(env_path),
+                s3_key="",
+                s3_bucket=S3_LOG_CONFIG_BUCKET_NAME,
+            )
+        if ENABLE_PI_AGENT_EXPRESS_SERVICE == "True":
+            recycle_express_gateway_tasks(
+                CLUSTER_NAME,
+                ECS_PI_EXPRESS_SERVICE_NAME,
+                aws_region=aws_region,
+            )
     return url
 
 
@@ -1428,7 +1497,7 @@ def sync_agentcore_runtime_url_from_stack(
 ) -> Optional[str]:
     """
     Read ``AgentCoreRuntimeArn`` from the stack, derive ``AGENTCORE_RUNTIME_URL``,
-    patch local env files, re-upload ``pi_agent.env`` to S3, and recycle the agent
+    patch local env files, re-upload ``agent.env`` to S3, and recycle the agent
     Express service so the new URL is picked up.
     """
     from cdk_config import (
@@ -1463,7 +1532,7 @@ def sync_agentcore_runtime_url_from_stack(
         return None
 
     repo_root = Path(__file__).resolve().parent.parent
-    pi_env = pi_agent_env_path or (repo_root / "config" / "pi_agent.env")
+    pi_env = resolve_agent_env_path(pi_agent_env_path, repo_root)
     cdk_env = cdk_env_path or (repo_root / "cdk" / "config" / "cdk_config.env")
     updates = {
         "AGENTCORE_RUNTIME_URL": url,
@@ -1497,6 +1566,264 @@ def sync_agentcore_runtime_url_from_stack(
             aws_region=aws_region,
         )
 
+    return url
+
+
+def _sanitize_agentcore_runtime_name(raw: str) -> str:
+    """Coerce a name to the AgentCore pattern ``[a-zA-Z][a-zA-Z0-9_]{0,47}``.
+
+    Bedrock AgentCore runtime names allow only letters, digits and underscores
+    and must start with a letter (e.g. ``Demo-Redaction-RedactionAgent`` ->
+    ``Demo_Redaction_RedactionAgent``).
+    """
+    cleaned = re.sub(r"[^a-zA-Z0-9_]", "_", (raw or "").strip())
+    cleaned = cleaned.lstrip("0123456789_")
+    if not cleaned:
+        cleaned = "RedactionAgent"
+    return cleaned[:48]
+
+
+def _resolve_agentcore_execution_role_arn(
+    stack_name: str, aws_region: str
+) -> Optional[str]:
+    """Execution role ARN for the AgentCore runtime.
+
+    Prefers ``AGENTCORE_RUNTIME_ROLE_ARN`` from config; otherwise resolves the
+    stack-managed ``AgentCoreRuntimeExecutionRole`` from CloudFormation.
+    """
+    from cdk_config import AGENTCORE_RUNTIME_ROLE_ARN
+
+    external = (AGENTCORE_RUNTIME_ROLE_ARN or "").strip()
+    if external:
+        return external
+
+    try:
+        cfn = boto3.client("cloudformation", region_name=aws_region)
+        resources = cfn.describe_stack_resources(StackName=stack_name)["StackResources"]
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: could not read stack resources for {stack_name}: {exc}")
+        return None
+
+    role_name = next(
+        (
+            r["PhysicalResourceId"]
+            for r in resources
+            if r.get("ResourceType") == "AWS::IAM::Role"
+            and r.get("LogicalResourceId", "").startswith(
+                "AgentCoreRuntimeExecutionRole"
+            )
+        ),
+        None,
+    )
+    if not role_name:
+        print(
+            "Warning: AgentCoreRuntimeExecutionRole not found in "
+            f"{stack_name}. Deploy with AGENTCORE_CDK_DEPLOY=True first, or set "
+            "AGENTCORE_RUNTIME_ROLE_ARN in cdk_config.env."
+        )
+        return None
+
+    try:
+        iam = boto3.client("iam", region_name=aws_region)
+        return iam.get_role(RoleName=role_name)["Role"]["Arn"]
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: could not resolve ARN for role {role_name}: {exc}")
+        return None
+
+
+def _resolve_agentcore_container_uri(
+    repository_name: str, aws_region: str
+) -> Optional[str]:
+    """``<repo-uri>:latest`` for the AgentCore runtime image, if the repo exists."""
+    try:
+        ecr = boto3.client("ecr", region_name=aws_region)
+        repos = ecr.describe_repositories(repositoryNames=[repository_name])[
+            "repositories"
+        ]
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: could not resolve ECR repository '{repository_name}': {exc}")
+        return None
+    if not repos:
+        return None
+    return f"{repos[0]['repositoryUri']}:latest"
+
+
+def _find_existing_agentcore_runtime_arn(client, runtime_name: str) -> Optional[str]:
+    """Return the ARN of an existing AgentCore runtime with ``runtime_name``."""
+    try:
+        paginator = None
+        try:
+            paginator = client.get_paginator("list_agent_runtimes")
+        except Exception:  # noqa: BLE001 - not all botocore versions paginate
+            paginator = None
+        pages = paginator.paginate() if paginator else [client.list_agent_runtimes()]
+        for page in pages:
+            for rt in page.get("agentRuntimes", []) or []:
+                if rt.get("agentRuntimeName") == runtime_name:
+                    return rt.get("agentRuntimeArn")
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: could not list existing AgentCore runtimes: {exc}")
+    return None
+
+
+def create_agentcore_runtime_from_ecr(
+    *,
+    stack_name: str = "RedactionStack",
+    region: Optional[str] = None,
+    pi_agent_env_path: Optional[Path] = None,
+    cdk_env_path: Optional[Path] = None,
+    recycle_agent_service: bool = True,
+) -> Optional[str]:
+    """Create the Bedrock AgentCore runtime from an existing ECR image (no CDK).
+
+    This is the no-stack-update phase 2: it calls the bedrock-agentcore-control
+    API directly (mirroring the CDK ``CfnRuntime`` parameters), so it never runs
+    ``cdk deploy`` and cannot mutate/delete the RedactionStack's managed
+    resources. It then derives ``AGENTCORE_RUNTIME_URL``, patches the local env
+    files, re-uploads ``agent.env`` to S3, and recycles the agent Express
+    service. Idempotent: reuses an existing runtime of the same name.
+    """
+    from cdk_config import (
+        AGENTCORE_BEDROCK_MODEL,
+        AGENTCORE_NETWORK_MODE,
+        AGENTCORE_RUNTIME_NAME,
+        CLUSTER_NAME,
+        ECR_AGENTCORE_REPO_NAME,
+        ECS_PI_EXPRESS_SERVICE_NAME,
+        ENABLE_PI_AGENT_EXPRESS_SERVICE,
+        S3_LOG_CONFIG_BUCKET_NAME,
+    )
+    from cdk_functions import (
+        derive_agentcore_runtime_url,
+        normalize_agentcore_runtime_url,
+    )
+
+    aws_region = region or AWS_REGION
+    runtime_name = _sanitize_agentcore_runtime_name(
+        AGENTCORE_RUNTIME_NAME or "RedactionAgent"
+    )
+
+    container_uri = _resolve_agentcore_container_uri(
+        ECR_AGENTCORE_REPO_NAME, aws_region
+    )
+    if not container_uri:
+        print(
+            "AgentCore runtime image is not available in ECR yet "
+            f"({ECR_AGENTCORE_REPO_NAME}:latest). Build/push it first, then re-run."
+        )
+        return None
+
+    role_arn = _resolve_agentcore_execution_role_arn(stack_name, aws_region)
+    if not role_arn:
+        return None
+
+    try:
+        client = boto3.client("bedrock-agentcore-control", region_name=aws_region)
+    except Exception as exc:  # noqa: BLE001
+        print(
+            "Could not create a 'bedrock-agentcore-control' client "
+            f"(upgrade boto3?): {exc}"
+        )
+        return None
+
+    bedrock_model = (AGENTCORE_BEDROCK_MODEL or "anthropic.claude-sonnet-4-6").strip()
+    runtime_env_vars = {
+        "AGENT_DEFAULT_PROVIDER": "amazon-bedrock",
+        "AGENT_DEFAULT_MODEL": bedrock_model,
+        "AWS_REGION": aws_region,
+        "AWS_DEFAULT_REGION": aws_region,
+        "AGENT_WORKSPACE_DIR": "/tmp/agentcore-workspace",
+    }
+
+    runtime_arn = _find_existing_agentcore_runtime_arn(client, runtime_name)
+    if runtime_arn:
+        print(f"Reusing existing AgentCore runtime '{runtime_name}': {runtime_arn}")
+        print(
+            "  Note: an existing runtime's model is not changed here. To switch the "
+            f"Bedrock model (env AGENT_DEFAULT_MODEL='{bedrock_model}'), delete and "
+            "recreate the runtime."
+        )
+    else:
+        print(f"Creating AgentCore runtime '{runtime_name}' from {container_uri} ...")
+        print(f"  Bedrock model: {bedrock_model} (AGENT_DEFAULT_MODEL)")
+        try:
+            resp = client.create_agent_runtime(
+                agentRuntimeName=runtime_name,
+                agentRuntimeArtifact={
+                    "containerConfiguration": {"containerUri": container_uri}
+                },
+                roleArn=role_arn,
+                networkConfiguration={
+                    "networkMode": (AGENTCORE_NETWORK_MODE or "PUBLIC").upper()
+                },
+                environmentVariables=runtime_env_vars,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"Failed to create AgentCore runtime: {exc}")
+            return None
+        runtime_arn = resp.get("agentRuntimeArn")
+        if not runtime_arn:
+            print(
+                "create_agent_runtime returned no agentRuntimeArn; "
+                f"response keys: {sorted(resp.keys())}"
+            )
+            return None
+        print(f"Created AgentCore runtime: {runtime_arn}")
+
+    url = normalize_agentcore_runtime_url(
+        derive_agentcore_runtime_url(runtime_arn, aws_region)
+    )
+    if not url:
+        print("Warning: could not derive AGENTCORE_RUNTIME_URL from runtime ARN.")
+        return None
+
+    repo_root = Path(__file__).resolve().parent.parent
+    pi_env = resolve_agent_env_path(pi_agent_env_path, repo_root)
+    cdk_env = cdk_env_path or (repo_root / "cdk" / "config" / "cdk_config.env")
+    updates = {
+        "AGENTCORE_RUNTIME_URL": url,
+        "AGENT_ORCHESTRATOR": "agentcore",
+        "ENABLE_AGENTCORE_RUNTIME": "True",
+    }
+    # Backend URL (CloudFront when enabled) + magic-link token for the runtime.
+    backend_env = resolve_agentcore_backend_env(stack_name, aws_region)
+    pi_updates = {**updates, **backend_env}
+    if pi_env.is_file() or pi_agent_env_path is not None:
+        _patch_env_key_values(pi_env, pi_updates)
+        print(f"Updated {pi_env} AGENTCORE_RUNTIME_URL={url}")
+        if backend_env.get("DOC_REDACTION_GRADIO_URL"):
+            print(
+                f"Updated {pi_env} DOC_REDACTION_GRADIO_URL="
+                f"{backend_env['DOC_REDACTION_GRADIO_URL']}"
+                + (
+                    " (+ magic-link token)"
+                    if "DOC_REDACTION_AUTH_TOKEN" in backend_env
+                    else ""
+                )
+            )
+    if cdk_env.is_file() or cdk_env_path is not None:
+        # Runtime is NOT CDK-managed here, so leave ENABLE_AGENTCORE_CDK_RUNTIME as-is.
+        _patch_env_key_values(cdk_env, updates)
+        print(f"Updated {cdk_env} AGENTCORE_RUNTIME_URL={url}")
+
+    if pi_env.is_file() and S3_LOG_CONFIG_BUCKET_NAME:
+        upload_file_to_s3(
+            local_file_paths=str(pi_env),
+            s3_key="",
+            s3_bucket=S3_LOG_CONFIG_BUCKET_NAME,
+        )
+
+    if recycle_agent_service and ENABLE_PI_AGENT_EXPRESS_SERVICE == "True":
+        recycle_express_gateway_tasks(
+            CLUSTER_NAME,
+            ECS_PI_EXPRESS_SERVICE_NAME,
+            aws_region=aws_region,
+        )
+
+    print(
+        "\nAgentCore runtime is wired up (no stack update performed).\n"
+        f"  AGENTCORE_RUNTIME_URL={url}"
+    )
     return url
 
 

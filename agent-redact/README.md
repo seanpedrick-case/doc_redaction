@@ -9,7 +9,7 @@ Supports three orchestration backends via `AGENT_ORCHESTRATOR` (`pi` default, `l
 | [`pi-agent/`](pi-agent/) | Pi Docker image (`dev` + `runtime` targets), sync script, and manifest |
 | [`requirements_pi_agent.txt`](requirements_pi_agent.txt) | Python deps for the Pi agent image |
 
-Per-user output isolation uses Gradio `session_hash` subfolders under `PI_WORKSPACE_DIR` (see `agent-redact/pi/session_workspace.py`). Enabled by default locally and on HF Spaces. Set `PI_SESSION_WORKSPACE=false` only if you want one shared workspace tree for all sessions.
+Per-user output isolation uses Gradio `session_hash` subfolders under `AGENT_WORKSPACE_DIR` (see `agent-redact/pi/session_workspace.py`). Enabled by default locally and on HF Spaces. Set `AGENT_SESSION_WORKSPACE=false` only if you want one shared workspace tree for all sessions.
 
 ## Local Docker
 

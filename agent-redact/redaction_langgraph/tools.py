@@ -520,8 +520,8 @@ def run_doc_redact(
     result, saved = call_doc_redact(
         pdf,
         dest,
-        ocr_method=ocr_from_tool or os.environ.get("PI_DEFAULT_OCR_METHOD"),
-        pii_method=pii_from_tool or os.environ.get("PI_DEFAULT_PII_METHOD"),
+        ocr_method=ocr_from_tool or os.environ.get("AGENT_DEFAULT_OCR_METHOD"),
+        pii_method=pii_from_tool or os.environ.get("AGENT_DEFAULT_PII_METHOD"),
         deny_list=deny_list,
         allow_list=allow_list,
     )

@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 _DOCKER_WORKSPACE = Path("/home/user/app/workspace")
 _DOCKER_UPLOAD_ROOT = Path("/tmp/gradio")
 _DOCKER_PI_WORKDIR = Path("/workspace/doc_redaction")
-# CSV log dirs must not live under read-only PI_WORKDIR (ECS/HF runtime images).
+# CSV log dirs must not live under read-only AGENT_WORKDIR (ECS/HF runtime images).
 _DOCKER_ACCESS_LOGS = Path("/tmp/agent-logs")
 _DOCKER_USAGE_LOGS = Path("/tmp/agent-usage")
 _DOCKER_FEEDBACK_LOGS = Path("/tmp/agent-feedback")
@@ -33,14 +33,14 @@ def _pi_running_in_container() -> bool:
 
 def ensure_pi_workspace_dir(repo_root: Path | None = None) -> str:
     """
-    Resolve ``PI_WORKSPACE_DIR``, create it, and sync ``os.environ``.
+    Resolve ``AGENT_WORKSPACE_DIR``, create it, and sync ``os.environ``.
 
-    - Explicit ``PI_WORKSPACE_DIR`` wins.
+    - Explicit ``AGENT_WORKSPACE_DIR`` wins.
     - Else use the Docker mount only when running in a container.
     - Else ``{repo_root}/workspace`` (local Windows/macOS/Linux dev).
     """
     root = (repo_root or Path(__file__).resolve().parents[2]).resolve()
-    raw = (os.environ.get("PI_WORKSPACE_DIR") or "").strip()
+    raw = (os.environ.get("AGENT_WORKSPACE_DIR") or "").strip()
     if raw:
         path = Path(raw)
     elif _pi_running_in_container() and _DOCKER_WORKSPACE.is_dir():
@@ -49,13 +49,13 @@ def ensure_pi_workspace_dir(repo_root: Path | None = None) -> str:
         path = root / "workspace"
     path.mkdir(parents=True, exist_ok=True)
     resolved = str(path.resolve())
-    os.environ["PI_WORKSPACE_DIR"] = resolved
+    os.environ["AGENT_WORKSPACE_DIR"] = resolved
     return resolved
 
 
 def _pi_runtime_needs_tmp_log_dirs() -> bool:
-    """True when CSV logs must not live under read-only ``PI_WORKDIR`` (ECS/HF images)."""
-    profile = os.environ.get("PI_DEPLOYMENT_PROFILE", "").strip().lower()
+    """True when CSV logs must not live under read-only ``AGENT_WORKDIR`` (ECS/HF images)."""
+    profile = os.environ.get("AGENT_DEPLOYMENT_PROFILE", "").strip().lower()
     if profile in ("aws-ecs", "hf-space"):
         return True
     return _pi_running_in_container()
@@ -65,7 +65,7 @@ def ensure_pi_writable_log_dirs() -> None:
     """
     Point access/usage/feedback CSV logs at ``/tmp`` when running in Docker/ECS.
 
-    ``tools.config`` resolves relative ``logs/`` under ``PI_WORKDIR``, which is
+    ``tools.config`` resolves relative ``logs/`` under ``AGENT_WORKDIR``, which is
     read-only in the Pi runtime image; ``/tmp`` is allowed by
     ``ensure_folder_within_app_directory`` for absolute paths.
 
@@ -96,14 +96,14 @@ def ensure_pi_upload_root(repo_root: Path | None = None) -> str:
     Must run before ``import gradio`` so ``GRADIO_TEMP_DIR`` matches validation
     in ``redaction_prompt._resolve_and_validate_upload_path``.
 
-    - Explicit ``PI_UPLOAD_ROOT`` wins.
+    - Explicit ``AGENT_UPLOAD_ROOT`` wins.
     - Else ``GRADIO_TEMP_DIR`` if already set.
     - Else Docker ``/tmp/gradio`` when that directory exists.
     - Else ``{repo}/workspace/.gradio_uploads`` (local dev; stays inside the app tree
       so ``tools.config.ensure_folder_within_app_directory`` accepts ``GRADIO_TEMP_DIR``).
     """
     root = (repo_root or Path(__file__).resolve().parents[2]).resolve()
-    raw = (os.environ.get("PI_UPLOAD_ROOT") or "").strip()
+    raw = (os.environ.get("AGENT_UPLOAD_ROOT") or "").strip()
     if raw:
         path = Path(raw)
     else:
@@ -116,7 +116,7 @@ def ensure_pi_upload_root(repo_root: Path | None = None) -> str:
             path = root / "workspace" / ".gradio_uploads"
     path.mkdir(parents=True, exist_ok=True)
     resolved = str(path.resolve())
-    os.environ["PI_UPLOAD_ROOT"] = resolved
+    os.environ["AGENT_UPLOAD_ROOT"] = resolved
     if not (os.environ.get("GRADIO_TEMP_DIR") or "").strip():
         os.environ["GRADIO_TEMP_DIR"] = resolved
     return resolved
@@ -128,37 +128,52 @@ def _partnership_template_exists(repo: Path) -> bool:
 
 def ensure_pi_workdir(repo_root: Path | None = None) -> str:
     """
-    Resolve ``PI_WORKDIR`` (monorepo root for skills/ and Pi RPC cwd).
+    Resolve ``AGENT_WORKDIR`` (monorepo root for skills/ and Pi RPC cwd).
 
-    - Explicit ``PI_WORKDIR`` wins when the partnership prompt template exists there.
+    - Explicit ``AGENT_WORKDIR`` wins when the partnership prompt template exists there.
     - Else use the checkout root (``agent-redact/pi`` → parents[2]).
-    - Docker images set ``PI_WORKDIR=/workspace/doc_redaction`` via env or ``start.sh``.
+    - Docker images set ``AGENT_WORKDIR=/workspace/doc_redaction`` via env or ``start.sh``.
     """
     root = (repo_root or Path(__file__).resolve().parents[2]).resolve()
-    raw = (os.environ.get("PI_WORKDIR") or "").strip()
+    raw = (os.environ.get("AGENT_WORKDIR") or "").strip()
     if raw:
         candidate = Path(raw)
         if _partnership_template_exists(candidate):
             resolved = str(candidate.resolve())
-            os.environ["PI_WORKDIR"] = resolved
+            os.environ["AGENT_WORKDIR"] = resolved
             return resolved
     if _pi_running_in_container() and _partnership_template_exists(_DOCKER_PI_WORKDIR):
         resolved = str(_DOCKER_PI_WORKDIR.resolve())
-        os.environ["PI_WORKDIR"] = resolved
+        os.environ["AGENT_WORKDIR"] = resolved
         return resolved
     resolved = str(root)
-    os.environ["PI_WORKDIR"] = resolved
+    os.environ["AGENT_WORKDIR"] = resolved
     return resolved
 
 
 def pi_repo_root_path(repo_root: Path | None = None) -> Path:
-    """Return ``PI_WORKDIR`` as a :class:`~pathlib.Path` (calls :func:`ensure_pi_workdir`)."""
+    """Return ``AGENT_WORKDIR`` as a :class:`~pathlib.Path` (calls :func:`ensure_pi_workdir`)."""
     return Path(ensure_pi_workdir(repo_root))
+
+
+def resolve_agent_env_file(config_dir: Path) -> Path:
+    """
+    Return the agent config file path, preferring ``agent.env`` over legacy ``pi_agent.env``.
+
+    The config file was renamed from ``pi_agent.env`` to ``agent.env``. Prefer the
+    new name; fall back to the legacy file only when the new one is absent but the
+    old one exists. When neither exists, return the new-name path.
+    """
+    new_path = config_dir / "agent.env"
+    legacy_path = config_dir / "pi_agent.env"
+    if not new_path.is_file() and legacy_path.is_file():
+        return legacy_path
+    return new_path
 
 
 def load_pi_agent_env_file(config_path: str | Path | None = None) -> bool:
     """
-    Load ``config/pi_agent.env`` into ``os.environ`` (does not override existing vars).
+    Load ``config/agent.env`` into ``os.environ`` (does not override existing vars).
 
     Must run before ``import pi_agent_config`` so module-level defaults see the file.
     """
@@ -167,6 +182,29 @@ def load_pi_agent_env_file(config_path: str | Path | None = None) -> bool:
         return False
     load_dotenv(path, override=False)
     return True
+
+
+# Env vars owned by the external ``pi`` coding-agent CLI (not renamed).
+_EXTERNAL_PI_ENV_VARS = frozenset({"PI_OFFLINE", "PI_SKIP_VERSION_CHECK"})
+
+
+def migrate_legacy_pi_env_vars() -> None:
+    """
+    Backward-compat: mirror legacy ``PI_*`` env vars onto the new ``AGENT_*`` names.
+
+    The app renamed its ``PI_*`` environment variables to ``AGENT_*``. Existing
+    deployments / config files may still set the old names, so copy any legacy
+    value onto the new key when the new key is unset. A legacy ``PI_AGENT_*`` key
+    collapses to ``AGENT_*`` (e.g. legacy ``PI_AGENT_ENV_S3_KEY`` -> ``AGENT_ENV_S3_KEY``).
+    Vars owned by the external ``pi`` CLI are left untouched. Safe to call repeatedly.
+    """
+    for key in list(os.environ.keys()):
+        if not key.startswith("PI_") or key in _EXTERNAL_PI_ENV_VARS:
+            continue
+        rest = key[3:]
+        new_key = rest if rest.startswith("AGENT") else "AGENT_" + rest
+        if new_key not in os.environ:
+            os.environ[new_key] = os.environ[key]
 
 
 def ensure_pi_config_env(repo_root: Path | None = None) -> str:
@@ -178,10 +216,12 @@ def ensure_pi_config_env(repo_root: Path | None = None) -> str:
     existing environment variables.
     """
     root = (repo_root or Path(__file__).resolve().parents[2]).resolve()
+    migrate_legacy_pi_env_vars()
     os.environ.setdefault("APP_TYPE", "agent")
     if not os.environ.get("APP_CONFIG_PATH", "").strip():
-        os.environ["APP_CONFIG_PATH"] = str(root / "config" / "pi_agent.env")
+        os.environ["APP_CONFIG_PATH"] = str(resolve_agent_env_file(root / "config"))
     load_pi_agent_env_file()
+    migrate_legacy_pi_env_vars()
     ensure_pi_workdir(root)
     ensure_pi_workspace_dir(root)
     ensure_pi_upload_root(root)

@@ -17,7 +17,7 @@ def bedrock_agentcore_client(region: str):
     except (ClientError, BotoCoreError, NoCredentialsError) as exc:
         raise AgentRuntimeError(
             "AWS credentials are required to invoke AgentCore. "
-            "Set AWS_PROFILE / PI_AWS_PROFILE, mount ~/.aws into the pi-agent container, "
+            "Set AWS_PROFILE / AGENT_AWS_PROFILE, mount ~/.aws into the pi-agent container, "
             "or paste session keys under **Agent backend** → **Apply backend**. "
             "For HTTP runtime auth with CUSTOM_JWT, set AGENTCORE_API_KEY instead."
         ) from exc

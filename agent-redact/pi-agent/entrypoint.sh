@@ -1,13 +1,13 @@
 #!/bin/sh
 set -e
 
-echo "Starting Pi agent (profile=${PI_DEPLOYMENT_PROFILE:-unknown})"
+echo "Starting Pi agent (profile=${AGENT_DEPLOYMENT_PROFILE:-unknown})"
 
 for dir in \
-    "${PI_CODING_AGENT_DIR:-/tmp/agent-coding}" \
-    "${PI_WORKSPACE_DIR:-/home/user/app/workspace}" \
-    "${PI_UPLOAD_ROOT:-/tmp/gradio}" \
-    "${PI_SESSION_DIR:-/tmp/agent-sessions}" \
+    "${AGENT_CODING_AGENT_DIR:-/tmp/agent-coding}" \
+    "${AGENT_WORKSPACE_DIR:-/home/user/app/workspace}" \
+    "${AGENT_UPLOAD_ROOT:-/tmp/gradio}" \
+    "${AGENT_SESSION_DIR:-/tmp/agent-sessions}" \
     "${ACCESS_LOGS_FOLDER:-/tmp/agent-logs}" \
     "${USAGE_LOGS_FOLDER:-/tmp/agent-usage}" \
     "${FEEDBACK_LOGS_FOLDER:-/tmp/agent-feedback}" \
@@ -19,16 +19,16 @@ for dir in \
     fi
 done
 
-cd "${PI_WORKDIR:-/workspace/doc_redaction}"
+cd "${AGENT_WORKDIR:-/workspace/doc_redaction}"
 
-echo "Entrypoint environment: PI_WORKSPACE_DIR=${PI_WORKSPACE_DIR:-} PI_UI_HOST=${PI_UI_HOST:-} PI_UI_PORT=${PI_UI_PORT:-} PI_GRADIO_PORT=${PI_GRADIO_PORT:-} GRADIO_SERVER_NAME=${GRADIO_SERVER_NAME:-} GRADIO_SERVER_PORT=${GRADIO_SERVER_PORT:-} RUN_FASTAPI=${RUN_FASTAPI:-}"
+echo "Entrypoint environment: AGENT_WORKSPACE_DIR=${AGENT_WORKSPACE_DIR:-} AGENT_UI_HOST=${AGENT_UI_HOST:-} AGENT_UI_PORT=${AGENT_UI_PORT:-} AGENT_GRADIO_PORT=${AGENT_GRADIO_PORT:-} GRADIO_SERVER_NAME=${GRADIO_SERVER_NAME:-} GRADIO_SERVER_PORT=${GRADIO_SERVER_PORT:-} RUN_FASTAPI=${RUN_FASTAPI:-}"
 
 python3 agent-redact/pi/pi_agent_config.py
 if [ "${RUN_FASTAPI:-False}" = "True" ]; then
   exec uvicorn gradio_app:app \
     --app-dir agent-redact/pi \
     --host "${GRADIO_SERVER_NAME:-0.0.0.0}" \
-    --port "${PI_GRADIO_PORT:-${GRADIO_SERVER_PORT:-7860}}" \
+    --port "${AGENT_GRADIO_PORT:-${GRADIO_SERVER_PORT:-7860}}" \
     --proxy-headers \
     --forwarded-allow-ips "*"
 else

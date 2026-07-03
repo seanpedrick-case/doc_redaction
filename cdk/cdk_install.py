@@ -34,6 +34,11 @@ Usage examples::
     # Demo with agentic redaction (AgentCore CDK two-phase deploy is automatic)
     python cdk_install.py --profile demo --enable-agentic --yes
 
+    # AgentCore two-phase deploy, phase 2 only: create the runtime once its ECR
+    # image exists (CodeBuild success or manual push). Uses the AgentCore API
+    # (boto3) — no cdk deploy / no stack update.
+    python cdk_install.py --complete-agentcore
+
     # Demo with AgentCore URL (manual CLI deploy — see agent-redact/agentcore/README.md)
     python cdk_install.py --profile demo --enable-agentic --agent-orchestrator agentcore \\
         --agentcore-runtime-url https://your-runtime.example --yes --config-only
@@ -72,8 +77,11 @@ CONFIG_DIR = CDK_DIR / "config"
 ENV_PATH = CONFIG_DIR / "cdk_config.env"
 APP_CONFIG_ENV_PATH = CONFIG_DIR / "app_config.env"
 APP_CONFIG_ENV_EXAMPLE = CONFIG_DIR / "app_config.env.example"
-PI_AGENT_ENV_PATH = CONFIG_DIR / "pi_agent.env"
-PI_AGENT_ENV_EXAMPLE = REPO_ROOT / "config" / "pi_agent.env.example"
+# Agent runtime config file (renamed from pi_agent.env -> agent.env).
+PI_AGENT_ENV_PATH = CONFIG_DIR / "agent.env"
+PI_AGENT_ENV_EXAMPLE = REPO_ROOT / "config" / "agent.env.example"
+# Legacy path kept so an existing pi_agent.env is detected/migrated if present.
+PI_AGENT_ENV_LEGACY_PATH = CONFIG_DIR / "pi_agent.env"
 AGENTIC_ALB_ROUTING_MODES = ("path", "host", "both")
 AGENT_ORCHESTRATOR_CHOICES = ("pi", "langgraph", "agentcore")
 
@@ -82,6 +90,19 @@ DEFAULT_POLICY_FILE_LOCATIONS = (
     "policies/comprehend_policy.json",
 )
 PI_AGENTCORE_INVOKE_POLICY_FILE = "policies/pi_agentcore_invoke_policy.json"
+
+# Bedrock models selectable for the AgentCore runtime engine. Mirrors
+# BEDROCK_MODELS in agent-redact/pi/pi_agent_config.py (kept local to avoid
+# importing the heavy Pi agent config from the installer). The runtime's model
+# is fixed at creation via the AGENT_DEFAULT_MODEL env var; changing it later
+# requires recreating the runtime.
+AGENTCORE_DEFAULT_BEDROCK_MODEL = "anthropic.claude-sonnet-4-6"
+AGENTCORE_BEDROCK_MODEL_CHOICES = (
+    ("anthropic.claude-sonnet-4-6", "Anthropic Claude Sonnet 4.6"),
+    ("amazon.nova-pro-v1:0", "Amazon Nova Pro"),
+    ("nvidia.nemotron-super-3-120b", "NVIDIA Nemotron Super 3 120B"),
+    ("mistral.devstral-2-123b", "Mistral Devstral 2 123B"),
+)
 
 AGENTCORE_CDK_DEPLOY_SUMMARY = (
     "AgentCore CDK deploy: CodeBuild pushes the runtime image to ECR (phase 1), "
@@ -97,7 +118,7 @@ AgentCore manual CLI deploy:
   2. Deploy runtime: cd <AgentCoreProject> && agentcore deploy
   3. Copy invocationUrl from `agentcore status` (base URL, no /invocations suffix)
   4. Re-run cdk_install.py --config-only with --agentcore-runtime-url <URL>
-     or update config/pi_agent.env + upload to S3, then restart the agentic Express service
+     or update config/agent.env + upload to S3, then restart the agentic Express service
 """.strip()
 
 # Kept for backwards compatibility (tests / docs may reference the name).
@@ -1309,7 +1330,7 @@ class InstallAnswers:
     enable_service_connect: bool = False
     enable_s3_batch: bool = False
     enable_headless: bool = False
-    ecs_memory: str = "4096"
+    ecs_memory: str = "8192"
     agentic_alb_routing: str = "path"
     agentic_alb_path_prefix: str = "/agent"
     agentic_alb_host_header: str = ""
@@ -1323,6 +1344,7 @@ class InstallAnswers:
     enable_agentcore_cdk_runtime: bool = False
     agentcore_runtime_url: str = ""
     agentcore_api_key: str = ""
+    agentcore_bedrock_model: str = ""
     allow_empty_agentcore_url: bool = False
     write_pi_agent_env: bool = True
     overwrite_pi_agent_env: bool = False
@@ -1864,6 +1886,229 @@ def normalize_agentcore_runtime_url(raw: str) -> str:
     return _normalize(raw)
 
 
+def normalize_agentcore_bedrock_model(raw: str) -> str:
+    """Return a trimmed Bedrock model id, defaulting to Sonnet 4.6 when empty."""
+    model = (raw or "").strip()
+    return model or AGENTCORE_DEFAULT_BEDROCK_MODEL
+
+
+def validate_bedrock_model_access(
+    model_id: str, region: str
+) -> Tuple[Optional[bool], str]:
+    """
+    Best-effort check that the calling AWS identity can use *model_id* in *region*.
+
+    Returns ``(status, message)`` where ``status`` is ``True`` (access confirmed),
+    ``False`` (definitively no access) or ``None`` (could not determine, e.g. missing
+    boto3, throttling, or an ambiguous error). Never raises.
+
+    Strategy: query the Bedrock control-plane for foundation-model availability
+    (entitlement + authorization) first; if that is inconclusive, fall back to a
+    minimal ``bedrock-runtime`` converse probe (1 token) that exercises the exact
+    model string the runtime will use.
+    """
+    model_id = (model_id or "").strip()
+    if not model_id:
+        return None, "No Bedrock model id provided."
+    try:
+        import boto3  # noqa: PLC0415
+        from botocore.exceptions import (  # noqa: PLC0415
+            BotoCoreError,
+            ClientError,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return None, f"boto3 unavailable, skipping Bedrock access check ({exc})."
+
+    # 1) Control-plane entitlement/authorization (does not consume tokens).
+    try:
+        bedrock = boto3.client("bedrock", region_name=region)
+        avail = bedrock.get_foundation_model_availability(modelId=model_id)
+        entitlement = (avail.get("entitlementAvailability") or "").upper()
+        authorization = (avail.get("authorizationStatus") or "").upper()
+        region_av = (avail.get("regionAvailability") or "").upper()
+        if region_av and region_av != "AVAILABLE":
+            return (
+                False,
+                f"Model '{model_id}' is not available in region {region} "
+                f"(regionAvailability={region_av}).",
+            )
+        if entitlement == "AVAILABLE" and authorization in ("", "AUTHORIZED"):
+            return True, f"Bedrock access confirmed for '{model_id}' in {region}."
+        if entitlement == "NOT_AVAILABLE":
+            return (
+                False,
+                f"Model access for '{model_id}' is not granted in this account. "
+                "Request access in the Bedrock console (Model access), then retry.",
+            )
+        # Otherwise fall through to the runtime probe for a definitive answer.
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code in ("AccessDeniedException", "UnrecognizedClientException"):
+            return (
+                None,
+                "Could not check model availability (missing bedrock:GetFoundation"
+                "ModelAvailability permission); will try a runtime probe instead.",
+            )
+        # ValidationException often means the id is an inference-profile id the
+        # control plane doesn't accept — fall through to the runtime probe.
+    except (BotoCoreError, Exception):  # noqa: BLE001
+        pass
+
+    # 2) Runtime converse probe (consumes ~1 output token).
+    try:
+        rt = boto3.client("bedrock-runtime", region_name=region)
+        rt.converse(
+            modelId=model_id,
+            messages=[{"role": "user", "content": [{"text": "ping"}]}],
+            inferenceConfig={"maxTokens": 1},
+        )
+        return True, f"Bedrock access confirmed for '{model_id}' in {region}."
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        msg = exc.response.get("Error", {}).get("Message", str(exc))
+        if code in ("AccessDeniedException",):
+            return (
+                False,
+                f"Access denied invoking '{model_id}' in {region}. Grant model "
+                "access in the Bedrock console and ensure the caller has "
+                "bedrock:InvokeModel / bedrock:Converse permissions.",
+            )
+        if code in ("ResourceNotFoundException",):
+            return (
+                False,
+                f"Model '{model_id}' was not found in {region}. Check the model id "
+                "and region, or use an inference-profile id (e.g. 'us.<model>').",
+            )
+        if code in ("ValidationException",) and "inference profile" in msg.lower():
+            return (
+                None,
+                f"Model '{model_id}' requires an inference profile id in {region} "
+                "(e.g. prefix with 'us.'). Access could not be confirmed automatically.",
+            )
+        return None, f"Could not confirm access to '{model_id}' ({code or exc})."
+    except (BotoCoreError, Exception) as exc:  # noqa: BLE001
+        return None, f"Could not confirm access to '{model_id}' ({exc})."
+
+
+def report_bedrock_model_access(
+    model_id: str,
+    region: str,
+    *,
+    interactive: bool,
+    assume_yes: bool,
+) -> bool:
+    """
+    Run :func:`validate_bedrock_model_access` and surface the result.
+
+    Returns ``True`` to proceed, ``False`` to abort. Confirmed access proceeds
+    silently-ish; a definitive "no access" prompts the user (interactive) or warns
+    loudly and proceeds (non-interactive). Inconclusive results always proceed.
+    """
+    status, message = validate_bedrock_model_access(model_id, region)
+    if status is True:
+        print(f"  [ok] {message}")
+        return True
+    if status is None:
+        print(f"  [warn] {message}")
+        return True
+    # Definitive no-access.
+    print(f"\n  [ERROR] {message}")
+    if interactive and not assume_yes:
+        return ask_yes_no(
+            "Continue anyway with this model (the AgentCore runtime will fail "
+            "until access is granted)?",
+            default=False,
+        )
+    print(
+        "  Proceeding anyway (non-interactive). Grant Bedrock model access before "
+        "invoking the AgentCore runtime, or re-run with a different "
+        "--agentcore-model."
+    )
+    return True
+
+
+def finalize_agentcore_bedrock_model(
+    answers: InstallAnswers,
+    args: argparse.Namespace,
+    *,
+    interactive: bool,
+    assume_yes: bool,
+) -> None:
+    """
+    Resolve the AgentCore Bedrock model and (optionally) validate account access.
+
+    Interactive runs prompt for a model (default Sonnet 4.6); non-interactive runs
+    keep any CLI/answers value or fall back to the default. Access is validated for
+    the calling AWS identity unless ``--skip-bedrock-model-check`` was passed.
+    """
+    if interactive and not assume_yes and not getattr(args, "agentcore_model", None):
+        print("\n--- AgentCore engine model (Bedrock) ---")
+        print(
+            "The AgentCore runtime's model is fixed when the runtime is created and "
+            "cannot be changed from the Gradio UI later."
+        )
+        labels = [
+            f"{label} ({model})" for model, label in AGENTCORE_BEDROCK_MODEL_CHOICES
+        ]
+        labels.append("Other (enter a custom Bedrock model id)")
+        current = normalize_agentcore_bedrock_model(answers.agentcore_bedrock_model)
+        default_idx = next(
+            (
+                i
+                for i, (model, _) in enumerate(AGENTCORE_BEDROCK_MODEL_CHOICES)
+                if model == current
+            ),
+            0,
+        )
+        idx = ask_choice(
+            "Which Bedrock model should the AgentCore engine use?",
+            labels,
+            default_index=default_idx,
+        )
+        if idx < len(AGENTCORE_BEDROCK_MODEL_CHOICES):
+            answers.agentcore_bedrock_model = AGENTCORE_BEDROCK_MODEL_CHOICES[idx][0]
+        else:
+            answers.agentcore_bedrock_model = normalize_agentcore_bedrock_model(
+                ask("Bedrock model id", current)
+            )
+    else:
+        answers.agentcore_bedrock_model = normalize_agentcore_bedrock_model(
+            answers.agentcore_bedrock_model
+        )
+
+    model = answers.agentcore_bedrock_model
+    if getattr(args, "skip_bedrock_model_check", False):
+        print(f"  AgentCore Bedrock model: {model} (access check skipped)")
+        return
+    region = (answers.aws_region or "").strip() or _default_region_for_check()
+    print(f"  Checking Bedrock access for '{model}' in {region} ...")
+    proceed = report_bedrock_model_access(
+        model, region, interactive=interactive, assume_yes=assume_yes
+    )
+    if not proceed:
+        raise SystemExit(
+            "Aborted: no access to the selected AgentCore Bedrock model. "
+            "Grant model access in the Bedrock console or choose another model."
+        )
+
+
+def _default_region_for_check() -> str:
+    """Resolve a region for the Bedrock access probe (answers/env/AWS default)."""
+    for key in ("AWS_REGION", "AWS_DEFAULT_REGION"):
+        val = (os.environ.get(key) or "").strip()
+        if val:
+            return val
+    try:
+        import boto3  # noqa: PLC0415
+
+        region = boto3.session.Session().region_name
+        if region:
+            return str(region)
+    except Exception:  # noqa: BLE001
+        pass
+    return "us-east-1"
+
+
 def default_agent_orchestrator_for_answers(answers: "InstallAnswers") -> str:
     """Demo Express agent mode defaults to AgentCore; production/legacy stays on Pi."""
     if answers.profile == "demo" and answers.enable_agentic_express:
@@ -2027,7 +2272,7 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
         )
         values.update(
             {
-                "PI_GRADIO_PORT": answers.agentic_gradio_port,
+                "AGENT_GRADIO_PORT": answers.agentic_gradio_port,
                 "ECS_SERVICE_CONNECT_DISCOVERY_NAME": answers.sc_discovery_name,
                 "AGENT_ORCHESTRATOR": orchestrator,
                 "ENABLE_AGENTCORE_RUNTIME": "True" if agentcore_enabled else "False",
@@ -2039,6 +2284,10 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
             )
         if answers.agentcore_api_key.strip():
             values["AGENTCORE_API_KEY"] = answers.agentcore_api_key.strip()
+        if agentcore_enabled:
+            values["AGENTCORE_BEDROCK_MODEL"] = normalize_agentcore_bedrock_model(
+                answers.agentcore_bedrock_model
+            )
         if answers.enable_agentcore_cdk_deploy:
             values["AGENTCORE_CDK_DEPLOY"] = "True"
             values["ENABLE_AGENTCORE_RUNTIME"] = "True"
@@ -2069,13 +2318,15 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
             )
             values.update(
                 {
-                    "PI_ALB_ROUTING": routing,
-                    "PI_ALB_PATH_PREFIX": path_prefix,
-                    "PI_ALB_LISTENER_RULE_PRIORITY": priority,
+                    "AGENT_ALB_ROUTING": routing,
+                    "AGENT_ALB_PATH_PREFIX": path_prefix,
+                    "AGENT_ALB_LISTENER_RULE_PRIORITY": priority,
                 }
             )
             if routing in ("host", "both"):
-                values["PI_ALB_HOST_HEADER"] = answers.agentic_alb_host_header.strip()
+                values["AGENT_ALB_HOST_HEADER"] = (
+                    answers.agentic_alb_host_header.strip()
+                )
 
     if answers.profile == "production":
         values["ACM_SSL_CERTIFICATE_ARN"] = answers.acm_cert_arn
@@ -2260,18 +2511,18 @@ def validate_env_values(
             "ENABLE_HEADLESS_DEPLOYMENT is incompatible with agentic redaction or Service Connect."
         )
 
-    agentic_routing = (values.get("PI_ALB_ROUTING") or "").strip().lower()
+    agentic_routing = (values.get("AGENT_ALB_ROUTING") or "").strip().lower()
     if agentic_ecs:
         if agentic_routing not in AGENTIC_ALB_ROUTING_MODES:
             errors.append(
-                f"PI_ALB_ROUTING must be one of {list(AGENTIC_ALB_ROUTING_MODES)}; got '{agentic_routing}'."
+                f"AGENT_ALB_ROUTING must be one of {list(AGENTIC_ALB_ROUTING_MODES)}; got '{agentic_routing}'."
             )
         elif (
             agentic_routing in ("host", "both")
-            and not (values.get("PI_ALB_HOST_HEADER") or "").strip()
+            and not (values.get("AGENT_ALB_HOST_HEADER") or "").strip()
         ):
             errors.append(
-                "PI_ALB_HOST_HEADER is required when PI_ALB_ROUTING is 'host' or 'both'."
+                "AGENT_ALB_HOST_HEADER is required when AGENT_ALB_ROUTING is 'host' or 'both'."
             )
 
     return errors
@@ -2376,21 +2627,28 @@ def resolve_doc_redaction_gradio_url(answers: InstallAnswers) -> str:
 
 
 def build_pi_agent_env_values(answers: InstallAnswers) -> Dict[str, str]:
-    """Runtime settings for the Agent Gradio app (uploaded to S3 as pi_agent.env)."""
+    """Runtime settings for the Agent Gradio app (uploaded to S3 as agent.env)."""
     values = {
-        "PI_DEPLOYMENT_PROFILE": "aws-ecs",
-        "PI_DEFAULT_PROVIDER": answers.pi_default_provider,
+        "AGENT_DEPLOYMENT_PROFILE": "aws-ecs",
+        "AGENT_DEFAULT_PROVIDER": answers.pi_default_provider,
         "DOC_REDACTION_GRADIO_URL": resolve_doc_redaction_gradio_url(answers),
         "RUN_AWS_FUNCTIONS": "True",
         "AWS_REGION": answers.aws_region,
-        "PI_GRADIO_PORT": answers.agentic_gradio_port,
-        "PI_DEFAULT_OCR_METHOD": "AWS Textract service - all PDF types",
-        "PI_DEFAULT_PII_METHOD": "AWS Comprehend",
+        "AGENT_GRADIO_PORT": answers.agentic_gradio_port,
+        "AGENT_DEFAULT_OCR_METHOD": "AWS Textract service - all PDF types",
+        "AGENT_DEFAULT_PII_METHOD": "AWS Comprehend",
     }
     if answers.enable_agentic_express:
         values["RUN_FASTAPI"] = "True"
     orchestrator = normalize_agent_orchestrator(answers.agent_orchestrator)
     values["AGENT_ORCHESTRATOR"] = orchestrator
+    if orchestrator == "agentcore":
+        # The AgentCore runtime uses Bedrock; pin the model so the container's
+        # AGENT_DEFAULT_MODEL matches what the runtime was created with.
+        values["AGENT_DEFAULT_PROVIDER"] = "amazon-bedrock"
+        values["AGENT_DEFAULT_MODEL"] = normalize_agentcore_bedrock_model(
+            answers.agentcore_bedrock_model
+        )
     if answers.agentcore_runtime_url.strip():
         values["AGENTCORE_RUNTIME_URL"] = normalize_agentcore_runtime_url(
             answers.agentcore_runtime_url
@@ -2401,7 +2659,7 @@ def build_pi_agent_env_values(answers: InstallAnswers) -> Dict[str, str]:
         return values
     path_prefix = normalize_agentic_path_prefix(answers.agentic_alb_path_prefix)
     if answers.agentic_alb_routing.strip().lower() in ("path", "both"):
-        values["PI_ROOT_PATH"] = path_prefix
+        values["AGENT_ROOT_PATH"] = path_prefix
         values["ROOT_PATH"] = path_prefix
         values["FASTAPI_ROOT_PATH"] = path_prefix
     return values
@@ -2418,13 +2676,25 @@ def write_pi_agent_env_file(
     updates = build_pi_agent_env_values(answers)
     PI_AGENT_ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    if PI_AGENT_ENV_PATH.is_file() and not overwrite:
-        existing = read_env_file(PI_AGENT_ENV_PATH)
+    # Prefer agent.env; migrate an existing legacy pi_agent.env when agent.env is absent.
+    existing_source = None
+    if PI_AGENT_ENV_PATH.is_file():
+        existing_source = PI_AGENT_ENV_PATH
+    elif PI_AGENT_ENV_LEGACY_PATH.is_file():
+        existing_source = PI_AGENT_ENV_LEGACY_PATH
+
+    if existing_source is not None and not overwrite:
+        existing = read_env_file(existing_source)
         existing.update(updates)
-        backup_file(PI_AGENT_ENV_PATH)
+        backup_file(PI_AGENT_ENV_PATH) if PI_AGENT_ENV_PATH.is_file() else None
         lines = [f"{k}={v}" for k, v in existing.items()]
         PI_AGENT_ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        print(f"Updated {PI_AGENT_ENV_PATH} (AWS agentic runtime keys merged)")
+        note = (
+            " (migrated from pi_agent.env)"
+            if existing_source is PI_AGENT_ENV_LEGACY_PATH
+            else ""
+        )
+        print(f"Updated {PI_AGENT_ENV_PATH} (AWS agentic runtime keys merged){note}")
         return PI_AGENT_ENV_PATH
 
     if PI_AGENT_ENV_EXAMPLE.is_file() and not overwrite:
@@ -2439,7 +2709,7 @@ def write_pi_agent_env_file(
 
     backup_file(PI_AGENT_ENV_PATH) if PI_AGENT_ENV_PATH.is_file() else None
     lines = [
-        "# Generated by cdk_install.py — agentic runtime config for AWS ECS (pi_agent.env)",
+        "# Generated by cdk_install.py — agentic runtime config for AWS ECS (agent.env)",
         *[f"{k}={v}" for k, v in updates.items()],
     ]
     PI_AGENT_ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -2492,9 +2762,9 @@ def print_summary(values: Dict[str, str], python_exe: Optional[Path] = None) -> 
         "SSL_CERTIFICATE_DOMAIN",
         "ENABLE_PI_AGENT_EXPRESS_SERVICE",
         "ENABLE_PI_AGENT_ECS_SERVICE",
-        "PI_ALB_ROUTING",
-        "PI_ALB_PATH_PREFIX",
-        "PI_ALB_HOST_HEADER",
+        "AGENT_ALB_ROUTING",
+        "AGENT_ALB_PATH_PREFIX",
+        "AGENT_ALB_HOST_HEADER",
     ]
     print("\n--- Configuration summary ---")
     for key in keys:
@@ -2992,25 +3262,32 @@ def maybe_complete_agentcore_cdk_deploy(
     *,
     assume_yes: bool,
 ) -> None:
-    """Phase 2: create CfnRuntime after the AgentCore ECR image exists, then sync URL."""
+    """Phase 2: create the AgentCore runtime once its ECR image exists, then wire URL.
+
+    Uses the bedrock-agentcore-control API (boto3) rather than a second
+    ``cdk deploy``. A second deploy of RedactionStack re-runs the precheck and
+    flips the stack's own managed roles/buckets/pool to imports, deleting them
+    (removal policy DESTROY on the demo profile) — so the runtime is created
+    out-of-band to avoid that footgun.
+    """
     if values.get("AGENTCORE_CDK_DEPLOY") != "True":
         return
-    if values.get("ENABLE_AGENTCORE_CDK_RUNTIME") == "True":
-        try:
-            from cdk_post_deploy import sync_agentcore_runtime_url_from_stack
-
-            sync_agentcore_runtime_url_from_stack(stack_name=REGIONAL_STACK)
-        except ImportError:
-            pass
+    if (values.get("AGENTCORE_RUNTIME_URL") or "").strip():
+        # Already wired in a previous run; nothing to do.
         return
 
-    print("\n--- AgentCore CDK phase 2 (create runtime from ECR image) ---")
+    print(
+        "\n--- AgentCore phase 2 (create runtime from ECR image, no stack update) ---"
+    )
     try:
         from cdk_config import (
             CODEBUILD_AGENTCORE_PROJECT_NAME,
             ECR_AGENTCORE_REPO_NAME,
         )
-        from cdk_post_deploy import wait_for_agentcore_ecr_image
+        from cdk_post_deploy import (
+            create_agentcore_runtime_from_ecr,
+            wait_for_agentcore_ecr_image,
+        )
     except ImportError as exc:
         print(f"Skipping AgentCore phase 2: {exc}")
         return
@@ -3023,8 +3300,9 @@ def maybe_complete_agentcore_cdk_deploy(
     )
     if not image_ready:
         print(
-            "\nAgentCore ECR image is not ready yet. When CodeBuild finishes, re-run "
-            "cdk_install.py (no extra flags needed) — phase 2 will run automatically."
+            "\nAgentCore ECR image is not ready yet. Once the image is in ECR "
+            "(CodeBuild succeeds or you push it manually), complete phase 2 with:\n"
+            "  python cdk_install.py --complete-agentcore"
         )
         return
 
@@ -3035,37 +3313,20 @@ def maybe_complete_agentcore_cdk_deploy(
         )
         if not proceed:
             print(
-                "Skipped AgentCore runtime creation. Re-run cdk_install.py when ready "
-                "(phase 2 will run automatically once the ECR image exists)."
+                "Skipped AgentCore runtime creation. When the image is in ECR, "
+                "complete phase 2 with:\n"
+                "  python cdk_install.py --complete-agentcore"
             )
             return
 
-    patch_env_file(
-        ENV_PATH,
-        {
-            "ENABLE_AGENTCORE_CDK_RUNTIME": "True",
-            "AGENTCORE_CDK_DEPLOY": "True",
-            "ENABLE_AGENTCORE_RUNTIME": "True",
-        },
-    )
     if args.config_only:
         print(
-            "Config updated for AgentCore phase 2. Re-run without --config-only to deploy "
-            f"{REGIONAL_STACK}."
+            "Config-only run: AgentCore runtime not created. Complete phase 2 with:\n"
+            "  python cdk_install.py --complete-agentcore"
         )
         return
 
-    print("AgentCore ECR image ready — creating Bedrock AgentCore Runtime...")
-    run_cdk_command(
-        ["deploy", REGIONAL_STACK, "--require-approval", "broadening"],
-        check=True,
-    )
-    try:
-        from cdk_post_deploy import sync_agentcore_runtime_url_from_stack
-
-        sync_agentcore_runtime_url_from_stack(stack_name=REGIONAL_STACK)
-    except ImportError:
-        pass
+    create_agentcore_runtime_from_ecr(stack_name=REGIONAL_STACK)
 
 
 # ---------------------------------------------------------------------------
@@ -3100,6 +3361,10 @@ def apply_agent_orchestrator_cli_flags(
         )
     if getattr(args, "agentcore_api_key", None):
         answers.agentcore_api_key = str(args.agentcore_api_key).strip()
+    if getattr(args, "agentcore_model", None):
+        answers.agentcore_bedrock_model = normalize_agentcore_bedrock_model(
+            str(args.agentcore_model)
+        )
 
 
 def configure_agent_orchestrator_options(
@@ -3139,9 +3404,17 @@ def configure_agent_orchestrator_options(
         ):
             answers.enable_agentcore_cdk_deploy = True
             answers.allow_empty_agentcore_url = True
+        if answers.agent_orchestrator == "agentcore":
+            finalize_agentcore_bedrock_model(
+                answers, args, interactive=False, assume_yes=assume_yes
+            )
         return
 
     if args.agent_orchestrator:
+        if answers.agent_orchestrator == "agentcore":
+            finalize_agentcore_bedrock_model(
+                answers, args, interactive=interactive, assume_yes=assume_yes
+            )
         return
 
     demo_default_idx = 2 if answers.profile == "demo" else 2
@@ -3159,6 +3432,9 @@ def configure_agent_orchestrator_options(
 
     if answers.agent_orchestrator == "agentcore":
         answers.enable_agentcore_runtime = True
+        finalize_agentcore_bedrock_model(
+            answers, args, interactive=True, assume_yes=assume_yes
+        )
         use_cdk_native = False
         if getattr(args, "enable_agentcore_cdk_deploy", False) or getattr(
             args, "enable_agentcore_cdk_runtime", False
@@ -3216,7 +3492,7 @@ def configure_agent_orchestrator_options(
     elif answers.agent_orchestrator == "langgraph":
         print(
             "LangGraph: orchestration runs inside the agent container using curated tools "
-            "(PI_DEFAULT_PROVIDER / Bedrock still applies for the LLM)."
+            "(AGENT_DEFAULT_PROVIDER / Bedrock still applies for the LLM)."
         )
 
 
@@ -3345,7 +3621,7 @@ def configure_agentic_options(
                 answers.write_pi_agent_env = True
                 if PI_AGENT_ENV_PATH.is_file():
                     answers.overwrite_pi_agent_env = ask_yes_no(
-                        "pi_agent.env exists — replace file from example template?",
+                        "agent.env exists — replace file from example template?",
                         default=False,
                     )
             else:
@@ -3368,7 +3644,7 @@ def configure_agentic_options(
             "How should the shared ALB route traffic to the Agent UI?",
             [
                 "Path prefix (default /agent/ — e.g. https://host/agent/)",
-                "Dedicated hostname (PI_ALB_HOST_HEADER)",
+                "Dedicated hostname (AGENT_ALB_HOST_HEADER)",
                 "Both path prefix and hostname",
             ],
             default_index=0,
@@ -3411,7 +3687,7 @@ def configure_agentic_options(
             answers.write_pi_agent_env = True
             if PI_AGENT_ENV_PATH.is_file():
                 answers.overwrite_pi_agent_env = ask_yes_no(
-                    "pi_agent.env exists — replace file from example template?",
+                    "agent.env exists — replace file from example template?",
                     default=False,
                 )
         else:
@@ -3772,6 +4048,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Skip wizard; use existing cdk_config.env",
     )
     p.add_argument(
+        "--complete-agentcore",
+        action="store_true",
+        help="AgentCore two-phase deploy, phase 2 only: after the AgentCore runtime "
+        "image is in ECR, create the Bedrock runtime via the bedrock-agentcore "
+        "API (boto3) and sync the runtime URL. No cdk deploy / no stack update. "
+        "Uses existing cdk_config.env; skips the wizard and existing-stack guard.",
+    )
+    p.add_argument(
         "--synth-only", action="store_true", help="Run cdk synth only (no deploy)"
     )
     p.add_argument("--skip-deploy", action="store_true", help="Skip cdk deploy")
@@ -3915,12 +4199,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     agentic.add_argument(
         "--pi-provider",
         default="",
-        help="PI_DEFAULT_PROVIDER for pi_agent.env (default amazon-bedrock)",
+        help="AGENT_DEFAULT_PROVIDER for agent.env (default amazon-bedrock)",
     )
     agentic.add_argument(
         "--skip-pi-agent-env",
         action="store_true",
-        help="Do not write config/pi_agent.env",
+        help="Do not write config/agent.env",
     )
     agentic.add_argument(
         "--agent-orchestrator",
@@ -3965,6 +4249,23 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "usually omitted on AWS ECS where IAM SigV4 is used)"
         ),
     )
+    agentic.add_argument(
+        "--agentcore-model",
+        default="",
+        help=(
+            "Bedrock model id for the AgentCore runtime engine (fixed at runtime "
+            f"creation). Default: {AGENTCORE_DEFAULT_BEDROCK_MODEL}. Common choices: "
+            + ", ".join(m for m, _ in AGENTCORE_BEDROCK_MODEL_CHOICES)
+        ),
+    )
+    agentic.add_argument(
+        "--skip-bedrock-model-check",
+        action="store_true",
+        help=(
+            "Skip validating that the calling AWS identity has access to the chosen "
+            "AgentCore Bedrock model."
+        ),
+    )
     p.add_argument(
         "--skip-app-config-env",
         action="store_true",
@@ -3976,6 +4277,40 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Replace existing config/app_config.env from app_config.env.example (non-interactive)",
     )
     return p
+
+
+def _run_complete_agentcore(args: argparse.Namespace) -> int:
+    """Phase 2 of the AgentCore two-phase deploy — WITHOUT a stack update.
+
+    Assumes the AgentCore runtime image is already in ECR (built by CodeBuild or
+    pushed manually) and that phase 1 created the execution role. Creates the
+    Bedrock AgentCore runtime via the bedrock-agentcore-control API (boto3), then
+    derives ``AGENTCORE_RUNTIME_URL``, patches config, re-uploads ``agent.env``
+    and recycles the agent Express service.
+
+    This deliberately does NOT run ``cdk deploy``. A second ``cdk deploy`` of
+    RedactionStack would re-run the precheck and flip the stack's own managed
+    roles/buckets/pool to imports, deleting them (removal policy DESTROY on the
+    demo profile). Creating the runtime out-of-band avoids that footgun.
+    """
+    if not ENV_PATH.is_file():
+        raise SystemExit(
+            f"No config at {ENV_PATH}. Run the initial deploy first, then re-run "
+            "with --complete-agentcore once the AgentCore image is in ECR."
+        )
+    values = read_env_file(ENV_PATH)
+
+    if values.get("AGENTCORE_CDK_DEPLOY") != "True":
+        raise SystemExit(
+            "AGENTCORE_CDK_DEPLOY is not True in cdk_config.env; there is no "
+            "AgentCore CDK phase 1 to complete. (Manual/CLI AgentCore deploys do "
+            "not use --complete-agentcore — see agent-redact/agentcore/README.md.)"
+        )
+
+    from cdk_post_deploy import create_agentcore_runtime_from_ecr
+
+    url = create_agentcore_runtime_from_ecr(stack_name=REGIONAL_STACK)
+    return 0 if url else 1
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -3992,6 +4327,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if not args.config_only:
             raise
         print("Warning: CDK CLI not found; config-only mode continuing.")
+
+    # AgentCore two-phase deploy, phase 2 only. This is the supported way to
+    # complete the runtime after its ECR image exists — it performs a targeted
+    # 'cdk deploy RedactionStack' (the one place an existing stack is updated on
+    # purpose) without the wizard or the existing-stack guard.
+    if args.complete_agentcore:
+        return _run_complete_agentcore(args)
 
     if not args.config_only and not args.synth_only:
         try:
@@ -4213,13 +4555,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "  - Agent UI: AgenticExpressEndpoint stack output (dedicated Express HTTPS URL)"
             )
         else:
-            routing = values.get("PI_ALB_ROUTING", "path")
+            routing = values.get("AGENT_ALB_ROUTING", "path")
             if routing in ("path", "both"):
-                prefix = values.get("PI_ALB_PATH_PREFIX", "/agent")
+                prefix = values.get("AGENT_ALB_PATH_PREFIX", "/agent")
                 print(f"  - Agent UI path: {prefix}/ on your app URL")
-            if routing in ("host", "both") and values.get("PI_ALB_HOST_HEADER"):
+            if routing in ("host", "both") and values.get("AGENT_ALB_HOST_HEADER"):
                 print(
-                    f"  - Agent DNS: CNAME {values['PI_ALB_HOST_HEADER']} -> "
+                    f"  - Agent DNS: CNAME {values['AGENT_ALB_HOST_HEADER']} -> "
                     f"{values.get('CLOUDFRONT_DOMAIN') or 'ALB/Express endpoint'}"
                 )
         if PI_AGENT_ENV_PATH.is_file():

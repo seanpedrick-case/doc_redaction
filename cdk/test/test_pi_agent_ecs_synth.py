@@ -29,9 +29,9 @@ def test_build_pi_agent_container_environment():
         pi_gradio_port=7862,
     )
     assert env["DOC_REDACTION_GRADIO_URL"] == "http://redaction:7860"
-    assert env["PI_DEFAULT_PROVIDER"] == "amazon-bedrock"
-    assert env["PI_GRADIO_PORT"] == "7862"
-    assert env["PI_CODING_AGENT_DIR"] == "/tmp/agent-coding"
+    assert env["AGENT_DEFAULT_PROVIDER"] == "amazon-bedrock"
+    assert env["AGENT_GRADIO_PORT"] == "7862"
+    assert env["AGENT_CODING_AGENT_DIR"] == "/tmp/agent-coding"
     assert env["ACCESS_LOGS_FOLDER"] == "/tmp/agent-logs/"
     assert env["RUN_FASTAPI"] == "True"
     assert env["RUN_AWS_FUNCTIONS"] == "True"

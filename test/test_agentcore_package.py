@@ -44,7 +44,7 @@ def test_bootstrap_runtime_env_loads_agentcore_env(tmp_path, monkeypatch):
     monkeypatch.delenv("DOC_REDACTION_GRADIO_URL", raising=False)
     bootstrap_runtime_env(tmp_path)
     assert os.environ.get("DOC_REDACTION_GRADIO_URL") == "https://example.test"
-    assert os.environ.get("PI_DEFAULT_PROVIDER") == "amazon-bedrock"
+    assert os.environ.get("AGENT_DEFAULT_PROVIDER") == "amazon-bedrock"
 
 
 def test_package_runtime_dry_run(tmp_path):

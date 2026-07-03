@@ -18,16 +18,16 @@ def pi_workspace(tmp_path, monkeypatch):
     """Writable workspace for build_settings_config (skills sync, session dir)."""
     ws = tmp_path / "workspace"
     ws.mkdir()
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(ws))
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(ws))
     return ws
 
 
 def test_build_settings_config_uses_pi_default_model_for_bedrock(
     tmp_path, monkeypatch, pi_workspace
 ):
-    monkeypatch.setenv("PI_DEFAULT_PROVIDER", "amazon-bedrock")
-    monkeypatch.setenv("PI_DEFAULT_MODEL", "anthropic.claude-sonnet-4-6")
-    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
+    monkeypatch.setenv("AGENT_DEFAULT_PROVIDER", "amazon-bedrock")
+    monkeypatch.setenv("AGENT_DEFAULT_MODEL", "anthropic.claude-sonnet-4-6")
+    monkeypatch.setenv("AGENT_CODING_AGENT_DIR", str(tmp_path / "agent"))
 
     import importlib
 
@@ -43,8 +43,8 @@ def test_build_settings_config_uses_pi_default_model_for_bedrock(
 
 
 def test_aws_ecs_profile_agent_dir_under_tmp(monkeypatch):
-    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "aws-ecs")
-    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "aws-ecs")
+    monkeypatch.delenv("AGENT_CODING_AGENT_DIR", raising=False)
 
     import importlib
 
@@ -54,8 +54,8 @@ def test_aws_ecs_profile_agent_dir_under_tmp(monkeypatch):
 
 
 def test_hf_profile_agent_dir_under_tmp(monkeypatch):
-    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "hf-space")
-    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "hf-space")
+    monkeypatch.delenv("AGENT_CODING_AGENT_DIR", raising=False)
 
     import importlib
 
@@ -65,9 +65,9 @@ def test_hf_profile_agent_dir_under_tmp(monkeypatch):
 
 
 def test_hf_profile_defaults_session_dir_to_tmp(tmp_path, monkeypatch, pi_workspace):
-    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "hf-space")
-    monkeypatch.delenv("PI_SESSION_DIR", raising=False)
-    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "hf-space")
+    monkeypatch.delenv("AGENT_SESSION_DIR", raising=False)
+    monkeypatch.setenv("AGENT_CODING_AGENT_DIR", str(tmp_path / "agent"))
 
     settings = pac.build_settings_config()
     assert (
@@ -80,10 +80,10 @@ def test_hf_profile_defaults_session_dir_to_tmp(tmp_path, monkeypatch, pi_worksp
 
 
 def test_gemini_provider_applies_retry_settings(tmp_path, monkeypatch, pi_workspace):
-    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "local-docker")
-    monkeypatch.setenv("PI_DEFAULT_PROVIDER", "google-gemini")
-    monkeypatch.setenv("PI_MAX_RETRIES", "7")
-    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "local-docker")
+    monkeypatch.setenv("AGENT_DEFAULT_PROVIDER", "google-gemini")
+    monkeypatch.setenv("AGENT_MAX_RETRIES", "7")
+    monkeypatch.setenv("AGENT_CODING_AGENT_DIR", str(tmp_path / "agent"))
 
     settings = pac.build_settings_config(default_provider="google-gemini")
     assert settings["retry"]["maxRetries"] == 7
@@ -93,10 +93,10 @@ def test_gemini_provider_applies_retry_settings(tmp_path, monkeypatch, pi_worksp
 def test_bedrock_provider_applies_quota_retry_settings(
     tmp_path, monkeypatch, pi_workspace
 ):
-    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "local-docker")
-    monkeypatch.setenv("PI_DEFAULT_PROVIDER", "amazon-bedrock")
-    monkeypatch.setenv("PI_QUOTA_RETRY_DELAY_S", "45")
-    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "local-docker")
+    monkeypatch.setenv("AGENT_DEFAULT_PROVIDER", "amazon-bedrock")
+    monkeypatch.setenv("AGENT_QUOTA_RETRY_DELAY_S", "45")
+    monkeypatch.setenv("AGENT_CODING_AGENT_DIR", str(tmp_path / "agent"))
 
     settings = pac.build_settings_config(default_provider="amazon-bedrock")
     assert settings["retry"]["baseDelayMs"] == 45000
@@ -107,10 +107,10 @@ def test_bedrock_provider_applies_quota_retry_settings(
 def test_aws_ecs_profile_applies_bedrock_retry_settings(
     tmp_path, monkeypatch, pi_workspace
 ):
-    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "aws-ecs")
-    monkeypatch.delenv("PI_DEFAULT_PROVIDER", raising=False)
-    monkeypatch.setenv("PI_BEDROCK_RETRY_BASE_DELAY_MS", "55000")
-    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "aws-ecs")
+    monkeypatch.delenv("AGENT_DEFAULT_PROVIDER", raising=False)
+    monkeypatch.setenv("AGENT_BEDROCK_RETRY_BASE_DELAY_MS", "55000")
+    monkeypatch.setenv("AGENT_CODING_AGENT_DIR", str(tmp_path / "agent"))
 
     settings = pac.build_settings_config()
     assert settings["defaultProvider"] == "amazon-bedrock"
@@ -120,8 +120,8 @@ def test_aws_ecs_profile_applies_bedrock_retry_settings(
 
 def test_pi_session_dir_override(tmp_path, monkeypatch, pi_workspace):
     custom = tmp_path / "custom-sessions"
-    monkeypatch.setenv("PI_SESSION_DIR", str(custom))
-    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
+    monkeypatch.setenv("AGENT_SESSION_DIR", str(custom))
+    monkeypatch.setenv("AGENT_CODING_AGENT_DIR", str(tmp_path / "agent"))
 
     settings = pac.build_settings_config()
     assert Path(settings["sessionDir"]) == custom.resolve()
@@ -161,7 +161,7 @@ def test_configure_aws_credentials_discovers_sso_profile_from_aws_config(
     monkeypatch.setenv("RUN_AWS_FUNCTIONS", "True")
     monkeypatch.setenv("PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS", "True")
     monkeypatch.delenv("AWS_PROFILE", raising=False)
-    monkeypatch.delenv("PI_AWS_PROFILE", raising=False)
+    monkeypatch.delenv("AGENT_AWS_PROFILE", raising=False)
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAEXAMPLE")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "secret")
 
@@ -177,7 +177,7 @@ def test_configure_aws_credentials_strips_empty_profile_and_uses_pi_alias(
     monkeypatch.setenv("RUN_AWS_FUNCTIONS", "True")
     monkeypatch.setenv("PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS", "True")
     monkeypatch.setenv("AWS_PROFILE", "")
-    monkeypatch.setenv("PI_AWS_PROFILE", "bedrock-sso")
+    monkeypatch.setenv("AGENT_AWS_PROFILE", "bedrock-sso")
 
     pac.configure_aws_credentials()
 
@@ -209,7 +209,7 @@ def test_configure_aws_credentials_defaults_region_when_unset(monkeypatch):
     monkeypatch.delenv("AWS_REGION", raising=False)
     monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
     monkeypatch.delenv("AWS_PROFILE", raising=False)
-    monkeypatch.delenv("PI_AWS_PROFILE", raising=False)
+    monkeypatch.delenv("AGENT_AWS_PROFILE", raising=False)
 
     pac.configure_aws_credentials()
 
@@ -246,10 +246,10 @@ def test_configure_aws_credentials_session_ui_keys_win(monkeypatch):
 def test_build_settings_config_compaction_enabled_from_env(
     tmp_path, monkeypatch, pi_workspace
 ):
-    monkeypatch.setenv("PI_COMPACTION_ENABLED", "true")
-    monkeypatch.setenv("PI_COMPACTION_RESERVE_TOKENS", "4096")
-    monkeypatch.setenv("PI_COMPACTION_KEEP_RECENT_TOKENS", "2048")
-    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
+    monkeypatch.setenv("AGENT_COMPACTION_ENABLED", "true")
+    monkeypatch.setenv("AGENT_COMPACTION_RESERVE_TOKENS", "4096")
+    monkeypatch.setenv("AGENT_COMPACTION_KEEP_RECENT_TOKENS", "2048")
+    monkeypatch.setenv("AGENT_CODING_AGENT_DIR", str(tmp_path / "agent"))
 
     settings = pac.build_settings_config()
 
@@ -261,8 +261,8 @@ def test_build_settings_config_compaction_enabled_from_env(
 def test_build_settings_config_compaction_disabled_from_env(
     tmp_path, monkeypatch, pi_workspace
 ):
-    monkeypatch.setenv("PI_COMPACTION_ENABLED", "false")
-    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
+    monkeypatch.setenv("AGENT_COMPACTION_ENABLED", "false")
+    monkeypatch.setenv("AGENT_CODING_AGENT_DIR", str(tmp_path / "agent"))
 
     settings = pac.build_settings_config()
 
@@ -270,8 +270,8 @@ def test_build_settings_config_compaction_disabled_from_env(
 
 
 def test_resolve_llama_base_url_prefers_pi_llama_base_url(monkeypatch):
-    monkeypatch.setenv("PI_LLAMA_BASE_URL", "http://192.168.0.220:8080/v1")
-    monkeypatch.setenv("PI_LLAMA_MODE_BASE_URL", "http://ignored:9999")
+    monkeypatch.setenv("AGENT_LLAMA_BASE_URL", "http://192.168.0.220:8080/v1")
+    monkeypatch.setenv("AGENT_LLAMA_MODE_BASE_URL", "http://ignored:9999")
 
     import importlib
 
@@ -282,8 +282,8 @@ def test_resolve_llama_base_url_prefers_pi_llama_base_url(monkeypatch):
 
 
 def test_resolve_llama_base_url_accepts_legacy_alias_and_appends_v1(monkeypatch):
-    monkeypatch.delenv("PI_LLAMA_BASE_URL", raising=False)
-    monkeypatch.setenv("PI_LLAMA_MODE_BASE_URL", "http://192.168.0.220:8080")
+    monkeypatch.delenv("AGENT_LLAMA_BASE_URL", raising=False)
+    monkeypatch.setenv("AGENT_LLAMA_MODE_BASE_URL", "http://192.168.0.220:8080")
 
     import importlib
 
@@ -296,10 +296,10 @@ def test_resolve_llama_base_url_accepts_legacy_alias_and_appends_v1(monkeypatch)
 def test_build_settings_config_compaction_uses_template_when_env_unset(
     tmp_path, monkeypatch, pi_workspace
 ):
-    monkeypatch.delenv("PI_COMPACTION_ENABLED", raising=False)
-    monkeypatch.delenv("PI_COMPACTION_RESERVE_TOKENS", raising=False)
-    monkeypatch.delenv("PI_COMPACTION_KEEP_RECENT_TOKENS", raising=False)
-    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
+    monkeypatch.delenv("AGENT_COMPACTION_ENABLED", raising=False)
+    monkeypatch.delenv("AGENT_COMPACTION_RESERVE_TOKENS", raising=False)
+    monkeypatch.delenv("AGENT_COMPACTION_KEEP_RECENT_TOKENS", raising=False)
+    monkeypatch.setenv("AGENT_CODING_AGENT_DIR", str(tmp_path / "agent"))
 
     settings = pac.build_settings_config()
 
@@ -309,10 +309,10 @@ def test_build_settings_config_compaction_uses_template_when_env_unset(
 
 
 def test_credential_status_markdown_llama_shows_endpoint_not_aws(monkeypatch):
-    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "local-docker")
-    monkeypatch.setenv("PI_DEFAULT_PROVIDER", "llama-cpp")
-    monkeypatch.setenv("PI_LLAMA_BASE_URL", "http://192.168.0.220:8000/v1")
-    monkeypatch.setenv("PI_AWS_PROFILE", "AWSAdministratorAccess-460501890304")
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "local-docker")
+    monkeypatch.setenv("AGENT_DEFAULT_PROVIDER", "llama-cpp")
+    monkeypatch.setenv("AGENT_LLAMA_BASE_URL", "http://192.168.0.220:8000/v1")
+    monkeypatch.setenv("AGENT_AWS_PROFILE", "AWSAdministratorAccess-460501890304")
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
 
     import importlib
@@ -327,7 +327,7 @@ def test_credential_status_markdown_llama_shows_endpoint_not_aws(monkeypatch):
 
 
 def test_credential_status_markdown_bedrock_shows_aws_profile(monkeypatch):
-    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "local-docker")
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "local-docker")
     monkeypatch.setenv("AWS_PROFILE", "corp-sso")
     monkeypatch.setenv("AWS_REGION", "eu-west-2")
     # CI runners often inject AWS_ACCESS_KEY_* for deployment; profile must win in UI text.
@@ -346,14 +346,14 @@ def test_credential_status_markdown_bedrock_shows_aws_profile(monkeypatch):
 
 
 def test_normalize_backend_model_accepts_custom_llama_id(monkeypatch):
-    monkeypatch.setenv("PI_LLAMA_MODEL_ID", "unsloth/Qwen3.6-27B-MTP-GGUF")
+    monkeypatch.setenv("AGENT_LLAMA_MODEL_ID", "unsloth/Qwen3.6-27B-MTP-GGUF")
     assert pac.normalize_backend_model("llama-cpp", "my-custom-swap-model") == (
         "my-custom-swap-model"
     )
 
 
 def test_normalize_backend_model_rejects_unknown_gemini_id(monkeypatch):
-    monkeypatch.setenv("PI_DEFAULT_PROVIDER", "google-gemini")
+    monkeypatch.setenv("AGENT_DEFAULT_PROVIDER", "google-gemini")
     assert pac.normalize_backend_model(
         "google-gemini", "not-a-real-gemini-model"
     ) == pac.default_model_for_provider(pac.PROVIDER_GEMINI)
@@ -362,15 +362,15 @@ def test_normalize_backend_model_rejects_unknown_gemini_id(monkeypatch):
 def test_resolved_default_model_uses_runtime_pi_default_for_active_provider(
     monkeypatch,
 ):
-    monkeypatch.setenv("PI_DEFAULT_PROVIDER", "llama-cpp")
-    monkeypatch.setenv("PI_DEFAULT_MODEL", "swap-model-v2")
+    monkeypatch.setenv("AGENT_DEFAULT_PROVIDER", "llama-cpp")
+    monkeypatch.setenv("AGENT_DEFAULT_MODEL", "swap-model-v2")
     assert pac.resolved_default_model(pac.PROVIDER_LLAMA) == "swap-model-v2"
 
 
 def test_resolved_default_model_ignores_gemini_env_on_bedrock(monkeypatch):
-    """Cross-profile PI_DEFAULT_MODEL must not apply to amazon-bedrock."""
-    monkeypatch.setenv("PI_DEFAULT_PROVIDER", "amazon-bedrock")
-    monkeypatch.setenv("PI_DEFAULT_MODEL", "gemini-flash-latest")
+    """Cross-profile AGENT_DEFAULT_MODEL must not apply to amazon-bedrock."""
+    monkeypatch.setenv("AGENT_DEFAULT_PROVIDER", "amazon-bedrock")
+    monkeypatch.setenv("AGENT_DEFAULT_MODEL", "gemini-flash-latest")
 
     assert pac.resolved_default_model(pac.PROVIDER_BEDROCK) == (
         "anthropic.claude-sonnet-4-6"
@@ -381,8 +381,8 @@ def test_resolved_default_model_ignores_gemini_env_on_bedrock(monkeypatch):
 
 
 def test_get_default_provider_aws_ecs_without_env_defaults_to_bedrock(monkeypatch):
-    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "aws-ecs")
-    monkeypatch.delenv("PI_DEFAULT_PROVIDER", raising=False)
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "aws-ecs")
+    monkeypatch.delenv("AGENT_DEFAULT_PROVIDER", raising=False)
 
     import importlib
 
@@ -402,9 +402,9 @@ def test_write_runtime_config_persists_custom_llama_model(
     tmp_path, monkeypatch, pi_workspace
 ):
     agent_dir = tmp_path / "agent"
-    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(agent_dir))
-    monkeypatch.setenv("PI_DEFAULT_PROVIDER", "llama-cpp")
-    monkeypatch.setenv("PI_LLAMA_MODEL_ID", "unsloth/Qwen3.6-27B-MTP-GGUF")
+    monkeypatch.setenv("AGENT_CODING_AGENT_DIR", str(agent_dir))
+    monkeypatch.setenv("AGENT_DEFAULT_PROVIDER", "llama-cpp")
+    monkeypatch.setenv("AGENT_LLAMA_MODEL_ID", "unsloth/Qwen3.6-27B-MTP-GGUF")
 
     pac.write_runtime_config(
         agent_dir=agent_dir,
@@ -412,9 +412,9 @@ def test_write_runtime_config_persists_custom_llama_model(
         default_model="custom-llama-model",
     )
 
-    assert os.environ["PI_DEFAULT_PROVIDER"] == "llama-cpp"
-    assert os.environ["PI_DEFAULT_MODEL"] == "custom-llama-model"
-    assert os.environ["PI_LLAMA_MODEL_ID"] == "custom-llama-model"
+    assert os.environ["AGENT_DEFAULT_PROVIDER"] == "llama-cpp"
+    assert os.environ["AGENT_DEFAULT_MODEL"] == "custom-llama-model"
+    assert os.environ["AGENT_LLAMA_MODEL_ID"] == "custom-llama-model"
     assert pac.models_for_provider(pac.PROVIDER_LLAMA) == ["custom-llama-model"]
 
     import json
@@ -430,10 +430,10 @@ def test_write_runtime_config_persists_custom_llama_model(
 def test_build_settings_config_compaction_scales_for_small_llama_context(
     tmp_path, monkeypatch, pi_workspace
 ):
-    monkeypatch.setenv("PI_LLAMA_CONTEXT_WINDOW", "65536")
-    monkeypatch.delenv("PI_COMPACTION_RESERVE_TOKENS", raising=False)
-    monkeypatch.delenv("PI_COMPACTION_KEEP_RECENT_TOKENS", raising=False)
-    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "agent"))
+    monkeypatch.setenv("AGENT_LLAMA_CONTEXT_WINDOW", "65536")
+    monkeypatch.delenv("AGENT_COMPACTION_RESERVE_TOKENS", raising=False)
+    monkeypatch.delenv("AGENT_COMPACTION_KEEP_RECENT_TOKENS", raising=False)
+    monkeypatch.setenv("AGENT_CODING_AGENT_DIR", str(tmp_path / "agent"))
 
     import importlib
 
