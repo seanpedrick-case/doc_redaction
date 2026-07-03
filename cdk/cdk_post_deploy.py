@@ -1953,8 +1953,18 @@ def print_express_mode_next_steps(
         prefix = (values.get("AGENT_ALB_PATH_PREFIX") or "/agent").strip()
         if not prefix.startswith("/"):
             prefix = f"/{prefix}"
-        if values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True" and main_url:
-            print(f"  - Agentic UI (after unlock): {main_url.rstrip('/')}{prefix}/")
+        if values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True":
+            agent_login_url = (
+                get_stack_output(stack_name, "AgentRedactionLoginUrl", aws_region) or ""
+            )
+            if agent_login_url:
+                print(
+                    "  - Open AgentRedactionLoginUrl to unlock and open the agent (Pi) "
+                    "app directly (7-day cookie)."
+                )
+                print(f"  - AgentRedactionLoginUrl: {agent_login_url}")
+            elif main_url:
+                print(f"  - Agentic UI (after unlock): {main_url.rstrip('/')}{prefix}/")
     elif values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True":
         print(
             "- Register a Cognito user in AWS Console, change password at the login page URL "

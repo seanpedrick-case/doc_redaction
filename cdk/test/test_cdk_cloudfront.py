@@ -138,6 +138,93 @@ def test_express_cloudfront_synth_no_waf():
         assert behavior["OriginRequestPolicyId"] == all_viewer_except_host
 
 
+def test_magic_link_emits_agent_app_login_url_output():
+    """When the agent (Pi) app has a dedicated CloudFront behavior, the stack must
+    expose AgentRedactionUrl / AgentRedactionLoginUrl so operators can unlock and
+    open the agent UI directly (magic-link cookie is domain-wide)."""
+    from aws_cdk import App, Environment, Stack, assertions
+    from cdk_cloudfront_distribution import create_redaction_cloudfront_distribution
+    from cdk_functions import managed_resource_removal_policy
+
+    app = App()
+    stack = Stack(
+        app,
+        "AgentLoginUrlTest",
+        env=Environment(account="123456789012", region="eu-west-2"),
+    )
+    create_redaction_cloudfront_distribution(
+        stack,
+        "Cf",
+        distribution_comment="test-dist",
+        cognito_redirection_url="https://main.example.on.aws",
+        cloudfront_domain="d111.cloudfront.net",
+        cognito_user_pool_domain_prefix="demo",
+        aws_region="eu-west-2",
+        cognito_user_pool_login_url="",
+        ssl_certificate_domain="",
+        enable_secure_response_headers=False,
+        geo_restriction_raw="GB",
+        enable_cloudfront_waf=False,
+        web_acl_name="test-waf",
+        auth_mode="magic-link",
+        magic_link_cookie_name="doc-redaction-auth",
+        magic_link_cookie_max_age_sec=604800,
+        custom_header_name="",
+        custom_header_value="",
+        cdk_prefix="Test",
+        resource_removal_policy=managed_resource_removal_policy(),
+        main_express_endpoint="https://main.example.on.aws",
+        agentic_express_endpoint="https://agentic.example.on.aws",
+        agentic_path_prefix="/agent",
+    )
+    outputs = assertions.Template.from_stack(stack).to_json().get("Outputs", {})
+    assert "AgentRedactionUrl" in outputs
+    assert "AgentRedactionLoginUrl" in outputs
+
+
+def test_no_agent_output_when_agent_shares_main_origin():
+    """No separate agent behavior (agentic host == main host) -> no agent URL output."""
+    from aws_cdk import App, Environment, Stack, assertions
+    from cdk_cloudfront_distribution import create_redaction_cloudfront_distribution
+    from cdk_functions import managed_resource_removal_policy
+
+    app = App()
+    stack = Stack(
+        app,
+        "NoAgentOutputTest",
+        env=Environment(account="123456789012", region="eu-west-2"),
+    )
+    create_redaction_cloudfront_distribution(
+        stack,
+        "Cf",
+        distribution_comment="test-dist",
+        cognito_redirection_url="https://main.example.on.aws",
+        cloudfront_domain="d111.cloudfront.net",
+        cognito_user_pool_domain_prefix="demo",
+        aws_region="eu-west-2",
+        cognito_user_pool_login_url="",
+        ssl_certificate_domain="",
+        enable_secure_response_headers=False,
+        geo_restriction_raw="GB",
+        enable_cloudfront_waf=False,
+        web_acl_name="test-waf",
+        auth_mode="magic-link",
+        magic_link_cookie_name="doc-redaction-auth",
+        magic_link_cookie_max_age_sec=604800,
+        custom_header_name="",
+        custom_header_value="",
+        cdk_prefix="Test",
+        resource_removal_policy=managed_resource_removal_policy(),
+        main_express_endpoint="https://main.example.on.aws",
+        agentic_express_endpoint="",
+        agentic_path_prefix="/agent",
+    )
+    outputs = assertions.Template.from_stack(stack).to_json().get("Outputs", {})
+    assert "RedactionLoginUrl" in outputs
+    assert "AgentRedactionUrl" not in outputs
+    assert "AgentRedactionLoginUrl" not in outputs
+
+
 def test_express_origins_set_static_forwarded_proto_header():
     """Every Express origin must carry a static X-Forwarded-Proto: https custom header
     so Gradio emits https asset URLs (the edge function can't set this header)."""

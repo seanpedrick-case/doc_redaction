@@ -169,6 +169,9 @@ def create_redaction_cloudfront_distribution(
     custom_headers["X-Forwarded-Proto"] = "https"
 
     additional_behaviors: Dict[str, cloudfront.BehaviorOptions] = {}
+    # Path prefix at which the agent (Pi) app is fronted by this distribution, when a
+    # dedicated agentic behavior is created below. Used to emit the agent app URL output.
+    agentic_behavior_prefix: Optional[str] = None
 
     if alb is not None:
         origin = origins.LoadBalancerV2Origin(
@@ -223,6 +226,7 @@ def create_redaction_cloudfront_distribution(
                 function_associations=function_associations,
                 origin_request_policy=origin_request_policy,
             )
+            agentic_behavior_prefix = prefix
 
     default_behavior = _behavior_options(
         default_origin,
@@ -264,6 +268,7 @@ def create_redaction_cloudfront_distribution(
             scope,
             distribution_domain_name=distribution.domain_name,
             auth_token=magic_link.auth_token,
+            agentic_path_prefix=agentic_behavior_prefix,
         )
 
     return RedactionCloudFrontResources(

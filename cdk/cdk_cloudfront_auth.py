@@ -206,8 +206,16 @@ def emit_magic_link_outputs(
     *,
     distribution_domain_name: str,
     auth_token: str,
+    agentic_path_prefix: str | None = None,
 ) -> None:
-    """Stack outputs for demo unlock URL and normal app URL."""
+    """Stack outputs for demo unlock URL and normal app URL.
+
+    When ``agentic_path_prefix`` is set (the agent/Pi app is fronted by this
+    distribution at that path), also emit ``AgentRedactionUrl`` and
+    ``AgentRedactionLoginUrl`` so operators get a one-click unlock URL for the
+    agent UI. The magic-link cookie is set at the domain level, so unlocking via
+    ``RedactionLoginUrl`` also authorizes the agent path.
+    """
     domain = distribution_domain_name
     CfnOutput(
         scope,
@@ -227,3 +235,27 @@ def emit_magic_link_outputs(
         value=f"https://{domain}/",
         description="Normal HTTPS URL — requires cookie from RedactionLoginUrl first",
     )
+
+    if agentic_path_prefix:
+        prefix = agentic_path_prefix.strip()
+        if not prefix.startswith("/"):
+            prefix = f"/{prefix}"
+        prefix = prefix.rstrip("/")
+        CfnOutput(
+            scope,
+            "AgentRedactionUrl",
+            value=f"https://{domain}{prefix}",
+            description=(
+                "Agent (Pi) app HTTPS URL via CloudFront — requires cookie from "
+                "AgentRedactionLoginUrl (or RedactionLoginUrl) first"
+            ),
+        )
+        CfnOutput(
+            scope,
+            "AgentRedactionLoginUrl",
+            value=f"https://{domain}{prefix}?key={auth_token}",
+            description=(
+                "Paste this URL into your browser to unlock and open the agent "
+                "(Pi) app (7-day cookie)"
+            ),
+        )

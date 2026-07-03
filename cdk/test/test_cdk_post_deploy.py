@@ -378,6 +378,27 @@ def test_print_express_mode_next_steps_magic_link_uses_cloudfront(capsys, monkey
     assert "pi.example.ecs.eu-west-2.on.aws" not in out
 
 
+def test_print_express_mode_next_steps_prints_agent_login_url(capsys, monkeypatch):
+    outputs = {
+        "CloudFrontDistributionURL": "d123.cloudfront.net",
+        "RedactionLoginUrl": "https://d123.cloudfront.net/?key=secret",
+        "AgentRedactionLoginUrl": "https://d123.cloudfront.net/agent?key=secret",
+    }
+    monkeypatch.setattr(post, "get_stack_output", lambda _s, key, _r: outputs.get(key))
+    post.print_express_mode_next_steps(
+        {
+            "AWS_REGION": "eu-west-2",
+            "ENABLE_PI_AGENT_EXPRESS_SERVICE": "True",
+            "USE_CLOUDFRONT": "True",
+            "CLOUDFRONT_AUTH_MODE": "magic-link",
+            "AGENT_ALB_PATH_PREFIX": "/agent",
+        }
+    )
+    out = capsys.readouterr().out
+    assert "AgentRedactionLoginUrl" in out
+    assert "https://d123.cloudfront.net/agent?key=secret" in out
+
+
 def test_sync_pi_agent_doc_redaction_url_for_agentcore(tmp_path, monkeypatch):
     env_file = tmp_path / "agent.env"
     env_file.write_text(
