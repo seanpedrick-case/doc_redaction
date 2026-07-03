@@ -2971,10 +2971,11 @@ def format_pi_public_urls(
 
 
 def _apply_pi_root_path_env(env: Dict[str, str], pi_root_path: str) -> None:
+    # The agent app only consumes AGENT_ROOT_PATH (see agent-redact/pi/gradio_app.py:
+    # launch_pi_ui). ROOT_PATH / FASTAPI_ROOT_PATH are the *main* redaction app's
+    # variables; setting them on the agent container is redundant and can conflict.
     if pi_root_path:
         env["AGENT_ROOT_PATH"] = pi_root_path
-        env["ROOT_PATH"] = pi_root_path
-        env["FASTAPI_ROOT_PATH"] = pi_root_path
 
 
 def build_pi_express_container_environment(

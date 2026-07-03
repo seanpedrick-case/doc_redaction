@@ -2664,9 +2664,9 @@ def build_pi_agent_env_values(answers: InstallAnswers) -> Dict[str, str]:
         return values
     path_prefix = normalize_agentic_path_prefix(answers.agentic_alb_path_prefix)
     if answers.agentic_alb_routing.strip().lower() in ("path", "both"):
+        # The agent app only consumes AGENT_ROOT_PATH; ROOT_PATH / FASTAPI_ROOT_PATH
+        # are the main redaction app's variables and must not be set here.
         values["AGENT_ROOT_PATH"] = path_prefix
-        values["ROOT_PATH"] = path_prefix
-        values["FASTAPI_ROOT_PATH"] = path_prefix
     return values
 
 

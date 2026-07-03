@@ -58,9 +58,11 @@ def test_pi_express_container_env_sets_root_path():
         pi_gradio_port=7862,
         pi_root_path="/agent",
     )
+    # The agent app only needs AGENT_ROOT_PATH; the main-app ROOT_PATH /
+    # FASTAPI_ROOT_PATH vars must not be set on the agent container.
     assert env["AGENT_ROOT_PATH"] == "/agent"
-    assert env["ROOT_PATH"] == "/agent"
-    assert env["FASTAPI_ROOT_PATH"] == "/agent"
+    assert "ROOT_PATH" not in env
+    assert "FASTAPI_ROOT_PATH" not in env
 
 
 def test_pi_express_container_env_no_root_path_when_empty():

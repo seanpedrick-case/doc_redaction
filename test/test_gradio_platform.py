@@ -153,3 +153,80 @@ def test_mount_or_launch_subpath_serves_200_not_404(monkeypatch):
     assert client.get("/pi/config").status_code == 200
     # Health endpoint on the parent app is unaffected by the subpath mount.
     assert client.get("/health").status_code == 200
+
+
+def _run_asgi(app, scope):
+    import asyncio
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(_message):
+        return None
+
+    asyncio.run(app(scope, receive, send))
+
+
+def test_forwarded_host_middleware_rewrites_host_and_scheme():
+    captured = {}
+
+    async def inner(scope, receive, send):
+        captured["scheme"] = scope["scheme"]
+        captured["host"] = dict(scope["headers"]).get(b"host")
+
+    mw = gradio_platform.ForwardedHostMiddleware(inner)
+    scope = {
+        "type": "http",
+        "scheme": "http",
+        "headers": [
+            (b"host", b"internal.ecs.on.aws"),
+            (b"x-forwarded-host", b"cf.example.net"),
+            (b"x-forwarded-proto", b"https"),
+        ],
+    }
+    _run_asgi(mw, scope)
+    assert captured["host"] == b"cf.example.net"
+    assert captured["scheme"] == "https"
+
+
+def test_forwarded_host_middleware_passthrough_without_header():
+    captured = {}
+
+    async def inner(scope, receive, send):
+        captured["host"] = dict(scope["headers"]).get(b"host")
+
+    mw = gradio_platform.ForwardedHostMiddleware(inner)
+    scope = {
+        "type": "http",
+        "scheme": "http",
+        "headers": [(b"host", b"internal.ecs.on.aws")],
+    }
+    _run_asgi(mw, scope)
+    assert captured["host"] == b"internal.ecs.on.aws"
+
+
+def test_forwarded_host_middleware_fixes_trailing_slash_redirect_target():
+    """The exact bug: GET /agent -> 307 /agent/ must redirect to the CloudFront host,
+    not the internal origin host (which is unreachable once locked to CloudFront)."""
+    from starlette.applications import Starlette
+    from starlette.responses import PlainTextResponse
+    from starlette.routing import Route
+    from starlette.testclient import TestClient
+
+    async def page(_request):
+        return PlainTextResponse("ok")
+
+    app = Starlette(routes=[Route("/agent/", page)])
+    app.add_middleware(gradio_platform.ForwardedHostMiddleware)
+    client = TestClient(app)
+    resp = client.get(
+        "/agent",
+        headers={
+            "host": "internal.ecs.on.aws",
+            "x-forwarded-host": "cf.example.net",
+            "x-forwarded-proto": "https",
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 307
+    assert resp.headers["location"] == "https://cf.example.net/agent/"

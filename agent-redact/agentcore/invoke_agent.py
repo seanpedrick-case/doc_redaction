@@ -73,6 +73,12 @@ INVOKE_RUNTIME_CONFIG_KEYS = frozenset(
         "DOC_REDACTION_GRADIO_URL",
         "DOC_REDACTION_GRADIO_AUTH_USER",
         "DOC_REDACTION_GRADIO_AUTH_PASSWORD",
+        # CloudFront magic-link cookie: the AgentCore runtime runs outside the VPC
+        # and reaches doc_redaction through CloudFront, so the token forwarded by
+        # build_agentcore_invoke_runtime_config must be applied here or every
+        # backend request hits the login wall ("credentials were not provided").
+        "DOC_REDACTION_AUTH_TOKEN",
+        "DOC_REDACTION_AUTH_COOKIE_NAME",
         "AGENT_DEFAULT_OCR_METHOD",
         "AGENT_DEFAULT_PII_METHOD",
         "HF_TOKEN",

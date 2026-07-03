@@ -261,3 +261,26 @@ def test_apply_invoke_runtime_config_overrides_agentcore_env(monkeypatch):
     assert (
         os.environ.get("DOC_REDACTION_GRADIO_URL") == "http://host.docker.internal:7861"
     )
+
+
+def test_apply_invoke_runtime_config_applies_cloudfront_magic_link_token(monkeypatch):
+    pytest = __import__("pytest")
+    pytest.importorskip("langchain_core")
+    _AGENTCORE = Path(__file__).resolve().parents[1] / "agent-redact" / "agentcore"
+    if str(_AGENTCORE) not in sys.path:
+        sys.path.insert(0, str(_AGENTCORE))
+    from invoke_agent import apply_invoke_runtime_config
+
+    monkeypatch.delenv("DOC_REDACTION_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("DOC_REDACTION_AUTH_COOKIE_NAME", raising=False)
+    apply_invoke_runtime_config(
+        {
+            "runtime_config": {
+                "DOC_REDACTION_GRADIO_URL": "https://example.cloudfront.net",
+                "DOC_REDACTION_AUTH_TOKEN": "magic-link-token",
+                "DOC_REDACTION_AUTH_COOKIE_NAME": "doc-redaction-auth",
+            }
+        }
+    )
+    assert os.environ.get("DOC_REDACTION_AUTH_TOKEN") == "magic-link-token"
+    assert os.environ.get("DOC_REDACTION_AUTH_COOKIE_NAME") == "doc-redaction-auth"

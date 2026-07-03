@@ -163,6 +163,54 @@ def gradio_head_html(root_path: str = ROOT_PATH) -> str:
     )
 
 
+class ForwardedHostMiddleware:
+    """Promote ``x-forwarded-host`` / ``x-forwarded-proto`` onto the ASGI scope.
+
+    Behind CloudFront with the ALL_VIEWER_EXCEPT_HOST_HEADER origin request policy, the
+    origin's ``Host`` header is the internal ``*.ecs.on.aws`` hostname, not the public
+    CloudFront domain. Starlette builds redirect ``Location`` headers and other absolute
+    URLs from that raw Host, so a trailing-slash redirect on a sub-mount (e.g. ``GET
+    /agent`` -> ``/agent/``) points the browser straight at the internal origin — which
+    is unreachable once the origin security group is locked to CloudFront-only, so the
+    app never loads.
+
+    This middleware rewrites the request ``Host`` header (and ``scheme``) from the
+    forwarded headers before routing, so every generated URL targets the public host
+    over https. CloudFront supplies ``x-forwarded-host`` via a viewer-request function
+    and ``x-forwarded-proto`` via a static custom origin header.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        headers = scope.get("headers") or []
+        forwarded_host = None
+        forwarded_proto = None
+        for key, value in headers:
+            if key == b"x-forwarded-host":
+                forwarded_host = value
+            elif key == b"x-forwarded-proto":
+                forwarded_proto = value
+        if forwarded_host:
+            host = forwarded_host.split(b",")[0].strip()
+            if host:
+                scope = dict(scope)
+                scope["headers"] = [(k, v) for (k, v) in headers if k != b"host"] + [
+                    (b"host", host)
+                ]
+                if forwarded_proto:
+                    proto = (
+                        forwarded_proto.split(b",")[0].strip().decode("latin-1").lower()
+                    )
+                    if proto in ("http", "https"):
+                        scope["scheme"] = proto
+        await self.app(scope, receive, send)
+
+
 def create_fastapi_app(*, root_path: str | None = None) -> FastAPI:
     """Create FastAPI app with lifespan, optional CORS/trusted-host middleware, and /health."""
     from tools.helper_functions import lifespan
@@ -185,6 +233,10 @@ def create_fastapi_app(*, root_path: str | None = None) -> FastAPI:
 
     if ALLOWED_HOSTS:
         fastapi_app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+
+    # Added last so it is the outermost middleware and rewrites the Host before the
+    # TrustedHost check and Starlette's routing/redirect logic run.
+    fastapi_app.add_middleware(ForwardedHostMiddleware)
 
     @fastapi_app.get("/health", status_code=status.HTTP_200_OK)
     def health_check():

@@ -195,20 +195,31 @@ def wait_for_agentcore_ecr_image(
     return ready
 
 
-def resolve_agent_env_path(override: Optional[Path], repo_root: Path) -> Path:
+def resolve_agent_env_path(override: Optional[Path], base_dir: Path) -> Path:
     """
     Resolve the agent config file, preferring ``agent.env`` over legacy ``pi_agent.env``.
 
-    Returns *override* when provided; otherwise ``config/agent.env`` unless it is
-    absent and the legacy ``config/pi_agent.env`` exists.
+    Returns *override* when provided. Otherwise searches ``<base_dir>/config`` first
+    (the CDK deploy location — ``cdk/config/agent.env``), then ``<base_dir>/../config``
+    (repo-root ``config/`` for non-CDK layouts), preferring ``agent.env`` over the
+    legacy ``pi_agent.env`` in each. If none exist, returns the primary
+    ``<base_dir>/config/agent.env`` so callers can report/create it.
     """
     if override is not None:
         return override
-    new_path = repo_root / "config" / "agent.env"
-    legacy_path = repo_root / "config" / "pi_agent.env"
-    if not new_path.is_file() and legacy_path.is_file():
-        return legacy_path
-    return new_path
+    search_dirs: List[Path] = []
+    for candidate in (base_dir / "config", base_dir.parent / "config"):
+        if candidate not in search_dirs:
+            search_dirs.append(candidate)
+    for directory in search_dirs:
+        agent_env = directory / "agent.env"
+        if agent_env.is_file():
+            return agent_env
+    for directory in search_dirs:
+        legacy = directory / "pi_agent.env"
+        if legacy.is_file():
+            return legacy
+    return search_dirs[0] / "agent.env"
 
 
 def upload_file_to_s3(
@@ -2059,7 +2070,7 @@ def sync_pi_agent_doc_redaction_url_for_agentcore(
         return None
     url = updates["DOC_REDACTION_GRADIO_URL"]
     env_path = resolve_agent_env_path(
-        pi_agent_env_path, Path(__file__).resolve().parent.parent
+        pi_agent_env_path, Path(__file__).resolve().parent
     )
     if not env_path.is_file():
         print(f"Note: {env_path} not found; skipping AgentCore backend URL sync.")
@@ -2165,9 +2176,9 @@ def sync_agentcore_runtime_url_from_stack(
         print("Warning: could not derive AGENTCORE_RUNTIME_URL from runtime ARN.")
         return None
 
-    repo_root = Path(__file__).resolve().parent.parent
-    pi_env = resolve_agent_env_path(pi_agent_env_path, repo_root)
-    cdk_env = cdk_env_path or (repo_root / "cdk" / "config" / "cdk_config.env")
+    cdk_dir = Path(__file__).resolve().parent
+    pi_env = resolve_agent_env_path(pi_agent_env_path, cdk_dir)
+    cdk_env = cdk_env_path or (cdk_dir / "config" / "cdk_config.env")
     updates = {
         "AGENTCORE_RUNTIME_URL": url,
         "AGENT_ORCHESTRATOR": "agentcore",
@@ -2411,9 +2422,9 @@ def create_agentcore_runtime_from_ecr(
         print("Warning: could not derive AGENTCORE_RUNTIME_URL from runtime ARN.")
         return None
 
-    repo_root = Path(__file__).resolve().parent.parent
-    pi_env = resolve_agent_env_path(pi_agent_env_path, repo_root)
-    cdk_env = cdk_env_path or (repo_root / "cdk" / "config" / "cdk_config.env")
+    cdk_dir = Path(__file__).resolve().parent
+    pi_env = resolve_agent_env_path(pi_agent_env_path, cdk_dir)
+    cdk_env = cdk_env_path or (cdk_dir / "config" / "cdk_config.env")
     updates = {
         "AGENTCORE_RUNTIME_URL": url,
         "AGENT_ORCHESTRATOR": "agentcore",

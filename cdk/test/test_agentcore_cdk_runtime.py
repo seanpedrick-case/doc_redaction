@@ -28,6 +28,53 @@ def test_normalize_agentcore_runtime_url_strips_invocations():
     )
 
 
+def test_resolve_agent_env_path_prefers_cdk_config(tmp_path):
+    """Regression: phase 2 must resolve the CDK deploy location cdk/config/agent.env.
+
+    cdk_post_deploy.py lives in cdk/, so the base_dir passed by callers is the cdk
+    directory; agent.env is written by the wizard to <cdk>/config/agent.env.
+    """
+    from cdk_post_deploy import resolve_agent_env_path
+
+    cdk_dir = tmp_path / "cdk"
+    (cdk_dir / "config").mkdir(parents=True)
+    agent_env = cdk_dir / "config" / "agent.env"
+    agent_env.write_text("AGENT_ORCHESTRATOR=agentcore\n", encoding="utf-8")
+
+    assert resolve_agent_env_path(None, cdk_dir) == agent_env
+
+
+def test_resolve_agent_env_path_falls_back_to_repo_config(tmp_path):
+    from cdk_post_deploy import resolve_agent_env_path
+
+    repo_root = tmp_path
+    cdk_dir = repo_root / "cdk"
+    (cdk_dir / "config").mkdir(parents=True)
+    (repo_root / "config").mkdir(parents=True)
+    repo_agent_env = repo_root / "config" / "agent.env"
+    repo_agent_env.write_text("AGENT_ORCHESTRATOR=pi\n", encoding="utf-8")
+
+    # No cdk/config/agent.env, so it should fall back to repo-root config/.
+    assert resolve_agent_env_path(None, cdk_dir) == repo_agent_env
+
+
+def test_resolve_agent_env_path_defaults_to_primary_when_absent(tmp_path):
+    from cdk_post_deploy import resolve_agent_env_path
+
+    cdk_dir = tmp_path / "cdk"
+    (cdk_dir / "config").mkdir(parents=True)
+
+    # Nothing exists yet: return the primary cdk/config/agent.env for reporting.
+    assert resolve_agent_env_path(None, cdk_dir) == cdk_dir / "config" / "agent.env"
+
+
+def test_resolve_agent_env_path_override_wins(tmp_path):
+    from cdk_post_deploy import resolve_agent_env_path
+
+    override = tmp_path / "custom.env"
+    assert resolve_agent_env_path(override, tmp_path / "cdk") == override
+
+
 def test_build_env_values_agentcore_cdk_deploy_flags():
     import cdk_install as inst
 
