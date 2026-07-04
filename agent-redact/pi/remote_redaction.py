@@ -54,6 +54,25 @@ def redaction_hf_token() -> str | None:
     return token.strip() if token and token.strip() else None
 
 
+def redaction_auth_cookie() -> str | None:
+    """CloudFront magic-link cookie header value for the redaction backend.
+
+    When the redaction backend is fronted by CloudFront in magic-link mode, every
+    request must carry ``Cookie: <name>=<token>`` (the headless equivalent of the
+    ``?key=<token>`` browser login). Set ``DOC_REDACTION_AUTH_TOKEN`` to the
+    ``RedactionAuthToken`` stack output; the cookie name defaults to
+    ``doc-redaction-auth`` (override with ``DOC_REDACTION_AUTH_COOKIE_NAME``).
+    Returns the full ``name=value`` cookie string, or ``None`` when unset.
+    """
+    token = (os.environ.get("DOC_REDACTION_AUTH_TOKEN") or "").strip()
+    if not token:
+        return None
+    name = (
+        os.environ.get("DOC_REDACTION_AUTH_COOKIE_NAME") or "doc-redaction-auth"
+    ).strip() or "doc-redaction-auth"
+    return f"{name}={token}"
+
+
 def redaction_gradio_auth() -> tuple[str, str] | None:
     """
     Optional Gradio HTTP basic auth for doc_redaction when ``COGNITO_AUTH=True``.
@@ -77,7 +96,7 @@ def httpx_timeout(
 
 
 def _quota_retry_attempts() -> int:
-    for key in ("PI_QUOTA_RETRY_ATTEMPTS", "PI_MAX_RETRIES"):
+    for key in ("AGENT_QUOTA_RETRY_ATTEMPTS", "AGENT_MAX_RETRIES"):
         raw = (os.environ.get(key) or "").strip()
         if raw.isdigit():
             return max(1, int(raw))
@@ -85,7 +104,7 @@ def _quota_retry_attempts() -> int:
 
 
 def _quota_retry_delay_s() -> int:
-    raw = (os.environ.get("PI_QUOTA_RETRY_DELAY_S") or "60").strip()
+    raw = (os.environ.get("AGENT_QUOTA_RETRY_DELAY_S") or "60").strip()
     try:
         return max(1, int(raw))
     except ValueError:
@@ -118,20 +137,28 @@ def make_redaction_client(
     Return a gradio_client for the remote doc_redaction Space.
 
     Uses ``token=`` (gradio_client 2.x). Retries ``TooManyRequestsError`` with
-    ``PI_QUOTA_RETRY_DELAY_S`` backoff and caches one client per URL+token pair
+    ``AGENT_QUOTA_RETRY_DELAY_S`` backoff and caches one client per URL+token pair
     so agents do not re-fetch ``/gradio_api/info`` on every bash one-liner.
     """
     url = (base_url or redaction_base_url()).rstrip("/")
     token = hf_token if hf_token is not None else redaction_hf_token()
     auth = redaction_gradio_auth()
-    cache_key = (url, token or "", auth or ())
+    cookie = redaction_auth_cookie()
+    cache_key = (url, token or "", auth or (), cookie or "")
     if not force_new and cache_key in _CLIENT_CACHE:
         return _CLIENT_CACHE[cache_key]
 
+    # Keep custom headers out of ``httpx_kwargs``: gradio_client spreads
+    # ``httpx_kwargs`` into httpx.get()/post() calls that already pass ``headers=``,
+    # which raises "got multiple values for keyword argument 'headers'". The
+    # dedicated ``headers=`` Client param is merged into the client's headers safely.
     client_kwargs: dict[str, Any] = {
         "httpx_kwargs": {"timeout": httpx_timeout()},
         "verbose": verbose,
     }
+    if cookie:
+        # CloudFront magic-link: send the token cookie on every backend request.
+        client_kwargs["headers"] = {"Cookie": cookie}
     max_attempts = _quota_retry_attempts()
     delay_s = _quota_retry_delay_s()
     last_error: BaseException | None = None
@@ -334,6 +361,9 @@ def _download_via_gradio_http(
     headers: dict[str, str] = {}
     if hf_token:
         headers["Authorization"] = f"Bearer {hf_token.strip()}"
+    cookie = redaction_auth_cookie()
+    if cookie:
+        headers["Cookie"] = cookie
 
     downloaded: list[Path] = []
     with httpx.Client(timeout=httpx_timeout(), headers=headers) as http:

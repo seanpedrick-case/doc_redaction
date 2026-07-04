@@ -3,46 +3,44 @@
 import importlib
 import sys
 from pathlib import Path
-from types import ModuleType
 
 _PI_SRC = Path(__file__).resolve().parents[1] / "agent-redact" / "pi"
 if str(_PI_SRC) not in sys.path:
     sys.path.insert(0, str(_PI_SRC))
 
-if "gradio" not in sys.modules:
-    _gr = ModuleType("gradio")
-    _gr.FileExplorer = lambda **kwargs: kwargs  # type: ignore[misc]
-    sys.modules["gradio"] = _gr
+from pi_test_support import ensure_gradio_importable
+
+ensure_gradio_importable()
 
 import pi_agent_config
 import redaction_prompt as rp
 
 
 def _reload_redaction_prompt(monkeypatch, *, profile: str = "local-docker"):
-    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", profile)
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", profile)
     importlib.reload(pi_agent_config)
     return importlib.reload(rp)
 
 
 def test_default_ocr_and_pii_from_pi_agent_env(monkeypatch):
-    monkeypatch.setenv("PI_DEFAULT_OCR_METHOD", "hybrid-paddle-vlm")
-    monkeypatch.setenv("PI_DEFAULT_PII_METHOD", "LLM (AWS Bedrock)")
+    monkeypatch.setenv("AGENT_DEFAULT_OCR_METHOD", "hybrid-paddle-vlm")
+    monkeypatch.setenv("AGENT_DEFAULT_PII_METHOD", "LLM (AWS Bedrock)")
     module = _reload_redaction_prompt(monkeypatch)
     assert module.DEFAULT_OCR_METHOD == "hybrid-paddle-vlm"
     assert module.DEFAULT_PII_METHOD == "LLM (AWS Bedrock)"
 
 
 def test_local_fallback_when_env_unset(monkeypatch):
-    monkeypatch.delenv("PI_DEFAULT_OCR_METHOD", raising=False)
-    monkeypatch.delenv("PI_DEFAULT_PII_METHOD", raising=False)
+    monkeypatch.delenv("AGENT_DEFAULT_OCR_METHOD", raising=False)
+    monkeypatch.delenv("AGENT_DEFAULT_PII_METHOD", raising=False)
     module = _reload_redaction_prompt(monkeypatch)
     assert module.DEFAULT_OCR_METHOD == "hybrid-paddle-inference-server"
     assert module.DEFAULT_PII_METHOD == "Local"
 
 
 def test_hf_space_defaults_when_env_unset(monkeypatch):
-    monkeypatch.delenv("PI_DEFAULT_OCR_METHOD", raising=False)
-    monkeypatch.delenv("PI_DEFAULT_PII_METHOD", raising=False)
+    monkeypatch.delenv("AGENT_DEFAULT_OCR_METHOD", raising=False)
+    monkeypatch.delenv("AGENT_DEFAULT_PII_METHOD", raising=False)
     module = _reload_redaction_prompt(monkeypatch, profile="hf-space")
     assert module.DEFAULT_OCR_METHOD == module.HF_DEFAULT_OCR
     assert module.DEFAULT_PII_METHOD == module.HF_DEFAULT_PII
@@ -58,6 +56,34 @@ def test_build_redaction_prompt_omits_long_document_rules_for_small_pdfs(monkeyp
     )
     assert "Specific rules for long documents" not in prompt
     assert "User redaction requirements" in prompt
+
+
+def test_tool_orchestrator_prompt_skips_skill_preread(monkeypatch):
+    monkeypatch.setenv("AGENT_ORCHESTRATOR", "agentcore")
+    module = _reload_redaction_prompt(monkeypatch)
+    prompt = module.build_redaction_prompt(
+        "short.pdf",
+        "- Redact names",
+        total_pages=5,
+        workspace_dir=Path("/workspace"),
+    )
+    assert "### Required skills" not in prompt
+    assert "Tool orchestrator workflow" in prompt
+    assert "Do not" in prompt and ".pi/skills/" in prompt
+    assert "list_workspace_files" in prompt
+
+
+def test_harness_prompt_keeps_skill_preread(monkeypatch):
+    monkeypatch.setenv("AGENT_ORCHESTRATOR", "agentcore-harness")
+    module = _reload_redaction_prompt(monkeypatch)
+    prompt = module.build_redaction_prompt(
+        "short.pdf",
+        "- Redact names",
+        total_pages=5,
+        workspace_dir=Path("/workspace"),
+    )
+    assert "### Required skills" in prompt
+    assert "Tool orchestrator workflow" not in prompt
 
 
 def test_aws_ecs_remote_guidance_forbids_workspace_output_grep(monkeypatch):
@@ -86,8 +112,8 @@ def test_hf_space_remote_guidance_uses_workspace_base_helpers(tmp_path, monkeypa
     helpers.mkdir(parents=True)
     (helpers / "remote_redaction.py").write_text("# helper\n", encoding="utf-8")
 
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "true")
     monkeypatch.setenv("DOC_REDACTION_GRADIO_URL", "https://example-redaction.hf.space")
     module = _reload_redaction_prompt(monkeypatch, profile="hf-space")
     guidance = module.build_remote_backend_guidance(

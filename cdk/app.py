@@ -1,6 +1,6 @@
 import os
 
-from aws_cdk import App, Environment
+from aws_cdk import App, Environment, Tags
 from cdk_appregistry import register_doc_redaction_application
 from cdk_config import (
     ALB_NAME,
@@ -15,6 +15,8 @@ from cdk_config import (
     CDK_PREFIX,
     ENABLE_APPREGISTRY,
     RUN_USEAST_STACK,
+    STACK_TAG_KEY,
+    STACK_TAG_VALUE,
     USE_CLOUDFRONT,
 )
 from cdk_functions import (
@@ -24,11 +26,18 @@ from cdk_functions import (
     log_aws_credential_context,
     purge_cdk_lookup_context,
 )
-from cdk_stack import CdkStack, CdkStackCloudfront  # , CdkStackMain
+from cdk_stack import CdkStack
 from check_resources import CONTEXT_FILE, check_and_set_context
 
 # Initialize the CDK app
 app = App()
+
+# Apply a single stack-wide tag (default key "Project", value derived from
+# CDK_PREFIX, e.g. "demo-redaction") to every taggable resource across all stacks.
+# CDK Tags are applied via aspects at synth time, so this covers RedactionStack and
+# the optional AppRegistry stack regardless of where it is called before synth.
+if STACK_TAG_KEY and STACK_TAG_VALUE:
+    Tags.of(app).add(STACK_TAG_KEY, STACK_TAG_VALUE)
 
 log_aws_credential_context(
     expected_account_id=AWS_ACCOUNT_ID,
@@ -104,18 +113,10 @@ if ENABLE_APPREGISTRY == "True":
     appregistry_stack.termination_protection = _stack_delete_protection
 
 if USE_CLOUDFRONT == "True" and RUN_USEAST_STACK == "True":
-    aws_env_us_east_1 = Environment(account=AWS_ACCOUNT_ID, region="us-east-1")
-
-    cloudfront_stack = CdkStackCloudfront(
-        app,
-        "RedactionStackCloudfront",
-        env=aws_env_us_east_1,
-        alb_arn=regional_stack.params["alb_arn_output"],
-        alb_sec_group_id=regional_stack.params["alb_security_group_id"],
-        alb_dns_name=regional_stack.params["alb_dns_name"],
-        cross_region_references=True,
+    raise RuntimeError(
+        "RUN_USEAST_STACK=True is deprecated: CloudFront is deployed in RedactionStack. "
+        "Set RUN_USEAST_STACK=False and remove RedactionStackCloudfront if it still exists."
     )
-    cloudfront_stack.termination_protection = _stack_delete_protection
 
 # CDK CLI invokes this script and expects a cloud assembly in cdk.out.
 # Without app.synth(), Python defines constructs but never writes manifest.json

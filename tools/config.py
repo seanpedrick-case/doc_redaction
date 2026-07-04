@@ -143,6 +143,28 @@ def ensure_folder_within_app_directory(
             ) from e
 
 
+# Env vars owned by the external ``pi`` coding-agent CLI (not renamed to AGENT_*).
+_EXTERNAL_PI_ENV_VARS = frozenset({"PI_OFFLINE", "PI_SKIP_VERSION_CHECK"})
+
+
+def migrate_legacy_pi_env_vars() -> None:
+    """
+    Backward-compat: mirror legacy ``PI_*`` env vars onto the new ``AGENT_*`` names.
+
+    Historic ``PI_*`` variables were renamed to ``AGENT_*``. When a deployment or
+    config file still sets an old name, copy its value onto the new key if unset.
+    A legacy ``PI_AGENT_*`` key collapses to ``AGENT_*``; vars owned by the external
+    ``pi`` CLI are left untouched. Safe to call repeatedly.
+    """
+    for key in list(os.environ.keys()):
+        if not key.startswith("PI_") or key in _EXTERNAL_PI_ENV_VARS:
+            continue
+        rest = key[3:]
+        new_key = rest if rest.startswith("AGENT") else "AGENT_" + rest
+        if new_key not in os.environ:
+            os.environ[new_key] = os.environ[key]
+
+
 def get_or_create_env_var(var_name: str, default_value: str, print_val: bool = False):
     """
     Get an environmental variable, and set it to a default value if it doesn't exist
@@ -298,8 +320,15 @@ CONFIG_FOLDER = get_or_create_env_var("CONFIG_FOLDER", "config/")
 CONFIG_FOLDER = ensure_folder_within_app_directory(CONFIG_FOLDER)
 
 APP_TYPE = get_or_create_env_var("APP_TYPE", "redaction-app")
-if APP_TYPE == "pi":
-    APP_CONFIG_FILE = "pi_agent.env"
+# "agent" is the current agentic UI app type; "pi" is accepted for backward compatibility.
+if APP_TYPE.strip().lower() in ("agent", "pi"):
+    # Config file renamed agent.env (legacy: pi_agent.env). Prefer the new name,
+    # fall back to the legacy file only when it exists but agent.env does not.
+    APP_CONFIG_FILE = "agent.env"
+    if not os.path.exists(CONFIG_FOLDER + APP_CONFIG_FILE) and os.path.exists(
+        CONFIG_FOLDER + "pi_agent.env"
+    ):
+        APP_CONFIG_FILE = "pi_agent.env"
 else:
     APP_CONFIG_FILE = "app_config.env"
 
@@ -311,7 +340,7 @@ APP_CONFIG_PATH = get_or_create_env_var(
 if APP_CONFIG_PATH:
     if os.path.exists(APP_CONFIG_PATH):
         print(f"Loading app variables from config file {APP_CONFIG_PATH}")
-        # Do not override task/compose env (e.g. ECS ``PI_DEFAULT_PROVIDER``).
+        # Do not override task/compose env (e.g. ECS ``AGENT_DEFAULT_PROVIDER``).
         load_dotenv(APP_CONFIG_PATH, override=False)
 
 ###
@@ -327,6 +356,9 @@ if AWS_CONFIG_PATH:
     if os.path.exists(AWS_CONFIG_PATH):
         print(f"Loading AWS variables from config file {AWS_CONFIG_PATH}")
         load_dotenv(AWS_CONFIG_PATH)
+
+# Honour legacy PI_* env/config names by mirroring them onto the new AGENT_* keys.
+migrate_legacy_pi_env_vars()
 
 RUN_AWS_FUNCTIONS = convert_string_to_boolean(
     get_or_create_env_var("RUN_AWS_FUNCTIONS", "False")
@@ -504,8 +536,8 @@ USAGE_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var(
 )
 DYNAMODB_USAGE_LOG_HEADERS = get_or_create_env_var("DYNAMODB_USAGE_LOG_HEADERS", "")
 
-PI_USAGE_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var(
-    "PI_USAGE_LOG_DYNAMODB_TABLE_NAME", "redaction_usage"
+AGENT_USAGE_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var(
+    "AGENT_USAGE_LOG_DYNAMODB_TABLE_NAME", "redaction_usage"
 )
 
 # Report logging to console?
@@ -520,11 +552,11 @@ if LOGGING:
 LOG_FILE_NAME = get_or_create_env_var("LOG_FILE_NAME", "log.csv")
 USAGE_LOG_FILE_NAME = get_or_create_env_var("USAGE_LOG_FILE_NAME", LOG_FILE_NAME)
 FEEDBACK_LOG_FILE_NAME = get_or_create_env_var("FEEDBACK_LOG_FILE_NAME", LOG_FILE_NAME)
-PI_USAGE_LOG_FILE_NAME = get_or_create_env_var(
-    "PI_USAGE_LOG_FILE_NAME", "pi_usage_log.csv"
+AGENT_USAGE_LOG_FILE_NAME = get_or_create_env_var(
+    "AGENT_USAGE_LOG_FILE_NAME", "pi_usage_log.csv"
 )
-PI_LOG_CHAT_USAGE = convert_string_to_boolean(
-    get_or_create_env_var("PI_LOG_CHAT_USAGE", "False")
+AGENT_LOG_CHAT_USAGE = convert_string_to_boolean(
+    get_or_create_env_var("AGENT_LOG_CHAT_USAGE", "False")
 )
 CSV_PI_USAGE_LOG_HEADERS = get_or_create_env_var(
     "CSV_PI_USAGE_LOG_HEADERS",
@@ -2812,31 +2844,33 @@ DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS = int(
 ###
 # Pi agent options
 ###
-PI_GRADIO_TITLE = get_or_create_env_var("PI_GRADIO_TITLE", "Agentic Document Redaction")
+AGENT_GRADIO_TITLE = get_or_create_env_var(
+    "AGENT_GRADIO_TITLE", "Agentic Document Redaction"
+)
 
-DEFAULT_PI_INTRO_TEXT = f"""# {PI_GRADIO_TITLE}
+DEFAULT_AGENT_INTRO_TEXT = f"""# {AGENT_GRADIO_TITLE}
 
 Upload a document, add redaction requirements, and start a task. The Pi agent orchestrates redaction using skills in this repository. See the [User Guide]({USER_GUIDE_URL}) for the further information about the underlying Document Redaction App.
 
 NOTE: Outputs are not guaranteed complete — review all redacted material **by a human** before use."""
 
-PI_INTRO_TEXT = _load_intro_text(
-    "PI_INTRO_TEXT",
-    DEFAULT_PI_INTRO_TEXT,
+AGENT_INTRO_TEXT = _load_intro_text(
+    "AGENT_INTRO_TEXT",
+    DEFAULT_AGENT_INTRO_TEXT,
     format_kwargs={
         "USER_GUIDE_URL": USER_GUIDE_URL,
-        "PI_GRADIO_TITLE": PI_GRADIO_TITLE,
+        "AGENT_GRADIO_TITLE": AGENT_GRADIO_TITLE,
     },
 )
 
 
 # Pi workspace: set by bootstrap_pi_config, compose, or HF Dockerfile — not a global default here.
-PI_WORKSPACE_DIR = get_or_create_env_var("PI_WORKSPACE_DIR", "")
+AGENT_WORKSPACE_DIR = get_or_create_env_var("AGENT_WORKSPACE_DIR", "")
 
 
 def resolve_pi_default_provider_fallback() -> str:
-    """Fallback when ``PI_DEFAULT_PROVIDER`` is unset (profile-aware)."""
-    profile = os.environ.get("PI_DEPLOYMENT_PROFILE", "local-docker").strip().lower()
+    """Fallback when ``AGENT_DEFAULT_PROVIDER`` is unset (profile-aware)."""
+    profile = os.environ.get("AGENT_DEPLOYMENT_PROFILE", "local-docker").strip().lower()
     if profile == "hf-space":
         return "google-gemini"
     if profile == "aws-ecs":
@@ -2845,8 +2879,8 @@ def resolve_pi_default_provider_fallback() -> str:
 
 
 def resolve_pi_default_model_fallback() -> str:
-    """Fallback when ``PI_DEFAULT_MODEL`` is unset (profile-aware)."""
-    profile = os.environ.get("PI_DEPLOYMENT_PROFILE", "local-docker").strip().lower()
+    """Fallback when ``AGENT_DEFAULT_MODEL`` is unset (profile-aware)."""
+    profile = os.environ.get("AGENT_DEPLOYMENT_PROFILE", "local-docker").strip().lower()
     if profile == "hf-space":
         return "gemini-flash-lite-latest"
     if profile == "aws-ecs":
@@ -2854,53 +2888,55 @@ def resolve_pi_default_model_fallback() -> str:
     return ""
 
 
-PI_DEFAULT_PROVIDER = get_or_create_env_var(
-    "PI_DEFAULT_PROVIDER", resolve_pi_default_provider_fallback()
+AGENT_DEFAULT_PROVIDER = get_or_create_env_var(
+    "AGENT_DEFAULT_PROVIDER", resolve_pi_default_provider_fallback()
 )  # Default Pi orchestration backend: llama-cpp | google-gemini | amazon-bedrock
 _pi_default_model = resolve_pi_default_model_fallback()
-if os.environ.get("PI_DEFAULT_MODEL") is None and _pi_default_model:
-    os.environ["PI_DEFAULT_MODEL"] = _pi_default_model
-PI_DEFAULT_MODEL = os.environ.get("PI_DEFAULT_MODEL") or ""
-PI_VLM_MODEL = get_or_create_env_var("PI_VLM_MODEL", "gemini-flash-lite-latest")
-PI_DEFAULT_OCR_METHOD = get_or_create_env_var("PI_DEFAULT_OCR_METHOD", "tesseract")
-PI_DEFAULT_PII_METHOD = get_or_create_env_var("PI_DEFAULT_PII_METHOD", "Local")
+if os.environ.get("AGENT_DEFAULT_MODEL") is None and _pi_default_model:
+    os.environ["AGENT_DEFAULT_MODEL"] = _pi_default_model
+AGENT_DEFAULT_MODEL = os.environ.get("AGENT_DEFAULT_MODEL") or ""
+AGENT_VLM_MODEL = get_or_create_env_var("AGENT_VLM_MODEL", "gemini-flash-lite-latest")
+AGENT_DEFAULT_OCR_METHOD = get_or_create_env_var(
+    "AGENT_DEFAULT_OCR_METHOD", "tesseract"
+)
+AGENT_DEFAULT_PII_METHOD = get_or_create_env_var("AGENT_DEFAULT_PII_METHOD", "Local")
 DOC_REDACTION_GRADIO_URL = get_or_create_env_var(
     "DOC_REDACTION_GRADIO_URL", "http://127.0.0.1:7860"
 )
-PI_UI_TITLE = PI_GRADIO_TITLE
+AGENT_UI_TITLE = AGENT_GRADIO_TITLE
 _pi_port_default = (
     "7860"
-    if os.environ.get("PI_DEPLOYMENT_PROFILE", "local-docker").strip().lower()
+    if os.environ.get("AGENT_DEPLOYMENT_PROFILE", "local-docker").strip().lower()
     == "hf-space"
     else "7862"
 )
-PI_UI_PORT = int(os.environ.get("PI_UI_PORT", _pi_port_default))
+AGENT_UI_PORT = int(os.environ.get("AGENT_UI_PORT", _pi_port_default))
 # Subpath when Pi sits behind ALB path routing (e.g. /pi on CloudFront). CDK sets on ECS.
-PI_ROOT_PATH = get_or_create_env_var("PI_ROOT_PATH", "")
+AGENT_ROOT_PATH = get_or_create_env_var("AGENT_ROOT_PATH", "")
 
-PI_UI_HOST = os.environ.get("PI_UI_HOST", "0.0.0.0")
+AGENT_UI_HOST = os.environ.get("AGENT_UI_HOST", "0.0.0.0")
 
 _thinking_default = (
     "true"
-    if os.environ.get("PI_DEPLOYMENT_PROFILE", "local-docker").strip().lower()
+    if os.environ.get("AGENT_DEPLOYMENT_PROFILE", "local-docker").strip().lower()
     == "hf-space"
     else "false"
 )
 SHOW_THINKING = os.environ.get(
-    "PI_GRADIO_SHOW_THINKING", _thinking_default
+    "AGENT_GRADIO_SHOW_THINKING", _thinking_default
 ).lower() in {
     "1",
     "true",
     "yes",
 }
-SHOW_TOOL_OUTPUT = os.environ.get("PI_GRADIO_SHOW_TOOL_OUTPUT", "true").lower() in {
+SHOW_TOOL_OUTPUT = os.environ.get("AGENT_GRADIO_SHOW_TOOL_OUTPUT", "true").lower() in {
     "1",
     "true",
     "yes",
 }
-TOOL_OUTPUT_MAX = int(os.environ.get("PI_GRADIO_TOOL_OUTPUT_MAX", "12000"))
-ACTIVITY_MAX_LINES = int(os.environ.get("PI_GRADIO_ACTIVITY_MAX_LINES", "50"))
-THINKING_DISPLAY_MAX = int(os.environ.get("PI_GRADIO_THINKING_MAX_CHARS", "16000"))
+TOOL_OUTPUT_MAX = int(os.environ.get("AGENT_GRADIO_TOOL_OUTPUT_MAX", "12000"))
+ACTIVITY_MAX_LINES = int(os.environ.get("AGENT_GRADIO_ACTIVITY_MAX_LINES", "50"))
+THINKING_DISPLAY_MAX = int(os.environ.get("AGENT_GRADIO_THINKING_MAX_CHARS", "16000"))
 THINKING_PANEL_CSS = """
 .thinking-panel textarea {
     max-height: 280px !important;
@@ -2908,12 +2944,12 @@ THINKING_PANEL_CSS = """
 }
 """
 # Pi agent: Gemini quota / rate-limit retries (Gradio loop + Pi settings.json).
-# PI_MAX_RETRIES is the preferred name; PI_QUOTA_RETRY_ATTEMPTS is a legacy alias.
-if os.environ.get("PI_QUOTA_RETRY_ATTEMPTS") is not None:
-    QUOTA_RETRY_ATTEMPTS = int(os.environ["PI_QUOTA_RETRY_ATTEMPTS"])
+# AGENT_MAX_RETRIES is the preferred name; AGENT_QUOTA_RETRY_ATTEMPTS is a legacy alias.
+if os.environ.get("AGENT_QUOTA_RETRY_ATTEMPTS") is not None:
+    QUOTA_RETRY_ATTEMPTS = int(os.environ["AGENT_QUOTA_RETRY_ATTEMPTS"])
 else:
-    QUOTA_RETRY_ATTEMPTS = int(get_or_create_env_var("PI_MAX_RETRIES", "5"))
-QUOTA_RETRY_DELAY_S = int(get_or_create_env_var("PI_QUOTA_RETRY_DELAY_S", "60"))
+    QUOTA_RETRY_ATTEMPTS = int(get_or_create_env_var("AGENT_MAX_RETRIES", "5"))
+QUOTA_RETRY_DELAY_S = int(get_or_create_env_var("AGENT_QUOTA_RETRY_DELAY_S", "60"))
 QUOTA_CONTINUE_PROMPT = (
     "Continue the redaction task from where you left off. "
     "Do not re-read skills or repeat completed tool steps unless required."

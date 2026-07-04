@@ -4,7 +4,7 @@ CloudFormation custom resource: create or update an ALB listener rule (upsert by
 If a rule already exists at the requested priority with matching conditions, it is
 modified in place. This supports stack retries after partial deploys left orphaned rules.
 If priority is taken by a rule with different conditions, the operation fails with a
-clear error so operators can choose another PI_ALB_LISTENER_RULE_PRIORITY.
+clear error so operators can choose another AGENT_ALB_LISTENER_RULE_PRIORITY.
 """
 
 from __future__ import annotations
@@ -135,7 +135,7 @@ def _upsert_rule(
         raise RuntimeError(
             f"Listener rule priority {priority} is already in use by {existing['RuleArn']} "
             "with different conditions. Delete that rule in the ELB console or set "
-            "PI_ALB_LISTENER_RULE_PRIORITY to a free value, then redeploy."
+            "AGENT_ALB_LISTENER_RULE_PRIORITY to a free value, then redeploy."
         )
     LOGGER.info("Creating listener rule at priority %s on %s", priority, listener_arn)
     created = elbv2.create_rule(

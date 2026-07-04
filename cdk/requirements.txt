@@ -1,6 +1,6 @@
 aws-cdk-lib==2.257.0
 aws-cdk.aws-servicecatalogappregistry-alpha~=2.257.0a0
-boto3<=1.42.91
+boto3<=1.43.36
 pandas<=2.3.3
 nodejs<=0.1.1
 python-dotenv<=1.2.2

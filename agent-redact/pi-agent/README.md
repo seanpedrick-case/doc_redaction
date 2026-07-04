@@ -37,7 +37,7 @@ Orchestrate document redaction with **[Pi](https://github.com/earendil-works/pi)
 
 ## Examples
 
-Two sample PDFs load in **Redaction task** → **Try an example** (same demos as the main doc_redaction app). Examples are **on by default**; set Space variable `PI_GRADIO_SHOW_EXAMPLES=false` to hide them. (`SHOW_PI_EXAMPLES` is also accepted.)
+Two sample PDFs load in **Redaction task** → **Try an example** (same demos as the main doc_redaction app). Examples are **on by default**; set Space variable `AGENT_GRADIO_SHOW_EXAMPLES=false` to hide them. (`SHOW_PI_EXAMPLES` is also accepted.)
 
 If examples do not appear, the UI shows a short status message (usually missing PDFs in the image — rebuild after a successful sync with LFS materialization).
 

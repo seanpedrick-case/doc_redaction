@@ -12,10 +12,10 @@ sys.path.insert(0, str(CDK_DIR))
 def test_pi_express_mutual_exclusion_with_legacy_pi():
     legacy = "True"
     express = "True"
-    with pytest.raises(ValueError, match="at most one Pi deployment"):
+    with pytest.raises(ValueError, match="at most one agent deployment"):
         if legacy == "True" and express == "True":
             raise ValueError(
-                "Enable at most one Pi deployment mode: ENABLE_PI_AGENT_ECS_SERVICE (legacy Fargate) "
+                "Enable at most one agent deployment mode: ENABLE_PI_AGENT_ECS_SERVICE (legacy Fargate) "
                 "or ENABLE_PI_AGENT_EXPRESS_SERVICE (Express), not both."
             )
 
@@ -40,11 +40,91 @@ def test_build_pi_express_container_environment():
         pi_gradio_port=7862,
     )
     assert env["DOC_REDACTION_GRADIO_URL"] == "http://redaction:7860"
-    assert env["PI_WORKSPACE_DIR"] == "/tmp/pi-workspace"
-    assert env["PI_UPLOAD_ROOT"] == "/tmp/gradio"
-    assert env["PI_DEPLOYMENT_PROFILE"] == "aws-ecs"
+    assert env["AGENT_WORKSPACE_DIR"] == "/tmp/agent-workspace"
+    assert env["AGENT_UPLOAD_ROOT"] == "/tmp/gradio"
+    assert env["AGENT_DEPLOYMENT_PROFILE"] == "aws-ecs"
     assert env["COGNITO_AUTH"] == "True"
     assert env["RUN_FASTAPI"] == "True"
+
+
+def test_build_pi_express_container_environment_agentcore_public_url():
+    from cdk_functions import build_pi_express_container_environment
+
+    env = build_pi_express_container_environment(
+        service_connect_discovery_name="redaction",
+        main_app_port=7860,
+        pi_gradio_port=7862,
+        doc_redaction_gradio_url="https://main.example.ecs.eu-west-2.on.aws",
+    )
+    assert (
+        env["DOC_REDACTION_GRADIO_URL"] == "https://main.example.ecs.eu-west-2.on.aws"
+    )
+
+
+def test_build_pi_express_env_agentcore_intent_without_runtime_url(monkeypatch):
+    """AGENT_ORCHESTRATOR must be set from intent even before phase 2 creates the URL."""
+    import cdk_config
+    from cdk_functions import build_pi_express_container_environment
+
+    monkeypatch.setattr(cdk_config, "ENABLE_AGENTCORE_RUNTIME", "True", raising=False)
+    monkeypatch.setattr(cdk_config, "AGENTCORE_RUNTIME_URL", "", raising=False)
+    monkeypatch.setattr(
+        cdk_config, "AGENT_ORCHESTRATOR_DEFAULT", "agentcore", raising=False
+    )
+    monkeypatch.setattr(
+        cdk_config,
+        "AGENTCORE_BEDROCK_MODEL",
+        "mistral.mistral-large-2407",
+        raising=False,
+    )
+
+    env = build_pi_express_container_environment(
+        service_connect_discovery_name="redaction",
+        main_app_port=7860,
+        pi_gradio_port=7862,
+    )
+    assert env["AGENT_ORCHESTRATOR"] == "agentcore"
+    assert env["AGENT_DEFAULT_PROVIDER"] == "amazon-bedrock"
+    assert env["AGENT_DEFAULT_MODEL"] == "mistral.mistral-large-2407"
+    # URL not known yet at synth; supplied later by the S3 overlay after phase 2.
+    assert "AGENTCORE_RUNTIME_URL" not in env
+
+
+def test_build_pi_express_env_agentcore_with_runtime_url(monkeypatch):
+    import cdk_config
+    from cdk_functions import build_pi_express_container_environment
+
+    monkeypatch.setattr(cdk_config, "ENABLE_AGENTCORE_RUNTIME", "True", raising=False)
+    monkeypatch.setattr(
+        cdk_config,
+        "AGENTCORE_RUNTIME_URL",
+        "https://runtime.example.amazonaws.com",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cdk_config, "AGENT_ORCHESTRATOR_DEFAULT", "agentcore", raising=False
+    )
+
+    env = build_pi_express_container_environment(
+        service_connect_discovery_name="redaction",
+        main_app_port=7860,
+        pi_gradio_port=7862,
+    )
+    assert env["AGENT_ORCHESTRATOR"] == "agentcore"
+    assert env["AGENTCORE_RUNTIME_URL"] == "https://runtime.example.amazonaws.com"
+
+
+def test_format_main_express_gradio_url():
+    from cdk_functions import format_main_express_gradio_url
+
+    assert (
+        format_main_express_gradio_url("main.example.ecs.eu-west-2.on.aws")
+        == "https://main.example.ecs.eu-west-2.on.aws"
+    )
+    assert (
+        format_main_express_gradio_url("https://main.example.ecs.eu-west-2.on.aws/")
+        == "https://main.example.ecs.eu-west-2.on.aws"
+    )
 
 
 def test_build_express_pi_primary_container_includes_cognito_secrets():
@@ -525,7 +605,7 @@ def test_dual_express_gateway_services_synth():
         container_port=7862,
         log_group_name="/ecs/pi-logs",
         aws_region="eu-west-2",
-        environment={"PI_WORKSPACE_DIR": "/tmp/pi-workspace"},
+        environment={"AGENT_WORKSPACE_DIR": "/tmp/agent-workspace"},
     )
     pi = create_express_gateway_service(
         stack,

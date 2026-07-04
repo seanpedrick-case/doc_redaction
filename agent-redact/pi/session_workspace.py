@@ -18,7 +18,7 @@ _SESSION_ID_RE = re.compile(r"[^a-zA-Z0-9_@.+-]+")
 
 def workspace_base_dir() -> Path:
     """Shared Pi workspace root (see ``bootstrap_pi_config.ensure_pi_workspace_dir``)."""
-    raw = (os.environ.get("PI_WORKSPACE_DIR") or "").strip()
+    raw = (os.environ.get("AGENT_WORKSPACE_DIR") or "").strip()
     if raw:
         path = Path(raw)
     else:
@@ -30,19 +30,19 @@ def workspace_base_dir() -> Path:
 
 
 def _session_output_folder_enabled() -> bool:
-    """Read at call time so ``pi_agent.env`` / dotenv apply before first use."""
+    """Read at call time so ``agent.env`` / dotenv apply before first use."""
     raw = (os.environ.get("SESSION_OUTPUT_FOLDER") or "").strip().lower()
     return raw in {"1", "true", "yes", "on"}
 
 
 def session_workspace_enabled() -> bool:
     """
-    When true, each Gradio session uses ``{PI_WORKSPACE_DIR}/{session_hash}/``.
+    When true, each Gradio session uses ``{AGENT_WORKSPACE_DIR}/{session_hash}/``.
 
-    Controlled by ``PI_SESSION_WORKSPACE`` in ``config/pi_agent.env`` (default on when unset).
-    Set ``PI_SESSION_WORKSPACE=false`` for a single shared workspace root.
+    Controlled by ``AGENT_SESSION_WORKSPACE`` in ``config/agent.env`` (default on when unset).
+    Set ``AGENT_SESSION_WORKSPACE=false`` for a single shared workspace root.
     """
-    raw = os.environ.get("PI_SESSION_WORKSPACE", "").strip().lower()
+    raw = os.environ.get("AGENT_SESSION_WORKSPACE", "").strip().lower()
     if raw in {"0", "false", "no", "off"}:
         return False
     if raw in {"1", "true", "yes", "on"}:
@@ -121,7 +121,7 @@ def prepare_session_workspace(
     request: gr.Request | None = None,
 ) -> tuple[str, Path, str]:
     """
-    Resolve session id, create ``{PI_WORKSPACE_DIR}/{hash}/``, return status text.
+    Resolve session id, create ``{AGENT_WORKSPACE_DIR}/{hash}/``, return status text.
 
     Call at the start of redaction (and on page load) so the folder always exists.
     """

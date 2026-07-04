@@ -23,7 +23,7 @@ logs/*
 usage/*
 feedback/*
 config/*
-!config/pi_agent.env.example
+!config/agent.env.example
 !config/docker_app_config.env.example
 !config/app_config.env.example
 workspace/*
@@ -72,3 +72,4 @@ docker_compose/*
 skills/example_prompts/*
 .pi/sessions/
 agent-redact/pi/agent/sessions/
+agent-redact/RedactionAgent/*

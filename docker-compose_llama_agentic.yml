@@ -18,12 +18,12 @@
 # docker compose -f docker-compose_llama_agentic.yml --profile gemma4-26b up -d pi-agent-gemma-26b
 
 # Cloud-only Pi agent (no local llama.cpp GPU model; redaction app still runs locally):
-# Set GEMINI_API_KEY (and optionally GOOGLE_API_KEY) in .env or config/pi_agent.env before starting pi-gemini.
+# Set GEMINI_API_KEY (and optionally GOOGLE_API_KEY) in .env or config/agent.env before starting pi-gemini.
 # docker compose -f docker-compose_llama_agentic.yml --profile pi-gemini up -d
 
 # Set AWS_REGION plus AWS credentials (or AWS_PROFILE via mounted ~/.aws) before starting pi-bedrock.
 # SSO (recommended): mount host ~/.aws (read-write — SSO token refresh writes to sso/cache),
-# set AWS_PROFILE (or PI_AWS_PROFILE) to your SSO profile name, run `aws sso login` on the host.
+# set AWS_PROFILE (or AGENT_AWS_PROFILE) to your SSO profile name, run `aws sso login` on the host.
 # Pi requires AWS_PROFILE in the container env — mounting ~/.aws alone is not enough for Pi's auth check.
 # docker compose -f docker-compose_llama_agentic.yml --profile pi-bedrock up -d
 #
@@ -43,6 +43,8 @@ x-pi-agent-common: &pi-agent-common
     target: dev
   image: pi-agent-doc-redaction
   env_file:
+    - path: config/agent.env
+      required: false
     - path: config/pi_agent.env
       required: false
   ports:
@@ -59,22 +61,26 @@ x-pi-agent-common: &pi-agent-common
     - redaction-net-llama
 
 x-pi-agent-env: &pi-agent-env
-  APP_TYPE: pi
-  APP_CONFIG_PATH: /workspace/doc_redaction/config/pi_agent.env
+  APP_TYPE: agent
+  APP_CONFIG_PATH: /workspace/doc_redaction/config/agent.env
   HOME: /home/user
   PI_SKIP_VERSION_CHECK: "1"
   PI_OFFLINE: "1"
   DOC_REDACTION_GRADIO_URL: ${DOC_REDACTION_GRADIO_URL:-http://redaction-app-llama:7860}
   GRADIO_SERVER_NAME: ${GRADIO_SERVER_NAME:-0.0.0.0}
-  PI_GRADIO_PORT: ${PI_GRADIO_PORT:-7862}
+  AGENT_GRADIO_PORT: ${AGENT_GRADIO_PORT:-7862}
   GRADIO_SERVER_PORT: ${GRADIO_SERVER_PORT:-7862}
   PYTHONPATH: /workspace/doc_redaction:/workspace/doc_redaction/agent-redact/pi
-  PI_WORKSPACE_DIR: /home/user/app/workspace
-  # PI_DEFAULT_PROVIDER: ${PI_DEFAULT_PROVIDER:-llama-cpp}
-  # PI_DEFAULT_MODEL: ${PI_DEFAULT_MODEL:-}
-  # PI_DEFAULT_OCR_METHOD: ${PI_DEFAULT_OCR_METHOD:-hybrid-paddle-inference-server}
-  # PI_DEFAULT_PII_METHOD: ${PI_DEFAULT_PII_METHOD:-Local}
-  PI_LLAMA_BASE_URL: ${PI_LLAMA_BASE_URL:-http://llama-inference:8080/v1}
+  AGENT_WORKSPACE_DIR: /home/user/app/workspace
+  # AGENT_DEFAULT_PROVIDER: ${AGENT_DEFAULT_PROVIDER:-llama-cpp}
+  # AGENT_DEFAULT_MODEL: ${AGENT_DEFAULT_MODEL:-}
+  # AGENT_DEFAULT_OCR_METHOD: ${AGENT_DEFAULT_OCR_METHOD:-hybrid-paddle-inference-server}
+  # AGENT_DEFAULT_PII_METHOD: ${AGENT_DEFAULT_PII_METHOD:-Local}
+  AGENT_LLAMA_BASE_URL: ${AGENT_LLAMA_BASE_URL:-http://llama-inference:8080/v1}
+  AGENT_ORCHESTRATOR: ${AGENT_ORCHESTRATOR:-pi}
+  AGENTCORE_RUNTIME_URL: ${AGENTCORE_RUNTIME_URL:-}
+  AGENTCORE_API_KEY: ${AGENTCORE_API_KEY:-}
+  LANGGRAPH_REQUIRE_REVIEW_APPROVAL: ${LANGGRAPH_REQUIRE_REVIEW_APPROVAL:-false}
   GEMINI_API_KEY: ${GEMINI_API_KEY:-}
   GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
   AWS_REGION: ${AWS_REGION:-eu-west-2}
@@ -85,7 +91,7 @@ x-pi-agent-env: &pi-agent-env
   AWS_PROFILE: ${AWS_PROFILE:-}
   RUN_AWS_FUNCTIONS: ${RUN_AWS_FUNCTIONS:-False}
   PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS: ${PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:-True}
-  # PI_VLM_BASE_URL: http://llama-inference:8080
+  # AGENT_VLM_BASE_URL: http://llama-inference:8080
   RUN_FASTAPI: ${RUN_FASTAPI:-False}
   ROOT_PATH: ${ROOT_PATH:-}
   FASTAPI_ROOT_PATH: ${FASTAPI_ROOT_PATH:-/}
@@ -103,7 +109,7 @@ x-pi-agent-env: &pi-agent-env
   S3_OUTPUTS_BUCKET: ${S3_OUTPUTS_BUCKET:-}
   CUSTOM_HEADER: ${CUSTOM_HEADER:-}
   CUSTOM_HEADER_VALUE: ${CUSTOM_HEADER_VALUE:-}
-  PI_MAX_PAGES: ${PI_MAX_PAGES:-${MAX_DOC_PAGES:-3000}}
+  AGENT_MAX_PAGES: ${AGENT_MAX_PAGES:-${MAX_DOC_PAGES:-3000}}
 
 x-redaction-app-build: &redaction-app-build
   <<: *redaction-app-env
@@ -162,7 +168,7 @@ services:
       - --fit
       - "off"
       - --temp
-      - "0.7"
+      - "0.6"
       - --top-k
       - "20"
       - --top-p
@@ -661,10 +667,10 @@ services:
         condition: service_started
     environment:
       <<: *pi-agent-env
-      PI_LLAMA_MODEL_ID: ${PI_LLAMA_MODEL_ID:-unsloth/Qwen3.6-27B-MTP-GGUF}
-      PI_LLAMA_CONTEXT_WINDOW: ${PI_LLAMA_CONTEXT_WINDOW:-114688}
-      PI_LLAMA_MAX_TOKENS: ${PI_LLAMA_MAX_TOKENS:-32768}
-      PI_VLM_MODEL: ${PI_VLM_MODEL:-unsloth/Qwen3.6-27B-MTP-GGUF}
+      AGENT_LLAMA_MODEL_ID: ${AGENT_LLAMA_MODEL_ID:-unsloth/Qwen3.6-27B-MTP-GGUF}
+      AGENT_LLAMA_CONTEXT_WINDOW: ${AGENT_LLAMA_CONTEXT_WINDOW:-114688}
+      AGENT_LLAMA_MAX_TOKENS: ${AGENT_LLAMA_MAX_TOKENS:-32768}
+      AGENT_VLM_MODEL: ${AGENT_VLM_MODEL:-unsloth/Qwen3.6-27B-MTP-GGUF}
 
   pi-agent-35b:
     <<: *pi-agent-common
@@ -676,10 +682,10 @@ services:
         condition: service_started
     environment:
       <<: *pi-agent-env
-      PI_LLAMA_MODEL_ID: ${PI_LLAMA_MODEL_ID:-unsloth/Qwen3.6-35B-A3B-GGUF}
-      PI_LLAMA_CONTEXT_WINDOW: ${PI_LLAMA_CONTEXT_WINDOW:-196608}
-      PI_LLAMA_MAX_TOKENS: ${PI_LLAMA_MAX_TOKENS:-65536}
-      PI_VLM_MODEL: ${PI_VLM_MODEL:-unsloth/Qwen3.6-35B-A3B-GGUF}
+      AGENT_LLAMA_MODEL_ID: ${AGENT_LLAMA_MODEL_ID:-unsloth/Qwen3.6-35B-A3B-GGUF}
+      AGENT_LLAMA_CONTEXT_WINDOW: ${AGENT_LLAMA_CONTEXT_WINDOW:-196608}
+      AGENT_LLAMA_MAX_TOKENS: ${AGENT_LLAMA_MAX_TOKENS:-65536}
+      AGENT_VLM_MODEL: ${AGENT_VLM_MODEL:-unsloth/Qwen3.6-35B-A3B-GGUF}
 
   pi-agent-gemma-31b:
     <<: *pi-agent-common
@@ -691,12 +697,12 @@ services:
         condition: service_started
     environment:
       <<: *pi-agent-env
-      PI_LLAMA_MODEL_ID: ${PI_LLAMA_MODEL_ID:-unsloth/gemma-4-31B-it-GGUF}
-      PI_LLAMA_CONTEXT_WINDOW: ${PI_LLAMA_CONTEXT_WINDOW:-65536}
-      PI_LLAMA_MAX_TOKENS: ${PI_LLAMA_MAX_TOKENS:-32768}
-      PI_COMPACTION_RESERVE_TOKENS: ${PI_COMPACTION_RESERVE_TOKENS:-16384}
-      PI_COMPACTION_KEEP_RECENT_TOKENS: ${PI_COMPACTION_KEEP_RECENT_TOKENS:-12288}
-      PI_VLM_MODEL: ${PI_VLM_MODEL:-unsloth/gemma-4-31B-it-GGUF}
+      AGENT_LLAMA_MODEL_ID: ${AGENT_LLAMA_MODEL_ID:-unsloth/gemma-4-31B-it-GGUF}
+      AGENT_LLAMA_CONTEXT_WINDOW: ${AGENT_LLAMA_CONTEXT_WINDOW:-65536}
+      AGENT_LLAMA_MAX_TOKENS: ${AGENT_LLAMA_MAX_TOKENS:-32768}
+      AGENT_COMPACTION_RESERVE_TOKENS: ${AGENT_COMPACTION_RESERVE_TOKENS:-16384}
+      AGENT_COMPACTION_KEEP_RECENT_TOKENS: ${AGENT_COMPACTION_KEEP_RECENT_TOKENS:-12288}
+      AGENT_VLM_MODEL: ${AGENT_VLM_MODEL:-unsloth/gemma-4-31B-it-GGUF}
 
   pi-agent-gemma-26b:
     <<: *pi-agent-common
@@ -708,10 +714,10 @@ services:
         condition: service_started
     environment:
       <<: *pi-agent-env
-      PI_LLAMA_MODEL_ID: ${PI_LLAMA_MODEL_ID:-unsloth/gemma-4-26B-A4B-it-GGUF}
-      PI_LLAMA_CONTEXT_WINDOW: ${PI_LLAMA_CONTEXT_WINDOW:-65536}
-      PI_LLAMA_MAX_TOKENS: ${PI_LLAMA_MAX_TOKENS:-32768}
-      PI_VLM_MODEL: ${PI_VLM_MODEL:-unsloth/gemma-4-26B-A4B-it-GGUF}
+      AGENT_LLAMA_MODEL_ID: ${AGENT_LLAMA_MODEL_ID:-unsloth/gemma-4-26B-A4B-it-GGUF}
+      AGENT_LLAMA_CONTEXT_WINDOW: ${AGENT_LLAMA_CONTEXT_WINDOW:-65536}
+      AGENT_LLAMA_MAX_TOKENS: ${AGENT_LLAMA_MAX_TOKENS:-32768}
+      AGENT_VLM_MODEL: ${AGENT_VLM_MODEL:-unsloth/gemma-4-26B-A4B-it-GGUF}
 
   pi-agent-gemini:
     <<: *pi-agent-common
@@ -721,12 +727,12 @@ services:
         condition: service_started
     environment:
       <<: *pi-agent-env
-      PI_DEFAULT_PROVIDER: google-gemini
-      PI_DEFAULT_MODEL: ${PI_DEFAULT_MODEL:-gemini-flash-latest}
-      PI_DEFAULT_OCR_METHOD: hybrid-paddle-vlm
-      PI_DEFAULT_PII_METHOD: Local
-      PI_VLM_BASE_URL: http://redaction-app-llama:7860
-      PI_VLM_MODEL: ${PI_VLM_MODEL:-gemini-flash-latest}
+      AGENT_DEFAULT_PROVIDER: google-gemini
+      AGENT_DEFAULT_MODEL: ${AGENT_DEFAULT_MODEL:-gemini-flash-latest}
+      AGENT_DEFAULT_OCR_METHOD: hybrid-paddle-vlm
+      AGENT_DEFAULT_PII_METHOD: Local
+      AGENT_VLM_BASE_URL: http://redaction-app-llama:7860
+      AGENT_VLM_MODEL: ${AGENT_VLM_MODEL:-gemini-flash-latest}
 
   pi-agent-bedrock:
     <<: *pi-agent-common
@@ -741,17 +747,17 @@ services:
         condition: service_started
     environment:
       <<: *pi-agent-env
-      PI_DEFAULT_PROVIDER: amazon-bedrock
-      # PI_DEFAULT_MODEL: ${PI_DEFAULT_MODEL:-anthropic.claude-sonnet-4-6}
-      # PI_DEFAULT_OCR_METHOD: AWS Textract service - all PDF types
-      # PI_DEFAULT_PII_METHOD: AWS Comprehend
-      PI_VLM_BASE_URL: http://redaction-app-llama:7860
-      # PI_VLM_MODEL: ${PI_VLM_MODEL:-anthropic.claude-sonnet-4-6}
+      AGENT_DEFAULT_PROVIDER: amazon-bedrock
+      # AGENT_DEFAULT_MODEL: ${AGENT_DEFAULT_MODEL:-anthropic.claude-sonnet-4-6}
+      # AGENT_DEFAULT_OCR_METHOD: AWS Textract service - all PDF types
+      # AGENT_DEFAULT_PII_METHOD: AWS Comprehend
+      AGENT_VLM_BASE_URL: http://redaction-app-llama:7860
+      # AGENT_VLM_MODEL: ${AGENT_VLM_MODEL:-anthropic.claude-sonnet-4-6}
       RUN_AWS_FUNCTIONS: "True"
       # AWS_REGION: ${AWS_REGION:-eu-west-2}
       # AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-${AWS_REGION:-eu-west-2}}
-      # AWS_PROFILE: ${AWS_PROFILE:-${PI_AWS_PROFILE:-}}
-      # PI_AWS_PROFILE: ${PI_AWS_PROFILE:-}
+      # AWS_PROFILE: ${AWS_PROFILE:-${AGENT_AWS_PROFILE:-}}
+      # AGENT_AWS_PROFILE: ${AGENT_AWS_PROFILE:-}
 
 networks:
   redaction-net-llama:

@@ -2,9 +2,12 @@ import os
 import time
 
 from cdk_config import (
+    AGENT_ENV_S3_KEY,
+    AGENTCORE_CDK_DEPLOY,
     AWS_REGION,
     CDK_PREFIX,
     CLUSTER_NAME,
+    CODEBUILD_AGENTCORE_PROJECT_NAME,
     CODEBUILD_PI_PROJECT_NAME,
     CODEBUILD_PROJECT_NAME,
     COGNITO_USER_POOL_CLIENT_SECRET_NAME,
@@ -17,16 +20,20 @@ from cdk_config import (
     ECS_SERVICE_CONNECT_DISCOVERY_NAME,
     ECS_SERVICE_CONNECT_NAMESPACE,
     ECS_SERVICE_NAME,
+    ENABLE_AGENTCORE_CDK_RUNTIME,
+    ENABLE_AGENTCORE_RUNTIME,
     ENABLE_HEADLESS_DEPLOYMENT,
     ENABLE_PI_AGENT_ECS_SERVICE,
     ENABLE_PI_AGENT_EXPRESS_SERVICE,
     GRADIO_SERVER_PORT,
-    PI_AGENT_ENV_S3_KEY,
+    RESTRICT_ALB_AUTORAISE_SG_QUOTA,
+    RESTRICT_ALB_INGRESS_TO_CLOUDFRONT,
     S3_BATCH_ENV_PREFIX,
     S3_BATCH_INPUT_PREFIX,
     S3_BATCH_LAMBDA_FUNCTION_NAME,
     S3_LOG_CONFIG_BUCKET_NAME,
     S3_OUTPUT_BUCKET_NAME,
+    USE_CLOUDFRONT,
     USE_ECS_EXPRESS_MODE,
 )
 from cdk_functions import create_basic_config_env
@@ -36,6 +43,7 @@ from cdk_post_deploy import (
     apply_cognito_secret_fixup_from_stack,
     configure_express_pi_service_connect,
     print_headless_deployment_next_steps,
+    restrict_express_albs_to_cloudfront,
     seed_headless_batch_s3_layout,
     start_codebuild_build,
     start_ecs_task,
@@ -59,8 +67,25 @@ _enable_pi_image_build = (
     ENABLE_PI_AGENT_ECS_SERVICE == "True" or ENABLE_PI_AGENT_EXPRESS_SERVICE == "True"
 )
 if _enable_pi_image_build:
-    print("Starting Pi agent CodeBuild project.")
+    print("Starting agent CodeBuild project.")
     start_codebuild_build(project_name=CODEBUILD_PI_PROJECT_NAME)
+
+_enable_agentcore_image_build = (
+    AGENTCORE_CDK_DEPLOY == "True" or ENABLE_AGENTCORE_CDK_RUNTIME == "True"
+)
+agentcore_build_id = None
+if _enable_agentcore_image_build:
+    print("Starting AgentCore runtime CodeBuild project.")
+    agentcore_build_id = start_codebuild_build(
+        project_name=CODEBUILD_AGENTCORE_PROJECT_NAME
+    )
+    if agentcore_build_id and AGENTCORE_CDK_DEPLOY == "True":
+        from cdk_post_deploy import _patch_env_key_values
+
+        _patch_env_key_values(
+            os.path.join("config", "cdk_config.env"),
+            {"AGENTCORE_LAST_CODEBUILD_ID": agentcore_build_id},
+        )
 
 # Upload app_config.env file to S3 bucket
 upload_file_to_s3(
@@ -70,10 +95,15 @@ upload_file_to_s3(
 )
 
 if _enable_pi_image_build:
-    pi_env_local = os.path.join("config", "pi_agent.env")
+    # Config file renamed agent.env (legacy: pi_agent.env). Prefer the new name.
+    pi_env_local = os.path.join("config", "agent.env")
+    if not os.path.isfile(pi_env_local) and os.path.isfile(
+        os.path.join("config", "pi_agent.env")
+    ):
+        pi_env_local = os.path.join("config", "pi_agent.env")
     if os.path.isfile(pi_env_local):
         print(
-            f"Uploading {pi_env_local} to s3://{S3_LOG_CONFIG_BUCKET_NAME}/{PI_AGENT_ENV_S3_KEY}"
+            f"Uploading {pi_env_local} to s3://{S3_LOG_CONFIG_BUCKET_NAME}/{AGENT_ENV_S3_KEY}"
         )
         upload_file_to_s3(
             local_file_paths=pi_env_local,
@@ -83,9 +113,40 @@ if _enable_pi_image_build:
     else:
         print(
             f"Skipping Pi env upload: {pi_env_local} not found. "
-            f"Create it (from config/pi_agent.env.example) and upload to "
-            f"s3://{S3_LOG_CONFIG_BUCKET_NAME}/{PI_AGENT_ENV_S3_KEY} before scaling the Pi service."
+            f"Create it (from config/agent.env.example) and upload to "
+            f"s3://{S3_LOG_CONFIG_BUCKET_NAME}/{AGENT_ENV_S3_KEY} before scaling the Pi service."
         )
+    try:
+        from cdk_config import ENABLE_AGENTCORE_RUNTIME
+
+        if ENABLE_AGENTCORE_RUNTIME == "True":
+            from cdk_config import AGENTCORE_CDK_DEPLOY, ENABLE_AGENTCORE_CDK_RUNTIME
+
+            if AGENTCORE_CDK_DEPLOY == "True":
+                print(
+                    "\n--- AgentCore CDK deploy ---\n"
+                    "Phase 1: CodeBuild is pushing the runtime image to ECR.\n"
+                    "Phase 2: cdk_install.py will create the Bedrock runtime automatically "
+                    "once the image is ready (no extra flags needed)."
+                )
+            elif ENABLE_AGENTCORE_CDK_RUNTIME == "True":
+                print(
+                    "\n--- AgentCore CDK deploy ---\n"
+                    "Runtime ARN: see AgentCoreRuntimeArn stack output after deploy.\n"
+                    "AGENTCORE_RUNTIME_URL is patched automatically from the ARN."
+                )
+            else:
+                print("\n--- AgentCore manual deploy ---")
+                print(
+                    "Package and deploy with the agentcore CLI, then set "
+                    "AGENTCORE_RUNTIME_URL — see agent-redact/agentcore/README.md"
+                )
+            print(
+                "DOC_REDACTION_GRADIO_URL is set automatically on agentic Express when "
+                "ENABLE_AGENTCORE_RUNTIME=True.\n"
+            )
+    except ImportError:
+        pass
 
 total_seconds = 480  # 8 minutes
 update_interval = 1  # Update every second
@@ -120,6 +181,28 @@ if ENABLE_HEADLESS_DEPLOYMENT != "True":
                 )
             except Exception as exc:
                 print("Warning: could not configure Express Service Connect: " f"{exc}")
+        try:
+            from cdk_config import (
+                ENABLE_AGENTCORE_CDK_RUNTIME,
+                ENABLE_AGENTCORE_RUNTIME,
+            )
+            from cdk_post_deploy import (
+                sync_agentcore_runtime_url_from_stack,
+                sync_pi_agent_doc_redaction_url_for_agentcore,
+            )
+
+            if ENABLE_AGENTCORE_RUNTIME == "True":
+                sync_pi_agent_doc_redaction_url_for_agentcore(
+                    stack_name="RedactionStack",
+                    region=AWS_REGION,
+                )
+            if ENABLE_AGENTCORE_CDK_RUNTIME == "True":
+                sync_agentcore_runtime_url_from_stack(
+                    stack_name="RedactionStack",
+                    region=AWS_REGION,
+                )
+        except ImportError:
+            pass
         print("Syncing Cognito app client secret for in-app authentication.")
         apply_cognito_secret_fixup_from_stack(
             stack_name="RedactionStack",
@@ -155,16 +238,36 @@ else:
     )
 
 if ENABLE_PI_AGENT_ECS_SERVICE == "True":
-    print(f"Starting Pi agent ECS service {ECS_PI_SERVICE_NAME}")
+    print(f"Starting agent ECS service {ECS_PI_SERVICE_NAME}")
     start_ecs_task(cluster_name=CLUSTER_NAME, service_name=ECS_PI_SERVICE_NAME)
 
 if ENABLE_PI_AGENT_EXPRESS_SERVICE == "True":
-    print(f"Starting Pi Express ECS service {ECS_PI_EXPRESS_SERVICE_NAME}")
+    print(f"Starting agent Express ECS service {ECS_PI_EXPRESS_SERVICE_NAME}")
     start_express_gateway_service(
         cluster_name=CLUSTER_NAME, service_name=ECS_PI_EXPRESS_SERVICE_NAME
     )
 
+if (
+    USE_ECS_EXPRESS_MODE == "True"
+    and USE_CLOUDFRONT == "True"
+    and RESTRICT_ALB_INGRESS_TO_CLOUDFRONT == "True"
+    and ENABLE_HEADLESS_DEPLOYMENT != "True"
+):
+    print("Restricting Express managed ALB security group(s) to CloudFront ingress.")
+    try:
+        restrict_express_albs_to_cloudfront(
+            stack_name="RedactionStack",
+            region=AWS_REGION,
+            auto_raise_quota=(RESTRICT_ALB_AUTORAISE_SG_QUOTA == "True"),
+        )
+    except Exception as exc:
+        print(
+            "Warning: could not restrict Express ALB security group(s) to CloudFront: "
+            f"{exc}"
+        )
+
 if USE_ECS_EXPRESS_MODE == "True" and ENABLE_HEADLESS_DEPLOYMENT != "True":
+    from cdk_config import AGENT_ALB_PATH_PREFIX, CLOUDFRONT_AUTH_MODE
     from cdk_post_deploy import print_express_mode_next_steps
 
     print_express_mode_next_steps(
@@ -172,5 +275,10 @@ if USE_ECS_EXPRESS_MODE == "True" and ENABLE_HEADLESS_DEPLOYMENT != "True":
             "AWS_REGION": AWS_REGION,
             "ECS_EXPRESS_COGNITO_REDIRECT_BASE": ECS_EXPRESS_COGNITO_REDIRECT_BASE,
             "ENABLE_PI_AGENT_EXPRESS_SERVICE": ENABLE_PI_AGENT_EXPRESS_SERVICE,
+            # Needed so magic-link/CloudFront guidance points at the CloudFront URL
+            # (with ?key= unlock) instead of the direct ECS endpoints.
+            "USE_CLOUDFRONT": USE_CLOUDFRONT,
+            "CLOUDFRONT_AUTH_MODE": CLOUDFRONT_AUTH_MODE,
+            "AGENT_ALB_PATH_PREFIX": AGENT_ALB_PATH_PREFIX,
         }
     )
