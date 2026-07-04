@@ -151,5 +151,5 @@ def test_legacy_pi_on_express_error_message():
         if legacy_pi == "True" and use_express == "True":
             raise ValueError(
                 "ENABLE_PI_AGENT_ECS_SERVICE=True requires legacy Fargate (USE_ECS_EXPRESS_MODE=False). "
-                "For Pi on Express, use ENABLE_PI_AGENT_EXPRESS_SERVICE=True instead."
+                "For the agent on Express, use ENABLE_PI_AGENT_EXPRESS_SERVICE=True instead."
             )

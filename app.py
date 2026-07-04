@@ -59,7 +59,11 @@ def _run_and_capture(cmd: list[str]) -> tuple[int, str]:
 
 def _external_dep_warning_markdown() -> str | None:
     """
-    Best-effort check that Tesseract + Poppler are discoverable.
+    Best-effort check that external OCR/PDF dependencies are discoverable.
+
+    Tesseract is always checked (local OCR). Poppler is only checked when
+    `POPPLER_FOLDER` is set in config; PDF handling in this app uses PyMuPDF,
+    so Poppler is optional when that variable is unset.
 
     We warn (but do not fail) when binaries aren't found, because many workflows
     (e.g. tabular-only redaction) can still work without them.
@@ -108,13 +112,15 @@ def _external_dep_warning_markdown() -> str | None:
         TESSERACT_FOLDER = ""
 
     tesseract_exe = _find_exe("tesseract", TESSERACT_FOLDER)
-    pdftoppm_exe = _find_exe("pdftoppm", POPPLER_FOLDER)
-
     t_code, t_out = _run_and_capture([tesseract_exe, "--version"])
-    p_code, p_out = _run_and_capture([pdftoppm_exe, "-v"])
-
     t_ok = t_code == 0 and bool(t_out.strip())
-    p_ok = p_code == 0 and bool(p_out.strip())
+
+    poppler_configured = bool((POPPLER_FOLDER or "").strip())
+    p_ok = True
+    if poppler_configured:
+        pdftoppm_exe = _find_exe("pdftoppm", POPPLER_FOLDER)
+        p_code, p_out = _run_and_capture([pdftoppm_exe, "-v"])
+        p_ok = p_code == 0 and bool(p_out.strip())
 
     if t_ok and p_ok:
         return None
@@ -122,15 +128,26 @@ def _external_dep_warning_markdown() -> str | None:
     missing = []
     if not t_ok:
         missing.append("Tesseract (`tesseract --version` failed)")
-    if not p_ok:
-        missing.append("Poppler (`pdftoppm -v` failed)")
+    if poppler_configured and not p_ok:
+        poppler_path = Path(POPPLER_FOLDER)
+        exe_name = "pdftoppm.exe" if os.name == "nt" else "pdftoppm"
+        if not (poppler_path / exe_name).is_file():
+            missing.append(
+                "Poppler (`POPPLER_FOLDER` is set but "
+                f"`{POPPLER_FOLDER}` does not contain `{exe_name}`)"
+            )
+        else:
+            missing.append("Poppler (`pdftoppm -v` failed)")
 
     missing_text = ", ".join(missing)
+    config_hint = "`TESSERACT_FOLDER` in `config/app_config.env`"
+    if poppler_configured:
+        config_hint = "`TESSERACT_FOLDER` / `POPPLER_FOLDER` in `config/app_config.env`"
     return (
         "### ⚠️ Missing external dependencies\n\n"
         f"This app could not find: **{missing_text}**.\n\n"
         "- If you already installed them, ensure they are on your **PATH**, or set "
-        "`TESSERACT_FOLDER` / `POPPLER_FOLDER` in `config/app_config.env`.\n"
+        f"{config_hint}.\n"
         "- To install automatically (recommended), run:\n\n"
         "```bash\n"
         "python -m doc_redaction.install_deps\n"

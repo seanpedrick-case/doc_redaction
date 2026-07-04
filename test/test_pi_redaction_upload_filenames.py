@@ -5,7 +5,6 @@ from __future__ import annotations
 import importlib
 import sys
 from pathlib import Path
-from types import ModuleType
 
 import pytest
 
@@ -13,16 +12,15 @@ _PI_SRC = Path(__file__).resolve().parents[1] / "agent-redact" / "pi"
 if str(_PI_SRC) not in sys.path:
     sys.path.insert(0, str(_PI_SRC))
 
-if "gradio" not in sys.modules:
-    _gr = ModuleType("gradio")
-    _gr.FileExplorer = lambda **kwargs: kwargs  # type: ignore[misc]
-    sys.modules["gradio"] = _gr
+from pi_test_support import ensure_gradio_importable
+
+ensure_gradio_importable()
 
 import redaction_prompt as rp
 
 
 def _reload_redaction_prompt(monkeypatch):
-    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "local-docker")
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "local-docker")
     return importlib.reload(rp)
 
 
@@ -58,7 +56,7 @@ def test_workspace_filename_from_upload(monkeypatch, original, expected, renamed
 
 def test_copy_upload_to_workspace_preserves_permissive_names(monkeypatch, tmp_path):
     module = _reload_redaction_prompt(monkeypatch)
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(tmp_path))
     upload_root = tmp_path / "uploads"
     upload_root.mkdir()
     workspace = tmp_path / "workspace"
@@ -79,7 +77,7 @@ def test_copy_upload_to_workspace_preserves_permissive_names(monkeypatch, tmp_pa
 
 def test_copy_upload_to_workspace_reports_minimal_rename(monkeypatch, tmp_path):
     module = _reload_redaction_prompt(monkeypatch)
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(tmp_path))
     upload_root = tmp_path / "uploads"
     upload_root.mkdir()
     workspace = tmp_path / "workspace"

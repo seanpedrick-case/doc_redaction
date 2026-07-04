@@ -442,6 +442,45 @@ def _find_tesseract_bin_from_prefix(prefix: Path) -> Path | None:
     return None
 
 
+def _is_probable_tessdata_dir(path: Path) -> bool:
+    if not path.is_dir():
+        return False
+    if (path / "eng.traineddata").is_file():
+        return True
+    try:
+        return any(p.suffix.lower() == ".traineddata" for p in path.iterdir())
+    except OSError:
+        return False
+
+
+def _find_tesseract_data_folder(tesseract_dir: Path) -> Path | None:
+    """
+    Locate the tessdata directory for a Tesseract install.
+
+    Supports common Windows layouts:
+    - UB Mannheim: <install>/tessdata next to tesseract.exe
+    - conda-forge: <prefix>/share/tessdata with exe in <prefix>/Library/bin
+    """
+    tesseract_dir = tesseract_dir.resolve()
+
+    for candidate in (
+        tesseract_dir / "tessdata",
+        tesseract_dir.parent / "tessdata",
+    ):
+        if _is_probable_tessdata_dir(candidate):
+            return candidate
+
+    if tesseract_dir.name.lower() in ("bin", "scripts"):
+        prefix = tesseract_dir.parent
+        if prefix.name.lower() == "library":
+            prefix = prefix.parent
+        conda_candidate = prefix / "share" / "tessdata"
+        if _is_probable_tessdata_dir(conda_candidate):
+            return conda_candidate
+
+    return None
+
+
 def _install_tesseract_with_conda_prefix() -> Path | None:
     """
     Try a non-admin install into the current conda environment prefix.
@@ -563,6 +602,48 @@ def _install_windows_tesseract(base_dir: Path, force: bool) -> Path:
     )
 
 
+def _locate_tesseract_bin_dir() -> Path | None:
+    exe = shutil.which("tesseract")
+    if not exe:
+        return None
+    return Path(exe).resolve().parent
+
+
+def _locate_poppler_bin_dir() -> Path | None:
+    exe = shutil.which("pdftoppm")
+    if not exe:
+        return None
+    return Path(exe).resolve().parent
+
+
+def _sync_app_config_paths(
+    app_config_path: Path,
+    cwd: Path,
+    *,
+    tesseract_dir: Path | None = None,
+    poppler_bin: Path | None = None,
+) -> None:
+    if tesseract_dir:
+        _env_upsert(
+            app_config_path,
+            "TESSERACT_FOLDER",
+            _config_path_value(tesseract_dir, cwd),
+        )
+        tessdata_dir = _find_tesseract_data_folder(tesseract_dir)
+        if tessdata_dir:
+            _env_upsert(
+                app_config_path,
+                "TESSERACT_DATA_FOLDER",
+                _config_path_value(tessdata_dir, cwd),
+            )
+    if poppler_bin:
+        _env_upsert(
+            app_config_path,
+            "POPPLER_FOLDER",
+            _config_path_value(poppler_bin, cwd),
+        )
+
+
 def _prepend_path(folder: Path) -> None:
     folder_str = str(folder)
     current = os.environ.get("PATH", "")
@@ -604,7 +685,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--app-config-path",
         default=os.environ.get("APP_CONFIG_PATH", "config/app_config.env"),
-        help="Where to write TESSERACT_FOLDER/POPPLER_FOLDER. Default: config/app_config.env (or APP_CONFIG_PATH if set).",
+        help="Where to write TESSERACT_FOLDER/TESSERACT_DATA_FOLDER/POPPLER_FOLDER. Default: config/app_config.env (or APP_CONFIG_PATH if set).",
     )
     return p
 
@@ -617,11 +698,20 @@ def main(argv: list[str] | None = None) -> int:
     app_config_path = (cwd / args.app_config_path).resolve()
 
     status = _detect_status()
-    if status.tesseract_ok and status.poppler_ok:
+    if status.tesseract_ok and status.poppler_ok and not args.force:
+        tesseract_dir = _locate_tesseract_bin_dir()
+        poppler_bin = _locate_poppler_bin_dir()
+        _sync_app_config_paths(
+            app_config_path,
+            cwd,
+            tesseract_dir=tesseract_dir,
+            poppler_bin=poppler_bin,
+        )
         print(
             "Dependencies already available.\n"
             f"- Tesseract: ok{f' ({status.tesseract_version})' if status.tesseract_version else ''}\n"
-            f"- Poppler:   ok{f' ({status.poppler_version})' if status.poppler_version else ''}"
+            f"- Poppler:   ok{f' ({status.poppler_version})' if status.poppler_version else ''}\n"
+            f"\nWrote configuration to: {app_config_path}"
         )
         return 0
 
@@ -650,14 +740,20 @@ def main(argv: list[str] | None = None) -> int:
 
     if not status.poppler_ok or args.force:
         poppler_bin = _install_windows_poppler(base_dir=base_dir, force=args.force)
-        # Store relative path if possible (works best with tools.config security checks)
-        poppler_value = _config_path_value(poppler_bin, cwd)
-        _env_upsert(app_config_path, "POPPLER_FOLDER", poppler_value)
+    elif status.poppler_ok:
+        poppler_bin = _locate_poppler_bin_dir()
 
     if not status.tesseract_ok or args.force:
         tesseract_dir = _install_windows_tesseract(base_dir=base_dir, force=args.force)
-        tesseract_value = _config_path_value(tesseract_dir, cwd)
-        _env_upsert(app_config_path, "TESSERACT_FOLDER", tesseract_value)
+    elif status.tesseract_ok:
+        tesseract_dir = _locate_tesseract_bin_dir()
+
+    _sync_app_config_paths(
+        app_config_path,
+        cwd,
+        tesseract_dir=tesseract_dir,
+        poppler_bin=poppler_bin,
+    )
 
     # Validate in-process by prepending PATH so the checks can find the binaries
     # without requiring the user to restart their shell.

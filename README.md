@@ -51,7 +51,7 @@ pip install -e ".[vlm]"
 
 Note that the versions of both PaddleOCR and Torch installed by default are the CPU-only versions. If you want to install the GPU-enabled version of torch, it is advised to install the following version:
 ```bash
-pip install torch==2.9.1 torchvision==0.24.1 --index-url https://download.pytorch.org/whl/cu129
+pip install torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/cu129
 ```
 
 #### Option 2 - Install from PyPI
@@ -143,11 +143,11 @@ For llama.cpp + Pi together, see the compose examples at the top of [docker-comp
 
 #### Option 4 - Installation on AWS with CDK
 
-The repo contains a [CDK folder](https://github.com/seanpedrick-case/doc_redaction/tree/main/cdk), that contains all the files you need to setup and deploy to an AWS environment with CDK. The installation wizard is [cdk_install.py](https://github.com/seanpedrick-case/doc_redaction/blob/main/cdk/cdk_install.py), which provides a number of options to deploy the Document Redaction App to AWS for demonstration or production. More details on CDK deployment can be found in the [Installation Guide](https://seanpedrick-case.github.io/doc_redaction/src/installation_guide.html).
+The repo contains a [CDK folder](https://github.com/seanpedrick-case/doc_redaction/tree/main/cdk), that contains all the files you need to setup and deploy to an AWS environment with CDK. The installation wizard is [cdk_install.py](https://github.com/seanpedrick-case/doc_redaction/blob/main/cdk/cdk_install.py), which provides a number of options to deploy the Document Redaction App to AWS for demonstration or production. CDK-specific notes (including CloudFront CSP/CORS and the post-deploy refresh deploy) are in [cdk/README.md](cdk/README.md). More details on CDK deployment can be found in the [Installation Guide](https://seanpedrick-case.github.io/doc_redaction/src/installation_guide.html).
 
 ### 2. Install prerequisites: Tesseract and Poppler
 
-This application relies on two external tools for OCR (Tesseract) and PDF processing (Poppler). If not using a Docker-based deployment, you will need to install them on your system before proceeding. To run the Document Redaction app successfully, these tools need to be installed and either 1. added to PATH, or 2. be in a folder that is directly referenced in the config/app_config.env file with the variables TESSERACT_FOLDER and POPPLER_FOLDER (defined [here](https://github.com/seanpedrick-case/doc_redaction/blob/main/tools/config.py) if you want to see the code). The instructions below will guide you through diffferent ways to install these dependencies.
+This application relies on two external tools for OCR (Tesseract) and PDF processing (Poppler). If not using a Docker-based deployment, you will need to install them on your system before proceeding. To run the Document Redaction app successfully, these tools need to be installed and either 1. added to PATH, or 2. be in a folder that is directly referenced in the config/app_config.env file with the variables TESSERACT_FOLDER and POPPLER_FOLDER (defined [here](https://github.com/seanpedrick-case/doc_redaction/blob/main/tools/config.py) if you want to see the code). The instructions below will guide you through different ways to install these dependencies.
 
 ---
 

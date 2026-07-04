@@ -129,3 +129,128 @@ def test_create_fastapi_app_exposes_health():
 def test_gradio_head_html_sets_base_href():
     html = gradio_platform.gradio_head_html("pi-agent")
     assert "<base href='/pi-agent/'>" in html
+
+
+def test_mount_or_launch_subpath_sets_gradio_root_path(monkeypatch):
+    """Regression: subpath mounts must set Gradio ``root_path`` so file URLs include the prefix."""
+    import gradio as gr
+
+    monkeypatch.setattr(gradio_platform, "RUN_FASTAPI", True)
+    monkeypatch.setattr(gradio_platform, "COGNITO_AUTH", False)
+
+    with gr.Blocks() as demo:
+        gr.Markdown("hi")
+
+    app = gradio_platform.mount_or_launch(
+        demo,
+        root_path="/agent",
+        fastapi_root_path="/agent",
+    )
+    mounted = next(
+        route for route in app.routes if getattr(route, "path", None) == "/agent"
+    )
+    blocks = mounted.app.get_blocks()
+    assert blocks.root_path == "/agent"
+    assert blocks.custom_mount_path == "/agent"
+    assert mounted.app.root_path == "/agent"
+
+
+def test_mount_or_launch_subpath_serves_200_not_404(monkeypatch):
+    """Regression: mounting Gradio at /pi must not double-apply the prefix as FastAPI
+    root_path (which strips /pi before routing and returns 404 for GET /pi/)."""
+    import gradio as gr
+    from starlette.testclient import TestClient
+
+    monkeypatch.setattr(gradio_platform, "RUN_FASTAPI", True)
+    monkeypatch.setattr(gradio_platform, "COGNITO_AUTH", False)
+
+    with gr.Blocks() as demo:
+        gr.Markdown("hi")
+
+    app = gradio_platform.mount_or_launch(
+        demo,
+        root_path="/pi",
+        fastapi_root_path="/pi",
+    )
+    client = TestClient(app)
+    assert client.get("/pi/").status_code == 200
+    assert client.get("/pi/config").status_code == 200
+    # Health endpoint on the parent app is unaffected by the subpath mount.
+    assert client.get("/health").status_code == 200
+
+
+def _run_asgi(app, scope):
+    import asyncio
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(_message):
+        return None
+
+    asyncio.run(app(scope, receive, send))
+
+
+def test_forwarded_host_middleware_rewrites_host_and_scheme():
+    captured = {}
+
+    async def inner(scope, receive, send):
+        captured["scheme"] = scope["scheme"]
+        captured["host"] = dict(scope["headers"]).get(b"host")
+
+    mw = gradio_platform.ForwardedHostMiddleware(inner)
+    scope = {
+        "type": "http",
+        "scheme": "http",
+        "headers": [
+            (b"host", b"internal.ecs.on.aws"),
+            (b"x-forwarded-host", b"cf.example.net"),
+            (b"x-forwarded-proto", b"https"),
+        ],
+    }
+    _run_asgi(mw, scope)
+    assert captured["host"] == b"cf.example.net"
+    assert captured["scheme"] == "https"
+
+
+def test_forwarded_host_middleware_passthrough_without_header():
+    captured = {}
+
+    async def inner(scope, receive, send):
+        captured["host"] = dict(scope["headers"]).get(b"host")
+
+    mw = gradio_platform.ForwardedHostMiddleware(inner)
+    scope = {
+        "type": "http",
+        "scheme": "http",
+        "headers": [(b"host", b"internal.ecs.on.aws")],
+    }
+    _run_asgi(mw, scope)
+    assert captured["host"] == b"internal.ecs.on.aws"
+
+
+def test_forwarded_host_middleware_fixes_trailing_slash_redirect_target():
+    """The exact bug: GET /agent -> 307 /agent/ must redirect to the CloudFront host,
+    not the internal origin host (which is unreachable once locked to CloudFront)."""
+    from starlette.applications import Starlette
+    from starlette.responses import PlainTextResponse
+    from starlette.routing import Route
+    from starlette.testclient import TestClient
+
+    async def page(_request):
+        return PlainTextResponse("ok")
+
+    app = Starlette(routes=[Route("/agent/", page)])
+    app.add_middleware(gradio_platform.ForwardedHostMiddleware)
+    client = TestClient(app)
+    resp = client.get(
+        "/agent",
+        headers={
+            "host": "internal.ecs.on.aws",
+            "x-forwarded-host": "cf.example.net",
+            "x-forwarded-proto": "https",
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 307
+    assert resp.headers["location"] == "https://cf.example.net/agent/"

@@ -27,7 +27,7 @@ def test_normalize_pi_alb_path_prefix():
 
     assert normalize_pi_alb_path_prefix("/pi") == "/pi"
     assert normalize_pi_alb_path_prefix("pi") == "/pi"
-    assert normalize_pi_alb_path_prefix("") == "/pi"
+    assert normalize_pi_alb_path_prefix("") == "/agent"
 
 
 def test_pi_alb_path_patterns():
@@ -47,6 +47,35 @@ def test_format_pi_public_urls_path_on_cloudfront():
         use_https=True,
     )
     assert urls == ["https://d123.cloudfront.net/pi/"]
+
+
+def test_pi_express_container_env_sets_root_path():
+    from cdk_functions import build_pi_express_container_environment
+
+    env = build_pi_express_container_environment(
+        service_connect_discovery_name="redaction",
+        main_app_port=7860,
+        pi_gradio_port=7862,
+        pi_root_path="/agent",
+    )
+    # The agent app only needs AGENT_ROOT_PATH; the main-app ROOT_PATH /
+    # FASTAPI_ROOT_PATH vars must not be set on the agent container.
+    assert env["AGENT_ROOT_PATH"] == "/agent"
+    assert "ROOT_PATH" not in env
+    assert "FASTAPI_ROOT_PATH" not in env
+
+
+def test_pi_express_container_env_no_root_path_when_empty():
+    from cdk_functions import build_pi_express_container_environment
+
+    env = build_pi_express_container_environment(
+        service_connect_discovery_name="redaction",
+        main_app_port=7860,
+        pi_gradio_port=7862,
+    )
+    assert "AGENT_ROOT_PATH" not in env
+    assert "ROOT_PATH" not in env
+    assert "FASTAPI_ROOT_PATH" not in env
 
 
 def test_pi_listener_rule_count():

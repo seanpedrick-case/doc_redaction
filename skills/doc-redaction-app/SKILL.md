@@ -30,7 +30,7 @@ If the API returns **`[]`** with `"doc_redact completed"` but the server log sho
 
 ### 2f) AWS ECS / split-container Pi (no shared disk with doc_redaction)
 
-When `PI_DEPLOYMENT_PROFILE=aws-ecs` (or `DOC_REDACTION_GRADIO_URL` points at an internal service like `http://redaction:7860`), the Pi agent and doc_redaction run in **separate containers**.
+When `AGENT_DEPLOYMENT_PROFILE=aws-ecs` (or `DOC_REDACTION_GRADIO_URL` points at an internal service like `http://redaction:7860`), the Pi agent and doc_redaction run in **separate containers**.
 
 | Do | Don't |
 |----|-------|
@@ -43,7 +43,7 @@ When `PI_DEPLOYMENT_PROFILE=aws-ecs` (or `DOC_REDACTION_GRADIO_URL` points at an
 
 **Split-container verify playbook:** pre-apply checks run on **local copies** of the edited review CSV (it only exists in your session workspace until `/review_apply`). Post-apply checks use the **Agent API on the redaction service** with paths that already exist under `/home/user/app/output/...` on that server. See [`../doc-redaction-modifications/SKILL.md`](../doc-redaction-modifications/SKILL.md) § Split-container verify.
 
-Helper (synced into the workspace): `{PI_WORKSPACE_DIR}/.pi/helpers/remote_redaction.py`. When `predict` returns `[]`, retry once and parse the status message for paths — **do not** grep the Pi container filesystem.
+Helper (synced into the workspace): `{AGENT_WORKSPACE_DIR}/.pi/helpers/remote_redaction.py`. When `predict` returns `[]`, retry once and parse the status message for paths — **do not** grep the Pi container filesystem.
 
 ### 2c) `/doc_redact` vs `/redact_document` parameter names
 

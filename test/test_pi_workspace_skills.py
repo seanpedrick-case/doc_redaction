@@ -11,12 +11,9 @@ _PI_SRC = Path(__file__).resolve().parents[1] / "agent-redact" / "pi"
 if str(_PI_SRC) not in sys.path:
     sys.path.insert(0, str(_PI_SRC))
 
-if "gradio" not in sys.modules:
-    import types
+from pi_test_support import ensure_gradio_importable
 
-    _gr = types.ModuleType("gradio")
-    _gr.FileExplorer = lambda **kwargs: kwargs  # type: ignore[misc]
-    sys.modules["gradio"] = _gr
+ensure_gradio_importable()
 
 
 @pytest.fixture
@@ -33,10 +30,10 @@ def workspace_layout(tmp_path, monkeypatch):
 
     ws = tmp_path / "workspace"
     ws.mkdir()
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(ws))
-    monkeypatch.setenv("PI_WORKDIR", str(repo))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
-    monkeypatch.delenv("PI_SKILLS_RESYNC", raising=False)
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(ws))
+    monkeypatch.setenv("AGENT_WORKDIR", str(repo))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "true")
+    monkeypatch.delenv("AGENT_SKILLS_RESYNC", raising=False)
 
     import importlib
 
@@ -96,7 +93,7 @@ def test_resync_overwrites_readonly_skills(workspace_layout, monkeypatch):
     assert (dest / "config" / "app_config.env").read_text(encoding="utf-8") == "OLD=1\n"
 
     (config / "app_config.env").write_text("NEW=2\n", encoding="utf-8")
-    monkeypatch.setenv("PI_SKILLS_RESYNC", "true")
+    monkeypatch.setenv("AGENT_SKILLS_RESYNC", "true")
     dest = pws.sync_repo_skills_to_workspace()
     assert (dest / "config" / "app_config.env").read_text(encoding="utf-8") == "NEW=2\n"
 
@@ -118,7 +115,7 @@ def test_sync_skips_archive_attempts_and_large_blobs(workspace_layout):
 def test_hf_space_deployment_skill_written_before_readonly(
     workspace_layout, monkeypatch
 ):
-    monkeypatch.setenv("PI_DEPLOYMENT_PROFILE", "hf-space")
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "hf-space")
     monkeypatch.setenv("DOC_REDACTION_GRADIO_URL", "https://example-redaction.hf.space")
 
     import importlib

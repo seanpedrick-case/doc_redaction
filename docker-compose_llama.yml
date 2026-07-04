@@ -51,7 +51,7 @@ services:
       - --fit
       - "off"
       - --temp
-      - "0.7"
+      - "0.6"
       - --top-k
       - "20"
       - --top-p
@@ -122,7 +122,7 @@ services:
       - --fit
       - "off"
       - --temp
-      - "0.7"
+      - "0.6"
       - --top-k
       - "20"
       - --top-p
@@ -189,7 +189,7 @@ services:
       - --fit
       - "off"
       - --temp
-      - "0.7"
+      - "0.6"
       - --top-k
       - "20"
       - --top-p

@@ -12,6 +12,7 @@ import json
 import os
 import re
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 import boto3
@@ -55,8 +56,10 @@ _CONTAINER_REGISTER_OMIT_KEYS = frozenset(
 )
 
 
-def start_codebuild_build(project_name: str, aws_region: str = AWS_REGION) -> None:
-    """Start an existing CodeBuild project build."""
+def start_codebuild_build(
+    project_name: str, aws_region: str = AWS_REGION
+) -> Optional[str]:
+    """Start an existing CodeBuild project build. Returns the build ID, or None on failure."""
     client = boto3.client("codebuild", region_name=aws_region)
 
     try:
@@ -69,10 +72,154 @@ def start_codebuild_build(project_name: str, aws_region: str = AWS_REGION) -> No
             f"https://{aws_region}.console.aws.amazon.com/codesuite/codebuild/projects/"
             f"{project_name}/build/{build_id.split(':')[-1]}/detail"
         )
+        return build_id
     except client.exceptions.ResourceNotFoundException:
         print(f"Error: Project '{project_name}' not found in region '{aws_region}'.")
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
+    return None
+
+
+_CODEBUILD_TERMINAL_STATUSES = frozenset(
+    {"SUCCEEDED", "FAILED", "FAULT", "STOPPED", "TIMED_OUT"}
+)
+
+
+def wait_for_codebuild_build(
+    build_id: str,
+    *,
+    aws_region: str = AWS_REGION,
+    poll_interval_sec: int = 15,
+    timeout_sec: int = 3600,
+) -> bool:
+    """Poll a CodeBuild build until it finishes. Returns True if it succeeded."""
+    client = boto3.client("codebuild", region_name=aws_region)
+    deadline = time.time() + timeout_sec
+    short_id = build_id.split(":")[-1]
+
+    while time.time() < deadline:
+        builds = client.batch_get_builds(ids=[build_id]).get("builds") or []
+        if not builds:
+            print(f"  CodeBuild build {short_id} not found.")
+            return False
+        status = builds[0]["buildStatus"]
+        print(f"  CodeBuild {short_id}: {status}")
+        if status in _CODEBUILD_TERMINAL_STATUSES:
+            return status == "SUCCEEDED"
+        time.sleep(poll_interval_sec)
+
+    print(f"  Timed out waiting for CodeBuild build {short_id}.")
+    return False
+
+
+def get_latest_codebuild_build_id(
+    project_name: str,
+    *,
+    aws_region: str = AWS_REGION,
+) -> Optional[str]:
+    """Return the most recent build ID for a CodeBuild project, if any."""
+    client = boto3.client("codebuild", region_name=aws_region)
+    try:
+        resp = client.list_builds_for_project(
+            projectName=project_name,
+            sortOrder="DESCENDING",
+        )
+        ids = resp.get("ids") or []
+        return ids[0] if ids else None
+    except client.exceptions.ResourceNotFoundException:
+        return None
+
+
+def ecr_image_with_tag_exists(
+    repository_name: str,
+    tag: str = "latest",
+    *,
+    aws_region: str = AWS_REGION,
+) -> bool:
+    """Return True when the ECR repository has an image with the given tag."""
+    client = boto3.client("ecr", region_name=aws_region)
+    try:
+        resp = client.describe_images(
+            repositoryName=repository_name,
+            imageIds=[{"imageTag": tag}],
+        )
+        return bool(resp.get("imageDetails"))
+    except client.exceptions.RepositoryNotFoundException:
+        return False
+    except Exception as exc:
+        if exc.__class__.__name__ == "ImageNotFoundException":
+            return False
+        raise
+
+
+def wait_for_agentcore_ecr_image(
+    *,
+    repository_name: str,
+    codebuild_project: str,
+    build_id: Optional[str] = None,
+    aws_region: str = AWS_REGION,
+    timeout_sec: int = 3600,
+) -> bool:
+    """
+    Wait for the AgentCore runtime image in ECR.
+
+    If the image is not present yet, polls the given (or latest) CodeBuild build
+    until it succeeds, then re-checks ECR.
+    """
+    if ecr_image_with_tag_exists(repository_name, aws_region=aws_region):
+        print(f"  AgentCore ECR image already present in {repository_name}:latest")
+        return True
+
+    resolved_build_id = build_id or get_latest_codebuild_build_id(
+        codebuild_project,
+        aws_region=aws_region,
+    )
+    if not resolved_build_id:
+        print(
+            f"  No CodeBuild history for {codebuild_project}; "
+            "cannot wait for AgentCore image."
+        )
+        return False
+
+    print(f"  Waiting for AgentCore CodeBuild ({codebuild_project})...")
+    if not wait_for_codebuild_build(
+        resolved_build_id,
+        aws_region=aws_region,
+        timeout_sec=timeout_sec,
+    ):
+        return False
+
+    ready = ecr_image_with_tag_exists(repository_name, aws_region=aws_region)
+    if not ready:
+        print(f"  CodeBuild finished but {repository_name}:latest is not in ECR yet.")
+    return ready
+
+
+def resolve_agent_env_path(override: Optional[Path], base_dir: Path) -> Path:
+    """
+    Resolve the agent config file, preferring ``agent.env`` over legacy ``pi_agent.env``.
+
+    Returns *override* when provided. Otherwise searches ``<base_dir>/config`` first
+    (the CDK deploy location — ``cdk/config/agent.env``), then ``<base_dir>/../config``
+    (repo-root ``config/`` for non-CDK layouts), preferring ``agent.env`` over the
+    legacy ``pi_agent.env`` in each. If none exist, returns the primary
+    ``<base_dir>/config/agent.env`` so callers can report/create it.
+    """
+    if override is not None:
+        return override
+    search_dirs: List[Path] = []
+    for candidate in (base_dir / "config", base_dir.parent / "config"):
+        if candidate not in search_dirs:
+            search_dirs.append(candidate)
+    for directory in search_dirs:
+        agent_env = directory / "agent.env"
+        if agent_env.is_file():
+            return agent_env
+    for directory in search_dirs:
+        legacy = directory / "pi_agent.env"
+        if legacy.is_file():
+            return legacy
+    return search_dirs[0] / "agent.env"
 
 
 def upload_file_to_s3(
@@ -1128,6 +1275,640 @@ def get_stack_output(
     return None
 
 
+def resolve_cloudfront_origin_prefix_list_id(
+    region: str,
+    fallback: Optional[str] = None,
+) -> Optional[str]:
+    """Resolve the region's CloudFront origin-facing managed prefix list id.
+
+    The managed prefix list ``com.amazonaws.global.cloudfront.origin-facing`` has a
+    different id per region, so it is resolved dynamically. Falls back to the supplied
+    value (e.g. ``CLOUDFRONT_PREFIX_LIST_ID``) if the lookup fails.
+    """
+    ec2 = boto3.client("ec2", region_name=region)
+    try:
+        response = ec2.describe_managed_prefix_lists(
+            Filters=[
+                {
+                    "Name": "prefix-list-name",
+                    "Values": ["com.amazonaws.global.cloudfront.origin-facing"],
+                }
+            ]
+        )
+        for prefix_list in response.get("PrefixLists", []):
+            pl_id = prefix_list.get("PrefixListId")
+            if pl_id:
+                return pl_id
+    except Exception as exc:  # pragma: no cover - network/permission dependent
+        print(f"  Warning: could not resolve CloudFront prefix list: {exc}")
+    return fallback
+
+
+# Service Quotas: "Inbound or outbound rules per security group" (Amazon VPC).
+_SG_RULES_QUOTA_SERVICE_CODE = "vpc"
+_SG_RULES_QUOTA_CODE = "L-0EA8095F"
+
+
+def _get_managed_prefix_list_max_entries(
+    ec2_client: Any,
+    prefix_list_id: str,
+) -> Optional[int]:
+    """MaxEntries for a managed prefix list (the rule-slot cost of referencing it)."""
+    try:
+        response = ec2_client.describe_managed_prefix_lists(
+            PrefixListIds=[prefix_list_id]
+        )
+        for prefix_list in response.get("PrefixLists", []):
+            max_entries = prefix_list.get("MaxEntries")
+            if max_entries is not None:
+                return int(max_entries)
+    except Exception as exc:  # pragma: no cover - network/permission dependent
+        print(f"  Warning: could not read prefix list {prefix_list_id} size: {exc}")
+    return None
+
+
+def get_security_group_rules_quota(region: str) -> Optional[float]:
+    """Current 'Inbound or outbound rules per security group' quota, or None."""
+    try:
+        sq = boto3.client("service-quotas", region_name=region)
+        try:
+            resp = sq.get_service_quota(
+                ServiceCode=_SG_RULES_QUOTA_SERVICE_CODE,
+                QuotaCode=_SG_RULES_QUOTA_CODE,
+            )
+        except Exception:
+            resp = sq.get_aws_default_service_quota(
+                ServiceCode=_SG_RULES_QUOTA_SERVICE_CODE,
+                QuotaCode=_SG_RULES_QUOTA_CODE,
+            )
+        value = resp.get("Quota", {}).get("Value")
+        return float(value) if value is not None else None
+    except Exception as exc:  # pragma: no cover - network/permission dependent
+        print(f"  Warning: could not read security-group rules quota: {exc}")
+        return None
+
+
+def request_security_group_rules_quota_increase(
+    region: str,
+    desired_value: int,
+) -> bool:
+    """Request a Service Quotas increase for SG rules. Returns True if submitted.
+
+    The increase is not effective immediately (AWS may auto-approve or require review);
+    re-run the lockdown once it is approved.
+    """
+    try:
+        sq = boto3.client("service-quotas", region_name=region)
+        sq.request_service_quota_increase(
+            ServiceCode=_SG_RULES_QUOTA_SERVICE_CODE,
+            QuotaCode=_SG_RULES_QUOTA_CODE,
+            DesiredValue=float(desired_value),
+        )
+        print(
+            f"  Requested increase of 'Inbound or outbound rules per security group' "
+            f"to {desired_value} in {region}. This needs AWS approval; re-run the "
+            "lockdown once it is granted."
+        )
+        return True
+    except Exception as exc:  # pragma: no cover - network/permission dependent
+        msg = str(exc)
+        if "ResourceAlreadyExists" in msg or "DependencyAccessDenied" in msg:
+            print(
+                "  Note: a quota increase request may already be open, or Service "
+                f"Quotas access is restricted: {exc}"
+            )
+        else:
+            print(f"  Warning: could not request quota increase: {exc}")
+        return False
+
+
+def _collect_open_ingress(
+    permissions: List[Dict[str, Any]],
+) -> tuple[List[Dict[str, Any]], List[tuple]]:
+    """From SG IpPermissions, return (revoke_permissions, open_port_keys).
+
+    ``revoke_permissions`` is the set of IpPermissions to revoke (only the open
+    0.0.0.0/0 and ::/0 ranges), and ``open_port_keys`` are the distinct
+    ``(protocol, from_port, to_port)`` tuples that had open ingress.
+    """
+    revoke_permissions: List[Dict[str, Any]] = []
+    port_keys: List[tuple] = []
+    seen: set = set()
+    for perm in permissions:
+        proto = perm.get("IpProtocol")
+        from_port = perm.get("FromPort")
+        to_port = perm.get("ToPort")
+        open_v4 = [
+            {"CidrIp": r["CidrIp"]}
+            for r in perm.get("IpRanges", [])
+            if r.get("CidrIp") == "0.0.0.0/0"
+        ]
+        open_v6 = [
+            {"CidrIpv6": r["CidrIpv6"]}
+            for r in perm.get("Ipv6Ranges", [])
+            if r.get("CidrIpv6") == "::/0"
+        ]
+        if not (open_v4 or open_v6):
+            continue
+        revoke_perm: Dict[str, Any] = {"IpProtocol": proto}
+        if from_port is not None:
+            revoke_perm["FromPort"] = from_port
+        if to_port is not None:
+            revoke_perm["ToPort"] = to_port
+        if open_v4:
+            revoke_perm["IpRanges"] = open_v4
+        if open_v6:
+            revoke_perm["Ipv6Ranges"] = open_v6
+        revoke_permissions.append(revoke_perm)
+        port_key = (proto, from_port, to_port)
+        if port_key not in seen:
+            seen.add(port_key)
+            port_keys.append(port_key)
+    return revoke_permissions, port_keys
+
+
+def _get_load_balancer_for_security_group(
+    elbv2_client: Any,
+    sg_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Find the load balancer whose security groups include ``sg_id``."""
+    try:
+        paginator = elbv2_client.get_paginator("describe_load_balancers")
+        pages = paginator.paginate()
+    except Exception:  # pragma: no cover - some stubs lack paginators
+        pages = [elbv2_client.describe_load_balancers()]
+    for page in pages:
+        for lb in page.get("LoadBalancers", []):
+            if sg_id in (lb.get("SecurityGroups") or []):
+                return {
+                    "arn": lb.get("LoadBalancerArn"),
+                    "vpc_id": lb.get("VpcId"),
+                    "security_groups": list(lb.get("SecurityGroups") or []),
+                }
+    return None
+
+
+def _port_label(from_port: Optional[int], to_port: Optional[int]) -> str:
+    if from_port is None:
+        return "all"
+    if to_port is None or to_port == from_port:
+        return str(from_port)
+    return f"{from_port}-{to_port}"
+
+
+def _ensure_cloudfront_port_security_group(
+    ec2_client: Any,
+    *,
+    vpc_id: str,
+    prefix_list_id: str,
+    port_key: tuple,
+    base_sg_id: str,
+) -> str:
+    """Create (or reuse) a dedicated SG holding the CloudFront prefix list on one port.
+
+    Splitting the prefix list into one dedicated SG *per listener port* keeps each SG
+    under the per-SG rule quota (the prefix list counts as ~55 entries, and referencing
+    it on two ports in one SG would exceed the 60-rule default). Deterministic naming
+    makes re-runs idempotent. Raises ClientError if authorization fails for a non-
+    duplicate reason (e.g. a single port still exceeds the quota).
+    """
+    from botocore.exceptions import ClientError
+
+    proto, from_port, to_port = port_key
+    label = _port_label(from_port, to_port)
+    name = f"cf-lockdown-{base_sg_id}-{proto}-{label}"[:255]
+
+    existing = ec2_client.describe_security_groups(
+        Filters=[
+            {"Name": "group-name", "Values": [name]},
+            {"Name": "vpc-id", "Values": [vpc_id]},
+        ]
+    ).get("SecurityGroups", [])
+    if existing:
+        cf_sg_id = existing[0]["GroupId"]
+    else:
+        created = ec2_client.create_security_group(
+            GroupName=name,
+            Description=(
+                f"CloudFront origin-facing ingress {proto}/{label} for {base_sg_id}"
+            )[:255],
+            VpcId=vpc_id,
+            TagSpecifications=[
+                {
+                    "ResourceType": "security-group",
+                    "Tags": [
+                        {"Key": "Name", "Value": name},
+                        {
+                            "Key": "doc-redaction:cloudfront-lockdown",
+                            "Value": base_sg_id,
+                        },
+                    ],
+                }
+            ],
+        )
+        cf_sg_id = created["GroupId"]
+
+    perm: Dict[str, Any] = {"IpProtocol": proto}
+    if from_port is not None:
+        perm["FromPort"] = from_port
+    if to_port is not None:
+        perm["ToPort"] = to_port
+    perm["PrefixListIds"] = [
+        {"PrefixListId": prefix_list_id, "Description": "CloudFront origin-facing"}
+    ]
+    try:
+        ec2_client.authorize_security_group_ingress(
+            GroupId=cf_sg_id, IpPermissions=[perm]
+        )
+    except ClientError as exc:
+        if "InvalidPermission.Duplicate" not in str(exc):
+            raise
+    return cf_sg_id
+
+
+def _restrict_single_alb_to_cloudfront_split(
+    ec2_client: Any,
+    elbv2_client: Any,
+    sg_id: str,
+    prefix_list_id: str,
+) -> str:
+    """Lock an ALB to CloudFront by attaching dedicated per-port CloudFront SGs.
+
+    Rather than stuffing the CloudFront prefix list into the ECS-managed ALB SG (which
+    overflows the per-SG rule quota once the ~55-entry list is referenced on multiple
+    ports), this creates one dedicated SG per open listener port containing only the
+    CloudFront prefix list, attaches them to the load balancer alongside the existing
+    SGs, then revokes the open internet ingress from the managed SG. The ALB's effective
+    ingress is the union of all attached SGs, so there is no downtime window: CloudFront
+    access is added *before* open access is removed.
+
+    Returns ``"ok"``, ``"quota"`` (a single port still exceeds the quota),
+    ``"error"``, or ``"noop"``.
+    """
+    from botocore.exceptions import ClientError
+
+    lb = _get_load_balancer_for_security_group(elbv2_client, sg_id)
+    if not lb or not lb.get("arn"):
+        print(
+            f"  Warning: no load balancer found using SG {sg_id}; cannot attach "
+            "dedicated CloudFront security groups."
+        )
+        return "error"
+
+    try:
+        groups = ec2_client.describe_security_groups(GroupIds=[sg_id]).get(
+            "SecurityGroups", []
+        )
+    except ClientError as exc:
+        print(f"  Warning: cannot describe SG {sg_id}: {exc}")
+        return "error"
+    if not groups:
+        print(f"  SG {sg_id} not found; skipping.")
+        return "noop"
+
+    vpc_id = groups[0].get("VpcId") or lb.get("vpc_id")
+    if not vpc_id:
+        print(f"  Warning: could not determine VPC for SG {sg_id}; skipping.")
+        return "error"
+
+    revoke_permissions, port_keys = _collect_open_ingress(
+        groups[0].get("IpPermissions", [])
+    )
+    extra_attached = [s for s in lb["security_groups"] if s != sg_id]
+    if not port_keys:
+        if extra_attached:
+            print(
+                f"  SG {sg_id}: already locked down (CloudFront SG(s) attached, no "
+                "open internet ingress)."
+            )
+            return "noop"
+        port_keys = [("tcp", 80, 80), ("tcp", 443, 443)]
+        print(
+            f"  SG {sg_id}: no open ingress detected; defaulting CloudFront SGs to "
+            "tcp 80 and 443."
+        )
+
+    cf_sg_ids: List[str] = []
+    try:
+        for port_key in port_keys:
+            cf_sg_ids.append(
+                _ensure_cloudfront_port_security_group(
+                    ec2_client,
+                    vpc_id=vpc_id,
+                    prefix_list_id=prefix_list_id,
+                    port_key=port_key,
+                    base_sg_id=sg_id,
+                )
+            )
+    except ClientError as exc:
+        if "RulesPerSecurityGroupLimitExceeded" in str(exc):
+            max_entries = _get_managed_prefix_list_max_entries(
+                ec2_client, prefix_list_id
+            )
+            size = f" (~{max_entries} entries)" if max_entries else ""
+            print(
+                f"  Warning: the CloudFront prefix list{size} does not fit even a "
+                "single dedicated security group. Raise the 'Inbound or outbound rules "
+                "per security group' quota (Service Quotas > VPC, L-0EA8095F), or switch "
+                "to enumerated CIDR ranges."
+            )
+            return "quota"
+        print(
+            f"  Warning: could not create CloudFront security group for {sg_id}: {exc}"
+        )
+        return "error"
+
+    desired = list(dict.fromkeys(lb["security_groups"] + cf_sg_ids))
+    try:
+        elbv2_client.set_security_groups(
+            LoadBalancerArn=lb["arn"], SecurityGroups=desired
+        )
+        print(
+            f"  LB for {sg_id}: attached CloudFront SG(s) {', '.join(cf_sg_ids)} "
+            f"({len(port_keys)} port(s))."
+        )
+    except ClientError as exc:
+        print(
+            f"  Warning: could not attach CloudFront SG(s) to the load balancer "
+            f"({lb['arn']}): {exc}"
+        )
+        return "error"
+
+    if revoke_permissions:
+        try:
+            ec2_client.revoke_security_group_ingress(
+                GroupId=sg_id, IpPermissions=revoke_permissions
+            )
+            print(
+                f"  SG {sg_id}: revoked open internet ingress (CloudFront SGs now gate "
+                "access)."
+            )
+        except ClientError as exc:
+            if "InvalidPermission.NotFound" not in str(exc):
+                print(f"  Warning: could not revoke open ingress on {sg_id}: {exc}")
+                return "error"
+    return "ok"
+
+
+def _restrict_single_alb_sg_to_cloudfront(
+    ec2_client: Any,
+    sg_id: str,
+    prefix_list_id: str,
+) -> str:
+    """Replace open (0.0.0.0/0, ::/0) ingress on ``sg_id`` with the CloudFront prefix list.
+
+    The CloudFront managed prefix list expands to ~55 entries, each counting toward the
+    per-SG rule quota (default 60). To avoid ``RulesPerSecurityGroupLimitExceeded``, the
+    open internet rules are revoked **first** (freeing capacity), then the prefix-list
+    rule is authorized. If the authorize still fails, the open rules are restored so the
+    ALB is never left unreachable. There is a brief window between revoke and authorize
+    where the ALB rejects all ingress (safe fail-closed; this runs during initial deploy
+    while the app is still building). Idempotent: re-running is a no-op once locked down.
+
+    Returns a status string: ``"ok"``, ``"quota"`` (rule quota too small),
+    ``"error"``, or ``"noop"``.
+    """
+    from botocore.exceptions import ClientError
+
+    try:
+        response = ec2_client.describe_security_groups(GroupIds=[sg_id])
+    except ClientError as exc:
+        print(f"  Warning: cannot describe SG {sg_id}: {exc}")
+        return "error"
+
+    groups = response.get("SecurityGroups", [])
+    if not groups:
+        print(f"  SG {sg_id} not found; skipping.")
+        return "noop"
+
+    permissions = groups[0].get("IpPermissions", [])
+    revoke_permissions: List[Dict[str, Any]] = []
+    authorize_permissions: List[Dict[str, Any]] = []
+    preexisting_prefix_ports = set()
+    queued_prefix_ports = set()
+
+    for perm in permissions:
+        proto = perm.get("IpProtocol")
+        from_port = perm.get("FromPort")
+        to_port = perm.get("ToPort")
+        port_key = (proto, from_port, to_port)
+
+        for pl in perm.get("PrefixListIds", []):
+            if pl.get("PrefixListId") == prefix_list_id:
+                preexisting_prefix_ports.add(port_key)
+
+        open_v4 = [
+            {"CidrIp": r["CidrIp"]}
+            for r in perm.get("IpRanges", [])
+            if r.get("CidrIp") == "0.0.0.0/0"
+        ]
+        open_v6 = [
+            {"CidrIpv6": r["CidrIpv6"]}
+            for r in perm.get("Ipv6Ranges", [])
+            if r.get("CidrIpv6") == "::/0"
+        ]
+        if not (open_v4 or open_v6):
+            continue
+
+        revoke_perm: Dict[str, Any] = {"IpProtocol": proto}
+        if from_port is not None:
+            revoke_perm["FromPort"] = from_port
+        if to_port is not None:
+            revoke_perm["ToPort"] = to_port
+        if open_v4:
+            revoke_perm["IpRanges"] = open_v4
+        if open_v6:
+            revoke_perm["Ipv6Ranges"] = open_v6
+        revoke_permissions.append(revoke_perm)
+
+        if (
+            port_key not in preexisting_prefix_ports
+            and port_key not in queued_prefix_ports
+        ):
+            auth_perm: Dict[str, Any] = {"IpProtocol": proto}
+            if from_port is not None:
+                auth_perm["FromPort"] = from_port
+            if to_port is not None:
+                auth_perm["ToPort"] = to_port
+            auth_perm["PrefixListIds"] = [
+                {
+                    "PrefixListId": prefix_list_id,
+                    "Description": "CloudFront origin-facing",
+                }
+            ]
+            authorize_permissions.append(auth_perm)
+            queued_prefix_ports.add(port_key)
+
+    if not revoke_permissions and not authorize_permissions:
+        print(f"  SG {sg_id}: already restricted to CloudFront (no change needed).")
+        return "noop"
+
+    # Revoke the open internet ingress FIRST to free rule-quota capacity for the
+    # CloudFront prefix list (which expands to ~55 rule entries).
+    revoked_open = False
+    if revoke_permissions:
+        try:
+            ec2_client.revoke_security_group_ingress(
+                GroupId=sg_id, IpPermissions=revoke_permissions
+            )
+            revoked_open = True
+            print(f"  SG {sg_id}: revoked open internet ingress.")
+        except ClientError as exc:
+            if "InvalidPermission.NotFound" in str(exc):
+                revoked_open = True
+                print(f"  SG {sg_id}: open ingress already removed.")
+            else:
+                print(f"  Warning: could not revoke open ingress on {sg_id}: {exc}")
+                return "error"
+
+    if not authorize_permissions:
+        print(f"  SG {sg_id}: CloudFront prefix list already present.")
+        return "ok"
+
+    try:
+        ec2_client.authorize_security_group_ingress(
+            GroupId=sg_id, IpPermissions=authorize_permissions
+        )
+        print(f"  SG {sg_id}: authorized CloudFront prefix list {prefix_list_id}.")
+        return "ok"
+    except ClientError as exc:
+        if "InvalidPermission.Duplicate" in str(exc):
+            print(f"  SG {sg_id}: CloudFront prefix list rule already present.")
+            return "ok"
+
+        # Restore open access so the ALB is not left unreachable, then advise.
+        if revoked_open and revoke_permissions:
+            try:
+                ec2_client.authorize_security_group_ingress(
+                    GroupId=sg_id, IpPermissions=revoke_permissions
+                )
+                print(
+                    f"  SG {sg_id}: restored open internet ingress after failed lockdown."
+                )
+            except ClientError as restore_exc:
+                print(
+                    f"  Warning: could not restore open ingress on {sg_id} "
+                    f"(SG may now reject traffic): {restore_exc}"
+                )
+        if "RulesPerSecurityGroupLimitExceeded" in str(exc):
+            max_entries = _get_managed_prefix_list_max_entries(
+                ec2_client, prefix_list_id
+            )
+            needed = (max_entries + 10) if max_entries else None
+            size_note = (
+                f"The CloudFront prefix list needs up to {max_entries} rule slots"
+                if max_entries
+                else "The CloudFront prefix list is larger than the per-SG rule quota"
+            )
+            target = (
+                f"at least {needed}" if needed else "above the prefix list size (~60+)"
+            )
+            print(
+                f"  Warning: SG {sg_id} cannot fit the CloudFront prefix list within the "
+                f"per-security-group rule quota. {size_note}. Raise the 'Inbound or "
+                f"outbound rules per security group' quota (Service Quotas > VPC, "
+                f"L-0EA8095F) to {target}, then re-run the lockdown; or set "
+                "USE_ECS_EXPRESS_MODE=False to use an ALB you fully control."
+            )
+            return "quota"
+        print(f"  Warning: could not authorize prefix list on {sg_id}: {exc}")
+        return "error"
+
+
+def restrict_express_albs_to_cloudfront(
+    stack_name: str = "RedactionStack",
+    region: Optional[str] = None,
+    *,
+    prefix_list_id: Optional[str] = None,
+    output_keys: Optional[List[str]] = None,
+    auto_raise_quota: bool = False,
+) -> List[str]:
+    """Lock the Express-managed ALB security group(s) down to CloudFront only.
+
+    Discovers the Express managed ALB security group ids from stack outputs
+    (``AlbSecurityGroupIdOutput`` for the main service, ``AgenticAlbSecurityGroupIdOutput``
+    for the agentic service). For each, it creates one dedicated security group *per open
+    listener port* containing only the CloudFront origin-facing managed prefix list,
+    attaches those SGs to the load balancer, and revokes the open internet ingress from
+    the managed SG. Splitting by port keeps every SG within the per-SG rule quota
+    (default 60) without any quota increase, since the prefix list counts as ~55 entries.
+
+    ``auto_raise_quota`` is only a last-resort fallback: it is used if even a single
+    dedicated per-port SG cannot fit the prefix list (very unlikely). It requests a
+    Service Quotas increase (needs AWS approval; re-run once granted).
+
+    NOTE: The Express ALB and its security-group membership are owned by ECS Express
+    Mode. If ECS reconciles the load balancer it may revert these attachments; re-run
+    the quickstart to re-apply, or use ``USE_ECS_EXPRESS_MODE=False`` for full control.
+
+    Returns the list of security group ids that were processed.
+    """
+    region = region or AWS_REGION
+    if prefix_list_id is None:
+        from cdk_config import CLOUDFRONT_PREFIX_LIST_ID
+
+        prefix_list_id = resolve_cloudfront_origin_prefix_list_id(
+            region, fallback=CLOUDFRONT_PREFIX_LIST_ID
+        )
+    if not prefix_list_id:
+        print(
+            "Skipping Express ALB CloudFront lockdown: no CloudFront prefix list id "
+            "resolved (set CLOUDFRONT_PREFIX_LIST_ID)."
+        )
+        return []
+
+    keys = output_keys or [
+        "AlbSecurityGroupIdOutput",
+        "AgenticAlbSecurityGroupIdOutput",
+    ]
+    sg_ids: List[str] = []
+    for key in keys:
+        value = (get_stack_output(stack_name, key, region) or "").strip()
+        if value.startswith("sg-") and value not in sg_ids:
+            sg_ids.append(value)
+
+    if not sg_ids:
+        print(
+            "Skipping Express ALB CloudFront lockdown: no ALB security group ids "
+            f"found in stack outputs {keys}."
+        )
+        return []
+
+    print(
+        f"Restricting Express ALB security group(s) to CloudFront "
+        f"(prefix list {prefix_list_id}): {', '.join(sg_ids)}"
+    )
+    print(
+        "  Using dedicated per-port CloudFront security groups (attached to the load "
+        "balancer) to stay within the per-SG rule quota without any quota increase."
+    )
+    print(
+        "  NOTE: ECS Express owns the load balancer's security-group membership; if it "
+        "reconciles the ALB these attachments may be reverted — re-run this if the "
+        "lockdown is lost, or set USE_ECS_EXPRESS_MODE=False for an ALB you fully own."
+    )
+    ec2_client = boto3.client("ec2", region_name=region)
+    elbv2_client = boto3.client("elbv2", region_name=region)
+    hit_quota_limit = False
+    for sg_id in sg_ids:
+        status = _restrict_single_alb_to_cloudfront_split(
+            ec2_client, elbv2_client, sg_id, prefix_list_id
+        )
+        if status == "quota":
+            hit_quota_limit = True
+
+    if hit_quota_limit and auto_raise_quota:
+        max_entries = _get_managed_prefix_list_max_entries(ec2_client, prefix_list_id)
+        current_quota = get_security_group_rules_quota(region)
+        desired = (max_entries + 10) if max_entries else 100
+        if current_quota is not None:
+            print(f"  Current 'rules per security group' quota: {int(current_quota)}.")
+            desired = max(desired, int(current_quota) + 10)
+        request_security_group_rules_quota_increase(region, desired)
+
+    return sg_ids
+
+
 def print_express_mode_next_steps(
     values: Dict[str, str],
     *,
@@ -1139,8 +1920,16 @@ def print_express_mode_next_steps(
     from cdk_functions import format_express_pi_public_url
 
     aws_region = region or values.get("AWS_REGION") or AWS_REGION
+    use_cloudfront = values.get("USE_CLOUDFRONT") == "True"
+    magic_link = values.get("CLOUDFRONT_AUTH_MODE") == "magic-link"
 
     main_raw = (values.get("ECS_EXPRESS_COGNITO_REDIRECT_BASE") or "").strip()
+    if use_cloudfront:
+        cf_domain = (
+            get_stack_output(stack_name, "CloudFrontDistributionURL", aws_region) or ""
+        )
+        if cf_domain:
+            main_raw = f"https://{cf_domain.strip()}"
     if not main_raw:
         main_raw = (
             get_stack_output(stack_name, "ExpressServiceEndpoint", aws_region) or ""
@@ -1149,14 +1938,41 @@ def print_express_mode_next_steps(
 
     print("\nDone. Next steps:")
     print("  - Wait 10 minutes for app deployment to finish.")
-    pi_express = values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True"
-    if pi_express:
+    if magic_link:
+        login_url = get_stack_output(stack_name, "RedactionLoginUrl", aws_region) or ""
+        if login_url:
+            print(
+                "  - Open RedactionLoginUrl from stack outputs once (sets a 7-day cookie), "
+                "then use RedactionUrl for normal browsing."
+            )
+            print(f"  - RedactionLoginUrl: {login_url}")
+        else:
+            print(
+                "  - Magic-link auth: see RedactionLoginUrl and RedactionAuthToken stack outputs."
+            )
+        prefix = (values.get("AGENT_ALB_PATH_PREFIX") or "/agent").strip()
+        if not prefix.startswith("/"):
+            prefix = f"/{prefix}"
+        if values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True":
+            agent_login_url = (
+                get_stack_output(stack_name, "AgentRedactionLoginUrl", aws_region) or ""
+            )
+            if agent_login_url:
+                print(
+                    "  - Open AgentRedactionLoginUrl to unlock and open the agent (Pi) "
+                    "app directly (7-day cookie)."
+                )
+                print(f"  - AgentRedactionLoginUrl: {agent_login_url}")
+            elif main_url:
+                print(f"  - Agentic UI (after unlock): {main_url.rstrip('/')}{prefix}/")
+    elif values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True":
         print(
-            "  - Register a Cognito user in AWS Console, change password at the login page URL, "
-            " and sign in at the Pi agent URL below. The main redaction backend runs without "
-            " in-app login so the Pi agent can call it over Service Connect. You can disable "
-            " Cognito authorisation by setting COGNITO_AUTH to False in the ECS task definition / "
-            " ECS service options."
+            "- Register a Cognito user in AWS Console, change password at the login page URL "
+            "(available in the Cognito AWS console -> App Clients -> Login pages -> View login page "
+            "and sign in at the agentic redaction URL below. The main redaction backend runs without "
+            "in-app login so the agentic app can call it over Service Connect. You can disable "
+            "Cognito authorisation by setting COGNITO_AUTH to False in the ECS task definition / "
+            "ECS service options."
         )
     else:
         print(
@@ -1166,23 +1982,504 @@ def print_express_mode_next_steps(
             "False in the ECS task definition / ECS service options."
         )
     if main_url:
-        print(f"  - The main redaction app can be accessed at {main_url}")
+        label = "CloudFront URL" if use_cloudfront else "main redaction app"
+        print(f"  - The {label} can be accessed at {main_url}")
+    elif use_cloudfront:
+        print("  - App URL: see CloudFrontDistributionURL stack output")
     else:
         print("  - The main redaction app URL: see ExpressServiceEndpoint stack output")
 
-    if values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True":
-        pi_raw = get_stack_output(stack_name, "PiExpressEndpoint", aws_region) or ""
-        pi_url = (
-            format_express_pi_public_url(normalize_https_redirect_url(pi_raw))
-            if pi_raw
+    if values.get("ENABLE_PI_AGENT_EXPRESS_SERVICE") == "True" and not magic_link:
+        agentic_raw = (
+            get_stack_output(stack_name, "AgenticExpressEndpoint", aws_region) or ""
+        )
+        agentic_url = (
+            format_express_pi_public_url(normalize_https_redirect_url(agentic_raw))
+            if agentic_raw
             else ""
         )
-        if pi_url:
-            print(f"  - The Pi agentic redaction app can be accessed at {pi_url}")
+        if agentic_url:
+            print(f"  - The agentic redaction app can be accessed at {agentic_url}")
         else:
             print(
-                "  - The Pi agentic redaction app URL: see PiExpressEndpoint stack output"
+                "  - The agentic redaction app URL: see AgenticExpressEndpoint stack output"
             )
+
+
+def resolve_agentcore_backend_env(stack_name: str, aws_region: str) -> Dict[str, str]:
+    """Backend env for the AgentCore runtime: CloudFront (or Express) URL + magic-link token.
+
+    Returns a dict with ``DOC_REDACTION_GRADIO_URL`` and, when the backend is fronted by
+    CloudFront magic-link, ``DOC_REDACTION_AUTH_TOKEN`` (+ ``DOC_REDACTION_AUTH_COOKIE_NAME``
+    if non-default). Empty dict if no endpoint can be resolved.
+    """
+    from cdk_config import (
+        CLOUDFRONT_AUTH_MODE,
+        CLOUDFRONT_MAGIC_LINK_COOKIE_NAME,
+        USE_CLOUDFRONT,
+        normalize_https_redirect_url,
+    )
+
+    url = ""
+    via_cloudfront = False
+    if USE_CLOUDFRONT == "True":
+        cf_domain = get_stack_output(
+            stack_name, "CloudFrontDistributionURL", aws_region
+        )
+        if cf_domain:
+            url = normalize_https_redirect_url(f"https://{cf_domain.strip()}")
+            via_cloudfront = True
+    if not url:
+        endpoint = get_stack_output(stack_name, "ExpressServiceEndpoint", aws_region)
+        if not endpoint:
+            return {}
+        url = normalize_https_redirect_url(endpoint)
+
+    result: Dict[str, str] = {"DOC_REDACTION_GRADIO_URL": url}
+    if via_cloudfront and str(CLOUDFRONT_AUTH_MODE).strip().lower() == "magic-link":
+        token = get_stack_output(stack_name, "RedactionAuthToken", aws_region)
+        if token and token.strip():
+            result["DOC_REDACTION_AUTH_TOKEN"] = token.strip()
+            cookie_name = (CLOUDFRONT_MAGIC_LINK_COOKIE_NAME or "").strip()
+            if cookie_name and cookie_name != "doc-redaction-auth":
+                result["DOC_REDACTION_AUTH_COOKIE_NAME"] = cookie_name
+        else:
+            print(
+                "Warning: RedactionAuthToken output not found; AgentCore requests "
+                "through CloudFront magic-link will be blocked without the token."
+            )
+    return result
+
+
+def sync_pi_agent_doc_redaction_url_for_agentcore(
+    *,
+    stack_name: str = "RedactionStack",
+    region: Optional[str] = None,
+    pi_agent_env_path: Optional[Path] = None,
+    upload_and_recycle: bool = True,
+) -> Optional[str]:
+    """
+    Set ``config/agent.env`` ``DOC_REDACTION_GRADIO_URL`` to the CloudFront (or main
+    Express HTTPS) URL, plus the magic-link token when CloudFront magic-link is on.
+
+    AgentCore runtime tools cannot use ECS Service Connect DNS. When ``upload_and_recycle``
+    is set, the updated ``agent.env`` is uploaded to S3 and the Pi Express service is
+    recycled so its startup S3 overlay picks up the new backend URL + token.
+    """
+    from cdk_config import ENABLE_AGENTCORE_RUNTIME
+
+    if ENABLE_AGENTCORE_RUNTIME != "True":
+        return None
+    aws_region = region or AWS_REGION
+    updates = resolve_agentcore_backend_env(stack_name, aws_region)
+    if not updates:
+        print(
+            "Warning: ExpressServiceEndpoint / CloudFrontDistributionURL not found; "
+            "agent.env DOC_REDACTION_GRADIO_URL not updated for AgentCore."
+        )
+        return None
+    url = updates["DOC_REDACTION_GRADIO_URL"]
+    env_path = resolve_agent_env_path(
+        pi_agent_env_path, Path(__file__).resolve().parent
+    )
+    if not env_path.is_file():
+        print(f"Note: {env_path} not found; skipping AgentCore backend URL sync.")
+        return url
+
+    _patch_env_key_values(env_path, updates)
+    print(
+        f"Updated {env_path} DOC_REDACTION_GRADIO_URL for AgentCore: {url}"
+        + (
+            " (CloudFront + magic-link token)"
+            if "DOC_REDACTION_AUTH_TOKEN" in updates
+            else ""
+        )
+    )
+
+    if upload_and_recycle:
+        from cdk_config import (
+            CLUSTER_NAME,
+            ECS_PI_EXPRESS_SERVICE_NAME,
+            ENABLE_PI_AGENT_EXPRESS_SERVICE,
+            S3_LOG_CONFIG_BUCKET_NAME,
+        )
+
+        if S3_LOG_CONFIG_BUCKET_NAME:
+            upload_file_to_s3(
+                local_file_paths=str(env_path),
+                s3_key="",
+                s3_bucket=S3_LOG_CONFIG_BUCKET_NAME,
+            )
+        if ENABLE_PI_AGENT_EXPRESS_SERVICE == "True":
+            recycle_express_gateway_tasks(
+                CLUSTER_NAME,
+                ECS_PI_EXPRESS_SERVICE_NAME,
+                aws_region=aws_region,
+            )
+    return url
+
+
+def _patch_env_key_values(path: Union[str, Path], updates: Dict[str, str]) -> None:
+    """Merge key=value pairs into a dotenv-style file (creates keys if missing)."""
+    path = Path(path)
+    lines: List[str] = []
+    seen: set[str] = set()
+    if path.is_file():
+        lines = path.read_text(encoding="utf-8").splitlines()
+    out: List[str] = []
+    for line in lines:
+        if "=" in line and not line.lstrip().startswith("#"):
+            key = line.split("=", 1)[0].strip()
+            if key in updates:
+                out.append(f"{key}={updates[key]}")
+                seen.add(key)
+                continue
+        out.append(line)
+    for key, value in updates.items():
+        if key not in seen:
+            out.append(f"{key}={value}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(out) + ("\n" if out else ""), encoding="utf-8")
+
+
+def sync_agentcore_runtime_url_from_stack(
+    *,
+    stack_name: str = "RedactionStack",
+    region: Optional[str] = None,
+    pi_agent_env_path: Optional[Path] = None,
+    cdk_env_path: Optional[Path] = None,
+    recycle_agent_service: bool = True,
+) -> Optional[str]:
+    """
+    Read ``AgentCoreRuntimeArn`` from the stack, derive ``AGENTCORE_RUNTIME_URL``,
+    patch local env files, re-upload ``agent.env`` to S3, and recycle the agent
+    Express service so the new URL is picked up.
+    """
+    from cdk_config import (
+        CLUSTER_NAME,
+        ECS_PI_EXPRESS_SERVICE_NAME,
+        ENABLE_AGENTCORE_CDK_RUNTIME,
+        ENABLE_PI_AGENT_EXPRESS_SERVICE,
+        S3_LOG_CONFIG_BUCKET_NAME,
+    )
+    from cdk_functions import (
+        derive_agentcore_runtime_url,
+        normalize_agentcore_runtime_url,
+    )
+
+    if ENABLE_AGENTCORE_CDK_RUNTIME != "True":
+        return None
+
+    aws_region = region or AWS_REGION
+    runtime_arn = get_stack_output(stack_name, "AgentCoreRuntimeArn", aws_region)
+    if not runtime_arn:
+        print(
+            "Warning: AgentCoreRuntimeArn stack output not found; "
+            "AGENTCORE_RUNTIME_URL not updated."
+        )
+        return None
+
+    url = normalize_agentcore_runtime_url(
+        derive_agentcore_runtime_url(runtime_arn, aws_region)
+    )
+    if not url:
+        print("Warning: could not derive AGENTCORE_RUNTIME_URL from runtime ARN.")
+        return None
+
+    cdk_dir = Path(__file__).resolve().parent
+    pi_env = resolve_agent_env_path(pi_agent_env_path, cdk_dir)
+    cdk_env = cdk_env_path or (cdk_dir / "config" / "cdk_config.env")
+    updates = {
+        "AGENTCORE_RUNTIME_URL": url,
+        "AGENT_ORCHESTRATOR": "agentcore",
+        "ENABLE_AGENTCORE_RUNTIME": "True",
+    }
+    if pi_env.is_file() or pi_agent_env_path is not None:
+        _patch_env_key_values(pi_env, updates)
+        print(f"Updated {pi_env} AGENTCORE_RUNTIME_URL={url}")
+    if cdk_env.is_file() or cdk_env_path is not None:
+        _patch_env_key_values(
+            cdk_env,
+            {
+                **updates,
+                "ENABLE_AGENTCORE_CDK_RUNTIME": "True",
+            },
+        )
+        print(f"Updated {cdk_env} AGENTCORE_RUNTIME_URL={url}")
+
+    if pi_env.is_file() and S3_LOG_CONFIG_BUCKET_NAME:
+        upload_file_to_s3(
+            local_file_paths=str(pi_env),
+            s3_key="",
+            s3_bucket=S3_LOG_CONFIG_BUCKET_NAME,
+        )
+
+    if recycle_agent_service and ENABLE_PI_AGENT_EXPRESS_SERVICE == "True":
+        recycle_express_gateway_tasks(
+            CLUSTER_NAME,
+            ECS_PI_EXPRESS_SERVICE_NAME,
+            aws_region=aws_region,
+        )
+
+    return url
+
+
+def _sanitize_agentcore_runtime_name(raw: str) -> str:
+    """Coerce a name to the AgentCore pattern ``[a-zA-Z][a-zA-Z0-9_]{0,47}``.
+
+    Bedrock AgentCore runtime names allow only letters, digits and underscores
+    and must start with a letter (e.g. ``Demo-Redaction-RedactionAgent`` ->
+    ``Demo_Redaction_RedactionAgent``).
+    """
+    cleaned = re.sub(r"[^a-zA-Z0-9_]", "_", (raw or "").strip())
+    cleaned = cleaned.lstrip("0123456789_")
+    if not cleaned:
+        cleaned = "RedactionAgent"
+    return cleaned[:48]
+
+
+def _resolve_agentcore_execution_role_arn(
+    stack_name: str, aws_region: str
+) -> Optional[str]:
+    """Execution role ARN for the AgentCore runtime.
+
+    Prefers ``AGENTCORE_RUNTIME_ROLE_ARN`` from config; otherwise resolves the
+    stack-managed ``AgentCoreRuntimeExecutionRole`` from CloudFormation.
+    """
+    from cdk_config import AGENTCORE_RUNTIME_ROLE_ARN
+
+    external = (AGENTCORE_RUNTIME_ROLE_ARN or "").strip()
+    if external:
+        return external
+
+    try:
+        cfn = boto3.client("cloudformation", region_name=aws_region)
+        resources = cfn.describe_stack_resources(StackName=stack_name)["StackResources"]
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: could not read stack resources for {stack_name}: {exc}")
+        return None
+
+    role_name = next(
+        (
+            r["PhysicalResourceId"]
+            for r in resources
+            if r.get("ResourceType") == "AWS::IAM::Role"
+            and r.get("LogicalResourceId", "").startswith(
+                "AgentCoreRuntimeExecutionRole"
+            )
+        ),
+        None,
+    )
+    if not role_name:
+        print(
+            "Warning: AgentCoreRuntimeExecutionRole not found in "
+            f"{stack_name}. Deploy with AGENTCORE_CDK_DEPLOY=True first, or set "
+            "AGENTCORE_RUNTIME_ROLE_ARN in cdk_config.env."
+        )
+        return None
+
+    try:
+        iam = boto3.client("iam", region_name=aws_region)
+        return iam.get_role(RoleName=role_name)["Role"]["Arn"]
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: could not resolve ARN for role {role_name}: {exc}")
+        return None
+
+
+def _resolve_agentcore_container_uri(
+    repository_name: str, aws_region: str
+) -> Optional[str]:
+    """``<repo-uri>:latest`` for the AgentCore runtime image, if the repo exists."""
+    try:
+        ecr = boto3.client("ecr", region_name=aws_region)
+        repos = ecr.describe_repositories(repositoryNames=[repository_name])[
+            "repositories"
+        ]
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: could not resolve ECR repository '{repository_name}': {exc}")
+        return None
+    if not repos:
+        return None
+    return f"{repos[0]['repositoryUri']}:latest"
+
+
+def _find_existing_agentcore_runtime_arn(client, runtime_name: str) -> Optional[str]:
+    """Return the ARN of an existing AgentCore runtime with ``runtime_name``."""
+    try:
+        paginator = None
+        try:
+            paginator = client.get_paginator("list_agent_runtimes")
+        except Exception:  # noqa: BLE001 - not all botocore versions paginate
+            paginator = None
+        pages = paginator.paginate() if paginator else [client.list_agent_runtimes()]
+        for page in pages:
+            for rt in page.get("agentRuntimes", []) or []:
+                if rt.get("agentRuntimeName") == runtime_name:
+                    return rt.get("agentRuntimeArn")
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: could not list existing AgentCore runtimes: {exc}")
+    return None
+
+
+def create_agentcore_runtime_from_ecr(
+    *,
+    stack_name: str = "RedactionStack",
+    region: Optional[str] = None,
+    pi_agent_env_path: Optional[Path] = None,
+    cdk_env_path: Optional[Path] = None,
+    recycle_agent_service: bool = True,
+) -> Optional[str]:
+    """Create the Bedrock AgentCore runtime from an existing ECR image (no CDK).
+
+    This is the no-stack-update phase 2: it calls the bedrock-agentcore-control
+    API directly (mirroring the CDK ``CfnRuntime`` parameters), so it never runs
+    ``cdk deploy`` and cannot mutate/delete the RedactionStack's managed
+    resources. It then derives ``AGENTCORE_RUNTIME_URL``, patches the local env
+    files, re-uploads ``agent.env`` to S3, and recycles the agent Express
+    service. Idempotent: reuses an existing runtime of the same name.
+    """
+    from cdk_config import (
+        AGENTCORE_BEDROCK_MODEL,
+        AGENTCORE_NETWORK_MODE,
+        AGENTCORE_RUNTIME_NAME,
+        CLUSTER_NAME,
+        ECR_AGENTCORE_REPO_NAME,
+        ECS_PI_EXPRESS_SERVICE_NAME,
+        ENABLE_PI_AGENT_EXPRESS_SERVICE,
+        S3_LOG_CONFIG_BUCKET_NAME,
+    )
+    from cdk_functions import (
+        derive_agentcore_runtime_url,
+        normalize_agentcore_runtime_url,
+    )
+
+    aws_region = region or AWS_REGION
+    runtime_name = _sanitize_agentcore_runtime_name(
+        AGENTCORE_RUNTIME_NAME or "RedactionAgent"
+    )
+
+    container_uri = _resolve_agentcore_container_uri(
+        ECR_AGENTCORE_REPO_NAME, aws_region
+    )
+    if not container_uri:
+        print(
+            "AgentCore runtime image is not available in ECR yet "
+            f"({ECR_AGENTCORE_REPO_NAME}:latest). Build/push it first, then re-run."
+        )
+        return None
+
+    role_arn = _resolve_agentcore_execution_role_arn(stack_name, aws_region)
+    if not role_arn:
+        return None
+
+    try:
+        client = boto3.client("bedrock-agentcore-control", region_name=aws_region)
+    except Exception as exc:  # noqa: BLE001
+        print(
+            "Could not create a 'bedrock-agentcore-control' client "
+            f"(upgrade boto3?): {exc}"
+        )
+        return None
+
+    bedrock_model = (AGENTCORE_BEDROCK_MODEL or "anthropic.claude-sonnet-4-6").strip()
+    runtime_env_vars = {
+        "AGENT_DEFAULT_PROVIDER": "amazon-bedrock",
+        "AGENT_DEFAULT_MODEL": bedrock_model,
+        "AWS_REGION": aws_region,
+        "AWS_DEFAULT_REGION": aws_region,
+        "AGENT_WORKSPACE_DIR": "/tmp/agentcore-workspace",
+    }
+
+    runtime_arn = _find_existing_agentcore_runtime_arn(client, runtime_name)
+    if runtime_arn:
+        print(f"Reusing existing AgentCore runtime '{runtime_name}': {runtime_arn}")
+        print(
+            "  Note: an existing runtime's model is not changed here. To switch the "
+            f"Bedrock model (env AGENT_DEFAULT_MODEL='{bedrock_model}'), delete and "
+            "recreate the runtime."
+        )
+    else:
+        print(f"Creating AgentCore runtime '{runtime_name}' from {container_uri} ...")
+        print(f"  Bedrock model: {bedrock_model} (AGENT_DEFAULT_MODEL)")
+        try:
+            resp = client.create_agent_runtime(
+                agentRuntimeName=runtime_name,
+                agentRuntimeArtifact={
+                    "containerConfiguration": {"containerUri": container_uri}
+                },
+                roleArn=role_arn,
+                networkConfiguration={
+                    "networkMode": (AGENTCORE_NETWORK_MODE or "PUBLIC").upper()
+                },
+                environmentVariables=runtime_env_vars,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"Failed to create AgentCore runtime: {exc}")
+            return None
+        runtime_arn = resp.get("agentRuntimeArn")
+        if not runtime_arn:
+            print(
+                "create_agent_runtime returned no agentRuntimeArn; "
+                f"response keys: {sorted(resp.keys())}"
+            )
+            return None
+        print(f"Created AgentCore runtime: {runtime_arn}")
+
+    url = normalize_agentcore_runtime_url(
+        derive_agentcore_runtime_url(runtime_arn, aws_region)
+    )
+    if not url:
+        print("Warning: could not derive AGENTCORE_RUNTIME_URL from runtime ARN.")
+        return None
+
+    cdk_dir = Path(__file__).resolve().parent
+    pi_env = resolve_agent_env_path(pi_agent_env_path, cdk_dir)
+    cdk_env = cdk_env_path or (cdk_dir / "config" / "cdk_config.env")
+    updates = {
+        "AGENTCORE_RUNTIME_URL": url,
+        "AGENT_ORCHESTRATOR": "agentcore",
+        "ENABLE_AGENTCORE_RUNTIME": "True",
+    }
+    # Backend URL (CloudFront when enabled) + magic-link token for the runtime.
+    backend_env = resolve_agentcore_backend_env(stack_name, aws_region)
+    pi_updates = {**updates, **backend_env}
+    if pi_env.is_file() or pi_agent_env_path is not None:
+        _patch_env_key_values(pi_env, pi_updates)
+        print(f"Updated {pi_env} AGENTCORE_RUNTIME_URL={url}")
+        if backend_env.get("DOC_REDACTION_GRADIO_URL"):
+            print(
+                f"Updated {pi_env} DOC_REDACTION_GRADIO_URL="
+                f"{backend_env['DOC_REDACTION_GRADIO_URL']}"
+                + (
+                    " (+ magic-link token)"
+                    if "DOC_REDACTION_AUTH_TOKEN" in backend_env
+                    else ""
+                )
+            )
+    if cdk_env.is_file() or cdk_env_path is not None:
+        # Runtime is NOT CDK-managed here, so leave ENABLE_AGENTCORE_CDK_RUNTIME as-is.
+        _patch_env_key_values(cdk_env, updates)
+        print(f"Updated {cdk_env} AGENTCORE_RUNTIME_URL={url}")
+
+    if pi_env.is_file() and S3_LOG_CONFIG_BUCKET_NAME:
+        upload_file_to_s3(
+            local_file_paths=str(pi_env),
+            s3_key="",
+            s3_bucket=S3_LOG_CONFIG_BUCKET_NAME,
+        )
+
+    if recycle_agent_service and ENABLE_PI_AGENT_EXPRESS_SERVICE == "True":
+        recycle_express_gateway_tasks(
+            CLUSTER_NAME,
+            ECS_PI_EXPRESS_SERVICE_NAME,
+            aws_region=aws_region,
+        )
+
+    print(
+        "\nAgentCore runtime is wired up (no stack update performed).\n"
+        f"  AGENTCORE_RUNTIME_URL={url}"
+    )
+    return url
 
 
 def _s3_object_exists(s3_client, bucket: str, key: str) -> bool:
@@ -1290,9 +2587,14 @@ def print_headless_deployment_next_steps(
     example_name = "example_headless_env_file.env"
 
     print("\nDone. Next steps:")
-    print(f"  - Upload a PDF file for redaction to {input_uri}")
     print(
-        f"  - Create a .env file for submitting a task. You can use '{example_name}' "
+        f"  - Upload a PDF file for redaction to {input_uri}. You can use the example file "
+        "'example_of_emails_sent_to_a_professor_before_applying.pdf' from doc_redaction/example_data "
+        "if you want to use the example .env file below."
+    )
+    print(
+        f"  - Create a .env file for submitting a task to the folder {config_uri}."
+        "You can resubmit the file '{example_name}' in the repo at cdk\config\headless_s3_seed\input\config, "
         f"(also at {config_uri}{example_name}) and change the PDF filename inside. "
         "Further direct-mode config variables are in tools/config.py (DIRECT_MODE_*)."
     )

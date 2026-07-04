@@ -2,14 +2,8 @@ import json  # You might still need json if loading task_definition.json
 import os
 from typing import Any, Dict, List
 
-from aws_cdk import (
-    CfnOutput,  # <-- Import CfnOutput directly
-    Duration,
-    SecretValue,
-    Stack,
-)
-from aws_cdk import aws_cloudfront as cloudfront
-from aws_cdk import aws_cloudfront_origins as origins
+from aws_cdk import CfnOutput, Duration, SecretValue, Stack
+from aws_cdk import aws_bedrockagentcore as bedrockagentcore
 from aws_cdk import aws_codebuild as codebuild
 from aws_cdk import aws_cognito as cognito
 from aws_cdk import aws_dynamodb as dynamodb  # Import the DynamoDB module
@@ -23,13 +17,23 @@ from aws_cdk import aws_logs as logs
 from aws_cdk import aws_s3 as s3
 from aws_cdk import aws_secretsmanager as secretsmanager
 from aws_cdk import aws_wafv2 as wafv2
-from cdk_cloudfront_headers import (
-    create_secure_cloudfront_response_headers_policy,
-    resolve_cloudfront_csp_urls,
-)
+from cdk_cloudfront_distribution import create_redaction_cloudfront_distribution
 from cdk_config import (
     ACCESS_LOG_DYNAMODB_TABLE_NAME,
     ACM_SSL_CERTIFICATE_ARN,
+    AGENT_ALB_HOST_HEADER,
+    AGENT_ALB_LISTENER_RULE_PRIORITY,
+    AGENT_ALB_PATH_PREFIX_NORMALIZED,
+    AGENT_ALB_ROUTING,
+    AGENT_ALB_TARGET_GROUP_NAME,
+    AGENT_ENV_S3_KEY,
+    AGENT_GRADIO_PORT,
+    AGENTCORE_BEDROCK_MODEL,
+    AGENTCORE_CDK_DEPLOY,
+    AGENTCORE_NETWORK_MODE,
+    AGENTCORE_RUNTIME_NAME,
+    AGENTCORE_RUNTIME_ROLE_ARN,
+    AGENTCORE_TASK_ROLE_POLICY_FILES,
     ALB_NAME,
     ALB_NAME_SECURITY_GROUP_NAME,
     ALB_TARGET_GROUP_NAME,
@@ -40,12 +44,17 @@ from cdk_config import (
     AWS_REGION,
     CDK_FOLDER,
     CDK_PREFIX,
+    CLOUDFRONT_ATTACH_SECURE_RESPONSE_HEADERS,
+    CLOUDFRONT_AUTH_MODE,
     CLOUDFRONT_DISTRIBUTION_NAME,
     CLOUDFRONT_DOMAIN,
     CLOUDFRONT_ENABLE_SECURE_RESPONSE_HEADERS,
     CLOUDFRONT_GEO_RESTRICTION,
+    CLOUDFRONT_MAGIC_LINK_COOKIE_MAX_AGE_SEC,
+    CLOUDFRONT_MAGIC_LINK_COOKIE_NAME,
     CLOUDFRONT_PREFIX_LIST_ID,
     CLUSTER_NAME,
+    CODEBUILD_AGENTCORE_PROJECT_NAME,
     CODEBUILD_PI_PROJECT_NAME,
     CODEBUILD_PROJECT_NAME,
     CODEBUILD_ROLE_NAME,
@@ -62,8 +71,9 @@ from cdk_config import (
     CUSTOM_HEADER_VALUE,
     CUSTOM_KMS_KEY_NAME,
     DAYS_TO_DISPLAY_WHOLE_DOCUMENT_JOBS,
+    ECR_AGENT_REPO_NAME,
+    ECR_AGENTCORE_REPO_NAME,
     ECR_CDK_REPO_NAME,
-    ECR_PI_REPO_NAME,
     ECS_AVAILABILITY_ZONE_REBALANCING,
     ECS_EXECUTION_ROLE_MANAGED_POLICIES,
     ECS_EXECUTION_ROLE_POLICY_ARNS,
@@ -97,6 +107,9 @@ from cdk_config import (
     ECS_TASK_MEMORY_SIZE,
     ECS_TASK_ROLE_NAME,
     ECS_USE_FARGATE_SPOT,
+    ENABLE_AGENTCORE_CDK_RUNTIME,
+    ENABLE_AGENTCORE_RUNTIME,
+    ENABLE_CLOUDFRONT_WAF,
     ENABLE_ECS_SERVICE_CONNECT,
     ENABLE_ECS_VPC_INTERFACE_ENDPOINTS,
     ENABLE_HEADLESS_DEPLOYMENT,
@@ -116,13 +129,6 @@ from cdk_config import (
     NAT_GATEWAY_NAME,
     NEW_VPC_CIDR,
     NEW_VPC_DEFAULT_NAME,
-    PI_AGENT_ENV_S3_KEY,
-    PI_ALB_HOST_HEADER,
-    PI_ALB_LISTENER_RULE_PRIORITY,
-    PI_ALB_PATH_PREFIX_NORMALIZED,
-    PI_ALB_ROUTING,
-    PI_ALB_TARGET_GROUP_NAME,
-    PI_GRADIO_PORT,
     POLICY_FILE_ARNS,
     POLICY_FILE_LOCATIONS,
     PRIVATE_SUBNET_AVAILABILITY_ZONES,
@@ -159,8 +165,8 @@ from cdk_functions import (  # Only keep CDK-native functions
     attach_pi_agent_to_shared_alb,
     build_ecs_execution_role_kms_policy,
     build_ecs_task_role_kms_policy,
+    build_express_agentic_primary_container,
     build_express_gateway_primary_container,
-    build_express_pi_primary_container,
     build_pi_express_container_environment,
     configure_public_github_codebuild_source,
     create_ecs_express_infrastructure_role,
@@ -177,8 +183,9 @@ from cdk_functions import (  # Only keep CDK-native functions
     ecs_availability_zone_rebalancing,
     express_ingress_first_load_balancer_security_group,
     express_ingress_load_balancer_arn,
-    format_express_pi_public_url,
-    format_pi_public_urls,
+    format_agentic_public_urls,
+    format_express_agentic_public_url,
+    format_main_express_gradio_url,
     load_app_config_env_for_express,
     managed_resource_removal_policy,
     pi_alb_root_path_for_container,
@@ -193,6 +200,10 @@ from cdk_functions import (  # Only keep CDK-native functions
     wire_public_subnet_internet_access,
 )
 from constructs import Construct
+
+# Amazon Linux 2023 x86_64 standard image (AL2023 host kernel; Docker privileged builds).
+_CODEBUILD_DOCKER_IMAGE = codebuild.LinuxBuildImage.AMAZON_LINUX_2023_5
+_CODEBUILD_ARM_IMAGE = codebuild.LinuxArmBuildImage.AMAZON_LINUX_2023_STANDARD_3_0
 
 
 def _get_env_list(env_var_name: str) -> List[str]:
@@ -277,13 +288,22 @@ class CdkStack(Stack):
         enable_service_connect = (
             ENABLE_ECS_SERVICE_CONNECT == "True" and not use_express_ingress
         )
-        enable_pi_agent = (
+        enable_agentic_legacy = (
             ENABLE_PI_AGENT_ECS_SERVICE == "True" and not use_express_ingress
         )
-        enable_pi_express = (
+        enable_agentic_express = (
             ENABLE_PI_AGENT_EXPRESS_SERVICE == "True" and use_express_ingress
         )
-        enable_pi_build = enable_pi_agent or enable_pi_express
+        enable_agentic_build = enable_agentic_legacy or enable_agentic_express
+        enable_agentcore_cdk_deploy = (
+            AGENTCORE_CDK_DEPLOY == "True" or ENABLE_AGENTCORE_CDK_RUNTIME == "True"
+        )
+        cloudfront_magic_link = (
+            USE_CLOUDFRONT == "True" and CLOUDFRONT_AUTH_MODE == "magic-link"
+        )
+        express_cognito_auth = (
+            ENABLE_HEADLESS_DEPLOYMENT != "True" and not cloudfront_magic_link
+        )
         if enable_headless:
             print(
                 "ENABLE_HEADLESS_DEPLOYMENT=True: S3 batch trigger + one-shot Fargate "
@@ -310,7 +330,7 @@ class CdkStack(Stack):
             if (
                 not ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_IDS_LIST
                 and not ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_NAMES_TO_LOOKUP
-                and not enable_pi_agent
+                and not enable_agentic_legacy
             ):
                 raise ValueError(
                     "ENABLE_ECS_SERVICE_CONNECT=True requires at least one of "
@@ -318,7 +338,7 @@ class CdkStack(Stack):
                     "ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_NAMES, or "
                     "ECS_SERVICE_CONNECT_CLIENT_CDK_PREFIXES (other apps' CDK_PREFIX "
                     f"values, resolved to {{prefix}}{ECS_SERVICE_CONNECT_CLIENT_SG_NAME_SUFFIX} "
-                    "in this VPC), unless ENABLE_PI_AGENT_ECS_SERVICE=True (Pi SG is wired in-stack)."
+                    "in this VPC), unless ENABLE_PI_AGENT_ECS_SERVICE=True (agentic mode SG is wired in-stack)."
                 )
             service_connect_client_sg_ids = (
                 resolve_service_connect_client_security_group_ids(
@@ -416,7 +436,9 @@ class CdkStack(Stack):
                     ec2.SubnetConfiguration(
                         name="Public",
                         subnet_type=ec2.SubnetType.PUBLIC,
-                        cidr_mask=28,
+                        # /27 (~27 usable IPs): Express managed ALB needs 8+ free IPs per
+                        # subnet alongside VPC interface endpoints and task ENIs.
+                        cidr_mask=27,
                     ),
                 ]
             else:
@@ -427,12 +449,12 @@ class CdkStack(Stack):
                     ec2.SubnetConfiguration(
                         name="Public",  # Name prefix for public subnets
                         subnet_type=ec2.SubnetType.PUBLIC,
-                        cidr_mask=28,  # Adjust CIDR mask as needed (e.g., /24 provides ~250 IPs per subnet)
+                        cidr_mask=26,
                     ),
                     ec2.SubnetConfiguration(
                         name="Private",  # Name prefix for private subnets
                         subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS,  # Ensures these subnets have NAT Gateway access
-                        cidr_mask=28,  # Adjust CIDR mask as needed
+                        cidr_mask=28,
                     ),
                     # You could also add ec2.SubnetType.PRIVATE_ISOLATED if needed
                 ]
@@ -1128,6 +1150,12 @@ class CdkStack(Stack):
         # --- S3 Buckets ---
         try:
             log_bucket_name = S3_LOG_CONFIG_BUCKET_NAME
+            if get_context_bool(f"globally_taken:{log_bucket_name}"):
+                raise ValueError(
+                    f"S3 bucket name {log_bucket_name!r} is taken globally by another "
+                    "AWS account. Set S3_LOG_CONFIG_BUCKET_NAME in cdk/config/cdk_config.env "
+                    "to a unique name (re-run cdk_install.py or check_resources.py)."
+                )
             if get_context_bool(f"exists:{log_bucket_name}"):
                 bucket = s3.Bucket.from_bucket_name(
                     self, "LogConfigBucket", bucket_name=log_bucket_name
@@ -1184,6 +1212,12 @@ class CdkStack(Stack):
             )
 
             output_bucket_name = S3_OUTPUT_BUCKET_NAME
+            if get_context_bool(f"globally_taken:{output_bucket_name}"):
+                raise ValueError(
+                    f"S3 bucket name {output_bucket_name!r} is taken globally by another "
+                    "AWS account. Set S3_OUTPUT_BUCKET_NAME in cdk/config/cdk_config.env "
+                    "to a unique name (re-run cdk_install.py or check_resources.py)."
+                )
             if get_context_bool(f"exists:{output_bucket_name}"):
                 output_bucket = s3.Bucket.from_bucket_name(
                     self, "OutputBucket", bucket_name=output_bucket_name
@@ -1247,7 +1281,7 @@ class CdkStack(Stack):
                     resources=[output_bucket.bucket_arn],
                 )
             )
-            # Identity-based grants (Pi agent + main app share task_role; required when the
+            # Identity-based grants (agentic redaction + main app share task_role; required when the
             # output bucket is imported and bucket policies were not updated).
             bucket.grant_read_write(task_role)
             output_bucket.grant_read_write(task_role)
@@ -1277,23 +1311,21 @@ class CdkStack(Stack):
         except Exception as e:
             raise Exception("Could not handle ECR repo due to:", e)
 
-        pi_ecr_image_loc = ecr_image_loc
+        agentic_ecr_image_loc = ecr_image_loc
 
         # --- CODEBUILD ---
         try:
             codebuild_project_name = CODEBUILD_PROJECT_NAME
-            if get_context_bool(f"exists:{codebuild_project_name}"):
-                # Lookup CodeBuild project by ARN from context
-                project_arn = get_context_str(f"arn:{codebuild_project_name}")
-                if not project_arn:
-                    raise ValueError(
-                        f"Context value 'arn:{codebuild_project_name}' is required if project exists."
-                    )
-                codebuild.Project.from_project_arn(
-                    self, "CodeBuildProject", project_arn=project_arn
-                )
-                print("Using existing CodeBuild project")
-            else:
+            # CodeBuild projects are ALWAYS managed by this stack — never imported.
+            # Importing an existing project (from_project_arn) emits no
+            # CloudFormation resource, so a project that was previously
+            # stack-managed gets DELETED by CloudFormation on the next deploy.
+            # Because cdk_install.py deploys twice (initial + CloudFront refresh)
+            # and each deploy re-runs the precheck, an exists->import switch would
+            # silently delete the project between the two deploys (this is what
+            # removed the main app project). Creating under a stable logical ID
+            # makes both deploys update the same resource in place.
+            if codebuild_project_name:
                 main_codebuild_project = codebuild.Project(
                     self,
                     "CodeBuildProject",  # Logical ID
@@ -1305,7 +1337,7 @@ class CdkStack(Stack):
                         branch_or_ref=GITHUB_REPO_BRANCH,
                     ),
                     environment=codebuild.BuildEnvironment(
-                        build_image=codebuild.LinuxBuildImage.STANDARD_7_0,
+                        build_image=_CODEBUILD_DOCKER_IMAGE,
                         privileged=True,
                         environment_variables={
                             "ECR_REPO_NAME": codebuild.BuildEnvironmentVariable(
@@ -1356,39 +1388,19 @@ class CdkStack(Stack):
                 )
                 print("Successfully created CodeBuild project", codebuild_project_name)
 
-            # Imported projects have role=undefined in CDK; use the actual service
-            # role from context (existing project) or the managed codebuild_role (new).
-            if get_context_bool(f"exists:{codebuild_project_name}"):
-                project_service_role_arn = get_context_str(
-                    f"service_role_arn:{codebuild_project_name}"
-                )
-                if project_service_role_arn:
-                    ecr_grantee = iam.Role.from_role_arn(
-                        self,
-                        "CodeBuildProjectServiceRole",
-                        role_arn=project_service_role_arn,
-                        mutable=True,
-                    )
-                else:
-                    ecr_grantee = codebuild_role
-            else:
-                ecr_grantee = codebuild_role
+            # All CodeBuild projects are stack-managed and share codebuild_role.
+            ecr_grantee = codebuild_role
             ecr_repo.grant_pull_push(ecr_grantee)
 
-            if enable_pi_build:
-                pi_codebuild_name = CODEBUILD_PI_PROJECT_NAME
-                if get_context_bool(f"exists:{pi_codebuild_name}"):
-                    project_arn = get_context_str(f"arn:{pi_codebuild_name}")
-                    if project_arn:
-                        codebuild.Project.from_project_arn(
-                            self, "CodeBuildPiProject", project_arn=project_arn
-                        )
-                    print("Using existing Pi agent CodeBuild project")
-                else:
-                    pi_codebuild_project = codebuild.Project(
+            if enable_agentic_build:
+                agentic_codebuild_name = CODEBUILD_PI_PROJECT_NAME
+                # Always stack-managed (see main CodeBuild note above): never
+                # import, or a previously created project is deleted on redeploy.
+                if agentic_codebuild_name:
+                    agentic_codebuild_project = codebuild.Project(
                         self,
-                        "CodeBuildPiProject",
-                        project_name=pi_codebuild_name,
+                        "CodeBuildAgenticProject",
+                        project_name=agentic_codebuild_name,
                         role=codebuild_role,
                         source=public_github_codebuild_source(
                             owner=GITHUB_REPO_USERNAME,
@@ -1396,11 +1408,11 @@ class CdkStack(Stack):
                             branch_or_ref=GITHUB_REPO_BRANCH,
                         ),
                         environment=codebuild.BuildEnvironment(
-                            build_image=codebuild.LinuxBuildImage.STANDARD_7_0,
+                            build_image=_CODEBUILD_DOCKER_IMAGE,
                             privileged=True,
                             environment_variables={
                                 "ECR_REPO_NAME": codebuild.BuildEnvironmentVariable(
-                                    value=ECR_PI_REPO_NAME
+                                    value=ECR_AGENT_REPO_NAME
                                 ),
                                 "AWS_DEFAULT_REGION": codebuild.BuildEnvironmentVariable(
                                     value=AWS_REGION
@@ -1418,7 +1430,7 @@ class CdkStack(Stack):
                                         "commands": [
                                             "echo Logging in to Amazon ECR",
                                             "aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com",
-                                            "test -f config/pi_agent.env.example",
+                                            "test -f config/agent.env.example",
                                             "test -f agent-redact/pi-agent/Dockerfile",
                                         ]
                                     },
@@ -1438,34 +1450,190 @@ class CdkStack(Stack):
                         ),
                     )
                     configure_public_github_codebuild_source(
-                        pi_codebuild_project,
+                        agentic_codebuild_project,
                         GITHUB_REPO_USERNAME,
                         GITHUB_REPO_NAME,
                     )
-                    print("Created Pi agent CodeBuild project", pi_codebuild_name)
+                    print(
+                        "Created agentic redaction CodeBuild project",
+                        agentic_codebuild_name,
+                    )
 
-                pi_ecr_repo_name = ECR_PI_REPO_NAME
-                if get_context_bool(f"exists:{pi_ecr_repo_name}"):
-                    pi_ecr_repo = ecr.Repository.from_repository_name(
-                        self, "ECRPiRepo", repository_name=pi_ecr_repo_name
+                agentic_ecr_repo_name = ECR_AGENT_REPO_NAME
+                if get_context_bool(f"exists:{agentic_ecr_repo_name}"):
+                    agentic_ecr_repo = ecr.Repository.from_repository_name(
+                        self, "ECRAgenticRepo", repository_name=agentic_ecr_repo_name
                     )
                 else:
-                    pi_ecr_repo = ecr.Repository(
+                    agentic_ecr_repo = ecr.Repository(
                         self,
-                        "ECRPiRepo",
-                        repository_name=pi_ecr_repo_name,
+                        "ECRAgenticRepo",
+                        repository_name=agentic_ecr_repo_name,
                         removal_policy=resource_removal_policy,
                         empty_on_delete=ecr_empty_on_delete(),
                     )
-                pi_ecr_image_loc = pi_ecr_repo.repository_uri
-                pi_ecr_repo.grant_pull_push(ecr_grantee)
-                CfnOutput(self, "ECRPiRepoUri", value=pi_ecr_repo.repository_uri)
+                agentic_ecr_image_loc = agentic_ecr_repo.repository_uri
+                agentic_ecr_repo.grant_pull_push(ecr_grantee)
+                CfnOutput(
+                    self, "ECRAgenticRepoUri", value=agentic_ecr_repo.repository_uri
+                )
+
+            if enable_agentcore_cdk_deploy:
+                agentcore_ecr_repo_name = ECR_AGENTCORE_REPO_NAME
+                if get_context_bool(f"exists:{agentcore_ecr_repo_name}"):
+                    agentcore_ecr_repo = ecr.Repository.from_repository_name(
+                        self,
+                        "ECRAgentCoreRuntimeRepo",
+                        repository_name=agentcore_ecr_repo_name,
+                    )
+                else:
+                    agentcore_ecr_repo = ecr.Repository(
+                        self,
+                        "ECRAgentCoreRuntimeRepo",
+                        repository_name=agentcore_ecr_repo_name,
+                        removal_policy=resource_removal_policy,
+                        empty_on_delete=ecr_empty_on_delete(),
+                    )
+                agentcore_ecr_repo.grant_pull_push(ecr_grantee)
+                CfnOutput(
+                    self,
+                    "ECRAgentCoreRuntimeRepoUri",
+                    value=agentcore_ecr_repo.repository_uri,
+                )
+
+                agentcore_codebuild_name = CODEBUILD_AGENTCORE_PROJECT_NAME
+                # Always stack-managed (see main CodeBuild note above): never
+                # import, or a previously created project is deleted on redeploy.
+                if agentcore_codebuild_name:
+                    agentcore_codebuild_project = codebuild.Project(
+                        self,
+                        "CodeBuildAgentCoreProject",
+                        project_name=agentcore_codebuild_name,
+                        role=codebuild_role,
+                        source=public_github_codebuild_source(
+                            owner=GITHUB_REPO_USERNAME,
+                            repo=GITHUB_REPO_NAME,
+                            branch_or_ref=GITHUB_REPO_BRANCH,
+                        ),
+                        environment=codebuild.BuildEnvironment(
+                            build_image=_CODEBUILD_ARM_IMAGE,
+                            privileged=True,
+                            environment_variables={
+                                "ECR_REPO_NAME": codebuild.BuildEnvironmentVariable(
+                                    value=agentcore_ecr_repo_name
+                                ),
+                                "AWS_DEFAULT_REGION": codebuild.BuildEnvironmentVariable(
+                                    value=AWS_REGION
+                                ),
+                                "AWS_ACCOUNT_ID": codebuild.BuildEnvironmentVariable(
+                                    value=AWS_ACCOUNT_ID
+                                ),
+                            },
+                        ),
+                        build_spec=codebuild.BuildSpec.from_object(
+                            {
+                                "version": "0.2",
+                                "phases": {
+                                    "pre_build": {
+                                        "commands": [
+                                            "echo Logging in to Amazon ECR",
+                                            "aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com",
+                                            "test -f agent-redact/agentcore/Dockerfile.runtime",
+                                        ]
+                                    },
+                                    "build": {
+                                        "commands": [
+                                            "docker build -f agent-redact/agentcore/Dockerfile.runtime -t $ECR_REPO_NAME:latest .",
+                                            "docker tag $ECR_REPO_NAME:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPO_NAME:latest",
+                                        ]
+                                    },
+                                    "post_build": {
+                                        "commands": [
+                                            "docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPO_NAME:latest",
+                                        ]
+                                    },
+                                },
+                            }
+                        ),
+                    )
+                    configure_public_github_codebuild_source(
+                        agentcore_codebuild_project,
+                        GITHUB_REPO_USERNAME,
+                        GITHUB_REPO_NAME,
+                    )
+                    print(
+                        "Created AgentCore runtime CodeBuild project",
+                        agentcore_codebuild_name,
+                    )
+
+                external_agentcore_role_arn = (AGENTCORE_RUNTIME_ROLE_ARN or "").strip()
+                if external_agentcore_role_arn:
+                    agentcore_exec_role = iam.Role.from_role_arn(
+                        self,
+                        "AgentCoreRuntimeExecutionRole",
+                        role_arn=external_agentcore_role_arn,
+                        mutable=True,
+                    )
+                else:
+                    agentcore_exec_role = iam.Role(
+                        self,
+                        "AgentCoreRuntimeExecutionRole",
+                        role_name=f"{CDK_PREFIX}AgentCoreRuntimeRole"[:64],
+                        assumed_by=iam.ServicePrincipal(
+                            "bedrock-agentcore.amazonaws.com"
+                        ),
+                    )
+                    agentcore_exec_role = add_custom_policies(
+                        self,
+                        agentcore_exec_role,
+                        policy_file_locations=list(AGENTCORE_TASK_ROLE_POLICY_FILES),
+                    )
+                    agentcore_ecr_repo.grant_pull(agentcore_exec_role)
+
+                if ENABLE_AGENTCORE_CDK_RUNTIME == "True":
+                    runtime_name = (AGENTCORE_RUNTIME_NAME or "RedactionAgent").strip()[
+                        :48
+                    ]
+                    agentcore_runtime = bedrockagentcore.CfnRuntime(
+                        self,
+                        "RedactionAgentCoreRuntime",
+                        agent_runtime_name=runtime_name,
+                        agent_runtime_artifact=bedrockagentcore.CfnRuntime.AgentRuntimeArtifactProperty(
+                            container_configuration=bedrockagentcore.CfnRuntime.ContainerConfigurationProperty(
+                                container_uri=f"{agentcore_ecr_repo.repository_uri}:latest",
+                            ),
+                        ),
+                        role_arn=agentcore_exec_role.role_arn,
+                        network_configuration=bedrockagentcore.CfnRuntime.NetworkConfigurationProperty(
+                            network_mode=(AGENTCORE_NETWORK_MODE or "PUBLIC").upper(),
+                        ),
+                        environment_variables={
+                            "AGENT_DEFAULT_PROVIDER": "amazon-bedrock",
+                            "AGENT_DEFAULT_MODEL": (
+                                AGENTCORE_BEDROCK_MODEL or "anthropic.claude-sonnet-4-6"
+                            ),
+                            "AWS_REGION": AWS_REGION,
+                            "AWS_DEFAULT_REGION": AWS_REGION,
+                            "AGENT_WORKSPACE_DIR": "/tmp/agentcore-workspace",
+                        },
+                    )
+                    CfnOutput(
+                        self,
+                        "AgentCoreRuntimeArn",
+                        value=agentcore_runtime.attr_agent_runtime_arn,
+                    )
+                    print(
+                        "Created Bedrock AgentCore Runtime",
+                        runtime_name,
+                        "from ECR image",
+                        f"{agentcore_ecr_repo.repository_uri}:latest",
+                    )
 
         except Exception as e:
             raise Exception("Could not handle Codebuild project due to:", e)
 
-        pi_ecs_service = None
-        pi_ecs_security_group = None
+        agentic_ecs_service = None
+        agentic_ecs_security_group = None
 
         # --- Security Groups ---
         try:
@@ -1808,19 +1976,51 @@ class CdkStack(Stack):
                 )
 
                 # Add a domain to the User Pool (crucial for ALB integration)
-                user_pool_domain = user_pool.add_domain(
-                    "UserPoolDomain",
-                    cognito_domain=cognito.CognitoDomainOptions(
-                        domain_prefix=COGNITO_USER_POOL_DOMAIN_PREFIX
-                    ),
+                domain_prefix = (COGNITO_USER_POOL_DOMAIN_PREFIX or "").strip().lower()
+                domain_exists_on_pool = get_context_bool(
+                    f"cognito_domain_exists_on_pool:{domain_prefix}"
                 )
+                if (
+                    get_context_bool(f"cognito_domain_taken:{domain_prefix}")
+                    and not domain_exists_on_pool
+                ):
+                    raise ValueError(
+                        f"Cognito hosted UI domain prefix {domain_prefix!r} is not "
+                        f"available in this region (taken by another AWS account or "
+                        "an existing pool). Set COGNITO_USER_POOL_DOMAIN_PREFIX in "
+                        "cdk/config/cdk_config.env to a unique value and re-run "
+                        "cdk_install.py / check_resources.py."
+                    )
 
-                # Apply removal_policy to the created UserPoolDomain construct
-                user_pool_domain.apply_removal_policy(policy=resource_removal_policy)
+                if domain_exists_on_pool:
+                    # The hosted UI domain is already attached to the reused user
+                    # pool. Re-creating it with add_domain would fail at deploy
+                    # time (AlreadyExists), so import the existing domain instead.
+                    user_pool_domain = cognito.UserPoolDomain.from_domain_name(
+                        self, "UserPoolDomain", user_pool_domain_name=domain_prefix
+                    )
+                    login_url = (
+                        f"https://{domain_prefix}.auth.{self.region}.amazoncognito.com"
+                    )
+                    print(
+                        f"Using existing Cognito hosted UI domain {domain_prefix!r} "
+                        "on the reused user pool (imported, not re-created)."
+                    )
+                else:
+                    user_pool_domain = user_pool.add_domain(
+                        "UserPoolDomain",
+                        cognito_domain=cognito.CognitoDomainOptions(
+                            domain_prefix=COGNITO_USER_POOL_DOMAIN_PREFIX
+                        ),
+                    )
 
-                CfnOutput(
-                    self, "CognitoUserPoolLoginUrl", value=user_pool_domain.base_url()
-                )
+                    # Apply removal_policy to the created UserPoolDomain construct
+                    user_pool_domain.apply_removal_policy(
+                        policy=resource_removal_policy
+                    )
+                    login_url = user_pool_domain.base_url()
+
+                CfnOutput(self, "CognitoUserPoolLoginUrl", value=login_url)
 
             except Exception as e:
                 raise Exception("Could not handle Cognito resources due to:", e)
@@ -1908,7 +2108,7 @@ class CdkStack(Stack):
                 "enable_fargate_capacity_providers": True,
                 "vpc": vpc,
             }
-            if enable_service_connect or enable_pi_express:
+            if enable_service_connect or enable_agentic_express:
                 cluster_kwargs["default_cloud_map_namespace"] = (
                     ecs.CloudMapNamespaceOptions(
                         name=ECS_SERVICE_CONNECT_NAMESPACE,
@@ -1943,9 +2143,10 @@ class CdkStack(Stack):
                 express_app_overrides: Dict[str, str] = {}
                 if ENABLE_HEADLESS_DEPLOYMENT == "True":
                     express_app_overrides["COGNITO_AUTH"] = "False"
-                elif enable_pi_express:
-                    # Pi agent calls main over Service Connect; Gradio auth blocks
+                elif enable_agentic_express or cloudfront_magic_link:
+                    # Agentic Gradio app calls main over Service Connect; Gradio auth blocks
                     # gradio_client unless credentials are passed on every call.
+                    # Magic-link edge auth replaces in-app Cognito on demo.
                     express_app_overrides["COGNITO_AUTH"] = "False"
                 express_app_environment = load_app_config_env_for_express(
                     APP_CONFIG_ENV_FILE,
@@ -1987,7 +2188,6 @@ class CdkStack(Stack):
                         "(internal managed ALB)."
                     )
 
-                # MinTaskCount=0 until post_cdk_build_quickstart builds/pushes :latest.
                 express_service = create_express_gateway_service(
                     self,
                     "ExpressGatewayService",
@@ -2048,44 +2248,63 @@ class CdkStack(Stack):
                     value=express_service.attr_ecs_managed_resource_arns_ingress_path_certificate_arn,
                 )
 
-                if enable_pi_express:
+                express_agentic_service = None
+                if enable_agentic_express:
                     try:
-                        pi_express_log_group = logs.LogGroup(
+                        agentic_express_log_group = logs.LogGroup(
                             self,
-                            "ExpressPiTaskLogGroup",
+                            "ExpressAgenticTaskLogGroup",
                             log_group_name=f"/ecs/{ECS_PI_EXPRESS_SERVICE_NAME}-logs".lower(),
                             retention=logs.RetentionDays.ONE_MONTH,
                             removal_policy=resource_removal_policy,
                         )
-                        pi_express_log_group.grant_write(execution_role)
+                        agentic_express_log_group.grant_write(execution_role)
 
-                        pi_express_security_group = ec2.SecurityGroup(
+                        agentic_express_security_group = ec2.SecurityGroup(
                             self,
-                            "ExpressPiSecurityGroup",
+                            "ExpressAgenticSecurityGroup",
                             vpc=vpc,
                             security_group_name=ECS_PI_EXPRESS_SECURITY_GROUP_NAME,
-                            description="Pi agent ECS Express tasks",
+                            description="Agentic redaction ECS Express tasks",
                         )
 
-                        pi_express_environment = build_pi_express_container_environment(
+                        agentcore_backend = ENABLE_AGENTCORE_RUNTIME == "True"
+                        agentic_express_environment = build_pi_express_container_environment(
                             service_connect_discovery_name=ECS_SERVICE_CONNECT_DISCOVERY_NAME,
                             main_app_port=int(GRADIO_SERVER_PORT),
-                            pi_gradio_port=int(PI_GRADIO_PORT),
-                            cognito_auth=ENABLE_HEADLESS_DEPLOYMENT != "True",
+                            pi_gradio_port=int(AGENT_GRADIO_PORT),
+                            cognito_auth=express_cognito_auth,
+                            doc_redaction_gradio_url=(
+                                format_main_express_gradio_url(express_alb_dns)
+                                if agentcore_backend
+                                else None
+                            ),
+                            # With CloudFront (demo route) the '/agent' prefix is
+                            # forwarded to this origin without being stripped, so Pi
+                            # must serve under that root path. Without CloudFront the
+                            # agentic service is reached at the root of its own
+                            # Express endpoint, so no root path is applied.
+                            pi_root_path=(
+                                AGENT_ALB_PATH_PREFIX_NORMALIZED
+                                if USE_CLOUDFRONT == "True"
+                                else ""
+                            ),
                         )
-                        pi_primary_container = build_express_pi_primary_container(
-                            image_uri=pi_ecr_image_loc + ":latest",
-                            container_port=int(PI_GRADIO_PORT),
-                            log_group_name=pi_express_log_group.log_group_name,
-                            aws_region=AWS_REGION,
-                            environment=pi_express_environment,
-                            secret=secret,
-                            cognito_auth=ENABLE_HEADLESS_DEPLOYMENT != "True",
+                        agentic_primary_container = (
+                            build_express_agentic_primary_container(
+                                image_uri=agentic_ecr_image_loc + ":latest",
+                                container_port=int(AGENT_GRADIO_PORT),
+                                log_group_name=agentic_express_log_group.log_group_name,
+                                aws_region=AWS_REGION,
+                                environment=agentic_express_environment,
+                                secret=secret,
+                                cognito_auth=express_cognito_auth,
+                            )
                         )
 
-                        express_pi_service = create_express_gateway_service(
+                        express_agentic_service = create_express_gateway_service(
                             self,
-                            "ExpressPiGatewayService",
+                            "ExpressAgenticGatewayService",
                             service_name=ECS_PI_EXPRESS_SERVICE_NAME,
                             cluster_name=CLUSTER_NAME,
                             execution_role_arn=execution_role.role_arn,
@@ -2094,66 +2313,93 @@ class CdkStack(Stack):
                             cpu=str(ECS_PI_TASK_CPU_SIZE),
                             memory=str(ECS_PI_TASK_MEMORY_SIZE),
                             health_check_path=ECS_PI_EXPRESS_HEALTH_CHECK_PATH,
-                            primary_container=pi_primary_container,
+                            primary_container=agentic_primary_container,
                             subnet_ids=express_subnet_ids,
                             security_group_ids=[
-                                pi_express_security_group.security_group_id
+                                agentic_express_security_group.security_group_id
                             ],
                         )
-                        express_pi_service.node.add_dependency(cluster)
-                        express_pi_service.node.add_dependency(express_service)
+                        express_agentic_service.node.add_dependency(cluster)
+                        express_agentic_service.node.add_dependency(express_service)
 
                         allow_express_load_balancer_to_ecs_security_group(
                             self,
-                            "ExpressAlbToPiExpressIngress",
-                            express_service=express_pi_service,
-                            ecs_security_group=pi_express_security_group,
-                            container_port=int(PI_GRADIO_PORT),
+                            "ExpressAlbToAgenticExpressIngress",
+                            express_service=express_agentic_service,
+                            ecs_security_group=agentic_express_security_group,
+                            container_port=int(AGENT_GRADIO_PORT),
                         )
 
-                        pi_express_security_group.add_egress_rule(
-                            peer=ecs_security_group,
-                            connection=ec2.Port.tcp(int(GRADIO_SERVER_PORT)),
-                            description="Pi Express (Service Connect) to main redaction app",
-                        )
+                        # The agentic Express SG is created with the CDK default
+                        # allow_all_outbound=True, so egress to the main app (and to
+                        # ECR/Secrets/KMS/Logs/internet needed by the task) is already
+                        # permitted. An explicit egress rule would be ignored by CDK
+                        # (emitting the ipv4IgnoreEgressRule annotation), so only the
+                        # ingress rule on the main app SG — which actually gates the
+                        # connection — is defined here.
                         ecs_security_group.add_ingress_rule(
-                            peer=pi_express_security_group,
+                            peer=agentic_express_security_group,
                             connection=ec2.Port.tcp(int(GRADIO_SERVER_PORT)),
-                            description="Pi Express (Service Connect) to main redaction app",
+                            description="Agentic Express (Service Connect) to main redaction app",
                         )
 
                         # Service Connect for Express is applied in post_cdk_build_quickstart.py
                         # after CodeBuild pushes :latest. Express primary containers do not
                         # define named portMappings at create time; CDK cannot enable SC here.
 
-                        pi_public_url = format_express_pi_public_url(
-                            express_pi_service.attr_endpoint,
+                        agentic_public_url = format_express_agentic_public_url(
+                            express_agentic_service.attr_endpoint,
                         )
                         sc_backend = (
                             f"http://{ECS_SERVICE_CONNECT_DISCOVERY_NAME}:"
                             f"{GRADIO_SERVER_PORT}"
                         )
-                        CfnOutput(
-                            self,
-                            "PiExpressEndpoint",
-                            value=express_pi_service.attr_endpoint,
-                            description="HTTPS URL for the Pi ECS Express service (AWS-managed cert)",
+                        agentic_doc_redaction_backend = (
+                            format_main_express_gradio_url(express_alb_dns)
+                            if agentcore_backend
+                            else sc_backend
+                        )
+                        agentic_doc_redaction_backend_desc = (
+                            "DOC_REDACTION_GRADIO_URL on agentic Express for AgentCore "
+                            "(main Express public HTTPS; passed to runtime via runtime_config)"
+                            if agentcore_backend
+                            else (
+                                "DOC_REDACTION_GRADIO_URL on agentic Express "
+                                "(Service Connect, no Cognito)"
+                            )
                         )
                         CfnOutput(
                             self,
-                            "PiPublicUrl",
-                            value=pi_public_url,
-                            description="Public URL for Pi Express UI (managed HTTPS endpoint)",
+                            "AgenticExpressEndpoint",
+                            value=express_agentic_service.attr_endpoint,
+                            description="HTTPS URL for the agentic ECS Express service (AWS-managed cert)",
                         )
                         CfnOutput(
                             self,
-                            "PiDocRedactionBackendUrl",
-                            value=sc_backend,
-                            description="DOC_REDACTION_GRADIO_URL on Pi Express (Service Connect, no Cognito)",
+                            "AgenticAlbSecurityGroupIdOutput",
+                            value=express_ingress_first_load_balancer_security_group(
+                                express_agentic_service
+                            ),
+                            description=(
+                                "ID of the agentic Express-managed ALB Security Group "
+                                "(post-deploy CloudFront lockdown target)"
+                            ),
                         )
                         CfnOutput(
                             self,
-                            "PiExpressServiceName",
+                            "AgenticPublicUrl",
+                            value=agentic_public_url,
+                            description="Public URL for agentic Express UI (managed HTTPS endpoint)",
+                        )
+                        CfnOutput(
+                            self,
+                            "AgenticDocRedactionBackendUrl",
+                            value=agentic_doc_redaction_backend,
+                            description=agentic_doc_redaction_backend_desc,
+                        )
+                        CfnOutput(
+                            self,
+                            "AgenticExpressServiceName",
                             value=ECS_PI_EXPRESS_SERVICE_NAME,
                         )
                         CfnOutput(
@@ -2163,13 +2409,49 @@ class CdkStack(Stack):
                             description="Cloud Map namespace for Express Service Connect",
                         )
                         print(
-                            "ECS Express Pi gateway service defined with Service Connect "
-                            f"backend {sc_backend}; public URL: {pi_public_url}."
+                            "ECS Express agentic gateway service defined with Service Connect "
+                            f"backend {sc_backend}; public URL: {agentic_public_url}."
                         )
                     except Exception as e:
                         raise Exception(
-                            "Could not handle ECS Express Pi agent due to:", e
+                            "Could not handle ECS Express agentic redaction due to:", e
                         )
+
+                if USE_CLOUDFRONT == "True":
+                    agentic_endpoint = ""
+                    if enable_agentic_express and express_agentic_service is not None:
+                        agentic_endpoint = express_agentic_service.attr_endpoint
+                    create_redaction_cloudfront_distribution(
+                        self,
+                        "RedactionCloudFront",
+                        distribution_comment=CLOUDFRONT_DISTRIBUTION_NAME,
+                        cognito_redirection_url=COGNITO_REDIRECTION_URL,
+                        cloudfront_domain=CLOUDFRONT_DOMAIN,
+                        cognito_user_pool_domain_prefix=COGNITO_USER_POOL_DOMAIN_PREFIX,
+                        aws_region=AWS_REGION,
+                        cognito_user_pool_login_url=COGNITO_USER_POOL_LOGIN_URL,
+                        ssl_certificate_domain=SSL_CERTIFICATE_DOMAIN,
+                        enable_secure_response_headers=(
+                            CLOUDFRONT_ENABLE_SECURE_RESPONSE_HEADERS == "True"
+                        ),
+                        attach_secure_response_headers=(
+                            CLOUDFRONT_ATTACH_SECURE_RESPONSE_HEADERS == "True"
+                        ),
+                        geo_restriction_raw=CLOUDFRONT_GEO_RESTRICTION,
+                        enable_cloudfront_waf=ENABLE_CLOUDFRONT_WAF == "True",
+                        web_acl_name=WEB_ACL_NAME,
+                        auth_mode=CLOUDFRONT_AUTH_MODE,
+                        magic_link_cookie_name=CLOUDFRONT_MAGIC_LINK_COOKIE_NAME,
+                        magic_link_cookie_max_age_sec=CLOUDFRONT_MAGIC_LINK_COOKIE_MAX_AGE_SEC,
+                        custom_header_name=CUSTOM_HEADER,
+                        custom_header_value=CUSTOM_HEADER_VALUE,
+                        cdk_prefix=CDK_PREFIX,
+                        resource_removal_policy=resource_removal_policy,
+                        main_express_endpoint=express_service.attr_endpoint,
+                        agentic_express_endpoint=agentic_endpoint,
+                        agentic_path_prefix=AGENT_ALB_PATH_PREFIX_NORMALIZED,
+                    )
+                    print("CloudFront distribution defined for Express ingress.")
 
                 print("ECS Express Gateway service defined.")
             except Exception as e:
@@ -2506,45 +2788,47 @@ class CdkStack(Stack):
                 except Exception as e:
                     raise Exception("Could not handle ECS service due to:", e)
 
-            if enable_pi_agent:
+            if enable_agentic_legacy:
                 try:
-                    pi_ecs_service, pi_ecs_security_group, _pi_task_def = (
-                        create_pi_agent_ecs_resources(
-                            self,
-                            "PiAgent",
-                            vpc=vpc,
-                            cluster=cluster,
-                            private_subnets=self.private_subnets,
-                            pi_ecr_image_uri=pi_ecr_image_loc,
-                            container_name=ECR_PI_REPO_NAME,
-                            task_role=task_role,
-                            execution_role=execution_role,
-                            config_bucket=bucket,
-                            pi_agent_env_s3_key=PI_AGENT_ENV_S3_KEY,
-                            service_name=ECS_PI_SERVICE_NAME,
-                            task_family=ECS_PI_TASK_DEFINITION_NAME,
-                            security_group_name=ECS_PI_SECURITY_GROUP_NAME,
-                            log_group_name=ECS_PI_LOG_GROUP_NAME,
-                            cpu=int(ECS_PI_TASK_CPU_SIZE),
-                            memory_mib=int(ECS_PI_TASK_MEMORY_SIZE),
-                            pi_gradio_port=int(PI_GRADIO_PORT),
-                            service_connect_namespace=ECS_SERVICE_CONNECT_NAMESPACE,
-                            service_connect_discovery_name=ECS_SERVICE_CONNECT_DISCOVERY_NAME,
-                            main_app_port=int(GRADIO_SERVER_PORT),
-                            use_fargate_spot=use_fargate_spot,
-                            pi_root_path=pi_alb_root_path_for_container(
-                                PI_ALB_PATH_PREFIX_NORMALIZED, PI_ALB_ROUTING
-                            ),
-                        )
+                    (
+                        agentic_ecs_service,
+                        agentic_ecs_security_group,
+                        _agentic_task_def,
+                    ) = create_pi_agent_ecs_resources(
+                        self,
+                        "AgenticRedaction",
+                        vpc=vpc,
+                        cluster=cluster,
+                        private_subnets=self.private_subnets,
+                        pi_ecr_image_uri=agentic_ecr_image_loc,
+                        container_name=ECR_AGENT_REPO_NAME,
+                        task_role=task_role,
+                        execution_role=execution_role,
+                        config_bucket=bucket,
+                        pi_agent_env_s3_key=AGENT_ENV_S3_KEY,
+                        service_name=ECS_PI_SERVICE_NAME,
+                        task_family=ECS_PI_TASK_DEFINITION_NAME,
+                        security_group_name=ECS_PI_SECURITY_GROUP_NAME,
+                        log_group_name=ECS_PI_LOG_GROUP_NAME,
+                        cpu=int(ECS_PI_TASK_CPU_SIZE),
+                        memory_mib=int(ECS_PI_TASK_MEMORY_SIZE),
+                        pi_gradio_port=int(AGENT_GRADIO_PORT),
+                        service_connect_namespace=ECS_SERVICE_CONNECT_NAMESPACE,
+                        service_connect_discovery_name=ECS_SERVICE_CONNECT_DISCOVERY_NAME,
+                        main_app_port=int(GRADIO_SERVER_PORT),
+                        use_fargate_spot=use_fargate_spot,
+                        pi_root_path=pi_alb_root_path_for_container(
+                            AGENT_ALB_PATH_PREFIX_NORMALIZED, AGENT_ALB_ROUTING
+                        ),
                     )
                     ecs_security_group.add_ingress_rule(
-                        peer=pi_ecs_security_group,
+                        peer=agentic_ecs_security_group,
                         connection=ec2_port_gradio_server_port,
-                        description="Pi agent (Service Connect) to main redaction app",
+                        description="Agentic redaction (Service Connect) to main redaction app",
                     )
-                    print("Pi agent ECS service defined.")
+                    print("Agentic redaction ECS service defined.")
                 except Exception as e:
-                    raise Exception("Could not handle Pi agent ECS service due to:", e)
+                    raise Exception("Could not handle agentic ECS service due to:", e)
 
             if ENABLE_S3_BATCH_ECS_TRIGGER == "True":
                 try:
@@ -2625,11 +2909,45 @@ class CdkStack(Stack):
                 # If they might pre-exist outside the stack, you need lookups.
                 cookie_duration = Duration.hours(8)
                 target_group_name = ALB_TARGET_GROUP_NAME  # Explicit resource name
-                cloudfront_distribution_url = "cloudfront_placeholder.net"  # Need to replace this afterwards with the actual cloudfront_distribution.domain_name
+                cloudfront_distribution_url = CLOUDFRONT_DOMAIN
+                if USE_CLOUDFRONT == "True":
+                    cf_resources = create_redaction_cloudfront_distribution(
+                        self,
+                        "RedactionCloudFront",
+                        distribution_comment=CLOUDFRONT_DISTRIBUTION_NAME,
+                        cognito_redirection_url=COGNITO_REDIRECTION_URL,
+                        cloudfront_domain=CLOUDFRONT_DOMAIN,
+                        cognito_user_pool_domain_prefix=COGNITO_USER_POOL_DOMAIN_PREFIX,
+                        aws_region=AWS_REGION,
+                        cognito_user_pool_login_url=COGNITO_USER_POOL_LOGIN_URL,
+                        ssl_certificate_domain=SSL_CERTIFICATE_DOMAIN,
+                        enable_secure_response_headers=(
+                            CLOUDFRONT_ENABLE_SECURE_RESPONSE_HEADERS == "True"
+                        ),
+                        attach_secure_response_headers=(
+                            CLOUDFRONT_ATTACH_SECURE_RESPONSE_HEADERS == "True"
+                        ),
+                        geo_restriction_raw=CLOUDFRONT_GEO_RESTRICTION,
+                        enable_cloudfront_waf=ENABLE_CLOUDFRONT_WAF == "True",
+                        web_acl_name=WEB_ACL_NAME,
+                        auth_mode=CLOUDFRONT_AUTH_MODE,
+                        magic_link_cookie_name=CLOUDFRONT_MAGIC_LINK_COOKIE_NAME,
+                        magic_link_cookie_max_age_sec=CLOUDFRONT_MAGIC_LINK_COOKIE_MAX_AGE_SEC,
+                        custom_header_name=CUSTOM_HEADER,
+                        custom_header_value=CUSTOM_HEADER_VALUE,
+                        cdk_prefix=CDK_PREFIX,
+                        resource_removal_policy=resource_removal_policy,
+                        alb=alb,
+                    )
+                    cloudfront_distribution_url = cf_resources.distribution.domain_name
                 cloudfront_http_rule_priority = (
-                    PI_ALB_LISTENER_RULE_PRIORITY
-                    + (pi_listener_rule_count(PI_ALB_ROUTING) if enable_pi_agent else 0)
-                    if enable_pi_agent
+                    AGENT_ALB_LISTENER_RULE_PRIORITY
+                    + (
+                        pi_listener_rule_count(AGENT_ALB_ROUTING)
+                        if enable_agentic_legacy
+                        else 0
+                    )
+                    if enable_agentic_legacy
                     else 1
                 )
                 https_listener = None
@@ -2767,15 +3085,19 @@ class CdkStack(Stack):
 
                         print("Added targets and actions to ALB HTTPS listener.")
 
-                    if enable_pi_agent and pi_ecs_service and alb_security_group:
-                        pi_tg_name = PI_ALB_TARGET_GROUP_NAME
-                        if len(pi_tg_name) > 32:
-                            pi_tg_name = pi_tg_name[-32:]
+                    if (
+                        enable_agentic_legacy
+                        and agentic_ecs_service
+                        and alb_security_group
+                    ):
+                        agentic_tg_name = AGENT_ALB_TARGET_GROUP_NAME
+                        if len(agentic_tg_name) > 32:
+                            agentic_tg_name = agentic_tg_name[-32:]
 
-                        _pi_public_urls = format_pi_public_urls(
-                            routing_mode=PI_ALB_ROUTING,
-                            path_prefix=PI_ALB_PATH_PREFIX_NORMALIZED,
-                            host_header=PI_ALB_HOST_HEADER,
+                        _agentic_public_urls = format_agentic_public_urls(
+                            routing_mode=AGENT_ALB_ROUTING,
+                            path_prefix=AGENT_ALB_PATH_PREFIX_NORMALIZED,
+                            host_header=AGENT_ALB_HOST_HEADER,
                             cloudfront_domain=(
                                 CLOUDFRONT_DOMAIN if USE_CLOUDFRONT == "True" else ""
                             ),
@@ -2783,17 +3105,17 @@ class CdkStack(Stack):
                         )
                         attach_pi_agent_to_shared_alb(
                             self,
-                            "PiAgent",
+                            "AgenticRedaction",
                             vpc=vpc,
                             alb_security_group=alb_security_group,
-                            pi_security_group=pi_ecs_security_group,
-                            pi_service=pi_ecs_service,
-                            pi_port=int(PI_GRADIO_PORT),
-                            routing_mode=PI_ALB_ROUTING,
-                            path_prefix=PI_ALB_PATH_PREFIX_NORMALIZED,
-                            pi_host_header=PI_ALB_HOST_HEADER.strip(),
-                            listener_rule_priority=PI_ALB_LISTENER_RULE_PRIORITY,
-                            target_group_name=pi_tg_name,
+                            pi_security_group=agentic_ecs_security_group,
+                            pi_service=agentic_ecs_service,
+                            pi_port=int(AGENT_GRADIO_PORT),
+                            routing_mode=AGENT_ALB_ROUTING,
+                            path_prefix=AGENT_ALB_PATH_PREFIX_NORMALIZED,
+                            pi_host_header=AGENT_ALB_HOST_HEADER.strip(),
+                            listener_rule_priority=AGENT_ALB_LISTENER_RULE_PRIORITY,
+                            target_group_name=agentic_tg_name,
                             stickiness_cookie_duration=cookie_duration,
                             https_listener=https_listener,
                             http_listener=http_listener,
@@ -2803,29 +3125,31 @@ class CdkStack(Stack):
                             cognito_user_pool_client=user_pool_client,
                             cognito_user_pool_domain=user_pool_domain,
                         )
-                        pi_public_url = _pi_public_urls[0] if _pi_public_urls else ""
+                        agentic_public_url = (
+                            _agentic_public_urls[0] if _agentic_public_urls else ""
+                        )
                         CfnOutput(
                             self,
-                            "PiPublicUrl",
-                            value=pi_public_url,
-                            description="Primary public URL for Pi agent UI (path and/or host ALB rules)",
+                            "AgenticPublicUrl",
+                            value=agentic_public_url,
+                            description="Primary public URL for agentic redaction UI (path and/or host ALB rules)",
                         )
-                        if len(_pi_public_urls) > 1:
+                        if len(_agentic_public_urls) > 1:
                             CfnOutput(
                                 self,
-                                "PiPublicUrls",
-                                value=", ".join(_pi_public_urls),
-                                description="All configured Pi UI entry URLs",
+                                "AgenticPublicUrls",
+                                value=", ".join(_agentic_public_urls),
+                                description="All configured agentic UI entry URLs",
                             )
                         CfnOutput(
                             self,
-                            "PiAlbPathPrefix",
-                            value=PI_ALB_PATH_PREFIX_NORMALIZED,
-                            description="ALB path prefix for Pi when PI_ALB_ROUTING includes path",
+                            "AgenticAlbPathPrefix",
+                            value=AGENT_ALB_PATH_PREFIX_NORMALIZED,
+                            description="ALB path prefix for agentic UI when AGENT_ALB_ROUTING includes path",
                         )
                         CfnOutput(
                             self,
-                            "PiAgentServiceName",
+                            "AgenticServiceName",
                             value=ECS_PI_SERVICE_NAME,
                         )
                         sc_backend = (
@@ -2834,13 +3158,13 @@ class CdkStack(Stack):
                         )
                         CfnOutput(
                             self,
-                            "PiDocRedactionBackendUrl",
+                            "AgenticDocRedactionBackendUrl",
                             value=sc_backend,
-                            description="DOC_REDACTION_GRADIO_URL set on Pi tasks (Service Connect)",
+                            description="DOC_REDACTION_GRADIO_URL set on agentic tasks (Service Connect)",
                         )
                         print(
-                            "Pi agent attached to shared ALB "
-                            f"(routing={PI_ALB_ROUTING}, urls={', '.join(_pi_public_urls)})."
+                            "Agentic redaction attached to shared ALB "
+                            f"(routing={AGENT_ALB_ROUTING}, urls={', '.join(_agentic_public_urls)})."
                         )
 
                 except Exception as e:
@@ -2963,139 +3287,3 @@ class CdkStack(Stack):
                 "ServiceConnectNamespace",
                 value=ECS_SERVICE_CONNECT_NAMESPACE,
             )
-
-
-# --- CLOUDFRONT DISTRIBUTION in separate stack (us-east-1 required) ---
-class CdkStackCloudfront(Stack):
-
-    def __init__(
-        self,
-        scope: Construct,
-        construct_id: str,
-        alb_arn: str,
-        alb_sec_group_id: str,
-        alb_dns_name: str,
-        **kwargs,
-    ) -> None:
-        super().__init__(scope, construct_id, **kwargs)
-
-        # --- Helper to get context values ---
-        def get_context_bool(key: str, default: bool = False) -> bool:
-            return self.node.try_get_context(key) or default
-
-        def get_context_str(key: str, default: str = None) -> str:
-            return self.node.try_get_context(key) or default
-
-        def get_context_dict(scope: Construct, key: str, default: dict = None) -> dict:
-            return scope.node.try_get_context(key) or default
-
-        resource_removal_policy = managed_resource_removal_policy()
-
-        print(f"CloudFront Stack: Received ALB ARN: {alb_arn}")
-        print(f"CloudFront Stack: Received ALB Security Group ID: {alb_sec_group_id}")
-
-        if not alb_arn:
-            raise ValueError("ALB ARN must be provided to CloudFront stack")
-        if not alb_sec_group_id:
-            raise ValueError(
-                "ALB Security Group ID must be provided to CloudFront stack"
-            )
-
-        # 2. Import the ALB using its ARN
-        # This imports an existing ALB as a construct in the CloudFront stack's context.
-        # CloudFormation will understand this reference at deploy time.
-        alb = elbv2.ApplicationLoadBalancer.from_application_load_balancer_attributes(
-            self,
-            "ImportedAlb",
-            load_balancer_arn=alb_arn,
-            security_group_id=alb_sec_group_id,
-            load_balancer_dns_name=alb_dns_name,
-        )
-
-        try:
-            web_acl_name = WEB_ACL_NAME
-            if get_context_bool(f"exists:{web_acl_name}"):
-                # Lookup WAF ACL by ARN from context
-                web_acl_arn = get_context_str(f"arn:{web_acl_name}")
-                if not web_acl_arn:
-                    raise ValueError(
-                        f"Context value 'arn:{web_acl_name}' is required if Web ACL exists."
-                    )
-
-                web_acl = create_web_acl_with_common_rules(
-                    self, web_acl_name
-                )  # Assuming it takes scope and name
-                print(f"Handled Cloudfront WAF web ACL {web_acl_name}.")
-            else:
-                web_acl = create_web_acl_with_common_rules(
-                    self, web_acl_name
-                )  # Assuming it takes scope and name
-                print(f"Created Cloudfront WAF web ACL {web_acl_name}.")
-
-            # Add ALB as CloudFront Origin
-            origin = origins.LoadBalancerV2Origin(
-                alb,  # Use the created or looked-up ALB object
-                custom_headers={CUSTOM_HEADER: CUSTOM_HEADER_VALUE},
-                origin_shield_enabled=False,
-                protocol_policy=cloudfront.OriginProtocolPolicy.HTTP_ONLY,
-            )
-
-            if CLOUDFRONT_GEO_RESTRICTION:
-                geo_restrict = cloudfront.GeoRestriction.allowlist(
-                    CLOUDFRONT_GEO_RESTRICTION
-                )
-            else:
-                geo_restrict = None
-
-            response_headers_policy = None
-            if CLOUDFRONT_ENABLE_SECURE_RESPONSE_HEADERS == "True":
-                app_origin, cognito_login_url = resolve_cloudfront_csp_urls(
-                    cognito_redirection_url=COGNITO_REDIRECTION_URL,
-                    cloudfront_domain=CLOUDFRONT_DOMAIN,
-                    cognito_user_pool_domain_prefix=COGNITO_USER_POOL_DOMAIN_PREFIX,
-                    aws_region=AWS_REGION,
-                    cognito_user_pool_login_url=COGNITO_USER_POOL_LOGIN_URL,
-                    ssl_certificate_domain=SSL_CERTIFICATE_DOMAIN,
-                )
-                policy_name = f"{CDK_PREFIX}SecureResponseHeaders"[:128]
-                response_headers_policy = (
-                    create_secure_cloudfront_response_headers_policy(
-                        self,
-                        "SecureResponseHeadersPolicy",
-                        policy_name=policy_name,
-                        app_origin=app_origin,
-                        cognito_login_url=cognito_login_url,
-                    )
-                )
-                print(
-                    "CloudFront secure response headers: "
-                    f"app_origin={app_origin}, cognito_login_url={cognito_login_url}"
-                )
-
-            default_behavior = cloudfront.BehaviorOptions(
-                origin=origin,
-                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-                allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
-                cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
-                origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER,
-                response_headers_policy=response_headers_policy,
-            )
-
-            cloudfront_distribution = cloudfront.Distribution(
-                self,
-                "CloudFrontDistribution",  # Logical ID
-                comment=CLOUDFRONT_DISTRIBUTION_NAME,  # Use name as comment for easier identification
-                geo_restriction=geo_restrict,
-                default_behavior=default_behavior,
-                web_acl_id=web_acl.attr_arn,
-            )
-            cloudfront_distribution.apply_removal_policy(resource_removal_policy)
-            print(f"Cloudfront distribution {CLOUDFRONT_DISTRIBUTION_NAME} defined.")
-
-        except Exception as e:
-            raise Exception("Could not handle Cloudfront distribution due to:", e)
-
-        # --- Outputs ---
-        CfnOutput(
-            self, "CloudFrontDistributionURL", value=cloudfront_distribution.domain_name
-        )

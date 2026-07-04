@@ -8,11 +8,9 @@ _PI_SRC = Path(__file__).resolve().parents[1] / "agent-redact" / "pi"
 if str(_PI_SRC) not in sys.path:
     sys.path.insert(0, str(_PI_SRC))
 
-# output_files imports gradio at module level; stub it for unit tests.
-if "gradio" not in sys.modules:
-    _gr = ModuleType("gradio")
-    _gr.FileExplorer = lambda **kwargs: kwargs  # type: ignore[misc]
-    sys.modules["gradio"] = _gr
+from pi_test_support import ensure_gradio_importable
+
+ensure_gradio_importable()
 
 if "pi_examples" not in sys.modules:
     _pi_examples = ModuleType("pi_examples")
@@ -20,6 +18,15 @@ if "pi_examples" not in sys.modules:
     sys.modules["pi_examples"] = _pi_examples
 
 import output_files as of
+
+
+def _minimal_pdf_bytes(body: bytes = b"content") -> bytes:
+    """Build a PDF blob that passes ``_is_valid_pdf_file`` (size + %%EOF)."""
+    min_bytes = 1024
+    payload = b"%PDF-1.4\n" + body + b"\n%%EOF"
+    if len(payload) < min_bytes:
+        payload += b" " * (min_bytes - len(payload))
+    return payload
 
 
 def test_resolve_under_workspace_accepts_absolute_paths(tmp_path, monkeypatch):
@@ -96,11 +103,91 @@ def test_workspace_files_download_fn_returns_absolute_paths(tmp_path, monkeypatc
     pdf = session_dir / "out.pdf"
     pdf.write_bytes(b"%PDF")
 
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "true")
 
     result = of.workspace_files_download_fn([str(pdf)], "user1")
     assert result == [str(pdf.resolve())]
+
+
+def test_workspace_files_download_fn_blocks_other_session_files(tmp_path, monkeypatch):
+    """A session may not download files that live under another session's folder."""
+    base = tmp_path / "workspace"
+    base.mkdir()
+    mine = base / "user1"
+    mine.mkdir()
+    my_pdf = mine / "mine.pdf"
+    my_pdf.write_bytes(b"%PDF")
+    theirs = base / "user2"
+    theirs.mkdir()
+    their_pdf = theirs / "secret.pdf"
+    their_pdf.write_bytes(b"%PDF")
+
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "true")
+
+    # As user1: own file resolves, other session's absolute path is rejected.
+    result = of.workspace_files_download_fn(
+        [str(my_pdf), str(their_pdf)],
+        "user1",
+    )
+    assert result == [str(my_pdf.resolve())]
+
+
+def test_workspace_files_download_fn_denies_when_session_missing(tmp_path, monkeypatch):
+    """With isolation on and no resolvable session, nothing under base is served."""
+    base = tmp_path / "workspace"
+    base.mkdir()
+    session_dir = base / "user1"
+    session_dir.mkdir()
+    pdf = session_dir / "out.pdf"
+    pdf.write_bytes(b"%PDF")
+
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "true")
+
+    # Empty session hash + no request must NOT fall back to the shared base.
+    assert of.workspace_files_download_fn([str(pdf)], "") is None
+    assert of.workspace_files_download_fn([str(pdf)], "default") is None
+
+
+def test_session_browse_root_scopes_and_denies(tmp_path, monkeypatch):
+    base = tmp_path / "workspace"
+    base.mkdir()
+    (base / "user1").mkdir()
+
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "true")
+
+    assert of.session_browse_root("user1") == (base / "user1").resolve()
+    # No session resolves -> empty stub dir, never the shared base.
+    stub = of.session_browse_root("")
+    assert stub == of.fileexplorer_stub_dir()
+    assert stub != base.resolve()
+    assert list(stub.iterdir()) == []
+
+
+def test_session_browse_root_shared_when_isolation_disabled(tmp_path, monkeypatch):
+    base = tmp_path / "workspace"
+    base.mkdir()
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "false")
+
+    assert of.session_browse_root("") == base.resolve()
+
+
+def test_fileexplorer_stub_dir_is_empty_and_not_base(tmp_path, monkeypatch):
+    base = tmp_path / "workspace"
+    base.mkdir()
+    (base / "user1").mkdir()
+    monkeypatch.delenv("AGENT_FILEEXPLORER_STUB_DIR", raising=False)
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+
+    stub = of.fileexplorer_stub_dir()
+    assert stub.is_dir()
+    assert stub != base.resolve()
+    # Stub sits under the base's hidden .pi area and lists nothing.
+    assert list(stub.iterdir()) == []
 
 
 def test_collect_final_output_files_finds_review_final_folder(tmp_path, monkeypatch):
@@ -114,8 +201,8 @@ def test_collect_final_output_files_finds_review_final_folder(tmp_path, monkeypa
     other.parent.mkdir(parents=True)
     other.write_text("x")
 
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "true")
 
     result = of.collect_final_output_files("session")
     assert result == [
@@ -134,8 +221,8 @@ def test_collect_final_output_files_supports_output_final_alias(tmp_path, monkey
     redacted = final_dir / "doc_redacted.pdf"
     redacted.write_bytes(b"%PDF")
 
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "true")
 
     result = of.collect_final_output_files("session")
     assert result == [
@@ -169,8 +256,8 @@ def test_collect_final_output_files_deduplicates_and_strips_prefix(
     plain = final_dir / "notes.txt"
     plain.write_text("notes")
 
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "true")
 
     result = of.collect_final_output_files("session")
     download_dir = session_dir / "output_final_download"
@@ -187,8 +274,8 @@ def test_final_download_dir_isolated_per_session_when_workspace_shared(
 ):
     base = tmp_path / "workspace"
     base.mkdir()
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "false")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "false")
 
     assert (
         of.final_download_dir("user_a")
@@ -223,24 +310,67 @@ def test_latest_redacted_pdf_path_returns_newest_match(tmp_path, monkeypatch):
     draft_dir = session_dir / "redact" / "doc.pdf" / "output_redact"
     draft_dir.mkdir(parents=True)
     older = draft_dir / "doc_redacted.pdf"
-    older.write_bytes(b"%PDF-1.4 draft")
+    older.write_bytes(_minimal_pdf_bytes(b"draft"))
     time.sleep(0.02)
     final_dir = session_dir / "redact" / "doc.pdf" / "review" / "output_review_final"
     final_dir.mkdir(parents=True)
     newer = final_dir / "doc_redacted.pdf"
-    newer.write_bytes(b"%PDF-1.4 final content" + b" " * 48)
+    newer.write_bytes(_minimal_pdf_bytes(b"final content"))
     unrelated = session_dir / "notes.txt"
     unrelated.write_text("x")
 
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "true")
 
     path = of.latest_redacted_pdf_path("session")
     assert path is not None
     assert path.endswith("latest_redacted.pdf")
     staged = Path(path)
     assert staged.is_file()
-    assert staged.read_bytes().startswith(b"%PDF-1.4 final")
+    assert staged.read_bytes().startswith(b"%PDF-1.4")
+    assert "final content" in staged.read_bytes().decode("latin-1")
+
+
+def test_latest_redacted_pdf_path_prefers_final_output_over_newer_intermediate(
+    tmp_path, monkeypatch
+):
+    import time
+
+    base = tmp_path / "workspace"
+    session_dir = base / "session"
+    final_dir = session_dir / "redact" / "doc.pdf" / "review" / "output_review_final"
+    final_dir.mkdir(parents=True)
+    final_pdf = final_dir / "doc_redacted.pdf"
+    final_pdf.write_bytes(_minimal_pdf_bytes(b"final deliverable"))
+    time.sleep(0.02)
+    draft_dir = session_dir / "redact" / "doc.pdf" / "output_redact"
+    draft_dir.mkdir(parents=True)
+    draft_pdf = draft_dir / "doc_redacted.pdf"
+    draft_pdf.write_bytes(_minimal_pdf_bytes(b"intermediate draft"))
+
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "true")
+
+    path = of.latest_redacted_pdf_path("session")
+    assert path is not None
+    staged = Path(path)
+    assert b"final deliverable" in staged.read_bytes()
+
+
+def test_latest_redacted_pdf_path_uses_posix_separators(tmp_path, monkeypatch):
+    base = tmp_path / "workspace"
+    session_dir = base / "session"
+    out_dir = session_dir / "redact" / "doc.pdf" / "output_redact"
+    out_dir.mkdir(parents=True)
+    (out_dir / "doc_redacted.pdf").write_bytes(_minimal_pdf_bytes())
+
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "true")
+
+    path = of.latest_redacted_pdf_path("session")
+    assert path is not None
+    assert "\\" not in path
+    assert "/preview/latest_redacted.pdf" in path
 
 
 def test_latest_redacted_pdf_path_skips_invalid_and_review_pdfs(tmp_path, monkeypatch):
@@ -251,14 +381,14 @@ def test_latest_redacted_pdf_path_skips_invalid_and_review_pdfs(tmp_path, monkey
     (out_dir / "doc_redactions_for_review.pdf").write_bytes(b"%PDF-1.4 review")
     (out_dir / "error_redacted.pdf").write_text("<html>429 Too Many Requests</html>")
     valid = out_dir / "doc_redacted.pdf"
-    valid.write_bytes(b"%PDF-1.4 valid" + b" " * 52)
+    valid.write_bytes(_minimal_pdf_bytes(b"valid"))
 
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "true")
 
     path = of.latest_redacted_pdf_path("session")
     assert path is not None
-    assert Path(path).read_bytes().startswith(b"%PDF-1.4 valid")
+    assert Path(path).read_bytes().startswith(b"%PDF-1.4")
 
 
 def test_latest_redacted_pdf_path_returns_none_when_missing(tmp_path, monkeypatch):
@@ -267,8 +397,8 @@ def test_latest_redacted_pdf_path_returns_none_when_missing(tmp_path, monkeypatc
     session_dir = base / "session"
     session_dir.mkdir()
 
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "true")
 
     assert of.latest_redacted_pdf_path("session") is None
 
@@ -279,8 +409,8 @@ def test_workspace_root_from_uses_session_hash_only(tmp_path, monkeypatch):
     session_dir = base / "abc123"
     session_dir.mkdir()
 
-    monkeypatch.setenv("PI_WORKSPACE_DIR", str(base))
-    monkeypatch.setenv("PI_SESSION_WORKSPACE", "true")
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "true")
 
     assert of.workspace_root_from("abc123") == session_dir
     assert of.workspace_root_from(None) == base.resolve()

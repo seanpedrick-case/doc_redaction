@@ -163,6 +163,54 @@ def gradio_head_html(root_path: str = ROOT_PATH) -> str:
     )
 
 
+class ForwardedHostMiddleware:
+    """Promote ``x-forwarded-host`` / ``x-forwarded-proto`` onto the ASGI scope.
+
+    Behind CloudFront with the ALL_VIEWER_EXCEPT_HOST_HEADER origin request policy, the
+    origin's ``Host`` header is the internal ``*.ecs.on.aws`` hostname, not the public
+    CloudFront domain. Starlette builds redirect ``Location`` headers and other absolute
+    URLs from that raw Host, so a trailing-slash redirect on a sub-mount (e.g. ``GET
+    /agent`` -> ``/agent/``) points the browser straight at the internal origin — which
+    is unreachable once the origin security group is locked to CloudFront-only, so the
+    app never loads.
+
+    This middleware rewrites the request ``Host`` header (and ``scheme``) from the
+    forwarded headers before routing, so every generated URL targets the public host
+    over https. CloudFront supplies ``x-forwarded-host`` via a viewer-request function
+    and ``x-forwarded-proto`` via a static custom origin header.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        headers = scope.get("headers") or []
+        forwarded_host = None
+        forwarded_proto = None
+        for key, value in headers:
+            if key == b"x-forwarded-host":
+                forwarded_host = value
+            elif key == b"x-forwarded-proto":
+                forwarded_proto = value
+        if forwarded_host:
+            host = forwarded_host.split(b",")[0].strip()
+            if host:
+                scope = dict(scope)
+                scope["headers"] = [(k, v) for (k, v) in headers if k != b"host"] + [
+                    (b"host", host)
+                ]
+                if forwarded_proto:
+                    proto = (
+                        forwarded_proto.split(b",")[0].strip().decode("latin-1").lower()
+                    )
+                    if proto in ("http", "https"):
+                        scope["scheme"] = proto
+        await self.app(scope, receive, send)
+
+
 def create_fastapi_app(*, root_path: str | None = None) -> FastAPI:
     """Create FastAPI app with lifespan, optional CORS/trusted-host middleware, and /health."""
     from tools.helper_functions import lifespan
@@ -185,6 +233,10 @@ def create_fastapi_app(*, root_path: str | None = None) -> FastAPI:
 
     if ALLOWED_HOSTS:
         fastapi_app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+
+    # Added last so it is the outermost middleware and rewrites the Host before the
+    # TrustedHost check and Starlette's routing/redirect logic run.
+    fastapi_app.add_middleware(ForwardedHostMiddleware)
 
     @fastapi_app.get("/health", status_code=status.HTTP_200_OK)
     def health_check():
@@ -360,7 +412,7 @@ def log_platform_access(session_hash: str, host_name: str = HOST_NAME) -> None:
     except OSError as exc:
         logger.warning(
             "Access log write failed (%s); session UI continues. "
-            "On ECS/HF Pi images set ACCESS_LOGS_FOLDER=/tmp/pi-logs/ "
+            "On ECS/HF agent images set ACCESS_LOGS_FOLDER=/tmp/agent-logs/ "
             "(see agent-redact/pi/bootstrap_pi_config.py).",
             exc,
         )
@@ -498,17 +550,35 @@ def mount_or_launch(
 
     if RUN_FASTAPI:
         if fastapi_app is None:
-            fastapi_app = create_fastapi_app(root_path=fastapi_root_path)
+            # When Gradio is mounted at a subpath (mount_path != ""), the upstream proxy
+            # (e.g. CloudFront) forwards that prefix *unstripped*, so the request path
+            # already contains it. FastAPI/Starlette ``root_path`` is meant for a prefix
+            # the proxy has *already* stripped: setting it to the mount prefix makes
+            # Starlette strip it again before routing, so ``/pi/`` becomes ``/`` and never
+            # matches the sub-mount at ``/pi`` -> 404. Only honour ``fastapi_root_path``
+            # when serving at the app root ("/").
+            effective_fastapi_root = "" if mount_path else fastapi_root_path
+            fastapi_app = create_fastapi_app(root_path=effective_fastapi_root)
+        # Gradio file/download URLs are built as ``/gradio_api/file=…`` (origin-absolute).
+        # ``<base href>`` does not rewrite paths that start with ``/``. Behind CloudFront
+        # ``x-forwarded-host`` is host-only, so without ``root_path`` on the mounted Blocks
+        # object, ``add_root_url`` prefixes ``https://<cf-host>/gradio_api/…`` and omits
+        # the subpath (e.g. ``/agent``), which routes to the wrong CloudFront behavior.
+        mount_kwargs: dict[str, Any] = {
+            "head": head,
+            "css": css,
+            "theme": theme,
+            "show_error": show_error,
+            "auth": auth,
+            "allowed_paths": allowed,
+        }
+        if mount_path:
+            mount_kwargs["root_path"] = mount_path
         return gr.mount_gradio_app(
             fastapi_app,
             demo,
             path=mount_path,
-            head=head,
-            css=css,
-            theme=theme,
-            show_error=show_error,
-            auth=auth,
-            allowed_paths=allowed,
+            **mount_kwargs,
         )
 
     demo.launch(

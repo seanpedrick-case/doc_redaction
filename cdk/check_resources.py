@@ -11,10 +11,12 @@ from cdk_config import (  # Import necessary config
     CODEBUILD_ROLE_NAME,
     COGNITO_USER_POOL_CLIENT_NAME,
     COGNITO_USER_POOL_CLIENT_SECRET_NAME,
+    COGNITO_USER_POOL_DOMAIN_PREFIX,
     COGNITO_USER_POOL_NAME,
     CONTEXT_FILE,
+    ECR_AGENT_REPO_NAME,
+    ECR_AGENTCORE_REPO_NAME,
     ECR_CDK_REPO_NAME,
-    ECR_PI_REPO_NAME,
     ECS_SERVICE_CONNECT_CLIENT_SECURITY_GROUP_NAMES_TO_LOOKUP,
     ECS_TASK_EXECUTION_ROLE_NAME,
     ECS_TASK_ROLE_NAME,
@@ -45,13 +47,15 @@ from cdk_functions import (  # Import your check functions (assuming they use Bo
     check_for_existing_user_pool,
     check_for_existing_user_pool_client,
     check_for_secret,
-    check_s3_bucket_exists,
     check_subnet_exists_by_name,
     check_web_acl_exists,
+    get_cognito_domain_owner_pool_id,
     get_secret_kms_key_arn,
     get_security_group_id_by_name,
     get_vpc_id_by_name,
     list_existing_vpc_endpoint_service_names,
+    resolve_cognito_domain_prefix_availability,
+    resolve_s3_bucket_availability,
     validate_subnet_creation_parameters,
     # Add other check functions as needed
 )
@@ -394,21 +398,19 @@ def check_and_set_context():
         context_data[f"arn:{role_name}"] = role_arn
 
     # S3 Buckets
+    def _record_s3_bucket_context(name: str) -> None:
+        status, _ = resolve_s3_bucket_availability(name)
+        context_data[f"exists:{name}"] = status == "owned"
+        context_data[f"globally_taken:{name}"] = status == "globally_taken"
+
     bucket_name = S3_LOG_CONFIG_BUCKET_NAME
-    exists, _ = check_s3_bucket_exists(bucket_name)
-    context_data[f"exists:{bucket_name}"] = exists
-    if exists:
-        # You might not need the ARN if using from_bucket_name
-        pass
+    _record_s3_bucket_context(bucket_name)
 
     output_bucket_name = S3_OUTPUT_BUCKET_NAME
-    exists, _ = check_s3_bucket_exists(output_bucket_name)
-    context_data[f"exists:{output_bucket_name}"] = exists
-    if exists:
-        pass
+    _record_s3_bucket_context(output_bucket_name)
 
     # ECR Repositories
-    for repo_name in (ECR_CDK_REPO_NAME, ECR_PI_REPO_NAME):
+    for repo_name in (ECR_CDK_REPO_NAME, ECR_AGENT_REPO_NAME, ECR_AGENTCORE_REPO_NAME):
         exists, _ = check_ecr_repo_exists(repo_name)
         context_data[f"exists:{repo_name}"] = exists
 
@@ -445,7 +447,7 @@ def check_and_set_context():
     if ENABLE_PI_AGENT_ECS_SERVICE == "True":
         print(
             "ENABLE_PI_AGENT_ECS_SERVICE=True: requires legacy Fargate, Service Connect, "
-            "and PI_ALB_ROUTING (default path=/pi on shared ALB; host mode needs PI_ALB_HOST_HEADER)."
+            "and AGENT_ALB_ROUTING (default path=/agent on shared ALB; host mode needs AGENT_ALB_HOST_HEADER)."
         )
     elif ENABLE_HEADLESS_DEPLOYMENT == "True":
         print(
@@ -469,11 +471,40 @@ def check_and_set_context():
 
     # Cognito (web login only; headless batch mode has no Gradio/ALB ingress)
     if ENABLE_HEADLESS_DEPLOYMENT != "True":
+        # Resolve the existing user pool first so we can tell whether a "taken"
+        # domain prefix is genuinely owned by another pool/account or simply
+        # already attached to the pool we intend to reuse.
         user_pool_name = COGNITO_USER_POOL_NAME
         exists, user_pool_id, _ = check_for_existing_user_pool(user_pool_name)
         context_data[f"exists:{user_pool_name}"] = exists
         if exists:
             context_data[f"id:{user_pool_name}"] = user_pool_id
+
+        domain_prefix = (COGNITO_USER_POOL_DOMAIN_PREFIX or "").strip().lower()
+        if domain_prefix:
+            availability = resolve_cognito_domain_prefix_availability(
+                domain_prefix, region_name=AWS_REGION
+            )
+            domain_on_reused_pool = False
+            if availability == "taken" and exists and user_pool_id:
+                domain_owner_pool_id = get_cognito_domain_owner_pool_id(
+                    domain_prefix, region_name=AWS_REGION
+                )
+                if domain_owner_pool_id and domain_owner_pool_id == user_pool_id:
+                    domain_on_reused_pool = True
+                    print(
+                        f"Cognito domain prefix {domain_prefix!r} is already "
+                        f"attached to the reused user pool {user_pool_id}; CDK "
+                        "will import the existing domain (no re-create)."
+                    )
+            # Only a genuine conflict (foreign account or a different pool)
+            # should block deployment.
+            context_data[f"cognito_domain_taken:{domain_prefix}"] = (
+                availability == "taken" and not domain_on_reused_pool
+            )
+            context_data[f"cognito_domain_exists_on_pool:{domain_prefix}"] = (
+                domain_on_reused_pool
+            )
 
         # Cognito User Pool Client (by name and pool ID) - requires User Pool ID from check
         if user_pool_id:
@@ -481,7 +512,7 @@ def check_and_set_context():
             user_pool_client_name = COGNITO_USER_POOL_CLIENT_NAME
             if user_pool_id_for_client_check:
                 exists, client_id, _ = check_for_existing_user_pool_client(
-                    user_pool_client_name, user_pool_id_for_client_check
+                    user_pool_id_for_client_check, user_pool_client_name
                 )
                 context_data[f"exists:{user_pool_client_name}"] = exists
                 if exists:
@@ -544,12 +575,17 @@ def check_and_set_context():
                 "Connect client security group names."
             )
 
-    # WAF Web ACL (by name and scope)
-    web_acl_name = WEB_ACL_NAME
-    exists, existing_web_acl = check_web_acl_exists(web_acl_name, scope="CLOUDFRONT")
-    context_data[f"exists:{web_acl_name}"] = exists
-    if exists:
-        context_data[f"arn:{web_acl_name}"] = existing_web_acl["ARN"]
+    # WAF Web ACL (by name and scope) — only when CloudFront WAF is enabled
+    from cdk_config import ENABLE_CLOUDFRONT_WAF
+
+    if ENABLE_CLOUDFRONT_WAF == "True":
+        web_acl_name = WEB_ACL_NAME
+        exists, existing_web_acl = check_web_acl_exists(
+            web_acl_name, scope="CLOUDFRONT"
+        )
+        context_data[f"exists:{web_acl_name}"] = exists
+        if exists:
+            context_data[f"arn:{web_acl_name}"] = existing_web_acl["ARN"]
 
     # Write the context data to the file
     with open(CONTEXT_FILE, "w") as f:

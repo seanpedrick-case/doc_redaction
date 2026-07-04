@@ -859,9 +859,9 @@ def create_nlp_analyser(
 
 
 def _init_default_analyser() -> None:
-    """Eager-load Presidio/spaCy for the main app; skip for Pi agent UI (``APP_TYPE=pi``)."""
+    """Eager-load Presidio/spaCy for the main app; skip for the agent UI (``APP_TYPE=agent``; ``pi`` accepted for back-compat)."""
     global nlp_analyser, nlp
-    if os.environ.get("APP_TYPE", "").strip().lower() == "pi":
+    if os.environ.get("APP_TYPE", "").strip().lower() in ("agent", "pi"):
         nlp_analyser = None
         nlp = None
         return

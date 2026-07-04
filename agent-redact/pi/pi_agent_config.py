@@ -14,13 +14,15 @@ DEPLOYMENT_AWS_ECS = "aws-ecs"
 
 def resolve_agent_dir() -> Path:
     """Directory for Pi ``models.json`` / ``settings.json`` (must be writable at runtime)."""
-    explicit = (os.environ.get("PI_CODING_AGENT_DIR") or "").strip()
+    explicit = (os.environ.get("AGENT_CODING_AGENT_DIR") or "").strip()
     if explicit:
         return Path(explicit)
-    profile = os.environ.get("PI_DEPLOYMENT_PROFILE", DEPLOYMENT_LOCAL).strip().lower()
+    profile = (
+        os.environ.get("AGENT_DEPLOYMENT_PROFILE", DEPLOYMENT_LOCAL).strip().lower()
+    )
     # HF Space and ECS often use a read-only root FS; only mounted paths (or /tmp) are writable.
     if profile in (DEPLOYMENT_HF_SPACE, DEPLOYMENT_AWS_ECS):
-        return Path("/tmp/pi-agent")
+        return Path("/tmp/agent-coding")
     return Path.home() / ".pi" / "agent"
 
 
@@ -30,15 +32,15 @@ TEMPLATE_DIR = Path(__file__).resolve().parent / "agent"
 SETTINGS_TEMPLATE = TEMPLATE_DIR / "settings.json"
 
 DEPLOYMENT_PROFILE = (
-    os.environ.get("PI_DEPLOYMENT_PROFILE", DEPLOYMENT_LOCAL).strip().lower()
+    os.environ.get("AGENT_DEPLOYMENT_PROFILE", DEPLOYMENT_LOCAL).strip().lower()
 )
 
 
 def pi_max_retries() -> int:
-    """Max retries for Pi auto-retry and Gradio quota backoff (env: PI_MAX_RETRIES, default 5)."""
+    """Max retries for Pi auto-retry and Gradio quota backoff (env: AGENT_MAX_RETRIES, default 5)."""
     raw = (
-        os.environ.get("PI_QUOTA_RETRY_ATTEMPTS")
-        or os.environ.get("PI_MAX_RETRIES")
+        os.environ.get("AGENT_QUOTA_RETRY_ATTEMPTS")
+        or os.environ.get("AGENT_MAX_RETRIES")
         or "5"
     ).strip()
     return int(raw)
@@ -60,21 +62,21 @@ def _apply_retry_settings(
     base_delay_ms = 2000
     max_delay_ms = 60000
     if use_long_delays:
-        default_base_ms = int(os.environ.get("PI_QUOTA_RETRY_DELAY_S", "60")) * 1000
+        default_base_ms = int(os.environ.get("AGENT_QUOTA_RETRY_DELAY_S", "60")) * 1000
         default_max_ms = int(default_base_ms * 1.5)
         if provider == PROVIDER_BEDROCK or (
             is_aws_ecs_profile() and not is_hf_space_profile()
         ):
-            prefix = "PI_BEDROCK"
+            prefix = "AGENT_BEDROCK"
         else:
-            prefix = "PI_GEMINI"
+            prefix = "AGENT_GEMINI"
         base_delay_ms = int(
             os.environ.get(f"{prefix}_RETRY_BASE_DELAY_MS")
-            or os.environ.get("PI_GEMINI_RETRY_BASE_DELAY_MS", str(default_base_ms))
+            or os.environ.get("AGENT_GEMINI_RETRY_BASE_DELAY_MS", str(default_base_ms))
         )
         max_delay_ms = int(
             os.environ.get(f"{prefix}_RETRY_MAX_DELAY_MS")
-            or os.environ.get("PI_GEMINI_RETRY_MAX_DELAY_MS", str(default_max_ms))
+            or os.environ.get("AGENT_GEMINI_RETRY_MAX_DELAY_MS", str(default_max_ms))
         )
     settings["retry"] = {
         "enabled": True,
@@ -100,12 +102,16 @@ PROVIDER_LABELS: dict[str, str] = {
 
 
 def is_hf_space_profile() -> bool:
-    profile = os.environ.get("PI_DEPLOYMENT_PROFILE", DEPLOYMENT_LOCAL).strip().lower()
+    profile = (
+        os.environ.get("AGENT_DEPLOYMENT_PROFILE", DEPLOYMENT_LOCAL).strip().lower()
+    )
     return profile == DEPLOYMENT_HF_SPACE
 
 
 def is_aws_ecs_profile() -> bool:
-    profile = os.environ.get("PI_DEPLOYMENT_PROFILE", DEPLOYMENT_LOCAL).strip().lower()
+    profile = (
+        os.environ.get("AGENT_DEPLOYMENT_PROFILE", DEPLOYMENT_LOCAL).strip().lower()
+    )
     return profile == DEPLOYMENT_AWS_ECS
 
 
@@ -114,9 +120,9 @@ def uses_split_redaction_backend() -> bool:
     True when Pi and doc_redaction run in separate containers (no shared output disk).
 
     HF Space and AWS ECS use Gradio HTTP download; local-docker typically shares a host
-    volume. Override with ``PI_REDACTION_SPLIT_BACKEND=true|false``.
+    volume. Override with ``AGENT_REDACTION_SPLIT_BACKEND=true|false``.
     """
-    explicit = (os.environ.get("PI_REDACTION_SPLIT_BACKEND") or "").strip().lower()
+    explicit = (os.environ.get("AGENT_REDACTION_SPLIT_BACKEND") or "").strip().lower()
     if explicit in {"1", "true", "yes", "on"}:
         return True
     if explicit in {"0", "false", "no", "off"}:
@@ -128,12 +134,12 @@ def resolve_llama_base_url() -> str:
     """
     OpenAI-compatible base URL for Pi's ``llama-cpp`` provider (includes ``/v1``).
 
-    Reads ``PI_LLAMA_BASE_URL``; also accepts legacy aliases
-    ``PI_LLAMA_MODE_BASE_URL`` and ``PI_LLAMA_MODE__BASE_URL``.
+    Reads ``AGENT_LLAMA_BASE_URL``; also accepts legacy aliases
+    ``AGENT_LLAMA_MODE_BASE_URL`` and ``AGENT_LLAMA_MODE__BASE_URL``.
     """
     for key in (
-        "PI_LLAMA_BASE_URL",
-        "PI_LLAMA_MODE_BASE_URL",
+        "AGENT_LLAMA_BASE_URL",
+        "AGENT_LLAMA_MODE_BASE_URL",
     ):
         raw = (os.environ.get(key) or "").strip().rstrip("/")
         if raw:
@@ -142,9 +148,9 @@ def resolve_llama_base_url() -> str:
 
 
 LLAMA_BASE_URL = resolve_llama_base_url()
-LLAMA_MODEL_ID = os.environ.get("PI_LLAMA_MODEL_ID", "unsloth/Qwen3.6-27B-MTP-GGUF")
-LLAMA_CONTEXT = int(os.environ.get("PI_LLAMA_CONTEXT_WINDOW", "114688"))
-LLAMA_MAX_TOKENS = int(os.environ.get("PI_LLAMA_MAX_TOKENS", "32768"))
+LLAMA_MODEL_ID = os.environ.get("AGENT_LLAMA_MODEL_ID", "unsloth/Qwen3.6-27B-MTP-GGUF")
+LLAMA_CONTEXT = int(os.environ.get("AGENT_LLAMA_CONTEXT_WINDOW", "114688"))
+LLAMA_MAX_TOKENS = int(os.environ.get("AGENT_LLAMA_MAX_TOKENS", "32768"))
 
 GEMINI_MODELS: tuple[tuple[str, str, int, bool], ...] = (
     ("gemini-flash-lite-latest", "Gemini Flash Lite", 1048576, False),
@@ -183,10 +189,10 @@ DEFAULT_MODEL_BY_PROVIDER: dict[str, str] = {
 
 
 def get_default_provider() -> str:
-    """Current default Pi provider (reads ``PI_DEFAULT_PROVIDER`` from env each call)."""
+    """Current default Pi provider (reads ``AGENT_DEFAULT_PROVIDER`` from env each call)."""
     if is_hf_space_profile():
         return PROVIDER_GEMINI
-    raw = (os.environ.get("PI_DEFAULT_PROVIDER") or "").strip()
+    raw = (os.environ.get("AGENT_DEFAULT_PROVIDER") or "").strip()
     if raw in PROVIDER_MODELS:
         return raw
     if is_aws_ecs_profile():
@@ -202,7 +208,7 @@ def _catalog_contains_model(model_id: str, provider: str) -> bool:
     return model_id in PROVIDER_MODELS.get(provider, ())
 
 
-_env_default_model = (os.environ.get("PI_DEFAULT_MODEL") or "").strip()
+_env_default_model = (os.environ.get("AGENT_DEFAULT_MODEL") or "").strip()
 if _env_default_model and (
     DEFAULT_PROVIDER == PROVIDER_LLAMA
     or _catalog_contains_model(_env_default_model, DEFAULT_PROVIDER)
@@ -213,9 +219,9 @@ else:
 
 
 def llama_model_id() -> str:
-    """Active llama-cpp model id (runtime ``PI_LLAMA_MODEL_ID`` or startup default)."""
+    """Active llama-cpp model id (runtime ``AGENT_LLAMA_MODEL_ID`` or startup default)."""
     return (
-        os.environ.get("PI_LLAMA_MODEL_ID") or LLAMA_MODEL_ID
+        os.environ.get("AGENT_LLAMA_MODEL_ID") or LLAMA_MODEL_ID
     ).strip() or LLAMA_MODEL_ID
 
 
@@ -223,13 +229,13 @@ def resolved_default_model(provider: str, *, override: str | None = None) -> str
     """
     Pick the default model id for a provider.
 
-    Order: explicit override → ``PI_DEFAULT_MODEL`` when valid for *provider* →
-    built-in per-provider default (llama uses ``PI_LLAMA_MODEL_ID``).
+    Order: explicit override → ``AGENT_DEFAULT_MODEL`` when valid for *provider* →
+    built-in per-provider default (llama uses ``AGENT_LLAMA_MODEL_ID``).
     """
     if override and override.strip():
         return override.strip()
     normalized = normalize_provider(provider)
-    env_model = (os.environ.get("PI_DEFAULT_MODEL") or "").strip()
+    env_model = (os.environ.get("AGENT_DEFAULT_MODEL") or "").strip()
     active_provider = normalize_provider(get_default_provider())
     if env_model:
         if normalized == PROVIDER_LLAMA:
@@ -338,7 +344,7 @@ _AWS_CREDENTIAL_ENV_KEYS: tuple[str, ...] = (
     "AWS_ACCESS_KEY",
     "AWS_SECRET_KEY",
 )
-_AWS_PROFILE_ENV_KEYS: tuple[str, ...] = ("AWS_PROFILE", "PI_AWS_PROFILE")
+_AWS_PROFILE_ENV_KEYS: tuple[str, ...] = ("AWS_PROFILE", "AGENT_AWS_PROFILE")
 
 
 def _env_flag(name: str, *, default: bool = False) -> bool:
@@ -389,7 +395,7 @@ def _aws_config_path() -> Path | None:
 
 def _discover_aws_profile_from_config() -> str | None:
     """Return an AWS profile name for Pi/Bedrock when only ~/.aws is mounted."""
-    explicit = (os.environ.get("PI_AWS_PROFILE") or "").strip()
+    explicit = (os.environ.get("AGENT_AWS_PROFILE") or "").strip()
     if not explicit:
         explicit = (os.environ.get("AWS_PROFILE") or "").strip()
     if explicit:
@@ -543,8 +549,8 @@ def configure_aws_credentials(
             os.environ.pop(key, None)
         _ensure_pi_bedrock_auth_env()
 
-    # Propagate PI_AWS_PROFILE when only that alias is set (e.g. pi_agent.env).
-    pi_profile = (os.environ.get("PI_AWS_PROFILE") or "").strip()
+    # Propagate AGENT_AWS_PROFILE when only that alias is set (e.g. agent.env).
+    pi_profile = (os.environ.get("AGENT_AWS_PROFILE") or "").strip()
     if pi_profile and not (os.environ.get("AWS_PROFILE") or "").strip():
         os.environ["AWS_PROFILE"] = pi_profile
 
@@ -616,10 +622,10 @@ def _apply_compaction_settings(settings: dict[str, Any]) -> None:
     """
     Merge Pi session auto-compaction from env into ``settings.json``.
 
-    ``PI_COMPACTION_ENABLED`` — when set, overrides the template ``compaction.enabled``
+    ``AGENT_COMPACTION_ENABLED`` — when set, overrides the template ``compaction.enabled``
     flag (``true`` / ``false``). When unset, the template default applies (enabled).
 
-    Optional tuning: ``PI_COMPACTION_RESERVE_TOKENS``, ``PI_COMPACTION_KEEP_RECENT_TOKENS``.
+    Optional tuning: ``AGENT_COMPACTION_RESERVE_TOKENS``, ``AGENT_COMPACTION_KEEP_RECENT_TOKENS``.
     """
     compaction = dict(
         settings.get("compaction")
@@ -629,15 +635,15 @@ def _apply_compaction_settings(settings: dict[str, Any]) -> None:
             "keepRecentTokens": 20000,
         }
     )
-    if os.environ.get("PI_COMPACTION_ENABLED") is not None:
-        compaction["enabled"] = _env_flag("PI_COMPACTION_ENABLED")
-    reserve = (os.environ.get("PI_COMPACTION_RESERVE_TOKENS") or "").strip()
+    if os.environ.get("AGENT_COMPACTION_ENABLED") is not None:
+        compaction["enabled"] = _env_flag("AGENT_COMPACTION_ENABLED")
+    reserve = (os.environ.get("AGENT_COMPACTION_RESERVE_TOKENS") or "").strip()
     if reserve:
         compaction["reserveTokens"] = int(reserve)
     elif LLAMA_CONTEXT < 100_000:
         # Smaller local models (e.g. Gemma 4 31B at 65536): default reserve was 32768.
         compaction["reserveTokens"] = min(16_384, max(8_192, LLAMA_CONTEXT // 4))
-    keep = (os.environ.get("PI_COMPACTION_KEEP_RECENT_TOKENS") or "").strip()
+    keep = (os.environ.get("AGENT_COMPACTION_KEEP_RECENT_TOKENS") or "").strip()
     if keep:
         compaction["keepRecentTokens"] = int(keep)
     elif LLAMA_CONTEXT < 100_000:
@@ -647,11 +653,11 @@ def _apply_compaction_settings(settings: dict[str, Any]) -> None:
 
 def resolve_session_dir() -> str:
     """Pi session JSONL directory (absolute path or relative to ``AGENT_DIR``)."""
-    explicit = os.environ.get("PI_SESSION_DIR", "").strip()
+    explicit = os.environ.get("AGENT_SESSION_DIR", "").strip()
     if explicit:
         return explicit
     if is_hf_space_profile():
-        return "/tmp/pi-sessions"
+        return "/tmp/agent-sessions"
     return "sessions"
 
 
@@ -705,12 +711,12 @@ def write_runtime_config(
     """Write models.json and settings.json; return their paths."""
     provider = normalize_provider(default_provider or get_default_provider())
     if default_provider:
-        os.environ["PI_DEFAULT_PROVIDER"] = provider
+        os.environ["AGENT_DEFAULT_PROVIDER"] = provider
     if default_model and default_model.strip():
         model = default_model.strip()
-        os.environ["PI_DEFAULT_MODEL"] = model
+        os.environ["AGENT_DEFAULT_MODEL"] = model
         if provider == PROVIDER_LLAMA:
-            os.environ["PI_LLAMA_MODEL_ID"] = model
+            os.environ["AGENT_LLAMA_MODEL_ID"] = model
 
     target = Path(agent_dir or resolve_agent_dir())
     target.mkdir(parents=True, exist_ok=True)
@@ -810,6 +816,20 @@ def credential_status_markdown(*, provider: str | None = None) -> str:
     Gemini and Bedrock lines appear only when that provider is selected.
     """
     active = normalize_provider(provider or get_default_provider())
+    orchestrator = (os.environ.get("AGENT_ORCHESTRATOR") or "pi").strip().lower()
+    if orchestrator in {"agentcore", "agentcore-harness"}:
+        try:
+            from redaction_prompt import doc_redaction_gradio_url
+
+            backend = doc_redaction_gradio_url()
+        except ImportError:
+            backend = (os.environ.get("DOC_REDACTION_GRADIO_URL") or "—").strip()
+        region = _bedrock_region()
+        return (
+            f"**Credentials:** AWS `{_aws_credential_status()}` · region `{region}` "
+            f"(AgentCore orchestration)  \n"
+            f"**Redaction tools call:** `{backend}` (sent to runtime each invoke)"
+        )
     if is_hf_space_profile():
         gemini = (
             "set"

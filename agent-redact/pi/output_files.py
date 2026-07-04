@@ -13,12 +13,29 @@ from bootstrap_pi_config import pi_repo_root_path
 from pi_examples import gradio_example_allowed_paths
 from session_logs import gradio_session_log_allowed_paths
 from session_workspace import (
+    effective_session_hash,
     sanitize_session_id,
     session_workspace_dir,
+    session_workspace_enabled,
     workspace_base_dir,
 )
 
-REFRESH_STUB_DIR = Path(os.environ.get("PI_FILEEXPLORER_STUB_DIR", "/tmp"))
+
+def fileexplorer_stub_dir() -> Path:
+    """Empty directory used as a safe FileExplorer root (never the shared base).
+
+    Used as the initial explorer root before a session is known, and as the
+    transient "stub" root that forces Gradio to re-fetch the explorer listing.
+    Kept empty so no cross-session files are ever listed, even momentarily.
+    """
+    raw = (os.environ.get("AGENT_FILEEXPLORER_STUB_DIR") or "").strip()
+    if raw:
+        stub = Path(raw)
+    else:
+        stub = workspace_base_dir().resolve() / ".pi" / "_fileexplorer_stub"
+    stub.mkdir(parents=True, exist_ok=True)
+    return stub.resolve()
+
 
 # Folder names under ``.../review/`` where Pass 1 deliverables are saved (see partnership prompt).
 _DEFAULT_FINAL_OUTPUT_FOLDER_NAMES = ("output_review_final", "output_final")
@@ -27,7 +44,7 @@ _DEFAULT_GRADIO_PREFIX_MIN_LEN = 16
 
 
 def final_output_folder_names() -> frozenset[str]:
-    raw = os.environ.get("PI_FINAL_OUTPUT_FOLDER_NAMES", "").strip()
+    raw = os.environ.get("AGENT_FINAL_OUTPUT_FOLDER_NAMES", "").strip()
     if raw:
         names = {part.strip() for part in raw.split(",") if part.strip()}
         if names:
@@ -46,7 +63,7 @@ def _is_under_final_output_dir(relative_path: Path) -> bool:
 
 
 def final_download_folder_name() -> str:
-    raw = os.environ.get("PI_FINAL_DOWNLOAD_FOLDER", _DEFAULT_FINAL_DOWNLOAD_FOLDER)
+    raw = os.environ.get("AGENT_FINAL_DOWNLOAD_FOLDER", _DEFAULT_FINAL_DOWNLOAD_FOLDER)
     stripped = raw.strip() if raw else ""
     return stripped or _DEFAULT_FINAL_DOWNLOAD_FOLDER
 
@@ -55,8 +72,8 @@ def final_download_dir(session_hash: str | None = None) -> Path:
     """
     Per-session staging folder for ``gr.File`` downloads.
 
-    Always ``{PI_WORKSPACE_DIR}/{session_id}/output_final_download/`` when a session
-    id is known, even if the broader workspace is shared (``PI_SESSION_WORKSPACE=false``).
+    Always ``{AGENT_WORKSPACE_DIR}/{session_id}/output_final_download/`` when a session
+    id is known, even if the broader workspace is shared (``AGENT_SESSION_WORKSPACE=false``).
     """
     base = workspace_base_dir().resolve()
     folder = final_download_folder_name()
@@ -95,7 +112,7 @@ def _reset_download_dir(download_dir: Path) -> None:
 
 def _gradio_prefix_min_len() -> int:
     raw = os.environ.get(
-        "PI_GRADIO_FILENAME_PREFIX_MIN_LEN",
+        "AGENT_GRADIO_FILENAME_PREFIX_MIN_LEN",
         str(_DEFAULT_GRADIO_PREFIX_MIN_LEN),
     )
     try:
@@ -204,9 +221,10 @@ def collect_final_output_files(
 
 _REDACTED_PDF_SUFFIX = "_redacted.pdf"
 _REVIEW_PDF_MARKER = "_redactions_for_review"
-_PREVIEW_DIRNAME = ".pi/preview"
+_PREVIEW_DIRNAME = "preview"
+_LEGACY_PREVIEW_DIRNAME = ".pi/preview"
 _PREVIEW_FILENAME = "latest_redacted.pdf"
-_MIN_PDF_BYTES = 64
+_MIN_PDF_BYTES = 1024
 
 
 def _is_redacted_pdf_candidate(path: Path) -> bool:
@@ -227,18 +245,30 @@ def _is_valid_pdf_file(path: Path, *, min_bytes: int = _MIN_PDF_BYTES) -> bool:
         if path.stat().st_size < min_bytes:
             return False
         with path.open("rb") as handle:
-            return handle.read(5).startswith(b"%PDF-")
+            header = handle.read(5)
+            if not header.startswith(b"%PDF-"):
+                return False
+            size = path.stat().st_size
+            if size < 256:
+                handle.seek(max(0, size - 32))
+                return b"%%EOF" in handle.read()
+            return True
     except OSError:
         return False
 
 
 def _find_newest_valid_redacted_pdf(session_hash: str | None) -> Path | None:
-    """Newest readable ``*_redacted.pdf`` under the session workspace."""
+    """Newest readable ``*_redacted.pdf`` under the session workspace.
+
+    Prefer deliverables under ``review/output_final`` (and aliases) over intermediate
+    ``output_redact`` copies so the preview matches the final download.
+    """
     root = workspace_root_from(session_hash)
     if not root.is_dir():
         return None
 
-    newest: tuple[float, Path] | None = None
+    final_candidates: list[tuple[float, Path]] = []
+    other_candidates: list[tuple[float, Path]] = []
     try:
         for path in root.rglob("*"):
             if not path.is_file() or not _is_redacted_pdf_candidate(path):
@@ -246,21 +276,38 @@ def _find_newest_valid_redacted_pdf(session_hash: str | None) -> Path | None:
             if not _is_valid_pdf_file(path):
                 continue
             try:
-                path.resolve(strict=False).relative_to(root.resolve())
+                relative = path.resolve(strict=False).relative_to(root.resolve())
             except ValueError:
                 continue
             timestamp = _file_created_timestamp(path)
-            if newest is None or timestamp > newest[0]:
-                newest = (timestamp, path)
+            bucket = (
+                final_candidates
+                if _is_under_final_output_dir(relative)
+                else other_candidates
+            )
+            bucket.append((timestamp, path))
     except OSError:
         return None
 
-    return newest[1] if newest else None
+    pool = final_candidates or other_candidates
+    if not pool:
+        return None
+    return max(pool, key=lambda item: item[0])[1]
 
 
 def _staged_preview_pdf_path(session_hash: str | None) -> Path:
     root = workspace_root_from(session_hash)
-    return root / ".pi" / "preview" / _PREVIEW_FILENAME
+    return root / _PREVIEW_DIRNAME / _PREVIEW_FILENAME
+
+
+def _legacy_staged_preview_pdf_path(session_hash: str | None) -> Path:
+    root = workspace_root_from(session_hash)
+    return root / _LEGACY_PREVIEW_DIRNAME / _PREVIEW_FILENAME
+
+
+def _gradio_pdf_path(path: Path) -> str:
+    """POSIX absolute path for Gradio File/PDF components (Windows-safe URLs)."""
+    return path.resolve().as_posix()
 
 
 def _stage_preview_pdf(source: Path, session_hash: str | None) -> Path:
@@ -274,7 +321,8 @@ def _stage_preview_pdf(source: Path, session_hash: str | None) -> Path:
     dest = _staged_preview_pdf_path(session_hash)
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(dest.name + ".tmp")
-    shutil.copy2(source, tmp)
+    # copyfile only: copy2/copystat can raise EPERM on OneDrive bind mounts.
+    shutil.copyfile(source, tmp)
     tmp.replace(dest)
     return dest.resolve()
 
@@ -283,14 +331,16 @@ def latest_redacted_pdf_path(session_hash: str | None = None) -> str | None:
     """
     Return the newest valid ``*_redacted.pdf`` for the Gradio PDF preview.
 
-    Copies the chosen file to ``{session}/.pi/preview/latest_redacted.pdf`` so
-    the component always receives a complete PDF under the workspace root.
+    Copies the chosen file to ``{session}/preview/latest_redacted.pdf`` so the
+    component always receives a complete PDF under the workspace root.
     """
     source = _find_newest_valid_redacted_pdf(session_hash)
     staged = _staged_preview_pdf_path(session_hash)
+    legacy_staged = _legacy_staged_preview_pdf_path(session_hash)
     if source is None:
-        if _is_valid_pdf_file(staged):
-            return str(staged.resolve())
+        for candidate in (staged, legacy_staged):
+            if _is_valid_pdf_file(candidate):
+                return _gradio_pdf_path(candidate)
         return None
 
     try:
@@ -302,18 +352,48 @@ def latest_redacted_pdf_path(session_hash: str | None = None) -> str | None:
                 and staged.stat().st_size == source.stat().st_size
                 and _is_valid_pdf_file(staged)
             ):
-                return str(staged.resolve())
+                return _gradio_pdf_path(staged)
     except OSError:
         pass
 
-    return str(_stage_preview_pdf(source, session_hash))
+    return _gradio_pdf_path(_stage_preview_pdf(source, session_hash))
+
+
+def preview_pdf_path_for_gradio(session_hash: str | None = None) -> str | None:
+    """Return a Gradio-safe preview path, or ``None`` when no valid PDF exists."""
+    return latest_redacted_pdf_path(session_hash)
 
 
 def workspace_root_from(session_hash: str | None = None) -> Path:
-    """Resolve the session workspace from a sanitized Gradio session hash only."""
+    """Resolve the session workspace from a sanitized Gradio session hash only.
+
+    Internal/server-side use (preview staging, final-deliverable collection). For
+    anything a user can browse or download, use :func:`session_browse_root`, which
+    never falls back to the shared base.
+    """
     if not session_hash or not str(session_hash).strip():
         return workspace_base_dir().resolve()
     return session_workspace_dir(str(session_hash).strip())
+
+
+def session_browse_root(
+    session_hash: str | None = None,
+    request: gr.Request | None = None,
+) -> Path:
+    """Strictly session-scoped root for user-facing browse/download.
+
+    Resolves the session id from state, falling back to the active request. When
+    per-session workspaces are enabled and no real session resolves, returns an
+    empty stub directory instead of the shared workspace base, so a user can never
+    see or download another session's files (even if the session state is missing).
+    """
+    resolved = effective_session_hash(session_hash or "", request)
+    if session_workspace_enabled():
+        if not resolved or resolved == "default":
+            return fileexplorer_stub_dir()
+        return session_workspace_dir(resolved)
+    # Per-session isolation explicitly disabled: single shared workspace by config.
+    return workspace_base_dir().resolve()
 
 
 def _is_file_path(path: str) -> bool:
@@ -361,14 +441,17 @@ def _resolve_under_workspace(
     return resolved if resolved.is_file() else None
 
 
-def load_workspace_output_files(session_hash: str = ""):
-    root = workspace_root_from(session_hash or None)
+def load_workspace_output_files(
+    session_hash: str = "",
+    request: gr.Request | None = None,
+):
+    root = session_browse_root(session_hash, request)
     root.mkdir(parents=True, exist_ok=True)
     return gr.FileExplorer(root_dir=str(root))
 
 
 def refresh_workspace_output_files_stub():
-    return gr.FileExplorer(root_dir=str(REFRESH_STUB_DIR.resolve()))
+    return gr.FileExplorer(root_dir=str(fileexplorer_stub_dir()))
 
 
 def gradio_allowed_paths() -> list[str]:
@@ -377,7 +460,7 @@ def gradio_allowed_paths() -> list[str]:
     for raw in (
         workspace_base_dir(),
         str(pi_repo_root_path()),
-        REFRESH_STUB_DIR,
+        fileexplorer_stub_dir(),
         "/tmp",
     ):
         try:
@@ -397,22 +480,30 @@ def gradio_allowed_paths() -> list[str]:
 
 def refresh_workspace_panel(
     session_hash: str = "",
+    request: gr.Request | None = None,
 ) -> tuple[Any, list[str] | None]:
     """Refresh file explorer and auto-detected final deliverables."""
+    resolved = effective_session_hash(session_hash or "", request)
     return (
-        load_workspace_output_files(session_hash),
-        collect_final_output_files(session_hash),
+        load_workspace_output_files(resolved, request),
+        collect_final_output_files(resolved),
     )
 
 
 def workspace_files_download_fn(
     selected: list[str] | None,
     session_hash: str = "",
+    request: gr.Request | None = None,
 ) -> list[str] | None:
-    """Return only file paths under the session workspace (for gr.File download)."""
+    """Return only file paths under the session workspace (for gr.File download).
+
+    The download root is strictly the current session's folder (with a request
+    fallback when session state is missing), so a user cannot download files that
+    belong to another session even if the client submits arbitrary paths.
+    """
     if not selected:
         return None
-    root = workspace_root_from(session_hash or None)
+    root = session_browse_root(session_hash, request)
     downloads: list[str] = []
     for raw in selected:
         if not _is_file_path(raw):

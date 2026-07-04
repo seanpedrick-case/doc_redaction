@@ -36,6 +36,18 @@ def test_policy_file_locations_default_is_list():
     assert all(str(p).endswith(".json") for p in POLICY_FILE_LOCATIONS)
 
 
+def test_pi_agentcore_invoke_policy_file_exists():
+    policy_path = CDK_DIR / "policies" / "pi_agentcore_invoke_policy.json"
+    assert policy_path.is_file()
+    data = json.loads(policy_path.read_text(encoding="utf-8"))
+    actions = {
+        action
+        for stmt in data.get("Statement", [])
+        for action in stmt.get("Action", [])
+    }
+    assert "bedrock-agentcore:InvokeAgentRuntime" in actions
+
+
 def test_execution_role_managed_policies_default_minimal():
     assert "service-role/AmazonECSTaskExecutionRolePolicy" in (
         ECS_EXECUTION_ROLE_MANAGED_POLICIES
