@@ -559,16 +559,26 @@ def mount_or_launch(
             # when serving at the app root ("/").
             effective_fastapi_root = "" if mount_path else fastapi_root_path
             fastapi_app = create_fastapi_app(root_path=effective_fastapi_root)
+        # Gradio file/download URLs are built as ``/gradio_api/file=…`` (origin-absolute).
+        # ``<base href>`` does not rewrite paths that start with ``/``. Behind CloudFront
+        # ``x-forwarded-host`` is host-only, so without ``root_path`` on the mounted Blocks
+        # object, ``add_root_url`` prefixes ``https://<cf-host>/gradio_api/…`` and omits
+        # the subpath (e.g. ``/agent``), which routes to the wrong CloudFront behavior.
+        mount_kwargs: dict[str, Any] = {
+            "head": head,
+            "css": css,
+            "theme": theme,
+            "show_error": show_error,
+            "auth": auth,
+            "allowed_paths": allowed,
+        }
+        if mount_path:
+            mount_kwargs["root_path"] = mount_path
         return gr.mount_gradio_app(
             fastapi_app,
             demo,
             path=mount_path,
-            head=head,
-            css=css,
-            theme=theme,
-            show_error=show_error,
-            auth=auth,
-            allowed_paths=allowed,
+            **mount_kwargs,
         )
 
     demo.launch(

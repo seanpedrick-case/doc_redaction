@@ -131,6 +131,30 @@ def test_gradio_head_html_sets_base_href():
     assert "<base href='/pi-agent/'>" in html
 
 
+def test_mount_or_launch_subpath_sets_gradio_root_path(monkeypatch):
+    """Regression: subpath mounts must set Gradio ``root_path`` so file URLs include the prefix."""
+    import gradio as gr
+
+    monkeypatch.setattr(gradio_platform, "RUN_FASTAPI", True)
+    monkeypatch.setattr(gradio_platform, "COGNITO_AUTH", False)
+
+    with gr.Blocks() as demo:
+        gr.Markdown("hi")
+
+    app = gradio_platform.mount_or_launch(
+        demo,
+        root_path="/agent",
+        fastapi_root_path="/agent",
+    )
+    mounted = next(
+        route for route in app.routes if getattr(route, "path", None) == "/agent"
+    )
+    blocks = mounted.app.get_blocks()
+    assert blocks.root_path == "/agent"
+    assert blocks.custom_mount_path == "/agent"
+    assert mounted.app.root_path == "/agent"
+
+
 def test_mount_or_launch_subpath_serves_200_not_404(monkeypatch):
     """Regression: mounting Gradio at /pi must not double-apply the prefix as FastAPI
     root_path (which strips /pi before routing and returns 404 for GET /pi/)."""
