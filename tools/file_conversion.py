@@ -473,7 +473,7 @@ def process_file_for_image_creation(
 
     # Check if the file is an image type
     if file_extension in [".jpg", ".jpeg", ".png"]:
-        print(f"{file_path} is an image file.")
+        print("File is an image file.")
         progress(0.1, desc="Processing image file")
         # Perform image processing here
         img_object = [file_path]  # [Image.open(file_path)]
@@ -507,7 +507,7 @@ def process_file_for_image_creation(
         )
 
     else:
-        print(f"{file_path} is not an image or PDF file.")
+        print("File is not an image or PDF file.")
         img_path = list()
         image_sizes_width = list()
         image_sizes_height = list()
@@ -1946,14 +1946,14 @@ def prepare_image_or_pdf(
                     textract_output_found = True
                 else:
                     print(
-                        f"Skipping {file_path}: Expected 1 JSON file, found {len(json_files)}"
+                        f"Skipping file: Expected 1 JSON file, found {len(json_files)}"
                     )
 
         converted_file_paths.append(converted_file_path)
         image_file_paths.extend(image_file_path)
 
         toc = time.perf_counter()
-        out_time = f"File '{file_name_with_ext}' prepared in {toc - tic:0.1f} seconds."
+        out_time = f"File prepared in {toc - tic:0.1f} seconds."
 
         print(out_time)
 
