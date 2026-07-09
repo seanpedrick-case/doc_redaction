@@ -776,7 +776,7 @@ walkthrough_custom_llm_instructions_textbox = gr.Textbox(
 in_doc_files = gr.File(
     label="Choose a PDF document or image file (PDF, JPG, PNG)",
     file_count="multiple",
-    file_types=[".pdf", ".jpg", ".png", ".json", ".zip"],
+    file_types=[".pdf", ".jpg", ".png", ".json"],
     height=FILE_INPUT_HEIGHT,
 )
 

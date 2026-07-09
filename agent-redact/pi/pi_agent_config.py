@@ -100,6 +100,14 @@ PROVIDER_LABELS: dict[str, str] = {
     PROVIDER_BEDROCK: "AWS Bedrock",
 }
 
+# Pi RPC ``get_state`` provider ids (e.g. ``google``) → canonical config ids.
+_PI_RPC_PROVIDER_ALIASES: dict[str, str] = {
+    "google": PROVIDER_GEMINI,
+    "gemini": PROVIDER_GEMINI,
+    "bedrock": PROVIDER_BEDROCK,
+    "llama": PROVIDER_LLAMA,
+}
+
 
 def is_hf_space_profile() -> bool:
     profile = (
@@ -759,9 +767,82 @@ def normalize_provider(provider: str) -> str:
     lowered = (provider or "").strip().lower()
     if lowered in PROVIDER_MODELS:
         return lowered
+    if lowered in _PI_RPC_PROVIDER_ALIASES:
+        return _PI_RPC_PROVIDER_ALIASES[lowered]
     if lowered in label_map:
         return label_map[lowered]
     return PROVIDER_GEMINI if is_hf_space_profile() else PROVIDER_LLAMA
+
+
+def active_model_from_pi_state(state: dict[str, Any]) -> tuple[str, str]:
+    """Return ``(normalized_provider, model_id)`` from a Pi RPC ``get_state`` payload."""
+    if not isinstance(state, dict):
+        return "", ""
+    model = state.get("model") or {}
+    if not isinstance(model, dict):
+        model = {}
+    provider_raw = str(model.get("provider") or state.get("provider") or "").strip()
+    model_id = str(model.get("id") or model.get("name") or "").strip()
+    return normalize_provider(provider_raw), model_id
+
+
+def pi_model_fallback_notice(
+    *,
+    intended_provider: str,
+    intended_model: str,
+    active_provider: str,
+    active_model: str,
+) -> str | None:
+    """
+    User-facing warning when Pi runs a different provider/model than configured.
+
+    Returns ``None`` when the active model matches the intended configuration.
+    """
+    intended_p = normalize_provider(intended_provider)
+    intended_m = (intended_model or "").strip()
+    active_p = normalize_provider(active_provider)
+    active_m = (active_model or "").strip()
+    if not active_m:
+        return None
+    if intended_p == active_p and intended_m.casefold() == active_m.casefold():
+        return None
+    intended_label = (
+        f"{PROVIDER_LABELS.get(intended_p, intended_p)} / `{intended_m or '—'}`"
+    )
+    active_label = f"{PROVIDER_LABELS.get(active_p, active_p)} / `{active_m}`"
+    llama_hint = ""
+    if intended_p == PROVIDER_LLAMA:
+        llama_hint = (
+            f" Check your llama.cpp model id (`GET {LLAMA_BASE_URL.rstrip('/')}/models`) "
+            f"and align `AGENT_DEFAULT_MODEL` / `AGENT_LLAMA_MODEL_ID` in "
+            f"`config/agent.env`."
+        )
+    cloud_hint = ""
+    if active_p == PROVIDER_GEMINI and intended_p == PROVIDER_LLAMA:
+        cloud_hint = (
+            " A Gemini API key in the container environment can trigger this fallback."
+        )
+    return (
+        f"The configured orchestration model {intended_label} was not found or could "
+        f"not be selected. Pi is using **{active_label}** instead.{llama_hint}"
+        f"{cloud_hint} Click **Apply backend** with the correct model, or recreate "
+        f"`pi-agent` after updating `config/agent.env`."
+    )
+
+
+def pi_model_fallback_notice_from_state(
+    state: dict[str, Any],
+    intended_provider: str,
+    intended_model: str,
+) -> str | None:
+    """Build a fallback notice from Pi RPC state and the configured provider/model."""
+    active_p, active_m = active_model_from_pi_state(state)
+    return pi_model_fallback_notice(
+        intended_provider=intended_provider,
+        intended_model=intended_model,
+        active_provider=active_p,
+        active_model=active_m,
+    )
 
 
 def apply_session_credentials(

@@ -446,3 +446,41 @@ def test_build_settings_config_compaction_scales_for_small_llama_context(
 
     assert settings["compaction"]["reserveTokens"] == 16384
     assert settings["compaction"]["keepRecentTokens"] == 12288
+
+
+def test_normalize_provider_maps_pi_google_alias():
+    assert pac.normalize_provider("google") == pac.PROVIDER_GEMINI
+
+
+def test_pi_model_fallback_notice_when_model_differs():
+    notice = pac.pi_model_fallback_notice(
+        intended_provider=pac.PROVIDER_LLAMA,
+        intended_model="qwen_3_6_27b",
+        active_provider="google",
+        active_model="gemini-3.1-pro-preview",
+    )
+    assert notice is not None
+    assert "qwen_3_6_27b" in notice
+    assert "gemini-3.1-pro-preview" in notice
+    assert "Gemini API key" in notice
+
+
+def test_pi_model_fallback_notice_none_when_model_matches():
+    notice = pac.pi_model_fallback_notice(
+        intended_provider=pac.PROVIDER_LLAMA,
+        intended_model="unsloth/Qwen3.6-27B-MTP-GGUF",
+        active_provider="llama-cpp",
+        active_model="unsloth/Qwen3.6-27B-MTP-GGUF",
+    )
+    assert notice is None
+
+
+def test_active_model_from_pi_state():
+    provider, model_id = pac.active_model_from_pi_state(
+        {
+            "provider": "google",
+            "model": {"id": "gemini-3.1-pro-preview", "provider": "google"},
+        }
+    )
+    assert provider == pac.PROVIDER_GEMINI
+    assert model_id == "gemini-3.1-pro-preview"

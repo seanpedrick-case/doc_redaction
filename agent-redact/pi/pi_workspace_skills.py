@@ -81,6 +81,11 @@ def _copy_tree_item(src: Path, dest: Path) -> None:
     _copy_tree_item_filtered(src, dest, src_root=src)
 
 
+def _copy_to_workspace(src: Path, dest: Path) -> None:
+    """Copy file content without metadata (copy2/copystat raises EPERM on bind mounts)."""
+    shutil.copyfile(src, dest)
+
+
 def _copy_tree_item_filtered(src: Path, dest: Path, *, src_root: Path) -> None:
     rel = src.relative_to(src_root)
     if _should_skip_skill_relpath(rel):
@@ -95,7 +100,7 @@ def _copy_tree_item_filtered(src: Path, dest: Path, *, src_root: Path) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
         if dest.exists():
             _make_writable(dest)
-        shutil.copy2(src, dest)
+        _copy_to_workspace(src, dest)
         return
     if dest.exists():
         for child in sorted(src.iterdir()):
@@ -227,7 +232,7 @@ def sync_workspace_helpers() -> Path:
         if not src.is_file():
             continue
         if not dest.is_file() or src.stat().st_mtime > dest.stat().st_mtime:
-            shutil.copy2(src, dest)
+            _copy_to_workspace(src, dest)
     return helpers.resolve()
 
 

@@ -79,6 +79,7 @@ from pi_agent_config import (
     models_for_provider,
     normalize_backend_model,
     normalize_provider,
+    pi_model_fallback_notice_from_state,
     provider_choices,
     provider_label,
     resolved_default_model,
@@ -838,6 +839,39 @@ def _gemini_key_error() -> str | None:
     return None
 
 
+def _configure_pi_rpc_model(client: AgentRuntime) -> None:
+    """Apply configured provider/model; warn in-chat if Pi selected a fallback."""
+    if normalize_orchestrator() != "pi" or not client.running:
+        return
+    provider = normalize_provider(get_default_provider())
+    model = resolved_default_model(provider)
+    try:
+        client.set_model(provider, model)
+    except PiRpcError:
+        pass
+    try:
+        notice = pi_model_fallback_notice_from_state(
+            client.get_state(), provider, model
+        )
+    except PiRpcError:
+        return
+    if notice:
+        client.stage_ui_chat_notice("Orchestration model", notice)
+
+
+def _prepend_pending_chat_notices(
+    history: list[dict[str, Any]],
+    client: AgentRuntime,
+) -> list[dict[str, Any]]:
+    """Merge staged UI notices (e.g. model fallback) ahead of the next chat turn."""
+    pending = client.drain_pending_ui_history()
+    if not pending:
+        return history
+    merged = _clone_history(history)
+    merged[:0] = pending
+    return merged
+
+
 def _ensure_client(
     client: AgentRuntime | None,
     session_hash: str = "",
@@ -849,12 +883,7 @@ def _ensure_client(
         return client
     client = create_agent_runtime(session_hash or None)
     client.start()
-    provider = normalize_provider(get_default_provider())
-    model = resolved_default_model(provider)
-    try:
-        client.set_model(provider, model)
-    except PiRpcError:
-        pass
+    _configure_pi_rpc_model(client)
     return client
 
 
@@ -1016,6 +1045,17 @@ def _apply_event(
 
     elif event.kind == "status":
         activity = _append_activity(activity, event.text)
+
+    elif event.kind in {"compaction_start", "compaction_end"}:
+        activity = _append_activity(activity, event.text)
+        if not _history_has_user_notice(
+            history, label="Context compaction", message=event.text
+        ):
+            history = _append_user_steer_notice(
+                history,
+                label="Context compaction",
+                message=event.text,
+            )
 
     elif event.kind == "turn_end":
         activity = _append_activity(activity, event.text)
@@ -1238,12 +1278,7 @@ def _pi_wait_until_idle(
 
 def _refresh_pi_client_model(client: AgentRuntime) -> None:
     """Re-apply provider/model on the live RPC client (no session reset)."""
-    provider = normalize_provider(get_default_provider())
-    model = resolved_default_model(provider)
-    try:
-        client.set_model(provider, model)
-    except PiRpcError:
-        pass
+    _configure_pi_rpc_model(client)
 
 
 def _build_pi_prompt_message(
@@ -1359,6 +1394,12 @@ def apply_backend(
             f"**Backend applied:** `{provider_label(normalized)}` / `{model}`  \n\n"
             f"{_session_summary(rpc)}"
         )
+        fallback_notice = pi_model_fallback_notice_from_state(
+            rpc.get_state(), normalized, model
+        )
+        if fallback_notice:
+            summary += f"\n\n**Warning:** {fallback_notice}"
+            rpc.stage_ui_chat_notice("Orchestration model", fallback_notice)
     except (PiRpcError, AgentRuntimeError, FileNotFoundError, OSError) as exc:
         rpc.close()
         rpc = None
@@ -1897,6 +1938,7 @@ def _run_pi_chat(
             return _append_activity(act, f"**S3 upload:** {warning}")
         return act
 
+    history = _prepend_pending_chat_notices(history, client)
     history.append({"role": "user", "content": chat_user_message or message.strip()})
     history.append({"role": "assistant", "content": ""})
     prompt_activity = (
@@ -2335,11 +2377,9 @@ def _restart_pi_rpc_client(
             prior.close()
         except (PiRpcError, OSError, ValueError):
             pass
-    provider = normalize_provider(get_default_provider())
-    model = resolved_default_model(provider)
     rpc = create_agent_runtime(session_hash or None)
     rpc.start()
-    rpc.set_model(provider, model)
+    _configure_pi_rpc_model(rpc)
     rpc.new_session()
     return rpc
 

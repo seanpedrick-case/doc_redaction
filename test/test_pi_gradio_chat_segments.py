@@ -153,6 +153,43 @@ def test_apply_event_done_skips_finish_notice_when_retry_pending():
     assert streaming_text == ""
 
 
+def test_compaction_events_post_user_notice_to_chat():
+    history = [{"role": "assistant", "content": ""}]
+    activity: list[str] = []
+    start = type(
+        "E",
+        (),
+        {
+            "kind": "compaction_start",
+            "text": "Session context is being summarised to stay within the model limit (overflow).",
+            "tool_name": None,
+            "tool_call_id": None,
+            "tool_args": None,
+            "tool_output": None,
+            "is_error": False,
+            "meta": {},
+        },
+    )()
+    history, activity, *_ = _apply_event(
+        start,
+        history=history,
+        activity=activity,
+        thinking="",
+        tool_output="",
+        tool_heading="",
+        completed_segments=[],
+        streaming_text="",
+        append_finish_notice=False,
+    )
+    assert any(
+        item.get("role") == "user"
+        and "Context compaction" in str(item.get("content", ""))
+        and "summarised" in str(item.get("content", ""))
+        for item in history
+    )
+    assert activity[0].startswith("Session context is being summarised")
+
+
 def test_append_rate_limit_wait_notice_updates_assistant_chat():
     history = [{"role": "assistant", "content": ""}]
     completed_segments: list[str] = []

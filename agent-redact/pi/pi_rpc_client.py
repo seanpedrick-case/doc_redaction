@@ -810,30 +810,56 @@ class PiRpcClient:
                     )
 
             elif event_type == "compaction_start":
-                reason = event.get("reason") or "unknown"
+                reason = event.get("reason") or "context limit"
                 yield PiStreamEvent(
-                    kind="status",
-                    text=f"Compaction started ({reason})…",
-                    meta={"reason": reason},
+                    kind="compaction_start",
+                    text=(
+                        "Session context is being summarised to stay within the model "
+                        f"limit ({reason}). Older messages and tool output are compressed; "
+                        "recent turns are kept."
+                    ),
+                    meta={"reason": reason, "phase": "start"},
                 )
 
             elif event_type == "compaction_end":
                 if event.get("aborted"):
-                    text = "Compaction aborted."
+                    text = "Context compaction was aborted."
+                    yield PiStreamEvent(
+                        kind="compaction_end",
+                        text=text,
+                        meta={"phase": "end", "aborted": True},
+                    )
                 elif event.get("errorMessage"):
-                    text = f"Compaction failed: {event['errorMessage']}"
+                    text = f"Context compaction failed: {event['errorMessage']}"
                     yield PiStreamEvent(kind="error", text=text, is_error=True)
                     continue
                 elif event.get("willRetry"):
-                    text = "Compaction complete — retrying prompt…"
+                    text = (
+                        "Context compaction finished — retrying the prompt with a "
+                        "shorter history."
+                    )
+                    yield PiStreamEvent(
+                        kind="compaction_end",
+                        text=text,
+                        meta={"phase": "end", "willRetry": True},
+                    )
                 else:
                     tokens = (event.get("result") or {}).get("tokensBefore")
-                    text = (
-                        f"Compaction complete ({tokens:,} tokens before)."
-                        if isinstance(tokens, int)
-                        else "Compaction complete."
+                    if isinstance(tokens, int):
+                        text = (
+                            f"Context compaction finished ({tokens:,} tokens before "
+                            "summarisation). The agent continues with a shorter context."
+                        )
+                    else:
+                        text = (
+                            "Context compaction finished. The agent continues with a "
+                            "shorter context."
+                        )
+                    yield PiStreamEvent(
+                        kind="compaction_end",
+                        text=text,
+                        meta={"phase": "end", "tokensBefore": tokens},
                     )
-                yield PiStreamEvent(kind="status", text=text, meta=event)
 
             elif event_type == "auto_retry_start":
                 attempt = event.get("attempt")
