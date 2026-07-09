@@ -681,6 +681,21 @@ def ensure_session_dir(session_dir: str | None = None) -> Path:
     return path
 
 
+def configure_pi_coding_agent_env() -> None:
+    """
+    Mirror ``AGENT_*`` paths into Pi CLI env vars.
+
+    The external ``pi`` binary reads ``PI_CODING_AGENT_DIR`` (models/settings) and
+    ``PI_CODING_AGENT_SESSION_DIR`` (session JSONL), not our ``AGENT_*`` names.
+    HF Space / ECS images write config under ``/tmp``; without this mirror Pi falls
+    back to ``~/.pi/agent``, which is often not writable on Spaces.
+    """
+    agent_dir = str(resolve_agent_dir())
+    session_dir = str(ensure_session_dir(resolve_session_dir()))
+    os.environ.setdefault("PI_CODING_AGENT_DIR", agent_dir)
+    os.environ.setdefault("PI_CODING_AGENT_SESSION_DIR", session_dir)
+
+
 def build_settings_config(
     *,
     default_provider: str | None = None,
@@ -747,6 +762,7 @@ def write_runtime_config(
         + "\n",
         encoding="utf-8",
     )
+    configure_pi_coding_agent_env()
     return models_path, settings_path
 
 

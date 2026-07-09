@@ -621,7 +621,7 @@ def get_input_file_names(
                 full_file_name = file_path
 
     all_relevant_files_str = ", ".join(all_relevant_files)
-    print("file_name_with_extension on document upload:", file_name_with_extension)
+    # print("file_name_with_extension on document upload:", file_name_with_extension)
     return (
         all_relevant_files_str,
         file_name_with_extension,
@@ -1565,7 +1565,7 @@ def prepare_image_or_pdf(
         file_path_without_ext = get_file_name_without_type(file_path)
         file_name_with_ext = os.path.basename(file_path)
 
-        print("Loading file:", file_name_with_ext)
+        # print("Loading file:", file_name_with_ext)
 
         if not file_path:
             out_message = "Please select at least one file."
@@ -1578,7 +1578,7 @@ def prepare_image_or_pdf(
 
         # If a pdf, load as a pymupdf document
         if is_pdf(file_path):
-            print(f"File {file_name_with_ext} is a PDF")
+            print("File is a PDF")
             pymupdf_doc = pymupdf.open(file_path)
 
             converted_file_path = file_path

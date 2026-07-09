@@ -528,12 +528,17 @@ def test_should_queue_only_while_pi_streaming(monkeypatch):
 
 def test_refresh_pi_client_model_calls_set_model(monkeypatch):
     class _Client:
+        running = True
         calls: list[tuple[str, str]] = []
 
         def set_model(self, provider: str, model: str) -> None:
             self.calls.append((provider, model))
 
+        def get_state(self) -> dict:
+            return {}
+
     client = _Client()
+    monkeypatch.setattr("gradio_app.normalize_orchestrator", lambda: "pi")
     monkeypatch.setattr("gradio_app.normalize_provider", lambda _p: "llama-cpp")
     monkeypatch.setattr("gradio_app.resolved_default_model", lambda _p: "gemma_4_31b")
     _refresh_pi_client_model(client)

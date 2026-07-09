@@ -149,6 +149,14 @@ from tools.config import (
     THINKING_PANEL_CSS,
     TOOL_OUTPUT_MAX,
 )
+from tools.malware_scan import (
+    USER_REJECT_MESSAGE,
+    USER_SERVICE_ERROR_MESSAGE,
+    MalwareScanRejectedError,
+    MalwareScanServiceError,
+    ensure_upload_scanned_for_malware,
+    scan_gradio_file_upload,
+)
 
 # After ``tools.config`` import: it may set ``AGENT_DEFAULT_PROVIDER`` / ``AGENT_DEFAULT_MODEL``
 # when unset (must match ``pi_agent_config.get_default_provider``, not always Gemini).
@@ -2530,6 +2538,79 @@ def submit_redaction_task(
         )
     )
     try:
+        ensure_upload_scanned_for_malware(upload_file)
+    except MalwareScanServiceError as exc:
+        gr.Warning(USER_SERVICE_ERROR_MESSAGE)
+        history = list(history or [])
+        history.append(
+            {
+                "role": "user",
+                "content": f"_Redaction task not started: {USER_SERVICE_ERROR_MESSAGE}_",
+            }
+        )
+        client = (
+            _ensure_client(client, session_hash)
+            if client and client.running
+            else client
+        )
+        yield (
+            _clone_history(history),
+            client,
+            "",
+            _format_activity([f"**Redaction task error:** {exc}"]),
+            "",
+            "",
+            (
+                _session_summary(client)
+                if client and client.running
+                else _agent_status_markdown(client)
+            ),
+            gr.update(interactive=True),
+            gr.update(interactive=False),
+            gr.update(interactive=True),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            AGENT_FINISH_SIGNAL_NONE,
+            False,
+        )
+        return
+    except MalwareScanRejectedError as exc:
+        history = list(history or [])
+        history.append(
+            {
+                "role": "user",
+                "content": f"_Redaction task not started: {USER_REJECT_MESSAGE}_",
+            }
+        )
+        client = (
+            _ensure_client(client, session_hash)
+            if client and client.running
+            else client
+        )
+        yield (
+            _clone_history(history),
+            client,
+            "",
+            _format_activity([f"**Redaction task error:** {exc}"]),
+            "",
+            "",
+            (
+                _session_summary(client)
+                if client and client.running
+                else _agent_status_markdown(client)
+            ),
+            gr.update(interactive=True),
+            gr.update(interactive=False),
+            gr.update(interactive=True),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            AGENT_FINISH_SIGNAL_NONE,
+            False,
+        )
+        return
+    try:
         _file_name, prompt, renamed_from = prepare_redaction_task(
             upload_file,
             user_instructions,
@@ -3133,6 +3214,12 @@ def build_ui():
             inputs=_chat_outputs_notify_inputs(chat_outputs),
             outputs=chat_outputs,
             js=PI_AGENT_FINISH_NOTIFY_JS,
+            api_visibility="undocumented",
+        )
+        redact_file.upload(
+            fn=scan_gradio_file_upload,
+            inputs=[redact_file],
+            outputs=[],
             api_visibility="undocumented",
         )
         run_redact_prepare = start_redact_btn.click(

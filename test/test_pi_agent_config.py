@@ -79,6 +79,38 @@ def test_hf_profile_defaults_session_dir_to_tmp(tmp_path, monkeypatch, pi_worksp
     assert settings["retry"]["provider"]["maxRetries"] == 5
 
 
+def test_configure_pi_coding_agent_env_hf_space(tmp_path, monkeypatch, pi_workspace):
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "hf-space")
+    monkeypatch.delenv("AGENT_SESSION_DIR", raising=False)
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    monkeypatch.delenv("PI_CODING_AGENT_SESSION_DIR", raising=False)
+    agent_dir = tmp_path / "agent"
+    monkeypatch.setenv("AGENT_CODING_AGENT_DIR", str(agent_dir))
+
+    pac.configure_pi_coding_agent_env()
+
+    assert os.environ["PI_CODING_AGENT_DIR"] == str(agent_dir)
+    assert (
+        Path(os.environ["PI_CODING_AGENT_SESSION_DIR"]).resolve()
+        == Path("/tmp/agent-sessions").resolve()
+    )
+
+
+def test_write_runtime_config_sets_pi_cli_env(tmp_path, monkeypatch, pi_workspace):
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "hf-space")
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    monkeypatch.delenv("PI_CODING_AGENT_SESSION_DIR", raising=False)
+    monkeypatch.setenv("AGENT_CODING_AGENT_DIR", str(tmp_path / "agent"))
+
+    pac.write_runtime_config()
+
+    assert os.environ["PI_CODING_AGENT_DIR"] == str(tmp_path / "agent")
+    assert (
+        Path(os.environ["PI_CODING_AGENT_SESSION_DIR"]).resolve()
+        == Path("/tmp/agent-sessions").resolve()
+    )
+
+
 def test_gemini_provider_applies_retry_settings(tmp_path, monkeypatch, pi_workspace):
     monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "local-docker")
     monkeypatch.setenv("AGENT_DEFAULT_PROVIDER", "google-gemini")
