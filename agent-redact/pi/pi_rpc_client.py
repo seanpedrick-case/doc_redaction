@@ -992,10 +992,11 @@ def start_pi_prompt_event_worker(
 
 
 def default_client(session_hash: str | None = None) -> PiRpcClient:
-    from pi_agent_config import configure_aws_credentials
+    from pi_agent_config import configure_aws_credentials, configure_pi_coding_agent_env
     from pi_workspace_skills import ensure_workspace_skills, pi_rpc_args, pi_rpc_cwd
 
     configure_aws_credentials()
+    configure_pi_coding_agent_env()
     ensure_workspace_skills()
     env = os.environ.copy()
     env.setdefault("HOME", os.path.expanduser("~"))

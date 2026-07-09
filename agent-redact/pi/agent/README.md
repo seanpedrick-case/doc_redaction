@@ -64,6 +64,10 @@ Copy [`config/agent.env.example`](../../../config/agent.env.example) to `config/
 | `AGENT_COMPACTION_ENABLED` | Pi session auto-compaction in `settings.json` (`true` / `false`; unset uses template default, enabled) |
 | `AGENT_COMPACTION_RESERVE_TOKENS` | Optional compaction `reserveTokens` (default `32768` from template) |
 | `AGENT_COMPACTION_KEEP_RECENT_TOKENS` | Optional compaction `keepRecentTokens` (default `20000` from template) |
+| `AGENT_CODING_AGENT_DIR` | Writable directory for generated `models.json` / `settings.json` (HF/ECS: `/tmp/agent-coding`) |
+| `AGENT_SESSION_DIR` | Pi session JSONL directory (HF/ECS: `/tmp/agent-sessions`) |
+| `PI_CODING_AGENT_DIR` | Pi CLI config directory (auto-mirrored from `AGENT_CODING_AGENT_DIR` at startup) |
+| `PI_CODING_AGENT_SESSION_DIR` | Pi CLI session directory (auto-mirrored from `AGENT_SESSION_DIR`; overrides `settings.json`) |
 
 ### Usage logging (CSV / DynamoDB / S3)
 

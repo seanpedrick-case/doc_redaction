@@ -32,6 +32,7 @@ from cdk_config import (  # Import necessary config
     PUBLIC_SUBNET_CIDR_BLOCKS,
     PUBLIC_SUBNETS_TO_USE,
     S3_LOG_CONFIG_BUCKET_NAME,
+    S3_MALWARE_SCAN_BUCKET_NAME,
     S3_OUTPUT_BUCKET_NAME,
     USE_ECS_EXPRESS_MODE,
     VPC_NAME,
@@ -408,6 +409,9 @@ def check_and_set_context():
 
     output_bucket_name = S3_OUTPUT_BUCKET_NAME
     _record_s3_bucket_context(output_bucket_name)
+
+    malware_scan_bucket_name = S3_MALWARE_SCAN_BUCKET_NAME
+    _record_s3_bucket_context(malware_scan_bucket_name)
 
     # ECR Repositories
     for repo_name in (ECR_CDK_REPO_NAME, ECR_AGENT_REPO_NAME, ECR_AGENTCORE_REPO_NAME):

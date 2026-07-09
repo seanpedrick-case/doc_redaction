@@ -421,6 +421,7 @@ from tools.helper_functions import (
     update_language_dropdown,
 )
 from tools.load_spacy_model_custom_recognisers import custom_entities
+from tools.malware_scan import scan_gradio_file_upload
 from tools.quickstart import (
     handle_main_pii_method_selection,
     handle_main_redaction_method_selection,
@@ -4724,6 +4725,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         else [relevant_ocr_output_with_words_found_checkbox]
     )
     in_doc_files.upload(
+        fn=scan_gradio_file_upload,
+        inputs=[in_doc_files],
+        outputs=[],
+        api_visibility="undocumented",
+    ).success(
         fn=_doc_upload_fn,
         inputs=[in_doc_files],
         outputs=_doc_upload_outputs,
@@ -4776,6 +4782,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     # Same process as above for walkthrough file input
     walkthrough_file_input.upload(
+        fn=scan_gradio_file_upload,
+        inputs=[walkthrough_file_input],
+        outputs=[],
+        api_visibility="undocumented",
+    ).success(
         fn=_doc_upload_fn,
         inputs=[walkthrough_file_input],
         outputs=_doc_upload_outputs,
@@ -6245,6 +6256,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     # Upload previous PDF for modifying redactions
     input_pdf_for_review.upload(
+        fn=scan_gradio_file_upload,
+        inputs=[input_pdf_for_review],
+        outputs=[],
+        api_visibility="undocumented",
+    ).success(
         fn=reset_review_vars,
         inputs=None,
         outputs=[recogniser_entity_dataframe, recogniser_entity_dataframe_base],
@@ -6361,6 +6377,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     # Upload previous review CSV files for modifying redactions
     input_review_files.upload(
+        fn=scan_gradio_file_upload,
+        inputs=[input_review_files],
+        outputs=[],
+        api_visibility="undocumented",
+    ).success(
         fn=prepare_image_or_pdf_with_efficient_ocr,
         inputs=[
             input_review_files,
@@ -8546,6 +8567,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
     # WORD/TABULAR DATA REDACTION
     ###
     in_data_files.upload(
+        fn=scan_gradio_file_upload,
+        inputs=[in_data_files],
+        outputs=[],
+        api_visibility="undocumented",
+    ).success(
         fn=put_columns_in_df,
         inputs=[in_data_files],
         outputs=[in_colnames, in_excel_sheets],
@@ -9090,6 +9116,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     # Event handlers
     in_tabular_duplicate_files.upload(
+        fn=scan_gradio_file_upload,
+        inputs=[in_tabular_duplicate_files],
+        outputs=[],
+        api_visibility="undocumented",
+    ).success(
         fn=put_columns_in_df,
         inputs=[in_tabular_duplicate_files],
         outputs=[tabular_text_columns, in_excel_tabular_sheets],

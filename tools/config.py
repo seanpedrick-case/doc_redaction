@@ -380,6 +380,31 @@ AWS_SECRET_KEY = get_or_create_env_var("AWS_SECRET_KEY", "")
 
 DOCUMENT_REDACTION_BUCKET = get_or_create_env_var("DOCUMENT_REDACTION_BUCKET", "")
 
+# GuardDuty Malware Protection for S3 — stage uploads for scan before processing
+SCAN_UPLOADS_FOR_MALWARE = convert_string_to_boolean(
+    get_or_create_env_var("SCAN_UPLOADS_FOR_MALWARE", "False")
+)
+MALWARE_SCAN_S3_BUCKET = get_or_create_env_var("MALWARE_SCAN_S3_BUCKET", "")
+MALWARE_SCAN_S3_PREFIX = get_or_create_env_var(
+    "MALWARE_SCAN_S3_PREFIX", "upload-staging/"
+)
+MALWARE_SCAN_POLL_INTERVAL_SEC = float(
+    get_or_create_env_var("MALWARE_SCAN_POLL_INTERVAL_SEC", "2.0")
+)
+MALWARE_SCAN_TIMEOUT_SEC = float(
+    get_or_create_env_var("MALWARE_SCAN_TIMEOUT_SEC", "120.0")
+)
+
+
+def malware_scan_enabled() -> bool:
+    """True when upload malware scanning should run (AWS + bucket + feature flag)."""
+    return (
+        SCAN_UPLOADS_FOR_MALWARE
+        and RUN_AWS_FUNCTIONS
+        and bool((MALWARE_SCAN_S3_BUCKET or "").strip())
+    )
+
+
 # Should the app prioritise using AWS SSO over using API keys stored in environment variables/secrets (defaults to yes)
 PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS = convert_string_to_boolean(
     get_or_create_env_var("PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS", "True")
