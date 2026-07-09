@@ -394,6 +394,9 @@ MALWARE_SCAN_POLL_INTERVAL_SEC = float(
 MALWARE_SCAN_TIMEOUT_SEC = float(
     get_or_create_env_var("MALWARE_SCAN_TIMEOUT_SEC", "120.0")
 )
+MALWARE_SCAN_SHOW_CHECKING_INFO = convert_string_to_boolean(
+    get_or_create_env_var("MALWARE_SCAN_SHOW_CHECKING_INFO", "True")
+)
 
 
 def malware_scan_enabled() -> bool:

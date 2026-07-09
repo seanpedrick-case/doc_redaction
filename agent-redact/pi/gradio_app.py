@@ -151,7 +151,9 @@ from tools.config import (
 )
 from tools.malware_scan import (
     USER_REJECT_MESSAGE,
+    USER_SERVICE_ERROR_MESSAGE,
     MalwareScanRejectedError,
+    MalwareScanServiceError,
     ensure_upload_scanned_for_malware,
     scan_gradio_file_upload,
 )
@@ -2537,6 +2539,42 @@ def submit_redaction_task(
     )
     try:
         ensure_upload_scanned_for_malware(upload_file)
+    except MalwareScanServiceError as exc:
+        gr.Warning(USER_SERVICE_ERROR_MESSAGE)
+        history = list(history or [])
+        history.append(
+            {
+                "role": "user",
+                "content": f"_Redaction task not started: {USER_SERVICE_ERROR_MESSAGE}_",
+            }
+        )
+        client = (
+            _ensure_client(client, session_hash)
+            if client and client.running
+            else client
+        )
+        yield (
+            _clone_history(history),
+            client,
+            "",
+            _format_activity([f"**Redaction task error:** {exc}"]),
+            "",
+            "",
+            (
+                _session_summary(client)
+                if client and client.running
+                else _agent_status_markdown(client)
+            ),
+            gr.update(interactive=True),
+            gr.update(interactive=False),
+            gr.update(interactive=True),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            AGENT_FINISH_SIGNAL_NONE,
+            False,
+        )
+        return
     except MalwareScanRejectedError as exc:
         history = list(history or [])
         history.append(
