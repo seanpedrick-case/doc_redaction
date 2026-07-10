@@ -2663,7 +2663,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             else:
                 show_main_redaction_accordion = True
 
-            with gr.Row():
+            with gr.Row(equal_height=True):
                 with gr.Column(scale=1):
 
                     with gr.Accordion("Load files and view costs"):
@@ -2673,7 +2673,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
                         if SHOW_COSTS:
                             with gr.Accordion(
-                                "Estimated costs and time taken.",
+                                "Estimated costs and time taken",
                                 open=True,
                                 visible=True,
                             ):
