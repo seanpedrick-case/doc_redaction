@@ -327,6 +327,7 @@ from tools.config import (
     SHOW_AWS_PII_DETECTION_OPTIONS,
     SHOW_AWS_TEXT_EXTRACTION_OPTIONS,
     SHOW_COSTS,
+    SHOW_COSTS_ACCORDION_OPEN,
     SHOW_DIFFICULT_OCR_EXAMPLES,
     SHOW_EXAMPLES,
     SHOW_HYBRID_TEXTRACT_BEDROCK_CHECKBOX,
@@ -427,10 +428,10 @@ from tools.helper_functions import (
 )
 from tools.load_spacy_model_custom_recognisers import custom_entities
 from tools.malware_scan import (
-    make_malware_scan_disable_outputs,
+    handle_gradio_file_deleted,
     make_malware_scan_enable_outputs,
     make_malware_scan_upload_failure_outputs,
-    scan_gradio_file_upload,
+    make_malware_scan_upload_start,
 )
 from tools.quickstart import (
     handle_main_pii_method_selection,
@@ -622,7 +623,6 @@ walkthrough_file_input = gr.File(
         ".jpg",
         ".png",
         ".json",
-        ".zip",
         ".xlsx",
         ".xls",
         ".csv",
@@ -1031,7 +1031,7 @@ combine_page_text_for_duplicates_bool = gr.Radio(
 in_data_files = gr.File(
     label="Choose Excel or csv files",
     file_count="multiple",
-    file_types=[".xlsx", ".xls", ".csv", ".parquet", ".docx"],
+    file_types=[".xlsx", ".xls", ".csv", ".parquet", ".docx", ".txt"],
     height=FILE_INPUT_HEIGHT,
 )
 
@@ -2663,294 +2663,290 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             else:
                 show_main_redaction_accordion = True
 
-            with gr.Row(equal_height=True):
-                with gr.Column(scale=1):
+            with gr.Accordion("Document redaction"):
 
-                    with gr.Accordion("Load files and view costs"):
+                with gr.Accordion("Load in file"):
+                    in_doc_files.render()
 
-                        with gr.Accordion("Load in file"):
-                            in_doc_files.render()
+                with gr.Accordion(
+                    "Redaction settings", open=show_main_redaction_accordion
+                ):
 
-                        if SHOW_COSTS:
-                            with gr.Accordion(
-                                "Estimated costs and time taken",
-                                open=True,
-                                visible=True,
-                            ):
-                                gr.Markdown(
-                                    "Note that costs shown only include direct usage of AWS services and do not include other running costs (e.g. storage, run-time costs). Costs are an upper bound - if there are many PDF pages with selectable text in your document, then they may be skipped in practice if you are not extracting signatures."
-                                )
-                                with gr.Row(equal_height=True):
-                                    with gr.Column(scale=1):
-                                        textract_output_found_checkbox = gr.Checkbox(
-                                            value=False,
-                                            label="Existing Textract output file found",
-                                            interactive=False,
-                                            visible=True,
-                                        )
-                                        relevant_ocr_output_with_words_found_checkbox = gr.Checkbox(
-                                            value=False,
-                                            label="Existing local OCR output file found",
-                                            interactive=False,
-                                            visible=True,
-                                        )
-                                    with gr.Column(scale=4):
-                                        with gr.Row(equal_height=True):
-                                            total_pdf_page_count.render()
-                                            estimated_aws_costs_number = gr.Number(
-                                                label="Approximate AWS services cost (£)",
-                                                value=0.00,
-                                                precision=2,
-                                                visible=True,
-                                                interactive=False,
-                                            )
-                                            estimated_time_taken_number = gr.Number(
-                                                label="Approximate time for task (minutes)",
-                                                value=0,
-                                                visible=True,
-                                                precision=2,
-                                                interactive=False,
-                                            )
-                        else:
-                            total_pdf_page_count.render()  # Need to render in both cases, as included in examples
+                    textract_text = ""
 
-                        if GET_COST_CODES or ENFORCE_COST_CODES:
-                            with gr.Accordion(
-                                "Assign task to cost code",
-                                open=COST_CODE_ACCORDION_OPEN,
-                                visible=True,
-                            ):
-                                gr.Markdown(
-                                    "Please ensure that you have approval from your budget holder before using this app for redaction tasks that incur a cost."
-                                )
-                                with gr.Row():
-                                    with gr.Column():
-                                        with gr.Accordion(
-                                            "View and filter cost code table",
-                                            open=False,
-                                            visible=True,
-                                        ):
-                                            cost_code_dataframe.render()
-                                            reset_cost_code_dataframe_button.render()
-                                    with gr.Column():
-                                        cost_code_choice_drop.render()
-                                        set_default_cost_code_button.render()
-                        else:
-                            cost_code_dataframe.render()
-                            cost_code_choice_drop.render()
-                            reset_cost_code_dataframe_button.render()
-                            set_default_cost_code_button.render()
-
-                with gr.Column(scale=3):
-
-                    with gr.Accordion(
-                        "Redaction settings", open=show_main_redaction_accordion
+                    if (
+                        SHOW_AWS_TEXT_EXTRACTION_OPTIONS
+                        and DEFAULT_TEXT_EXTRACTION_MODEL
+                        == TEXTRACT_TEXT_EXTRACT_OPTION
                     ):
-
+                        textract_text = "AWS Textract has a cost per page - $1.50 without signature detection (default), $3.50 per 1,000 pages with signature detection. Enable this in the tab below (AWS Textract signature detection)."
+                    else:
                         textract_text = ""
 
-                        if (
-                            SHOW_AWS_TEXT_EXTRACTION_OPTIONS
-                            and DEFAULT_TEXT_EXTRACTION_MODEL
-                            == TEXTRACT_TEXT_EXTRACT_OPTION
-                        ):
-                            textract_text = "AWS Textract has a cost per page - $1.50 without signature detection (default), $3.50 per 1,000 pages with signature detection. Enable this in the tab below (AWS Textract signature detection)."
+                    with gr.Accordion(
+                        label="Change text extraction settings",
+                        open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
+                    ):
+                        if textract_text:
+                            gr.Markdown(textract_text.strip())
                         else:
-                            textract_text = ""
-
+                            pass
                         with gr.Accordion(
-                            label="Change text extraction settings",
-                            open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
+                            "Change text extraction OCR method",
+                            open=True,
+                            visible=SHOW_OCR_GUI_OPTIONS,
                         ):
-                            if textract_text:
-                                gr.Markdown(textract_text.strip())
-                            else:
-                                pass
-                            with gr.Accordion(
-                                "Change text extraction OCR method",
-                                open=True,
-                                visible=SHOW_OCR_GUI_OPTIONS,
-                            ):
-                                text_extract_method_radio.render()
-                                # Store accordion references for dynamic visibility control
-                                # Initialise visibility based on default text extraction method
-                                local_ocr_accordion = gr.Accordion(
-                                    label="Change local OCR model",
-                                    open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
-                                    visible=(
-                                        DEFAULT_TEXT_EXTRACTION_MODEL
-                                        == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
-                                    ),
-                                )
-                                with local_ocr_accordion:
-                                    local_ocr_method_radio.render()
-
-                                inference_server_vlm_accordion = gr.Accordion(
-                                    "Inference Server VLM Model (for inference-server OCR only)",
-                                    open=False,
-                                    visible=(
-                                        SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS
-                                        and DEFAULT_TEXT_EXTRACTION_MODEL
-                                        == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
-                                    ),
-                                )
-                                with inference_server_vlm_accordion:
-                                    inference_server_vlm_model_textbox.render()
-
-                            aws_textract_signature_accordion = gr.Accordion(
-                                "Enable AWS Textract signature detection (default is off)",
-                                open=False,
+                            text_extract_method_radio.render()
+                            # Store accordion references for dynamic visibility control
+                            # Initialise visibility based on default text extraction method
+                            local_ocr_accordion = gr.Accordion(
+                                label="Change local OCR model",
+                                open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
                                 visible=(
-                                    SHOW_AWS_TEXT_EXTRACTION_OPTIONS
-                                    and DEFAULT_TEXT_EXTRACTION_MODEL
-                                    == TEXTRACT_TEXT_EXTRACT_OPTION
+                                    DEFAULT_TEXT_EXTRACTION_MODEL
+                                    == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
                                 ),
                             )
-                            with aws_textract_signature_accordion:
-                                handwrite_signature_checkbox.render()
+                            with local_ocr_accordion:
+                                local_ocr_method_radio.render()
 
-                        if (
-                            SHOW_AWS_PII_DETECTION_OPTIONS
-                            and DEFAULT_PII_DETECTION_MODEL == AWS_PII_OPTION
-                        ):
-                            comprehend_text = "AWS Comprehend has a small cost per character processed."
-                        else:
-                            comprehend_text = ""
-
-                        with gr.Accordion(
-                            "Change PII identification method",
-                            open=True,
-                            visible=SHOW_PII_IDENTIFICATION_OPTIONS,
-                        ):
-                            if comprehend_text:
-                                gr.Markdown(comprehend_text.strip())
-                            else:
-                                pass
-                            with gr.Row(equal_height=True):
-                                with gr.Column(scale=3):
-                                    redaction_method_radio.render()
-                                with gr.Column(scale=1):
-                                    # Checkbox for automatically redacting duplicate pages
-                                    redact_duplicate_pages_checkbox.render()
-                            with gr.Row(equal_height=True):
-                                pii_identification_method_drop.render()
-
-                                entity_types_to_redact_accordion = gr.Accordion(
-                                    "Select entity types to redact", open=True
-                                )
-                                with entity_types_to_redact_accordion:
-                                    # Store accordion references for dynamic visibility control
-                                    # Determine initial visibility based on default PII method
-                                    default_pii_method = DEFAULT_PII_DETECTION_MODEL
-                                    is_no_redaction_init = (
-                                        default_pii_method == NO_REDACTION_PII_OPTION
-                                    )
-                                    show_local_entities_init = (
-                                        not is_no_redaction_init
-                                        and (default_pii_method == LOCAL_PII_OPTION)
-                                    )
-                                    show_comprehend_entities_init = (
-                                        not is_no_redaction_init
-                                        and (default_pii_method == AWS_PII_OPTION)
-                                    )
-                                    is_llm_method_init = not is_no_redaction_init and (
-                                        default_pii_method
-                                        == LOCAL_TRANSFORMERS_LLM_PII_OPTION
-                                        or default_pii_method
-                                        == INFERENCE_SERVER_PII_OPTION
-                                        or default_pii_method == AWS_LLM_PII_OPTION
-                                    )
-
-                                    in_redact_entities.render()
-                                    in_redact_comprehend_entities.render()
-                                    in_redact_llm_entities.render()
-
-                                custom_llm_entities_accordion = gr.Accordion(
-                                    "Custom instructions for LLM-based entity detection",
-                                    open=True,
-                                    visible=initial_is_llm_method,
-                                )
-                                with custom_llm_entities_accordion:
-                                    custom_llm_instructions_textbox.render()
-
-                            with gr.Row(equal_height=True):
-                                terms_accordion = gr.Accordion(
-                                    "Terms to always include or exclude in redactions, and whole page redaction. To add many terms at once, you can load in a file on the Redaction Settings tab.",
-                                    open=True,
-                                )
-                                with terms_accordion:
-                                    with gr.Row(equal_height=True):
-                                        with gr.Column(scale=3):
-                                            with gr.Row(equal_height=True):
-                                                in_allow_list_state.render()
-                                                in_deny_list_state.render()
-                                                in_fully_redacted_list_state.render()
-                                        with gr.Column(scale=1):
-                                            max_fuzzy_spelling_mistakes_num.render()
-
-                        if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS:
-                            with gr.Accordion(
-                                "Submit whole document to AWS Textract API (quickest text extraction for large documents)",
+                            inference_server_vlm_accordion = gr.Accordion(
+                                "Inference Server VLM Model (for inference-server OCR only)",
                                 open=False,
-                                visible=True,
-                            ):
+                                visible=(
+                                    SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS
+                                    and DEFAULT_TEXT_EXTRACTION_MODEL
+                                    == LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
+                                ),
+                            )
+                            with inference_server_vlm_accordion:
+                                inference_server_vlm_model_textbox.render()
+
+                        aws_textract_signature_accordion = gr.Accordion(
+                            "Enable AWS Textract signature detection (default is off)",
+                            open=False,
+                            visible=(
+                                SHOW_AWS_TEXT_EXTRACTION_OPTIONS
+                                and DEFAULT_TEXT_EXTRACTION_MODEL
+                                == TEXTRACT_TEXT_EXTRACT_OPTION
+                            ),
+                        )
+                        with aws_textract_signature_accordion:
+                            handwrite_signature_checkbox.render()
+
+                    if (
+                        SHOW_AWS_PII_DETECTION_OPTIONS
+                        and DEFAULT_PII_DETECTION_MODEL == AWS_PII_OPTION
+                    ):
+                        comprehend_text = (
+                            "AWS Comprehend has a small cost per character processed."
+                        )
+                    else:
+                        comprehend_text = ""
+
+                    with gr.Accordion(
+                        "Change PII identification method",
+                        open=EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT,
+                        visible=SHOW_PII_IDENTIFICATION_OPTIONS,
+                    ):
+                        if comprehend_text:
+                            gr.Markdown(comprehend_text.strip())
+                        else:
+                            pass
+                        with gr.Row(equal_height=True):
+                            with gr.Column(scale=3):
+                                redaction_method_radio.render()
+                            with gr.Column(scale=1):
+                                # Checkbox for automatically redacting duplicate pages
+                                redact_duplicate_pages_checkbox.render()
+                        with gr.Row(equal_height=True):
+                            pii_identification_method_drop.render()
+
+                            entity_types_to_redact_accordion = gr.Accordion(
+                                "Select entity types to redact", open=True
+                            )
+                            with entity_types_to_redact_accordion:
+                                # Store accordion references for dynamic visibility control
+                                # Determine initial visibility based on default PII method
+                                default_pii_method = DEFAULT_PII_DETECTION_MODEL
+                                is_no_redaction_init = (
+                                    default_pii_method == NO_REDACTION_PII_OPTION
+                                )
+                                show_local_entities_init = (
+                                    not is_no_redaction_init
+                                    and (default_pii_method == LOCAL_PII_OPTION)
+                                )
+                                show_comprehend_entities_init = (
+                                    not is_no_redaction_init
+                                    and (default_pii_method == AWS_PII_OPTION)
+                                )
+                                is_llm_method_init = not is_no_redaction_init and (
+                                    default_pii_method
+                                    == LOCAL_TRANSFORMERS_LLM_PII_OPTION
+                                    or default_pii_method == INFERENCE_SERVER_PII_OPTION
+                                    or default_pii_method == AWS_LLM_PII_OPTION
+                                )
+
+                                in_redact_entities.render()
+                                in_redact_comprehend_entities.render()
+                                in_redact_llm_entities.render()
+
+                            custom_llm_entities_accordion = gr.Accordion(
+                                "Custom instructions for LLM-based entity detection",
+                                open=True,
+                                visible=initial_is_llm_method,
+                            )
+                            with custom_llm_entities_accordion:
+                                custom_llm_instructions_textbox.render()
+
+                        with gr.Row(equal_height=True):
+                            terms_accordion = gr.Accordion(
+                                "Phrases to always/never redact, and whole page redaction",
+                                open=True,
+                            )
+                            with terms_accordion:
                                 with gr.Row(equal_height=True):
-                                    gr.Markdown(
-                                        """Document will be submitted to AWS Textract API service to extract all text in the document. Processing will take place on (secure) AWS servers, and outputs will be stored on S3 for up to 7 days. To download the results, click 'Check status' below and they will be downloaded if ready."""
-                                    )
-                                with gr.Row(equal_height=True):
-                                    send_document_to_textract_api_btn = gr.Button(
-                                        "Analyse document with AWS Textract API call",
-                                        variant="primary",
+                                    with gr.Column(scale=3):
+                                        with gr.Row(equal_height=True):
+                                            in_allow_list_state.render()
+                                            in_deny_list_state.render()
+                                            in_fully_redacted_list_state.render()
+                                    with gr.Column(scale=1):
+                                        max_fuzzy_spelling_mistakes_num.render()
+
+                    if SHOW_COSTS:
+                        with gr.Accordion(
+                            "Estimated costs and time taken",
+                            open=SHOW_COSTS_ACCORDION_OPEN,
+                            visible=True,
+                        ):
+                            gr.Markdown(
+                                "Csosts shown only include direct usage of AWS services and do not include other running costs (e.g. storage, run-time costs). Costs are an upper bound - if there are many PDF pages with selectable text in your document, then they may be skipped in practice if you are not extracting signatures."
+                            )
+                            with gr.Row(equal_height=True):
+                                with gr.Column(scale=1):
+                                    textract_output_found_checkbox = gr.Checkbox(
+                                        value=False,
+                                        label="Existing Textract output file found",
+                                        interactive=False,
                                         visible=True,
                                     )
-                                with gr.Row(equal_height=False):
-                                    with gr.Column(scale=2):
-                                        textract_job_detail_df = gr.Dataframe(
-                                            pd.DataFrame(
-                                                columns=[
-                                                    "job_id",
-                                                    "file_name",
-                                                    "job_type",
-                                                    "signature_extraction",
-                                                    "job_date_time",
-                                                ]
-                                            ),
-                                            label="Previous job details",
+                                    relevant_ocr_output_with_words_found_checkbox = gr.Checkbox(
+                                        value=False,
+                                        label="Existing local OCR output file found",
+                                        interactive=False,
+                                        visible=True,
+                                    )
+                                with gr.Column(scale=4):
+                                    with gr.Row(equal_height=True):
+                                        total_pdf_page_count.render()
+                                        estimated_aws_costs_number = gr.Number(
+                                            label="Approximate AWS services cost (£)",
+                                            value=0.00,
+                                            precision=2,
                                             visible=True,
-                                            type="pandas",
-                                            wrap=True,
+                                            interactive=False,
                                         )
-                                    with gr.Column(scale=1):
-                                        job_id_textbox = gr.Textbox(
-                                            label="Job ID to check status",
-                                            value="",
+                                        estimated_time_taken_number = gr.Number(
+                                            label="Approximate time for task (minutes)",
+                                            value=0,
                                             visible=True,
-                                            lines=2,
+                                            precision=2,
+                                            interactive=False,
                                         )
-                                        check_state_of_textract_api_call_btn = gr.Button(
-                                            "Check status of Textract job and download",
-                                            variant="secondary",
-                                            visible=True,
-                                        )
-                                with gr.Row():
-                                    with gr.Column():
-                                        textract_job_output_file = gr.File(
-                                            label="Textract job output files",
-                                            height=100,
-                                            visible=True,
-                                        )
-                                    with gr.Column():
-                                        job_current_status = gr.Textbox(
-                                            value="",
-                                            label="Analysis job current status",
-                                            visible=True,
-                                        )
-                                        convert_textract_outputs_to_ocr_results = gr.Button(
-                                            "Convert Textract job outputs to OCR results",
-                                            variant="secondary",
-                                            visible=True,
-                                        )
+                    else:
+                        total_pdf_page_count.render()  # Need to render in both cases, as included in examples
+
+                    if GET_COST_CODES or ENFORCE_COST_CODES:
+                        with gr.Accordion(
+                            "Assign task to cost code",
+                            open=COST_CODE_ACCORDION_OPEN,
+                            visible=True,
+                        ):
+                            gr.Markdown(
+                                "Please ensure that you have approval from your budget holder before using this app for redaction tasks that incur a cost."
+                            )
+                            with gr.Row():
+                                with gr.Column():
+                                    with gr.Accordion(
+                                        "View and filter cost code table",
+                                        open=False,
+                                        visible=True,
+                                    ):
+                                        cost_code_dataframe.render()
+                                        reset_cost_code_dataframe_button.render()
+                                with gr.Column():
+                                    cost_code_choice_drop.render()
+                                    set_default_cost_code_button.render()
+                    else:
+                        cost_code_dataframe.render()
+                        cost_code_choice_drop.render()
+                        reset_cost_code_dataframe_button.render()
+                        set_default_cost_code_button.render()
+
+                    if SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS:
+                        with gr.Accordion(
+                            "Submit whole document to AWS Textract API (quickest text extraction for large documents)",
+                            open=False,
+                            visible=True,
+                        ):
+                            with gr.Row(equal_height=True):
+                                gr.Markdown(
+                                    """Document will be submitted to AWS Textract API service to extract all text in the document. Processing will take place on (secure) AWS servers, and outputs will be stored on S3 for up to 7 days. To download the results, click 'Check status' below and they will be downloaded if ready."""
+                                )
+                            with gr.Row(equal_height=True):
+                                send_document_to_textract_api_btn = gr.Button(
+                                    "Analyse document with AWS Textract API call",
+                                    variant="primary",
+                                    visible=True,
+                                )
+                            with gr.Row(equal_height=False):
+                                with gr.Column(scale=2):
+                                    textract_job_detail_df = gr.Dataframe(
+                                        pd.DataFrame(
+                                            columns=[
+                                                "job_id",
+                                                "file_name",
+                                                "job_type",
+                                                "signature_extraction",
+                                                "job_date_time",
+                                            ]
+                                        ),
+                                        label="Previous job details",
+                                        visible=True,
+                                        type="pandas",
+                                        wrap=True,
+                                    )
+                                with gr.Column(scale=1):
+                                    job_id_textbox = gr.Textbox(
+                                        label="Job ID to check status",
+                                        value="",
+                                        visible=True,
+                                        lines=2,
+                                    )
+                                    check_state_of_textract_api_call_btn = gr.Button(
+                                        "Check status of Textract job and download",
+                                        variant="secondary",
+                                        visible=True,
+                                    )
+                            with gr.Row():
+                                with gr.Column():
+                                    textract_job_output_file = gr.File(
+                                        label="Textract job output files",
+                                        height=100,
+                                        visible=True,
+                                    )
+                                with gr.Column():
+                                    job_current_status = gr.Textbox(
+                                        value="",
+                                        label="Analysis job current status",
+                                        visible=True,
+                                    )
+                                    convert_textract_outputs_to_ocr_results = gr.Button(
+                                        "Convert Textract job outputs to OCR results",
+                                        variant="secondary",
+                                        visible=True,
+                                    )
 
             with gr.Accordion(label="Extract text and redact document", open=True):
 
@@ -4767,15 +4763,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         else [relevant_ocr_output_with_words_found_checkbox]
     )
     in_doc_files.upload(
-        fn=make_malware_scan_disable_outputs(1),
-        inputs=None,
+        fn=make_malware_scan_upload_start(1),
+        inputs=[in_doc_files],
         outputs=[document_redact_btn],
         queue=True,
-        api_visibility="undocumented",
-    ).success(
-        fn=scan_gradio_file_upload,
-        inputs=[in_doc_files],
-        outputs=[],
         api_visibility="undocumented",
     ).success(
         fn=make_malware_scan_enable_outputs(1),
@@ -4847,15 +4838,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     # Same process as above for walkthrough file input
     walkthrough_file_input.upload(
-        fn=make_malware_scan_disable_outputs(1),
-        inputs=None,
+        fn=make_malware_scan_upload_start(1),
+        inputs=[walkthrough_file_input],
         outputs=[step_4_next_document_redact_btn],
         queue=True,
-        api_visibility="undocumented",
-    ).success(
-        fn=scan_gradio_file_upload,
-        inputs=[walkthrough_file_input],
-        outputs=[],
         api_visibility="undocumented",
     ).success(
         fn=make_malware_scan_enable_outputs(1),
@@ -6344,8 +6330,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     # Upload previous PDF for modifying redactions
     input_pdf_for_review.upload(
-        fn=make_malware_scan_disable_outputs(4),
-        inputs=None,
+        fn=make_malware_scan_upload_start(4),
+        inputs=[input_pdf_for_review],
         outputs=[
             annotation_button_apply,
             export_redaction_overlay_btn,
@@ -6353,11 +6339,6 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             update_current_page_redactions_btn,
         ],
         queue=True,
-        api_visibility="undocumented",
-    ).success(
-        fn=scan_gradio_file_upload,
-        inputs=[input_pdf_for_review],
-        outputs=[],
         api_visibility="undocumented",
     ).success(
         fn=make_malware_scan_enable_outputs(4),
@@ -6509,8 +6490,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     # Upload previous review CSV files for modifying redactions
     input_review_files.upload(
-        fn=make_malware_scan_disable_outputs(6),
-        inputs=None,
+        fn=make_malware_scan_upload_start(6),
+        inputs=[input_review_files],
         outputs=[
             annotation_button_apply,
             export_redaction_overlay_btn,
@@ -6520,11 +6501,6 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             redact_selected_row_btn,
         ],
         queue=True,
-        api_visibility="undocumented",
-    ).success(
-        fn=scan_gradio_file_upload,
-        inputs=[input_review_files],
-        outputs=[],
         api_visibility="undocumented",
     ).success(
         fn=make_malware_scan_enable_outputs(6),
@@ -8743,15 +8719,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
     # WORD/TABULAR DATA REDACTION
     ###
     in_data_files.upload(
-        fn=make_malware_scan_disable_outputs(1),
-        inputs=None,
+        fn=make_malware_scan_upload_start(1),
+        inputs=[in_data_files],
         outputs=[tabular_data_redact_btn],
         queue=True,
-        api_visibility="undocumented",
-    ).success(
-        fn=scan_gradio_file_upload,
-        inputs=[in_data_files],
-        outputs=[],
         api_visibility="undocumented",
     ).success(
         fn=make_malware_scan_enable_outputs(1),
@@ -9315,15 +9286,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     # Event handlers
     in_tabular_duplicate_files.upload(
-        fn=make_malware_scan_disable_outputs(1),
-        inputs=None,
+        fn=make_malware_scan_upload_start(1),
+        inputs=[in_tabular_duplicate_files],
         outputs=[find_tabular_duplicates_btn],
         queue=True,
-        api_visibility="undocumented",
-    ).success(
-        fn=scan_gradio_file_upload,
-        inputs=[in_tabular_duplicate_files],
-        outputs=[],
         api_visibility="undocumented",
     ).success(
         fn=make_malware_scan_enable_outputs(1),
@@ -9348,6 +9314,22 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         queue=False,
         api_visibility="undocumented",
     )
+
+    for _malware_scanned_file_input in (
+        in_doc_files,
+        walkthrough_file_input,
+        input_pdf_for_review,
+        input_review_files,
+        in_data_files,
+        in_tabular_duplicate_files,
+    ):
+        _malware_scanned_file_input.delete(
+            fn=handle_gradio_file_deleted,
+            inputs=None,
+            outputs=[],
+            queue=False,
+            api_visibility="undocumented",
+        )
 
     find_tabular_duplicates_btn.click(
         fn=run_tabular_duplicate_detection,

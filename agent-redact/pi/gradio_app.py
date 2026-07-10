@@ -159,10 +159,10 @@ from tools.malware_scan import (
     MalwareScanRejectedError,
     MalwareScanServiceError,
     ensure_upload_scanned_for_malware,
-    make_malware_scan_disable_outputs,
+    handle_gradio_file_deleted,
     make_malware_scan_enable_outputs,
     make_malware_scan_upload_failure_outputs,
-    scan_gradio_file_upload,
+    make_malware_scan_upload_start,
 )
 
 # After ``tools.config`` import: it may set ``AGENT_DEFAULT_PROVIDER`` / ``AGENT_DEFAULT_MODEL``
@@ -3225,15 +3225,10 @@ def build_ui():
             api_visibility="undocumented",
         )
         redact_file.upload(
-            fn=make_malware_scan_disable_outputs(1),
-            inputs=None,
+            fn=make_malware_scan_upload_start(1),
+            inputs=[redact_file],
             outputs=[start_redact_btn],
             queue=True,
-            api_visibility="undocumented",
-        ).success(
-            fn=scan_gradio_file_upload,
-            inputs=[redact_file],
-            outputs=[],
             api_visibility="undocumented",
         ).success(
             fn=make_malware_scan_enable_outputs(1),
@@ -3244,6 +3239,13 @@ def build_ui():
         ).failure(
             fn=make_malware_scan_upload_failure_outputs(1),
             outputs=[redact_file, start_redact_btn],
+            queue=False,
+            api_visibility="undocumented",
+        )
+        redact_file.delete(
+            fn=handle_gradio_file_deleted,
+            inputs=None,
+            outputs=[],
             queue=False,
             api_visibility="undocumented",
         )

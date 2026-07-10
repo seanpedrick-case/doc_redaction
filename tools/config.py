@@ -2827,6 +2827,10 @@ GET_COST_CODES = convert_string_to_boolean(
     get_or_create_env_var("GET_COST_CODES", "False")
 )
 
+SHOW_COSTS_ACCORDION_OPEN = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_COSTS_ACCORDION_OPEN", "False")
+)  # Whether the costs accordion is open by default
+
 DEFAULT_COST_CODE = get_or_create_env_var("DEFAULT_COST_CODE", "")
 
 COST_CODES_PATH = get_or_create_env_var(
