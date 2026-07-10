@@ -1292,6 +1292,7 @@ class CdkStack(Stack):
                 self,
                 bucket_name=S3_MALWARE_SCAN_BUCKET_NAME,
                 task_role=task_role,
+                execution_role=execution_role,
                 get_context_bool=get_context_bool,
                 resource_removal_policy=resource_removal_policy,
                 s3_auto_delete_objects=s3_auto_delete_objects,

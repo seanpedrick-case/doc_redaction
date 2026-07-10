@@ -696,11 +696,63 @@ def add_s3_enforce_ssl_policy(bucket: s3.IBucket) -> None:
     )
 
 
+def _grant_malware_scan_role_access(
+    malware_bucket: s3.IBucket,
+    role: iam.IRole,
+    *,
+    object_arn: str,
+    bucket_arn: str,
+) -> None:
+    """Grant one ECS app role identity + bucket policy access for the scan workflow."""
+    malware_bucket.add_to_resource_policy(
+        iam.PolicyStatement(
+            effect=iam.Effect.ALLOW,
+            principals=[role],
+            actions=[
+                "s3:PutObject",
+                "s3:GetObject",
+                "s3:GetObjectTagging",
+                "s3:DeleteObject",
+            ],
+            resources=[object_arn],
+        )
+    )
+    malware_bucket.add_to_resource_policy(
+        iam.PolicyStatement(
+            effect=iam.Effect.ALLOW,
+            principals=[role],
+            actions=["s3:ListBucket"],
+            resources=[bucket_arn],
+        )
+    )
+    malware_bucket.grant_read_write(role)
+    role.add_to_policy(
+        iam.PolicyStatement(
+            effect=iam.Effect.ALLOW,
+            actions=[
+                "s3:PutObject",
+                "s3:GetObject",
+                "s3:GetObjectTagging",
+                "s3:DeleteObject",
+            ],
+            resources=[object_arn],
+        )
+    )
+    role.add_to_policy(
+        iam.PolicyStatement(
+            effect=iam.Effect.ALLOW,
+            actions=["s3:ListBucket"],
+            resources=[bucket_arn],
+        )
+    )
+
+
 def create_malware_scan_bucket_and_guardduty_plan(
     scope: Construct,
     *,
     bucket_name: str,
     task_role: iam.IRole,
+    execution_role: Optional[iam.IRole] = None,
     get_context_bool,
     resource_removal_policy: RemovalPolicy,
     s3_auto_delete_objects: bool,
@@ -711,7 +763,7 @@ def create_malware_scan_bucket_and_guardduty_plan(
     Dedicated S3 bucket for ephemeral upload staging with GuardDuty Malware Protection.
 
     Enables object tagging (``GuardDutyMalwareScanStatus``) and grants the ECS task role
-    put/tag/delete access for the app-side scan workflow.
+    (and execution role when supplied) put/tag/delete access for the app-side scan workflow.
     """
     if get_context_bool(f"globally_taken:{bucket_name}"):
         raise ValueError(
@@ -747,47 +799,17 @@ def create_malware_scan_bucket_and_guardduty_plan(
     add_s3_enforce_ssl_policy(malware_bucket)
 
     object_arn = f"{malware_bucket.bucket_arn}/*"
-    malware_bucket.add_to_resource_policy(
-        iam.PolicyStatement(
-            effect=iam.Effect.ALLOW,
-            principals=[task_role],
-            actions=[
-                "s3:PutObject",
-                "s3:GetObject",
-                "s3:GetObjectTagging",
-                "s3:DeleteObject",
-            ],
-            resources=[object_arn],
+    bucket_arn = malware_bucket.bucket_arn
+    app_roles: list[iam.IRole] = [task_role]
+    if execution_role is not None and execution_role.role_arn != task_role.role_arn:
+        app_roles.append(execution_role)
+    for role in app_roles:
+        _grant_malware_scan_role_access(
+            malware_bucket,
+            role,
+            object_arn=object_arn,
+            bucket_arn=bucket_arn,
         )
-    )
-    malware_bucket.add_to_resource_policy(
-        iam.PolicyStatement(
-            effect=iam.Effect.ALLOW,
-            principals=[task_role],
-            actions=["s3:ListBucket"],
-            resources=[malware_bucket.bucket_arn],
-        )
-    )
-    malware_bucket.grant_read_write(task_role)
-    task_role.add_to_policy(
-        iam.PolicyStatement(
-            effect=iam.Effect.ALLOW,
-            actions=[
-                "s3:PutObject",
-                "s3:GetObject",
-                "s3:GetObjectTagging",
-                "s3:DeleteObject",
-            ],
-            resources=[object_arn],
-        )
-    )
-    task_role.add_to_policy(
-        iam.PolicyStatement(
-            effect=iam.Effect.ALLOW,
-            actions=["s3:ListBucket"],
-            resources=[malware_bucket.bucket_arn],
-        )
-    )
 
     guardduty_role = iam.Role(
         scope,
