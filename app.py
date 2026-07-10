@@ -1765,9 +1765,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                     7,
                 ],
             )
-            example_labels.append(
-                "PDF redaction with deny list and page redaction"
-            )
+            example_labels.append("PDF redaction with deny list and page redaction")
 
         # When RUN_ALL_EXAMPLES_THROUGH_AWS, replace text extraction with AWS Textract and PII with AWS Comprehend (except "Only extract text")
         if RUN_ALL_EXAMPLES_THROUGH_AWS:
