@@ -138,11 +138,15 @@ from tools.config import (
     EMPTY_SEND_WITH_FILE_HINT,
     FASTAPI_ROOT_PATH,
     HOST_NAME,
+    LOGOUT_BUTTON_LABEL,
+    LOGOUT_BUTTON_URL,
+    LOGOUT_FOOTER_CSS,
     QUOTA_CONTINUE_PROMPT,
     QUOTA_RETRY_ATTEMPTS,
     QUOTA_RETRY_DELAY_S,
     RUN_FASTAPI,
     SAVE_OUTPUTS_TO_S3,
+    SHOW_LOGOUT_BUTTON,
     SHOW_THINKING,
     SHOW_TOOL_OUTPUT,
     THINKING_DISPLAY_MAX,
@@ -169,6 +173,7 @@ from tools.gradio_platform import (
     log_agent_usage_event,
     log_platform_access,
     mount_or_launch,
+    render_logout_button,
 )
 
 IS_HF_SPACE = is_hf_space_profile()
@@ -3379,6 +3384,16 @@ def build_ui():
             api_visibility="undocumented",
         )
 
+        with gr.Row():
+            with gr.Column(scale=2):
+                pass
+            with gr.Column(scale=1):
+                render_logout_button(
+                    show=SHOW_LOGOUT_BUTTON,
+                    url=LOGOUT_BUTTON_URL,
+                    label=LOGOUT_BUTTON_LABEL,
+                )
+
     return demo
 
 
@@ -3395,7 +3410,7 @@ def launch_pi_ui() -> FastAPI | None:
     return mount_or_launch(
         demo,
         allowed_paths=gradio_allowed_paths(),
-        css=THINKING_PANEL_CSS,
+        css=THINKING_PANEL_CSS + LOGOUT_FOOTER_CSS,
         head_extra=PI_AGENT_FINISH_HEAD_HTML,
         server_name=AGENT_UI_HOST,
         server_port=AGENT_UI_PORT,

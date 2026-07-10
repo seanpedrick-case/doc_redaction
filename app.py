@@ -288,6 +288,9 @@ from tools.config import (
     LOCAL_PII_OPTION,
     LOCAL_TRANSFORMERS_LLM_PII_OPTION,
     LOG_FILE_NAME,
+    LOGOUT_BUTTON_LABEL,
+    LOGOUT_BUTTON_URL,
+    LOGOUT_FOOTER_CSS,
     MAPPED_LANGUAGE_CHOICES,
     MAX_FILE_SIZE,
     MAX_OPEN_TEXT_CHARACTERS,
@@ -331,6 +334,7 @@ from tools.config import (
     SHOW_INFERENCE_SERVER_VLM_MODEL_OPTIONS,
     SHOW_LANGUAGE_SELECTION,
     SHOW_LOCAL_OCR_MODEL_OPTIONS,
+    SHOW_LOGOUT_BUTTON,
     SHOW_OCR_GUI_OPTIONS,
     SHOW_PII_IDENTIFICATION_OPTIONS,
     SHOW_QUICKSTART,
@@ -381,6 +385,7 @@ from tools.find_duplicate_tabular import (
     handle_tabular_row_selection,
     run_tabular_duplicate_detection,
 )
+from tools.gradio_platform import render_logout_button
 from tools.helper_functions import (
     _file_name_from_pdf_path,
     all_outputs_file_download_fn,
@@ -1157,7 +1162,7 @@ div[class*="tab-nav"] button {
     word-break: break-word;
     overflow-wrap: anywhere;
 }
-"""
+""" + LOGOUT_FOOTER_CSS
 
 # Create the gradio interface.
 if RUN_FASTAPI:
@@ -4174,6 +4179,16 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         all_output_files_btn.render()
         all_output_files.render()
         all_outputs_file_download.render()
+
+    with gr.Row():
+        with gr.Column(scale=2):
+            pass
+        with gr.Column(scale=1):
+            render_logout_button(
+                show=SHOW_LOGOUT_BUTTON,
+                url=LOGOUT_BUTTON_URL,
+                label=LOGOUT_BUTTON_LABEL,
+            )
 
     ###
     # UI INTERACTION

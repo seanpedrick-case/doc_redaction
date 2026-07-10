@@ -206,7 +206,12 @@ def add_folder_to_path(folder_path: str):
         print(f"Folder not found at {folder_path} - not added to PATH")
 
 
-def validate_safe_url(url_candidate: str, allowed_domains: list = None) -> str:
+def validate_safe_url(
+    url_candidate: str,
+    allowed_domains: list = None,
+    *,
+    fallback: str = "https://seanpedrick-case.github.io/doc_redaction",
+) -> str:
     """
     Validate and return a safe URL with enhanced security checks.
     """
@@ -248,7 +253,7 @@ def validate_safe_url(url_candidate: str, allowed_domains: list = None) -> str:
 
     except Exception as e:
         print(f"URL validation failed: {e}")
-        return "https://seanpedrick-case.github.io/doc_redaction"  # Safe fallback
+        return fallback
 
 
 def sanitize_markdown_text(text: str) -> str:
@@ -2541,6 +2546,36 @@ FILL_SCREEN_WIDTH = convert_string_to_boolean(
 
 # Get some environment variables and Launch the Gradio app
 COGNITO_AUTH = convert_string_to_boolean(get_or_create_env_var("COGNITO_AUTH", "False"))
+
+_LOGOUT_BUTTON_URL_RAW = get_or_create_env_var("LOGOUT_BUTTON_URL", "").strip()
+_LOGOUT_BUTTON_ALLOWED_DOMAINS = [
+    "seanpedrick-case.github.io",
+    "github.io",
+    "github.com",
+    "sharepoint.com",
+    "amazoncognito.com",
+]
+LOGOUT_BUTTON_URL = (
+    validate_safe_url(
+        _LOGOUT_BUTTON_URL_RAW,
+        allowed_domains=_LOGOUT_BUTTON_ALLOWED_DOMAINS,
+        fallback="",
+    )
+    if _LOGOUT_BUTTON_URL_RAW
+    else ""
+)
+SHOW_LOGOUT_BUTTON = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_LOGOUT_BUTTON", "False")
+)
+LOGOUT_BUTTON_LABEL = get_or_create_env_var("LOGOUT_BUTTON_LABEL", "Log out")
+LOGOUT_FOOTER_CSS = """
+.logout-footer-row {
+    margin-top: 1.5rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border-color-primary, #e5e5e5);
+    justify-content: flex-end !important;
+}
+"""
 
 SHOW_FEEDBACK_BUTTONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_FEEDBACK_BUTTONS", "False")
