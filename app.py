@@ -4740,11 +4740,6 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         inputs=[in_doc_files],
         outputs=[],
         api_visibility="undocumented",
-    ).failure(
-        fn=make_malware_scan_upload_failure_outputs(1),
-        outputs=[in_doc_files, document_redact_btn],
-        queue=False,
-        api_visibility="undocumented",
     ).success(
         fn=make_malware_scan_enable_outputs(1),
         inputs=None,
@@ -4806,6 +4801,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         outputs=[document_redact_btn],
         queue=False,
         api_visibility="undocumented",
+    ).failure(
+        fn=make_malware_scan_upload_failure_outputs(1),
+        outputs=[in_doc_files, document_redact_btn],
+        queue=False,
+        api_visibility="undocumented",
     )
 
     # Same process as above for walkthrough file input
@@ -4819,11 +4819,6 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         fn=scan_gradio_file_upload,
         inputs=[walkthrough_file_input],
         outputs=[],
-        api_visibility="undocumented",
-    ).failure(
-        fn=make_malware_scan_upload_failure_outputs(1),
-        outputs=[walkthrough_file_input, step_4_next_document_redact_btn],
-        queue=False,
         api_visibility="undocumented",
     ).success(
         fn=make_malware_scan_enable_outputs(1),
@@ -4884,6 +4879,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         fn=make_malware_scan_enable_outputs(1),
         inputs=None,
         outputs=[step_4_next_document_redact_btn],
+        queue=False,
+        api_visibility="undocumented",
+    ).failure(
+        fn=make_malware_scan_upload_failure_outputs(1),
+        outputs=[walkthrough_file_input, step_4_next_document_redact_btn],
         queue=False,
         api_visibility="undocumented",
     )
@@ -6322,17 +6322,6 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         inputs=[input_pdf_for_review],
         outputs=[],
         api_visibility="undocumented",
-    ).failure(
-        fn=make_malware_scan_upload_failure_outputs(4),
-        outputs=[
-            input_pdf_for_review,
-            annotation_button_apply,
-            export_redaction_overlay_btn,
-            export_review_ocr_visualisation_btn,
-            update_current_page_redactions_btn,
-        ],
-        queue=False,
-        api_visibility="undocumented",
     ).success(
         fn=make_malware_scan_enable_outputs(4),
         inputs=None,
@@ -6468,6 +6457,17 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         queue=False,
         api_visibility="undocumented",
+    ).failure(
+        fn=make_malware_scan_upload_failure_outputs(4),
+        outputs=[
+            input_pdf_for_review,
+            annotation_button_apply,
+            export_redaction_overlay_btn,
+            export_review_ocr_visualisation_btn,
+            update_current_page_redactions_btn,
+        ],
+        queue=False,
+        api_visibility="undocumented",
     )
 
     # Upload previous review CSV files for modifying redactions
@@ -6488,19 +6488,6 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         fn=scan_gradio_file_upload,
         inputs=[input_review_files],
         outputs=[],
-        api_visibility="undocumented",
-    ).failure(
-        fn=make_malware_scan_upload_failure_outputs(6),
-        outputs=[
-            input_review_files,
-            annotation_button_apply,
-            export_redaction_overlay_btn,
-            export_review_ocr_visualisation_btn,
-            update_current_page_redactions_btn,
-            redact_selected_btn,
-            redact_selected_row_btn,
-        ],
-        queue=False,
         api_visibility="undocumented",
     ).success(
         fn=make_malware_scan_enable_outputs(6),
@@ -6625,15 +6612,20 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         queue=False,
         api_visibility="undocumented",
+    ).failure(
+        fn=make_malware_scan_upload_failure_outputs(6),
+        outputs=[
+            input_review_files,
+            annotation_button_apply,
+            export_redaction_overlay_btn,
+            export_review_ocr_visualisation_btn,
+            update_current_page_redactions_btn,
+            redact_selected_btn,
+            redact_selected_row_btn,
+        ],
+        queue=False,
+        api_visibility="undocumented",
     )
-
-    # Manual updates to review df
-    # review_file_df_format_check_btn.click(
-    #     validate_review_file_df,
-    #     inputs=[review_file_df],
-    #     outputs=[],
-    #     api_visibility="undocumented",
-    # )
 
     review_file_df_update_btn.click(
         validate_review_file_df,
@@ -8724,11 +8716,6 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         inputs=[in_data_files],
         outputs=[],
         api_visibility="undocumented",
-    ).failure(
-        fn=make_malware_scan_upload_failure_outputs(1),
-        outputs=[in_data_files, tabular_data_redact_btn],
-        queue=False,
-        api_visibility="undocumented",
     ).success(
         fn=make_malware_scan_enable_outputs(1),
         inputs=None,
@@ -8755,6 +8742,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         fn=make_malware_scan_enable_outputs(1),
         inputs=None,
         outputs=[tabular_data_redact_btn],
+        queue=False,
+        api_visibility="undocumented",
+    ).failure(
+        fn=make_malware_scan_upload_failure_outputs(1),
+        outputs=[in_data_files, tabular_data_redact_btn],
         queue=False,
         api_visibility="undocumented",
     )
@@ -9296,11 +9288,6 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         inputs=[in_tabular_duplicate_files],
         outputs=[],
         api_visibility="undocumented",
-    ).failure(
-        fn=make_malware_scan_upload_failure_outputs(1),
-        outputs=[in_tabular_duplicate_files, find_tabular_duplicates_btn],
-        queue=False,
-        api_visibility="undocumented",
     ).success(
         fn=make_malware_scan_enable_outputs(1),
         inputs=None,
@@ -9316,6 +9303,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         fn=make_malware_scan_enable_outputs(1),
         inputs=None,
         outputs=[find_tabular_duplicates_btn],
+        queue=False,
+        api_visibility="undocumented",
+    ).failure(
+        fn=make_malware_scan_upload_failure_outputs(1),
+        outputs=[in_tabular_duplicate_files, find_tabular_duplicates_btn],
         queue=False,
         api_visibility="undocumented",
     )

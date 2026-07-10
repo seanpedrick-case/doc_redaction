@@ -122,6 +122,7 @@ from tools.file_conversion import (
     convert_pymupdf_to_image_coords,
     create_annotation_dicts_from_annotation_df,
     divide_coordinates_by_page_sizes,
+    ensure_word_level_ocr_df_columns,
     fill_missing_box_ids,
     fill_missing_ids,
     is_pdf,
@@ -3562,6 +3563,11 @@ def _choose_and_run_redactor_impl(
 
             all_page_line_level_ocr_results_with_words_df["line_text"] = ""
             # Keep line_x0, line_x1, line_y0, line_y1 so downstream can clip word boxes to line
+            all_page_line_level_ocr_results_with_words_df = (
+                ensure_word_level_ocr_df_columns(
+                    all_page_line_level_ocr_results_with_words_df
+                )
+            )
 
             sort_cols = ["page", "line", "word_x0"]
             if not all_page_line_level_ocr_results_with_words_df.empty and all(
@@ -3597,17 +3603,29 @@ def _choose_and_run_redactor_impl(
                 "line_conf",
                 "line_model",
             ]
+            present_subset_cols = [
+                col
+                for col in subset_cols
+                if col in all_page_line_level_ocr_results_with_words_df.columns
+            ]
             # Identify duplicated rows (excluding the first occurrence)
-            dupes_mask = all_page_line_level_ocr_results_with_words_df.duplicated(
-                subset=subset_cols, keep="first"
-            )
-            # Set these columns to empty for duplicated rows
-            for col in subset_cols:
-                all_page_line_level_ocr_results_with_words_df.loc[dupes_mask, col] = (
-                    ""
-                    if all_page_line_level_ocr_results_with_words_df[col].dtype == "O"
-                    else None
+            if (
+                present_subset_cols
+                and not all_page_line_level_ocr_results_with_words_df.empty
+            ):
+                dupes_mask = all_page_line_level_ocr_results_with_words_df.duplicated(
+                    subset=present_subset_cols, keep="first"
                 )
+                # Set these columns to empty for duplicated rows
+                for col in present_subset_cols:
+                    all_page_line_level_ocr_results_with_words_df.loc[
+                        dupes_mask, col
+                    ] = (
+                        ""
+                        if all_page_line_level_ocr_results_with_words_df[col].dtype
+                        == "O"
+                        else None
+                    )
             all_page_line_level_ocr_results_with_words_df.to_csv(
                 all_page_line_level_ocr_results_with_words_df_file_path,
                 index=False,

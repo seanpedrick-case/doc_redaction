@@ -3230,18 +3230,19 @@ def build_ui():
             inputs=[redact_file],
             outputs=[],
             api_visibility="undocumented",
-        ).failure(
-            fn=make_malware_scan_upload_failure_outputs(1),
-            outputs=[redact_file, start_redact_btn],
-            queue=False,
-            api_visibility="undocumented",
         ).success(
             fn=make_malware_scan_enable_outputs(1),
             inputs=None,
             outputs=[start_redact_btn],
             queue=False,
             api_visibility="undocumented",
+        ).failure(
+            fn=make_malware_scan_upload_failure_outputs(1),
+            outputs=[redact_file, start_redact_btn],
+            queue=False,
+            api_visibility="undocumented",
         )
+
         run_redact_prepare = start_redact_btn.click(
             prepare_redaction_session_ui,
             inputs=[session_hash_state],

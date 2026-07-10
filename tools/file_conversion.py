@@ -869,6 +869,34 @@ def _get_bbox(d: dict) -> list:
     return d.get("bounding_box") or d.get("boundingBox") or [0, 0, 0, 0]
 
 
+WORD_LEVEL_OCR_DF_COLUMNS = [
+    "page",
+    "line",
+    "word_text",
+    "word_x0",
+    "word_y0",
+    "word_x1",
+    "word_y1",
+    "word_conf",
+    "line_text",
+    "line_x0",
+    "line_y0",
+    "line_x1",
+    "line_y1",
+    "line_conf",
+    "line_model",
+]
+
+
+def ensure_word_level_ocr_df_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Return a copy with the standard word-level OCR CSV schema (adds missing columns)."""
+    out = df.copy()
+    for col in WORD_LEVEL_OCR_DF_COLUMNS:
+        if col not in out.columns:
+            out[col] = ""
+    return out
+
+
 def word_level_ocr_output_to_dataframe(ocr_results: dict) -> pd.DataFrame:
     """
     Convert a json of ocr results to a dataframe
@@ -915,6 +943,8 @@ def word_level_ocr_output_to_dataframe(ocr_results: dict) -> pd.DataFrame:
                     }
                 )
 
+    if not rows:
+        return pd.DataFrame(columns=WORD_LEVEL_OCR_DF_COLUMNS)
     return pd.DataFrame(rows)
 
 
