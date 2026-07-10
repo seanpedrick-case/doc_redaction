@@ -421,7 +421,7 @@ from tools.helper_functions import (
     update_language_dropdown,
 )
 from tools.load_spacy_model_custom_recognisers import custom_entities
-from tools.malware_scan import scan_gradio_file_upload
+from tools.malware_scan import clear_gradio_file_upload, scan_gradio_file_upload
 from tools.quickstart import (
     handle_main_pii_method_selection,
     handle_main_redaction_method_selection,
@@ -4729,6 +4729,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         inputs=[in_doc_files],
         outputs=[],
         api_visibility="undocumented",
+    ).failure(
+        fn=clear_gradio_file_upload,
+        outputs=[in_doc_files],
+        api_visibility="undocumented",
     ).success(
         fn=_doc_upload_fn,
         inputs=[in_doc_files],
@@ -4785,6 +4789,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         fn=scan_gradio_file_upload,
         inputs=[walkthrough_file_input],
         outputs=[],
+        api_visibility="undocumented",
+    ).failure(
+        fn=clear_gradio_file_upload,
+        outputs=[walkthrough_file_input],
         api_visibility="undocumented",
     ).success(
         fn=_doc_upload_fn,
@@ -6260,6 +6268,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         inputs=[input_pdf_for_review],
         outputs=[],
         api_visibility="undocumented",
+    ).failure(
+        fn=clear_gradio_file_upload,
+        outputs=[input_pdf_for_review],
+        api_visibility="undocumented",
     ).success(
         fn=reset_review_vars,
         inputs=None,
@@ -6380,6 +6392,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         fn=scan_gradio_file_upload,
         inputs=[input_review_files],
         outputs=[],
+        api_visibility="undocumented",
+    ).failure(
+        fn=clear_gradio_file_upload,
+        outputs=[input_review_files],
         api_visibility="undocumented",
     ).success(
         fn=prepare_image_or_pdf_with_efficient_ocr,
@@ -8571,6 +8587,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         inputs=[in_data_files],
         outputs=[],
         api_visibility="undocumented",
+    ).failure(
+        fn=clear_gradio_file_upload,
+        outputs=[in_data_files],
+        api_visibility="undocumented",
     ).success(
         fn=put_columns_in_df,
         inputs=[in_data_files],
@@ -9119,6 +9139,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         fn=scan_gradio_file_upload,
         inputs=[in_tabular_duplicate_files],
         outputs=[],
+        api_visibility="undocumented",
+    ).failure(
+        fn=clear_gradio_file_upload,
+        outputs=[in_tabular_duplicate_files],
         api_visibility="undocumented",
     ).success(
         fn=put_columns_in_df,

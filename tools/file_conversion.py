@@ -1374,6 +1374,9 @@ def prepare_image_or_pdf_with_efficient_ocr(
     progress: Progress | None = None,
 ):
     """When EFFICIENT_OCR is enabled, skip loading all images; they are created later only for pages that need OCR."""
+    from tools.malware_scan import require_files_malware_scanned
+
+    require_files_malware_scanned(file_paths)
     prepare_images = (
         False
         if efficient_ocr

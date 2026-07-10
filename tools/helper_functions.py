@@ -1068,6 +1068,9 @@ def custom_regex_load(in_file: List[str], file_type: str = "allow_list"):
 
 
 def put_columns_in_df(in_file: List[str]):
+    from tools.malware_scan import require_files_malware_scanned
+
+    require_files_malware_scanned(in_file)
     new_choices = []
     concat_choices = []
     all_sheet_names = []

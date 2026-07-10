@@ -4233,6 +4233,9 @@ def choose_and_run_redactor(
     progress=gr.Progress(track_tqdm=True),
 ):
     """Compatibility wrapper: builds RedactionOptions/RedactionContext and calls run_redaction."""
+    from tools.malware_scan import require_files_malware_scanned
+
+    require_files_malware_scanned(file_paths)
     flat = dict(locals())
     flat.pop("file_paths", None)
     prog = flat.pop("progress")

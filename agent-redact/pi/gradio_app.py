@@ -154,6 +154,7 @@ from tools.malware_scan import (
     USER_SERVICE_ERROR_MESSAGE,
     MalwareScanRejectedError,
     MalwareScanServiceError,
+    clear_gradio_file_upload,
     ensure_upload_scanned_for_malware,
     scan_gradio_file_upload,
 )
@@ -3220,6 +3221,10 @@ def build_ui():
             fn=scan_gradio_file_upload,
             inputs=[redact_file],
             outputs=[],
+            api_visibility="undocumented",
+        ).failure(
+            fn=clear_gradio_file_upload,
+            outputs=[redact_file],
             api_visibility="undocumented",
         )
         run_redact_prepare = start_redact_btn.click(

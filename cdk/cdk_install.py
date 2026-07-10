@@ -2758,7 +2758,6 @@ def write_env_file(path: Path, values: Dict[str, str]) -> Path:
     lines = [f"{key}={val}" for key, val in values.items()]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"Wrote {path}")
     return path
 
 
