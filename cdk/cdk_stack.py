@@ -1886,6 +1886,9 @@ class CdkStack(Stack):
                         vpc_subnets=public_subnet_selection,
                         drop_invalid_header_fields=True,
                         deletion_protection=resource_delete_protection,
+                        # GuardDuty upload scans can poll for several minutes; default ALB idle
+                        # timeout (60s) drops the client connection before the scan finishes.
+                        idle_timeout=Duration.seconds(400),
                     )
                     print("Successfully created new Application Load Balancer")
             except Exception as e:

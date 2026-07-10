@@ -769,6 +769,25 @@ def create_malware_scan_bucket_and_guardduty_plan(
         )
     )
     malware_bucket.grant_read_write(task_role)
+    task_role.add_to_policy(
+        iam.PolicyStatement(
+            effect=iam.Effect.ALLOW,
+            actions=[
+                "s3:PutObject",
+                "s3:GetObject",
+                "s3:GetObjectTagging",
+                "s3:DeleteObject",
+            ],
+            resources=[object_arn],
+        )
+    )
+    task_role.add_to_policy(
+        iam.PolicyStatement(
+            effect=iam.Effect.ALLOW,
+            actions=["s3:ListBucket"],
+            resources=[malware_bucket.bucket_arn],
+        )
+    )
 
     guardduty_role = iam.Role(
         scope,

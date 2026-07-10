@@ -421,7 +421,12 @@ from tools.helper_functions import (
     update_language_dropdown,
 )
 from tools.load_spacy_model_custom_recognisers import custom_entities
-from tools.malware_scan import clear_gradio_file_upload, scan_gradio_file_upload
+from tools.malware_scan import (
+    make_malware_scan_disable_outputs,
+    make_malware_scan_enable_outputs,
+    make_malware_scan_upload_failure_outputs,
+    scan_gradio_file_upload,
+)
 from tools.quickstart import (
     handle_main_pii_method_selection,
     handle_main_redaction_method_selection,
@@ -4725,13 +4730,24 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         else [relevant_ocr_output_with_words_found_checkbox]
     )
     in_doc_files.upload(
+        fn=make_malware_scan_disable_outputs(1),
+        inputs=None,
+        outputs=[document_redact_btn],
+        queue=True,
+        api_visibility="undocumented",
+    ).success(
         fn=scan_gradio_file_upload,
         inputs=[in_doc_files],
         outputs=[],
         api_visibility="undocumented",
     ).failure(
-        fn=clear_gradio_file_upload,
-        outputs=[in_doc_files],
+        fn=make_malware_scan_upload_failure_outputs(1),
+        outputs=[in_doc_files, document_redact_btn],
+        api_visibility="undocumented",
+    ).success(
+        fn=make_malware_scan_enable_outputs(1),
+        inputs=None,
+        outputs=[document_redact_btn],
         api_visibility="undocumented",
     ).success(
         fn=_doc_upload_fn,
@@ -4786,13 +4802,24 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     # Same process as above for walkthrough file input
     walkthrough_file_input.upload(
+        fn=make_malware_scan_disable_outputs(1),
+        inputs=None,
+        outputs=[step_4_next_document_redact_btn],
+        queue=True,
+        api_visibility="undocumented",
+    ).success(
         fn=scan_gradio_file_upload,
         inputs=[walkthrough_file_input],
         outputs=[],
         api_visibility="undocumented",
     ).failure(
-        fn=clear_gradio_file_upload,
-        outputs=[walkthrough_file_input],
+        fn=make_malware_scan_upload_failure_outputs(1),
+        outputs=[walkthrough_file_input, step_4_next_document_redact_btn],
+        api_visibility="undocumented",
+    ).success(
+        fn=make_malware_scan_enable_outputs(1),
+        inputs=None,
+        outputs=[step_4_next_document_redact_btn],
         api_visibility="undocumented",
     ).success(
         fn=_doc_upload_fn,
@@ -6264,13 +6291,40 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     # Upload previous PDF for modifying redactions
     input_pdf_for_review.upload(
+        fn=make_malware_scan_disable_outputs(4),
+        inputs=None,
+        outputs=[
+            annotation_button_apply,
+            export_redaction_overlay_btn,
+            export_review_ocr_visualisation_btn,
+            update_current_page_redactions_btn,
+        ],
+        queue=True,
+        api_visibility="undocumented",
+    ).success(
         fn=scan_gradio_file_upload,
         inputs=[input_pdf_for_review],
         outputs=[],
         api_visibility="undocumented",
     ).failure(
-        fn=clear_gradio_file_upload,
-        outputs=[input_pdf_for_review],
+        fn=make_malware_scan_upload_failure_outputs(4),
+        outputs=[
+            input_pdf_for_review,
+            annotation_button_apply,
+            export_redaction_overlay_btn,
+            export_review_ocr_visualisation_btn,
+            update_current_page_redactions_btn,
+        ],
+        api_visibility="undocumented",
+    ).success(
+        fn=make_malware_scan_enable_outputs(4),
+        inputs=None,
+        outputs=[
+            annotation_button_apply,
+            export_redaction_overlay_btn,
+            export_review_ocr_visualisation_btn,
+            update_current_page_redactions_btn,
+        ],
         api_visibility="undocumented",
     ).success(
         fn=reset_review_vars,
@@ -6389,13 +6443,46 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     # Upload previous review CSV files for modifying redactions
     input_review_files.upload(
+        fn=make_malware_scan_disable_outputs(6),
+        inputs=None,
+        outputs=[
+            annotation_button_apply,
+            export_redaction_overlay_btn,
+            export_review_ocr_visualisation_btn,
+            update_current_page_redactions_btn,
+            redact_selected_btn,
+            redact_selected_row_btn,
+        ],
+        queue=True,
+        api_visibility="undocumented",
+    ).success(
         fn=scan_gradio_file_upload,
         inputs=[input_review_files],
         outputs=[],
         api_visibility="undocumented",
     ).failure(
-        fn=clear_gradio_file_upload,
-        outputs=[input_review_files],
+        fn=make_malware_scan_upload_failure_outputs(6),
+        outputs=[
+            input_review_files,
+            annotation_button_apply,
+            export_redaction_overlay_btn,
+            export_review_ocr_visualisation_btn,
+            update_current_page_redactions_btn,
+            redact_selected_btn,
+            redact_selected_row_btn,
+        ],
+        api_visibility="undocumented",
+    ).success(
+        fn=make_malware_scan_enable_outputs(6),
+        inputs=None,
+        outputs=[
+            annotation_button_apply,
+            export_redaction_overlay_btn,
+            export_review_ocr_visualisation_btn,
+            update_current_page_redactions_btn,
+            redact_selected_btn,
+            redact_selected_row_btn,
+        ],
         api_visibility="undocumented",
     ).success(
         fn=prepare_image_or_pdf_with_efficient_ocr,
@@ -8583,13 +8670,24 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
     # WORD/TABULAR DATA REDACTION
     ###
     in_data_files.upload(
+        fn=make_malware_scan_disable_outputs(1),
+        inputs=None,
+        outputs=[tabular_data_redact_btn],
+        queue=True,
+        api_visibility="undocumented",
+    ).success(
         fn=scan_gradio_file_upload,
         inputs=[in_data_files],
         outputs=[],
         api_visibility="undocumented",
     ).failure(
-        fn=clear_gradio_file_upload,
-        outputs=[in_data_files],
+        fn=make_malware_scan_upload_failure_outputs(1),
+        outputs=[in_data_files, tabular_data_redact_btn],
+        api_visibility="undocumented",
+    ).success(
+        fn=make_malware_scan_enable_outputs(1),
+        inputs=None,
+        outputs=[tabular_data_redact_btn],
         api_visibility="undocumented",
     ).success(
         fn=put_columns_in_df,
@@ -9136,13 +9234,24 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     # Event handlers
     in_tabular_duplicate_files.upload(
+        fn=make_malware_scan_disable_outputs(1),
+        inputs=None,
+        outputs=[find_tabular_duplicates_btn],
+        queue=True,
+        api_visibility="undocumented",
+    ).success(
         fn=scan_gradio_file_upload,
         inputs=[in_tabular_duplicate_files],
         outputs=[],
         api_visibility="undocumented",
     ).failure(
-        fn=clear_gradio_file_upload,
-        outputs=[in_tabular_duplicate_files],
+        fn=make_malware_scan_upload_failure_outputs(1),
+        outputs=[in_tabular_duplicate_files, find_tabular_duplicates_btn],
+        api_visibility="undocumented",
+    ).success(
+        fn=make_malware_scan_enable_outputs(1),
+        inputs=None,
+        outputs=[find_tabular_duplicates_btn],
         api_visibility="undocumented",
     ).success(
         fn=put_columns_in_df,

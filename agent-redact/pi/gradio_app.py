@@ -154,8 +154,10 @@ from tools.malware_scan import (
     USER_SERVICE_ERROR_MESSAGE,
     MalwareScanRejectedError,
     MalwareScanServiceError,
-    clear_gradio_file_upload,
     ensure_upload_scanned_for_malware,
+    make_malware_scan_disable_outputs,
+    make_malware_scan_enable_outputs,
+    make_malware_scan_upload_failure_outputs,
     scan_gradio_file_upload,
 )
 
@@ -3218,13 +3220,24 @@ def build_ui():
             api_visibility="undocumented",
         )
         redact_file.upload(
+            fn=make_malware_scan_disable_outputs(1),
+            inputs=None,
+            outputs=[start_redact_btn],
+            queue=True,
+            api_visibility="undocumented",
+        ).success(
             fn=scan_gradio_file_upload,
             inputs=[redact_file],
             outputs=[],
             api_visibility="undocumented",
         ).failure(
-            fn=clear_gradio_file_upload,
-            outputs=[redact_file],
+            fn=make_malware_scan_upload_failure_outputs(1),
+            outputs=[redact_file, start_redact_btn],
+            api_visibility="undocumented",
+        ).success(
+            fn=make_malware_scan_enable_outputs(1),
+            inputs=None,
+            outputs=[start_redact_btn],
             api_visibility="undocumented",
         )
         run_redact_prepare = start_redact_btn.click(
