@@ -2119,6 +2119,11 @@ def show_info_box_on_click(
     in_fully_redacted_list_state,
     total_pdf_page_count,
 ):
+    from tools.malware_scan import mark_gradio_example_files_malware_clean
+
+    mark_gradio_example_files_malware_clean(in_doc_files)
+    mark_gradio_example_files_malware_clean(prepared_pdf_state)
+
     gr.Info(
         "Example data loaded. Now click on 'Extract text and redact document' on the Redact PDFs/images tab to run the example redaction."
     )
@@ -2258,6 +2263,11 @@ def show_info_box_on_click_ocr_examples(
     in_redact_llm_entities,
     custom_llm_instructions_textbox,
 ):
+    from tools.malware_scan import mark_gradio_example_files_malware_clean
+
+    mark_gradio_example_files_malware_clean(in_doc_files)
+    mark_gradio_example_files_malware_clean(prepared_pdf_state)
+
     gr.Info(
         "Example OCR data loaded. Now click on 'Extract text and redact document' on the Redact PDFs/images tab to run the OCR analysis."
     )
