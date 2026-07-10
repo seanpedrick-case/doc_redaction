@@ -392,7 +392,7 @@ MALWARE_SCAN_POLL_INTERVAL_SEC = float(
     get_or_create_env_var("MALWARE_SCAN_POLL_INTERVAL_SEC", "2.0")
 )
 MALWARE_SCAN_TIMEOUT_SEC = float(
-    get_or_create_env_var("MALWARE_SCAN_TIMEOUT_SEC", "120.0")
+    get_or_create_env_var("MALWARE_SCAN_TIMEOUT_SEC", "300.0")
 )
 MALWARE_SCAN_SHOW_CHECKING_INFO = convert_string_to_boolean(
     get_or_create_env_var("MALWARE_SCAN_SHOW_CHECKING_INFO", "True")
