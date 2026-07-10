@@ -3233,11 +3233,13 @@ def build_ui():
         ).failure(
             fn=make_malware_scan_upload_failure_outputs(1),
             outputs=[redact_file, start_redact_btn],
+            queue=False,
             api_visibility="undocumented",
         ).success(
             fn=make_malware_scan_enable_outputs(1),
             inputs=None,
             outputs=[start_redact_btn],
+            queue=False,
             api_visibility="undocumented",
         )
         run_redact_prepare = start_redact_btn.click(
