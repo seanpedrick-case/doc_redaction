@@ -681,6 +681,10 @@ SHOW_SUMMARISATION = convert_string_to_boolean(
     get_or_create_env_var("SHOW_SUMMARISATION", "False")
 )
 
+REDACTION_SETTINGS_ACCORDION_OPEN = convert_string_to_boolean(
+    get_or_create_env_var("REDACTION_SETTINGS_ACCORDION_OPEN", "False")
+)
+
 # Extraction and PII options open by default:
 EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT = convert_string_to_boolean(
     get_or_create_env_var("EXTRACTION_AND_PII_OPTIONS_OPEN_BY_DEFAULT", "True")

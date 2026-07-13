@@ -302,6 +302,7 @@ from tools.config import (
     OVERWRITE_EXISTING_OCR_RESULTS,
     PADDLE_MODEL_PATH,
     PII_DETECTION_MODELS,
+    REDACTION_SETTINGS_ACCORDION_OPEN,
     REMOVE_DUPLICATE_ROWS,
     ROOT_PATH,
     RUN_ALL_EXAMPLES_THROUGH_AWS,
@@ -1636,9 +1637,9 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     # Examples for PDF/image redaction
     if SHOW_EXAMPLES:
-        gr.Markdown(
-            "### Try out general redaction tasks - click on an example below and then the 'Extract text and redact document' button:"
-        )
+        # gr.Markdown(
+        #     "### Try out general redaction tasks - click on an example below and then the 'Extract text and redact document' button:"
+        # )
 
         available_examples = list()
         example_labels = list()
@@ -2656,18 +2657,14 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ###
         with gr.Tab("Redact PDFs/images", id=1):
 
-            if SHOW_QUICKSTART:
-                show_main_redaction_accordion = False
-            else:
-                show_main_redaction_accordion = True
-
-            with gr.Accordion("Document redaction"):
+            with gr.Accordion("Document redaction", open=True):
 
                 with gr.Accordion("Load in file"):
                     in_doc_files.render()
 
                 with gr.Accordion(
-                    "Redaction settings", open=show_main_redaction_accordion
+                    "Redaction settings",
+                    open=REDACTION_SETTINGS_ACCORDION_OPEN,
                 ):
 
                     textract_text = ""
@@ -2946,7 +2943,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                                         visible=True,
                                     )
 
-            with gr.Accordion(label="Extract text and redact document", open=True):
+                # with gr.Accordion(label="Extract text and redact document", open=True):
 
                 document_redact_btn = gr.Button(
                     "Extract text and redact document",
@@ -3552,15 +3549,15 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ###
         with gr.Tab(label="Open text, Word or Excel/CSV files", id=5):
 
-            gr.Markdown(
-                """Enter open text, or choose a Word/tabular data file (XLSX or CSV) to redact. Note that when redacting complex Word files with e.g. images, some content/formatting will be removed, and it may not attempt to redact headers. You may prefer to convert the document file to PDF in Word, and then run it through the first tab of this app (Redact PDFs/images)."""
-            )
+            # gr.Markdown(
+            #     """Enter open text, or choose a Word/tabular data file (XLSX or CSV) to redact. Note that when redacting complex Word files with e.g. images, some content/formatting will be removed, and it may not attempt to redact headers. You may prefer to convert the document file to PDF in Word, and then run it through the first tab of this app (Redact PDFs/images)."""
+            # )
 
             # Examples for Word/Excel/csv redaction and tabular duplicate detection
             if SHOW_EXAMPLES:
-                gr.Markdown(
-                    "### Try an example - Click on an example below and then the 'Redact text/data files' button for redaction, or the 'Find duplicate cells/rows' button for duplicate detection:"
-                )
+                # gr.Markdown(
+                #     "### Try an example - Click on an example below and then the 'Redact text/data files' button for redaction, or the 'Find duplicate cells/rows' button for duplicate detection:"
+                # )
 
                 # Check which tabular example files exist
                 tabular_example_files = [
@@ -3655,53 +3652,58 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
             with gr.Accordion(
                 "Redact open text, Word or Excel/CSV files. Further settings such as entity types and custom allow/deny lists can be set in the first tab (Redact PDFs/images).",
-                open=show_main_redaction_accordion,
+                open=True,
             ):
-                with gr.Accordion("Redact open text", open=False):
-                    in_text = gr.Textbox(
-                        label="Enter open text",
-                        lines=10,
-                        max_length=MAX_OPEN_TEXT_CHARACTERS,
-                    )
-                with gr.Accordion("Upload docx, xlsx, or csv files", open=True):
-                    in_data_files.render()
+                with gr.Accordion("Load in files", open=True):
+                    with gr.Accordion("Redact open text", open=False):
+                        in_text = gr.Textbox(
+                            label="Enter open text",
+                            lines=10,
+                            max_length=MAX_OPEN_TEXT_CHARACTERS,
+                        )
+                    with gr.Accordion("Upload docx, xlsx, or csv files", open=True):
+                        in_data_files.render()
 
-                in_excel_sheets.render()
+                        in_excel_sheets.render()
 
-                in_colnames.render()
-
-                pii_identification_method_drop_tabular.render()
+                        in_colnames.render()
 
                 with gr.Accordion(
-                    "Anonymisation output format - by default will replace PII with a blank space. ",
-                    open=False,
+                    "Redaction settings", open=REDACTION_SETTINGS_ACCORDION_OPEN
                 ):
-                    with gr.Row():
-                        anon_strategy.render()
 
-                        do_initial_clean.render()
+                    pii_identification_method_drop_tabular.render()
 
-            with gr.Accordion(label="Redact Word/data files", open=True):
-                tabular_data_redact_btn = gr.Button(
-                    "Redact text/data files",
-                    variant="primary",
-                    elem_id="tabular-redact-btn",
-                )
-                with gr.Row():
-                    text_output_summary = gr.Textbox(label="Output result", lines=4)
-                    text_output_file = gr.File(label="Output files")
-                    text_tabular_files_done = gr.Number(
-                        value=0,
-                        label="Number of tabular files redacted",
-                        interactive=False,
-                        visible=False,
+                    with gr.Accordion(
+                        "Anonymisation output format - by default will replace PII with a blank space. ",
+                        open=False,
+                    ):
+                        with gr.Row():
+                            anon_strategy.render()
+
+                            do_initial_clean.render()
+
+                with gr.Accordion(label="Redact Word/data files", open=True):
+                    tabular_data_redact_btn = gr.Button(
+                        "Redact text/data files",
+                        variant="primary",
+                        elem_id="tabular-redact-btn",
                     )
-                text_redaction_example_markdown = gr.Markdown(
-                    value=REDACTION_EXAMPLE_PLACEHOLDER,
-                    label="Example redacted output",
-                    elem_id="text-redaction-example-markdown",
-                    buttons=["copy"],
-                )
+                    with gr.Row():
+                        text_output_summary = gr.Textbox(label="Output result", lines=4)
+                        text_output_file = gr.File(label="Output files")
+                        text_tabular_files_done = gr.Number(
+                            value=0,
+                            label="Number of tabular files redacted",
+                            interactive=False,
+                            visible=False,
+                        )
+                    text_redaction_example_markdown = gr.Markdown(
+                        value=REDACTION_EXAMPLE_PLACEHOLDER,
+                        label="Example redacted output",
+                        elem_id="text-redaction-example-markdown",
+                        buttons=["copy"],
+                    )
 
             ###
             # TABULAR DUPLICATE DETECTION

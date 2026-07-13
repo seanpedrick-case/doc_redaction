@@ -1680,7 +1680,7 @@ def prepare_image_or_pdf(
                 )
 
         elif is_pdf_or_image(file_path):  # Alternatively, if it's an image
-            print(f"File {file_name_with_ext} is an image")
+            print("File is an image")
             # Check if the file is an image type and the user selected text ocr option
             if (
                 file_extension in [".jpg", ".jpeg", ".png"]

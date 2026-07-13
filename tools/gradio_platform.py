@@ -67,8 +67,8 @@ def render_logout_button(
     """Render a logout link button below the main layout when configured."""
     if not show or not (url or "").strip():
         return
-    with gr.Row(elem_classes="logout-footer-row"):
-        gr.Button(value=label, link=url.strip(), variant="secondary", size="md")
+    # with gr.Row(elem_classes="logout-footer-row"):
+    gr.Button(value=label, link=url.strip(), variant="secondary", size="md")
 
 
 def validate_custom_header(request: gr.Request) -> None:
