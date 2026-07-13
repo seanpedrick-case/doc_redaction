@@ -122,9 +122,19 @@ def test_build_env_values_uses_custom_s3_bucket_names():
     answers = _demo_answers()
     answers.s3_log_bucket_name = "063418083240-demo-redaction-s3-logs"
     answers.s3_output_bucket_name = "063418083240-demo-redaction-s3-output"
+    answers.s3_malware_scan_bucket_name = "063418083240-demo-redaction-s3-malware-scan"
     values = inst.build_env_values(answers)
     assert values["S3_LOG_CONFIG_BUCKET_NAME"] == "063418083240-demo-redaction-s3-logs"
     assert values["S3_OUTPUT_BUCKET_NAME"] == "063418083240-demo-redaction-s3-output"
+    assert (
+        values["S3_MALWARE_SCAN_BUCKET_NAME"]
+        == "063418083240-demo-redaction-s3-malware-scan"
+    )
+
+
+def test_derive_s3_bucket_names_includes_malware_scan_bucket():
+    names = inst.derive_s3_bucket_names("demo-redaction")
+    assert names["S3_MALWARE_SCAN_BUCKET_NAME"] == "demo-redactions3-malware-scan"
 
 
 def test_normalize_s3_bucket_name_truncates_and_sanitizes():
@@ -463,6 +473,8 @@ def test_build_app_config_env_values_feature_defaults():
     assert updates["INCLUDE_FACE_IDENTIFICATION_TEXTRACT_OPTION"] == "True"
     assert updates["SHOW_SUMMARISATION"] == "True"
     assert updates["SAVE_LOGS_TO_DYNAMODB"] == "True"
+    assert updates["SCAN_UPLOADS_FOR_MALWARE"] == "True"
+    assert updates["MALWARE_SCAN_S3_BUCKET"].endswith("s3-malware-scan")
 
 
 def test_build_env_values_defaults_ecs_cpu_to_two_vcpu():

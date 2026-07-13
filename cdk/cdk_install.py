@@ -1312,6 +1312,7 @@ class InstallAnswers:
     cognito_domain_prefix: str = ""
     s3_log_bucket_name: str = ""
     s3_output_bucket_name: str = ""
+    s3_malware_scan_bucket_name: str = ""
     github_branch: str = "main"
     vpc_mode: str = "existing"  # new | existing
     vpc_name: str = ""
@@ -1449,6 +1450,7 @@ def derive_s3_bucket_names(cdk_prefix: str) -> Dict[str, str]:
     return {
         "S3_LOG_CONFIG_BUCKET_NAME": f"{prefix}s3-logs",
         "S3_OUTPUT_BUCKET_NAME": f"{prefix}s3-output",
+        "S3_MALWARE_SCAN_BUCKET_NAME": f"{prefix}s3-malware-scan",
     }
 
 
@@ -1750,6 +1752,15 @@ def resolve_globally_unique_install_names(
         cli_override=getattr(args, "s3_output_bucket", "") or "",
         s3_client=s3_client,
     )
+    answers.s3_malware_scan_bucket_name = _prompt_globally_unique_s3_bucket(
+        "S3 malware scan staging bucket",
+        defaults.get("S3_MALWARE_SCAN_BUCKET_NAME", ""),
+        account_id,
+        interactive=interactive,
+        assume_yes=assume_yes,
+        cli_override=getattr(args, "s3_malware_scan_bucket", "") or "",
+        s3_client=s3_client,
+    )
 
     if answers_use_headless(answers):
         answers.cognito_domain_prefix = ""
@@ -1778,7 +1789,11 @@ def validate_globally_unique_env_values(values: Dict[str, str]) -> List[str]:
 
     errors: List[str] = []
     region = (values.get("AWS_REGION") or "").strip()
-    for env_key in ("S3_LOG_CONFIG_BUCKET_NAME", "S3_OUTPUT_BUCKET_NAME"):
+    for env_key in (
+        "S3_LOG_CONFIG_BUCKET_NAME",
+        "S3_OUTPUT_BUCKET_NAME",
+        "S3_MALWARE_SCAN_BUCKET_NAME",
+    ):
         bucket_name = (values.get(env_key) or "").strip().lower()
         if not bucket_name:
             continue
@@ -2213,6 +2228,10 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
         s3_bucket_names["S3_LOG_CONFIG_BUCKET_NAME"] = answers.s3_log_bucket_name
     if answers.s3_output_bucket_name:
         s3_bucket_names["S3_OUTPUT_BUCKET_NAME"] = answers.s3_output_bucket_name
+    if answers.s3_malware_scan_bucket_name:
+        s3_bucket_names["S3_MALWARE_SCAN_BUCKET_NAME"] = (
+            answers.s3_malware_scan_bucket_name
+        )
 
     values: Dict[str, str] = merge_preset(
         answers_preset_profile(answers), answers.custom_overrides
@@ -2469,6 +2488,7 @@ def validate_env_values(
     for env_key, bare_suffix in (
         ("S3_LOG_CONFIG_BUCKET_NAME", "s3-logs"),
         ("S3_OUTPUT_BUCKET_NAME", "s3-output"),
+        ("S3_MALWARE_SCAN_BUCKET_NAME", "s3-malware-scan"),
     ):
         bucket_name = (values.get(env_key) or "").strip().lower()
         if prefix_lower and bucket_name == bare_suffix:
@@ -2561,6 +2581,10 @@ def build_app_config_env_values(values: Dict[str, str]) -> Dict[str, str]:
         "DOCUMENT_REDACTION_BUCKET": _name("S3_LOG_CONFIG_BUCKET_NAME", "s3-logs"),
         "TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET": _name(
             "S3_OUTPUT_BUCKET_NAME", "s3-output"
+        ),
+        "SCAN_UPLOADS_FOR_MALWARE": "True",
+        "MALWARE_SCAN_S3_BUCKET": _name(
+            "S3_MALWARE_SCAN_BUCKET_NAME", "s3-malware-scan"
         ),
         "ACCESS_LOG_DYNAMODB_TABLE_NAME": _name(
             "ACCESS_LOG_DYNAMODB_TABLE_NAME", "dynamodb-access-logs"
@@ -2734,7 +2758,6 @@ def write_env_file(path: Path, values: Dict[str, str]) -> Path:
     lines = [f"{key}={val}" for key, val in values.items()]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"Wrote {path}")
     return path
 
 
@@ -4143,6 +4166,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--s3-output-bucket",
         help="S3 output bucket name (globally unique; skips wizard suggestion)",
+    )
+    p.add_argument(
+        "--s3-malware-scan-bucket",
+        help="S3 malware scan staging bucket name (globally unique)",
     )
     p.add_argument("--vpc-name", help="Existing VPC Name tag")
     p.add_argument("--new-vpc-cidr", help="CIDR for new VPC")

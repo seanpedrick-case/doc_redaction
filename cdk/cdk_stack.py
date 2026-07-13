@@ -144,6 +144,7 @@ from cdk_config import (
     S3_BATCH_INPUT_PREFIX,
     S3_BATCH_LAMBDA_FUNCTION_NAME,
     S3_LOG_CONFIG_BUCKET_NAME,
+    S3_MALWARE_SCAN_BUCKET_NAME,
     S3_OUTPUT_BUCKET_NAME,
     SAVE_LOGS_TO_DYNAMODB,
     SINGLE_NAT_GATEWAY_ID,
@@ -173,6 +174,7 @@ from cdk_functions import (  # Only keep CDK-native functions
     create_ecs_vpc_endpoints_for_private_subnets,
     create_express_gateway_service,
     create_headless_s3_batch_seed,
+    create_malware_scan_bucket_and_guardduty_plan,
     create_nat_gateway,
     create_pi_agent_ecs_resources,
     create_s3_batch_ecs_trigger_lambda,
@@ -1286,6 +1288,18 @@ class CdkStack(Stack):
             bucket.grant_read_write(task_role)
             output_bucket.grant_read_write(task_role)
 
+            create_malware_scan_bucket_and_guardduty_plan(
+                self,
+                bucket_name=S3_MALWARE_SCAN_BUCKET_NAME,
+                task_role=task_role,
+                execution_role=execution_role,
+                get_context_bool=get_context_bool,
+                resource_removal_policy=resource_removal_policy,
+                s3_auto_delete_objects=s3_auto_delete_objects,
+                kms_key=kms_key if USE_CUSTOM_KMS_KEY == "1" else None,
+                use_custom_kms=USE_CUSTOM_KMS_KEY == "1",
+            )
+
         except Exception as e:
             raise Exception("Could not handle S3 buckets due to:", e)
 
@@ -1873,6 +1887,9 @@ class CdkStack(Stack):
                         vpc_subnets=public_subnet_selection,
                         drop_invalid_header_fields=True,
                         deletion_protection=resource_delete_protection,
+                        # GuardDuty upload scans can poll for several minutes; default ALB idle
+                        # timeout (60s) drops the client connection before the scan finishes.
+                        idle_timeout=Duration.seconds(400),
                     )
                     print("Successfully created new Application Load Balancer")
             except Exception as e:
