@@ -85,6 +85,94 @@ def _first_string(payload: dict[str, Any], keys: tuple[str, ...]) -> str:
     return ""
 
 
+def _looks_like_filesystem_path(text: str) -> bool:
+    normalized = text.strip().replace("\\", "/")
+    if not normalized:
+        return False
+    if normalized.startswith(("/", "~")):
+        return True
+    if re.match(r"^[A-Za-z]:/", normalized):
+        return True
+    return "/" in normalized or normalized.lower().endswith(".pdf")
+
+
+def _deep_flatten_tool_payload(*values: Any) -> dict[str, Any]:
+    """
+    Recursively collect tool-arg fields from nested local-model structures.
+
+    Weak models often nest the real args under an absolute path key, e.g.
+    ``{"pdf_relative_path": {"/abs/path/doc.pdf": {"pdf_relative_path": "doc.pdf"}}}``.
+    """
+    merged: dict[str, Any] = {}
+
+    def absorb(key: str, val: Any) -> None:
+        if isinstance(val, str) and val.strip():
+            merged[key] = val.strip()
+        elif val is not None and not isinstance(val, (dict, list, tuple)):
+            merged[key] = val
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            for key, val in node.items():
+                if isinstance(key, str) and _TOOL_ARG_KEY_RE.fullmatch(key):
+                    if isinstance(val, dict):
+                        walk(val)
+                    else:
+                        absorb(key, val)
+                elif isinstance(key, str) and _looks_like_filesystem_path(key):
+                    if isinstance(val, dict):
+                        walk(val)
+                    elif isinstance(val, str) and val.strip():
+                        absorb("pdf_path", val)
+                    else:
+                        key_path = Path(key.replace("\\", "/"))
+                        if key_path.suffix.lower() in _OUTPUT_FILE_EXTENSIONS:
+                            name = key_path.name
+                            if name:
+                                absorb("pdf_path", name)
+                else:
+                    walk(val)
+        elif isinstance(node, str) and node.strip():
+            absorb("_literal", node)
+        elif isinstance(node, (list, tuple)):
+            for item in node:
+                walk(item)
+
+    for value in values:
+        walk(value)
+    return merged
+
+
+def _normalize_workspace_relative_path(path: str, session_hash: str | None) -> str:
+    """Strip a session workspace prefix from absolute paths; keep basename as fallback."""
+    text = path.strip().replace("\\", "/")
+    if not text:
+        return text
+    root = _session_root(session_hash).resolve()
+    try:
+        raw_path = Path(path.strip())
+        if raw_path.is_absolute():
+            resolved = raw_path.resolve()
+            rel = os.path.relpath(str(resolved), str(root))
+            if not rel.startswith(".."):
+                return rel.replace("\\", "/")
+    except (OSError, ValueError):
+        pass
+    root_posix = root.as_posix().rstrip("/")
+    lowered = text.lower()
+    root_lower = root_posix.lower()
+    idx = lowered.find(root_lower)
+    if idx != -1:
+        suffix = text[idx + len(root_posix) :].lstrip("/\\")
+        if suffix:
+            return suffix.replace("\\", "/")
+    if "/" in text or ":" in text:
+        name = Path(text).name
+        if name:
+            return name
+    return text
+
+
 def _default_dest_for_pdf(pdf_relative_path: str) -> str:
     stem = Path(pdf_relative_path.replace("\\", "/")).stem
     return f"redact/{stem or 'document'}/output_redact"
@@ -234,6 +322,12 @@ def _coerce_relative_path(value: Any, *, label: str = "path") -> str:
                 if isinstance(nested, dict):
                     return _coerce_relative_path(nested, label=label)
         if not text:
+            for nested in value.values():
+                try:
+                    return _coerce_relative_path(nested, label=label)
+                except ValueError:
+                    continue
+        if not text:
             raise ValueError(f"Tool {label} must be a string path, got dict: {value!r}")
     elif isinstance(value, (list, tuple)) and len(value) == 1:
         return _coerce_relative_path(value[0], label=label)
@@ -366,20 +460,21 @@ def _parse_doc_redact_tool_input(
     *,
     ocr_method: str | None,
     pii_method: str | None,
+    session_hash: str | None = None,
 ) -> tuple[str, str, str | None, str | None]:
     """Merge/normalize doc_redact tool args from messy local-model tool calls."""
-    payload: dict[str, Any] = {}
-    for value in (pdf_relative_path, dest_relative_dir):
-        if isinstance(value, dict):
-            payload.update(_sanitize_tool_dict(value))
+    payload = _deep_flatten_tool_payload(pdf_relative_path, dest_relative_dir)
 
     pdf_raw = _first_string(payload, _DOC_REDACT_PDF_KEYS)
+    if not pdf_raw:
+        pdf_raw = str(payload.get("_literal") or "").strip()
     if not pdf_raw and isinstance(pdf_relative_path, str):
         pdf_raw = pdf_relative_path.strip()
     if not pdf_raw:
         raise ValueError(
             "doc_redact requires a PDF path (pdf_relative_path or pdf_path)."
         )
+    pdf_raw = _normalize_workspace_relative_path(pdf_raw, session_hash)
     pdf_rel = _coerce_relative_path(pdf_raw, label="pdf_relative_path")
 
     dest_raw = _first_string(payload, _DOC_REDACT_DEST_KEYS)
@@ -400,20 +495,24 @@ def _parse_review_apply_tool_input(
     pdf_relative_path: Any,
     review_csv_relative_path: Any,
     dest_relative_dir: Any | None,
+    *,
+    session_hash: str | None = None,
 ) -> tuple[str, str, str]:
     """Merge/normalize review_apply tool args from messy local-model tool calls."""
-    payload: dict[str, Any] = {}
-    for value in (pdf_relative_path, review_csv_relative_path, dest_relative_dir):
-        if isinstance(value, dict):
-            payload.update(_sanitize_tool_dict(value))
+    payload = _deep_flatten_tool_payload(
+        pdf_relative_path, review_csv_relative_path, dest_relative_dir
+    )
 
     pdf_raw = _first_string(payload, _DOC_REDACT_PDF_KEYS)
+    if not pdf_raw:
+        pdf_raw = str(payload.get("_literal") or "").strip()
     if not pdf_raw and isinstance(pdf_relative_path, str):
         pdf_raw = pdf_relative_path.strip()
     if not pdf_raw:
         raise ValueError(
             "review_apply requires a PDF path (pdf_relative_path or pdf_path)."
         )
+    pdf_raw = _normalize_workspace_relative_path(pdf_raw, session_hash)
     pdf_rel = _coerce_relative_path(pdf_raw, label="pdf_relative_path")
 
     review_raw = _first_string(
@@ -495,7 +594,7 @@ def list_workspace_files(session_hash: str | None = None) -> str:
 
 def run_doc_redact(
     pdf_relative_path: str,
-    dest_relative_dir: str,
+    dest_relative_dir: str = "",
     *,
     session_hash: str | None = None,
     ocr_method: str | None = None,
@@ -504,27 +603,31 @@ def run_doc_redact(
     allow_list: list[str] | None = None,
 ) -> str:
     """Run Pass 1 redaction via /doc_redact and download artifacts into the session workspace."""
-    pdf_rel, dest_rel, ocr_from_tool, pii_from_tool = _parse_doc_redact_tool_input(
-        pdf_relative_path,
-        dest_relative_dir,
-        ocr_method=ocr_method,
-        pii_method=pii_method,
-    )
-    pdf = _resolve_workspace_pdf(session_hash, pdf_rel)
-    dest = _ensure_workspace_output_dir(
-        session_hash,
-        dest_rel,
-        pdf_relative_path=pdf_rel,
-        default_for="doc_redact",
-    )
-    result, saved = call_doc_redact(
-        pdf,
-        dest,
-        ocr_method=ocr_from_tool or os.environ.get("AGENT_DEFAULT_OCR_METHOD"),
-        pii_method=pii_from_tool or os.environ.get("AGENT_DEFAULT_PII_METHOD"),
-        deny_list=deny_list,
-        allow_list=allow_list,
-    )
+    try:
+        pdf_rel, dest_rel, ocr_from_tool, pii_from_tool = _parse_doc_redact_tool_input(
+            pdf_relative_path,
+            dest_relative_dir,
+            ocr_method=ocr_method,
+            pii_method=pii_method,
+            session_hash=session_hash,
+        )
+        pdf = _resolve_workspace_pdf(session_hash, pdf_rel)
+        dest = _ensure_workspace_output_dir(
+            session_hash,
+            dest_rel,
+            pdf_relative_path=pdf_rel,
+            default_for="doc_redact",
+        )
+        result, saved = call_doc_redact(
+            pdf,
+            dest,
+            ocr_method=ocr_from_tool or os.environ.get("AGENT_DEFAULT_OCR_METHOD"),
+            pii_method=pii_from_tool or os.environ.get("AGENT_DEFAULT_PII_METHOD"),
+            deny_list=deny_list,
+            allow_list=allow_list,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        return json.dumps({"error": str(exc)})
     message = result[1] if isinstance(result, (list, tuple)) and len(result) > 1 else ""
     payload = {
         "message": str(message or "doc_redact completed."),
@@ -747,6 +850,7 @@ def run_review_apply(
             pdf_relative_path,
             review_csv_relative_path,
             dest_relative_dir,
+            session_hash=session_hash,
         )
     except ValueError as exc:
         return json.dumps({"error": str(exc)})
@@ -851,9 +955,10 @@ def build_langgraph_tools(session_hash: str | None):
             name="doc_redact",
             description=(
                 "Run initial document redaction (Pass 1) via /doc_redact. "
-                "Paths are relative to the session workspace."
+                "pdf_relative_path is workspace-relative (e.g. filename.pdf). "
+                "dest_relative_dir is optional."
             ),
-            func=lambda pdf_relative_path, dest_relative_dir, ocr_method=None, pii_method=None: run_doc_redact(
+            func=lambda pdf_relative_path, dest_relative_dir="", ocr_method=None, pii_method=None: run_doc_redact(
                 pdf_relative_path,
                 dest_relative_dir,
                 session_hash=session_hash,

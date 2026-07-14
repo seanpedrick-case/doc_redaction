@@ -170,6 +170,41 @@ def test_parse_doc_redact_tool_input_ignores_garbage_keys():
     assert pii == "Local"
 
 
+def test_parse_doc_redact_nested_absolute_path_key(tmp_path, monkeypatch):
+    """Local Qwen models nest args under an absolute path dict key."""
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "1")
+    abs_path = (
+        tmp_path / "sess" / "example_of_emails_sent_to_a_professor_before_applying.pdf"
+    ).as_posix()
+    messy = {
+        "pdf_relative_path": {
+            abs_path: {
+                "pdf_relative_path": (
+                    "example_of_emails_sent_to_a_professor_before_applying.pdf"
+                ),
+                "dest_relative_dir": (
+                    "redact/example_of_emails_sent_to_a_professor_before_applying/"
+                    "output_redact"
+                ),
+            }
+        }
+    }
+    pdf_rel, dest_rel, ocr, pii = _parse_doc_redact_tool_input(
+        messy,
+        None,
+        ocr_method=None,
+        pii_method=None,
+        session_hash="sess",
+    )
+    assert pdf_rel == "example_of_emails_sent_to_a_professor_before_applying.pdf"
+    assert dest_rel == (
+        "redact/example_of_emails_sent_to_a_professor_before_applying/output_redact"
+    )
+    assert ocr is None
+    assert pii is None
+
+
 def test_default_dest_for_pdf():
     assert _default_dest_for_pdf("uploads/doc.pdf") == "redact/doc/output_redact"
 

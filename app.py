@@ -3402,14 +3402,14 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ###
         with gr.Tab(label="Identify duplicate pages", id=4):
             gr.Markdown(
-                "Search for duplicate pages/subdocuments in your ocr_output files. By default, this function will search for duplicate text across multiple pages, and then join consecutive matching pages together into matched 'subdocuments'. The results can be reviewed below, false positives removed, and then the verified results applied to a document you have loaded in on the 'Review redactions' tab."
+                "Search for duplicate pages/subdocuments in your OCR output files. By default, this function will search for duplicate text across multiple pages, and then join consecutive matching pages together into matched 'subdocuments'. The results can be reviewed below, false positives removed, and then the verified results applied to a document you have loaded in on the 'Review redactions' tab."
             )
 
             # Examples for duplicate page detection
             if SHOW_EXAMPLES:
-                gr.Markdown(
-                    "### Try an example - Click on an example below and then the 'Identify duplicate pages/subdocuments' button:"
-                )
+                # gr.Markdown(
+                #     "### Try an example - Click on an example below and then the 'Identify duplicate pages/subdocuments' button:"
+                # )
 
                 # Check if duplicate example file exists
                 duplicate_example_file = _example_data_path(

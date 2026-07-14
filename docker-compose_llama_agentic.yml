@@ -180,6 +180,9 @@ services:
       - "1"
       - --presence-penalty
       - "0.0"
+      - --jinja
+      - --chat-template-file
+      - /templates/chat_template.jinja
       - --chat-template-kwargs
       - "{\"preserve_thinking\": true}"
       - --host
@@ -205,6 +208,7 @@ services:
       - "8000:8080"
     volumes:
       - ./models:/models
+      - ./skills/chat_template.jinja:/templates/chat_template.jinja:ro
       - hf-llama-cache-qwen36-27b:/root/.cache/llama.cpp
       - hf-hub-cache-qwen36-27b:/root/.cache/huggingface
     pull_policy: always
@@ -257,6 +261,9 @@ services:
       - "1.5"
       - --repeat-penalty
       - "1"
+      - --jinja
+      - --chat-template-file
+      - /templates/chat_template.jinja
       - --chat-template-kwargs
       - "{\"preserve_thinking\": true}"
       - --host
@@ -280,6 +287,7 @@ services:
       - "8005:8080"
     volumes:
       - ./models:/models
+      - ./skills/chat_template.jinja:/templates/chat_template.jinja:ro
       - hf-llama-cache-qwen36-35b:/root/.cache/llama.cpp
       - hf-hub-cache-qwen36-35b:/root/.cache/huggingface
     pull_policy: always
