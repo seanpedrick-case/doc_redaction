@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 import threading
@@ -26,68 +25,12 @@ from agent_runtime import (
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage  # noqa: E402
 
 from redaction_langgraph.graph import build_redaction_agent  # noqa: E402
-
-_WORKFLOW_CONTINUE_PROMPT = """Pass 1 redaction is NOT complete yet. Continue now:
-1. Edit the *_review_file.csv for the user requirements (write_workspace_text or run_workspace_python_script)
-2. Run verify_coverage until pass_strict is true
-3. Run review_apply once on the source PDF and edited review CSV
-Call the next required tool — do not stop after read_workspace_text or write_workspace_text."""
-
-
-def _last_written_python_script(tool_outputs: list[tuple[str, str]]) -> str | None:
-    for name, output in reversed(tool_outputs):
-        if name != "write_workspace_text":
-            continue
-        try:
-            data = json.loads(output)
-        except json.JSONDecodeError:
-            continue
-        written = str(data.get("written") or "")
-        if written.lower().endswith(".py"):
-            return written
-    return None
-
-
-def _build_workflow_continue_prompt(
-    tool_names_seen: set[str],
-    tool_outputs: list[tuple[str, str]],
-) -> str:
-    if (
-        "write_workspace_text" in tool_names_seen
-        and "run_workspace_python_script" not in tool_names_seen
-    ):
-        script_path = _last_written_python_script(tool_outputs)
-        if script_path:
-            return (
-                "Pass 1 is NOT complete. The Python script is already saved at "
-                f"`{script_path}` — do NOT call write_workspace_text again. "
-                f"Call run_workspace_python_script with relative_path={script_path!r} "
-                "now, then verify_coverage and review_apply."
-            )
-    return _WORKFLOW_CONTINUE_PROMPT
-
-
-def _langgraph_auto_continue_enabled() -> bool:
-    return os.environ.get(
-        "LANGGRAPH_AUTO_CONTINUE_WORKFLOW", "true"
-    ).strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-
-
-def _langgraph_max_continuations() -> int:
-    raw = os.environ.get("LANGGRAPH_WORKFLOW_CONTINUATIONS", "2").strip()
-    try:
-        return max(0, int(raw))
-    except ValueError:
-        return 2
-
-
-def _redaction_workflow_incomplete(tool_names: set[str]) -> bool:
-    return "doc_redact" in tool_names and "review_apply" not in tool_names
+from redaction_langgraph.workflow_continue import (  # noqa: E402
+    build_workflow_continue_prompt,
+    langgraph_auto_continue_enabled,
+    langgraph_max_continuations,
+    redaction_workflow_incomplete,
+)
 
 
 class LangGraphAgentRuntime(AgentRuntime):
@@ -227,75 +170,88 @@ class LangGraphAgentRuntime(AgentRuntime):
             if self._graph is None:
                 raise AgentRuntimeError("LangGraph agent is not initialized.")
 
+            from eval.arize_monitoring import (
+                arize_session_context,
+                langgraph_trace_config,
+            )
+
             from redaction_langgraph.graph import graph_recursion_limit
 
-            yield AgentStreamEvent(kind="status", text="LangGraph agent started…")
-            graph_messages: list[Any] = [
-                self._system_message,
-                *self._messages,
-                HumanMessage(content=message),
-            ]
-            self._messages.append(HumanMessage(content=message))
+            with arize_session_context(self._session_hash):
+                yield AgentStreamEvent(kind="status", text="LangGraph agent started…")
+                graph_messages: list[Any] = [
+                    self._system_message,
+                    *self._messages,
+                    HumanMessage(content=message),
+                ]
+                self._messages.append(HumanMessage(content=message))
 
-            assistant_chunks: list[str] = []
-            tool_names_seen: set[str] = set()
-            tool_outputs: list[tuple[str, str]] = []
-            stream_config = {"recursion_limit": graph_recursion_limit()}
-            max_rounds = 1 + (
-                _langgraph_max_continuations()
-                if _langgraph_auto_continue_enabled()
-                else 0
-            )
+                assistant_chunks: list[str] = []
+                tool_names_seen: set[str] = set()
+                tool_outputs: list[tuple[str, str]] = []
+                stream_config = langgraph_trace_config(
+                    self._session_hash,
+                    recursion_limit=graph_recursion_limit(),
+                )
+                max_rounds = 1 + (
+                    langgraph_max_continuations()
+                    if langgraph_auto_continue_enabled()
+                    else 0
+                )
 
-            for round_idx in range(max_rounds):
-                if round_idx > 0:
-                    yield AgentStreamEvent(
-                        kind="status",
-                        text="Pass 1 incomplete — nudging agent to continue workflow…",
-                    )
-                for event in self._graph.stream(
-                    {"messages": graph_messages},
-                    stream_mode="updates",
-                    config=stream_config,
-                ):
-                    if self._abort_requested:
-                        yield AgentStreamEvent(kind="done", text="Agent aborted.")
-                        return
-                    for _node, update in event.items():
-                        for msg in update.get("messages") or []:
-                            graph_messages.append(msg)
-                            yield from self._yield_message_updates(
-                                msg,
-                                assistant_chunks=assistant_chunks,
-                                tool_names_seen=tool_names_seen,
-                                tool_outputs=tool_outputs,
+                for round_idx in range(max_rounds):
+                    if round_idx > 0:
+                        yield AgentStreamEvent(
+                            kind="status",
+                            text="Workflow incomplete — nudging agent to continue…",
+                        )
+                    for event in self._graph.stream(
+                        {"messages": graph_messages},
+                        stream_mode="updates",
+                        config=stream_config,
+                    ):
+                        if self._abort_requested:
+                            yield AgentStreamEvent(kind="done", text="Agent aborted.")
+                            return
+                        for _node, update in event.items():
+                            for msg in update.get("messages") or []:
+                                graph_messages.append(msg)
+                                yield from self._yield_message_updates(
+                                    msg,
+                                    assistant_chunks=assistant_chunks,
+                                    tool_names_seen=tool_names_seen,
+                                    tool_outputs=tool_outputs,
+                                )
+                    if not redaction_workflow_incomplete(tool_names_seen, tool_outputs):
+                        break
+                    if round_idx >= max_rounds - 1:
+                        break
+                    graph_messages.append(
+                        HumanMessage(
+                            content=build_workflow_continue_prompt(
+                                tool_names_seen, tool_outputs
                             )
-                if not _redaction_workflow_incomplete(tool_names_seen):
-                    break
-                if round_idx >= max_rounds - 1:
-                    break
-                graph_messages.append(
-                    HumanMessage(
-                        content=_build_workflow_continue_prompt(
-                            tool_names_seen, tool_outputs
                         )
                     )
-                )
 
-            if assistant_chunks:
-                self._messages.append(AIMessage(content="\n".join(assistant_chunks)))
-            workflow_incomplete = _redaction_workflow_incomplete(tool_names_seen)
-            done_text = "Agent finished."
-            if workflow_incomplete:
-                done_text = (
-                    "Agent finished (Pass 1 incomplete — review_apply not run; "
-                    "use **Send** to continue or restart the task)."
+                if assistant_chunks:
+                    self._messages.append(
+                        AIMessage(content="\n".join(assistant_chunks))
+                    )
+                workflow_incomplete = redaction_workflow_incomplete(
+                    tool_names_seen, tool_outputs
                 )
-            yield AgentStreamEvent(
-                kind="done",
-                text=done_text,
-                meta={"workflow_incomplete": workflow_incomplete},
-            )
+                done_text = "Agent finished."
+                if workflow_incomplete:
+                    done_text = (
+                        "Agent finished (workflow incomplete — review_apply not run; "
+                        "use **Send** to continue or restart the task)."
+                    )
+                yield AgentStreamEvent(
+                    kind="done",
+                    text=done_text,
+                    meta={"workflow_incomplete": workflow_incomplete},
+                )
         finally:
             self._prompt_stream_depth = max(0, self._prompt_stream_depth - 1)
 

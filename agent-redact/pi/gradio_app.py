@@ -276,9 +276,10 @@ def _agent_finish_chat_notice(
     if incomplete:
         return (
             "---\n\n"
-            "**Agent paused** — Pass 1 is not finished (`review_apply` was not run). "
-            "Send **continue** to nudge the agent (e.g. run the saved `.py` script, "
-            "then `verify_coverage` and `review_apply`), or restart the task."
+            "**Agent paused** — redaction workflow is not finished "
+            "(`review_apply` was not run). Send **continue** to nudge the agent "
+            "(e.g. run the saved `.py` script, then `verify_coverage` and "
+            "`review_apply`), or restart the task."
         )
     return (
         "---\n\n"
@@ -299,7 +300,7 @@ def _show_agent_finish_toast(
         elif error:
             gr.Info("Agent stopped with an error.", duration=8)
         elif incomplete:
-            gr.Info("Agent paused — Pass 1 incomplete.", duration=8)
+            gr.Info("Agent paused — workflow incomplete.", duration=8)
         else:
             gr.Info("Agent finished — task complete.", duration=8)
     except Exception:

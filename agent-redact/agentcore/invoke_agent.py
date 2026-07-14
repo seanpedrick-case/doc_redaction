@@ -108,6 +108,14 @@ def apply_invoke_runtime_config(request: dict) -> None:
 
 async def invoke_redaction_agent(request: dict) -> AsyncIterator[dict]:
     """Stream LangGraph agent events for one user prompt (multi-turn per session_hash)."""
+    # Must run before LangChain imports (OpenInference patch order).
+    try:
+        from eval.arize_monitoring import setup_arize_ax_tracing
+
+        setup_arize_ax_tracing()
+    except ImportError:
+        pass
+
     from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
     from workspace_sync import (
         apply_workspace_files,
@@ -141,6 +149,7 @@ async def invoke_redaction_agent(request: dict) -> AsyncIterator[dict]:
             "message": f"Redaction backend for this turn: {backend_url}",
         }
 
+    from eval.arize_monitoring import arize_session_context, langgraph_trace_config
     from redaction_langgraph.graph import build_redaction_agent, graph_recursion_limit
 
     graph, system_message = build_redaction_agent(session_hash)
@@ -149,39 +158,44 @@ async def invoke_redaction_agent(request: dict) -> AsyncIterator[dict]:
     yield {"type": "agent_start"}
 
     assistant_chunks: list[str] = []
-    stream_config = {"recursion_limit": graph_recursion_limit()}
+    stream_config = langgraph_trace_config(
+        session_hash, recursion_limit=graph_recursion_limit()
+    )
     try:
-        for event in graph.stream(inputs, stream_mode="updates", config=stream_config):
-            for node, update in event.items():
-                messages = update.get("messages") or []
-                for message in messages:
-                    if isinstance(message, AIMessage):
-                        text = stringify_message_content(message.content)
-                        if text:
-                            assistant_chunks.append(text)
-                        yield {
-                            "type": "message_update",
-                            "node": node,
-                            "role": "assistant",
-                            "content": text,
-                            "tool_calls": message.tool_calls or [],
-                        }
-                    elif isinstance(message, ToolMessage):
-                        yield {
-                            "type": "message_update",
-                            "node": node,
-                            "role": "tool",
-                            "content": stringify_message_content(message.content),
-                            "tool_name": str(message.name or "tool"),
-                        }
-                    else:
-                        content = getattr(message, "content", "")
-                        yield {
-                            "type": "message_update",
-                            "node": node,
-                            "role": getattr(message, "type", "unknown"),
-                            "content": content,
-                        }
+        with arize_session_context(session_hash):
+            for event in graph.stream(
+                inputs, stream_mode="updates", config=stream_config
+            ):
+                for node, update in event.items():
+                    messages = update.get("messages") or []
+                    for message in messages:
+                        if isinstance(message, AIMessage):
+                            text = stringify_message_content(message.content)
+                            if text:
+                                assistant_chunks.append(text)
+                            yield {
+                                "type": "message_update",
+                                "node": node,
+                                "role": "assistant",
+                                "content": text,
+                                "tool_calls": message.tool_calls or [],
+                            }
+                        elif isinstance(message, ToolMessage):
+                            yield {
+                                "type": "message_update",
+                                "node": node,
+                                "role": "tool",
+                                "content": stringify_message_content(message.content),
+                                "tool_name": str(message.name or "tool"),
+                            }
+                        else:
+                            content = getattr(message, "content", "")
+                            yield {
+                                "type": "message_update",
+                                "node": node,
+                                "role": getattr(message, "type", "unknown"),
+                                "content": content,
+                            }
     except Exception as exc:
         yield {"type": "error", "message": f"LangGraph agent failed: {exc}"}
         return

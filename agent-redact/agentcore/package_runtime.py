@@ -28,6 +28,8 @@ RUNTIME_DEPENDENCIES: dict[str, str] = {
     "langchain-aws": ">=1.0.0",
     "pymupdf": ">=1.24.0",
     "pandas": ">=2.0.0",
+    "arize-otel": ">=0.9.0",
+    "openinference-instrumentation-langchain": ">=0.1.0",
 }
 
 MAIN_PY = '''"""doc_redaction LangGraph agent — packaged by agent-redact/agentcore/package_runtime.py."""
@@ -169,6 +171,12 @@ def package_runtime(
         dry_run=dry_run,
     )
 
+    _copy_tree(
+        agent_redact / "eval",
+        target / "eval",
+        dry_run=dry_run,
+    )
+
     pi_dest = target / "pi"
     for name in ("remote_redaction.py",):
         _copy_file(agent_redact / "pi" / name, pi_dest / name, dry_run=dry_run)
@@ -209,6 +217,12 @@ AWS_REGION=eu-west-2
 AGENT_WORKSPACE_DIR=/tmp/agentcore-workspace
 AGENT_DEFAULT_OCR_METHOD=paddle
 AGENT_DEFAULT_PII_METHOD=Local
+# Optional Arize AX tracing for in-process LangGraph (see agent-redact/eval/arize_monitoring.py).
+# ARIZE_TRACING_ENABLED=true
+# ARIZE_SPACE_ID=
+# ARIZE_API_KEY=
+# ARIZE_PROJECT_NAME=doc-redaction-langgraph
+# ARIZE_ENDPOINT=europe
 """
     if dry_run:
         log(f"  write {env_example}")

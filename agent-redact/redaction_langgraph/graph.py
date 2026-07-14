@@ -27,6 +27,7 @@ explicitly asks to stop:
 5. review_apply — **once** on the original PDF + edited review CSV; save under
    redact/<document>/review/output_review_final/
 6. verify_coverage again on the **post-apply** *_redacted.pdf from review_apply
+   (pass redacted_pdf_relative_path as that PDF only — never the review CSV; omit it for pre-apply)
 
 Do not stop after step 2 or after a failed verify_coverage — read tool errors, fix paths/CSV, and continue.
 After write_workspace_text saves a .py script, call run_workspace_python_script immediately — never rewrite the same script.

@@ -884,6 +884,54 @@ def run_review_apply(
     )
 
 
+def _resolve_optional_redacted_pdf(
+    session_hash: str | None,
+    redacted_pdf_relative_path: Any,
+    *,
+    review_csv: Path,
+) -> Path | None:
+    """Resolve optional post-apply PDF; reject CSV / non-PDF mix-ups from the model."""
+    if redacted_pdf_relative_path is None:
+        return None
+    if (
+        isinstance(redacted_pdf_relative_path, str)
+        and not redacted_pdf_relative_path.strip()
+    ):
+        return None
+    rel = _coerce_relative_path(
+        redacted_pdf_relative_path, label="redacted_pdf_relative_path"
+    )
+    if not rel:
+        return None
+    lower = rel.lower().replace("\\", "/")
+    name = Path(lower).name
+    if (
+        lower.endswith((".csv", ".json", ".py", ".txt", ".md"))
+        or "review_file" in name
+        or name.endswith("_review.csv")
+    ):
+        raise ValueError(
+            "redacted_pdf_relative_path must be a PDF (e.g. *_redacted.pdf). "
+            f"Got {rel!r}. For pre-apply verify_coverage, omit "
+            "redacted_pdf_relative_path entirely. For post-apply checks, pass the "
+            "*_redacted.pdf produced by review_apply."
+        )
+    if not lower.endswith(".pdf"):
+        raise ValueError(
+            "redacted_pdf_relative_path must end with .pdf "
+            f"(got {rel!r}). Omit it for pre-apply checks."
+        )
+    path = _resolve_workspace_path(session_hash, rel)
+    if path.resolve() == review_csv.resolve():
+        raise ValueError(
+            "redacted_pdf_relative_path must not be the review CSV. "
+            "Omit it for pre-apply verify_coverage, or pass *_redacted.pdf."
+        )
+    if not path.is_file():
+        raise FileNotFoundError(f"redacted PDF not found: {rel}")
+    return path
+
+
 def run_verify_coverage(
     review_csv_relative_path: str,
     *,
@@ -896,30 +944,34 @@ def run_verify_coverage(
     """Run Pass 1 coverage verification on workspace-local CSV/PDF paths."""
     from redaction_langgraph.verify_coverage_lib import verify_redaction_coverage
 
-    review_csv = _resolve_workspace_path(session_hash, review_csv_relative_path)
-    if ocr_words_csv_relative_path:
-        ocr_words_csv = _resolve_workspace_path(
-            session_hash, ocr_words_csv_relative_path
-        )
-    else:
-        discovered = _discover_ocr_words_csv(review_csv)
-        if discovered is None:
-            return json.dumps(
-                {
-                    "error": (
-                        "Could not find word-level OCR CSV beside the review CSV. "
-                        "Pass ocr_words_csv_relative_path explicitly."
-                    ),
-                    "review_csv": str(review_csv),
-                }
-            )
-        ocr_words_csv = discovered
-    redacted_pdf = (
-        _resolve_workspace_path(session_hash, redacted_pdf_relative_path)
-        if redacted_pdf_relative_path
-        else None
-    )
     try:
+        review_rel = _coerce_relative_path(
+            review_csv_relative_path, label="review_csv_relative_path"
+        )
+        review_csv = _resolve_workspace_path(session_hash, review_rel)
+        if ocr_words_csv_relative_path:
+            ocr_rel = _coerce_relative_path(
+                ocr_words_csv_relative_path, label="ocr_words_csv_relative_path"
+            )
+            ocr_words_csv = _resolve_workspace_path(session_hash, ocr_rel)
+        else:
+            discovered = _discover_ocr_words_csv(review_csv)
+            if discovered is None:
+                return json.dumps(
+                    {
+                        "error": (
+                            "Could not find word-level OCR CSV beside the review CSV. "
+                            "Pass ocr_words_csv_relative_path explicitly."
+                        ),
+                        "review_csv": str(review_csv),
+                    }
+                )
+            ocr_words_csv = discovered
+        redacted_pdf = _resolve_optional_redacted_pdf(
+            session_hash,
+            redacted_pdf_relative_path,
+            review_csv=review_csv,
+        )
         report = verify_redaction_coverage(
             review_csv,
             ocr_words_csv,
@@ -927,17 +979,33 @@ def run_verify_coverage(
             must_not_redact=must_not_redact,
             redacted_pdf_path=redacted_pdf,
         )
-    except (ValueError, re.error) as exc:
+    except (ValueError, re.error, FileNotFoundError, OSError) as exc:
         return json.dumps(
             {
                 "error": str(exc),
-                "review_csv": str(review_csv),
-                "ocr_words_csv": str(ocr_words_csv),
+                "hint": (
+                    "verify_coverage args: review_csv_relative_path (required), "
+                    "optional redacted_pdf_relative_path (*_redacted.pdf only; "
+                    "omit for pre-apply), optional ocr_words_csv_relative_path."
+                ),
+            },
+            indent=2,
+        )
+    except Exception as exc:  # noqa: BLE001 — keep LangGraph tool node alive
+        return json.dumps(
+            {
+                "error": f"{type(exc).__name__}: {exc}",
+                "hint": (
+                    "verify_coverage failed unexpectedly. Check paths: review CSV vs "
+                    "optional *_redacted.pdf (never pass the review CSV as the PDF)."
+                ),
             },
             indent=2,
         )
     payload = report.to_dict()
     payload["ocr_words_csv"] = str(ocr_words_csv)
+    if redacted_pdf is not None:
+        payload["redacted_pdf"] = str(redacted_pdf)
     return json.dumps(payload, indent=2, default=str)
 
 
@@ -987,8 +1055,12 @@ def build_langgraph_tools(session_hash: str | None):
         StructuredTool.from_function(
             name="verify_coverage",
             description=(
-                "Verify Pass 1 redaction coverage on workspace-local review CSV and word OCR CSV. "
-                "Returns pass_strict and pages needing fixes. Auto-discovers OCR words CSV when omitted. "
+                "Verify Pass 1 redaction coverage on a *_review_file.csv (+ auto-discovered "
+                "word OCR CSV). Returns pass_strict and pages needing fixes. "
+                "For pre-apply checks, pass only review_csv_relative_path (omit "
+                "redacted_pdf_relative_path). For post-apply checks, pass "
+                "redacted_pdf_relative_path as the *_redacted.pdf from review_apply — "
+                "never the review CSV. "
                 "must_redact and must_not_redact: list of regex strings (one term per item), e.g. "
                 '["Hyde", "Lauren\\\\s+Lilley", "Poss\\\\b"]. A single pipe-separated string is also accepted.'
             ),

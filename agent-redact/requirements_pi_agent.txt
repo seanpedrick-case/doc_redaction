@@ -32,6 +32,10 @@ langchain-openai<=1.3.3
 langchain-aws<=1.6.1
 langchain-google-genai<=4.2.6
 
+# --- Arize AX tracing (optional; LangGraph only — see config/agent.env.example ARIZE_*) ---
+arize-otel>=0.9.0
+openinference-instrumentation-langchain>=0.1.0
+
 # --- General utilities ---
 tabulate<=0.10.0
 rapidfuzz<=3.14.5

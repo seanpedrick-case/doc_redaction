@@ -24,11 +24,13 @@ from redaction_langgraph.tools import (  # noqa: E402
     _ensure_workspace_output_dir,
     _parse_doc_redact_tool_input,
     _parse_write_workspace_text_input,
+    _resolve_optional_redacted_pdf,
     _resolve_workspace_path,
     _resolve_workspace_pdf,
     read_workspace_text,
     run_doc_redact,
     run_review_apply,
+    run_verify_coverage,
     write_workspace_text,
 )
 from redaction_langgraph.verify_coverage_lib import (  # noqa: E402
@@ -441,3 +443,42 @@ def test_run_review_apply_repairs_pdf_dest(tmp_path, monkeypatch):
     assert captured["kwargs"]["pdf_file"] is not None
     assert captured["kwargs"]["review_csv_file"] is not None
     assert data["saved_paths"][0].endswith("final_redacted.pdf")
+
+
+def test_resolve_optional_redacted_pdf_rejects_review_csv(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "1")
+    session = tmp_path / "sess"
+    review = session / "doc_review_file.csv"
+    review.parent.mkdir(parents=True)
+    review.write_text("id,page\n", encoding="utf-8-sig")
+    try:
+        _resolve_optional_redacted_pdf(
+            "sess",
+            "doc_review_file.csv",
+            review_csv=review,
+        )
+        raise AssertionError("expected ValueError")
+    except ValueError as exc:
+        assert "must be a PDF" in str(exc)
+
+
+def test_run_verify_coverage_rejects_csv_as_redacted_pdf(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "1")
+    session = tmp_path / "sess"
+    out = session / "output_redact"
+    out.mkdir(parents=True)
+    review = out / "doc_review_file.csv"
+    review.write_text("id,page,text\n1,1,hello\n", encoding="utf-8-sig")
+    words = out / "doc_ocr_results_with_words_local_ocr.csv"
+    words.write_text("word_text,page\nhello,1\n", encoding="utf-8-sig")
+    result = run_verify_coverage(
+        "output_redact/doc_review_file.csv",
+        session_hash="sess",
+        redacted_pdf_relative_path="output_redact/doc_review_file.csv",
+    )
+    data = json.loads(result)
+    assert "error" in data
+    assert "PDF" in data["error"]
+    assert "hint" in data

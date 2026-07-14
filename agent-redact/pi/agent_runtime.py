@@ -215,6 +215,13 @@ def create_agent_runtime(session_hash: str | None = None) -> AgentRuntime:
     """Factory for the configured orchestration backend."""
     orchestrator = normalize_orchestrator()
     if orchestrator == "langgraph":
+        # Must run before LangGraph/LangChain imports (OpenInference patch order).
+        try:
+            from eval.arize_monitoring import setup_arize_ax_tracing
+
+            setup_arize_ax_tracing()
+        except ImportError:
+            pass
         from langgraph_runtime import LangGraphAgentRuntime
 
         return LangGraphAgentRuntime(session_hash=session_hash)
