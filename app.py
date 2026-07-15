@@ -330,6 +330,7 @@ from tools.config import (
     SHOW_COSTS,
     SHOW_COSTS_ACCORDION_OPEN,
     SHOW_DIFFICULT_OCR_EXAMPLES,
+    SHOW_DUPLICATE_PAGES,
     SHOW_EXAMPLES,
     SHOW_HYBRID_TEXTRACT_BEDROCK_CHECKBOX,
     SHOW_INFERENCE_SERVER_PII_OPTIONS,
@@ -344,6 +345,7 @@ from tools.config import (
     SHOW_SUMMARISATION,
     SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS,
     SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS,
+    SHOW_WORD_EXCEL_REDACTION,
     SPACY_MODEL_PATH,
     TABULAR_PII_DETECTION_MODELS,
     TEXT_EXTRACTION_MODELS,
@@ -3400,7 +3402,9 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ###
         # IDENTIFY DUPLICATE PAGES TAB
         ###
-        with gr.Tab(label="Identify duplicate pages", id=4):
+        with gr.Tab(
+            label="Identify duplicate pages", id=4, visible=SHOW_DUPLICATE_PAGES
+        ):
             gr.Markdown(
                 "Search for duplicate pages/subdocuments in your OCR output files. By default, this function will search for duplicate text across multiple pages, and then join consecutive matching pages together into matched 'subdocuments'. The results can be reviewed below, false positives removed, and then the verified results applied to a document you have loaded in on the 'Review redactions' tab."
             )
@@ -3547,7 +3551,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ###
         # WORD / TABULAR DATA TAB
         ###
-        with gr.Tab(label="Open text, Word or Excel/CSV files", id=5):
+        with gr.Tab(
+            label="Open text, Word or Excel/CSV files",
+            id=5,
+            visible=SHOW_WORD_EXCEL_REDACTION,
+        ):
 
             # gr.Markdown(
             #     """Enter open text, or choose a Word/tabular data file (XLSX or CSV) to redact. Note that when redacting complex Word files with e.g. images, some content/formatting will be removed, and it may not attempt to redact headers. You may prefer to convert the document file to PDF in Word, and then run it through the first tab of this app (Redact PDFs/images)."""

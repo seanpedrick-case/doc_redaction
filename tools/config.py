@@ -681,6 +681,14 @@ SHOW_SUMMARISATION = convert_string_to_boolean(
     get_or_create_env_var("SHOW_SUMMARISATION", "False")
 )
 
+SHOW_DUPLICATE_PAGES = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_DUPLICATE_PAGES", "False")
+)
+
+SHOW_WORD_EXCEL_REDACTION = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_WORD_EXCEL_REDACTION", "False")
+)
+
 REDACTION_SETTINGS_ACCORDION_OPEN = convert_string_to_boolean(
     get_or_create_env_var("REDACTION_SETTINGS_ACCORDION_OPEN", "False")
 )
