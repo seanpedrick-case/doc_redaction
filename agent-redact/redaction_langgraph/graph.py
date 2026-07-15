@@ -20,7 +20,10 @@ explicitly asks to stop:
 2. doc_redact — initial redaction; artifacts land under redact/<document>/output_redact/
 3. Edit the review CSV to satisfy **User redaction requirements**:
    - read_workspace_text / write_workspace_text for small edits, or
-   - write_workspace_text a fix_policy.py script, then run_workspace_python_script
+   - write_workspace_text a compact fix_policy.py, then run_workspace_python_script
+   - Prefer short scripts that derive rows from OCR/review CSV (filter/match by text/page) —
+     do **not** embed dozens of hard-coded bbox dicts in tool arguments (breaks JSON tool calls)
+   - Keep each write_workspace_text body modest (roughly under ~80 lines / a few KB)
    - Preserve CSV headers, utf-8-sig encoding, and bbox values in [0, 1]
 4. verify_coverage — pre-apply check on the review CSV (+ auto-discovered word OCR CSV).
    Fix issues until pass_strict is true (or report why it cannot be reached).
@@ -68,11 +71,14 @@ def _build_llm():
         or os.environ.get("AGENT_DEFAULT_MODEL")
         or "local"
     ).strip()
+    from redaction_langgraph.message_context import langgraph_max_output_tokens
+
     return ChatOpenAI(
         base_url=base_url,
         api_key=os.environ.get("OPENAI_API_KEY") or "not-needed",
         model=model_id,
         temperature=0.2,
+        max_tokens=langgraph_max_output_tokens(),
     )
 
 

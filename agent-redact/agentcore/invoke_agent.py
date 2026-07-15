@@ -151,12 +151,16 @@ async def invoke_redaction_agent(request: dict) -> AsyncIterator[dict]:
 
     from eval.arize_monitoring import arize_session_context, langgraph_trace_config
     from redaction_langgraph.graph import build_redaction_agent, graph_recursion_limit
+    from redaction_langgraph.llm_errors import (
+        is_context_overflow_error,
+        is_tool_call_json_parse_error,
+    )
     from redaction_langgraph.message_context import (
         get_trim_stats,
-        is_context_overflow_error,
         reset_trim_stats,
         set_aggressive_trim,
     )
+    from redaction_langgraph.workflow_continue import build_tool_call_json_retry_prompt
 
     graph, system_message = build_redaction_agent(session_hash)
     prior = get_messages(session_hash)
@@ -168,13 +172,13 @@ async def invoke_redaction_agent(request: dict) -> AsyncIterator[dict]:
         session_hash, recursion_limit=graph_recursion_limit()
     )
 
-    def _emit_stream(active_graph) -> list[dict]:
+    def _emit_stream(active_graph, active_inputs) -> list[dict]:
         """Collect stream events; callers yield them and handle errors."""
         out: list[dict] = []
         reset_trim_stats()
         compaction_noted = False
         for event in active_graph.stream(
-            inputs, stream_mode="updates", config=stream_config
+            active_inputs, stream_mode="updates", config=stream_config
         ):
             stats = get_trim_stats()
             if stats is not None and stats.trimmed and not compaction_noted:
@@ -229,28 +233,46 @@ async def invoke_redaction_agent(request: dict) -> AsyncIterator[dict]:
     try:
         with arize_session_context(session_hash):
             try:
-                for item in _emit_stream(graph):
+                for item in _emit_stream(graph, inputs):
                     yield item
             except Exception as exc:
-                if not is_context_overflow_error(exc):
-                    raise
-                assistant_chunks.clear()
-                yield {
-                    "type": "status",
-                    "message": (
-                        "Prompt exceeded model context — retrying once with "
-                        "aggressive compaction…"
-                    ),
-                }
-                set_aggressive_trim(True)
-                try:
-                    graph, _ = build_redaction_agent(
-                        session_hash, aggressive_compaction=True
-                    )
-                    for item in _emit_stream(graph):
+                if is_context_overflow_error(exc):
+                    assistant_chunks.clear()
+                    yield {
+                        "type": "status",
+                        "message": (
+                            "Prompt exceeded model context — retrying once with "
+                            "aggressive compaction…"
+                        ),
+                    }
+                    set_aggressive_trim(True)
+                    try:
+                        graph, _ = build_redaction_agent(
+                            session_hash, aggressive_compaction=True
+                        )
+                        for item in _emit_stream(graph, inputs):
+                            yield item
+                    finally:
+                        set_aggressive_trim(False)
+                elif is_tool_call_json_parse_error(exc):
+                    assistant_chunks.clear()
+                    yield {
+                        "type": "status",
+                        "message": (
+                            "Tool-call JSON was truncated or invalid — retrying once "
+                            "with a compact-script nudge…"
+                        ),
+                    }
+                    retry_inputs = {
+                        "messages": [
+                            *(inputs.get("messages") or []),
+                            HumanMessage(content=build_tool_call_json_retry_prompt()),
+                        ]
+                    }
+                    for item in _emit_stream(graph, retry_inputs):
                         yield item
-                finally:
-                    set_aggressive_trim(False)
+                else:
+                    raise
     except Exception as exc:
         yield {"type": "error", "message": f"LangGraph agent failed: {exc}"}
         return

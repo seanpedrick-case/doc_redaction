@@ -162,3 +162,27 @@ def test_is_context_overflow_error(text):
 
 def test_is_context_overflow_error_negative():
     assert is_context_overflow_error(RuntimeError("connection refused")) is False
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Error code: 500 - {'error': {'code': 500, 'message': 'Failed to parse tool call arguments as JSON: [json.exception.parse_error.101] parse error at line 1, column 6673: syntax error while parsing value - invalid string: missing closing quote', 'type': 'server_error'}}",
+        "failed to parse tool call arguments as json",
+        "json.exception.parse_error.101",
+        "invalid string: missing closing quote",
+    ],
+)
+def test_is_tool_call_json_parse_error(text):
+    from redaction_langgraph.message_context import is_tool_call_json_parse_error
+
+    assert is_tool_call_json_parse_error(RuntimeError(text)) is True
+
+
+def test_is_tool_call_json_parse_error_negative():
+    from redaction_langgraph.message_context import is_tool_call_json_parse_error
+
+    assert is_tool_call_json_parse_error(RuntimeError("connection refused")) is False
+    assert (
+        is_tool_call_json_parse_error(RuntimeError("context_length_exceeded")) is False
+    )

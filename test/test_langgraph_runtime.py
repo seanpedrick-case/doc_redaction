@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from pi_test_support import ensure_agent_redact_paths
 
 ensure_agent_redact_paths()
 
 from redaction_langgraph.workflow_continue import (  # noqa: E402
+    build_tool_call_json_retry_prompt,
     build_workflow_continue_prompt,
     redaction_workflow_incomplete,
 )
@@ -108,3 +110,36 @@ def test_continue_prompt_generic_when_no_pending_script():
     prompt = build_workflow_continue_prompt(tools, outputs)
     assert "review_apply" in prompt
     assert "NOT complete" in prompt
+    assert "compact" in prompt.lower() or "hard-coded" in prompt.lower()
+
+
+def test_tool_call_json_retry_prompt_asks_for_compact_script():
+    prompt = build_tool_call_json_retry_prompt()
+    assert "JSON" in prompt
+    assert "write_workspace_text" in prompt
+    assert "run_workspace_python_script" in prompt
+    assert "compact" in prompt.lower() or "SHORT" in prompt
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Error code: 500 - {'error': {'code': 500, 'message': 'Failed to parse tool call arguments as JSON: [json.exception.parse_error.101] parse error at line 1, column 6673: syntax error while parsing value - invalid string: missing closing quote', 'type': 'server_error'}}",
+        "failed to parse tool call arguments as json",
+        "json.exception.parse_error.101",
+        "invalid string: missing closing quote",
+    ],
+)
+def test_is_tool_call_json_parse_error(text):
+    from redaction_langgraph.llm_errors import is_tool_call_json_parse_error
+
+    assert is_tool_call_json_parse_error(RuntimeError(text)) is True
+
+
+def test_is_tool_call_json_parse_error_negative():
+    from redaction_langgraph.llm_errors import is_tool_call_json_parse_error
+
+    assert is_tool_call_json_parse_error(RuntimeError("connection refused")) is False
+    assert (
+        is_tool_call_json_parse_error(RuntimeError("context_length_exceeded")) is False
+    )

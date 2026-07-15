@@ -1083,7 +1083,10 @@ def build_langgraph_tools(session_hash: str | None):
         StructuredTool.from_function(
             name="write_workspace_text",
             description=(
-                "Write UTF-8 text into the session workspace (use utf-8-sig for review CSV edits)."
+                "Write UTF-8 text into the session workspace (use utf-8-sig for review CSV edits). "
+                "Keep content compact — prefer short .py scripts that read OCR/review CSVs and "
+                "add rows programmatically; avoid huge hard-coded lists in the content argument "
+                "(large/quote-heavy payloads often break tool-call JSON on local models)."
             ),
             func=lambda relative_path, content: write_workspace_text(
                 relative_path, content, session_hash=session_hash
@@ -1092,7 +1095,9 @@ def build_langgraph_tools(session_hash: str | None):
         StructuredTool.from_function(
             name="run_workspace_python_script",
             description=(
-                "Execute a .py script saved in the session workspace (for pandas CSV policy edits)."
+                "Execute a .py script saved in the session workspace (for pandas CSV policy edits). "
+                "Prefer writing the script with write_workspace_text first, then call this with "
+                "relative_path only (omit content) so tool args stay small."
             ),
             func=lambda relative_path, content=None: run_workspace_python_script(
                 relative_path, content, session_hash=session_hash
