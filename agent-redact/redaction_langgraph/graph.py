@@ -76,13 +76,30 @@ def _build_llm():
     )
 
 
-def build_redaction_agent(session_hash: str | None):
-    """Compile a ReAct agent with session-scoped tools."""
+def build_redaction_agent(
+    session_hash: str | None,
+    *,
+    aggressive_compaction: bool = False,
+):
+    """Compile a ReAct agent with session-scoped tools.
+
+    When compaction is enabled (default), attaches a ``pre_model_hook`` that
+    trims LLM input to fit ``AGENT_LLAMA_CONTEXT_WINDOW`` without overwriting
+    the full graph message history. Pass ``aggressive_compaction=True`` for
+    the one-shot overflow retry path (halved token budget).
+    """
+    from redaction_langgraph.message_context import (
+        build_pre_model_hook,
+        langgraph_compaction_enabled,
+    )
     from redaction_langgraph.tools import build_langgraph_tools
 
     llm = _build_llm()
     tools = build_langgraph_tools(session_hash)
-    graph = create_react_agent(llm, tools)
+    hook = None
+    if langgraph_compaction_enabled():
+        hook = build_pre_model_hook(aggressive=aggressive_compaction)
+    graph = create_react_agent(llm, tools, pre_model_hook=hook)
     return graph, SystemMessage(content=_SYSTEM_PROMPT)
 
 

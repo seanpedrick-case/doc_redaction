@@ -151,6 +151,12 @@ async def invoke_redaction_agent(request: dict) -> AsyncIterator[dict]:
 
     from eval.arize_monitoring import arize_session_context, langgraph_trace_config
     from redaction_langgraph.graph import build_redaction_agent, graph_recursion_limit
+    from redaction_langgraph.message_context import (
+        get_trim_stats,
+        is_context_overflow_error,
+        reset_trim_stats,
+        set_aggressive_trim,
+    )
 
     graph, system_message = build_redaction_agent(session_hash)
     prior = get_messages(session_hash)
@@ -161,41 +167,90 @@ async def invoke_redaction_agent(request: dict) -> AsyncIterator[dict]:
     stream_config = langgraph_trace_config(
         session_hash, recursion_limit=graph_recursion_limit()
     )
-    try:
-        with arize_session_context(session_hash):
-            for event in graph.stream(
-                inputs, stream_mode="updates", config=stream_config
-            ):
-                for node, update in event.items():
-                    messages = update.get("messages") or []
-                    for message in messages:
-                        if isinstance(message, AIMessage):
-                            text = stringify_message_content(message.content)
-                            if text:
-                                assistant_chunks.append(text)
-                            yield {
+
+    def _emit_stream(active_graph) -> list[dict]:
+        """Collect stream events; callers yield them and handle errors."""
+        out: list[dict] = []
+        reset_trim_stats()
+        compaction_noted = False
+        for event in active_graph.stream(
+            inputs, stream_mode="updates", config=stream_config
+        ):
+            stats = get_trim_stats()
+            if stats is not None and stats.trimmed and not compaction_noted:
+                compaction_noted = True
+                out.append(
+                    {
+                        "type": "status",
+                        "message": (
+                            f"Context compaction ({stats.tokens_before:,} → "
+                            f"{stats.tokens_after:,} tokens)."
+                        ),
+                    }
+                )
+            for node, update in event.items():
+                messages = update.get("messages") or []
+                for message in messages:
+                    if isinstance(message, AIMessage):
+                        text = stringify_message_content(message.content)
+                        if text:
+                            assistant_chunks.append(text)
+                        out.append(
+                            {
                                 "type": "message_update",
                                 "node": node,
                                 "role": "assistant",
                                 "content": text,
                                 "tool_calls": message.tool_calls or [],
                             }
-                        elif isinstance(message, ToolMessage):
-                            yield {
+                        )
+                    elif isinstance(message, ToolMessage):
+                        out.append(
+                            {
                                 "type": "message_update",
                                 "node": node,
                                 "role": "tool",
                                 "content": stringify_message_content(message.content),
                                 "tool_name": str(message.name or "tool"),
                             }
-                        else:
-                            content = getattr(message, "content", "")
-                            yield {
+                        )
+                    else:
+                        content = getattr(message, "content", "")
+                        out.append(
+                            {
                                 "type": "message_update",
                                 "node": node,
                                 "role": getattr(message, "type", "unknown"),
                                 "content": content,
                             }
+                        )
+        return out
+
+    try:
+        with arize_session_context(session_hash):
+            try:
+                for item in _emit_stream(graph):
+                    yield item
+            except Exception as exc:
+                if not is_context_overflow_error(exc):
+                    raise
+                assistant_chunks.clear()
+                yield {
+                    "type": "status",
+                    "message": (
+                        "Prompt exceeded model context — retrying once with "
+                        "aggressive compaction…"
+                    ),
+                }
+                set_aggressive_trim(True)
+                try:
+                    graph, _ = build_redaction_agent(
+                        session_hash, aggressive_compaction=True
+                    )
+                    for item in _emit_stream(graph):
+                        yield item
+                finally:
+                    set_aggressive_trim(False)
     except Exception as exc:
         yield {"type": "error", "message": f"LangGraph agent failed: {exc}"}
         return

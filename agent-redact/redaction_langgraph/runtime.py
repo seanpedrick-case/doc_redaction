@@ -25,6 +25,12 @@ from agent_runtime import (
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage  # noqa: E402
 
 from redaction_langgraph.graph import build_redaction_agent  # noqa: E402
+from redaction_langgraph.message_context import (  # noqa: E402
+    get_trim_stats,
+    is_context_overflow_error,
+    reset_trim_stats,
+    set_aggressive_trim,
+)
 from redaction_langgraph.workflow_continue import (  # noqa: E402
     build_workflow_continue_prompt,
     langgraph_auto_continue_enabled,
@@ -44,6 +50,7 @@ class LangGraphAgentRuntime(AgentRuntime):
         self._running = False
         self._prompt_stream_depth = 0
         self._abort_requested = False
+        self._is_compacting = False
         self._lock = threading.Lock()
         self._pending_ui_notices: list[dict[str, Any]] = []
         self._pending_ui_history: list[dict[str, Any]] = []
@@ -71,6 +78,7 @@ class LangGraphAgentRuntime(AgentRuntime):
         self._running = False
         self._graph = None
         self._messages = []
+        self._is_compacting = False
 
     def abort(self) -> None:
         self._abort_requested = True
@@ -78,6 +86,7 @@ class LangGraphAgentRuntime(AgentRuntime):
     def new_session(self) -> None:
         self._messages = []
         self._abort_requested = False
+        self._is_compacting = False
 
     def set_model(self, provider: str, model_id: str) -> dict[str, Any]:
         os.environ["AGENT_DEFAULT_PROVIDER"] = provider
@@ -95,7 +104,7 @@ class LangGraphAgentRuntime(AgentRuntime):
     def get_state(self) -> dict[str, Any]:
         return {
             "isStreaming": self.prompt_stream_active,
-            "isCompacting": False,
+            "isCompacting": self._is_compacting,
             "provider": os.environ.get("AGENT_DEFAULT_PROVIDER"),
             "model": {
                 "provider": os.environ.get("AGENT_DEFAULT_PROVIDER"),
@@ -161,9 +170,85 @@ class LangGraphAgentRuntime(AgentRuntime):
                 is_error=False,
             )
 
+    def _yield_compaction_notice_if_needed(
+        self, *, compaction_emitted: list[bool]
+    ) -> Iterator[AgentStreamEvent]:
+        if compaction_emitted[0]:
+            return
+        stats = get_trim_stats()
+        if stats is None or not stats.trimmed:
+            return
+        compaction_emitted[0] = True
+        self._is_compacting = True
+        yield AgentStreamEvent(
+            kind="compaction_start",
+            text=(
+                "Context compaction — trimming older tool history so the prompt "
+                "fits the model window…"
+            ),
+        )
+        yield AgentStreamEvent(
+            kind="compaction_end",
+            text=(
+                f"Context compaction finished ({stats.tokens_before:,} → "
+                f"{stats.tokens_after:,} tokens; dropped "
+                f"{stats.messages_dropped} message(s)). The agent continues "
+                "with a shorter history."
+            ),
+            meta={
+                "tokens_before": stats.tokens_before,
+                "tokens_after": stats.tokens_after,
+                "messages_dropped": stats.messages_dropped,
+            },
+        )
+        self._is_compacting = False
+
+    def _stream_graph_round(
+        self,
+        graph: Any,
+        graph_messages: list[Any],
+        stream_config: dict[str, Any],
+        *,
+        assistant_chunks: list[str],
+        tool_names_seen: set[str],
+        tool_outputs: list[tuple[str, str]],
+    ) -> Iterator[AgentStreamEvent]:
+        reset_trim_stats()
+        compaction_emitted = [False]
+        for event in graph.stream(
+            {"messages": graph_messages},
+            stream_mode="updates",
+            config=stream_config,
+        ):
+            if self._abort_requested:
+                yield AgentStreamEvent(kind="done", text="Agent aborted.")
+                return
+            yield from self._yield_compaction_notice_if_needed(
+                compaction_emitted=compaction_emitted
+            )
+            for _node, update in event.items():
+                for msg in update.get("messages") or []:
+                    graph_messages.append(msg)
+                    yield from self._yield_message_updates(
+                        msg,
+                        assistant_chunks=assistant_chunks,
+                        tool_names_seen=tool_names_seen,
+                        tool_outputs=tool_outputs,
+                    )
+        yield from self._yield_compaction_notice_if_needed(
+            compaction_emitted=compaction_emitted
+        )
+
+    def _rebuild_graph(self, *, aggressive_compaction: bool = False) -> None:
+        self._graph, self._system_message = build_redaction_agent(
+            self._session_hash,
+            aggressive_compaction=aggressive_compaction,
+        )
+
     def prompt_events(self, message: str) -> Iterator[AgentStreamEvent]:
         self._prompt_stream_depth += 1
         self._abort_requested = False
+        self._is_compacting = False
         try:
             if not self._running:
                 self.start()
@@ -205,23 +290,54 @@ class LangGraphAgentRuntime(AgentRuntime):
                             kind="status",
                             text="Workflow incomplete — nudging agent to continue…",
                         )
-                    for event in self._graph.stream(
-                        {"messages": graph_messages},
-                        stream_mode="updates",
-                        config=stream_config,
-                    ):
-                        if self._abort_requested:
-                            yield AgentStreamEvent(kind="done", text="Agent aborted.")
-                            return
-                        for _node, update in event.items():
-                            for msg in update.get("messages") or []:
-                                graph_messages.append(msg)
-                                yield from self._yield_message_updates(
-                                    msg,
-                                    assistant_chunks=assistant_chunks,
-                                    tool_names_seen=tool_names_seen,
-                                    tool_outputs=tool_outputs,
-                                )
+                    round_messages_start = len(graph_messages)
+                    chunks_at_round_start = len(assistant_chunks)
+                    tools_at_round_start = set(tool_names_seen)
+                    outputs_at_round_start = len(tool_outputs)
+                    overflow_retried = False
+                    while True:
+                        try:
+                            for evt in self._stream_graph_round(
+                                self._graph,
+                                graph_messages,
+                                stream_config,
+                                assistant_chunks=assistant_chunks,
+                                tool_names_seen=tool_names_seen,
+                                tool_outputs=tool_outputs,
+                            ):
+                                yield evt
+                                if evt.kind == "done":
+                                    return
+                            break
+                        except Exception as exc:
+                            if overflow_retried or not is_context_overflow_error(exc):
+                                raise
+                            overflow_retried = True
+                            # Roll back state from the failed stream attempt.
+                            del graph_messages[round_messages_start:]
+                            del assistant_chunks[chunks_at_round_start:]
+                            tool_names_seen.clear()
+                            tool_names_seen.update(tools_at_round_start)
+                            del tool_outputs[outputs_at_round_start:]
+                            yield AgentStreamEvent(
+                                kind="status",
+                                text=(
+                                    "Prompt exceeded model context — retrying once "
+                                    "with aggressive compaction…"
+                                ),
+                            )
+                            set_aggressive_trim(True)
+                            try:
+                                self._rebuild_graph(aggressive_compaction=True)
+                            except Exception:
+                                set_aggressive_trim(False)
+                                raise
+                            continue
+                    if overflow_retried:
+                        set_aggressive_trim(False)
+                        # Restore normal (non-aggressive) graph for later rounds.
+                        self._rebuild_graph(aggressive_compaction=False)
+
                     if not redaction_workflow_incomplete(tool_names_seen, tool_outputs):
                         break
                     if round_idx >= max_rounds - 1:
@@ -253,6 +369,8 @@ class LangGraphAgentRuntime(AgentRuntime):
                     meta={"workflow_incomplete": workflow_incomplete},
                 )
         finally:
+            set_aggressive_trim(False)
+            self._is_compacting = False
             self._prompt_stream_depth = max(0, self._prompt_stream_depth - 1)
 
     @staticmethod

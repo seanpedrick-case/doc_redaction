@@ -1,29 +1,34 @@
-"""Arize AX OpenTelemetry tracing for LangGraph agent runs.
+"""Arize / Phoenix OpenTelemetry tracing for LangGraph agent runs.
 
 Call :func:`setup_arize_ax_tracing` once **before** any ``langchain`` /
 ``langchain_core`` import so ``LangChainInstrumentor`` can patch the stack.
 
 Multi-turn chats: wrap each ``graph.stream`` with :func:`arize_session_context`
 and pass :func:`langgraph_trace_config` so turns share ``session.id`` (Gradio
-``session_hash``) and appear under one Sessions row in Arize AX.
+``session_hash``) and appear under one Sessions row in Arize AX or Phoenix.
 
 Environment (see ``config/agent.env.example``):
 
 - ``ARIZE_TRACING_ENABLED`` — set ``true`` / ``1`` / ``yes`` / ``on`` to enable
-- ``ARIZE_SPACE_ID`` / ``ARIZE_API_KEY`` — required when enabled
-- ``ARIZE_PROJECT_NAME`` — default ``doc-redaction-langgraph``
-- ``ARIZE_ENDPOINT`` — ``europe`` (default) or ``us``
+- ``ARIZE_BACKEND`` — ``ax`` (default, hosted Arize AX) or ``phoenix`` (local /
+  self-hosted Phoenix)
+- ``ARIZE_PROJECT_NAME`` — default ``doc-redaction-langgraph`` (Phoenix also
+  accepts ``PHOENIX_PROJECT_NAME``)
+- AX (``ARIZE_BACKEND=ax``): ``ARIZE_SPACE_ID`` / ``ARIZE_API_KEY`` required;
+  ``ARIZE_ENDPOINT`` — ``europe`` (default) or ``us``
+- Phoenix (``ARIZE_BACKEND=phoenix``): ``PHOENIX_COLLECTOR_ENDPOINT`` (default
+  ``http://localhost:6006``); optional ``PHOENIX_API_KEY``
 
 Smoke check
 -----------
-1. Set ``AGENT_ORCHESTRATOR=langgraph`` and the ``ARIZE_*`` variables above.
-2. Start the agent Gradio app; send one short chat that triggers an LLM call.
-3. Confirm spans appear under the Arize AX EU (or US) project — LLM plus
-   tool/agent hierarchy if tools run.
+1. Set ``AGENT_ORCHESTRATOR=langgraph`` and tracing env vars.
+2. For Phoenix: run ``phoenix serve``, set ``ARIZE_BACKEND=phoenix``, then
+   start the agent Gradio app and send one short chat that triggers an LLM call.
+3. Confirm spans in Phoenix (``http://localhost:6006``) or the Arize AX project.
 4. Send a follow-up in the same Gradio session; both turns should share one
    Sessions row (``session.id`` = Gradio ``session_hash``).
 5. With tracing disabled or ``AGENT_ORCHESTRATOR=pi``: confirm no errors and
-   no Arize traffic.
+   no collector traffic.
 """
 
 from __future__ import annotations
@@ -44,6 +49,32 @@ def _env_truthy(name: str) -> bool:
         "yes",
         "on",
     }
+
+
+def _tracing_backend() -> str:
+    """Return ``ax`` or ``phoenix`` from ``ARIZE_BACKEND`` (default ``ax``)."""
+    raw = (os.environ.get("ARIZE_BACKEND") or "ax").strip().lower()
+    if raw in {"phoenix", "local", "oss"}:
+        return "phoenix"
+    return "ax"
+
+
+def _project_name() -> str:
+    return (
+        os.environ.get("PHOENIX_PROJECT_NAME")
+        or os.environ.get("ARIZE_PROJECT_NAME")
+        or "doc-redaction-langgraph"
+    ).strip()
+
+
+def _phoenix_otlp_endpoint(collector: str) -> str:
+    """Normalize collector base URL to an HTTP OTLP traces endpoint when needed."""
+    ep = collector.strip().rstrip("/")
+    if not ep:
+        ep = "http://localhost:6006"
+    if ep.endswith("/v1/traces") or ep.endswith(":4317"):
+        return ep
+    return f"{ep}/v1/traces"
 
 
 def arize_session_id(session_hash: str | None) -> str | None:
@@ -91,19 +122,39 @@ def arize_session_context(session_hash: str | None) -> Iterator[None]:
         yield
 
 
-def setup_arize_ax_tracing() -> bool:
-    """Register Arize AX tracer + LangChainInstrumentor.
-
-    Returns True if tracing was enabled (or already initialized). Soft-fails
-    with a warning when partially configured or packages are missing.
-    """
-    global _INITIALIZED
-    if _INITIALIZED:
-        return True
-
-    if not _env_truthy("ARIZE_TRACING_ENABLED"):
+def _setup_phoenix_tracing(project_name: str) -> bool:
+    """Register Phoenix OTEL exporter + LangChainInstrumentor."""
+    try:
+        from openinference.instrumentation.langchain import LangChainInstrumentor
+        from phoenix.otel import register
+    except ImportError as exc:
+        warnings.warn(
+            f"Phoenix tracing dependencies unavailable ({exc}); tracing skipped. "
+            "Install arize-phoenix-otel and openinference-instrumentation-langchain.",
+            UserWarning,
+            stacklevel=3,
+        )
         return False
 
+    collector = (
+        os.environ.get("PHOENIX_COLLECTOR_ENDPOINT") or "http://localhost:6006"
+    ).strip()
+    endpoint = _phoenix_otlp_endpoint(collector)
+    register_kwargs: dict[str, Any] = {
+        "project_name": project_name,
+        "endpoint": endpoint,
+    }
+    api_key = (os.environ.get("PHOENIX_API_KEY") or "").strip()
+    if api_key:
+        register_kwargs["api_key"] = api_key
+
+    tracer_provider = register(**register_kwargs)
+    LangChainInstrumentor().instrument(tracer_provider=tracer_provider)
+    return True
+
+
+def _setup_ax_tracing(project_name: str) -> bool:
+    """Register Arize AX tracer + LangChainInstrumentor."""
     space_id = (os.environ.get("ARIZE_SPACE_ID") or "").strip()
     api_key = (os.environ.get("ARIZE_API_KEY") or "").strip()
     if not space_id or not api_key:
@@ -111,14 +162,9 @@ def setup_arize_ax_tracing() -> bool:
             "ARIZE_TRACING_ENABLED is set but ARIZE_SPACE_ID / ARIZE_API_KEY "
             "are missing; Arize AX tracing is skipped.",
             UserWarning,
-            stacklevel=2,
+            stacklevel=3,
         )
         return False
-
-    project_name = (
-        os.environ.get("ARIZE_PROJECT_NAME") or "doc-redaction-langgraph"
-    ).strip()
-    endpoint_raw = (os.environ.get("ARIZE_ENDPOINT") or "europe").strip().lower()
 
     try:
         from arize.otel import Endpoint, register
@@ -128,10 +174,11 @@ def setup_arize_ax_tracing() -> bool:
             f"Arize AX tracing dependencies unavailable ({exc}); tracing skipped. "
             "Install arize-otel and openinference-instrumentation-langchain.",
             UserWarning,
-            stacklevel=2,
+            stacklevel=3,
         )
         return False
 
+    endpoint_raw = (os.environ.get("ARIZE_ENDPOINT") or "europe").strip().lower()
     if endpoint_raw in {"us", "arize", "default"}:
         endpoint = Endpoint.ARIZE
     else:
@@ -145,5 +192,31 @@ def setup_arize_ax_tracing() -> bool:
         endpoint=endpoint,
     )
     LangChainInstrumentor().instrument(tracer_provider=tracer_provider)
-    _INITIALIZED = True
     return True
+
+
+def setup_arize_ax_tracing() -> bool:
+    """Register Arize AX or Phoenix tracer + LangChainInstrumentor.
+
+    Backend is selected via ``ARIZE_BACKEND`` (``ax`` default, or ``phoenix``).
+
+    Returns True if tracing was enabled (or already initialized). Soft-fails
+    with a warning when partially configured or packages are missing.
+    """
+    global _INITIALIZED
+    if _INITIALIZED:
+        return True
+
+    if not _env_truthy("ARIZE_TRACING_ENABLED"):
+        return False
+
+    project_name = _project_name()
+    backend = _tracing_backend()
+    if backend == "phoenix":
+        ok = _setup_phoenix_tracing(project_name)
+    else:
+        ok = _setup_ax_tracing(project_name)
+
+    if ok:
+        _INITIALIZED = True
+    return ok

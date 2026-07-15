@@ -29,6 +29,7 @@ RUNTIME_DEPENDENCIES: dict[str, str] = {
     "pymupdf": ">=1.24.0",
     "pandas": ">=2.0.0",
     "arize-otel": ">=0.9.0",
+    "arize-phoenix-otel": ">=0.16.0",
     "openinference-instrumentation-langchain": ">=0.1.0",
 }
 
@@ -217,8 +218,12 @@ AWS_REGION=eu-west-2
 AGENT_WORKSPACE_DIR=/tmp/agentcore-workspace
 AGENT_DEFAULT_OCR_METHOD=paddle
 AGENT_DEFAULT_PII_METHOD=Local
-# Optional Arize AX tracing for in-process LangGraph (see agent-redact/eval/arize_monitoring.py).
+# Optional Arize AX / Phoenix tracing for in-process LangGraph
+# (see agent-redact/eval/arize_monitoring.py).
 # ARIZE_TRACING_ENABLED=true
+# ARIZE_BACKEND=ax
+# ARIZE_BACKEND=phoenix
+# PHOENIX_COLLECTOR_ENDPOINT=http://localhost:6006
 # ARIZE_SPACE_ID=
 # ARIZE_API_KEY=
 # ARIZE_PROJECT_NAME=doc-redaction-langgraph
