@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import pytest
+
+pytest.importorskip("langchain_core")
+
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.messages.utils import count_tokens_approximately
+from pi_test_support import ensure_agent_redact_paths
 
-_AGENT_REDACT = Path(__file__).resolve().parents[1] / "agent-redact"
-if str(_AGENT_REDACT) not in sys.path:
-    sys.path.insert(0, str(_AGENT_REDACT))
+ensure_agent_redact_paths()
 
 from redaction_langgraph.message_context import (  # noqa: E402
     build_pre_model_hook,
