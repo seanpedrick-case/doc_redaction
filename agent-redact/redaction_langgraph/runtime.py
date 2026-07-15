@@ -25,13 +25,17 @@ from agent_runtime import (
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage  # noqa: E402
 
 from redaction_langgraph.graph import build_redaction_agent  # noqa: E402
+from redaction_langgraph.llm_errors import (  # noqa: E402
+    is_context_overflow_error,
+    is_tool_call_json_parse_error,
+)
 from redaction_langgraph.message_context import (  # noqa: E402
     get_trim_stats,
-    is_context_overflow_error,
     reset_trim_stats,
     set_aggressive_trim,
 )
 from redaction_langgraph.workflow_continue import (  # noqa: E402
+    build_tool_call_json_retry_prompt,
     build_workflow_continue_prompt,
     langgraph_auto_continue_enabled,
     langgraph_max_continuations,
@@ -295,6 +299,7 @@ class LangGraphAgentRuntime(AgentRuntime):
                     tools_at_round_start = set(tool_names_seen)
                     outputs_at_round_start = len(tool_outputs)
                     overflow_retried = False
+                    tool_json_retried = False
                     while True:
                         try:
                             for evt in self._stream_graph_round(
@@ -310,29 +315,57 @@ class LangGraphAgentRuntime(AgentRuntime):
                                     return
                             break
                         except Exception as exc:
-                            if overflow_retried or not is_context_overflow_error(exc):
-                                raise
-                            overflow_retried = True
                             # Roll back state from the failed stream attempt.
-                            del graph_messages[round_messages_start:]
-                            del assistant_chunks[chunks_at_round_start:]
-                            tool_names_seen.clear()
-                            tool_names_seen.update(tools_at_round_start)
-                            del tool_outputs[outputs_at_round_start:]
-                            yield AgentStreamEvent(
-                                kind="status",
-                                text=(
-                                    "Prompt exceeded model context — retrying once "
-                                    "with aggressive compaction…"
-                                ),
-                            )
-                            set_aggressive_trim(True)
-                            try:
-                                self._rebuild_graph(aggressive_compaction=True)
-                            except Exception:
-                                set_aggressive_trim(False)
-                                raise
-                            continue
+                            def _rollback_round() -> None:
+                                del graph_messages[round_messages_start:]
+                                del assistant_chunks[chunks_at_round_start:]
+                                tool_names_seen.clear()
+                                tool_names_seen.update(tools_at_round_start)
+                                del tool_outputs[outputs_at_round_start:]
+
+                            if not overflow_retried and is_context_overflow_error(exc):
+                                overflow_retried = True
+                                _rollback_round()
+                                yield AgentStreamEvent(
+                                    kind="status",
+                                    text=(
+                                        "Prompt exceeded model context — retrying once "
+                                        "with aggressive compaction…"
+                                    ),
+                                )
+                                set_aggressive_trim(True)
+                                try:
+                                    self._rebuild_graph(aggressive_compaction=True)
+                                except Exception:
+                                    set_aggressive_trim(False)
+                                    raise
+                                continue
+
+                            if not tool_json_retried and is_tool_call_json_parse_error(
+                                exc
+                            ):
+                                tool_json_retried = True
+                                _rollback_round()
+                                yield AgentStreamEvent(
+                                    kind="status",
+                                    text=(
+                                        "Tool-call JSON was truncated or invalid — "
+                                        "retrying once with a compact-script nudge…"
+                                    ),
+                                )
+                                graph_messages.append(
+                                    HumanMessage(
+                                        content=build_tool_call_json_retry_prompt()
+                                    )
+                                )
+                                # Keep the nudge if a later overflow rollback runs.
+                                round_messages_start = len(graph_messages)
+                                chunks_at_round_start = len(assistant_chunks)
+                                tools_at_round_start = set(tool_names_seen)
+                                outputs_at_round_start = len(tool_outputs)
+                                continue
+
+                            raise
                     if overflow_retried:
                         set_aggressive_trim(False)
                         # Restore normal (non-aggressive) graph for later rounds.

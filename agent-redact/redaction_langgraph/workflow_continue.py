@@ -10,7 +10,22 @@ _WORKFLOW_CONTINUE_PROMPT = """Redaction work is NOT complete yet. Continue now:
 1. Edit the *_review_file.csv for the user requirements (write_workspace_text or run_workspace_python_script)
 2. Run verify_coverage until pass_strict is true
 3. Run review_apply once on the source PDF and edited review CSV
-Call the next required tool — do not stop after read_workspace_text or write_workspace_text."""
+Call the next required tool — do not stop after read_workspace_text or write_workspace_text.
+Keep write_workspace_text / script bodies compact (prefer short Python that derives rows from OCR/CSV — avoid dozens of hard-coded dict literals)."""
+
+_TOOL_CALL_JSON_RETRY_PROMPT = """Your previous tool call failed: the inference server could not parse the tool arguments as JSON (usually a truncated or unescaped string inside write_workspace_text content).
+
+Retry with a SHORT approach — do not paste a huge hard-coded row list into tool args:
+1. write_workspace_text a compact .py script (ideally under ~80 lines) that reads the review/OCR CSV and adds/filters rows programmatically, OR make a small targeted CSV edit
+2. run_workspace_python_script on that script (if you wrote one)
+3. verify_coverage until pass_strict, then review_apply once
+
+Use plain JSON string arguments only. Avoid triple-quoted Python docstrings and nested quote-heavy literals in content when possible."""
+
+
+def build_tool_call_json_retry_prompt() -> str:
+    """Nudge after llama.cpp / OpenAI-compatible tool-arg JSON parse failures."""
+    return _TOOL_CALL_JSON_RETRY_PROMPT
 
 
 def _parse_write_workspace_payload(output: str) -> dict[str, Any] | None:
