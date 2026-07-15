@@ -13,9 +13,9 @@ _AGENT_REDACT_ROOT = Path(__file__).resolve().parents[1]
 if str(_AGENT_REDACT_ROOT) not in sys.path:
     sys.path.insert(0, str(_AGENT_REDACT_ROOT))
 
-_PI_DIR = _AGENT_REDACT_ROOT / "pi"
-if str(_PI_DIR) not in sys.path:
-    sys.path.insert(0, str(_PI_DIR))
+_SHARED_DIR = _AGENT_REDACT_ROOT / "shared"
+if str(_SHARED_DIR) not in sys.path:
+    sys.path.insert(0, str(_SHARED_DIR))
 
 from agent_runtime import (
     AgentRuntime,

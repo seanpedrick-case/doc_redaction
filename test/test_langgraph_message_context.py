@@ -82,7 +82,6 @@ def test_aggressive_budget_smaller_than_normal(monkeypatch):
     assert aggressive == max(floor, normal // 2)
 
 
-
 def test_langgraph_llm_input_max_tokens_env_overrides(monkeypatch):
     monkeypatch.setenv("AGENT_LLAMA_CONTEXT_WINDOW", "65536")
     monkeypatch.setenv("LANGGRAPH_COMPACTION_RESERVE_TOKENS", "10000")

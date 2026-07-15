@@ -10,9 +10,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
-_PI_DIR = Path(__file__).resolve().parents[1] / "pi"
-if str(_PI_DIR) not in sys.path:
-    sys.path.insert(0, str(_PI_DIR))
+_SHARED_DIR = Path(__file__).resolve().parents[1] / "shared"
+if str(_SHARED_DIR) not in sys.path:
+    sys.path.insert(0, str(_SHARED_DIR))
 
 from remote_redaction import (  # noqa: E402
     call_doc_redact,

@@ -4,7 +4,7 @@ emoji: 🤖
 colorFrom: blue
 colorTo: yellow
 sdk: docker
-app_file: agent-redact/pi/gradio_app.py
+app_file: agent-redact/shared/gradio_app.py
 pinned: false
 license: agpl-3.0
 short_description: Agentic interface to redact PDF documents

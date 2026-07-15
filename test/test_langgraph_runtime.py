@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 
-_AGENT_REDACT = Path(__file__).resolve().parents[1] / "agent-redact"
-if str(_AGENT_REDACT) not in sys.path:
-    sys.path.insert(0, str(_AGENT_REDACT))
+from pi_test_support import ensure_agent_redact_paths
+
+ensure_agent_redact_paths()
 
 from redaction_langgraph.workflow_continue import (  # noqa: E402
     build_workflow_continue_prompt,

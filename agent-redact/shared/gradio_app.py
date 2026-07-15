@@ -34,10 +34,17 @@ if os.environ.get("AGENT_RPC_DEBUG") and not _logger.handlers:
 from fastapi import FastAPI
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
-
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+_AGENT_REDACT = Path(__file__).resolve().parents[1]
+for _path in (
+    _REPO_ROOT,
+    _AGENT_REDACT,
+    _AGENT_REDACT / "shared",
+    _AGENT_REDACT / "pi",
+    _AGENT_REDACT / "agentcore",
+):
+    _text = str(_path)
+    if _text not in sys.path:
+        sys.path.insert(0, _text)
 
 from bootstrap_pi_config import ensure_pi_config_env
 

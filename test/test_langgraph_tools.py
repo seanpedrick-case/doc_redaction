@@ -3,16 +3,12 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
-_AGENT_REDACT = Path(__file__).resolve().parents[1] / "agent-redact"
-if str(_AGENT_REDACT) not in sys.path:
-    sys.path.insert(0, str(_AGENT_REDACT))
+from pi_test_support import ensure_agent_redact_paths, ensure_gradio_importable
 
-from pi_test_support import ensure_gradio_importable
-
+ensure_agent_redact_paths()
 ensure_gradio_importable()
 
 from redaction_langgraph.tools import (  # noqa: E402

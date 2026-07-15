@@ -41,8 +41,8 @@ import sys
 from pathlib import Path
 
 _APP_ROOT = Path(__file__).resolve().parent
-_PI_DIR = _APP_ROOT / "pi"
-for path in (_APP_ROOT, _PI_DIR):
+_SHARED_DIR = _APP_ROOT / "shared"
+for path in (_APP_ROOT, _SHARED_DIR):
     text = str(path)
     if text not in sys.path:
         sys.path.insert(0, text)
@@ -178,13 +178,13 @@ def package_runtime(
         dry_run=dry_run,
     )
 
-    pi_dest = target / "pi"
+    shared_dest = target / "shared"
     for name in ("remote_redaction.py",):
-        _copy_file(agent_redact / "pi" / name, pi_dest / name, dry_run=dry_run)
+        _copy_file(agent_redact / "shared" / name, shared_dest / name, dry_run=dry_run)
 
     _copy_file(
         agentcore / "bundle_support" / "session_workspace.py",
-        pi_dest / "session_workspace.py",
+        shared_dest / "session_workspace.py",
         dry_run=dry_run,
     )
 

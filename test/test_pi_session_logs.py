@@ -11,9 +11,12 @@ def _import_session_logs(monkeypatch, tmp_path: Path):
     import importlib
     import sys
 
-    pi_dir = Path(__file__).resolve().parents[1] / "agent-redact" / "pi"
-    if str(pi_dir) not in sys.path:
-        sys.path.insert(0, str(pi_dir))
+    from pi_test_support import agent_redact_paths
+
+    for path in agent_redact_paths():
+        text = str(path)
+        if text not in sys.path:
+            sys.path.insert(0, text)
     import session_logs
 
     session_logs = importlib.reload(session_logs)

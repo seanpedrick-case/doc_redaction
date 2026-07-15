@@ -71,9 +71,13 @@ def langgraph_compaction_reserve_tokens() -> int:
     ``AGENT_COMPACTION_RESERVE_TOKENS``, else ``28672``.
     """
     if (os.environ.get("LANGGRAPH_COMPACTION_RESERVE_TOKENS") or "").strip():
-        return max(0, _env_int("LANGGRAPH_COMPACTION_RESERVE_TOKENS", _DEFAULT_RESERVE_TOKENS))
+        return max(
+            0, _env_int("LANGGRAPH_COMPACTION_RESERVE_TOKENS", _DEFAULT_RESERVE_TOKENS)
+        )
     if (os.environ.get("AGENT_COMPACTION_RESERVE_TOKENS") or "").strip():
-        return max(0, _env_int("AGENT_COMPACTION_RESERVE_TOKENS", _DEFAULT_RESERVE_TOKENS))
+        return max(
+            0, _env_int("AGENT_COMPACTION_RESERVE_TOKENS", _DEFAULT_RESERVE_TOKENS)
+        )
     return _DEFAULT_RESERVE_TOKENS
 
 

@@ -23,8 +23,8 @@ def configure_import_paths(app_root: Path | None = None) -> tuple[Path, Path]:
     """
     root = (app_root or Path(__file__).resolve().parent).resolve()
     agent_redact = root
-    pi_dir = root / "pi"
-    for path in (root, agent_redact, pi_dir):
+    shared_dir = root / "shared"
+    for path in (root, agent_redact, shared_dir):
         text = str(path)
         if text not in sys.path:
             sys.path.insert(0, text)
