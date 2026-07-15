@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 import time
 from pathlib import Path
 
@@ -11,9 +10,9 @@ import pytest
 pytest.importorskip("pikepdf")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-_PI_SRC = REPO_ROOT / "agent-redact" / "pi"
-if str(_PI_SRC) not in sys.path:
-    sys.path.insert(0, str(_PI_SRC))
+from pi_test_support import ensure_agent_redact_paths
+
+ensure_agent_redact_paths()
 
 from remote_redaction import (  # noqa: E402
     discover_redaction_outputs,

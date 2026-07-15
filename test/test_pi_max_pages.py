@@ -1,17 +1,10 @@
 """Tests for Pi agent PDF page limit validation."""
 
-import sys
-from pathlib import Path
-
 import pymupdf
 import pytest
+from pi_test_support import ensure_agent_redact_paths, ensure_gradio_importable
 
-_PI_SRC = Path(__file__).resolve().parents[1] / "agent-redact" / "pi"
-if str(_PI_SRC) not in sys.path:
-    sys.path.insert(0, str(_PI_SRC))
-
-from pi_test_support import ensure_gradio_importable
-
+ensure_agent_redact_paths()
 ensure_gradio_importable()
 
 import redaction_prompt as rp

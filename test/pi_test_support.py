@@ -1,10 +1,26 @@
-"""Helpers for importing agent-redact/pi modules in unit tests."""
+"""Helpers for importing agent-redact modules in unit tests."""
 
 from __future__ import annotations
 
 import importlib
 import sys
+from pathlib import Path
 from types import ModuleType
+
+
+def agent_redact_paths() -> list[Path]:
+    """Return sys.path entries for the agent-redact layout."""
+    root = Path(__file__).resolve().parents[1]
+    ar = root / "agent-redact"
+    return [root, ar, ar / "shared", ar / "pi", ar / "agentcore"]
+
+
+def ensure_agent_redact_paths() -> None:
+    """Insert agent-redact import roots if absent."""
+    for path in agent_redact_paths():
+        text = str(path)
+        if text not in sys.path:
+            sys.path.insert(0, text)
 
 
 def ensure_gradio_importable() -> None:

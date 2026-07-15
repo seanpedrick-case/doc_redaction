@@ -1,14 +1,12 @@
 """Tests for Pi runtime config (session directory)."""
 
 import os
-import sys
 from pathlib import Path
 
 import pytest
+from pi_test_support import ensure_agent_redact_paths
 
-_PI_SRC = Path(__file__).resolve().parents[1] / "agent-redact" / "pi"
-if str(_PI_SRC) not in sys.path:
-    sys.path.insert(0, str(_PI_SRC))
+ensure_agent_redact_paths()
 
 import pi_agent_config as pac
 

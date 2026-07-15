@@ -10,9 +10,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
-_PI_DIR = Path(__file__).resolve().parents[1] / "pi"
-if str(_PI_DIR) not in sys.path:
-    sys.path.insert(0, str(_PI_DIR))
+_SHARED_DIR = Path(__file__).resolve().parents[1] / "shared"
+if str(_SHARED_DIR) not in sys.path:
+    sys.path.insert(0, str(_SHARED_DIR))
 
 from remote_redaction import (  # noqa: E402
     call_doc_redact,
@@ -83,6 +83,94 @@ def _first_string(payload: dict[str, Any], keys: tuple[str, ...]) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
+
+
+def _looks_like_filesystem_path(text: str) -> bool:
+    normalized = text.strip().replace("\\", "/")
+    if not normalized:
+        return False
+    if normalized.startswith(("/", "~")):
+        return True
+    if re.match(r"^[A-Za-z]:/", normalized):
+        return True
+    return "/" in normalized or normalized.lower().endswith(".pdf")
+
+
+def _deep_flatten_tool_payload(*values: Any) -> dict[str, Any]:
+    """
+    Recursively collect tool-arg fields from nested local-model structures.
+
+    Weak models often nest the real args under an absolute path key, e.g.
+    ``{"pdf_relative_path": {"/abs/path/doc.pdf": {"pdf_relative_path": "doc.pdf"}}}``.
+    """
+    merged: dict[str, Any] = {}
+
+    def absorb(key: str, val: Any) -> None:
+        if isinstance(val, str) and val.strip():
+            merged[key] = val.strip()
+        elif val is not None and not isinstance(val, (dict, list, tuple)):
+            merged[key] = val
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            for key, val in node.items():
+                if isinstance(key, str) and _TOOL_ARG_KEY_RE.fullmatch(key):
+                    if isinstance(val, dict):
+                        walk(val)
+                    else:
+                        absorb(key, val)
+                elif isinstance(key, str) and _looks_like_filesystem_path(key):
+                    if isinstance(val, dict):
+                        walk(val)
+                    elif isinstance(val, str) and val.strip():
+                        absorb("pdf_path", val)
+                    else:
+                        key_path = Path(key.replace("\\", "/"))
+                        if key_path.suffix.lower() in _OUTPUT_FILE_EXTENSIONS:
+                            name = key_path.name
+                            if name:
+                                absorb("pdf_path", name)
+                else:
+                    walk(val)
+        elif isinstance(node, str) and node.strip():
+            absorb("_literal", node)
+        elif isinstance(node, (list, tuple)):
+            for item in node:
+                walk(item)
+
+    for value in values:
+        walk(value)
+    return merged
+
+
+def _normalize_workspace_relative_path(path: str, session_hash: str | None) -> str:
+    """Strip a session workspace prefix from absolute paths; keep basename as fallback."""
+    text = path.strip().replace("\\", "/")
+    if not text:
+        return text
+    root = _session_root(session_hash).resolve()
+    try:
+        raw_path = Path(path.strip())
+        if raw_path.is_absolute():
+            resolved = raw_path.resolve()
+            rel = os.path.relpath(str(resolved), str(root))
+            if not rel.startswith(".."):
+                return rel.replace("\\", "/")
+    except (OSError, ValueError):
+        pass
+    root_posix = root.as_posix().rstrip("/")
+    lowered = text.lower()
+    root_lower = root_posix.lower()
+    idx = lowered.find(root_lower)
+    if idx != -1:
+        suffix = text[idx + len(root_posix) :].lstrip("/\\")
+        if suffix:
+            return suffix.replace("\\", "/")
+    if "/" in text or ":" in text:
+        name = Path(text).name
+        if name:
+            return name
+    return text
 
 
 def _default_dest_for_pdf(pdf_relative_path: str) -> str:
@@ -234,6 +322,12 @@ def _coerce_relative_path(value: Any, *, label: str = "path") -> str:
                 if isinstance(nested, dict):
                     return _coerce_relative_path(nested, label=label)
         if not text:
+            for nested in value.values():
+                try:
+                    return _coerce_relative_path(nested, label=label)
+                except ValueError:
+                    continue
+        if not text:
             raise ValueError(f"Tool {label} must be a string path, got dict: {value!r}")
     elif isinstance(value, (list, tuple)) and len(value) == 1:
         return _coerce_relative_path(value[0], label=label)
@@ -366,20 +460,21 @@ def _parse_doc_redact_tool_input(
     *,
     ocr_method: str | None,
     pii_method: str | None,
+    session_hash: str | None = None,
 ) -> tuple[str, str, str | None, str | None]:
     """Merge/normalize doc_redact tool args from messy local-model tool calls."""
-    payload: dict[str, Any] = {}
-    for value in (pdf_relative_path, dest_relative_dir):
-        if isinstance(value, dict):
-            payload.update(_sanitize_tool_dict(value))
+    payload = _deep_flatten_tool_payload(pdf_relative_path, dest_relative_dir)
 
     pdf_raw = _first_string(payload, _DOC_REDACT_PDF_KEYS)
+    if not pdf_raw:
+        pdf_raw = str(payload.get("_literal") or "").strip()
     if not pdf_raw and isinstance(pdf_relative_path, str):
         pdf_raw = pdf_relative_path.strip()
     if not pdf_raw:
         raise ValueError(
             "doc_redact requires a PDF path (pdf_relative_path or pdf_path)."
         )
+    pdf_raw = _normalize_workspace_relative_path(pdf_raw, session_hash)
     pdf_rel = _coerce_relative_path(pdf_raw, label="pdf_relative_path")
 
     dest_raw = _first_string(payload, _DOC_REDACT_DEST_KEYS)
@@ -400,20 +495,24 @@ def _parse_review_apply_tool_input(
     pdf_relative_path: Any,
     review_csv_relative_path: Any,
     dest_relative_dir: Any | None,
+    *,
+    session_hash: str | None = None,
 ) -> tuple[str, str, str]:
     """Merge/normalize review_apply tool args from messy local-model tool calls."""
-    payload: dict[str, Any] = {}
-    for value in (pdf_relative_path, review_csv_relative_path, dest_relative_dir):
-        if isinstance(value, dict):
-            payload.update(_sanitize_tool_dict(value))
+    payload = _deep_flatten_tool_payload(
+        pdf_relative_path, review_csv_relative_path, dest_relative_dir
+    )
 
     pdf_raw = _first_string(payload, _DOC_REDACT_PDF_KEYS)
+    if not pdf_raw:
+        pdf_raw = str(payload.get("_literal") or "").strip()
     if not pdf_raw and isinstance(pdf_relative_path, str):
         pdf_raw = pdf_relative_path.strip()
     if not pdf_raw:
         raise ValueError(
             "review_apply requires a PDF path (pdf_relative_path or pdf_path)."
         )
+    pdf_raw = _normalize_workspace_relative_path(pdf_raw, session_hash)
     pdf_rel = _coerce_relative_path(pdf_raw, label="pdf_relative_path")
 
     review_raw = _first_string(
@@ -495,7 +594,7 @@ def list_workspace_files(session_hash: str | None = None) -> str:
 
 def run_doc_redact(
     pdf_relative_path: str,
-    dest_relative_dir: str,
+    dest_relative_dir: str = "",
     *,
     session_hash: str | None = None,
     ocr_method: str | None = None,
@@ -504,27 +603,31 @@ def run_doc_redact(
     allow_list: list[str] | None = None,
 ) -> str:
     """Run Pass 1 redaction via /doc_redact and download artifacts into the session workspace."""
-    pdf_rel, dest_rel, ocr_from_tool, pii_from_tool = _parse_doc_redact_tool_input(
-        pdf_relative_path,
-        dest_relative_dir,
-        ocr_method=ocr_method,
-        pii_method=pii_method,
-    )
-    pdf = _resolve_workspace_pdf(session_hash, pdf_rel)
-    dest = _ensure_workspace_output_dir(
-        session_hash,
-        dest_rel,
-        pdf_relative_path=pdf_rel,
-        default_for="doc_redact",
-    )
-    result, saved = call_doc_redact(
-        pdf,
-        dest,
-        ocr_method=ocr_from_tool or os.environ.get("AGENT_DEFAULT_OCR_METHOD"),
-        pii_method=pii_from_tool or os.environ.get("AGENT_DEFAULT_PII_METHOD"),
-        deny_list=deny_list,
-        allow_list=allow_list,
-    )
+    try:
+        pdf_rel, dest_rel, ocr_from_tool, pii_from_tool = _parse_doc_redact_tool_input(
+            pdf_relative_path,
+            dest_relative_dir,
+            ocr_method=ocr_method,
+            pii_method=pii_method,
+            session_hash=session_hash,
+        )
+        pdf = _resolve_workspace_pdf(session_hash, pdf_rel)
+        dest = _ensure_workspace_output_dir(
+            session_hash,
+            dest_rel,
+            pdf_relative_path=pdf_rel,
+            default_for="doc_redact",
+        )
+        result, saved = call_doc_redact(
+            pdf,
+            dest,
+            ocr_method=ocr_from_tool or os.environ.get("AGENT_DEFAULT_OCR_METHOD"),
+            pii_method=pii_from_tool or os.environ.get("AGENT_DEFAULT_PII_METHOD"),
+            deny_list=deny_list,
+            allow_list=allow_list,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        return json.dumps({"error": str(exc)})
     message = result[1] if isinstance(result, (list, tuple)) and len(result) > 1 else ""
     payload = {
         "message": str(message or "doc_redact completed."),
@@ -747,6 +850,7 @@ def run_review_apply(
             pdf_relative_path,
             review_csv_relative_path,
             dest_relative_dir,
+            session_hash=session_hash,
         )
     except ValueError as exc:
         return json.dumps({"error": str(exc)})
@@ -780,6 +884,54 @@ def run_review_apply(
     )
 
 
+def _resolve_optional_redacted_pdf(
+    session_hash: str | None,
+    redacted_pdf_relative_path: Any,
+    *,
+    review_csv: Path,
+) -> Path | None:
+    """Resolve optional post-apply PDF; reject CSV / non-PDF mix-ups from the model."""
+    if redacted_pdf_relative_path is None:
+        return None
+    if (
+        isinstance(redacted_pdf_relative_path, str)
+        and not redacted_pdf_relative_path.strip()
+    ):
+        return None
+    rel = _coerce_relative_path(
+        redacted_pdf_relative_path, label="redacted_pdf_relative_path"
+    )
+    if not rel:
+        return None
+    lower = rel.lower().replace("\\", "/")
+    name = Path(lower).name
+    if (
+        lower.endswith((".csv", ".json", ".py", ".txt", ".md"))
+        or "review_file" in name
+        or name.endswith("_review.csv")
+    ):
+        raise ValueError(
+            "redacted_pdf_relative_path must be a PDF (e.g. *_redacted.pdf). "
+            f"Got {rel!r}. For pre-apply verify_coverage, omit "
+            "redacted_pdf_relative_path entirely. For post-apply checks, pass the "
+            "*_redacted.pdf produced by review_apply."
+        )
+    if not lower.endswith(".pdf"):
+        raise ValueError(
+            "redacted_pdf_relative_path must end with .pdf "
+            f"(got {rel!r}). Omit it for pre-apply checks."
+        )
+    path = _resolve_workspace_path(session_hash, rel)
+    if path.resolve() == review_csv.resolve():
+        raise ValueError(
+            "redacted_pdf_relative_path must not be the review CSV. "
+            "Omit it for pre-apply verify_coverage, or pass *_redacted.pdf."
+        )
+    if not path.is_file():
+        raise FileNotFoundError(f"redacted PDF not found: {rel}")
+    return path
+
+
 def run_verify_coverage(
     review_csv_relative_path: str,
     *,
@@ -792,30 +944,34 @@ def run_verify_coverage(
     """Run Pass 1 coverage verification on workspace-local CSV/PDF paths."""
     from redaction_langgraph.verify_coverage_lib import verify_redaction_coverage
 
-    review_csv = _resolve_workspace_path(session_hash, review_csv_relative_path)
-    if ocr_words_csv_relative_path:
-        ocr_words_csv = _resolve_workspace_path(
-            session_hash, ocr_words_csv_relative_path
-        )
-    else:
-        discovered = _discover_ocr_words_csv(review_csv)
-        if discovered is None:
-            return json.dumps(
-                {
-                    "error": (
-                        "Could not find word-level OCR CSV beside the review CSV. "
-                        "Pass ocr_words_csv_relative_path explicitly."
-                    ),
-                    "review_csv": str(review_csv),
-                }
-            )
-        ocr_words_csv = discovered
-    redacted_pdf = (
-        _resolve_workspace_path(session_hash, redacted_pdf_relative_path)
-        if redacted_pdf_relative_path
-        else None
-    )
     try:
+        review_rel = _coerce_relative_path(
+            review_csv_relative_path, label="review_csv_relative_path"
+        )
+        review_csv = _resolve_workspace_path(session_hash, review_rel)
+        if ocr_words_csv_relative_path:
+            ocr_rel = _coerce_relative_path(
+                ocr_words_csv_relative_path, label="ocr_words_csv_relative_path"
+            )
+            ocr_words_csv = _resolve_workspace_path(session_hash, ocr_rel)
+        else:
+            discovered = _discover_ocr_words_csv(review_csv)
+            if discovered is None:
+                return json.dumps(
+                    {
+                        "error": (
+                            "Could not find word-level OCR CSV beside the review CSV. "
+                            "Pass ocr_words_csv_relative_path explicitly."
+                        ),
+                        "review_csv": str(review_csv),
+                    }
+                )
+            ocr_words_csv = discovered
+        redacted_pdf = _resolve_optional_redacted_pdf(
+            session_hash,
+            redacted_pdf_relative_path,
+            review_csv=review_csv,
+        )
         report = verify_redaction_coverage(
             review_csv,
             ocr_words_csv,
@@ -823,17 +979,33 @@ def run_verify_coverage(
             must_not_redact=must_not_redact,
             redacted_pdf_path=redacted_pdf,
         )
-    except (ValueError, re.error) as exc:
+    except (ValueError, re.error, FileNotFoundError, OSError) as exc:
         return json.dumps(
             {
                 "error": str(exc),
-                "review_csv": str(review_csv),
-                "ocr_words_csv": str(ocr_words_csv),
+                "hint": (
+                    "verify_coverage args: review_csv_relative_path (required), "
+                    "optional redacted_pdf_relative_path (*_redacted.pdf only; "
+                    "omit for pre-apply), optional ocr_words_csv_relative_path."
+                ),
+            },
+            indent=2,
+        )
+    except Exception as exc:  # noqa: BLE001 — keep LangGraph tool node alive
+        return json.dumps(
+            {
+                "error": f"{type(exc).__name__}: {exc}",
+                "hint": (
+                    "verify_coverage failed unexpectedly. Check paths: review CSV vs "
+                    "optional *_redacted.pdf (never pass the review CSV as the PDF)."
+                ),
             },
             indent=2,
         )
     payload = report.to_dict()
     payload["ocr_words_csv"] = str(ocr_words_csv)
+    if redacted_pdf is not None:
+        payload["redacted_pdf"] = str(redacted_pdf)
     return json.dumps(payload, indent=2, default=str)
 
 
@@ -851,9 +1023,10 @@ def build_langgraph_tools(session_hash: str | None):
             name="doc_redact",
             description=(
                 "Run initial document redaction (Pass 1) via /doc_redact. "
-                "Paths are relative to the session workspace."
+                "pdf_relative_path is workspace-relative (e.g. filename.pdf). "
+                "dest_relative_dir is optional."
             ),
-            func=lambda pdf_relative_path, dest_relative_dir, ocr_method=None, pii_method=None: run_doc_redact(
+            func=lambda pdf_relative_path, dest_relative_dir="", ocr_method=None, pii_method=None: run_doc_redact(
                 pdf_relative_path,
                 dest_relative_dir,
                 session_hash=session_hash,
@@ -882,8 +1055,12 @@ def build_langgraph_tools(session_hash: str | None):
         StructuredTool.from_function(
             name="verify_coverage",
             description=(
-                "Verify Pass 1 redaction coverage on workspace-local review CSV and word OCR CSV. "
-                "Returns pass_strict and pages needing fixes. Auto-discovers OCR words CSV when omitted. "
+                "Verify Pass 1 redaction coverage on a *_review_file.csv (+ auto-discovered "
+                "word OCR CSV). Returns pass_strict and pages needing fixes. "
+                "For pre-apply checks, pass only review_csv_relative_path (omit "
+                "redacted_pdf_relative_path). For post-apply checks, pass "
+                "redacted_pdf_relative_path as the *_redacted.pdf from review_apply — "
+                "never the review CSV. "
                 "must_redact and must_not_redact: list of regex strings (one term per item), e.g. "
                 '["Hyde", "Lauren\\\\s+Lilley", "Poss\\\\b"]. A single pipe-separated string is also accepted.'
             ),

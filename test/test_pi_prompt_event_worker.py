@@ -1,13 +1,11 @@
 """Tests for Pi prompt event worker startup (rate-limit retry support)."""
 
 import queue
-import sys
 import time
-from pathlib import Path
 
-_PI_SRC = Path(__file__).resolve().parents[1] / "agent-redact" / "pi"
-if str(_PI_SRC) not in sys.path:
-    sys.path.insert(0, str(_PI_SRC))
+from pi_test_support import ensure_agent_redact_paths
+
+ensure_agent_redact_paths()
 
 from pi_rpc_client import PiStreamEvent, start_pi_prompt_event_worker
 

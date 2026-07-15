@@ -225,9 +225,9 @@ def sync_workspace_helpers() -> Path:
     """
     helpers = workspace_helpers_dir()
     helpers.mkdir(parents=True, exist_ok=True)
-    pi_dir = Path(__file__).resolve().parent
+    shared_dir = Path(__file__).resolve().parent.parent / "shared"
     for name in ("remote_redaction.py", "run_doc_redact.py"):
-        src = pi_dir / name
+        src = shared_dir / name
         dest = helpers / name
         if not src.is_file():
             continue

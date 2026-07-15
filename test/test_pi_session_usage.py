@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock
 
-_PI = Path(__file__).resolve().parents[1] / "agent-redact" / "pi"
-if str(_PI) not in sys.path:
-    sys.path.insert(0, str(_PI))
+from pi_test_support import ensure_agent_redact_paths
+
+ensure_agent_redact_paths()
 
 from pi_session_usage import (  # noqa: E402
     TokenUsageTotals,

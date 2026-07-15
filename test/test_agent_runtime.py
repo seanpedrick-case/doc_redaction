@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
+from pi_test_support import ensure_agent_redact_paths
 
-_PI_SRC = Path(__file__).resolve().parents[1] / "agent-redact" / "pi"
-if str(_PI_SRC) not in sys.path:
-    sys.path.insert(0, str(_PI_SRC))
+ensure_agent_redact_paths()
 
 from agent_runtime import (  # noqa: E402
     AgentStreamEvent,
@@ -19,7 +16,8 @@ from agent_runtime import (  # noqa: E402
 from pi_rpc_client import PiStreamEvent  # noqa: E402
 
 
-def test_normalize_orchestrator_defaults_to_pi():
+def test_normalize_orchestrator_defaults_to_pi(monkeypatch):
+    monkeypatch.delenv("AGENT_ORCHESTRATOR", raising=False)
     assert normalize_orchestrator(None) == "pi"
     assert normalize_orchestrator("langgraph") == "langgraph"
     assert normalize_orchestrator("unknown") == "pi"

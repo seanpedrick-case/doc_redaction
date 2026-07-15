@@ -27,6 +27,7 @@ explicitly asks to stop:
 5. review_apply — **once** on the original PDF + edited review CSV; save under
    redact/<document>/review/output_review_final/
 6. verify_coverage again on the **post-apply** *_redacted.pdf from review_apply
+   (pass redacted_pdf_relative_path as that PDF only — never the review CSV; omit it for pre-apply)
 
 Do not stop after step 2 or after a failed verify_coverage — read tool errors, fix paths/CSV, and continue.
 After write_workspace_text saves a .py script, call run_workspace_python_script immediately — never rewrite the same script.
@@ -75,13 +76,30 @@ def _build_llm():
     )
 
 
-def build_redaction_agent(session_hash: str | None):
-    """Compile a ReAct agent with session-scoped tools."""
+def build_redaction_agent(
+    session_hash: str | None,
+    *,
+    aggressive_compaction: bool = False,
+):
+    """Compile a ReAct agent with session-scoped tools.
+
+    When compaction is enabled (default), attaches a ``pre_model_hook`` that
+    trims LLM input to fit ``AGENT_LLAMA_CONTEXT_WINDOW`` without overwriting
+    the full graph message history. Pass ``aggressive_compaction=True`` for
+    the one-shot overflow retry path (halved token budget).
+    """
+    from redaction_langgraph.message_context import (
+        build_pre_model_hook,
+        langgraph_compaction_enabled,
+    )
     from redaction_langgraph.tools import build_langgraph_tools
 
     llm = _build_llm()
     tools = build_langgraph_tools(session_hash)
-    graph = create_react_agent(llm, tools)
+    hook = None
+    if langgraph_compaction_enabled():
+        hook = build_pre_model_hook(aggressive=aggressive_compaction)
+    graph = create_react_agent(llm, tools, pre_model_hook=hook)
     return graph, SystemMessage(content=_SYSTEM_PROMPT)
 
 

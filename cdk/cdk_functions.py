@@ -3143,7 +3143,7 @@ def format_pi_public_urls(
 
 
 def _apply_pi_root_path_env(env: Dict[str, str], pi_root_path: str) -> None:
-    # The agent app only consumes AGENT_ROOT_PATH (see agent-redact/pi/gradio_app.py:
+    # The agent app only consumes AGENT_ROOT_PATH (see agent-redact/shared/gradio_app.py:
     # launch_pi_ui). ROOT_PATH / FASTAPI_ROOT_PATH are the *main* redaction app's
     # variables; setting them on the agent container is redundant and can conflict.
     if pi_root_path:
@@ -3701,10 +3701,10 @@ def build_pi_agent_container_environment(
     return env
 
 
-# Gradio mounted on FastAPI (tools.gradio_platform.mount_or_launch); matches agent-redact/pi/start.sh.
+# Gradio mounted on FastAPI (tools.gradio_platform.mount_or_launch); matches agent-redact/shared/start.sh.
 AGENT_ECS_APP_START_CMD = (
     "python3 agent-redact/pi/pi_agent_config.py && "
-    "exec uvicorn gradio_app:app --app-dir agent-redact/pi "
+    "exec uvicorn gradio_app:app --app-dir agent-redact/shared "
     "--host 0.0.0.0 --port ${AGENT_GRADIO_PORT:-7862} "
     '--proxy-headers --forwarded-allow-ips "*"'
 )

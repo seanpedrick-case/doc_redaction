@@ -131,7 +131,7 @@ def ensure_pi_workdir(repo_root: Path | None = None) -> str:
     Resolve ``AGENT_WORKDIR`` (monorepo root for skills/ and Pi RPC cwd).
 
     - Explicit ``AGENT_WORKDIR`` wins when the partnership prompt template exists there.
-    - Else use the checkout root (``agent-redact/pi`` → parents[2]).
+    - Else use the checkout root (``agent-redact/shared`` → parents[2]).
     - Docker images set ``AGENT_WORKDIR=/workspace/doc_redaction`` via env or ``start.sh``.
     """
     root = (repo_root or Path(__file__).resolve().parents[2]).resolve()

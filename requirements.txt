@@ -7,7 +7,7 @@ bleach<=6.4.0
 polars<=1.38.1
 pyarrow<=24.0.0
 openpyxl<=3.1.5
-boto3<=1.43.36
+boto3<=1.43.47
 python-dotenv<=1.2.2
 defusedxml<=0.7.1
 Faker<=40.8.0
@@ -54,8 +54,8 @@ pytest<=9.0.3
 pytest-cov<=7.1.0
 
 # --- LLM libraries ---
-google-genai<=1.73.0
-openai<=2.44.0
+google-genai<=2.11.0
+openai<=2.45.0
 
 # --- PyTorch (CUDA 12.8) ---
 --extra-index-url https://download.pytorch.org/whl/cu128

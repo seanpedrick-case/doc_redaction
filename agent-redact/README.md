@@ -4,12 +4,15 @@ Supports three orchestration backends via `AGENT_ORCHESTRATOR` (`pi` default, `l
 
 | Path | Purpose |
 |------|---------|
-| [`pi/`](pi/) | Gradio UI, Pi RPC client, remote redaction helpers, runtime config |
-| [`agentcore/`](agentcore/) | Bedrock AgentCore runtime entrypoint + **[install guide](agentcore/README.md)** |
-| [`pi-agent/`](pi-agent/) | Pi Docker image (`dev` + `runtime` targets), sync script, and manifest |
-| [`requirements_pi_agent.txt`](requirements_pi_agent.txt) | Python deps for the Pi agent image |
+| [`shared/`](shared/) | Gradio UI, runtime factory, session workspace, remote redaction helpers |
+| [`pi/`](pi/) | Pi RPC client, Pi config generation, skills sync, `agent/*.json` templates |
+| [`redaction_langgraph/`](redaction_langgraph/) | LangGraph ReAct agent (curated tools, no shell) |
+| [`agentcore/`](agentcore/) | Bedrock AgentCore runtime + Gradio AgentCore clients + **[install guide](agentcore/README.md)** |
+| [`eval/`](eval/) | Arize AX / Phoenix tracing for LangGraph |
+| [`pi-agent/`](pi-agent/) | Docker image (`dev` + `runtime` targets), sync script, and manifest |
+| [`requirements_agent.txt`](requirements_agent.txt) | Python deps for agent-redact Docker images |
 
-Per-user output isolation uses Gradio `session_hash` subfolders under `AGENT_WORKSPACE_DIR` (see `agent-redact/pi/session_workspace.py`). Enabled by default locally and on HF Spaces. Set `AGENT_SESSION_WORKSPACE=false` only if you want one shared workspace tree for all sessions.
+Per-user output isolation uses Gradio `session_hash` subfolders under `AGENT_WORKSPACE_DIR` (see `agent-redact/shared/session_workspace.py`). Enabled by default locally and on HF Spaces. Set `AGENT_SESSION_WORKSPACE=false` only if you want one shared workspace tree for all sessions.
 
 ## Local Docker
 

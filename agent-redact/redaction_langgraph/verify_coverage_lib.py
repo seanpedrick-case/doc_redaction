@@ -445,6 +445,8 @@ def verify_redaction_coverage(
     pages_in_review = {page_int(r) for r in review_rows}
     pages_in_ocr = {page_int(r) for r in ocr_rows}
     redacted_pdf = _safe_existing_path(redacted_pdf_path) if redacted_pdf_path else None
+    if redacted_pdf is not None and redacted_pdf.suffix.lower() != ".pdf":
+        raise ValueError(f"redacted_pdf_path must be a PDF (.pdf), got: {redacted_pdf}")
     if total_pages is None:
         total_pages = max(pages_in_review | pages_in_ocr | {0})
     if total_pages <= 0 and redacted_pdf is not None and pymupdf is not None:

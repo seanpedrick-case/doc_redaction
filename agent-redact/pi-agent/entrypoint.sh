@@ -26,11 +26,11 @@ echo "Entrypoint environment: AGENT_WORKSPACE_DIR=${AGENT_WORKSPACE_DIR:-} AGENT
 python3 agent-redact/pi/pi_agent_config.py
 if [ "${RUN_FASTAPI:-False}" = "True" ]; then
   exec uvicorn gradio_app:app \
-    --app-dir agent-redact/pi \
+    --app-dir agent-redact/shared \
     --host "${GRADIO_SERVER_NAME:-0.0.0.0}" \
     --port "${AGENT_GRADIO_PORT:-${GRADIO_SERVER_PORT:-7860}}" \
     --proxy-headers \
     --forwarded-allow-ips "*"
 else
-  exec python3 agent-redact/pi/gradio_app.py
+  exec python3 agent-redact/shared/gradio_app.py
 fi
