@@ -678,19 +678,19 @@ SHOW_QUICKSTART = convert_string_to_boolean(
 )
 
 SHOW_SUMMARISATION = convert_string_to_boolean(
-    get_or_create_env_var("SHOW_SUMMARISATION", "False")
+    get_or_create_env_var("SHOW_SUMMARISATION", "True")
 )
 
 SHOW_DUPLICATE_PAGES = convert_string_to_boolean(
-    get_or_create_env_var("SHOW_DUPLICATE_PAGES", "False")
+    get_or_create_env_var("SHOW_DUPLICATE_PAGES", "True")
 )
 
 SHOW_WORD_EXCEL_REDACTION = convert_string_to_boolean(
-    get_or_create_env_var("SHOW_WORD_EXCEL_REDACTION", "False")
+    get_or_create_env_var("SHOW_WORD_EXCEL_REDACTION", "True")
 )
 
 REDACTION_SETTINGS_ACCORDION_OPEN = convert_string_to_boolean(
-    get_or_create_env_var("REDACTION_SETTINGS_ACCORDION_OPEN", "False")
+    get_or_create_env_var("REDACTION_SETTINGS_ACCORDION_OPEN", "True")
 )
 
 # Extraction and PII options open by default:
