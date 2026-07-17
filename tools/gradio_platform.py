@@ -426,7 +426,7 @@ def log_platform_access(session_hash: str, host_name: str = HOST_NAME) -> None:
         logger.warning(
             "Access log write failed (%s); session UI continues. "
             "On ECS/HF agent images set ACCESS_LOGS_FOLDER=/tmp/agent-logs/ "
-            "(see agent-redact/pi/bootstrap_pi_config.py).",
+            "(see agent-redact/shared/bootstrap_pi_config.py).",
             exc,
         )
 

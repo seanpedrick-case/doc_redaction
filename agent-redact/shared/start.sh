@@ -4,7 +4,7 @@ set -euo pipefail
 
 export HOME="${HOME:-/home/user}"
 export AGENT_WORKDIR="${AGENT_WORKDIR:-/workspace/doc_redaction}"
-export PYTHONPATH="${AGENT_WORKDIR}:${AGENT_WORKDIR}/agent-redact/pi:${PYTHONPATH:-}"
+export PYTHONPATH="${AGENT_WORKDIR}:${AGENT_WORKDIR}/agent-redact:${AGENT_WORKDIR}/agent-redact/shared:${AGENT_WORKDIR}/agent-redact/pi:${AGENT_WORKDIR}/agent-redact/agentcore:${PYTHONPATH:-}"
 
 cd "$AGENT_WORKDIR"
 
@@ -25,11 +25,11 @@ python3 agent-redact/pi/pi_agent_config.py
 
 if [ "${RUN_FASTAPI:-False}" = "True" ]; then
   exec uvicorn gradio_app:app \
-    --app-dir agent-redact/pi \
+    --app-dir agent-redact/shared \
     --host "${GRADIO_SERVER_NAME:-0.0.0.0}" \
     --port "${AGENT_GRADIO_PORT:-${GRADIO_SERVER_PORT:-7862}}"
 else
-  python3 agent-redact/pi/gradio_app.py &
+  python3 agent-redact/shared/gradio_app.py &
 fi
 
 wait -n

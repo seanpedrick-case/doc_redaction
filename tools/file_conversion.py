@@ -42,7 +42,12 @@ from tools.helper_functions import (
     get_file_name_without_type,
     read_file,
 )
-from tools.secure_path_utils import secure_file_read, secure_join
+from tools.secure_path_utils import (
+    secure_file_read,
+    secure_file_write,
+    secure_join,
+    secure_zip_member_read,
+)
 from tools.secure_regex_utils import safe_extract_page_number_from_path
 
 IMAGE_NUM_REGEX = re.compile(r"_(\d+)\.png$")
@@ -1944,7 +1949,7 @@ def prepare_image_or_pdf(
                         all_annotations_object[i] = annotation
 
                 # Write the response to a JSON file in output folder
-                out_folder = output_folder + file_path_without_ext + ".json"
+                output_folder + file_path_without_ext + ".json"
                 # with open(out_folder, 'w') as json_file:
                 #     json.dump(all_annotations_object, json_file, separators=(",", ":"))
                 continue
@@ -1953,12 +1958,8 @@ def prepare_image_or_pdf(
         if file_extension in [".zip"]:
 
             # Assume it's a Textract response object. Copy it to the output folder so it can be used later.
-            out_folder = secure_join(
-                output_folder, file_path_without_ext + "_textract.json"
-            )
+            output_textract_json_file_name = file_path_without_ext + "_textract.json"
 
-            # Use shutil to copy the file directly
-            # Open the ZIP file to check its contents
             with zipfile.ZipFile(file_path, "r") as zip_ref:
                 json_files = [
                     f for f in zip_ref.namelist() if f.lower().endswith(".json")
@@ -1966,17 +1967,30 @@ def prepare_image_or_pdf(
 
                 if len(json_files) == 1:  # Ensure only one JSON file exists
                     json_filename = json_files[0]
-
-                    # Extract the JSON file to the same directory as the ZIP file
-                    extracted_path = secure_join(
-                        os.path.dirname(file_path), json_filename
-                    )
-                    zip_ref.extract(json_filename, os.path.dirname(file_path))
-
-                    # Move the extracted JSON to the intended output location
-                    shutil.move(extracted_path, out_folder)
-
-                    textract_output_found = True
+                    try:
+                        json_bytes = secure_zip_member_read(
+                            zip_ref,
+                            json_filename,
+                            os.path.dirname(file_path),
+                        )
+                        secure_file_write(
+                            output_folder,
+                            output_textract_json_file_name,
+                            json_bytes,
+                            mode="wb",
+                        )
+                    except (
+                        ValueError,
+                        PermissionError,
+                        FileNotFoundError,
+                        OSError,
+                    ) as exc:
+                        print(
+                            "Skipping file: unsafe or unreadable zip member "
+                            f"{json_filename!r}: {exc}"
+                        )
+                    else:
+                        textract_output_found = True
                 else:
                     print(
                         f"Skipping file: Expected 1 JSON file, found {len(json_files)}"

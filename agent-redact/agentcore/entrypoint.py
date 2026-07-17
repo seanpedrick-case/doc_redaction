@@ -8,7 +8,13 @@ from pathlib import Path
 _AGENTCORE_DIR = Path(__file__).resolve().parent
 _AGENT_REDACT = _AGENTCORE_DIR.parent
 _REPO_ROOT = _AGENT_REDACT.parent
-for path in (_REPO_ROOT, _AGENT_REDACT, _AGENT_REDACT / "pi", _AGENTCORE_DIR):
+for path in (
+    _REPO_ROOT,
+    _AGENT_REDACT,
+    _AGENT_REDACT / "shared",
+    _AGENT_REDACT / "pi",
+    _AGENTCORE_DIR,
+):
     text = str(path)
     if text not in sys.path:
         sys.path.insert(0, text)

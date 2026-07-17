@@ -28,6 +28,9 @@ RUNTIME_DEPENDENCIES: dict[str, str] = {
     "langchain-aws": ">=1.0.0",
     "pymupdf": ">=1.24.0",
     "pandas": ">=2.0.0",
+    "arize-otel": ">=0.9.0",
+    "arize-phoenix-otel": ">=0.16.0",
+    "openinference-instrumentation-langchain": ">=0.1.0",
 }
 
 MAIN_PY = '''"""doc_redaction LangGraph agent — packaged by agent-redact/agentcore/package_runtime.py."""
@@ -38,8 +41,8 @@ import sys
 from pathlib import Path
 
 _APP_ROOT = Path(__file__).resolve().parent
-_PI_DIR = _APP_ROOT / "pi"
-for path in (_APP_ROOT, _PI_DIR):
+_SHARED_DIR = _APP_ROOT / "shared"
+for path in (_APP_ROOT, _SHARED_DIR):
     text = str(path)
     if text not in sys.path:
         sys.path.insert(0, text)
@@ -169,13 +172,19 @@ def package_runtime(
         dry_run=dry_run,
     )
 
-    pi_dest = target / "pi"
+    _copy_tree(
+        agent_redact / "eval",
+        target / "eval",
+        dry_run=dry_run,
+    )
+
+    shared_dest = target / "shared"
     for name in ("remote_redaction.py",):
-        _copy_file(agent_redact / "pi" / name, pi_dest / name, dry_run=dry_run)
+        _copy_file(agent_redact / "shared" / name, shared_dest / name, dry_run=dry_run)
 
     _copy_file(
         agentcore / "bundle_support" / "session_workspace.py",
-        pi_dest / "session_workspace.py",
+        shared_dest / "session_workspace.py",
         dry_run=dry_run,
     )
 
@@ -209,6 +218,16 @@ AWS_REGION=eu-west-2
 AGENT_WORKSPACE_DIR=/tmp/agentcore-workspace
 AGENT_DEFAULT_OCR_METHOD=paddle
 AGENT_DEFAULT_PII_METHOD=Local
+# Optional Arize AX / Phoenix tracing for in-process LangGraph
+# (see agent-redact/eval/arize_monitoring.py).
+# ARIZE_TRACING_ENABLED=true
+# ARIZE_BACKEND=ax
+# ARIZE_BACKEND=phoenix
+# PHOENIX_COLLECTOR_ENDPOINT=http://localhost:6006
+# ARIZE_SPACE_ID=
+# ARIZE_API_KEY=
+# ARIZE_PROJECT_NAME=doc-redaction-langgraph
+# ARIZE_ENDPOINT=europe
 """
     if dry_run:
         log(f"  write {env_example}")

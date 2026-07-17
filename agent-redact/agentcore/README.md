@@ -33,7 +33,7 @@ There is **no HTTP invocation URL** for a Harness — configure the **ARN** and 
 
 ## What `AGENTCORE_RUNTIME_URL` is
 
-In this repo, set the **base URL only** (no trailing slash, **no** `/invocations` suffix). The Gradio client in [`agentcore_runtime.py`](../pi/agentcore_runtime.py) calls:
+In this repo, set the **base URL only** (no trailing slash, **no** `/invocations` suffix). The Gradio client in [`agentcore_runtime.py`](agentcore_runtime.py) calls:
 
 ```text
 {AGENTCORE_RUNTIME_URL}/invocations
@@ -130,7 +130,7 @@ Do **not** only rename `entrypoint.py` to `main.py`. The CLI already generates `
 
 1. Open the generated `app/RedactionAgent/main.py`.
 2. Replace its handler logic with the code from [`entrypoint.py`](entrypoint.py) in this repo (the `@app.entrypoint` async `handler` and `BedrockAgentCoreApp` setup).
-3. Add dependencies to `app/RedactionAgent/pyproject.toml` (e.g. `bedrock-agentcore`, `langgraph`, `langchain-*`) matching [`requirements_pi_agent.txt`](../requirements_pi_agent.txt).
+3. Add dependencies to `app/RedactionAgent/pyproject.toml` (e.g. `bedrock-agentcore`, `langgraph`, `langchain-*`) matching [`requirements_agent.txt`](../requirements_agent.txt).
 4. **Package monorepo code for deploy** — the generated project does not automatically include `redaction_langgraph/`, `tools/`, or `skills/`. Typical approaches:
    - **Container build** (`--build Container`): copy or mount the needed paths from `doc_redaction` in the Dockerfile the CLI scaffolds; or
    - **Vendor** `agent-redact/redaction_langgraph/` and required `tools/` modules into `app/RedactionAgent/` before deploy.
@@ -377,7 +377,7 @@ AGENTCORE_HARNESS_ARN=arn:aws:bedrock-agentcore:eu-west-2:...:harness/YourHarnes
 RUN_AWS_FUNCTIONS=True
 ```
 
-Client: [`agentcore_harness_runtime.py`](../pi/agentcore_harness_runtime.py). Requires a recent `boto3` with `invoke_harness`.
+Client: [`agentcore_harness_runtime.py`](agentcore_harness_runtime.py). Requires a recent `boto3` with `invoke_harness`.
 
 ### CDK installer (non-interactive)
 
@@ -467,4 +467,4 @@ Post-deploy reminder from [`cdk/post_cdk_build_quickstart.py`](../../cdk/post_cd
 - [Get started with the AgentCore CLI](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-cli.html)
 - [HTTP protocol contract (`/invocations`)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-http-protocol-contract.html)
 - [bedrock-agentcore-sdk-python](https://github.com/aws/bedrock-agentcore-sdk-python)
-- Repo: [`agent_runtime.py`](../pi/agent_runtime.py), [`agent-redact/pi/agent/README.md`](../pi/agent/README.md)
+- Repo: [`agent_runtime.py`](../shared/agent_runtime.py), [`agent-redact/pi/agent/README.md`](../pi/agent/README.md)

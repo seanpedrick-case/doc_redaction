@@ -12,9 +12,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-_AGENT_REDACT_ROOT = Path(__file__).resolve().parents[1]
-if str(_AGENT_REDACT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_AGENT_REDACT_ROOT))
+_SHARED_DIR = Path(__file__).resolve().parent
+_AGENT_REDACT_ROOT = _SHARED_DIR.parent
+for _path in (
+    _AGENT_REDACT_ROOT.parent,
+    _AGENT_REDACT_ROOT,
+    _SHARED_DIR,
+    _AGENT_REDACT_ROOT / "pi",
+    _AGENT_REDACT_ROOT / "agentcore",
+):
+    _text = str(_path)
+    if _text not in sys.path:
+        sys.path.insert(0, _text)
 
 
 class AgentRuntimeError(RuntimeError):
@@ -215,7 +224,14 @@ def create_agent_runtime(session_hash: str | None = None) -> AgentRuntime:
     """Factory for the configured orchestration backend."""
     orchestrator = normalize_orchestrator()
     if orchestrator == "langgraph":
-        from langgraph_runtime import LangGraphAgentRuntime
+        # Must run before LangGraph/LangChain imports (OpenInference patch order).
+        try:
+            from eval.arize_monitoring import setup_arize_ax_tracing
+
+            setup_arize_ax_tracing()
+        except ImportError:
+            pass
+        from redaction_langgraph.runtime import LangGraphAgentRuntime
 
         return LangGraphAgentRuntime(session_hash=session_hash)
     if orchestrator == "agentcore":

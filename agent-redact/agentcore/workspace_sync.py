@@ -20,7 +20,7 @@ def _ensure_session_workspace(session_hash: str | None) -> Path:
     try:
         from bundle_support.session_workspace import ensure_session_workspace
     except ImportError:
-        from pi.session_workspace import (
+        from session_workspace import (
             ensure_session_workspace,  # type: ignore[no-redef]
         )
 

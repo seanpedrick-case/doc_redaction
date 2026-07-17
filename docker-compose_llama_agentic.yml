@@ -56,7 +56,7 @@ x-pi-agent-common: &pi-agent-common
   working_dir: /workspace/doc_redaction
   stdin_open: true
   tty: true
-  entrypoint: ["/bin/bash", "/workspace/doc_redaction/agent-redact/pi/start.sh"]
+  entrypoint: ["/bin/bash", "/workspace/doc_redaction/agent-redact/shared/start.sh"]
   networks:
     - redaction-net-llama
 
@@ -70,7 +70,7 @@ x-pi-agent-env: &pi-agent-env
   GRADIO_SERVER_NAME: ${GRADIO_SERVER_NAME:-0.0.0.0}
   AGENT_GRADIO_PORT: ${AGENT_GRADIO_PORT:-7862}
   GRADIO_SERVER_PORT: ${GRADIO_SERVER_PORT:-7862}
-  PYTHONPATH: /workspace/doc_redaction:/workspace/doc_redaction/agent-redact/pi
+  PYTHONPATH: /workspace/doc_redaction:/workspace/doc_redaction/agent-redact:/workspace/doc_redaction/agent-redact/shared:/workspace/doc_redaction/agent-redact/pi:/workspace/doc_redaction/agent-redact/agentcore
   AGENT_WORKSPACE_DIR: /home/user/app/workspace
   # AGENT_DEFAULT_PROVIDER: ${AGENT_DEFAULT_PROVIDER:-llama-cpp}
   # AGENT_DEFAULT_MODEL: ${AGENT_DEFAULT_MODEL:-}
@@ -180,6 +180,9 @@ services:
       - "1"
       - --presence-penalty
       - "0.0"
+      - --jinja
+      - --chat-template-file
+      - /templates/chat_template.jinja
       - --chat-template-kwargs
       - "{\"preserve_thinking\": true}"
       - --host
@@ -205,6 +208,7 @@ services:
       - "8000:8080"
     volumes:
       - ./models:/models
+      - ./skills/chat_template.jinja:/templates/chat_template.jinja:ro
       - hf-llama-cache-qwen36-27b:/root/.cache/llama.cpp
       - hf-hub-cache-qwen36-27b:/root/.cache/huggingface
     pull_policy: always
@@ -257,6 +261,9 @@ services:
       - "1.5"
       - --repeat-penalty
       - "1"
+      - --jinja
+      - --chat-template-file
+      - /templates/chat_template.jinja
       - --chat-template-kwargs
       - "{\"preserve_thinking\": true}"
       - --host
@@ -280,6 +287,7 @@ services:
       - "8005:8080"
     volumes:
       - ./models:/models
+      - ./skills/chat_template.jinja:/templates/chat_template.jinja:ro
       - hf-llama-cache-qwen36-35b:/root/.cache/llama.cpp
       - hf-hub-cache-qwen36-35b:/root/.cache/huggingface
     pull_policy: always

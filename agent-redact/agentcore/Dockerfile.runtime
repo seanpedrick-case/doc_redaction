@@ -12,7 +12,7 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV APP_TYPE=agent
 ENV APP_HOME=/app
-ENV PYTHONPATH=${APP_HOME}:${APP_HOME}/agent-redact:${APP_HOME}/agent-redact/pi:${APP_HOME}/agent-redact/agentcore
+ENV PYTHONPATH=${APP_HOME}:${APP_HOME}/agent-redact:${APP_HOME}/agent-redact/shared:${APP_HOME}/agent-redact/pi:${APP_HOME}/agent-redact/agentcore
 ENV AGENT_WORKSPACE_DIR=/tmp/agentcore-workspace
 ENV AWS_REGION=eu-west-2
 ENV AWS_DEFAULT_REGION=${AWS_REGION}
@@ -23,9 +23,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR ${APP_HOME}
 
-COPY agent-redact/requirements_pi_agent.txt /tmp/requirements_pi_agent.txt
-RUN pip install --no-cache-dir -r /tmp/requirements_pi_agent.txt \
-    && rm /tmp/requirements_pi_agent.txt
+COPY agent-redact/requirements_agent.txt /tmp/requirements_agent.txt
+RUN pip install --no-cache-dir -r /tmp/requirements_agent.txt \
+    && rm /tmp/requirements_agent.txt
 
 COPY agent-redact/ ${APP_HOME}/agent-redact/
 COPY config/agent.env.example ${APP_HOME}/config/agent.env.example

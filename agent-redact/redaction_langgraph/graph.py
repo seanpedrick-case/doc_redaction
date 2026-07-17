@@ -13,24 +13,37 @@ Use only the provided tools — never run shell commands or access paths outside
 **Do not read `.pi/skills/` or `skills/` files** — skill playbooks are for the Pi coding agent only.
 Start with `list_workspace_files` and `doc_redact` when the user prompt includes a document path.
 
+TOOL ARGUMENT FORMAT (critical — wrong format wastes the whole turn):
+  Args are flat JSON strings. Nesting is WRONG.
+    Correct:  {"pdf_relative_path": "file.pdf"}
+    Correct:  {"relative_path": "fix_review.py", "content": "import csv\\n..."}
+    Wrong:    {"pdf_relative_path": {}}
+    Wrong:    {"pdf_relative_path": {"relative_path": "file.pdf"}}
+    Wrong:    {"relative_path": {"relative_path": "fix_review.py"}}
+  After the same tool error twice, stop and rebuild args from scratch using flat strings.
+
 **Pass 1 is not complete after doc_redact.** You must finish the full workflow in this turn unless the user
 explicitly asks to stop:
 
 1. list_workspace_files — locate the uploaded PDF
 2. doc_redact — initial redaction; artifacts land under redact/<document>/output_redact/
+   (result includes review_csv_relative_path and ocr_words_csv_relative_path when available)
 3. Edit the review CSV to satisfy **User redaction requirements**:
-   - read_workspace_text / write_workspace_text for small edits, or
-   - write_workspace_text a fix_policy.py script, then run_workspace_python_script
-   - Preserve CSV headers, utf-8-sig encoding, and bbox values in [0, 1]
-4. verify_coverage — pre-apply check on the review CSV (+ auto-discovered word OCR CSV).
-   Fix issues until pass_strict is true (or report why it cannot be reached).
+   - Write ONE compact fix_policy.py (derive rows from OCR/review CSV — do not hard-code bboxes)
+   - Call run_workspace_python_script IMMEDIATELY — never rewrite the same .py without running it
+   - Keep each write_workspace_text body modest (under ~80 lines / ~24KB)
+   - Preserve CSV headers, utf-8-sig encoding, and numeric bbox values in [0, 1]
+     (never "placeholder", "N/A", or empty strings for xmin/xmax/ymin/ymax)
+   - color column must be a tuple string like "(0, 0, 0)" with ints 0–255
+     (invalid colors are auto-repaired to black when possible)
+4. verify_coverage — pre-apply check on the review CSV (word OCR CSV auto-discovered;
+   pass ocr_words_csv_relative_path only if discovery fails). Fix until pass_strict is true.
 5. review_apply — **once** on the original PDF + edited review CSV; save under
    redact/<document>/review/output_review_final/
 6. verify_coverage again on the **post-apply** *_redacted.pdf from review_apply
+   (pass redacted_pdf_relative_path as that PDF only — never the review CSV; omit it for pre-apply)
 
 Do not stop after step 2 or after a failed verify_coverage — read tool errors, fix paths/CSV, and continue.
-After write_workspace_text saves a .py script, call run_workspace_python_script immediately — never rewrite the same script.
-Tool arguments must be plain strings (relative_path="fix_review.py", content="import csv...") — not nested {"relative_path": {"relative_path": ...}} objects.
 Prefer relative paths within the session workspace. Download artifacts via tool results; never assume shared disk
 with the remote doc_redaction server except files already saved in your workspace.
 """
@@ -67,21 +80,41 @@ def _build_llm():
         or os.environ.get("AGENT_DEFAULT_MODEL")
         or "local"
     ).strip()
+    from redaction_langgraph.message_context import langgraph_max_output_tokens
+
     return ChatOpenAI(
         base_url=base_url,
         api_key=os.environ.get("OPENAI_API_KEY") or "not-needed",
         model=model_id,
         temperature=0.2,
+        max_tokens=langgraph_max_output_tokens(),
     )
 
 
-def build_redaction_agent(session_hash: str | None):
-    """Compile a ReAct agent with session-scoped tools."""
+def build_redaction_agent(
+    session_hash: str | None,
+    *,
+    aggressive_compaction: bool = False,
+):
+    """Compile a ReAct agent with session-scoped tools.
+
+    When compaction is enabled (default), attaches a ``pre_model_hook`` that
+    trims LLM input to fit ``AGENT_LLAMA_CONTEXT_WINDOW`` without overwriting
+    the full graph message history. Pass ``aggressive_compaction=True`` for
+    the one-shot overflow retry path (halved token budget).
+    """
+    from redaction_langgraph.message_context import (
+        build_pre_model_hook,
+        langgraph_compaction_enabled,
+    )
     from redaction_langgraph.tools import build_langgraph_tools
 
     llm = _build_llm()
     tools = build_langgraph_tools(session_hash)
-    graph = create_react_agent(llm, tools)
+    hook = None
+    if langgraph_compaction_enabled():
+        hook = build_pre_model_hook(aggressive=aggressive_compaction)
+    graph = create_react_agent(llm, tools, pre_model_hook=hook)
     return graph, SystemMessage(content=_SYSTEM_PROMPT)
 
 
