@@ -2994,7 +2994,7 @@ def build_ui():
                             ),
                         )
                         hf_token = gr.Textbox(
-                            label="HF token for redaction space (optional, neededfor private spaces)",
+                            label="HF token for redaction space (optional, needed for private spaces)",
                             type="password",
                             placeholder="Uses HF_TOKEN Space secret if empty",
                             visible=IS_HF_SPACE,
