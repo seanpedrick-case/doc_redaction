@@ -2960,9 +2960,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                             label="Output summary", scale=1, lines=4
                         )
                     with gr.Column(scale=2):
-                        output_file = gr.File(
-                            label="Output files", scale=2
-                        )  # , height=FILE_INPUT_HEIGHT)
+                        output_file = gr.File(label="Output files", scale=2)
 
                 go_to_review_redactions_tab_btn = gr.Button(
                     "Review and modify redactions", variant="primary", scale=1
@@ -2988,9 +2986,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ###
         with gr.Tab("Review redactions", id=2):
 
-            with gr.Accordion(
+            review_upload_accordion = gr.Accordion(
                 label="Upload PDFs/images and OCR results for review", open=False
-            ):
+            )
+            with review_upload_accordion:
                 with gr.Row(equal_height=True):
                     with gr.Column(scale=2):
                         input_pdf_for_review = gr.File(
@@ -7168,6 +7167,15 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             review_file_df,
         ],
         show_progress_on=[input_pdf_for_review],
+        api_visibility="undocumented",
+    )
+
+    # Open the review upload accordion so apply outputs are visible
+    annotation_button_apply.click(
+        fn=lambda: gr.update(open=True),
+        inputs=None,
+        outputs=[review_upload_accordion],
+        queue=False,
         api_visibility="undocumented",
     )
 
