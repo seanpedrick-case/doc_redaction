@@ -10,9 +10,13 @@ from pi_test_support import ensure_agent_redact_paths
 ensure_agent_redact_paths()
 
 from redaction_langgraph.workflow_continue import (  # noqa: E402
+    build_identical_error_breaker_prompt,
     build_tool_call_json_retry_prompt,
     build_workflow_continue_prompt,
+    consecutive_python_writes_without_run,
+    identical_tool_error_streak,
     redaction_workflow_incomplete,
+    tool_output_error_signature,
 )
 
 
@@ -119,6 +123,67 @@ def test_tool_call_json_retry_prompt_asks_for_compact_script():
     assert "write_workspace_text" in prompt
     assert "run_workspace_python_script" in prompt
     assert "compact" in prompt.lower() or "SHORT" in prompt
+
+
+def test_identical_tool_error_streak_detects_repeat():
+    err = json.dumps({"error": "pdf_relative_path must be a plain string"})
+    outputs = [
+        ("doc_redact", err),
+        ("doc_redact", err),
+    ]
+    streak = identical_tool_error_streak(outputs, min_streak=2)
+    assert streak == ("doc_redact", tool_output_error_signature(err))
+
+
+def test_identical_tool_error_streak_ignores_success():
+    outputs = [
+        ("doc_redact", json.dumps({"error": "bad"})),
+        ("doc_redact", json.dumps({"ok": True})),
+    ]
+    assert identical_tool_error_streak(outputs, min_streak=2) is None
+
+
+def test_continue_prompt_uses_error_breaker_on_streak():
+    err = json.dumps({"error": "Tool relative_path is empty."})
+    outputs = [
+        ("write_workspace_text", err),
+        ("write_workspace_text", err),
+    ]
+    prompt = build_workflow_continue_prompt({"write_workspace_text"}, outputs)
+    assert "STOP" in prompt
+    assert "flat" in prompt.lower() or "nested" in prompt.lower()
+    assert "write_workspace_text" in prompt
+
+
+def test_build_identical_error_breaker_prompt_includes_error():
+    err = json.dumps({"error": "nested object not allowed"})
+    prompt = build_identical_error_breaker_prompt(
+        "doc_redact",
+        [("doc_redact", err)],
+    )
+    assert "doc_redact" in prompt
+    assert "nested object not allowed" in prompt
+
+
+def test_consecutive_python_writes_without_run():
+    outputs = [
+        ("write_workspace_text", _write_out("a.py")),
+        ("write_workspace_text", _write_out("a.py")),
+        ("write_workspace_text", _write_out("a.py")),
+    ]
+    path, count = consecutive_python_writes_without_run(outputs)
+    assert path == "a.py"
+    assert count == 3
+
+
+def test_continue_prompt_write_storm_nudge():
+    outputs = [
+        ("write_workspace_text", _write_out("fix_policy.py")),
+        ("write_workspace_text", _write_out("fix_policy.py")),
+    ]
+    prompt = build_workflow_continue_prompt({"write_workspace_text"}, outputs)
+    assert "run_workspace_python_script" in prompt
+    assert "fix_policy.py" in prompt
 
 
 @pytest.mark.parametrize(

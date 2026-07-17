@@ -34,10 +34,13 @@ from redaction_langgraph.message_context import (  # noqa: E402
     reset_trim_stats,
     set_aggressive_trim,
 )
+from redaction_langgraph.tools import reset_langgraph_tool_session_state  # noqa: E402
 from redaction_langgraph.workflow_continue import (  # noqa: E402
     build_tool_call_json_retry_prompt,
     build_workflow_continue_prompt,
+    identical_tool_error_streak,
     langgraph_auto_continue_enabled,
+    langgraph_identical_error_stop_streak,
     langgraph_max_continuations,
     redaction_workflow_incomplete,
 )
@@ -91,6 +94,7 @@ class LangGraphAgentRuntime(AgentRuntime):
         self._messages = []
         self._abort_requested = False
         self._is_compacting = False
+        reset_langgraph_tool_session_state(self._session_hash)
 
     def set_model(self, provider: str, model_id: str) -> dict[str, Any]:
         os.environ["AGENT_DEFAULT_PROVIDER"] = provider
@@ -147,6 +151,7 @@ class LangGraphAgentRuntime(AgentRuntime):
         assistant_chunks: list[str],
         tool_names_seen: set[str],
         tool_outputs: list[tuple[str, str]],
+        loop_break_requested: list[bool] | None = None,
     ) -> Iterator[AgentStreamEvent]:
         if isinstance(msg, AIMessage):
             text = self._stringify_content(msg.content)
@@ -173,6 +178,18 @@ class LangGraphAgentRuntime(AgentRuntime):
                 tool_output=output,
                 is_error=False,
             )
+            stop_streak = langgraph_identical_error_stop_streak()
+            if identical_tool_error_streak(tool_outputs, min_streak=stop_streak):
+                if loop_break_requested is not None:
+                    loop_break_requested[0] = True
+                self._abort_requested = True
+                yield AgentStreamEvent(
+                    kind="status",
+                    text=(
+                        f"Identical tool error repeated {stop_streak} times — "
+                        "breaking retry loop…"
+                    ),
+                )
 
     def _yield_compaction_notice_if_needed(
         self, *, compaction_emitted: list[bool]
@@ -216,6 +233,7 @@ class LangGraphAgentRuntime(AgentRuntime):
         assistant_chunks: list[str],
         tool_names_seen: set[str],
         tool_outputs: list[tuple[str, str]],
+        loop_break_requested: list[bool] | None = None,
     ) -> Iterator[AgentStreamEvent]:
         reset_trim_stats()
         compaction_emitted = [False]
@@ -238,7 +256,18 @@ class LangGraphAgentRuntime(AgentRuntime):
                         assistant_chunks=assistant_chunks,
                         tool_names_seen=tool_names_seen,
                         tool_outputs=tool_outputs,
+                        loop_break_requested=loop_break_requested,
                     )
+            if self._abort_requested:
+                yield AgentStreamEvent(
+                    kind="done",
+                    text=(
+                        "Agent aborted (identical tool-error loop)."
+                        if loop_break_requested and loop_break_requested[0]
+                        else "Agent aborted."
+                    ),
+                )
+                return
         yield from self._yield_compaction_notice_if_needed(
             compaction_emitted=compaction_emitted
         )
@@ -300,8 +329,11 @@ class LangGraphAgentRuntime(AgentRuntime):
                     outputs_at_round_start = len(tool_outputs)
                     overflow_retried = False
                     tool_json_retried = False
+                    loop_break_requested = [False]
+                    user_aborted = False
                     while True:
                         try:
+                            self._abort_requested = False
                             for evt in self._stream_graph_round(
                                 self._graph,
                                 graph_messages,
@@ -309,10 +341,28 @@ class LangGraphAgentRuntime(AgentRuntime):
                                 assistant_chunks=assistant_chunks,
                                 tool_names_seen=tool_names_seen,
                                 tool_outputs=tool_outputs,
+                                loop_break_requested=loop_break_requested,
                             ):
-                                yield evt
                                 if evt.kind == "done":
-                                    return
+                                    if loop_break_requested[0]:
+                                        # Soft stop: keep messages, continue outer rounds.
+                                        yield AgentStreamEvent(
+                                            kind="status",
+                                            text=evt.text
+                                            or "Breaking tool-error loop…",
+                                        )
+                                        break
+                                    user_aborted = True
+                                    yield evt
+                                    break
+                                yield evt
+                            else:
+                                # stream finished without done
+                                break
+                            if user_aborted:
+                                return
+                            if loop_break_requested[0]:
+                                break
                             break
                         except Exception as exc:
                             # Roll back state from the failed stream attempt.
@@ -371,10 +421,18 @@ class LangGraphAgentRuntime(AgentRuntime):
                         # Restore normal (non-aggressive) graph for later rounds.
                         self._rebuild_graph(aggressive_compaction=False)
 
-                    if not redaction_workflow_incomplete(tool_names_seen, tool_outputs):
+                    streak = identical_tool_error_streak(
+                        tool_outputs,
+                        min_streak=langgraph_identical_error_stop_streak(),
+                    )
+                    workflow_incomplete = redaction_workflow_incomplete(
+                        tool_names_seen, tool_outputs
+                    )
+                    if not workflow_incomplete and not streak:
                         break
                     if round_idx >= max_rounds - 1:
                         break
+                    # Always prefer the identical-error / pending-script continue prompt.
                     graph_messages.append(
                         HumanMessage(
                             content=build_workflow_continue_prompt(
@@ -382,6 +440,7 @@ class LangGraphAgentRuntime(AgentRuntime):
                             )
                         )
                     )
+                    self._abort_requested = False
 
                 if assistant_chunks:
                     self._messages.append(

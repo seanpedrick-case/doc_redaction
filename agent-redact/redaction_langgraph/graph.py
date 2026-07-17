@@ -13,28 +13,37 @@ Use only the provided tools — never run shell commands or access paths outside
 **Do not read `.pi/skills/` or `skills/` files** — skill playbooks are for the Pi coding agent only.
 Start with `list_workspace_files` and `doc_redact` when the user prompt includes a document path.
 
+TOOL ARGUMENT FORMAT (critical — wrong format wastes the whole turn):
+  Args are flat JSON strings. Nesting is WRONG.
+    Correct:  {"pdf_relative_path": "file.pdf"}
+    Correct:  {"relative_path": "fix_review.py", "content": "import csv\\n..."}
+    Wrong:    {"pdf_relative_path": {}}
+    Wrong:    {"pdf_relative_path": {"relative_path": "file.pdf"}}
+    Wrong:    {"relative_path": {"relative_path": "fix_review.py"}}
+  After the same tool error twice, stop and rebuild args from scratch using flat strings.
+
 **Pass 1 is not complete after doc_redact.** You must finish the full workflow in this turn unless the user
 explicitly asks to stop:
 
 1. list_workspace_files — locate the uploaded PDF
 2. doc_redact — initial redaction; artifacts land under redact/<document>/output_redact/
+   (result includes review_csv_relative_path and ocr_words_csv_relative_path when available)
 3. Edit the review CSV to satisfy **User redaction requirements**:
-   - read_workspace_text / write_workspace_text for small edits, or
-   - write_workspace_text a compact fix_policy.py, then run_workspace_python_script
-   - Prefer short scripts that derive rows from OCR/review CSV (filter/match by text/page) —
-     do **not** embed dozens of hard-coded bbox dicts in tool arguments (breaks JSON tool calls)
-   - Keep each write_workspace_text body modest (roughly under ~80 lines / a few KB)
-   - Preserve CSV headers, utf-8-sig encoding, and bbox values in [0, 1]
-4. verify_coverage — pre-apply check on the review CSV (+ auto-discovered word OCR CSV).
-   Fix issues until pass_strict is true (or report why it cannot be reached).
+   - Write ONE compact fix_policy.py (derive rows from OCR/review CSV — do not hard-code bboxes)
+   - Call run_workspace_python_script IMMEDIATELY — never rewrite the same .py without running it
+   - Keep each write_workspace_text body modest (under ~80 lines / ~24KB)
+   - Preserve CSV headers, utf-8-sig encoding, and numeric bbox values in [0, 1]
+     (never "placeholder", "N/A", or empty strings for xmin/xmax/ymin/ymax)
+   - color column must be a tuple string like "(0, 0, 0)" with ints 0–255
+     (invalid colors are auto-repaired to black when possible)
+4. verify_coverage — pre-apply check on the review CSV (word OCR CSV auto-discovered;
+   pass ocr_words_csv_relative_path only if discovery fails). Fix until pass_strict is true.
 5. review_apply — **once** on the original PDF + edited review CSV; save under
    redact/<document>/review/output_review_final/
 6. verify_coverage again on the **post-apply** *_redacted.pdf from review_apply
    (pass redacted_pdf_relative_path as that PDF only — never the review CSV; omit it for pre-apply)
 
 Do not stop after step 2 or after a failed verify_coverage — read tool errors, fix paths/CSV, and continue.
-After write_workspace_text saves a .py script, call run_workspace_python_script immediately — never rewrite the same script.
-Tool arguments must be plain strings (relative_path="fix_review.py", content="import csv...") — not nested {"relative_path": {"relative_path": ...}} objects.
 Prefer relative paths within the session workspace. Download artifacts via tool results; never assume shared disk
 with the remote doc_redaction server except files already saved in your workspace.
 """
