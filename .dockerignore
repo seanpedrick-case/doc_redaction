@@ -56,3 +56,4 @@ src/doc_redaction.egg-info/*
 docker_compose/*
 skills/example_prompts/*
 agent-redact/RedactionAgent/*
+.env

@@ -42,7 +42,12 @@ from tools.helper_functions import (
     get_file_name_without_type,
     read_file,
 )
-from tools.secure_path_utils import secure_file_read, secure_join
+from tools.secure_path_utils import (
+    secure_file_read,
+    secure_file_write,
+    secure_join,
+    secure_zip_member_read,
+)
 from tools.secure_regex_utils import safe_extract_page_number_from_path
 
 IMAGE_NUM_REGEX = re.compile(r"_(\d+)\.png$")
@@ -473,7 +478,7 @@ def process_file_for_image_creation(
 
     # Check if the file is an image type
     if file_extension in [".jpg", ".jpeg", ".png"]:
-        print(f"{file_path} is an image file.")
+        print("File is an image file.")
         progress(0.1, desc="Processing image file")
         # Perform image processing here
         img_object = [file_path]  # [Image.open(file_path)]
@@ -507,7 +512,7 @@ def process_file_for_image_creation(
         )
 
     else:
-        print(f"{file_path} is not an image or PDF file.")
+        print("File is not an image or PDF file.")
         img_path = list()
         image_sizes_width = list()
         image_sizes_height = list()
@@ -621,7 +626,7 @@ def get_input_file_names(
                 full_file_name = file_path
 
     all_relevant_files_str = ", ".join(all_relevant_files)
-    print("file_name_with_extension on document upload:", file_name_with_extension)
+    # print("file_name_with_extension on document upload:", file_name_with_extension)
     return (
         all_relevant_files_str,
         file_name_with_extension,
@@ -869,6 +874,34 @@ def _get_bbox(d: dict) -> list:
     return d.get("bounding_box") or d.get("boundingBox") or [0, 0, 0, 0]
 
 
+WORD_LEVEL_OCR_DF_COLUMNS = [
+    "page",
+    "line",
+    "word_text",
+    "word_x0",
+    "word_y0",
+    "word_x1",
+    "word_y1",
+    "word_conf",
+    "line_text",
+    "line_x0",
+    "line_y0",
+    "line_x1",
+    "line_y1",
+    "line_conf",
+    "line_model",
+]
+
+
+def ensure_word_level_ocr_df_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Return a copy with the standard word-level OCR CSV schema (adds missing columns)."""
+    out = df.copy()
+    for col in WORD_LEVEL_OCR_DF_COLUMNS:
+        if col not in out.columns:
+            out[col] = ""
+    return out
+
+
 def word_level_ocr_output_to_dataframe(ocr_results: dict) -> pd.DataFrame:
     """
     Convert a json of ocr results to a dataframe
@@ -915,6 +948,8 @@ def word_level_ocr_output_to_dataframe(ocr_results: dict) -> pd.DataFrame:
                     }
                 )
 
+    if not rows:
+        return pd.DataFrame(columns=WORD_LEVEL_OCR_DF_COLUMNS)
     return pd.DataFrame(rows)
 
 
@@ -1374,6 +1409,9 @@ def prepare_image_or_pdf_with_efficient_ocr(
     progress: Progress | None = None,
 ):
     """When EFFICIENT_OCR is enabled, skip loading all images; they are created later only for pages that need OCR."""
+    from tools.malware_scan import require_files_malware_scanned
+
+    require_files_malware_scanned(file_paths)
     prepare_images = (
         False
         if efficient_ocr
@@ -1565,7 +1603,7 @@ def prepare_image_or_pdf(
         file_path_without_ext = get_file_name_without_type(file_path)
         file_name_with_ext = os.path.basename(file_path)
 
-        print("Loading file:", file_name_with_ext)
+        # print("Loading file:", file_name_with_ext)
 
         if not file_path:
             out_message = "Please select at least one file."
@@ -1578,7 +1616,7 @@ def prepare_image_or_pdf(
 
         # If a pdf, load as a pymupdf document
         if is_pdf(file_path):
-            print(f"File {file_name_with_ext} is a PDF")
+            print("File is a PDF")
             pymupdf_doc = pymupdf.open(file_path)
 
             converted_file_path = file_path
@@ -1647,7 +1685,7 @@ def prepare_image_or_pdf(
                 )
 
         elif is_pdf_or_image(file_path):  # Alternatively, if it's an image
-            print(f"File {file_name_with_ext} is an image")
+            print("File is an image")
             # Check if the file is an image type and the user selected text ocr option
             if (
                 file_extension in [".jpg", ".jpeg", ".png"]
@@ -1911,7 +1949,7 @@ def prepare_image_or_pdf(
                         all_annotations_object[i] = annotation
 
                 # Write the response to a JSON file in output folder
-                out_folder = output_folder + file_path_without_ext + ".json"
+                output_folder + file_path_without_ext + ".json"
                 # with open(out_folder, 'w') as json_file:
                 #     json.dump(all_annotations_object, json_file, separators=(",", ":"))
                 continue
@@ -1920,12 +1958,8 @@ def prepare_image_or_pdf(
         if file_extension in [".zip"]:
 
             # Assume it's a Textract response object. Copy it to the output folder so it can be used later.
-            out_folder = secure_join(
-                output_folder, file_path_without_ext + "_textract.json"
-            )
+            output_textract_json_file_name = file_path_without_ext + "_textract.json"
 
-            # Use shutil to copy the file directly
-            # Open the ZIP file to check its contents
             with zipfile.ZipFile(file_path, "r") as zip_ref:
                 json_files = [
                     f for f in zip_ref.namelist() if f.lower().endswith(".json")
@@ -1933,27 +1967,40 @@ def prepare_image_or_pdf(
 
                 if len(json_files) == 1:  # Ensure only one JSON file exists
                     json_filename = json_files[0]
-
-                    # Extract the JSON file to the same directory as the ZIP file
-                    extracted_path = secure_join(
-                        os.path.dirname(file_path), json_filename
-                    )
-                    zip_ref.extract(json_filename, os.path.dirname(file_path))
-
-                    # Move the extracted JSON to the intended output location
-                    shutil.move(extracted_path, out_folder)
-
-                    textract_output_found = True
+                    try:
+                        json_bytes = secure_zip_member_read(
+                            zip_ref,
+                            json_filename,
+                            os.path.dirname(file_path),
+                        )
+                        secure_file_write(
+                            output_folder,
+                            output_textract_json_file_name,
+                            json_bytes,
+                            mode="wb",
+                        )
+                    except (
+                        ValueError,
+                        PermissionError,
+                        FileNotFoundError,
+                        OSError,
+                    ) as exc:
+                        print(
+                            "Skipping file: unsafe or unreadable zip member "
+                            f"{json_filename!r}: {exc}"
+                        )
+                    else:
+                        textract_output_found = True
                 else:
                     print(
-                        f"Skipping {file_path}: Expected 1 JSON file, found {len(json_files)}"
+                        f"Skipping file: Expected 1 JSON file, found {len(json_files)}"
                     )
 
         converted_file_paths.append(converted_file_path)
         image_file_paths.extend(image_file_path)
 
         toc = time.perf_counter()
-        out_time = f"File '{file_name_with_ext}' prepared in {toc - tic:0.1f} seconds."
+        out_time = f"File prepared in {toc - tic:0.1f} seconds."
 
         print(out_time)
 

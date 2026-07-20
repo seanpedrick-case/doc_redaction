@@ -73,3 +73,4 @@ skills/example_prompts/*
 .pi/sessions/
 agent-redact/pi/agent/sessions/
 agent-redact/RedactionAgent/*
+.env

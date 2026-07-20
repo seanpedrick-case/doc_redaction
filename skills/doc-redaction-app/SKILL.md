@@ -218,7 +218,7 @@ client.predict(
 - URL: `{BASE_URL}/gradio_api/file={urllib.parse.quote(path, safe="")}`. Always encode the path; spaces and special characters break naive URLs.
 - Gated HF Spaces: send **`Authorization: Bearer <HF_TOKEN>`** on download requests as well as on the client.
 - Paths may be strings or nested dicts with a `"path"` key; walk recursively if needed (see `extract_file_like_paths` in `mcp_doc_redaction/gradio_transport.py`).
-- **Windows / same-machine Pi agent:** paths look like `C:\...\output\...` or `C:\...\workspace\.gradio_uploads\...` — collectors that only accept `/` prefixes will see an **empty list**. Call **`/doc_redact`** without a custom `output_dir`, then copy into your workspace `output_redact/` with **`shutil.copy2`** when paths share a disk (`fetch_redaction_files`). HTTP `gradio_api/file=` may return **403** for `.gradio_uploads` unless the app exposes that folder in `allowed_paths`. Helpers: `agent-redact/pi/remote_redaction.py` (`resolve_redaction_output_paths`, `extract_server_paths`, `fetch_redaction_files`).
+- **Windows / same-machine Pi agent:** paths look like `C:\...\output\...` or `C:\...\workspace\.gradio_uploads\...` — collectors that only accept `/` prefixes will see an **empty list**. Call **`/doc_redact`** without a custom `output_dir`, then copy into your workspace `output_redact/` with **`shutil.copy2`** when paths share a disk (`fetch_redaction_files`). HTTP `gradio_api/file=` may return **403** for `.gradio_uploads` unless the app exposes that folder in `allowed_paths`. Helpers: `agent-redact/shared/remote_redaction.py` (`resolve_redaction_output_paths`, `extract_server_paths`, `fetch_redaction_files`).
 
 ### 5) `/redact_document` gotchas (initial run)
 

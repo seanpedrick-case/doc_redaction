@@ -1,7 +1,7 @@
-# Python stack for the pi-agent Docker image (orchestration + Pi Gradio UI).
+# Python stack for agent-redact Docker images (pi-agent + AgentCore runtime).
 #
 # Excludes spaCy, Presidio, and OCR stacks — heavy redaction runs in redaction-app-llama.
-# Includes full Gradio for agent-redact/pi/gradio_app.py (chat frontend over Pi RPC mode).
+# Includes full Gradio for agent-redact/shared/gradio_app.py (chat frontend for all orchestrators).
 #
 # Version caps align with requirements_lightweight.txt where packages overlap.
 
@@ -32,13 +32,19 @@ langchain-openai<=1.3.3
 langchain-aws<=1.6.1
 langchain-google-genai<=4.2.6
 
+# --- Arize AX / Phoenix tracing (optional; LangGraph only — see config/agent.env.example ARIZE_*) ---
+arize-otel>=0.9.0
+arize-phoenix-otel>=0.16.0
+arize-phoenix>=18.0.0
+openinference-instrumentation-langchain>=0.1.0
+
 # --- General utilities ---
 tabulate<=0.10.0
 rapidfuzz<=3.14.5
 defusedxml<=0.7.1
 
 # --- Shared platform features (logging, Cognito, S3 via tools/) ---
-boto3<=1.43.36
+boto3<=1.43.47
 bleach<=6.4.0
 fastapi>=0.115.0
 uvicorn>=0.34.0

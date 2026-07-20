@@ -1,11 +1,8 @@
 """Tests for Pi Gradio chat segment deduplication (in-progress tool snapshots)."""
 
-import sys
-from pathlib import Path
+from pi_test_support import ensure_agent_redact_paths
 
-_PI_SRC = Path(__file__).resolve().parents[1] / "agent-redact" / "pi"
-if str(_PI_SRC) not in sys.path:
-    sys.path.insert(0, str(_PI_SRC))
+ensure_agent_redact_paths()
 
 import gradio as gr
 from gradio_app import (
@@ -151,6 +148,43 @@ def test_apply_event_done_skips_finish_notice_when_retry_pending():
     assert history == [{"role": "assistant", "content": ""}]
     assert completed_segments == []
     assert streaming_text == ""
+
+
+def test_compaction_events_post_user_notice_to_chat():
+    history = [{"role": "assistant", "content": ""}]
+    activity: list[str] = []
+    start = type(
+        "E",
+        (),
+        {
+            "kind": "compaction_start",
+            "text": "Session context is being summarised to stay within the model limit (overflow).",
+            "tool_name": None,
+            "tool_call_id": None,
+            "tool_args": None,
+            "tool_output": None,
+            "is_error": False,
+            "meta": {},
+        },
+    )()
+    history, activity, *_ = _apply_event(
+        start,
+        history=history,
+        activity=activity,
+        thinking="",
+        tool_output="",
+        tool_heading="",
+        completed_segments=[],
+        streaming_text="",
+        append_finish_notice=False,
+    )
+    assert any(
+        item.get("role") == "user"
+        and "Context compaction" in str(item.get("content", ""))
+        and "summarised" in str(item.get("content", ""))
+        for item in history
+    )
+    assert activity[0].startswith("Session context is being summarised")
 
 
 def test_append_rate_limit_wait_notice_updates_assistant_chat():
@@ -491,12 +525,17 @@ def test_should_queue_only_while_pi_streaming(monkeypatch):
 
 def test_refresh_pi_client_model_calls_set_model(monkeypatch):
     class _Client:
+        running = True
         calls: list[tuple[str, str]] = []
 
         def set_model(self, provider: str, model: str) -> None:
             self.calls.append((provider, model))
 
+        def get_state(self) -> dict:
+            return {}
+
     client = _Client()
+    monkeypatch.setattr("gradio_app.normalize_orchestrator", lambda: "pi")
     monkeypatch.setattr("gradio_app.normalize_provider", lambda _p: "llama-cpp")
     monkeypatch.setattr("gradio_app.resolved_default_model", lambda _p: "gemma_4_31b")
     _refresh_pi_client_model(client)

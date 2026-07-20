@@ -64,6 +64,10 @@ Copy [`config/agent.env.example`](../../../config/agent.env.example) to `config/
 | `AGENT_COMPACTION_ENABLED` | Pi session auto-compaction in `settings.json` (`true` / `false`; unset uses template default, enabled) |
 | `AGENT_COMPACTION_RESERVE_TOKENS` | Optional compaction `reserveTokens` (default `32768` from template) |
 | `AGENT_COMPACTION_KEEP_RECENT_TOKENS` | Optional compaction `keepRecentTokens` (default `20000` from template) |
+| `AGENT_CODING_AGENT_DIR` | Writable directory for generated `models.json` / `settings.json` (HF/ECS: `/tmp/agent-coding`) |
+| `AGENT_SESSION_DIR` | Pi session JSONL directory (HF/ECS: `/tmp/agent-sessions`) |
+| `PI_CODING_AGENT_DIR` | Pi CLI config directory (auto-mirrored from `AGENT_CODING_AGENT_DIR` at startup) |
+| `PI_CODING_AGENT_SESSION_DIR` | Pi CLI session directory (auto-mirrored from `AGENT_SESSION_DIR`; overrides `settings.json`) |
 
 ### Usage logging (CSV / DynamoDB / S3)
 
@@ -161,11 +165,11 @@ When a Pi run completes, the chat shows an **Agent finished** (or **Agent stoppe
 Run the UI locally (outside Docker):
 
 ```powershell
-cd agent-redact/pi
-pip install -r ../requirements_pi_agent.txt
+cd agent-redact/shared
+pip install -r ../requirements_agent.txt
 # Pi orchestration subprocess (required for Apply backend / chat):
 npm install -g @earendil-works/pi-coding-agent
-python pi_agent_config.py
+python ../pi/pi_agent_config.py
 python gradio_app.py
 ```
 
@@ -185,7 +189,7 @@ On **HF Space** (`AGENT_DEPLOYMENT_PROFILE=hf-space`), sessions go to **`/tmp/ag
 
 ## Python dependencies
 
-The Pi image installs [`requirements_pi_agent.txt`](../requirements_pi_agent.txt) — Gradio UI + `gradio-client`, HTTP clients, CSV/PDF review helpers (`pandas`, `pymupdf`), and common utilities. It **does not** include spaCy, Presidio, or OCR; heavy redaction runs in `redaction-app-llama`.
+The agent image installs [`requirements_agent.txt`](../requirements_agent.txt) — Gradio UI + `gradio-client`, HTTP clients, CSV/PDF review helpers (`pandas`, `pymupdf`), and common utilities. It **does not** include spaCy, Presidio, or OCR; heavy redaction runs in `redaction-app-llama`.
 
 Rebuild after changing that file:
 
@@ -216,4 +220,4 @@ docker build -f agent-redact/pi-agent/Dockerfile --target runtime -t pi-agent-hf
 docker run --rm -p 7860:7860 -e GEMINI_API_KEY=... -e HF_TOKEN=... pi-agent-hf-space
 ```
 
-Pi uses `gradio_client` + `agent-redact/pi/remote_redaction.py` to upload/download from the remote Space; prompts include `{REMOTE_BACKEND_GUIDANCE}` (see [`redaction_prompt.py`](../redaction_prompt.py)).
+Pi uses `gradio_client` + `agent-redact/shared/remote_redaction.py` to upload/download from the remote Space; prompts include `{REMOTE_BACKEND_GUIDANCE}` (see [`redaction_prompt.py`](../../shared/redaction_prompt.py)).

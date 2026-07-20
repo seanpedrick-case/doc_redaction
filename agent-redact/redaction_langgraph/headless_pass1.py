@@ -10,8 +10,8 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _AGENT_REDACT = Path(__file__).resolve().parents[1]
-_PI = _AGENT_REDACT / "pi"
-for path in (_REPO_ROOT, _AGENT_REDACT, _PI):
+_SHARED = _AGENT_REDACT / "shared"
+for path in (_REPO_ROOT, _AGENT_REDACT, _SHARED):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 

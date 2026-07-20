@@ -7,7 +7,7 @@ bleach<=6.4.0
 polars<=1.38.1
 pyarrow<=24.0.0
 openpyxl<=3.1.5
-boto3<=1.43.36
+boto3<=1.43.47
 python-dotenv<=1.2.2
 defusedxml<=0.7.1
 Faker<=40.8.0
@@ -54,13 +54,10 @@ pytest<=9.0.3
 pytest-cov<=7.1.0
 
 # --- LLM libraries ---
-google-genai<=1.73.0
-openai<=2.44.0
+google-genai<=2.11.0
+openai<=2.45.0
 
 # --- PyTorch (CUDA 12.8) ---
 --extra-index-url https://download.pytorch.org/whl/cu128
-torch==2.8.0
-torchvision==0.23.0
-# flash-attn is optional (USE_FLASH_ATTENTION=True). Official cp310 wheels exist for torch<=2.8 only;
-# with torch 2.9 + Python 3.10 the Space uses sdpa attention instead (no extra package needed).
-flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp310-cp310-linux_x86_64.whl
+torch==2.10.0
+torchvision==0.25.0

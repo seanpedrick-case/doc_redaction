@@ -58,6 +58,19 @@ from tools.custom_csvlogger import CSVLogger_custom
 logger = logging.getLogger(__name__)
 
 
+def render_logout_button(
+    *,
+    show: bool,
+    url: str,
+    label: str = "Log out",
+) -> None:
+    """Render a logout link button below the main layout when configured."""
+    if not show or not (url or "").strip():
+        return
+    # with gr.Row(elem_classes="logout-footer-row"):
+    gr.Button(value=label, link=url.strip(), variant="secondary", size="md")
+
+
 def validate_custom_header(request: gr.Request) -> None:
     """Raise when CUSTOM_HEADER is configured but missing or wrong on the request."""
     if not CUSTOM_HEADER or not CUSTOM_HEADER_VALUE:
@@ -413,7 +426,7 @@ def log_platform_access(session_hash: str, host_name: str = HOST_NAME) -> None:
         logger.warning(
             "Access log write failed (%s); session UI continues. "
             "On ECS/HF agent images set ACCESS_LOGS_FOLDER=/tmp/agent-logs/ "
-            "(see agent-redact/pi/bootstrap_pi_config.py).",
+            "(see agent-redact/shared/bootstrap_pi_config.py).",
             exc,
         )
 

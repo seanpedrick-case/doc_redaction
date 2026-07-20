@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import tempfile
+import zipfile
 from pathlib import Path
 from typing import Optional, Union
 
@@ -149,6 +150,26 @@ def secure_file_write(
 
     with open(file_path, **open_kwargs) as f:
         f.write(content)
+
+
+def secure_zip_member_read(
+    zip_archive: zipfile.ZipFile,
+    member_name: str,
+    validation_base_dir: Union[str, Path],
+) -> bytes:
+    """
+    Read one ZIP member after validating its name resolves under ``validation_base_dir``.
+
+    Reads in memory and does not call ``ZipFile.extract``, avoiding Zip Slip and
+    CodeQL ``py/path-injection`` sinks on untrusted archive entry names.
+    """
+    if not member_name or member_name.endswith("/"):
+        raise ValueError("Invalid zip member name")
+    secure_path_join(validation_base_dir, member_name)
+    try:
+        return zip_archive.read(member_name)
+    except KeyError as exc:
+        raise FileNotFoundError(f"Zip member not found: {member_name}") from exc
 
 
 def secure_file_read(

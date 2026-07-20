@@ -343,6 +343,10 @@ S3_LOG_CONFIG_BUCKET_NAME = _resolve_s3_bucket_name(
     "S3_LOG_CONFIG_BUCKET_NAME", "s3-logs"
 )  # S3 bucket names need to be lower case
 S3_OUTPUT_BUCKET_NAME = _resolve_s3_bucket_name("S3_OUTPUT_BUCKET_NAME", "s3-output")
+S3_MALWARE_SCAN_BUCKET_NAME = _resolve_s3_bucket_name(
+    "S3_MALWARE_SCAN_BUCKET_NAME", "s3-malware-scan"
+)
+SCAN_UPLOADS_FOR_MALWARE = get_or_create_env_var("SCAN_UPLOADS_FOR_MALWARE", "True")
 
 ### VPC endpoints for ECS tasks in private subnets (ECR image pull, logs, secrets)
 ENABLE_ECS_VPC_INTERFACE_ENDPOINTS = get_or_create_env_var(

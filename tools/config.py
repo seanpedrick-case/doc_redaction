@@ -206,7 +206,12 @@ def add_folder_to_path(folder_path: str):
         print(f"Folder not found at {folder_path} - not added to PATH")
 
 
-def validate_safe_url(url_candidate: str, allowed_domains: list = None) -> str:
+def validate_safe_url(
+    url_candidate: str,
+    allowed_domains: list = None,
+    *,
+    fallback: str = "https://seanpedrick-case.github.io/doc_redaction",
+) -> str:
     """
     Validate and return a safe URL with enhanced security checks.
     """
@@ -248,7 +253,7 @@ def validate_safe_url(url_candidate: str, allowed_domains: list = None) -> str:
 
     except Exception as e:
         print(f"URL validation failed: {e}")
-        return "https://seanpedrick-case.github.io/doc_redaction"  # Safe fallback
+        return fallback
 
 
 def sanitize_markdown_text(text: str) -> str:
@@ -379,6 +384,34 @@ AWS_SECRET_KEY = get_or_create_env_var("AWS_SECRET_KEY", "")
 # if AWS_SECRET_KEY: print(f'AWS_SECRET_KEY found in environment variables')
 
 DOCUMENT_REDACTION_BUCKET = get_or_create_env_var("DOCUMENT_REDACTION_BUCKET", "")
+
+# GuardDuty Malware Protection for S3 — stage uploads for scan before processing
+SCAN_UPLOADS_FOR_MALWARE = convert_string_to_boolean(
+    get_or_create_env_var("SCAN_UPLOADS_FOR_MALWARE", "False")
+)
+MALWARE_SCAN_S3_BUCKET = get_or_create_env_var("MALWARE_SCAN_S3_BUCKET", "")
+MALWARE_SCAN_S3_PREFIX = get_or_create_env_var(
+    "MALWARE_SCAN_S3_PREFIX", "upload-staging/"
+)
+MALWARE_SCAN_POLL_INTERVAL_SEC = float(
+    get_or_create_env_var("MALWARE_SCAN_POLL_INTERVAL_SEC", "2.0")
+)
+MALWARE_SCAN_TIMEOUT_SEC = float(
+    get_or_create_env_var("MALWARE_SCAN_TIMEOUT_SEC", "300.0")
+)
+MALWARE_SCAN_SHOW_CHECKING_INFO = convert_string_to_boolean(
+    get_or_create_env_var("MALWARE_SCAN_SHOW_CHECKING_INFO", "True")
+)
+
+
+def malware_scan_enabled() -> bool:
+    """True when upload malware scanning should run (AWS + bucket + feature flag)."""
+    return (
+        SCAN_UPLOADS_FOR_MALWARE
+        and RUN_AWS_FUNCTIONS
+        and bool((MALWARE_SCAN_S3_BUCKET or "").strip())
+    )
+
 
 # Should the app prioritise using AWS SSO over using API keys stored in environment variables/secrets (defaults to yes)
 PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS = convert_string_to_boolean(
@@ -645,7 +678,19 @@ SHOW_QUICKSTART = convert_string_to_boolean(
 )
 
 SHOW_SUMMARISATION = convert_string_to_boolean(
-    get_or_create_env_var("SHOW_SUMMARISATION", "False")
+    get_or_create_env_var("SHOW_SUMMARISATION", "True")
+)
+
+SHOW_DUPLICATE_PAGES = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_DUPLICATE_PAGES", "True")
+)
+
+SHOW_WORD_EXCEL_REDACTION = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_WORD_EXCEL_REDACTION", "True")
+)
+
+REDACTION_SETTINGS_ACCORDION_OPEN = convert_string_to_boolean(
+    get_or_create_env_var("REDACTION_SETTINGS_ACCORDION_OPEN", "True")
 )
 
 # Extraction and PII options open by default:
@@ -2514,6 +2559,36 @@ FILL_SCREEN_WIDTH = convert_string_to_boolean(
 # Get some environment variables and Launch the Gradio app
 COGNITO_AUTH = convert_string_to_boolean(get_or_create_env_var("COGNITO_AUTH", "False"))
 
+_LOGOUT_BUTTON_URL_RAW = get_or_create_env_var("LOGOUT_BUTTON_URL", "").strip()
+_LOGOUT_BUTTON_ALLOWED_DOMAINS = [
+    "seanpedrick-case.github.io",
+    "github.io",
+    "github.com",
+    "sharepoint.com",
+    "amazoncognito.com",
+]
+LOGOUT_BUTTON_URL = (
+    validate_safe_url(
+        _LOGOUT_BUTTON_URL_RAW,
+        allowed_domains=_LOGOUT_BUTTON_ALLOWED_DOMAINS,
+        fallback="",
+    )
+    if _LOGOUT_BUTTON_URL_RAW
+    else ""
+)
+SHOW_LOGOUT_BUTTON = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_LOGOUT_BUTTON", "False")
+)
+LOGOUT_BUTTON_LABEL = get_or_create_env_var("LOGOUT_BUTTON_LABEL", "Log out")
+LOGOUT_FOOTER_CSS = """
+.logout-footer-row {
+    margin-top: 1.5rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border-color-primary, #e5e5e5);
+    justify-content: flex-end !important;
+}
+"""
+
 SHOW_FEEDBACK_BUTTONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_FEEDBACK_BUTTONS", "False")
 )
@@ -2763,6 +2838,10 @@ SHOW_COSTS = convert_string_to_boolean(get_or_create_env_var("SHOW_COSTS", "Fals
 GET_COST_CODES = convert_string_to_boolean(
     get_or_create_env_var("GET_COST_CODES", "False")
 )
+
+SHOW_COSTS_ACCORDION_OPEN = convert_string_to_boolean(
+    get_or_create_env_var("SHOW_COSTS_ACCORDION_OPEN", "False")
+)  # Whether the costs accordion is open by default
 
 DEFAULT_COST_CODE = get_or_create_env_var("DEFAULT_COST_CODE", "")
 

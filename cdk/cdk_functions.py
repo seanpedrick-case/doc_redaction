@@ -25,7 +25,9 @@ from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecs as ecs
 from aws_cdk import aws_elasticloadbalancingv2 as elb
 from aws_cdk import aws_elasticloadbalancingv2_actions as elb_act
+from aws_cdk import aws_guardduty as guardduty
 from aws_cdk import aws_iam as iam
+from aws_cdk import aws_kms as kms
 from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_logs as logs
 from aws_cdk import aws_s3 as s3
@@ -49,6 +51,7 @@ from cdk_config import (
     PUBLIC_SUBNET_CIDR_BLOCKS,
     PUBLIC_SUBNETS_TO_USE,
     S3_LOG_CONFIG_BUCKET_NAME,
+    S3_MALWARE_SCAN_BUCKET_NAME,
     S3_OUTPUT_BUCKET_NAME,
     USAGE_LOG_DYNAMODB_TABLE_NAME,
 )
@@ -691,6 +694,172 @@ def add_s3_enforce_ssl_policy(bucket: s3.IBucket) -> None:
             conditions={"Bool": {"aws:SecureTransport": "false"}},
         )
     )
+
+
+def _grant_malware_scan_role_access(
+    malware_bucket: s3.IBucket,
+    role: iam.IRole,
+    *,
+    object_arn: str,
+    bucket_arn: str,
+) -> None:
+    """Grant one ECS app role identity + bucket policy access for the scan workflow."""
+    malware_bucket.add_to_resource_policy(
+        iam.PolicyStatement(
+            effect=iam.Effect.ALLOW,
+            principals=[role],
+            actions=[
+                "s3:PutObject",
+                "s3:GetObject",
+                "s3:GetObjectTagging",
+                "s3:DeleteObject",
+            ],
+            resources=[object_arn],
+        )
+    )
+    malware_bucket.add_to_resource_policy(
+        iam.PolicyStatement(
+            effect=iam.Effect.ALLOW,
+            principals=[role],
+            actions=["s3:ListBucket"],
+            resources=[bucket_arn],
+        )
+    )
+    malware_bucket.grant_read_write(role)
+    role.add_to_policy(
+        iam.PolicyStatement(
+            effect=iam.Effect.ALLOW,
+            actions=[
+                "s3:PutObject",
+                "s3:GetObject",
+                "s3:GetObjectTagging",
+                "s3:DeleteObject",
+            ],
+            resources=[object_arn],
+        )
+    )
+    role.add_to_policy(
+        iam.PolicyStatement(
+            effect=iam.Effect.ALLOW,
+            actions=["s3:ListBucket"],
+            resources=[bucket_arn],
+        )
+    )
+
+
+def create_malware_scan_bucket_and_guardduty_plan(
+    scope: Construct,
+    *,
+    bucket_name: str,
+    task_role: iam.IRole,
+    execution_role: Optional[iam.IRole] = None,
+    get_context_bool,
+    resource_removal_policy: RemovalPolicy,
+    s3_auto_delete_objects: bool,
+    kms_key: Optional[kms.IKey] = None,
+    use_custom_kms: bool = False,
+) -> s3.IBucket:
+    """
+    Dedicated S3 bucket for ephemeral upload staging with GuardDuty Malware Protection.
+
+    Enables object tagging (``GuardDutyMalwareScanStatus``) and grants the ECS task role
+    (and execution role when supplied) put/tag/delete access for the app-side scan workflow.
+    """
+    if get_context_bool(f"globally_taken:{bucket_name}"):
+        raise ValueError(
+            f"S3 bucket name {bucket_name!r} is taken globally by another AWS account. "
+            "Set S3_MALWARE_SCAN_BUCKET_NAME in cdk/config/cdk_config.env to a unique name."
+        )
+
+    lifecycle_rules = [
+        s3.LifecycleRule(abort_incomplete_multipart_upload_after=Duration.days(1)),
+        s3.LifecycleRule(expiration=Duration.days(1)),
+    ]
+
+    if get_context_bool(f"exists:{bucket_name}"):
+        malware_bucket = s3.Bucket.from_bucket_name(
+            scope, "MalwareScanBucket", bucket_name=bucket_name
+        )
+        print("Using existing malware scan S3 bucket", bucket_name)
+    else:
+        bucket_kwargs: Dict[str, Any] = {
+            "bucket_name": bucket_name,
+            "lifecycle_rules": lifecycle_rules,
+            "versioned": False,
+            "removal_policy": resource_removal_policy,
+            "auto_delete_objects": s3_auto_delete_objects,
+            "block_public_access": s3.BlockPublicAccess.BLOCK_ALL,
+        }
+        if use_custom_kms and kms_key is not None:
+            bucket_kwargs["encryption"] = s3.BucketEncryption.KMS
+            bucket_kwargs["encryption_key"] = kms_key
+        malware_bucket = s3.Bucket(scope, "MalwareScanBucket", **bucket_kwargs)
+        print("Created malware scan S3 bucket", bucket_name)
+
+    add_s3_enforce_ssl_policy(malware_bucket)
+
+    object_arn = f"{malware_bucket.bucket_arn}/*"
+    bucket_arn = malware_bucket.bucket_arn
+    app_roles: list[iam.IRole] = [task_role]
+    if execution_role is not None and execution_role.role_arn != task_role.role_arn:
+        app_roles.append(execution_role)
+    for role in app_roles:
+        _grant_malware_scan_role_access(
+            malware_bucket,
+            role,
+            object_arn=object_arn,
+            bucket_arn=bucket_arn,
+        )
+
+    guardduty_role = iam.Role(
+        scope,
+        "GuardDutyMalwareScanRole",
+        assumed_by=iam.ServicePrincipal(
+            "malware-protection-plan.guardduty.amazonaws.com"
+        ),
+        description="GuardDuty Malware Protection for S3 scan role",
+    )
+    guardduty_role.add_to_policy(
+        iam.PolicyStatement(
+            effect=iam.Effect.ALLOW,
+            actions=[
+                "s3:GetObject",
+                "s3:GetObjectVersion",
+                "s3:ListBucket",
+                "s3:GetObjectTagging",
+                "s3:GetObjectVersionTagging",
+                "s3:PutObjectTagging",
+                "s3:PutObjectVersionTagging",
+            ],
+            resources=[malware_bucket.bucket_arn, object_arn],
+        )
+    )
+
+    malware_plan = guardduty.CfnMalwareProtectionPlan(
+        scope,
+        "MalwareScanProtectionPlan",
+        role=guardduty_role.role_arn,
+        protected_resource=guardduty.CfnMalwareProtectionPlan.CFNProtectedResourceProperty(
+            s3_bucket=guardduty.CfnMalwareProtectionPlan.S3BucketProperty(
+                bucket_name=malware_bucket.bucket_name,
+            ),
+        ),
+        actions=guardduty.CfnMalwareProtectionPlan.CFNActionsProperty(
+            tagging=guardduty.CfnMalwareProtectionPlan.CFNTaggingProperty(
+                status="ENABLED",
+            ),
+        ),
+    )
+    malware_plan.node.add_dependency(guardduty_role)
+
+    CfnOutput(
+        scope,
+        "MalwareScanBucketName",
+        value=malware_bucket.bucket_name,
+        description="S3 bucket for GuardDuty upload malware staging scans",
+    )
+
+    return malware_bucket
 
 
 def add_custom_policies(
@@ -2485,6 +2654,7 @@ def create_basic_config_env(
     out_dir: str = "config",
     s3_log_config_bucket_name: str = S3_LOG_CONFIG_BUCKET_NAME,
     s3_output_bucket_name: str = S3_OUTPUT_BUCKET_NAME,
+    s3_malware_scan_bucket_name: str = S3_MALWARE_SCAN_BUCKET_NAME,
     access_log_dynamodb_table_name: str = ACCESS_LOG_DYNAMODB_TABLE_NAME,
     feedback_log_dynamodb_table_name: str = FEEDBACK_LOG_DYNAMODB_TABLE_NAME,
     usage_log_dynamodb_table_name: str = USAGE_LOG_DYNAMODB_TABLE_NAME,
@@ -2515,6 +2685,8 @@ def create_basic_config_env(
         "LOAD_PREVIOUS_TEXTRACT_JOBS_S3": "True",
         "DOCUMENT_REDACTION_BUCKET": s3_log_config_bucket_name,
         "TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET": s3_output_bucket_name,
+        "SCAN_UPLOADS_FOR_MALWARE": "True",
+        "MALWARE_SCAN_S3_BUCKET": s3_malware_scan_bucket_name,
         "ACCESS_LOG_DYNAMODB_TABLE_NAME": access_log_dynamodb_table_name,
         "FEEDBACK_LOG_DYNAMODB_TABLE_NAME": feedback_log_dynamodb_table_name,
         "USAGE_LOG_DYNAMODB_TABLE_NAME": usage_log_dynamodb_table_name,
@@ -2971,7 +3143,7 @@ def format_pi_public_urls(
 
 
 def _apply_pi_root_path_env(env: Dict[str, str], pi_root_path: str) -> None:
-    # The agent app only consumes AGENT_ROOT_PATH (see agent-redact/pi/gradio_app.py:
+    # The agent app only consumes AGENT_ROOT_PATH (see agent-redact/shared/gradio_app.py:
     # launch_pi_ui). ROOT_PATH / FASTAPI_ROOT_PATH are the *main* redaction app's
     # variables; setting them on the agent container is redundant and can conflict.
     if pi_root_path:
@@ -3529,10 +3701,10 @@ def build_pi_agent_container_environment(
     return env
 
 
-# Gradio mounted on FastAPI (tools.gradio_platform.mount_or_launch); matches agent-redact/pi/start.sh.
+# Gradio mounted on FastAPI (tools.gradio_platform.mount_or_launch); matches agent-redact/shared/start.sh.
 AGENT_ECS_APP_START_CMD = (
     "python3 agent-redact/pi/pi_agent_config.py && "
-    "exec uvicorn gradio_app:app --app-dir agent-redact/pi "
+    "exec uvicorn gradio_app:app --app-dir agent-redact/shared "
     "--host 0.0.0.0 --port ${AGENT_GRADIO_PORT:-7862} "
     '--proxy-headers --forwarded-allow-ips "*"'
 )

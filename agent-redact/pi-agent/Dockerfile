@@ -30,7 +30,7 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV APP_HOME=/home/user
 ENV AGENT_WORKDIR=/workspace/doc_redaction
-ENV PYTHONPATH=${AGENT_WORKDIR}:${AGENT_WORKDIR}/agent-redact/pi
+ENV PYTHONPATH=${AGENT_WORKDIR}:${AGENT_WORKDIR}/agent-redact:${AGENT_WORKDIR}/agent-redact/shared:${AGENT_WORKDIR}/agent-redact/pi:${AGENT_WORKDIR}/agent-redact/agentcore
 ENV GRADIO_SERVER_NAME=0.0.0.0
 ENV MPLCONFIGDIR=/tmp/matplotlib_cache/
 ENV XDG_CACHE_HOME=/tmp/xdg_cache/user_1000
@@ -47,9 +47,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=pi-cli /opt/pi /opt/pi
 COPY --from=pi-cli /usr/local/bin/node /usr/local/bin/node
 
-COPY agent-redact/requirements_pi_agent.txt /tmp/requirements_pi_agent.txt
-RUN pip install --no-cache-dir -r /tmp/requirements_pi_agent.txt \
-    && rm /tmp/requirements_pi_agent.txt
+COPY agent-redact/requirements_agent.txt /tmp/requirements_agent.txt
+RUN pip install --no-cache-dir -r /tmp/requirements_agent.txt \
+    && rm /tmp/requirements_agent.txt
 
 # ===================================================================
 # Stage 3: Dev — thin image for docker-compose (repo bind-mounted)
@@ -80,7 +80,7 @@ USER user
 
 RUN pi --version
 
-# Compose overrides entrypoint with agent-redact/pi/start.sh on the bind mount.
+# Compose overrides entrypoint with agent-redact/shared/start.sh on the bind mount.
 
 # ===================================================================
 # Stage 4: Runtime — baked app for Hugging Face Space and AWS ECS
@@ -99,6 +99,8 @@ ENV AGENT_WORKSPACE_DIR=${APP_HOME}/app/workspace
 ENV AGENT_UPLOAD_ROOT=/tmp/gradio
 ENV AGENT_SESSION_DIR=/tmp/agent-sessions
 ENV AGENT_CODING_AGENT_DIR=/tmp/agent-coding
+ENV PI_CODING_AGENT_DIR=/tmp/agent-coding
+ENV PI_CODING_AGENT_SESSION_DIR=/tmp/agent-sessions
 ENV ACCESS_LOGS_FOLDER=/tmp/agent-logs/
 ENV USAGE_LOGS_FOLDER=/tmp/agent-usage/
 ENV FEEDBACK_LOGS_FOLDER=/tmp/agent-feedback/
@@ -115,6 +117,7 @@ ENV RUN_FASTAPI=False
 
 WORKDIR ${AGENT_WORKDIR}
 
+COPY agent-redact/shared agent-redact/shared
 COPY agent-redact/pi agent-redact/pi
 COPY skills skills
 COPY tools tools

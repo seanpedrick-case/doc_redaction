@@ -1,14 +1,12 @@
 """Tests for Pi runtime config (session directory)."""
 
 import os
-import sys
 from pathlib import Path
 
 import pytest
+from pi_test_support import ensure_agent_redact_paths
 
-_PI_SRC = Path(__file__).resolve().parents[1] / "agent-redact" / "pi"
-if str(_PI_SRC) not in sys.path:
-    sys.path.insert(0, str(_PI_SRC))
+ensure_agent_redact_paths()
 
 import pi_agent_config as pac
 
@@ -77,6 +75,38 @@ def test_hf_profile_defaults_session_dir_to_tmp(tmp_path, monkeypatch, pi_worksp
     assert settings["retry"]["baseDelayMs"] == 60000
     assert settings["retry"]["maxRetries"] == 5
     assert settings["retry"]["provider"]["maxRetries"] == 5
+
+
+def test_configure_pi_coding_agent_env_hf_space(tmp_path, monkeypatch, pi_workspace):
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "hf-space")
+    monkeypatch.delenv("AGENT_SESSION_DIR", raising=False)
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    monkeypatch.delenv("PI_CODING_AGENT_SESSION_DIR", raising=False)
+    agent_dir = tmp_path / "agent"
+    monkeypatch.setenv("AGENT_CODING_AGENT_DIR", str(agent_dir))
+
+    pac.configure_pi_coding_agent_env()
+
+    assert os.environ["PI_CODING_AGENT_DIR"] == str(agent_dir)
+    assert (
+        Path(os.environ["PI_CODING_AGENT_SESSION_DIR"]).resolve()
+        == Path("/tmp/agent-sessions").resolve()
+    )
+
+
+def test_write_runtime_config_sets_pi_cli_env(tmp_path, monkeypatch, pi_workspace):
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "hf-space")
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    monkeypatch.delenv("PI_CODING_AGENT_SESSION_DIR", raising=False)
+    monkeypatch.setenv("AGENT_CODING_AGENT_DIR", str(tmp_path / "agent"))
+
+    pac.write_runtime_config()
+
+    assert os.environ["PI_CODING_AGENT_DIR"] == str(tmp_path / "agent")
+    assert (
+        Path(os.environ["PI_CODING_AGENT_SESSION_DIR"]).resolve()
+        == Path("/tmp/agent-sessions").resolve()
+    )
 
 
 def test_gemini_provider_applies_retry_settings(tmp_path, monkeypatch, pi_workspace):
@@ -446,3 +476,41 @@ def test_build_settings_config_compaction_scales_for_small_llama_context(
 
     assert settings["compaction"]["reserveTokens"] == 16384
     assert settings["compaction"]["keepRecentTokens"] == 12288
+
+
+def test_normalize_provider_maps_pi_google_alias():
+    assert pac.normalize_provider("google") == pac.PROVIDER_GEMINI
+
+
+def test_pi_model_fallback_notice_when_model_differs():
+    notice = pac.pi_model_fallback_notice(
+        intended_provider=pac.PROVIDER_LLAMA,
+        intended_model="qwen_3_6_27b",
+        active_provider="google",
+        active_model="gemini-3.1-pro-preview",
+    )
+    assert notice is not None
+    assert "qwen_3_6_27b" in notice
+    assert "gemini-3.1-pro-preview" in notice
+    assert "Gemini API key" in notice
+
+
+def test_pi_model_fallback_notice_none_when_model_matches():
+    notice = pac.pi_model_fallback_notice(
+        intended_provider=pac.PROVIDER_LLAMA,
+        intended_model="unsloth/Qwen3.6-27B-MTP-GGUF",
+        active_provider="llama-cpp",
+        active_model="unsloth/Qwen3.6-27B-MTP-GGUF",
+    )
+    assert notice is None
+
+
+def test_active_model_from_pi_state():
+    provider, model_id = pac.active_model_from_pi_state(
+        {
+            "provider": "google",
+            "model": {"id": "gemini-3.1-pro-preview", "provider": "google"},
+        }
+    )
+    assert provider == pac.PROVIDER_GEMINI
+    assert model_id == "gemini-3.1-pro-preview"

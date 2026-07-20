@@ -34,10 +34,17 @@ if os.environ.get("AGENT_RPC_DEBUG") and not _logger.handlers:
 from fastapi import FastAPI
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
-
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+_AGENT_REDACT = Path(__file__).resolve().parents[1]
+for _path in (
+    _REPO_ROOT,
+    _AGENT_REDACT,
+    _AGENT_REDACT / "shared",
+    _AGENT_REDACT / "pi",
+    _AGENT_REDACT / "agentcore",
+):
+    _text = str(_path)
+    if _text not in sys.path:
+        sys.path.insert(0, _text)
 
 from bootstrap_pi_config import ensure_pi_config_env
 
@@ -79,6 +86,7 @@ from pi_agent_config import (
     models_for_provider,
     normalize_backend_model,
     normalize_provider,
+    pi_model_fallback_notice_from_state,
     provider_choices,
     provider_label,
     resolved_default_model,
@@ -137,16 +145,31 @@ from tools.config import (
     EMPTY_SEND_WITH_FILE_HINT,
     FASTAPI_ROOT_PATH,
     HOST_NAME,
+    LOGOUT_BUTTON_LABEL,
+    LOGOUT_BUTTON_URL,
+    LOGOUT_FOOTER_CSS,
     QUOTA_CONTINUE_PROMPT,
     QUOTA_RETRY_ATTEMPTS,
     QUOTA_RETRY_DELAY_S,
     RUN_FASTAPI,
     SAVE_OUTPUTS_TO_S3,
+    SHOW_LOGOUT_BUTTON,
     SHOW_THINKING,
     SHOW_TOOL_OUTPUT,
     THINKING_DISPLAY_MAX,
     THINKING_PANEL_CSS,
     TOOL_OUTPUT_MAX,
+)
+from tools.malware_scan import (
+    USER_REJECT_MESSAGE,
+    USER_SERVICE_ERROR_MESSAGE,
+    MalwareScanRejectedError,
+    MalwareScanServiceError,
+    ensure_upload_scanned_for_malware,
+    handle_gradio_file_deleted,
+    make_malware_scan_enable_outputs,
+    make_malware_scan_upload_failure_outputs,
+    make_malware_scan_upload_start,
 )
 
 # After ``tools.config`` import: it may set ``AGENT_DEFAULT_PROVIDER`` / ``AGENT_DEFAULT_MODEL``
@@ -157,6 +180,7 @@ from tools.gradio_platform import (
     log_agent_usage_event,
     log_platform_access,
     mount_or_launch,
+    render_logout_button,
 )
 
 IS_HF_SPACE = is_hf_space_profile()
@@ -259,9 +283,10 @@ def _agent_finish_chat_notice(
     if incomplete:
         return (
             "---\n\n"
-            "**Agent paused** — Pass 1 is not finished (`review_apply` was not run). "
-            "Send **continue** to nudge the agent (e.g. run the saved `.py` script, "
-            "then `verify_coverage` and `review_apply`), or restart the task."
+            "**Agent paused** — redaction workflow is not finished "
+            "(`review_apply` was not run). Send **continue** to nudge the agent "
+            "(e.g. run the saved `.py` script, then `verify_coverage` and "
+            "`review_apply`), or restart the task."
         )
     return (
         "---\n\n"
@@ -282,7 +307,7 @@ def _show_agent_finish_toast(
         elif error:
             gr.Info("Agent stopped with an error.", duration=8)
         elif incomplete:
-            gr.Info("Agent paused — Pass 1 incomplete.", duration=8)
+            gr.Info("Agent paused — workflow incomplete.", duration=8)
         else:
             gr.Info("Agent finished — task complete.", duration=8)
     except Exception:
@@ -838,6 +863,39 @@ def _gemini_key_error() -> str | None:
     return None
 
 
+def _configure_pi_rpc_model(client: AgentRuntime) -> None:
+    """Apply configured provider/model; warn in-chat if Pi selected a fallback."""
+    if normalize_orchestrator() != "pi" or not client.running:
+        return
+    provider = normalize_provider(get_default_provider())
+    model = resolved_default_model(provider)
+    try:
+        client.set_model(provider, model)
+    except PiRpcError:
+        pass
+    try:
+        notice = pi_model_fallback_notice_from_state(
+            client.get_state(), provider, model
+        )
+    except PiRpcError:
+        return
+    if notice:
+        client.stage_ui_chat_notice("Orchestration model", notice)
+
+
+def _prepend_pending_chat_notices(
+    history: list[dict[str, Any]],
+    client: AgentRuntime,
+) -> list[dict[str, Any]]:
+    """Merge staged UI notices (e.g. model fallback) ahead of the next chat turn."""
+    pending = client.drain_pending_ui_history()
+    if not pending:
+        return history
+    merged = _clone_history(history)
+    merged[:0] = pending
+    return merged
+
+
 def _ensure_client(
     client: AgentRuntime | None,
     session_hash: str = "",
@@ -849,12 +907,7 @@ def _ensure_client(
         return client
     client = create_agent_runtime(session_hash or None)
     client.start()
-    provider = normalize_provider(get_default_provider())
-    model = resolved_default_model(provider)
-    try:
-        client.set_model(provider, model)
-    except PiRpcError:
-        pass
+    _configure_pi_rpc_model(client)
     return client
 
 
@@ -1016,6 +1069,17 @@ def _apply_event(
 
     elif event.kind == "status":
         activity = _append_activity(activity, event.text)
+
+    elif event.kind in {"compaction_start", "compaction_end"}:
+        activity = _append_activity(activity, event.text)
+        if not _history_has_user_notice(
+            history, label="Context compaction", message=event.text
+        ):
+            history = _append_user_steer_notice(
+                history,
+                label="Context compaction",
+                message=event.text,
+            )
 
     elif event.kind == "turn_end":
         activity = _append_activity(activity, event.text)
@@ -1238,12 +1302,7 @@ def _pi_wait_until_idle(
 
 def _refresh_pi_client_model(client: AgentRuntime) -> None:
     """Re-apply provider/model on the live RPC client (no session reset)."""
-    provider = normalize_provider(get_default_provider())
-    model = resolved_default_model(provider)
-    try:
-        client.set_model(provider, model)
-    except PiRpcError:
-        pass
+    _configure_pi_rpc_model(client)
 
 
 def _build_pi_prompt_message(
@@ -1359,6 +1418,12 @@ def apply_backend(
             f"**Backend applied:** `{provider_label(normalized)}` / `{model}`  \n\n"
             f"{_session_summary(rpc)}"
         )
+        fallback_notice = pi_model_fallback_notice_from_state(
+            rpc.get_state(), normalized, model
+        )
+        if fallback_notice:
+            summary += f"\n\n**Warning:** {fallback_notice}"
+            rpc.stage_ui_chat_notice("Orchestration model", fallback_notice)
     except (PiRpcError, AgentRuntimeError, FileNotFoundError, OSError) as exc:
         rpc.close()
         rpc = None
@@ -1897,6 +1962,7 @@ def _run_pi_chat(
             return _append_activity(act, f"**S3 upload:** {warning}")
         return act
 
+    history = _prepend_pending_chat_notices(history, client)
     history.append({"role": "user", "content": chat_user_message or message.strip()})
     history.append({"role": "assistant", "content": ""})
     prompt_activity = (
@@ -2335,11 +2401,9 @@ def _restart_pi_rpc_client(
             prior.close()
         except (PiRpcError, OSError, ValueError):
             pass
-    provider = normalize_provider(get_default_provider())
-    model = resolved_default_model(provider)
     rpc = create_agent_runtime(session_hash or None)
     rpc.start()
-    rpc.set_model(provider, model)
+    _configure_pi_rpc_model(rpc)
     rpc.new_session()
     return rpc
 
@@ -2489,6 +2553,79 @@ def submit_redaction_task(
             encourage_vlm_signatures,
         )
     )
+    try:
+        ensure_upload_scanned_for_malware(upload_file)
+    except MalwareScanServiceError as exc:
+        gr.Warning(USER_SERVICE_ERROR_MESSAGE)
+        history = list(history or [])
+        history.append(
+            {
+                "role": "user",
+                "content": f"_Redaction task not started: {USER_SERVICE_ERROR_MESSAGE}_",
+            }
+        )
+        client = (
+            _ensure_client(client, session_hash)
+            if client and client.running
+            else client
+        )
+        yield (
+            _clone_history(history),
+            client,
+            "",
+            _format_activity([f"**Redaction task error:** {exc}"]),
+            "",
+            "",
+            (
+                _session_summary(client)
+                if client and client.running
+                else _agent_status_markdown(client)
+            ),
+            gr.update(interactive=True),
+            gr.update(interactive=False),
+            gr.update(interactive=True),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            AGENT_FINISH_SIGNAL_NONE,
+            False,
+        )
+        return
+    except MalwareScanRejectedError as exc:
+        history = list(history or [])
+        history.append(
+            {
+                "role": "user",
+                "content": f"_Redaction task not started: {USER_REJECT_MESSAGE}_",
+            }
+        )
+        client = (
+            _ensure_client(client, session_hash)
+            if client and client.running
+            else client
+        )
+        yield (
+            _clone_history(history),
+            client,
+            "",
+            _format_activity([f"**Redaction task error:** {exc}"]),
+            "",
+            "",
+            (
+                _session_summary(client)
+                if client and client.running
+                else _agent_status_markdown(client)
+            ),
+            gr.update(interactive=True),
+            gr.update(interactive=False),
+            gr.update(interactive=True),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            AGENT_FINISH_SIGNAL_NONE,
+            False,
+        )
+        return
     try:
         _file_name, prompt, renamed_from = prepare_redaction_task(
             upload_file,
@@ -2857,7 +2994,7 @@ def build_ui():
                             ),
                         )
                         hf_token = gr.Textbox(
-                            label="HF token for redaction space (optional, neededfor private spaces)",
+                            label="HF token for redaction space (optional, needed for private spaces)",
                             type="password",
                             placeholder="Uses HF_TOKEN Space secret if empty",
                             visible=IS_HF_SPACE,
@@ -3095,6 +3232,32 @@ def build_ui():
             js=PI_AGENT_FINISH_NOTIFY_JS,
             api_visibility="undocumented",
         )
+        redact_file.upload(
+            fn=make_malware_scan_upload_start(1),
+            inputs=[redact_file],
+            outputs=[start_redact_btn],
+            queue=True,
+            api_visibility="undocumented",
+        ).success(
+            fn=make_malware_scan_enable_outputs(1),
+            inputs=None,
+            outputs=[start_redact_btn],
+            queue=False,
+            api_visibility="undocumented",
+        ).failure(
+            fn=make_malware_scan_upload_failure_outputs(1),
+            outputs=[redact_file, start_redact_btn],
+            queue=False,
+            api_visibility="undocumented",
+        )
+        redact_file.delete(
+            fn=handle_gradio_file_deleted,
+            inputs=None,
+            outputs=[],
+            queue=False,
+            api_visibility="undocumented",
+        )
+
         run_redact_prepare = start_redact_btn.click(
             prepare_redaction_session_ui,
             inputs=[session_hash_state],
@@ -3231,6 +3394,16 @@ def build_ui():
             api_visibility="undocumented",
         )
 
+        with gr.Row():
+            with gr.Column(scale=2):
+                pass
+            with gr.Column(scale=1):
+                render_logout_button(
+                    show=SHOW_LOGOUT_BUTTON,
+                    url=LOGOUT_BUTTON_URL,
+                    label=LOGOUT_BUTTON_LABEL,
+                )
+
     return demo
 
 
@@ -3247,7 +3420,7 @@ def launch_pi_ui() -> FastAPI | None:
     return mount_or_launch(
         demo,
         allowed_paths=gradio_allowed_paths(),
-        css=THINKING_PANEL_CSS,
+        css=THINKING_PANEL_CSS + LOGOUT_FOOTER_CSS,
         head_extra=PI_AGENT_FINISH_HEAD_HTML,
         server_name=AGENT_UI_HOST,
         server_port=AGENT_UI_PORT,

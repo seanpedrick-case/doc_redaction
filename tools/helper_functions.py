@@ -1068,6 +1068,9 @@ def custom_regex_load(in_file: List[str], file_type: str = "allow_list"):
 
 
 def put_columns_in_df(in_file: List[str]):
+    from tools.malware_scan import require_files_malware_scanned
+
+    require_files_malware_scanned(in_file)
     new_choices = []
     concat_choices = []
     all_sheet_names = []
@@ -2116,6 +2119,11 @@ def show_info_box_on_click(
     in_fully_redacted_list_state,
     total_pdf_page_count,
 ):
+    from tools.malware_scan import mark_gradio_example_files_malware_clean
+
+    mark_gradio_example_files_malware_clean(in_doc_files)
+    mark_gradio_example_files_malware_clean(prepared_pdf_state)
+
     gr.Info(
         "Example data loaded. Now click on 'Extract text and redact document' on the Redact PDFs/images tab to run the example redaction."
     )
@@ -2255,6 +2263,11 @@ def show_info_box_on_click_ocr_examples(
     in_redact_llm_entities,
     custom_llm_instructions_textbox,
 ):
+    from tools.malware_scan import mark_gradio_example_files_malware_clean
+
+    mark_gradio_example_files_malware_clean(in_doc_files)
+    mark_gradio_example_files_malware_clean(prepared_pdf_state)
+
     gr.Info(
         "Example OCR data loaded. Now click on 'Extract text and redact document' on the Redact PDFs/images tab to run the OCR analysis."
     )
