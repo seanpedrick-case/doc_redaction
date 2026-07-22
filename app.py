@@ -163,7 +163,6 @@ from tools.aws_functions import (
     upload_log_file_to_s3,
 )
 from tools.config import (
-    ACCESS_LOG_DYNAMODB_TABLE_NAME,
     ACCESS_LOGS_FOLDER,
     ALLOW_LIST_PATH,
     ALLOWED_HOSTS,
@@ -187,7 +186,6 @@ from tools.config import (
     CONFIG_FOLDER,
     COST_CODE_ACCORDION_OPEN,
     COST_CODES_PATH,
-    CSV_ACCESS_LOG_HEADERS,
     CSV_FEEDBACK_LOG_HEADERS,
     CSV_USAGE_LOG_HEADERS,
     CUSTOM_BOX_COLOUR,
@@ -247,7 +245,6 @@ from tools.config import (
     DISPLAY_FILE_NAMES_IN_LOGS,
     DO_INITIAL_TABULAR_DATA_CLEAN,
     DOCUMENT_REDACTION_BUCKET,
-    DYNAMODB_ACCESS_LOG_HEADERS,
     DYNAMODB_FEEDBACK_LOG_HEADERS,
     DYNAMODB_USAGE_LOG_HEADERS,
     EFFICIENT_OCR,
@@ -322,6 +319,8 @@ from tools.config import (
     SAVE_OUTPUTS_TO_S3,
     SAVE_PAGE_OCR_VISUALISATIONS,
     SESSION_OUTPUT_FOLDER,
+    SESSION_SECURITY_ENABLED,
+    SESSION_SECURITY_HEARTBEAT_SECONDS,
     SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER,
     SHOW_AWS_API_KEYS,
     SHOW_AWS_EXAMPLES,
@@ -389,7 +388,12 @@ from tools.find_duplicate_tabular import (
     handle_tabular_row_selection,
     run_tabular_duplicate_detection,
 )
-from tools.gradio_platform import render_logout_button
+from tools.gradio_platform import (
+    get_client_ip,
+    log_platform_access,
+    render_logout_button,
+    resolve_session_identity,
+)
 from tools.helper_functions import (
     _file_name_from_pdf_path,
     all_outputs_file_download_fn,
@@ -485,6 +489,21 @@ from tools.redaction_review import (
     validate_review_file_df,
 )
 from tools.redaction_types import RedactionContext, RedactionOptions
+from tools.session_security import (
+    heartbeat as session_security_heartbeat,
+)
+from tools.session_security import (
+    list_sessions as session_security_list_sessions,
+)
+from tools.session_security import (
+    register_gradio_blocks as session_security_register_gradio_blocks,
+)
+from tools.session_security import (
+    register_session as session_security_register_session,
+)
+from tools.session_security import (
+    terminate_sessions as session_security_terminate_sessions,
+)
 from tools.summaries import (
     _summarisation_upload_to_paths,
     _upload_contains_pdf,
@@ -1183,6 +1202,10 @@ else:
         fill_width=FILL_SCREEN_WIDTH,
     )
 
+# Enables best-effort purge of Gradio-native login tokens on session invalidation
+# (tools/session_security.py); no-op unless SESSION_SECURITY_ENABLED and COGNITO_AUTH.
+session_security_register_gradio_blocks(blocks)
+
 # Warn early if OCR/PDF system dependencies aren't available.
 _DEPS_WARNING_MD = _external_dep_warning_markdown()
 
@@ -1616,6 +1639,16 @@ with blocks:
 
     if _DEPS_WARNING_MD:
         gr.Markdown(_DEPS_WARNING_MD)
+
+    # Session security: concurrent-login / anomaly notifications (tools/session_security.py).
+    # Inert (never shown, never ticks) unless SESSION_SECURITY_ENABLED.
+    session_security_notice_md = gr.Markdown(
+        visible=False, elem_id="session-security-notice"
+    )
+    session_security_heartbeat_timer = gr.Timer(
+        value=SESSION_SECURITY_HEARTBEAT_SECONDS,
+        active=SESSION_SECURITY_ENABLED,
+    )
 
     with gr.Accordion("API for agents (quickstart)", open=False, visible=False):
         gr.Markdown("""
@@ -4191,6 +4224,48 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                 merge_multiple_review_files_btn = gr.Button(
                     "Merge multiple review files into one", variant="primary"
                 )
+
+            with gr.Accordion(
+                "Active sessions & account activity",
+                open=False,
+                visible=SESSION_SECURITY_ENABLED,
+            ):
+                gr.Markdown(
+                    "Sessions currently associated with your account on this app "
+                    "instance. Ending a session here stops it being usable within "
+                    "this app; it does not necessarily invalidate an already-issued "
+                    "external sign-in cookie/token immediately."
+                )
+                session_security_sessions_df = gr.Dataframe(
+                    headers=[
+                        "This session",
+                        "IP address",
+                        "User-Agent",
+                        "Login time",
+                        "Last active",
+                        "Status",
+                    ],
+                    interactive=False,
+                    wrap=True,
+                    label="Your sessions",
+                )
+                with gr.Row():
+                    session_security_refresh_btn = gr.Button(
+                        "Refresh sessions", variant="secondary"
+                    )
+                    session_security_terminate_others_btn = gr.Button(
+                        "Terminate all other sessions", variant="stop"
+                    )
+                session_security_terminate_choice = gr.Dropdown(
+                    label="Or select specific session(s) to terminate",
+                    multiselect=True,
+                    choices=[],
+                    value=[],
+                )
+                session_security_terminate_selected_btn = gr.Button(
+                    "Terminate selected session(s)", variant="stop"
+                )
+                session_security_action_status_md = gr.Markdown()
 
     if SHOW_ALL_OUTPUTS_IN_OUTPUT_FOLDER:
         with gr.Accordion(
@@ -10355,23 +10430,194 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         )
 
     ###
+    # SESSION SECURITY
+    ###
+    # Concurrent-login detection, active-session self-service, and mid-session IP/User-Agent
+    # anomaly detection (tools/session_security.py). Inert unless SESSION_SECURITY_ENABLED.
+
+    def register_session_security_on_load(request: gr.Request):
+        if not SESSION_SECURITY_ENABLED:
+            return gr.update(visible=False)
+        username = resolve_session_identity(request)
+        ip_address = get_client_ip(request)
+        headers = getattr(request, "headers", None) or {}
+        user_agent = headers.get("user-agent", "") if headers else ""
+        notice = session_security_register_session(
+            username, request.session_hash, ip_address, user_agent
+        )
+        if notice:
+            return gr.update(value=f"**Notice:** {notice}", visible=True)
+        return gr.update(visible=False)
+
+    session_hash_textbox.change(
+        register_session_security_on_load,
+        inputs=[],
+        outputs=[session_security_notice_md],
+        api_visibility="undocumented",
+    )
+
+    def session_security_heartbeat_tick(request: gr.Request):
+        if not SESSION_SECURITY_ENABLED:
+            return gr.update(visible=False), gr.update(active=False)
+        ip_address = get_client_ip(request)
+        headers = getattr(request, "headers", None) or {}
+        user_agent = headers.get("user-agent", "") if headers else ""
+        result = session_security_heartbeat(
+            request.session_hash, ip_address, user_agent
+        )
+        if result.status == "terminated":
+            message = (
+                result.notice
+                or "This session has ended. Please reload the page and sign in again."
+            )
+            return (
+                gr.update(value=f"**Session ended:** {message}", visible=True),
+                gr.update(active=False),
+            )
+        if result.notice:
+            return (
+                gr.update(value=f"**Notice:** {result.notice}", visible=True),
+                gr.update(),
+            )
+        return gr.update(visible=False), gr.update()
+
+    session_security_heartbeat_timer.tick(
+        session_security_heartbeat_tick,
+        inputs=[],
+        outputs=[session_security_notice_md, session_security_heartbeat_timer],
+        api_visibility="undocumented",
+    )
+
+    def _session_security_rows(records, current_session_hash):
+        return [
+            [
+                "Yes" if record.session_hash == current_session_hash else "",
+                record.ip_address or "",
+                record.user_agent or "",
+                record.login_time or "",
+                record.last_seen_time or "",
+                record.status or "",
+            ]
+            for record in records
+        ]
+
+    def refresh_session_security_sessions(request: gr.Request):
+        if not SESSION_SECURITY_ENABLED:
+            return pd.DataFrame(), gr.update(choices=[], value=[])
+        username = resolve_session_identity(request)
+        current_hash = request.session_hash
+        records = session_security_list_sessions(username)
+        df = pd.DataFrame(
+            _session_security_rows(records, current_hash),
+            columns=[
+                "This session",
+                "IP address",
+                "User-Agent",
+                "Login time",
+                "Last active",
+                "Status",
+            ],
+        )
+        choices = [
+            (
+                f"{record.ip_address or 'unknown IP'} - {record.login_time} ({record.status})",
+                record.session_hash,
+            )
+            for record in records
+            if record.session_hash != current_hash and record.status == "active"
+        ]
+        return df, gr.update(choices=choices, value=[])
+
+    session_security_refresh_btn.click(
+        refresh_session_security_sessions,
+        inputs=[],
+        outputs=[session_security_sessions_df, session_security_terminate_choice],
+        api_visibility="undocumented",
+    )
+
+    def terminate_selected_session_security_sessions(
+        selected_hashes, request: gr.Request
+    ):
+        if not SESSION_SECURITY_ENABLED:
+            return "", pd.DataFrame(), gr.update(choices=[], value=[])
+        username = resolve_session_identity(request)
+        current_hash = request.session_hash
+        count = session_security_terminate_sessions(
+            username, selected_hashes or [], current_hash
+        )
+        df, dropdown_update = refresh_session_security_sessions(request)
+        status = (
+            f"Terminated {count} session(s)."
+            if count
+            else "No sessions were terminated."
+        )
+        return status, df, dropdown_update
+
+    session_security_terminate_selected_btn.click(
+        terminate_selected_session_security_sessions,
+        inputs=[session_security_terminate_choice],
+        outputs=[
+            session_security_action_status_md,
+            session_security_sessions_df,
+            session_security_terminate_choice,
+        ],
+        api_visibility="undocumented",
+    )
+
+    def terminate_other_session_security_sessions(request: gr.Request):
+        if not SESSION_SECURITY_ENABLED:
+            return "", pd.DataFrame(), gr.update(choices=[], value=[])
+        username = resolve_session_identity(request)
+        current_hash = request.session_hash
+        records = session_security_list_sessions(username)
+        other_hashes = [
+            record.session_hash
+            for record in records
+            if record.session_hash != current_hash and record.status == "active"
+        ]
+        count = session_security_terminate_sessions(
+            username, other_hashes, current_hash
+        )
+        df, dropdown_update = refresh_session_security_sessions(request)
+        status = (
+            f"Terminated {count} other session(s)."
+            if count
+            else "No other active sessions found."
+        )
+        return status, df, dropdown_update
+
+    session_security_terminate_others_btn.click(
+        terminate_other_session_security_sessions,
+        inputs=[],
+        outputs=[
+            session_security_action_status_md,
+            session_security_sessions_df,
+            session_security_terminate_choice,
+        ],
+        api_visibility="undocumented",
+    )
+
+    ###
     # LOGGING
     ###
 
     ### ACCESS LOGS
-    # Log usernames and times of access to file (to know who is using the app when running on AWS)
-    access_callback = CSVLogger_custom(dataset_file_name=LOG_FILE_NAME)
+    # Log page opens (and session-security events share this same CSV / DynamoDB table,
+    # distinguished by the "event" column — see tools/gradio_platform.PlatformAccessLogger).
+    def log_access_on_session_hash_change(session_hash, host_name, request: gr.Request):
+        headers = getattr(request, "headers", None) or {}
+        log_platform_access(
+            session_hash,
+            host_name or HOST_NAME,
+            username=resolve_session_identity(request),
+            event="access",
+            ip_address=get_client_ip(request),
+            user_agent=headers.get("user-agent", "") if headers else "",
+        )
+        return ""
 
-    access_callback.setup([session_hash_textbox, host_name_textbox], ACCESS_LOGS_FOLDER)
     session_hash_textbox.change(
-        lambda *args: access_callback.flag(
-            list(args),
-            save_to_csv=SAVE_LOGS_TO_CSV,
-            save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
-            dynamodb_table_name=ACCESS_LOG_DYNAMODB_TABLE_NAME,
-            dynamodb_headers=DYNAMODB_ACCESS_LOG_HEADERS,
-            replacement_headers=CSV_ACCESS_LOG_HEADERS,
-        ),
+        log_access_on_session_hash_change,
         [session_hash_textbox, host_name_textbox],
         outputs=[flag_value_placeholder],
         preprocess=False,

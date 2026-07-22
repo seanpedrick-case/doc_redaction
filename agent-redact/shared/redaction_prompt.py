@@ -353,6 +353,12 @@ This deployment uses **curated tools**, not the Pi coding agent. **Do not** read
 Available tools: `list_workspace_files`, `doc_redact`, `read_workspace_text`, `write_workspace_text`,
 `run_workspace_python_script`, `verify_coverage`, `review_apply`.
 
+On the first `doc_redact` call, cover **all** User redaction requirements together:
+- Keep default entities (includes `PERSON` for names); append `CUSTOM_VLM_FACES` /
+  `CUSTOM_VLM_SIGNATURE` only when the user asked for faces/signatures.
+- Put explicit org/place/phrase terms from the user into `deny_list` (e.g. Lambeth).
+- Use flat args only: `{"pdf_relative_path": "file.pdf", "deny_list": ["…"], …}`.
+
 Complete **full Pass 1** in this turn: initial redaction → CSV policy edits → pre-apply
 `verify_coverage` until `pass_strict` → **one** `review_apply` → post-apply verify on the
 deliverable `*_redacted.pdf`. User redaction requirements at the end of this prompt define *what*

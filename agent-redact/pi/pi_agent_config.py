@@ -940,7 +940,7 @@ def credential_status_markdown(*, provider: str | None = None) -> str:
     if active == PROVIDER_LLAMA:
         return (
             f"**Credentials:** local llama-cpp at `{LLAMA_BASE_URL}` "
-            f"(no API key; AWS/Gemini not used for Pi orchestration)"
+            f"(no API key; AWS/Gemini not used for agentic orchestration)"
         )
     if active == PROVIDER_GEMINI:
         gemini = (
