@@ -23,6 +23,7 @@ from tools.auth import authenticate_user
 from tools.aws_functions import upload_log_file_to_s3
 from tools.config import (
     ACCESS_LOG_DYNAMODB_TABLE_NAME,
+    ACCESS_LOG_UNIFIED_HEADERS,
     ACCESS_LOGS_FOLDER,
     ALLOWED_HOSTS,
     ALLOWED_ORIGINS,
@@ -49,6 +50,7 @@ from tools.config import (
     SAVE_LOGS_TO_CSV,
     SAVE_LOGS_TO_DYNAMODB,
     SAVE_OUTPUTS_TO_S3,
+    TRUST_FORWARDED_FOR_HEADER,
     USAGE_LOG_DYNAMODB_TABLE_NAME,
     USAGE_LOG_FILE_NAME,
     USAGE_LOGS_FOLDER,
@@ -135,6 +137,34 @@ def resolve_session_identity(request: gr.Request) -> str:
         return out_session_hash
 
     return request.session_hash
+
+
+def get_client_ip(request: gr.Request) -> str:
+    """
+    Resolve the client's IP address from a Gradio request.
+
+    Behind a reverse proxy/load balancer (e.g. AWS ALB, CloudFront), the socket-level
+    ``request.client.host`` is the proxy's own address, not the real client. When
+    ``TRUST_FORWARDED_FOR_HEADER`` is enabled, the first address in ``X-Forwarded-For``
+    (the original client, per the header's append-only convention) is used instead.
+    This must stay opt-in: trusting the header when there is no real proxy in front of
+    the app lets a client spoof any IP address it likes.
+    """
+    if TRUST_FORWARDED_FOR_HEADER:
+        headers = getattr(request, "headers", None) or {}
+        forwarded_for = headers.get("x-forwarded-for") if headers else None
+        if forwarded_for:
+            first_ip = str(forwarded_for).split(",")[0].strip()
+            if first_ip:
+                return first_ip
+
+    client = getattr(request, "client", None)
+    if client is not None:
+        host = getattr(client, "host", None)
+        if host:
+            return str(host)
+
+    return ""
 
 
 def build_s3_outputs_prefix(
@@ -273,24 +303,52 @@ class _LogField:
 
 
 class PlatformAccessLogger:
-    """Access log writer using CSVLogger_custom."""
+    """Access + session-activity log writer using CSVLogger_custom.
+
+    Writes the unified ACCESS_LOG_UNIFIED_HEADERS schema into the existing access
+    log CSV / DynamoDB table. Distinguish row types via the ``event`` column
+    (e.g. ``access``, ``login``, ``anomaly_notified``, ``manual_terminate``).
+    """
 
     def __init__(self) -> None:
+        self._headers = list(CSV_ACCESS_LOG_HEADERS or ACCESS_LOG_UNIFIED_HEADERS)
+        self._dynamodb_headers = list(
+            DYNAMODB_ACCESS_LOG_HEADERS or ACCESS_LOG_UNIFIED_HEADERS
+        )
         self._callback = CSVLogger_custom(dataset_file_name=LOG_FILE_NAME)
-        self._fields = [
-            _LogField("session_hash"),
-            _LogField("host_name"),
-        ]
+        self._fields = [_LogField(label) for label in self._headers]
         self._callback.setup(self._fields, ACCESS_LOGS_FOLDER)
 
-    def log(self, session_hash: str, host_name: str = HOST_NAME) -> None:
+    def log(
+        self,
+        session_hash: str,
+        host_name: str = HOST_NAME,
+        *,
+        username: str = "",
+        event: str = "access",
+        ip_address: str = "",
+        user_agent: str = "",
+        status: str = "",
+        details: str = "",
+    ) -> None:
+        values_by_header = {
+            "session_hash": session_hash,
+            "username": username or session_hash,
+            "host_name": host_name,
+            "event": event,
+            "ip_address": ip_address,
+            "user_agent": user_agent,
+            "status": status,
+            "details": details,
+        }
+        row = [values_by_header.get(header, "") for header in self._headers]
         self._callback.flag(
-            [session_hash, host_name],
+            row,
             save_to_csv=SAVE_LOGS_TO_CSV,
             save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
             dynamodb_table_name=ACCESS_LOG_DYNAMODB_TABLE_NAME,
-            dynamodb_headers=DYNAMODB_ACCESS_LOG_HEADERS,
-            replacement_headers=CSV_ACCESS_LOG_HEADERS or None,
+            dynamodb_headers=self._dynamodb_headers,
+            replacement_headers=self._headers,
         )
         upload_log_file_to_s3(
             ACCESS_LOGS_FOLDER + LOG_FILE_NAME,
@@ -417,11 +475,30 @@ def get_agent_usage_logger() -> PlatformAgentUsageLogger:
     return _agent_usage_logger
 
 
-def log_platform_access(session_hash: str, host_name: str = HOST_NAME) -> None:
+def log_platform_access(
+    session_hash: str,
+    host_name: str = HOST_NAME,
+    *,
+    username: str = "",
+    event: str = "access",
+    ip_address: str = "",
+    user_agent: str = "",
+    status: str = "",
+    details: str = "",
+) -> None:
     if not SAVE_LOGS_TO_CSV and not SAVE_LOGS_TO_DYNAMODB:
         return
     try:
-        get_access_logger().log(session_hash, host_name)
+        get_access_logger().log(
+            session_hash,
+            host_name,
+            username=username,
+            event=event,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            status=status,
+            details=details,
+        )
     except OSError as exc:
         logger.warning(
             "Access log write failed (%s); session UI continues. "
@@ -500,22 +577,25 @@ def wire_access_logging(
     """
     Wire access logging on session_hash change (main-app pattern).
 
-    Returns the EventListener so callers can chain further .success handlers.
+    Writes the unified access-log schema (same CSV / DynamoDB table as session-security
+    events). Returns the EventListener so callers can chain further .success handlers.
     """
-    access_callback = CSVLogger_custom(dataset_file_name=LOG_FILE_NAME)
-    access_callback.setup(
-        [session_hash_component, host_name_component], ACCESS_LOGS_FOLDER
-    )
+
+    def _log_access(session_hash, host_name, request: gr.Request):
+        headers = getattr(request, "headers", None) or {}
+        log_platform_access(
+            session_hash,
+            host_name or HOST_NAME,
+            username=resolve_session_identity(request),
+            event="access",
+            ip_address=get_client_ip(request),
+            user_agent=headers.get("user-agent", "") if headers else "",
+        )
+        return "" if flag_output is not None else None
+
     outputs = [flag_output] if flag_output is not None else []
     return session_hash_component.change(
-        lambda *args: access_callback.flag(
-            list(args),
-            save_to_csv=SAVE_LOGS_TO_CSV,
-            save_to_dynamodb=SAVE_LOGS_TO_DYNAMODB,
-            dynamodb_table_name=ACCESS_LOG_DYNAMODB_TABLE_NAME,
-            dynamodb_headers=DYNAMODB_ACCESS_LOG_HEADERS,
-            replacement_headers=CSV_ACCESS_LOG_HEADERS or None,
-        ),
+        _log_access,
         [session_hash_component, host_name_component],
         outputs=outputs,
         preprocess=False,

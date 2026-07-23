@@ -535,10 +535,28 @@ DISPLAY_FILE_NAMES_IN_LOGS = convert_string_to_boolean(
     get_or_create_env_var("DISPLAY_FILE_NAMES_IN_LOGS", "False")
 )
 
+# Unified access + session-activity log schema (page opens and security events share one
+# CSV / DynamoDB table). Override via CSV_ACCESS_LOG_HEADERS / DYNAMODB_ACCESS_LOG_HEADERS
+# only if you need a custom column set; blank means use this default.
+ACCESS_LOG_UNIFIED_HEADERS = [
+    "session_hash",
+    "username",
+    "host_name",
+    "event",
+    "ip_address",
+    "user_agent",
+    "status",
+    "details",
+]
+_ACCESS_LOG_UNIFIED_HEADERS_ENV = (
+    '["session_hash", "username", "host_name", "event", '
+    '"ip_address", "user_agent", "status", "details"]'
+)
+
 # Further customisation options for CSV logs
 CSV_ACCESS_LOG_HEADERS = get_or_create_env_var(
-    "CSV_ACCESS_LOG_HEADERS", ""
-)  # If blank, uses component labels
+    "CSV_ACCESS_LOG_HEADERS", _ACCESS_LOG_UNIFIED_HEADERS_ENV
+)  # If blank after parse, falls back to ACCESS_LOG_UNIFIED_HEADERS
 CSV_FEEDBACK_LOG_HEADERS = get_or_create_env_var(
     "CSV_FEEDBACK_LOG_HEADERS", ""
 )  # If blank, uses component labels
@@ -555,7 +573,9 @@ SAVE_LOGS_TO_DYNAMODB = convert_string_to_boolean(
 ACCESS_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var(
     "ACCESS_LOG_DYNAMODB_TABLE_NAME", "redaction_access_log"
 )
-DYNAMODB_ACCESS_LOG_HEADERS = get_or_create_env_var("DYNAMODB_ACCESS_LOG_HEADERS", "")
+DYNAMODB_ACCESS_LOG_HEADERS = get_or_create_env_var(
+    "DYNAMODB_ACCESS_LOG_HEADERS", _ACCESS_LOG_UNIFIED_HEADERS_ENV
+)
 
 FEEDBACK_LOG_DYNAMODB_TABLE_NAME = get_or_create_env_var(
     "FEEDBACK_LOG_DYNAMODB_TABLE_NAME", "redaction_feedback"
@@ -2589,6 +2609,88 @@ LOGOUT_FOOTER_CSS = """
 }
 """
 
+###
+# SESSION SECURITY (concurrent login detection, active session management, anomaly detection)
+###
+# Pen-test remediation: detect/respond to multiple concurrent logins from the same account,
+# let users view and terminate their own active sessions with a logbook, and flag mid-session
+# IP/User-Agent drift. Everything below defaults to off/inert until SESSION_SECURITY_ENABLED=True.
+
+# Master switch. When False, none of the session-security hooks or UI are added to the app.
+SESSION_SECURITY_ENABLED = convert_string_to_boolean(
+    get_or_create_env_var("SESSION_SECURITY_ENABLED", "False")
+)
+
+# What to do when a second concurrent login for the same resolved username is detected:
+# "notify" (tell the older session a new sign-in happened), "invalidate" (end the older
+# session at the app layer + best-effort at the IdP), or "both".
+SESSION_SECURITY_MODE = get_or_create_env_var("SESSION_SECURITY_MODE", "notify")
+
+# Which client properties to bind a session to and watch for mid-session drift.
+SESSION_SECURITY_BIND_IP = convert_string_to_boolean(
+    get_or_create_env_var("SESSION_SECURITY_BIND_IP", "True")
+)
+SESSION_SECURITY_BIND_USER_AGENT = convert_string_to_boolean(
+    get_or_create_env_var("SESSION_SECURITY_BIND_USER_AGENT", "True")
+)
+
+# What to do when a bound property changes mid-session: "log_only", "notify", or "terminate".
+SESSION_SECURITY_ANOMALY_ACTION = get_or_create_env_var(
+    "SESSION_SECURITY_ANOMALY_ACTION", "notify"
+)
+
+# Client-side heartbeat poll interval (seconds) used for idle tracking and to surface
+# notifications/terminations to a tab that is not otherwise triggering new requests.
+SESSION_SECURITY_HEARTBEAT_SECONDS = int(
+    get_or_create_env_var("SESSION_SECURITY_HEARTBEAT_SECONDS", "30")
+)
+
+# Optional idle timeout (minutes) after which an inactive session is auto-terminated.
+# 0 disables idle-timeout enforcement.
+SESSION_SECURITY_IDLE_TIMEOUT_MINUTES = int(
+    get_or_create_env_var("SESSION_SECURITY_IDLE_TIMEOUT_MINUTES", "0")
+)
+
+# Storage backend for the session registry. "memory" is per-process only (fine for a single
+# instance/task); "dynamodb" shares session state across multiple replicas/tasks.
+SESSION_SECURITY_STORE_BACKEND = get_or_create_env_var(
+    "SESSION_SECURITY_STORE_BACKEND", "memory"
+)
+SESSION_SECURITY_DYNAMODB_TABLE_NAME = get_or_create_env_var(
+    "SESSION_SECURITY_DYNAMODB_TABLE_NAME", "redaction_session_security"
+)
+
+# Account activity logbook (login/notify/invalidate/anomaly/manual-terminate events).
+# Defaults to the same CSV file and DynamoDB table as the existing access log, using the
+# unified ACCESS_LOG_UNIFIED_HEADERS schema (distinguish rows via the "event" column).
+SESSION_SECURITY_LOG_FOLDER = get_or_create_env_var(
+    "SESSION_SECURITY_LOG_FOLDER", ACCESS_LOGS_FOLDER
+)
+SESSION_SECURITY_LOG_FOLDER = ensure_folder_within_app_directory(
+    SESSION_SECURITY_LOG_FOLDER
+)
+SESSION_SECURITY_LOG_FILE_NAME = get_or_create_env_var(
+    "SESSION_SECURITY_LOG_FILE_NAME", LOG_FILE_NAME
+)
+SESSION_SECURITY_DYNAMODB_LOG_TABLE_NAME = get_or_create_env_var(
+    "SESSION_SECURITY_DYNAMODB_LOG_TABLE_NAME", ACCESS_LOG_DYNAMODB_TABLE_NAME
+)
+
+# Best-effort defence-in-depth: when invalidating a superseded session, also call Cognito's
+# AdminUserGlobalSignOut for that username (invalidates refresh tokens; forces re-auth at the
+# IdP on next token refresh - NOT an instant kill of an already-live ALB/session cookie).
+# Requires the extra cognito-idp:AdminUserGlobalSignOut IAM permission.
+SESSION_SECURITY_COGNITO_GLOBAL_SIGNOUT = convert_string_to_boolean(
+    get_or_create_env_var("SESSION_SECURITY_COGNITO_GLOBAL_SIGNOUT", "False")
+)
+
+# Trust the X-Forwarded-For header for client IP resolution. Only enable this when the app is
+# genuinely deployed behind a trusted reverse proxy/load balancer (e.g. ALB, CloudFront) that
+# sets this header itself - otherwise a client could trivially spoof their reported IP.
+TRUST_FORWARDED_FOR_HEADER = convert_string_to_boolean(
+    get_or_create_env_var("TRUST_FORWARDED_FOR_HEADER", "False")
+)
+
 SHOW_FEEDBACK_BUTTONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_FEEDBACK_BUTTONS", "False")
 )
@@ -3043,10 +3145,14 @@ EMPTY_SEND_WITH_FILE_HINT = (
 
 # Convert string environment variables to string or list
 CSV_ACCESS_LOG_HEADERS = _get_env_list(CSV_ACCESS_LOG_HEADERS)
+if not CSV_ACCESS_LOG_HEADERS:
+    CSV_ACCESS_LOG_HEADERS = list(ACCESS_LOG_UNIFIED_HEADERS)
 CSV_FEEDBACK_LOG_HEADERS = _get_env_list(CSV_FEEDBACK_LOG_HEADERS)
 CSV_USAGE_LOG_HEADERS = _get_env_list(CSV_USAGE_LOG_HEADERS)
 
 DYNAMODB_ACCESS_LOG_HEADERS = _get_env_list(DYNAMODB_ACCESS_LOG_HEADERS)
+if not DYNAMODB_ACCESS_LOG_HEADERS:
+    DYNAMODB_ACCESS_LOG_HEADERS = list(ACCESS_LOG_UNIFIED_HEADERS)
 DYNAMODB_FEEDBACK_LOG_HEADERS = _get_env_list(DYNAMODB_FEEDBACK_LOG_HEADERS)
 DYNAMODB_PI_USAGE_LOG_HEADERS = _get_env_list(DYNAMODB_PI_USAGE_LOG_HEADERS)
 CSV_PI_USAGE_LOG_HEADERS = _get_env_list(CSV_PI_USAGE_LOG_HEADERS)

@@ -15,6 +15,7 @@ if str(_SHARED_DIR) not in sys.path:
     sys.path.insert(0, str(_SHARED_DIR))
 
 from remote_redaction import (  # noqa: E402
+    DEFAULT_REDACT_ENTITIES,
     call_doc_redact,
     extract_server_paths,
     fetch_redaction_files,
@@ -59,6 +60,18 @@ _DOC_REDACT_DEST_KEYS = (
     "dest_dir",
     "dest",
     "output_dir",
+)
+_DOC_REDACT_ENTITY_KEYS = (
+    "redact_entities",
+    "entities",
+    "chosen_redact_entities",
+)
+_DOC_REDACT_DENY_KEYS = ("deny_list", "deny")
+_DOC_REDACT_ALLOW_KEYS = ("allow_list", "allow")
+_DOC_REDACT_HANDWRITE_KEYS = (
+    "handwrite_signature_checkbox",
+    "handwrite_signature",
+    "handwrite_signature_textbox",
 )
 _SCRIPT_PATH_KEYS = (
     "relative_path",
@@ -278,6 +291,12 @@ def normalize_tool_args(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
             "must_not_redact",
             "deny_list",
             "allow_list",
+            "redact_entities",
+            "entities",
+            "chosen_redact_entities",
+            "handwrite_signature_checkbox",
+            "handwrite_signature",
+            "handwrite_signature_textbox",
         }:
             out[key] = value
             continue
@@ -500,6 +519,54 @@ def _first_string(payload: dict[str, Any], keys: tuple[str, ...]) -> str:
     return ""
 
 
+def _coerce_str_list(value: Any) -> list[str] | None:
+    """Normalize tool list args (list, JSON string, or comma-separated)."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text or text in {"{}", "null", "None", "none"}:
+            return None
+        if text.startswith("["):
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, list):
+                out = [str(item).strip() for item in parsed if str(item).strip()]
+                return out or None
+        return [part.strip() for part in text.split(",") if part.strip()] or None
+    if isinstance(value, (list, tuple)):
+        out = [str(item).strip() for item in value if str(item).strip()]
+        return out or None
+    return None
+
+
+def _first_str_list(payload: dict[str, Any], keys: tuple[str, ...]) -> list[str] | None:
+    for key in keys:
+        if key not in payload:
+            continue
+        coerced = _coerce_str_list(payload.get(key))
+        if coerced:
+            return coerced
+    return None
+
+
+def _merge_redact_entities(requested: list[str] | None) -> list[str] | None:
+    """Union requested entities onto Pass 1 defaults (order: defaults, then extras)."""
+    if not requested:
+        return None
+    out = list(DEFAULT_REDACT_ENTITIES)
+    seen = {item.casefold() for item in out}
+    for entity in requested:
+        key = entity.casefold()
+        if key in seen:
+            continue
+        out.append(entity)
+        seen.add(key)
+    return out
+
+
 def _looks_like_filesystem_path(text: str) -> bool:
     normalized = text.strip().replace("\\", "/")
     if not normalized:
@@ -523,7 +590,10 @@ def _deep_flatten_tool_payload(*values: Any) -> dict[str, Any]:
     def absorb(key: str, val: Any) -> None:
         if isinstance(val, str) and val.strip():
             merged[key] = val.strip()
-        elif val is not None and not isinstance(val, (dict, list, tuple)):
+        elif isinstance(val, (list, tuple)):
+            # Preserve entity / deny / allow / handwrite lists from tool calls.
+            merged[key] = list(val)
+        elif val is not None and not isinstance(val, dict):
             merged[key] = val
 
     def walk(node: Any) -> None:
@@ -804,6 +874,52 @@ def _should_resolve_script_path(payload: dict[str, Any], rel_raw: str) -> bool:
     return "." not in name
 
 
+def _looks_like_file_content_not_path(text: str) -> bool:
+    """True when a string is source/CSV body, not a short workspace-relative path.
+
+    Local models often put the script body in ``relative_path``, which then blows
+    up ``Path.mkdir`` with OSError ENAMETOOLONG (errno 36).
+    """
+    s = (text or "").strip()
+    if not s:
+        return False
+    # Linux NAME_MAX is typically 255; any single path component beyond that fails.
+    if any(len(part) > 240 for part in s.replace("\\", "/").split("/")):
+        return True
+    if "\n" in s or "\r" in s:
+        return True
+    if len(s) > 240:
+        return True
+    head = s.lstrip()[:80].lower()
+    return head.startswith(
+        (
+            "import ",
+            "from ",
+            "#!/",
+            "def ",
+            "class ",
+            "image,page,label,",  # review CSV header
+            "page,line,",
+        )
+    )
+
+
+def _looks_like_short_relative_path(text: str) -> bool:
+    """True for a plausible short workspace-relative file path."""
+    s = (text or "").strip().replace("\\", "/")
+    if not s or _looks_like_file_content_not_path(s):
+        return False
+    if len(s) > 240 or "\n" in s or "\r" in s:
+        return False
+    name = Path(s).name
+    if not name or name in {".", ".."}:
+        return False
+    # Prefer paths with an extension; bare script names (fix_policy) also OK.
+    if "." in name:
+        return True
+    return bool(re.fullmatch(r"[A-Za-z0-9_./\-]+", s))
+
+
 def _parse_write_workspace_text_input(
     relative_path: Any,
     content: Any,
@@ -818,12 +934,14 @@ def _parse_write_workspace_text_input(
         if isinstance(nested, dict):
             rel_raw = _coerce_relative_path(nested, label="relative_path")
     if not rel_raw and isinstance(relative_path, str):
-        rel_raw = relative_path.strip()
-    if not rel_raw:
+        # Keep exact text so a swapped script body retains trailing newlines.
+        rel_raw = relative_path
+    if not (rel_raw or "").strip():
         raise ValueError(
             "write_workspace_text requires relative_path or script (e.g. fix_policy.py)."
         )
     rel_raw = rel_raw.replace("\\", "/")
+    rel_path = rel_raw.strip()
 
     content_raw: Any = merged.get("content")
     if isinstance(content_raw, dict):
@@ -841,10 +959,65 @@ def _parse_write_workspace_text_input(
             break
     if content_raw is None:
         raise ValueError("write_workspace_text requires content text.")
-    return rel_raw, _coerce_tool_text_content(content_raw)
+    body = _coerce_tool_text_content(content_raw)
+
+    # Rescue swapped args: relative_path got the script, content got the filename.
+    if _looks_like_file_content_not_path(rel_path):
+        if _looks_like_short_relative_path(body):
+            script_body = (
+                relative_path
+                if isinstance(relative_path, str)
+                and _looks_like_file_content_not_path(relative_path)
+                else rel_raw
+            )
+            return body.replace("\\", "/").strip(), script_body
+        raise ValueError(
+            "relative_path looks like file content (script/CSV body), not a short "
+            "path. Pass a short filename in relative_path and the body in content, "
+            'e.g. {"relative_path": "fix_review.py", "content": "import csv\\n..."}.'
+        )
+    return rel_path, body
 
 
-def _resolve_script_relative_path(session_hash: str | None, script: str) -> str:
+_OUTPUT_REDACT_IN_CONTENT_RE = re.compile(
+    r"""(?<![A-Za-z0-9_./-])((?:redact/)?[^'"\s\n]+/output_redact)(?=/|['"\s]|$)""",
+    re.IGNORECASE,
+)
+
+
+def _preferred_script_output_dir(
+    session_hash: str | None,
+    *,
+    content: str | None = None,
+) -> str | None:
+    """Prefer the active document's output_redact over leftover siblings in the workspace."""
+    # 1) Paths mentioned in the script body (OCR/review CSV strings).
+    if content:
+        for match in _OUTPUT_REDACT_IN_CONTENT_RE.finditer(content):
+            candidate = match.group(1).replace("\\", "/").strip("/")
+            if candidate:
+                return candidate
+    # 2) Latest doc_redact artifacts for this Gradio session.
+    arts = _session_artifacts(session_hash)
+    for key in ("ocr_words_csv_relative_path", "review_csv_relative_path"):
+        raw = arts.get(key)
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        posix = raw.replace("\\", "/")
+        marker = "/output_redact/"
+        if marker in posix:
+            return posix.split(marker, 1)[0] + "/output_redact"
+        if posix.endswith("/output_redact"):
+            return posix
+    return None
+
+
+def _resolve_script_relative_path(
+    session_hash: str | None,
+    script: str,
+    *,
+    content: str | None = None,
+) -> str:
     """Map a script filename or relative path to a workspace-relative .py path."""
     rel = script.replace("\\", "/").strip()
     if "/" in rel:
@@ -853,15 +1026,44 @@ def _resolve_script_relative_path(session_hash: str | None, script: str) -> str:
     if not name.lower().endswith(".py"):
         name = f"{name}.py" if name else "fix_policy.py"
     root = _session_root(session_hash).resolve()
+    preferred = _preferred_script_output_dir(session_hash, content=content)
+    if preferred:
+        candidate = (root / preferred / name).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            pass
+        else:
+            # Place under the active document even when the file does not exist yet.
+            return f"{preferred.strip('/')}/{name}".replace("\\", "/")
+
     matches = sorted(
         (path for path in root.rglob(name) if path.is_file()),
-        key=lambda path: len(path.relative_to(root).parts),
+        key=lambda path: (
+            (
+                0
+                if preferred
+                and preferred in str(path.relative_to(root)).replace("\\", "/")
+                else 1
+            ),
+            -path.stat().st_mtime_ns,
+            len(path.relative_to(root).parts),
+        ),
     )
     if matches:
         return str(matches[0].relative_to(root)).replace("\\", "/")
     output_dirs = sorted(
         (path for path in root.rglob("output_redact") if path.is_dir()),
-        key=lambda path: len(path.relative_to(root).parts),
+        key=lambda path: (
+            (
+                0
+                if preferred
+                and preferred in str(path.relative_to(root)).replace("\\", "/")
+                else 1
+            ),
+            -path.stat().st_mtime_ns,
+            len(path.relative_to(root).parts),
+        ),
     )
     if output_dirs:
         target = output_dirs[0]
@@ -992,7 +1194,20 @@ def _parse_doc_redact_tool_input(
     ocr_method: str | None,
     pii_method: str | None,
     session_hash: str | None = None,
-) -> tuple[str, str, str | None, str | None]:
+    redact_entities: Any | None = None,
+    deny_list: Any | None = None,
+    allow_list: Any | None = None,
+    handwrite_signature_checkbox: Any | None = None,
+) -> tuple[
+    str,
+    str,
+    str | None,
+    str | None,
+    list[str] | None,
+    list[str] | None,
+    list[str] | None,
+    list[str] | None,
+]:
     """Merge/normalize doc_redact tool args from messy local-model tool calls."""
     payload = _deep_flatten_tool_payload(pdf_relative_path, dest_relative_dir)
 
@@ -1064,7 +1279,19 @@ def _parse_doc_redact_tool_input(
 
     ocr = ocr_method or _first_string(payload, ("ocr_method",)) or None
     pii = pii_method or _first_string(payload, ("pii_method",)) or None
-    return pdf_rel, dest_rel, ocr, pii
+    entities = _coerce_str_list(redact_entities) or _first_str_list(
+        payload, _DOC_REDACT_ENTITY_KEYS
+    )
+    deny = _coerce_str_list(deny_list) or _first_str_list(
+        payload, _DOC_REDACT_DENY_KEYS
+    )
+    allow = _coerce_str_list(allow_list) or _first_str_list(
+        payload, _DOC_REDACT_ALLOW_KEYS
+    )
+    handwrite = _coerce_str_list(handwrite_signature_checkbox) or _first_str_list(
+        payload, _DOC_REDACT_HANDWRITE_KEYS
+    )
+    return pdf_rel, dest_rel, ocr, pii, entities, deny, allow, handwrite
 
 
 def _parse_review_apply_tool_input(
@@ -1275,15 +1502,30 @@ def run_doc_redact(
     pii_method: str | None = None,
     deny_list: list[str] | None = None,
     allow_list: list[str] | None = None,
+    redact_entities: list[str] | None = None,
+    handwrite_signature_checkbox: list[str] | None = None,
 ) -> str:
     """Run Pass 1 redaction via /doc_redact and download artifacts into the session workspace."""
     try:
-        pdf_rel, dest_rel, ocr_from_tool, pii_from_tool = _parse_doc_redact_tool_input(
+        (
+            pdf_rel,
+            dest_rel,
+            ocr_from_tool,
+            pii_from_tool,
+            entities_from_tool,
+            deny_from_tool,
+            allow_from_tool,
+            handwrite_from_tool,
+        ) = _parse_doc_redact_tool_input(
             pdf_relative_path,
             dest_relative_dir,
             ocr_method=ocr_method,
             pii_method=pii_method,
             session_hash=session_hash,
+            redact_entities=redact_entities,
+            deny_list=deny_list,
+            allow_list=allow_list,
+            handwrite_signature_checkbox=handwrite_signature_checkbox,
         )
         pdf = _resolve_workspace_pdf(session_hash, pdf_rel)
         dest = _ensure_workspace_output_dir(
@@ -1297,8 +1539,10 @@ def run_doc_redact(
             dest,
             ocr_method=ocr_from_tool or os.environ.get("AGENT_DEFAULT_OCR_METHOD"),
             pii_method=pii_from_tool or os.environ.get("AGENT_DEFAULT_PII_METHOD"),
-            deny_list=deny_list,
-            allow_list=allow_list,
+            deny_list=deny_from_tool,
+            allow_list=allow_from_tool,
+            redact_entities=_merge_redact_entities(entities_from_tool),
+            handwrite_signature_checkbox=handwrite_from_tool,
         )
     except (ValueError, FileNotFoundError) as exc:
         return _tool_error_payload(
@@ -1343,11 +1587,16 @@ def run_doc_redact(
             except ValueError:
                 ocr_words_rel = str(discovered)
     message = result[1] if isinstance(result, (list, tuple)) and len(result) > 1 else ""
+    effective_entities = _merge_redact_entities(entities_from_tool)
     payload: dict[str, Any] = {
         "message": str(message or "doc_redact completed."),
         "saved_paths": saved_rels,
         "server_paths": extract_server_paths(result),
     }
+    if effective_entities:
+        payload["redact_entities"] = effective_entities
+    if handwrite_from_tool:
+        payload["handwrite_signature_checkbox"] = handwrite_from_tool
     if review_csv_rel:
         payload["review_csv_relative_path"] = review_csv_rel
     if ocr_words_rel:
@@ -1503,7 +1752,7 @@ def write_workspace_text(
             merged = normalize_tool_args("write_workspace_text", merged) or merged
         rel, body = _parse_write_workspace_text_input(relative_path, content)
         if _should_resolve_script_path(_sanitize_tool_dict(merged), rel):
-            rel = _resolve_script_relative_path(session_hash, rel)
+            rel = _resolve_script_relative_path(session_hash, rel, content=body)
         path = _resolve_workspace_path(session_hash, rel)
     except ValueError as exc:
         return _tool_error_payload(
@@ -1553,23 +1802,41 @@ def write_workspace_text(
             )
     else:
         color_fixed = 0
-    # Write-storm gate: refuse a 3rd consecutive rewrite of the same .py without run.
+    # Write-storm gate: after N rewrites without run, execute the saved script
+    # (local models often ignore the "call run_…" error and loop forever).
     if path.suffix.lower() == ".py" or rel.lower().endswith(".py"):
-        # Count prospective write before applying storm limit (includes this call).
         storm_key = _session_key(session_hash)
         prior = _PY_WRITE_STORM.get(storm_key) or {}
         prior_count = int(prior.get("count") or 0) if prior.get("path") == rel else 0
         if prior_count >= _MAX_PY_WRITES_WITHOUT_RUN:
-            return _tool_error_payload(
-                session_hash,
-                "write_workspace_text",
-                (
-                    f"Refusing another write to {rel!r} — already saved "
-                    f"{prior_count} time(s) without running. Call "
-                    f"run_workspace_python_script with relative_path={rel!r} now."
-                ),
-                extra={"written": rel, "blocked_write_storm": True},
-                fix_example={"relative_path": rel},
+            run_out = run_workspace_python_script(rel, None, session_hash=session_hash)
+            try:
+                run_payload: Any = json.loads(run_out)
+            except json.JSONDecodeError:
+                run_payload = {"raw": run_out}
+            return json.dumps(
+                {
+                    "written": rel,
+                    "blocked_write_storm": True,
+                    "auto_ran": True,
+                    "note": (
+                        f"Refused another rewrite of {rel!r} (already saved "
+                        f"{prior_count} time(s) without running). Automatically ran "
+                        "the existing script instead. Do NOT call write_workspace_text "
+                        "again for this file — use the run output, then verify_coverage "
+                        "/ review_apply."
+                    ),
+                    "run": run_payload,
+                    "next_step": (
+                        "Inspect run.stdout/stderr, then continue toward "
+                        "verify_coverage and review_apply."
+                    ),
+                    "fix_example": {
+                        "tool": "run_workspace_python_script",
+                        "relative_path": rel,
+                    },
+                },
+                indent=2,
             )
     path.parent.mkdir(parents=True, exist_ok=True)
     unchanged = False
@@ -1647,7 +1914,14 @@ def run_workspace_python_script(
                 )
             rel = rel.replace("\\", "/")
             if _should_resolve_script_path(payload, rel):
-                rel = _resolve_script_relative_path(session_hash, rel)
+                content_hint = (
+                    merged.get("content")
+                    if isinstance(merged.get("content"), str)
+                    else None
+                )
+                rel = _resolve_script_relative_path(
+                    session_hash, rel, content=content_hint
+                )
         path = _resolve_workspace_path(session_hash, rel)
     except ValueError as exc:
         return _tool_error_payload(
@@ -1985,6 +2259,10 @@ def build_langgraph_tools(session_hash: str | None):
         dest_relative_dir="",
         ocr_method=None,
         pii_method=None,
+        redact_entities=None,
+        deny_list=None,
+        allow_list=None,
+        handwrite_signature_checkbox=None,
     ):
         args = normalize_tool_args(
             "doc_redact",
@@ -1993,6 +2271,10 @@ def build_langgraph_tools(session_hash: str | None):
                 "dest_relative_dir": dest_relative_dir,
                 "ocr_method": ocr_method,
                 "pii_method": pii_method,
+                "redact_entities": redact_entities,
+                "deny_list": deny_list,
+                "allow_list": allow_list,
+                "handwrite_signature_checkbox": handwrite_signature_checkbox,
             },
         )
         return run_doc_redact(
@@ -2001,6 +2283,12 @@ def build_langgraph_tools(session_hash: str | None):
             session_hash=session_hash,
             ocr_method=args.get("ocr_method", ocr_method),
             pii_method=args.get("pii_method", pii_method),
+            redact_entities=args.get("redact_entities", redact_entities),
+            deny_list=args.get("deny_list", deny_list),
+            allow_list=args.get("allow_list", allow_list),
+            handwrite_signature_checkbox=args.get(
+                "handwrite_signature_checkbox", handwrite_signature_checkbox
+            ),
         )
 
     def _review_apply(
@@ -2103,8 +2391,20 @@ def build_langgraph_tools(session_hash: str | None):
                 "pdf_relative_path MUST be a plain string path relative to the session "
                 'workspace (e.g. "filename.pdf") — never {}, never a nested object. '
                 "Call list_workspace_files first if you do not know the filename. "
-                "dest_relative_dir is optional. Returns review_csv_relative_path and "
-                "ocr_words_csv_relative_path when available."
+                "dest_relative_dir is optional. "
+                "Cover every user requirement in this call: "
+                "(1) redact_entities — defaults already include PERSON, EMAIL_ADDRESS, "
+                "PHONE_NUMBER, STREETNAME, UKPOSTCODE, TITLES, CUSTOM. Append "
+                "CUSTOM_VLM_FACES and/or CUSTOM_VLM_SIGNATURE only when the user asks for "
+                "faces/signatures (slower; needs VLM). Passing only those extras is fine; "
+                "they are merged onto the defaults — do not drop PERSON for faces. "
+                "(2) deny_list — required for explicit org/place/phrase terms from the user "
+                '(e.g. ["Lambeth", "Lambeth 2030"]); CUSTOM matching uses this list. '
+                "Optional allow_list. "
+                "Optional handwrite_signature_checkbox: for AWS Textract OCR only, e.g. "
+                '["Extract signatures"] or ["Extract handwriting", "Extract signatures"]. '
+                "Returns review_csv_relative_path and ocr_words_csv_relative_path when "
+                "available; response redact_entities shows the effective merged list."
             ),
             func=_doc_redact,
         ),
@@ -2149,6 +2449,8 @@ def build_langgraph_tools(session_hash: str | None):
             name="write_workspace_text",
             description=(
                 "Write UTF-8 text into the session workspace (use utf-8-sig for review CSV edits). "
+                'Flat args only: {"relative_path": "fix_review.py", "content": "<file body>"}. '
+                "relative_path must be a short path/filename — never put the script body there. "
                 "Keep content compact (roughly under 24KB / ~80 lines) — prefer short .py scripts "
                 "that read OCR/review CSVs and add rows programmatically; avoid huge hard-coded "
                 "lists (large/quote-heavy payloads often break tool-call JSON on local models). "

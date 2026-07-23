@@ -9,6 +9,11 @@ import pytest
 from tools import gradio_platform
 
 
+class _FakeClient:
+    def __init__(self, host: str | None):
+        self.host = host
+
+
 class _FakeRequest:
     def __init__(
         self,
@@ -16,10 +21,12 @@ class _FakeRequest:
         username: str | None = None,
         session_hash: str = "abc123",
         headers: dict | None = None,
+        client_host: str | None = "10.0.0.1",
     ):
         self.username = username
         self.session_hash = session_hash
         self.headers = headers or {}
+        self.client = _FakeClient(client_host)
 
 
 def test_resolve_session_identity_prefers_username():
@@ -74,8 +81,72 @@ def test_log_platform_access_calls_logger(monkeypatch):
     monkeypatch.setattr(gradio_platform, "get_access_logger", lambda: logger)
     monkeypatch.setattr(gradio_platform, "SAVE_LOGS_TO_CSV", True)
     monkeypatch.setattr(gradio_platform, "SAVE_LOGS_TO_DYNAMODB", False)
-    gradio_platform.log_platform_access("user-a", "host-1")
-    logger.log.assert_called_once_with("user-a", "host-1")
+    gradio_platform.log_platform_access(
+        "user-a",
+        "host-1",
+        username="alice@example.com",
+        event="access",
+        ip_address="1.2.3.4",
+        user_agent="TestAgent",
+    )
+    logger.log.assert_called_once_with(
+        "user-a",
+        "host-1",
+        username="alice@example.com",
+        event="access",
+        ip_address="1.2.3.4",
+        user_agent="TestAgent",
+        status="",
+        details="",
+    )
+
+
+def test_platform_access_logger_writes_unified_schema_row(monkeypatch, tmp_path):
+    monkeypatch.setattr(gradio_platform, "SAVE_LOGS_TO_CSV", True)
+    monkeypatch.setattr(gradio_platform, "SAVE_LOGS_TO_DYNAMODB", False)
+    monkeypatch.setattr(gradio_platform, "ACCESS_LOGS_FOLDER", str(tmp_path) + "/")
+    monkeypatch.setattr(gradio_platform, "LOG_FILE_NAME", "log.csv")
+    monkeypatch.setattr(
+        gradio_platform,
+        "CSV_ACCESS_LOG_HEADERS",
+        list(gradio_platform.ACCESS_LOG_UNIFIED_HEADERS),
+    )
+    monkeypatch.setattr(
+        gradio_platform,
+        "DYNAMODB_ACCESS_LOG_HEADERS",
+        list(gradio_platform.ACCESS_LOG_UNIFIED_HEADERS),
+    )
+    monkeypatch.setattr(
+        gradio_platform, "upload_log_file_to_s3", lambda *args, **kwargs: None
+    )
+
+    logger = gradio_platform.PlatformAccessLogger()
+    logger.log(
+        "sess-1",
+        "host-1",
+        username="alice",
+        event="login",
+        ip_address="9.9.9.9",
+        user_agent="UA",
+        status="active",
+        details="test",
+    )
+
+    import csv
+
+    with open(tmp_path / "log.csv", encoding="utf-8") as f:
+        rows = list(csv.reader(f))
+    assert rows[0][:8] == list(gradio_platform.ACCESS_LOG_UNIFIED_HEADERS)
+    assert rows[1][:8] == [
+        "sess-1",
+        "alice",
+        "host-1",
+        "login",
+        "9.9.9.9",
+        "UA",
+        "active",
+        "test",
+    ]
 
 
 def test_build_agent_usage_log_row_uses_main_app_schema(monkeypatch):
@@ -254,3 +325,34 @@ def test_forwarded_host_middleware_fixes_trailing_slash_redirect_target():
     )
     assert resp.status_code == 307
     assert resp.headers["location"] == "https://cf.example.net/agent/"
+
+
+def test_get_client_ip_uses_socket_host_by_default(monkeypatch):
+    """X-Forwarded-For must be ignored unless explicitly trusted (avoids IP spoofing)."""
+    monkeypatch.setattr(gradio_platform, "TRUST_FORWARDED_FOR_HEADER", False)
+    request = _FakeRequest(
+        headers={"x-forwarded-for": "203.0.113.5, 10.0.0.2"},
+        client_host="10.0.0.1",
+    )
+    assert gradio_platform.get_client_ip(request) == "10.0.0.1"
+
+
+def test_get_client_ip_trusts_forwarded_for_when_enabled(monkeypatch):
+    monkeypatch.setattr(gradio_platform, "TRUST_FORWARDED_FOR_HEADER", True)
+    request = _FakeRequest(
+        headers={"x-forwarded-for": "203.0.113.5, 10.0.0.2"},
+        client_host="10.0.0.1",
+    )
+    assert gradio_platform.get_client_ip(request) == "203.0.113.5"
+
+
+def test_get_client_ip_falls_back_when_forwarded_for_missing(monkeypatch):
+    monkeypatch.setattr(gradio_platform, "TRUST_FORWARDED_FOR_HEADER", True)
+    request = _FakeRequest(headers={}, client_host="10.0.0.1")
+    assert gradio_platform.get_client_ip(request) == "10.0.0.1"
+
+
+def test_get_client_ip_returns_empty_string_without_client():
+    request = _FakeRequest(client_host=None)
+    request.client = None
+    assert gradio_platform.get_client_ip(request) == ""

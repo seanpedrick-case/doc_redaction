@@ -13,11 +13,13 @@ ensure_gradio_importable()
 
 from redaction_langgraph.tools import (  # noqa: E402
     _coerce_relative_path,
+    _coerce_str_list,
     _coerce_tool_text_content,
     _default_dest_for_pdf,
     _default_review_apply_dest_for_review_csv,
     _discover_ocr_words_csv,
     _ensure_workspace_output_dir,
+    _merge_redact_entities,
     _normalize_review_color_cell,
     _parse_doc_redact_tool_input,
     _parse_review_apply_tool_input,
@@ -168,9 +170,40 @@ def test_write_storm_blocks_third_python_rewrite(tmp_path, monkeypatch):
     assert "error" not in json.loads(out2)
     out3 = write_workspace_text("fix_review.py", script_c, session_hash="sess")
     data3 = json.loads(out3)
-    assert "error" in data3
+    # Third rewrite auto-runs the already-saved script instead of error-looping.
     assert data3.get("blocked_write_storm") is True
-    assert "run_workspace_python_script" in data3["error"]
+    assert data3.get("auto_ran") is True
+    assert "error" not in data3
+    assert isinstance(data3.get("run"), dict)
+    assert data3["run"].get("returncode") == 0
+    assert "2" in (data3["run"].get("stdout") or "")
+
+
+def test_resolve_script_prefers_content_output_redact(tmp_path, monkeypatch):
+    from redaction_langgraph.tools import _resolve_script_relative_path
+
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "1")
+    reset_langgraph_tool_session_state("sess")
+    session = tmp_path / "sess"
+    old = (
+        session
+        / "redact"
+        / "example_of_emails_sent_to_a_professor_before_applying"
+        / "output_redact"
+    )
+    new = session / "redact" / "graduate-job-example-cover-letter" / "output_redact"
+    old.mkdir(parents=True)
+    new.mkdir(parents=True)
+    (old / "analyze_ocr.py").write_text("print('old')\n", encoding="utf-8")
+    content = (
+        'ocr_path = "redact/graduate-job-example-cover-letter/output_redact/'
+        'doc_ocr_results_with_words_local_ocr.csv"\n'
+    )
+    rel = _resolve_script_relative_path("sess", "analyze_ocr.py", content=content)
+    assert rel == (
+        "redact/graduate-job-example-cover-letter/output_redact/analyze_ocr.py"
+    )
 
 
 def test_read_workspace_text_autofills_empty_dict(tmp_path, monkeypatch):
@@ -345,7 +378,7 @@ def test_parse_doc_redact_tool_input_ignores_garbage_keys():
         "pii_method": "Local",
         "}] }' http://host.docker.internal:7861/api/call/doc_redact": -1,
     }
-    pdf_rel, dest_rel, ocr, pii = _parse_doc_redact_tool_input(
+    pdf_rel, dest_rel, ocr, pii, *_ = _parse_doc_redact_tool_input(
         "ignored.pdf",
         messy,
         ocr_method=None,
@@ -379,7 +412,7 @@ def test_parse_doc_redact_nested_absolute_path_key(tmp_path, monkeypatch):
             }
         }
     }
-    pdf_rel, dest_rel, ocr, pii = _parse_doc_redact_tool_input(
+    pdf_rel, dest_rel, ocr, pii, *_ = _parse_doc_redact_tool_input(
         messy,
         None,
         ocr_method=None,
@@ -405,7 +438,7 @@ def test_parse_doc_redact_output_redact_as_pdf_autodiscovers(tmp_path, monkeypat
     out = session / "redact" / "letter" / "output_redact"
     out.mkdir(parents=True)
 
-    pdf_rel, dest_rel, ocr, pii = _parse_doc_redact_tool_input(
+    pdf_rel, dest_rel, ocr, pii, *_ = _parse_doc_redact_tool_input(
         "output_redact",
         None,
         ocr_method=None,
@@ -430,7 +463,7 @@ def test_parse_doc_redact_empty_object_autodiscovers_single_pdf(tmp_path, monkey
     out.mkdir(parents=True)
     (out / "example_redacted.pdf").write_bytes(b"%PDF-1.4")
 
-    pdf_rel, dest_rel, ocr, pii = _parse_doc_redact_tool_input(
+    pdf_rel, dest_rel, ocr, pii, *_ = _parse_doc_redact_tool_input(
         {"pdf_relative_path": {}},
         None,
         ocr_method=None,
@@ -467,6 +500,90 @@ def test_parse_doc_redact_empty_object_lists_choices_when_ambiguous(
         assert "plain string" in msg
         assert "a.pdf" in msg
         assert "b.pdf" in msg
+
+
+def test_coerce_str_list_and_merge_redact_entities():
+    assert _coerce_str_list("CUSTOM_VLM_FACES, CUSTOM_VLM_SIGNATURE") == [
+        "CUSTOM_VLM_FACES",
+        "CUSTOM_VLM_SIGNATURE",
+    ]
+    assert _coerce_str_list('["CUSTOM_VLM_FACES"]') == ["CUSTOM_VLM_FACES"]
+    assert _coerce_str_list(["PERSON", "CUSTOM_VLM_FACES"]) == [
+        "PERSON",
+        "CUSTOM_VLM_FACES",
+    ]
+    merged = _merge_redact_entities(["CUSTOM_VLM_FACES"])
+    assert merged is not None
+    assert merged[0] == "PERSON"
+    assert "CUSTOM" in merged
+    assert merged[-1] == "CUSTOM_VLM_FACES"
+    assert _merge_redact_entities(None) is None
+
+
+def test_parse_doc_redact_extracts_vlm_entities_and_handwrite():
+    pdf_rel, dest_rel, ocr, pii, entities, deny, allow, handwrite = (
+        _parse_doc_redact_tool_input(
+            {
+                "pdf_relative_path": "faces.pdf",
+                "redact_entities": ["CUSTOM_VLM_FACES", "CUSTOM_VLM_SIGNATURE"],
+                "deny_list": "Alice,Bob",
+                "handwrite_signature_checkbox": ["Extract signatures"],
+            },
+            None,
+            ocr_method=None,
+            pii_method=None,
+        )
+    )
+    assert pdf_rel == "faces.pdf"
+    assert entities == ["CUSTOM_VLM_FACES", "CUSTOM_VLM_SIGNATURE"]
+    assert deny == ["Alice", "Bob"]
+    assert allow is None
+    assert handwrite == ["Extract signatures"]
+    assert ocr is None and pii is None
+    assert "output_redact" in dest_rel
+
+
+def test_run_doc_redact_forwards_vlm_entities(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "1")
+    reset_langgraph_tool_session_state("sess")
+    session = tmp_path / "sess"
+    pdf = session / "uploads" / "doc.pdf"
+    pdf.parent.mkdir(parents=True)
+    pdf.write_bytes(b"%PDF-1.4")
+
+    captured: dict[str, Any] = {}
+
+    def fake_call_doc_redact(pdf_path, dest_dir, **kwargs):
+        captured["pdf"] = Path(pdf_path)
+        captured["dest"] = Path(dest_dir)
+        captured["kwargs"] = kwargs
+        out_csv = Path(dest_dir) / "doc_review_file.csv"
+        out_csv.parent.mkdir(parents=True, exist_ok=True)
+        out_csv.write_text("page,text\n", encoding="utf-8")
+        return (["C:/server/out/doc_review_file.csv"], [out_csv])
+
+    monkeypatch.setattr(
+        "redaction_langgraph.tools.call_doc_redact",
+        fake_call_doc_redact,
+    )
+
+    out = run_doc_redact(
+        "uploads/doc.pdf",
+        "redact/doc/output_redact",
+        session_hash="sess",
+        redact_entities=["CUSTOM_VLM_FACES"],
+        handwrite_signature_checkbox=["Extract signatures"],
+        deny_list=["SecretOrg"],
+    )
+    data = json.loads(out)
+    assert "error" not in data
+    entities = captured["kwargs"]["redact_entities"]
+    assert "PERSON" in entities
+    assert "CUSTOM_VLM_FACES" in entities
+    assert captured["kwargs"]["handwrite_signature_checkbox"] == ["Extract signatures"]
+    assert captured["kwargs"]["deny_list"] == ["SecretOrg"]
+    assert data["redact_entities"][-1] == "CUSTOM_VLM_FACES"
 
 
 def test_default_dest_for_pdf():
@@ -570,6 +687,34 @@ def test_parse_write_workspace_text_input_doubly_nested():
     )
     assert rel == "fix_review.py"
     assert body == script
+
+
+def test_parse_write_workspace_text_swapped_path_and_content():
+    script = "import csv\nimport io\nprint('ok')\n"
+    rel, body = _parse_write_workspace_text_input(script, "fix_review.py")
+    assert rel == "fix_review.py"
+    assert body == script
+
+
+def test_parse_write_workspace_text_rejects_content_as_path():
+    script = "import csv\n" + ("x = 1\n" * 50)
+    try:
+        _parse_write_workspace_text_input(script, "# also a body\nprint(1)\n")
+        raise AssertionError("expected ValueError")
+    except ValueError as exc:
+        assert "relative_path looks like file content" in str(exc)
+
+
+def test_write_workspace_text_swapped_args(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "1")
+    reset_langgraph_tool_session_state("sess")
+    script = "import csv\nprint('ok')\n"
+    out = write_workspace_text(script, "fix_review.py", session_hash="sess")
+    data = json.loads(out)
+    assert "error" not in data, data
+    written = tmp_path / "sess" / "scripts" / "fix_review.py"
+    assert written.read_text(encoding="utf-8-sig") == script
 
 
 def test_write_workspace_text_python_next_step(tmp_path, monkeypatch):
