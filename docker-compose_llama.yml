@@ -14,6 +14,7 @@
 
 # Recommended for 16gb VRAM systems
 # docker compose -f docker-compose_llama.yml --profile 9b up -d
+# docker compose -f docker-compose_llama.yml --profile gemma4-12b up -d
 #
 # Optional Docker-only settings for redaction-app-llama: config/docker_app_config.env
 # (see config/docker_app_config.env.example). Loaded at container start; the
@@ -372,9 +373,78 @@ services:
         aliases:
           - llama-inference
 
+  gemma4-12b_q4_gguf:
+    profiles: ["gemma4-12b"]
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda12
+    command:
+      - -hf
+      - unsloth/gemma-4-12B-it-qat-GGUF
+      - --hf-file
+      - gemma-4-12B-it-qat-UD-Q4_K_XL.gguf
+      # - --no-mmproj
+      - --mmproj-url
+      - https://huggingface.co/unsloth/gemma-4-12B-it-qat-GGUF/resolve/main/mmproj-F16.gguf
+      - --n-gpu-layers
+      - "-1"
+      - --ctx-size
+      - "32768"
+      - --fit
+      - "off"
+      - --temp
+      - "1.0"
+      - --top-k
+      - "64"
+      - --top-p
+      - "0.95"
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8080"
+      - --no-warmup
+      - --seed
+      - "42"
+      - --cache-type-k
+      - "q8_0"
+      - --cache-type-v
+      - "q8_0"
+      - --image_min_tokens
+      - "300"
+      - --image_max_tokens
+      - "1024"
+      # - --parallel
+      # - "1"
+      - --spec-type
+      - "draft-mtp"
+      - --spec-draft-n-max
+      - "3"
+    ports:
+      - "8006:8080"
+    volumes:
+      - ./models:/models
+      - hf-llama-cache-gemma4-12b:/root/.cache/llama.cpp
+      - hf-hub-cache-gemma4-12b:/root/.cache/huggingface
+    pull_policy: always
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/v1/models >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 8
+      start_period: 1200s
+    networks:
+      redaction-net-llama:
+        aliases:
+          - llama-inference
+
   redaction-app-llama:
     <<: *redaction-app-env
-    profiles: ["35b_36", "27b_36", "35b", "27b", "9b", "gemma4-31b", "gemma4-26b"]
+    profiles: ["35b_36", "27b_36", "35b", "27b", "9b", "gemma4-31b", "gemma4-26b", "gemma4-12b"]
     image: redaction-app-main
     build:
       context: .              # Look in the current folder
@@ -400,6 +470,9 @@ services:
         condition: service_healthy
         required: false
       gemma4-26b_q4_gguf:
+        condition: service_healthy
+        required: false
+      gemma4-12b_q4_gguf:
         condition: service_healthy
         required: false
     environment:
@@ -471,3 +544,5 @@ volumes:
   hf-hub-cache-qwen9b:
   hf-hub-cache-gemma4-31b:
   hf-hub-cache-gemma4-26b:
+  hf-llama-cache-gemma4-12b:
+  hf-hub-cache-gemma4-12b:

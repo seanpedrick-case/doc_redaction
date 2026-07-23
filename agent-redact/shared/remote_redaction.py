@@ -14,7 +14,7 @@ from gradio_client import Client
 
 DEFAULT_CONNECT_TIMEOUT = 120.0
 DEFAULT_READ_TIMEOUT = 1800.0
-_DEFAULT_REDACT_ENTITIES = (
+DEFAULT_REDACT_ENTITIES = (
     "PERSON",
     "EMAIL_ADDRESS",
     "PHONE_NUMBER",
@@ -23,6 +23,8 @@ _DEFAULT_REDACT_ENTITIES = (
     "TITLES",
     "CUSTOM",
 )
+# Back-compat alias for older imports / callers.
+_DEFAULT_REDACT_ENTITIES = DEFAULT_REDACT_ENTITIES
 
 _CLIENT_CACHE: dict[tuple[str, str], Client] = {}
 
@@ -196,6 +198,7 @@ def call_doc_redact(
     redact_entities: list[str] | None = None,
     page_min: int | None = None,
     page_max: int | None = None,
+    handwrite_signature_checkbox: list[str] | None = None,
 ) -> tuple[Any, list[Path]]:
     """
     Run ``/doc_redact`` and download outputs into *dest_dir*.
@@ -211,7 +214,7 @@ def call_doc_redact(
     predict_kwargs: dict[str, Any] = {
         "api_name": "/doc_redact",
         "document_file": handle_file(str(pdf)),
-        "redact_entities": list(redact_entities or _DEFAULT_REDACT_ENTITIES),
+        "redact_entities": list(redact_entities or DEFAULT_REDACT_ENTITIES),
     }
     if ocr_method:
         predict_kwargs["ocr_method"] = ocr_method
@@ -225,6 +228,10 @@ def call_doc_redact(
         predict_kwargs["page_min"] = page_min
     if page_max is not None:
         predict_kwargs["page_max"] = page_max
+    if handwrite_signature_checkbox:
+        predict_kwargs["handwrite_signature_checkbox"] = list(
+            handwrite_signature_checkbox
+        )
 
     client = make_redaction_client()
     result = client.predict(**predict_kwargs)

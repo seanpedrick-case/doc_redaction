@@ -28,6 +28,18 @@ explicitly asks to stop:
 1. list_workspace_files — locate the uploaded PDF
 2. doc_redact — initial redaction; artifacts land under redact/<document>/output_redact/
    (result includes review_csv_relative_path and ocr_words_csv_relative_path when available)
+   Cover **all** User redaction requirements on this call — not only faces/signatures:
+   - Names: default entities already include PERSON (and related types). You do not need to
+     replace the entity list with faces alone.
+   - Explicit org/place/phrase terms from the user (e.g. "Lambeth", "Lambeth 2030"): pass them
+     in deny_list (CUSTOM is already in the defaults). Example:
+     {"pdf_relative_path": "file.pdf", "deny_list": ["Lambeth", "Lambeth 2030"],
+      "redact_entities": ["CUSTOM_VLM_FACES"]}
+   - Faces/photos: append CUSTOM_VLM_FACES. Signatures: append CUSTOM_VLM_SIGNATURE
+     (AWS Textract OCR: also handwrite_signature_checkbox including "Extract signatures").
+   Passing only the VLM extras is fine — they are merged onto the default entity list.
+   Do not add VLM entities unless the user asked for faces/signatures (they are slower).
+   Always use flat string paths: {"pdf_relative_path": "file.pdf"} — never nest relative_path.
 3. Edit the review CSV to satisfy **User redaction requirements**:
    - Write ONE compact fix_policy.py (derive rows from OCR/review CSV — do not hard-code bboxes)
    - Call run_workspace_python_script IMMEDIATELY — never rewrite the same .py without running it

@@ -36,6 +36,8 @@ Tool argument format (flat strings — nesting is WRONG):
   Wrong:    {{"pdf_relative_path": {{"relative_path": "file.pdf"}}}}
   Wrong:    {{"relative_path": {{"relative_path": "fix_review.py"}}}}
 
+If the error says the script was already saved / write-storm: call run_workspace_python_script (NOT write_workspace_text) with only relative_path.
+
 Last repeated error from `{tool_name}`:
 {error_preview}
 
