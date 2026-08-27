@@ -804,6 +804,9 @@ def anonymise_files_with_open_text(
     - custom_llm_instructions (str, optional): Custom instructions for LLM entity detection (tabular). Defaults to "".
     - chosen_llm_entities (List[str], optional): Entity types to detect when using LLM PII method (tabular). Defaults to None (uses chosen_redact_comprehend_entities).
     """
+    from tools.malware_scan import require_files_malware_scanned
+
+    require_files_malware_scanned(file_paths)
 
     tic = time.perf_counter()
     comprehend_client = ""

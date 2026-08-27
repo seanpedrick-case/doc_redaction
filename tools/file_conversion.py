@@ -1321,6 +1321,10 @@ def combine_review_pdf_files(file_list, output_folder: str = OUTPUT_FOLDER):
     if not file_list:
         return []
 
+    from tools.malware_scan import require_files_malware_scanned
+
+    require_files_malware_scanned(file_list)
+
     # Normalise to paths (Gradio may pass FileData with .name or dict with "name")
     paths = []
     for f in file_list:

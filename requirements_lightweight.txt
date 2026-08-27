@@ -1,42 +1,42 @@
 # --- Core and data packages ---
-numpy<=2.4.4
-pandas<=2.3.3
+numpy<=2.5.2
+pandas<=3.0.5
 bleach<=6.4.0
-polars<=1.38.1
-pyarrow<=24.0.0
+polars<=1.44.1
+pyarrow<=25.0.1
 openpyxl<=3.1.5
-boto3<=1.43.47
-python-dotenv<=1.2.2
+boto3<=1.43.81
+python-dotenv<=1.2.3
 defusedxml<=0.7.1
-Faker<=40.8.0
-python-levenshtein<=0.27.3
+Faker<=40.37.0
+python-levenshtein<=0.27.4
 rapidfuzz<=3.14.5
-markdown<=3.10.2
+markdown<=3.10.3
 tabulate<=0.10.0
 
 # --- Machine learning / NLP ---
-scikit-learn<=1.8.0
-spacy<=3.8.14
+scikit-learn<=1.9.0
+spacy<=3.8.16
 spaczz<=0.6.1
 
 # --- PDF / OCR / Redaction tools ---
 pdfminer.six<=20260107
 pdf2image<=1.17.0
-pymupdf<=1.27.1
-pikepdf<=10.3.0
-opencv-python<=4.13.0.92
-presidio_analyzer<=2.2.362
-presidio_anonymizer<=2.2.362
+pymupdf<=1.28.2
+pikepdf<=10.12.0
+opencv-python<=5.0.0.93
+presidio_analyzer<=2.2.364
+presidio_anonymizer<=2.2.364
 presidio-image-redactor<=0.0.57
 
 # --- Gradio and apps ---
-gradio==6.10.0
+gradio==6.26.1
 gradio-pdf-redaction<=0.0.25
 gradio_image_annotation_redaction==0.5.5 # Custom annotator version with rotation, zoom, labels, and box IDs
 spaces
 
 # --- AWS Lambda runtime ---
-awslambdaric<=3.1.1
+awslambdaric<=4.0.2
 
 # --- Document generation ---
 python-docx<=1.2.0
@@ -49,5 +49,5 @@ pytest-cov<=7.1.0
 # Explicit protobuf: PaddlePaddle imports google.protobuf; layered `pip --target` installs
 # plus google-* packages can leave the google namespace incomplete without it.
 protobuf<=7.34.0
-google-genai<=2.11.0
-openai<=2.45.0
+google-genai<=2.20.0
+openai<=3.5.0

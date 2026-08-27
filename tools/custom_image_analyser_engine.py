@@ -85,6 +85,7 @@ from tools.config import (
     TESSERACT_WORD_LEVEL_OCR,
     USE_LLAMA_SWAP,
     USE_TRANSFORMERS_VLM_MODEL_AS_LLM,
+    VLM_BBOX_COORD_ORDER,
     VLM_DEFAULT_STREAM,
     VLM_HYBRID_MIN_IMAGE_SIZE,
     VLM_MAX_ASPECT_RATIO,
@@ -1483,6 +1484,76 @@ def _prepare_hybrid_line_crop_for_vlm(image: Image.Image) -> Image.Image:
     return image
 
 
+# Cache of loaded inference-server model ids keyed by API base URL (from chat
+# completions `model` or GET /v1/models). Used when the UI/env model name is empty.
+_inference_server_model_id_cache: Dict[str, str] = {}
+_inference_server_model_id_lock = threading.Lock()
+
+
+def _extract_openai_response_model_id(payload: Any) -> Optional[str]:
+    """Return a non-empty `model` string from an OpenAI-compatible JSON body."""
+    if not isinstance(payload, dict):
+        return None
+    model = payload.get("model")
+    if isinstance(model, str) and model.strip():
+        return model.strip()
+    return None
+
+
+def _remember_inference_server_model_id(
+    api_url: Optional[str], model_id: Optional[str]
+) -> Optional[str]:
+    if not api_url or not model_id:
+        return model_id
+    with _inference_server_model_id_lock:
+        _inference_server_model_id_cache[api_url] = model_id
+    return model_id
+
+
+def _fetch_inference_server_loaded_model_id(
+    api_url: Optional[str] = None,
+    timeout: int = 10,
+) -> Optional[str]:
+    """
+    Return the first model id from GET {api}/v1/models, cached per API URL.
+
+    llama.cpp reports the loaded GGUF filename here when the request omitted `model`.
+    """
+    if api_url is None:
+        api_url = INFERENCE_SERVER_API_URL
+    if not api_url:
+        return None
+    with _inference_server_model_id_lock:
+        cached = _inference_server_model_id_cache.get(api_url)
+        if cached:
+            return cached
+    try:
+        resp = requests.get(f"{str(api_url).rstrip('/')}/v1/models", timeout=timeout)
+        resp.raise_for_status()
+        data = resp.json()
+        models = data.get("data") if isinstance(data, dict) else None
+        if isinstance(models, list) and models:
+            first = models[0]
+            mid = first.get("id") if isinstance(first, dict) else None
+            if isinstance(mid, str) and mid.strip():
+                return _remember_inference_server_model_id(api_url, mid.strip())
+    except Exception as e:
+        print(f"Warning: could not fetch inference-server /v1/models: {e}")
+    return None
+
+
+def _resolve_inference_server_served_model_id(
+    api_url: Optional[str],
+    *payloads: Any,
+) -> Optional[str]:
+    """Prefer `model` on a completions payload; else GET /v1/models."""
+    for payload in payloads:
+        served = _extract_openai_response_model_id(payload)
+        if served:
+            return _remember_inference_server_model_id(api_url, served)
+    return _fetch_inference_server_loaded_model_id(api_url)
+
+
 def _call_inference_server_vlm_api(
     image: Image.Image,
     prompt: str,
@@ -1502,7 +1573,7 @@ def _call_inference_server_vlm_api(
     use_llama_swap: bool = USE_LLAMA_SWAP,
     disable_thinking: bool = INFERENCE_SERVER_DISABLE_THINKING,
     apply_aspect_ratio_padding: bool = True,
-) -> Tuple[str, int, int, int, int]:
+) -> Tuple[str, int, int, int, int, Optional[str]]:
     """
     Calls a inference-server API endpoint with an image and text prompt.
 
@@ -1535,8 +1606,9 @@ def _call_inference_server_vlm_api(
         apply_aspect_ratio_padding: When False, send the image unchanged (caller already ran
             ``_pad_image_for_vlm_aspect_ratio``). Full-page callers keep the default True.
     Returns:
-        Tuple of response text, input tokens, output tokens, and image width/height
-        in pixels (as encoded for the API, including padding when applied).
+        Tuple of response text, input tokens, output tokens, image width/height
+        in pixels (as encoded for the API, including padding when applied), and
+        the served model id when the API reports one (else GET /v1/models).
         On success, also prints prompt/completion token counts and output tok/s to stdout.
 
     Raises:
@@ -1796,7 +1868,10 @@ def _call_inference_server_vlm_api(
                     )
 
                 iw, ih = image.size
-                return text, input_tokens, output_tokens, iw, ih
+                served_model_id = _resolve_inference_server_served_model_id(
+                    api_url, final_chunk
+                )
+                return text, input_tokens, output_tokens, iw, ih, served_model_id
 
             else:
                 # Handle non-streaming response
@@ -1849,7 +1924,10 @@ def _call_inference_server_vlm_api(
                     )
 
                 iw, ih = image.size
-                return content, input_tokens, output_tokens, iw, ih
+                served_model_id = _resolve_inference_server_served_model_id(
+                    api_url, result
+                )
+                return content, input_tokens, output_tokens, iw, ih, served_model_id
 
         except (
             requests.exceptions.RequestException,
@@ -2769,7 +2847,6 @@ def _process_page_result_with_hybrid_vlm_ocr(
 
             # If confidence is low, use VLM for a second opinion
             if line_conf <= confidence_threshold:
-
                 # Ensure minimum line height for VLM processing
                 # If line_height is too small, use a minimum height based on typical text line height
                 min_line_height = max(
@@ -2861,7 +2938,7 @@ def _process_page_result_with_hybrid_vlm_ocr(
                         >= -word_count_allowed_difference
                     ):
                         text_output = f"  Re-OCR'd line: '{line_text}' (conf: {line_conf:.1f}, words: {paddle_word_count}) "
-                        text_output += f"-> '{vlm_text}' (conf: {vlm_conf*100:.1f}, words: {vlm_word_count}) [VLM]"
+                        text_output += f"-> '{vlm_text}' (conf: {vlm_conf * 100:.1f}, words: {vlm_word_count}) [VLM]"
                         print(text_output)
 
                         if REPORT_VLM_OUTPUTS_TO_GUI:
@@ -2924,7 +3001,7 @@ def _process_page_result_with_hybrid_vlm_ocr(
                     else:
                         print(
                             f"  Line: '{line_text}' (conf: {line_conf:.1f}, words: {paddle_word_count}) -> "
-                            f"VLM result '{vlm_text}' (conf: {vlm_conf*100:.1f}, words: {vlm_word_count}) "
+                            f"VLM result '{vlm_text}' (conf: {vlm_conf * 100:.1f}, words: {vlm_word_count}) "
                             f"word count mismatch. Keeping PaddleOCR result."
                         )
                 else:
@@ -3608,7 +3685,7 @@ def _inference_server_ocr_predict(
                         else None
                     )
 
-                extracted_text, _vlm_input_tokens, _vlm_output_tokens, _, _ = (
+                extracted_text, _vlm_input_tokens, _vlm_output_tokens, _, _, _ = (
                     _call_inference_server_vlm_api(
                         image=image,
                         prompt=prompt,
@@ -4338,6 +4415,43 @@ def _azure_openai_vlm_ocr_predict(
         return {"rec_texts": [], "rec_scores": []}
 
 
+_VLM_YXYX_MODEL_MARKERS = ("gemma", "gemini", "paligemma")
+
+
+def _vlm_bbox_coord_order(
+    model_name: Optional[str] = None,
+    *,
+    config_order: Optional[str] = None,
+) -> str:
+    """
+    Return "xyxy" or "yxyx" for a VLM OCR bounding-box array.
+
+    Gemma / Gemini / PaliGemma natively emit [y1, x1, y2, x2]; Qwen and most
+    other VLMs emit [x1, y1, x2, y2]. ``VLM_BBOX_COORD_ORDER`` (or config_order)
+    of xyxy/yxyx overrides auto detection from model_name.
+    """
+    order = (
+        config_order if config_order is not None else VLM_BBOX_COORD_ORDER
+    ) or "auto"
+    order = str(order).strip().lower()
+    if order in ("xyxy", "yxyx"):
+        return order
+    name = str(model_name or "").lower()
+    if any(marker in name for marker in _VLM_YXYX_MODEL_MARKERS):
+        return "yxyx"
+    return "xyxy"
+
+
+def _bbox_to_xyxy(bbox: List[float], order: str) -> List[float]:
+    """Convert a 4-number bbox to [x1, y1, x2, y2]. ``yxyx`` swaps axis pairs."""
+    if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+        return list(bbox) if isinstance(bbox, (list, tuple)) else bbox
+    a, b, c, d = bbox
+    if order == "yxyx":
+        return [b, a, d, c]
+    return [a, b, c, d]
+
+
 def plot_text_bounding_boxes(
     image: Image.Image,
     bounding_boxes: List[Dict],
@@ -4345,6 +4459,7 @@ def plot_text_bounding_boxes(
     image_folder: str = "inference_server_visualisations",
     output_folder: str = OUTPUT_FOLDER,
     task_type: str = "ocr",
+    model_name: Optional[str] = None,
 ):
     """
     Plots bounding boxes on an image with markers for each a name, using PIL, normalised coordinates, and different colors.
@@ -4352,11 +4467,13 @@ def plot_text_bounding_boxes(
     Args:
         image: The PIL Image object.
         bounding_boxes: A list of bounding boxes containing the name of the object
-         and their positions in normalized [y1 x1 y2 x2] format.
+         and their positions in normalized 0-999 coordinates ([x1, y1, x2, y2] for
+         Qwen; Gemma/Gemini native [y1, x1, y2, x2] is converted when model_name matches).
         image_name: The name of the image for debugging.
         image_folder: The folder name (relative to output_folder) where the image will be saved.
         output_folder: The folder where the image will be saved.
         task_type: The type of task the bounding boxes are for ("ocr", "person", "signature").
+        model_name: Optional VLM id used to choose xyxy vs yxyx coordinate order.
     """
 
     # Load the image
@@ -4394,11 +4511,22 @@ def plot_text_bounding_boxes(
             else:
                 continue
 
+        try:
+            raw_coords = [
+                float(bbox_coords[0]),
+                float(bbox_coords[1]),
+                float(bbox_coords[2]),
+                float(bbox_coords[3]),
+            ]
+        except (TypeError, ValueError):
+            continue
+        x1, y1, x2, y2 = _bbox_to_xyxy(raw_coords, _vlm_bbox_coord_order(model_name))
+
         # Convert normalized coordinates to absolute coordinates
-        abs_y1 = int(bbox_coords[1] / 999 * height)
-        abs_x1 = int(bbox_coords[0] / 999 * width)
-        abs_y2 = int(bbox_coords[3] / 999 * height)
-        abs_x2 = int(bbox_coords[2] / 999 * width)
+        abs_x1 = int(x1 / 999 * width)
+        abs_y1 = int(y1 / 999 * height)
+        abs_x2 = int(x2 / 999 * width)
+        abs_y2 = int(y2 / 999 * height)
 
         if abs_x1 > abs_x2:
             abs_x1, abs_x2 = abs_x2, abs_x1
@@ -4823,11 +4951,15 @@ def _parse_vlm_line_item_to_geometry(
     line_item: dict,
     implied_label: Optional[str],
     warn_prefix: str,
+    model_name: Optional[str] = None,
+    bbox_order: Optional[str] = None,
 ) -> Optional[Tuple[str, List[float], float]]:
     """
     Parse one VLM JSON line object into text, xyxy floats, and raw confidence.
     For person/signature passes (implied_label in CUSTOM_VLM_CANONICAL_LABELS),
     text is always the canonical label when the bbox is valid; model text keys are ignored.
+    Native Gemma/Gemini [y1, x1, y2, x2] arrays are converted to [x1, y1, x2, y2]
+    when bbox_order or model_name indicates yxyx.
     """
     if not isinstance(line_item, dict):
         return None
@@ -4859,16 +4991,21 @@ def _parse_vlm_line_item_to_geometry(
         return None
 
     try:
-        x1 = float(bbox[0])
-        y1 = float(bbox[1])
-        x2 = float(bbox[2])
-        y2 = float(bbox[3])
+        raw_xy = [
+            float(bbox[0]),
+            float(bbox[1]),
+            float(bbox[2]),
+            float(bbox[3]),
+        ]
     except (ValueError, TypeError):
         dbg_txt = canon or _extract_vlm_line_text(line_item) or "?"
         print(
             f"{warn_prefix} warning: Invalid bbox coordinates for line '{dbg_txt[:50]}': {bbox}"
         )
         return None
+
+    order = bbox_order or _vlm_bbox_coord_order(model_name)
+    x1, y1, x2, y2 = _bbox_to_xyxy(raw_xy, order)
 
     if x2 <= x1 or y2 <= y1:
         dbg_txt = canon or _extract_vlm_line_text(line_item) or "?"
@@ -4922,7 +5059,6 @@ def _vlm_page_ocr_predict(
         matching the format expected by perform_ocr
     """
     try:
-
         # Validate image exists and is not None
         if image is None:
             print("VLM page OCR error: Image is None")
@@ -5306,6 +5442,7 @@ def _vlm_page_ocr_predict(
                     image_folder="vlm_visualisations",
                     output_folder=output_folder,
                     task_type=task_type,
+                    model_name=SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL,
                 )
             except Exception as viz_error:
                 print(f"Warning: VLM bbox visualization failed: {viz_error}")
@@ -5335,6 +5472,7 @@ def _vlm_page_ocr_predict(
                 line_item,
                 _inf_implied,
                 "VLM page OCR",
+                model_name=SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL,
             )
             if parsed is None:
                 continue
@@ -5616,6 +5754,7 @@ def _inference_server_page_ocr_predict(
             vlm_output_tokens,
             vlm_sent_w,
             vlm_sent_h,
+            served_model_id,
         ) = _call_inference_server_vlm_api(
             image=processed_image,
             prompt=prompt,
@@ -5631,6 +5770,8 @@ def _inference_server_page_ocr_predict(
             presence_penalty=None,
             use_llama_swap=USE_LLAMA_SWAP,
         )
+
+        bbox_model_name = (final_model_name or "").strip() or served_model_id
 
         # Save prompt and response to file
         if extracted_text and isinstance(extracted_text, str) and output_folder:
@@ -5823,6 +5964,7 @@ def _inference_server_page_ocr_predict(
                 image_folder="inference_server_visualisations",
                 output_folder=output_folder,
                 task_type=task_type,
+                model_name=bbox_model_name,
             )
 
         # Store a copy of the processed image for debug visualization (before rescaling)
@@ -5850,6 +5992,7 @@ def _inference_server_page_ocr_predict(
                 line_item,
                 _inf_server_implied,
                 "Inference-server page OCR",
+                model_name=bbox_model_name,
             )
             if parsed is None:
                 continue
@@ -5943,6 +6086,7 @@ def _parse_vlm_page_ocr_response(
     normalised_coords_range: Optional[int],
     model_name: str = "Cloud VLM",
     implied_label: Optional[str] = None,
+    bbox_model_name: Optional[str] = None,
 ) -> Dict[str, List]:
     """
     Helper function to parse VLM page OCR response and convert to expected format.
@@ -5959,6 +6103,7 @@ def _parse_vlm_page_ocr_response(
         model_name: Name of the model for the 'model' field in results
         implied_label: When set (e.g. \"[FACE]\" for face pass), used to repair malformed JSON
             where the model omits \"text\", and to fill missing text on dict entries that only have bbox.
+        bbox_model_name: Optional VLM id for xyxy vs yxyx detection. Defaults to model_name.
 
     Returns:
         Dictionary with 'text', 'left', 'top', 'width', 'height', 'conf', 'model' keys
@@ -6066,6 +6211,7 @@ def _parse_vlm_page_ocr_response(
             line_item,
             implied_label,
             f"{model_name} page OCR",
+            model_name=bbox_model_name or model_name,
         )
         if parsed is None:
             continue
@@ -6407,6 +6553,7 @@ def _bedrock_page_ocr_predict(
                     image_folder="bedrock_visualisations",
                     output_folder=output_folder,
                     task_type=task_type,
+                    model_name=model_choice,
                 )
             except Exception as plot_error:
                 print(
@@ -6424,6 +6571,7 @@ def _bedrock_page_ocr_predict(
             normalised_coords_range=normalised_coords_range,
             model_name="Bedrock",
             implied_label=_bedrock_implied_label,
+            bbox_model_name=model_choice,
         )
 
         # Get model name for tracking
@@ -6663,6 +6811,7 @@ def _gemini_page_ocr_predict(
             normalised_coords_range=normalised_coords_range,
             model_name="Gemini",
             implied_label=_gem_implied,
+            bbox_model_name=model_choice or "Gemini",
         )
 
         # Get model name for tracking
@@ -6903,6 +7052,7 @@ def _azure_openai_page_ocr_predict(
             normalised_coords_range=normalised_coords_range,
             model_name="Azure/OpenAI",
             implied_label=_azure_implied,
+            bbox_model_name=model_choice,
         )
 
         # Get model name for tracking
@@ -8430,7 +8580,6 @@ class CustomImageAnalyzerEngine:
 
                     # If confidence is low, use inference-server for a second opinion
                     if line_conf <= confidence_threshold:
-
                         # Ensure minimum line height for inference-server processing
                         min_line_height = max(
                             line_height, 20
@@ -8582,7 +8731,7 @@ class CustomImageAnalyzerEngine:
                             ):
                                 message_output = (
                                     f"  Re-OCR'd line: '{line_text}' (conf: {line_conf:.1f}, words: {paddle_word_count}) "
-                                    f"-> '{inference_server_text}' (conf: {inference_server_conf*100:.1f}, words: {inference_server_word_count}) [Inference Server]"
+                                    f"-> '{inference_server_text}' (conf: {inference_server_conf * 100:.1f}, words: {inference_server_word_count}) [Inference Server]"
                                 )
                                 print(message_output)
 
@@ -8648,7 +8797,7 @@ class CustomImageAnalyzerEngine:
                             else:
                                 print(
                                     f"  Line: '{line_text}' (conf: {line_conf:.1f}, words: {paddle_word_count}) -> "
-                                    f"Inference-server result '{inference_server_text}' (conf: {inference_server_conf*100:.1f}, words: {inference_server_word_count}) "
+                                    f"Inference-server result '{inference_server_text}' (conf: {inference_server_conf * 100:.1f}, words: {inference_server_word_count}) "
                                     f"word count mismatch. Keeping PaddleOCR result."
                                 )
                         else:
@@ -8905,7 +9054,6 @@ class CustomImageAnalyzerEngine:
             # Azure/OpenAI returns data already in the expected format, so no conversion needed
 
         elif self.ocr_engine == "tesseract":
-
             tesseract_cfg = _ensure_tessdata_available_in_env(self.tesseract_config)
             ocr_data = pytesseract.image_to_data(
                 image,
@@ -8941,7 +9089,6 @@ class CustomImageAnalyzerEngine:
             or self.ocr_engine == "hybrid-paddle-vlm"
             or self.ocr_engine == "hybrid-paddle-inference-server"
         ):
-
             if ocr is None:
                 if hasattr(self, "paddle_ocr") and self.paddle_ocr is not None:
                     ocr = self.paddle_ocr
@@ -9066,7 +9213,6 @@ class CustomImageAnalyzerEngine:
 
             # Save PaddleOCR visualization with bounding boxes
             if paddle_results and self.save_page_ocr_visualisations is True:
-
                 for res in paddle_results:
                     # self.output_folder is already validated and normalized at construction time
                     paddle_viz_folder = os.path.join(
@@ -9103,7 +9249,6 @@ class CustomImageAnalyzerEngine:
                         pass
 
             if self.ocr_engine == "hybrid-paddle-vlm":
-
                 modified_paddle_results = self._perform_hybrid_paddle_vlm_ocr(
                     paddle_processed_image,  # Use the exact image PaddleOCR processed
                     ocr=ocr,
@@ -9114,7 +9259,6 @@ class CustomImageAnalyzerEngine:
                 )
 
             elif self.ocr_engine == "hybrid-paddle-inference-server":
-
                 modified_paddle_results = self._perform_hybrid_paddle_inference_server_ocr(
                     paddle_processed_image,  # Use the exact image PaddleOCR processed
                     ocr=ocr,
@@ -9580,7 +9724,6 @@ class CustomImageAnalyzerEngine:
 
         # Process using either Local or AWS Comprehend
         if pii_identification_method == LOCAL_PII_OPTION:
-
             language_supported_entities = filter_entities_for_language(
                 custom_entities, valid_language_entities, language
             )
@@ -9629,7 +9772,6 @@ class CustomImageAnalyzerEngine:
             )
 
         elif pii_identification_method == AWS_PII_OPTION:
-
             # Run local detection for any custom entities (including CUSTOM/CUSTOM_FUZZY)
             local_custom_entities = [
                 entity
@@ -11114,11 +11256,13 @@ class CustomImageAnalyzerEngine:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             results = list(
                 executor.map(
-                    lambda ocr_result: CustomImageAnalyzerEngine._map_one_ocr_result_to_bboxes(
-                        ocr_result,
-                        text_analyzer_results,
-                        ocr_results_with_words_child_info,
-                        allow_list,
+                    lambda ocr_result: (
+                        CustomImageAnalyzerEngine._map_one_ocr_result_to_bboxes(
+                            ocr_result,
+                            text_analyzer_results,
+                            ocr_results_with_words_child_info,
+                            allow_list,
+                        )
                     ),
                     redaction_relevant_ocr_results,
                 )
@@ -11602,7 +11746,6 @@ def run_page_text_redaction(
             )
 
     elif pii_identification_method == AWS_PII_OPTION:
-
         # Run local detection for any custom entities (including CUSTOM/CUSTOM_FUZZY)
         local_custom_entities = [
             entity

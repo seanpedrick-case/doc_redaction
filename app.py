@@ -435,6 +435,7 @@ from tools.helper_functions import (
 )
 from tools.load_spacy_model_custom_recognisers import custom_entities
 from tools.malware_scan import (
+    bind_malware_scan_upload,
     handle_gradio_file_deleted,
     make_malware_scan_enable_outputs,
     make_malware_scan_upload_failure_outputs,
@@ -9413,6 +9414,14 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         input_review_files,
         in_data_files,
         in_tabular_duplicate_files,
+        in_duplicate_pages,
+        in_summarisation_ocr_files,
+        combine_review_pdfs_in_out,
+        multiple_review_files_in_out,
+        adobe_review_files_out,
+        in_allow_list,
+        in_deny_list,
+        in_fully_redacted_list,
     ):
         _malware_scanned_file_input.delete(
             fn=handle_gradio_file_deleted,
@@ -9421,6 +9430,14 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             queue=False,
             api_visibility="undocumented",
         )
+
+    bind_malware_scan_upload(in_duplicate_pages, find_duplicate_pages_btn)
+    bind_malware_scan_upload(in_summarisation_ocr_files, summarise_btn)
+    bind_malware_scan_upload(combine_review_pdfs_in_out, combine_review_pdfs_btn)
+    bind_malware_scan_upload(
+        multiple_review_files_in_out, merge_multiple_review_files_btn
+    )
+    bind_malware_scan_upload(adobe_review_files_out, convert_adobe_to_review_file_btn)
 
     find_tabular_duplicates_btn.click(
         fn=run_tabular_duplicate_detection,
@@ -9617,6 +9634,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         log_files_output_list_state, redaction_output_summary_textbox) so they update the same
         components as the document redaction tab.
         """
+        from tools.malware_scan import require_files_malware_scanned
+
+        require_files_malware_scanned(in_summarisation_ocr_files)
+
         paths = _summarisation_upload_to_paths(in_summarisation_ocr_files)
         if not _upload_contains_pdf(in_summarisation_ocr_files):
             out = summarise_document_wrapper(
@@ -10077,17 +10098,32 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         inputs=[in_allow_list],
         outputs=[in_allow_list_text, in_allow_list_state],
         api_visibility="undocumented",
+    ).failure(
+        fn=make_malware_scan_upload_failure_outputs(0),
+        outputs=[in_allow_list],
+        queue=False,
+        api_visibility="undocumented",
     )
     in_deny_list.change(
         fn=custom_regex_load,
         inputs=[in_deny_list, in_deny_list_text_in],
         outputs=[in_deny_list_text, in_deny_list_state],
         api_visibility="undocumented",
+    ).failure(
+        fn=make_malware_scan_upload_failure_outputs(0),
+        outputs=[in_deny_list],
+        queue=False,
+        api_visibility="undocumented",
     )
     in_fully_redacted_list.change(
         fn=custom_regex_load,
         inputs=[in_fully_redacted_list, in_fully_redacted_text_in],
         outputs=[in_fully_redacted_list_text, in_fully_redacted_list_state],
+        api_visibility="undocumented",
+    ).failure(
+        fn=make_malware_scan_upload_failure_outputs(0),
+        outputs=[in_fully_redacted_list],
+        queue=False,
         api_visibility="undocumented",
     )
 

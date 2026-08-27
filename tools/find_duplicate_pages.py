@@ -1403,6 +1403,11 @@ def run_duplicate_analysis(
     elif not files:
         raise Warning("Please upload files to analyse.")
 
+    if not isinstance(files, pd.DataFrame):
+        from tools.malware_scan import require_files_malware_scanned
+
+        require_files_malware_scanned(files)
+
     if isinstance(files, str):
         files = [files]
 

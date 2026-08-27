@@ -1036,9 +1036,12 @@ def custom_regex_load(in_file: List[str], file_type: str = "allow_list"):
     When file is loaded, update the column dropdown choices and write to relevant data states.
     Returns a list for Dropdown components (instead of DataFrame).
     """
+    from tools.malware_scan import require_files_malware_scanned
+
     custom_regex_list = list()
 
     if in_file:
+        require_files_malware_scanned(in_file)
         file_list = [string.name for string in in_file]
 
         regex_file_names = [string for string in file_list if "csv" in string.lower()]
@@ -1339,6 +1342,10 @@ def _merge_csv_input_path(file) -> str:
 
 
 def merge_csv_files(file_list: List, output_folder: str = OUTPUT_FOLDER):
+
+    from tools.malware_scan import require_files_malware_scanned
+
+    require_files_malware_scanned(file_list)
 
     # Initialise an empty list to hold DataFrames
     dataframes = []

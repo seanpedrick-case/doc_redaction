@@ -1076,6 +1076,18 @@ ADD_VLM_BOUNDING_BOX_RULES = convert_string_to_boolean(
     get_or_create_env_var("ADD_VLM_BOUNDING_BOX_RULES", "True")
 )  # Whether to add bounding box rules to the VLM prompt. Does not apply to Qwen models as they have already been trained in this coordinate system.
 
+# How to interpret VLM OCR bounding-box arrays before scaling to pixels.
+# - "auto": Gemma / Gemini / PaliGemma use native [y1, x1, y2, x2]; others [x1, y1, x2, y2]
+# - "xyxy": always treat as [x1, y1, x2, y2] (Qwen / COCO)
+# - "yxyx": always treat as [y1, x1, y2, x2] (Google / TensorFlow)
+_VLM_BBOX_COORD_ORDER_RAW = (
+    get_or_create_env_var("VLM_BBOX_COORD_ORDER", "auto").strip().lower()
+)
+if _VLM_BBOX_COORD_ORDER_RAW not in ("auto", "xyxy", "yxyx"):
+    VLM_BBOX_COORD_ORDER = "auto"
+else:
+    VLM_BBOX_COORD_ORDER = _VLM_BBOX_COORD_ORDER_RAW
+
 # Bedrock VLM OCR cost estimation (used when text extraction method is "AWS Bedrock VLM OCR - all PDF types")
 BEDROCK_VLM_INPUT_COST = float(
     get_or_create_env_var(
@@ -1713,6 +1725,12 @@ QWEN36_27B_BNB_4BIT_REPO_ID = get_or_create_env_var(
 QWEN36_35B_A3B_REPO_ID = get_or_create_env_var(
     "QWEN36_35B_A3B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-35B-A3B"
 )
+QWEN38_27B_REPO_ID = get_or_create_env_var(
+    "QWEN38_27B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.8-27B"
+)
+QWEN38_27B_BNB_4BIT_REPO_ID = get_or_create_env_var(
+    "QWEN38_27B_BNB_4BIT_REPO_TRANSFORMERS_ID", "unsloth/Qwen3.8-27B-unsloth-bnb-4bit"
+)
 
 QWEN35_122B_A10B_REPO_ID = get_or_create_env_var(
     "QWEN35_122B_A10B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-122B-A10B"
@@ -1826,6 +1844,20 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN36_27B_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.6 27B"
     elif (
+        "qwen3.8-27b-bnb" in model_choice_lower
+        or QWEN38_27B_BNB_4BIT_REPO_ID in model_choice_lower
+        or "qwen3.8-27b-4bit" in model_choice_lower
+    ):
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN38_27B_BNB_4BIT_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.8 27B (4-bit)"
+    elif (
+        "qwen3.8-27b" in model_choice_lower
+        or "qwen-3.8-27b"
+        or QWEN38_27B_REPO_ID in model_choice_lower
+    ):
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN38_27B_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.8 27B"
+    elif (
         "qwen3.6-35b-a3b" in model_choice_lower
         or QWEN36_35B_A3B_REPO_ID in model_choice_lower
     ):
@@ -1856,7 +1888,6 @@ if (
     SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS
     and LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
 ):
-
     display_name = LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
     model_full_names.append(display_name)
     model_short_names.append(display_name)
@@ -1877,6 +1908,8 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE in [
     "Qwen 3.5 35B-A3B",
     "Qwen 3.6 27B (4-bit)",
     "Qwen 3.6 27B",
+    "Qwen 3.8 27B (4-bit)",
+    "Qwen 3.8 27B",
     "Qwen 3.6 35B-A3B",
     "Qwen 3.5 122B-A10B",
     "Gemma 4 31B bnb",

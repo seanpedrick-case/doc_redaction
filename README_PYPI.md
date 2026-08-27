@@ -40,7 +40,7 @@ pip install -e ".[vlm]"
 
 Note that the versions of both PaddleOCR and Torch installed by default are the CPU-only versions. If you want to install the GPU-enabled version of torch, it is advised to install the following version:
 ```bash
-pip install torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/cu129
+pip install torch==2.13.0 torchvision==0.28.0 --index-url https://download.pytorch.org/whl/cu129
 ```
 
 #### Option 2 - Install from PyPI
@@ -112,9 +112,20 @@ docker build -f Dockerfile --target gradio -t doc-redaction-gradio .
 docker build -f Dockerfile --target lambda -t doc-redaction-lambda .
 ```
 
-##### Pi agent (agentic redaction)
+##### Agentic redaction (Pi, LangGraph, AgentCore)
 
-The [Pi](https://github.com/earendil-works/pi) orchestration UI uses a separate multi-stage image at [agent-redact/pi-agent/Dockerfile](https://github.com/seanpedrick-case/doc_redaction/blob/main/agent-redact/pi-agent/Dockerfile). It shares the same Python 3.12 slim base as the main app; a small Node stage installs the `pi` CLI, which is copied into the runtime image.
+The [agent-redact/](https://github.com/seanpedrick-case/doc_redaction/tree/main/agent-redact) folder (repository checkout, not the PyPI wheel) adds a separate Gradio UI that orchestrates redaction (Pass 1 review CSV, optional Pass 2 VLM, `/review_apply`) against the main doc_redaction app. Heavy OCR and PII detection stay in the main app; the agent UI only drives the workflow.
+
+Choose the orchestration backend with `AGENT_ORCHESTRATOR` in [`config/agent.env`](https://github.com/seanpedrick-case/doc_redaction/blob/main/config/agent.env.example) (copy from `config/agent.env.example`):
+
+| `AGENT_ORCHESTRATOR` | Runtime | Typical use |
+|----------------------|---------|-------------|
+| **`pi`** (default) | [Pi](https://github.com/earendil-works/pi) coding agent (`pi --mode rpc`) | Full bash + skills; [Hugging Face Space](https://huggingface.co/spaces/seanpedrickcase/agentic_document_redaction); local Docker / ECS |
+| **`langgraph`** | LangGraph ReAct agent in [`redaction_langgraph/`](https://github.com/seanpedrick-case/doc_redaction/tree/main/agent-redact/redaction_langgraph) | Same Docker image as Pi; curated Python tools only (no shell); local llama.cpp, Gemini, or Bedrock |
+| **`agentcore`** | [Amazon Bedrock AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/) **Runtime** | Managed AWS runtime wrapping the LangGraph bundle; the Gradio UI proxies prompts via `AGENTCORE_RUNTIME_URL` |
+| **`agentcore-harness`** | Bedrock AgentCore **Harness** | Console-managed loop (`AGENTCORE_HARNESS_ARN`); Pi-like skills/shell; S3 file bridge for uploads |
+
+The Gradio agent UI and the Pi / LangGraph in-container runtimes share one multi-stage image at [agent-redact/pi-agent/Dockerfile](https://github.com/seanpedrick-case/doc_redaction/blob/main/agent-redact/pi-agent/Dockerfile). It uses the same Python 3.12 slim base as the main app; a small Node stage installs the `pi` CLI, which is copied into the runtime image.
 
 | Build target | Typical use |
 |--------------|-------------|
@@ -128,7 +139,18 @@ docker build -f agent-redact/pi-agent/Dockerfile --target dev -t pi-agent-dev .
 docker build -f agent-redact/pi-agent/Dockerfile --target runtime -t pi-agent-runtime .
 ```
 
-For llama.cpp + Pi together, see the compose examples at the top of [docker-compose_llama_agentic.yml](https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_llama_agentic.yml). Further detail: [agent-redact/README.md](https://github.com/seanpedrick-case/doc_redaction/blob/main/agent-redact/README.md).
+**LangGraph (in-container).** Set `AGENT_ORCHESTRATOR=langgraph` in `config/agent.env` (or compose) and start the same `pi-agent` service as for Pi. Optional: `LANGGRAPH_REQUIRE_REVIEW_APPROVAL=true` to gate `/review_apply` until the agent calls an explicit approve tool. A headless Pass 1 spike is `python agent-redact/redaction_langgraph/headless_pass1.py --pdf path/to.pdf --direct-tool`. Optional tracing (Arize AX / Phoenix) lives under [`agent-redact/eval/`](https://github.com/seanpedrick-case/doc_redaction/tree/main/agent-redact/eval).
+
+**Bedrock AgentCore.** Deploy the LangGraph agent as a managed runtime, then point the Gradio UI at it:
+
+```bash
+AGENT_ORCHESTRATOR=agentcore
+AGENTCORE_RUNTIME_URL=https://bedrock-agentcore.<region>.amazonaws.com/runtimes/<URL-encoded-ARN>
+```
+
+The CDK demo installer can also build an ARM64 runtime image and create the AgentCore resource (`python cdk/cdk_install.py --profile demo --enable-agentic --enable-agentcore-cdk-deploy`). For a console Harness instead of the LangGraph bundle, use `AGENT_ORCHESTRATOR=agentcore-harness` with `AGENTCORE_HARNESS_ARN`. Full deploy, auth, and troubleshooting: [agent-redact/agentcore/README.md](https://github.com/seanpedrick-case/doc_redaction/blob/main/agent-redact/agentcore/README.md).
+
+For llama.cpp + the agent UI together, see the compose examples at the top of [docker-compose_llama_agentic.yml](https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_llama_agentic.yml). Layout of the agent tree: [agent-redact/README.md](https://github.com/seanpedrick-case/doc_redaction/blob/main/agent-redact/README.md). LLM providers, env vars, and Gradio usage: [agent-redact/pi/agent/README.md](https://github.com/seanpedrick-case/doc_redaction/blob/main/agent-redact/pi/agent/README.md).
 
 #### Option 4 - Installation on AWS with CDK
 

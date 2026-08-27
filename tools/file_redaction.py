@@ -1023,6 +1023,14 @@ def run_custom_vlm_only_pass(
     )
 
 
+def _mark_generated_ocr_paths_malware_clean(*path_groups: Any) -> None:
+    """Treat redactor-written OCR CSV paths as already scan-clean."""
+    from tools.malware_scan import mark_app_generated_files_malware_clean
+
+    for group in path_groups:
+        mark_app_generated_files_malware_clean(group)
+
+
 def _choose_and_run_redactor_impl(
     file_paths: List[str],
     prepared_pdf_file_paths: Optional[List[str]] = None,
@@ -1460,6 +1468,10 @@ def _choose_and_run_redactor_impl(
 
         page_break_return = True
 
+        _mark_generated_ocr_paths_malware_clean(
+            duplication_file_path_outputs, ocr_review_files
+        )
+
         return (
             combined_out_message,
             out_file_paths,
@@ -1698,6 +1710,10 @@ def _choose_and_run_redactor_impl(
                     review_out_file_paths.append(review_file_path)
 
         page_break_return = False
+
+        _mark_generated_ocr_paths_malware_clean(
+            duplication_file_path_outputs, ocr_review_files
+        )
 
         return (
             combined_out_message,
@@ -4129,6 +4145,10 @@ def _choose_and_run_redactor_impl(
     ocr_review_files = [
         p for p in ocr_review_files if isinstance(p, str) and os.path.exists(p)
     ]
+
+    _mark_generated_ocr_paths_malware_clean(
+        duplication_file_path_outputs, ocr_review_files
+    )
 
     return (
         combined_out_message,

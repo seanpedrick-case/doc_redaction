@@ -290,6 +290,10 @@ def summarise_document_wrapper(
         Output of the downstream summarisation process (see next code section for details).
     """
     """Wrapper to convert inference method selection to model choice and load CSV files."""
+    from tools.malware_scan import require_files_malware_scanned
+
+    require_files_malware_scanned(in_summarisation_ocr_files)
+
     # Map inference method option to inference method string
     inference_method_map = {
         AWS_LLM_PII_OPTION: "aws-bedrock",

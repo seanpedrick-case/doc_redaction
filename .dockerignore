@@ -57,3 +57,4 @@ docker_compose/*
 skills/example_prompts/*
 agent-redact/RedactionAgent/*
 .env
+.certs/*
