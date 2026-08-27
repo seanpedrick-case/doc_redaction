@@ -12,8 +12,7 @@
 # docker compose -f docker-compose_llama_agentic.yml --profile gemma4-31b up -d
 # docker compose -f docker-compose_llama_agentic.yml --profile gemma4-26b up -d
 
-# For agentic usage with pi (pi-agent service name matches the active profile):
-# docker compose -f docker-compose_llama_agentic.yml --profile 27b_38 up -d pi-agent
+# For agentic usage with pi (use the pi-agent* service that matches the profile):
 # docker compose -f docker-compose_llama_agentic.yml --profile 27b_36 up -d pi-agent
 # docker compose -f docker-compose_llama_agentic.yml --profile 27b_38 up -d pi-agent-38
 # docker compose -f docker-compose_llama_agentic.yml --profile 35b_36 up -d pi-agent-35b
@@ -761,12 +760,17 @@ services:
         aliases:
           - redaction-app-llama
 
+  # Qwen 3.6 27B agent. Do not pass this service with --profile 27b_38 (that starts 3.6 as well); use pi-agent-38.
   pi-agent:
     <<: *pi-agent-common
     profiles: ["27b_36"]
     depends_on:
       qwen36-27b_q4_gguf:
         condition: service_healthy
+        required: false
+      qwen38-27b_q4_gguf:
+        condition: service_healthy
+        required: false
       redaction-app-llama:
         condition: service_started
     environment:

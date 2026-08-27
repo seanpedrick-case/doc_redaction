@@ -1,5 +1,7 @@
 """Tests for Gemma/Gemini yxyx VLM bounding-box conversion."""
 
+import json
+
 import pytest
 
 from tools.custom_image_analyser_engine import (
@@ -7,7 +9,9 @@ from tools.custom_image_analyser_engine import (
     _extract_openai_response_model_id,
     _fetch_inference_server_loaded_model_id,
     _inference_server_model_id_cache,
+    _parse_vlm_bbox_dict_list,
     _parse_vlm_line_item_to_geometry,
+    _unwrap_vlm_ocr_item_list,
     _vlm_bbox_coord_order,
 )
 
@@ -127,3 +131,23 @@ def test_fetch_inference_server_loaded_model_id(monkeypatch):
         == "gemma-4-26B-A4B-it-UD-IQ4_NL.gguf"
     )
     _inference_server_model_id_cache.clear()
+
+
+def test_unwrap_vlm_ocr_item_list_results_wrapper():
+    wrapped = {
+        "results": [
+            {"bbox": [10, 20, 80, 40], "text": "hello", "conf": 0.9},
+        ]
+    }
+    items = _unwrap_vlm_ocr_item_list(wrapped)
+    assert len(items) == 1
+    assert items[0]["text"] == "hello"
+
+
+def test_parse_vlm_bbox_dict_list_unwraps_results_wrapper():
+    raw = json.dumps(
+        {"results": [{"bbox": [10, 20, 80, 40], "text": "hello", "conf": 0.9}]}
+    )
+    items = _parse_vlm_bbox_dict_list(raw)
+    assert len(items) == 1
+    assert items[0]["text"] == "hello"

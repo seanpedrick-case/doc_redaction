@@ -1253,8 +1253,11 @@ else:
     VLM_DEFAULT_PRESENCE_PENALTY = None
 
 VLM_DISABLE_QWEN3_5_THINKING = convert_string_to_boolean(
-    get_or_create_env_var("VLM_DISABLE_QWEN3_5_THINKING", "False")
-)  # Whether to disable Qwen3.5 thinking for local transformers VLM calls.
+    get_or_create_env_var("VLM_DISABLE_QWEN3_5_THINKING", "True")
+)  # Disable Qwen 3.5/3.6/3.8 thinking for local transformers VLM OCR. Must be passed as
+# enable_thinking=False to apply_chat_template (Qwen3.8 defaults thinking on with
+# reasoning_effort=xhigh). If thinking is left on, reasoning often consumes MAX_NEW_TOKENS
+# and the JSON OCR payload is truncated, producing empty OCR CSVs.
 
 # Suffix appended to the generation prompt when Qwen3.5 thinking is disabled (used in run_vlm and llm_funcs).
 VLM_QWEN3_5_NOTHINK_SUFFIX = "<think></think>"

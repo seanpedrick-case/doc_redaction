@@ -97,6 +97,7 @@ from tools.config import (
 from tools.helper_functions import (
     clean_unicode_text,
     extract_balanced_json_array,
+    extract_last_balanced_json_array,
     get_system_font_path,
     model_from_ocr_boxes,
     strip_vlm_thinking_tags,
@@ -4614,26 +4615,73 @@ def _parse_vlm_bbox_dict_list(bounding_boxes: str) -> List[Dict]:
     cleaned = _preprocess_vlm_ocr_json_string(cleaned)
     if not cleaned:
         return []
-    for candidate in (cleaned, extract_balanced_json_array(cleaned)):
+    candidates = [cleaned, extract_last_balanced_json_array(cleaned)]
+    first_arr = extract_balanced_json_array(cleaned)
+    if first_arr and first_arr not in candidates:
+        candidates.append(first_arr)
+    for candidate in candidates:
         if not candidate:
             continue
         try:
             data = json.loads(candidate)
-            if isinstance(data, list):
-                return data
-            if isinstance(data, dict):
-                return [data]
+            unwrapped = _unwrap_vlm_ocr_item_list(data)
+            if unwrapped is not None:
+                return unwrapped
         except json.JSONDecodeError:
             pass
         try:
             data = ast.literal_eval(candidate)
-            if isinstance(data, list):
-                return data
-            if isinstance(data, dict):
-                return [data]
+            unwrapped = _unwrap_vlm_ocr_item_list(data)
+            if unwrapped is not None:
+                return unwrapped
         except Exception:
             pass
     return []
+
+
+def _unwrap_vlm_ocr_item_list(lines_data):
+    """Coerce parsed VLM JSON into a list of OCR line dicts.
+
+    Thinking models often wrap the array as ``{"results": [...]}`` or similar.
+    Wrapping the whole dict as a one-item list would drop every line (no bbox
+    on the outer object) and write empty OCR CSVs.
+    """
+    if isinstance(lines_data, list):
+        if (
+            lines_data
+            and all(isinstance(item, list) for item in lines_data)
+            and any(item and isinstance(item[0], dict) for item in lines_data if item)
+        ):
+            flat = []
+            for item in lines_data:
+                flat.extend(item)
+            return flat
+        return lines_data
+    if not isinstance(lines_data, dict):
+        return None
+    for key in (
+        "items",
+        "results",
+        "lines",
+        "ocr",
+        "data",
+        "annotations",
+        "boxes",
+        "elements",
+        "words",
+    ):
+        val = lines_data.get(key)
+        if isinstance(val, list) and val:
+            return val
+    for val in lines_data.values():
+        if not (isinstance(val, list) and val and isinstance(val[0], dict)):
+            continue
+        sample = val[0]
+        if _get_vlm_item_bbox_field(sample) is not None or _extract_vlm_line_text(
+            sample
+        ):
+            return val
+    return [lines_data]
 
 
 def _fix_malformed_bbox_in_json_string(json_string):
@@ -5403,6 +5451,18 @@ def _vlm_page_ocr_predict(
             except json.JSONDecodeError:
                 pass
 
+        # Final attempt: last complete JSON array (thinking traces often draft an earlier `[`)
+        if lines_data is None:
+            last_arr = extract_last_balanced_json_array(extracted_text)
+            if last_arr:
+                try:
+                    lines_data = json.loads(last_arr)
+                except json.JSONDecodeError:
+                    try:
+                        lines_data = ast.literal_eval(last_arr)
+                    except Exception:
+                        pass
+
         # If we still couldn't parse JSON, return empty results
         if lines_data is None:
             print("VLM page OCR error: Could not parse JSON response")
@@ -5419,9 +5479,8 @@ def _vlm_page_ocr_predict(
                 "model": [],
             }
 
-        if isinstance(lines_data, dict):
-            lines_data = [lines_data]
-        elif not isinstance(lines_data, list):
+        lines_data = _unwrap_vlm_ocr_item_list(lines_data)
+        if not isinstance(lines_data, list):
             print(f"VLM page OCR error: Expected list, got {type(lines_data)}")
             return {
                 "text": [],
@@ -5940,6 +5999,17 @@ def _inference_server_page_ocr_predict(
             except json.JSONDecodeError:
                 pass
 
+        if lines_data is None:
+            last_arr = extract_last_balanced_json_array(extracted_text)
+            if last_arr:
+                try:
+                    lines_data = json.loads(last_arr)
+                except json.JSONDecodeError:
+                    try:
+                        lines_data = ast.literal_eval(last_arr)
+                    except Exception:
+                        pass
+
         # If we still couldn't parse JSON, return empty results
         if lines_data is None:
             print("Inference-server page OCR error: Could not parse JSON response")
@@ -5948,9 +6018,8 @@ def _inference_server_page_ocr_predict(
             )  # Print first 500 chars for debugging
             return _empty_inference_server_page_result(final_model_name)
 
-        if isinstance(lines_data, dict):
-            lines_data = [lines_data]
-        elif not isinstance(lines_data, list):
+        lines_data = _unwrap_vlm_ocr_item_list(lines_data)
+        if not isinstance(lines_data, list):
             print(
                 f"Inference-server page OCR error: Expected list, got {type(lines_data)}"
             )
@@ -6169,6 +6238,17 @@ def _parse_vlm_page_ocr_response(
             pass
 
     if lines_data is None:
+        last_arr = extract_last_balanced_json_array(extracted_text)
+        if last_arr:
+            try:
+                lines_data = json.loads(last_arr)
+            except json.JSONDecodeError:
+                try:
+                    lines_data = ast.literal_eval(last_arr)
+                except Exception:
+                    pass
+
+    if lines_data is None:
         print(f"{model_name} page OCR error: Could not parse JSON response")
         print(f"Response text: {extracted_text[:500]}")
         return {
@@ -6181,9 +6261,8 @@ def _parse_vlm_page_ocr_response(
             "model": [],
         }
 
-    if isinstance(lines_data, dict):
-        lines_data = [lines_data]
-    elif not isinstance(lines_data, list):
+    lines_data = _unwrap_vlm_ocr_item_list(lines_data)
+    if not isinstance(lines_data, list):
         print(f"{model_name} page OCR error: Expected list, got {type(lines_data)}")
         return {
             "text": [],

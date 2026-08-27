@@ -112,6 +112,30 @@ def extract_balanced_json_array(text: str):
     return None
 
 
+def extract_last_balanced_json_array(text: str):
+    """Return the last complete top-level [...] substring, or None.
+
+    Qwen thinking traces often draft a JSON array before the final answer. Preferring
+    the last complete array avoids parsing an incomplete draft. Incomplete ``[``
+    prefixes are skipped so a later complete array can still be found.
+    """
+    if not text:
+        return None
+    last = None
+    search_from = 0
+    while True:
+        start_idx = text.find("[", search_from)
+        if start_idx < 0:
+            break
+        chunk = extract_balanced_json_array(text[start_idx:])
+        if chunk:
+            last = chunk
+            search_from = start_idx + len(chunk)
+        else:
+            search_from = start_idx + 1
+    return last
+
+
 def reset_state_vars():
     return (
         [],
