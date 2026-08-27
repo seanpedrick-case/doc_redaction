@@ -6,7 +6,7 @@
 # Version caps align with requirements_lightweight.txt where packages overlap.
 
 # --- Gradio UI + API client ---
-gradio==6.26.1
+gradio==6.26.0
 gradio-pdf-redaction<=0.0.25
 httpx<=0.28.1
 requests<=2.34.2
