@@ -2076,12 +2076,22 @@ def create_annotation_objects_from_duplicates(
         )
 
     if combine_pages is False:
-        page_to_image_map = {item["page"]: item["image_path"] for item in page_sizes}
+        page_to_image_map = {}
+        for item in page_sizes or []:
+            p = pd.to_numeric(item.get("page"), errors="coerce")
+            if pd.notna(p) and "image_path" in item:
+                page_to_image_map[int(p)] = item["image_path"]
 
         # Prepare OCR Data: line_number_by_page must match the duplicate detection
-        # pipeline.
+        # pipeline. Coerce page so Gradio/CSV string pages still match int filters.
+        ocr_results_df = ocr_results_df.copy()
+        if "page" in ocr_results_df.columns:
+            ocr_results_df["page"] = (
+                pd.to_numeric(ocr_results_df["page"], errors="coerce")
+                .round()
+                .astype("Int64")
+            )
         if "line" in ocr_results_df.columns:
-            ocr_results_df = ocr_results_df.copy()
             ocr_results_df["line_number_by_page"] = (
                 pd.to_numeric(ocr_results_df["line"], errors="coerce")
                 .fillna(0)
@@ -2150,8 +2160,9 @@ def create_annotation_objects_from_duplicates(
                     "id": "",  # to be filled in after
                 }
                 page_number = line_row["page"]
-
-                annotations_by_page[page_number].append(box)
+                if pd.isna(page_number):
+                    continue
+                annotations_by_page[int(page_number)].append(box)
 
         # --- Format the final output list using the page-to-image map ---
 

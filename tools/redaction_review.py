@@ -165,6 +165,89 @@ def _concat_frames_without_all_na_warning(
     return pd.concat(cleaned, ignore_index=ignore_index).reindex(columns=union_cols)
 
 
+def _coerce_page_series(series: pd.Series) -> pd.Series:
+    """Normalise page numbers to nullable int, accepting str/int/float."""
+    return pd.to_numeric(series, errors="coerce").round().astype("Int64")
+
+
+def _page_equals(series: pd.Series, page) -> pd.Series:
+    """Element-wise page equality that treats ``"1"`` and ``1`` as the same page."""
+    page_num = pd.to_numeric(page, errors="coerce")
+    if pd.isna(page_num):
+        return pd.Series(False, index=series.index)
+    return _coerce_page_series(series) == int(round(float(page_num)))
+
+
+def _ensure_numeric_columns(
+    df: pd.DataFrame,
+    columns: List[str],
+    *,
+    integer: bool = False,
+) -> pd.DataFrame:
+    """Column-assign numeric dtypes so later ``.loc`` writes do not hit StringDtype.
+
+    ``df.loc[mask, col] = floats`` raises TypeError on pandas 3 when ``col`` is
+    ``str``. Assigning with ``df[col] = pd.to_numeric(...)`` changes the dtype.
+    """
+    for col in columns:
+        if col not in df.columns:
+            continue
+        numeric = pd.to_numeric(df[col], errors="coerce")
+        if integer:
+            df[col] = numeric.round().astype("Int64")
+        else:
+            df[col] = numeric.astype("float64")
+    return df
+
+
+def _page_to_image_map(page_sizes: List[Dict]) -> Dict:
+    """Map integer page numbers to image paths, ignoring unparseable pages."""
+    mapping = {}
+    for item in page_sizes or []:
+        p = pd.to_numeric(item.get("page"), errors="coerce")
+        if pd.notna(p) and "image_path" in item:
+            mapping[int(p)] = item["image_path"]
+    return mapping
+
+
+def _align_merge_key_columns(
+    left: pd.DataFrame, right: pd.DataFrame, columns: List[str]
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Cast merge-key columns to compatible dtypes on copies of both frames.
+
+    pandas 2.2+/3.0 StringDtype rejects assigning integer Series into ``str``
+    columns via ``df.loc[:, cols] = converted``. Reassigning per column (or
+    canonicalising both sides) is required so duplicate-detection merges do
+    not crash when Gradio/OCR frames store ``page`` as strings while existing
+    review rows store it as int. The same mismatch otherwise makes exclude and
+    row-highlight merges silently match zero rows.
+    """
+    left_out = left.copy()
+    right_out = right.copy()
+    numeric_float_cols = {"xmin", "ymin", "xmax", "ymax"}
+    for col in columns:
+        if col not in left_out.columns or col not in right_out.columns:
+            continue
+        left_num = pd.to_numeric(left_out[col], errors="coerce")
+        right_num = pd.to_numeric(right_out[col], errors="coerce")
+        left_numeric_ok = bool(left_out[col].isna().all() or left_num.notna().all())
+        right_numeric_ok = bool(right_out[col].isna().all() or right_num.notna().all())
+        if left_numeric_ok and right_numeric_ok:
+            if col == "page":
+                left_out[col] = left_num.round().astype("Int64")
+                right_out[col] = right_num.round().astype("Int64")
+            elif col in numeric_float_cols:
+                left_out[col] = left_num.astype("float64")
+                right_out[col] = right_num.astype("float64")
+            else:
+                left_out[col] = left_out[col].astype(str)
+                right_out[col] = right_out[col].astype(str)
+        else:
+            left_out[col] = left_out[col].astype(str)
+            right_out[col] = right_out[col].astype(str)
+    return left_out, right_out
+
+
 def _ensure_box_colour_string(colour):
     """Ensure colour is a string for gradio_image_annotation_redaction (JS expects .startsWith)."""
     if colour is None:
@@ -909,6 +992,13 @@ def _merge_horizontally_adjacent_boxes(
     if df.empty:
         return df
 
+    df = df.copy()
+    if "page" in df.columns:
+        df["page"] = _coerce_page_series(df["page"])
+    df = _ensure_numeric_columns(df, ["xmin", "ymin", "xmax", "ymax"])
+    if "line" in df.columns:
+        df["line"] = pd.to_numeric(df["line"], errors="coerce")
+
     # 1. Sort by page, then by vertical position (ymin) then horizontal (xmin)
     #    so that we compare consecutive words on the same visual line.
     df_sorted = df.sort_values(by=["page", "line", "xmin"]).copy()
@@ -989,6 +1079,11 @@ def get_and_merge_current_page_annotations(
         combined = _concat_frames_without_all_na_warning(
             dfs_to_concat, ignore_index=True
         )
+        if "page" in combined.columns:
+            combined["page"] = _coerce_page_series(combined["page"])
+        combined = _ensure_numeric_columns(
+            combined, ["xmin", "ymin", "xmax", "ymax"]
+        )
         if "id" in combined.columns:
             has_id = combined["id"].notna()
             if has_id.any():
@@ -1031,8 +1126,9 @@ def get_and_merge_current_page_annotations(
         and "ymax" in updated_df.columns
         and "ymin" in updated_df.columns
     ):
+        updated_df = _ensure_numeric_columns(updated_df, ["ymin", "ymax"])
         ymax_cap = 1.0
-        ymax_vals = pd.to_numeric(updated_df["ymax"], errors="coerce")
+        ymax_vals = updated_df["ymax"]
         need_cap = ymax_vals >= 1.0
         if need_cap.any():
             updated_df = updated_df.copy()
@@ -1040,13 +1136,11 @@ def get_and_merge_current_page_annotations(
                 upper=ymax_cap
             )
             # Keep box valid: ymax must remain > ymin
-            ymin_vals = pd.to_numeric(updated_df.loc[need_cap, "ymin"], errors="coerce")
+            ymin_vals = updated_df.loc[need_cap, "ymin"]
             invalid = updated_df.loc[need_cap, "ymax"].values <= ymin_vals.values
             if invalid.any():
                 idx = updated_df.index[need_cap][invalid]
-                updated_df.loc[idx, "ymax"] = (
-                    pd.to_numeric(updated_df.loc[idx, "ymin"], errors="coerce") + 1e-6
-                )
+                updated_df.loc[idx, "ymax"] = updated_df.loc[idx, "ymin"] + 1e-6
 
     return updated_df
 
@@ -1195,13 +1289,10 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
             print("No new annotations to add.")
             updated_annotations_df = existing_annotations_df.copy()
         else:
-            page_to_image_map = {
-                item["page"]: item["image_path"] for item in page_sizes
-            }
+            page_to_image_map = _page_to_image_map(page_sizes)
 
             # Prepare the initial new annotations DataFrame
             new_annotations_df = new_annotations_df.assign(
-                image=lambda df: df["page"].map(page_to_image_map),
                 label=redaction_label,
                 color=colour_label,
             ).rename(
@@ -1212,6 +1303,16 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
                     "word_y1": "ymax",
                     "word_text": "text",
                 }
+            )
+            if "page" in new_annotations_df.columns:
+                new_annotations_df["page"] = _coerce_page_series(
+                    new_annotations_df["page"]
+                )
+            new_annotations_df = _ensure_numeric_columns(
+                new_annotations_df, ["xmin", "ymin", "xmax", "ymax"]
+            )
+            new_annotations_df["image"] = new_annotations_df["page"].map(
+                page_to_image_map
             )
 
             # Clip box to line-level bounds (all four coordinates) when available
@@ -1345,15 +1446,18 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
             ):
                 unique_new_df = new_annotations_df
             else:
-                # Ensure that columns of both sides have the same type
-                new_annotations_df.loc[:, key_cols] = new_annotations_df.loc[
-                    :, key_cols
-                ].astype(existing_annotations_df.loc[:, key_cols].dtypes)
+                # Align dtypes without loc-assignment into StringDtype columns
+                # (pandas 3 raises TypeError: Invalid value int64 for dtype 'str').
+                aligned_new, aligned_existing_keys = _align_merge_key_columns(
+                    new_annotations_df,
+                    existing_annotations_df[key_cols].drop_duplicates(),
+                    key_cols,
+                )
 
                 # Do not add duplicate redactions
                 merged = pd.merge(
-                    new_annotations_df,
-                    existing_annotations_df[key_cols].drop_duplicates(),
+                    aligned_new,
+                    aligned_existing_keys,
                     on=key_cols,
                     how="left",
                     indicator=True,
@@ -1541,9 +1645,13 @@ def exclude_selected_items_from_redaction(
             subset=selected_merge_cols
         )
 
+        aligned_review, aligned_selected = _align_merge_key_columns(
+            review_df, selected_subset, selected_merge_cols
+        )
+
         # Perform anti-join using merge with indicator
-        merged_df = review_df.merge(
-            selected_subset, on=selected_merge_cols, how="left", indicator=True
+        merged_df = aligned_review.merge(
+            aligned_selected, on=selected_merge_cols, how="left", indicator=True
         )
         out_review_df = merged_df[merged_df["_merge"] == "left_only"].drop(
             columns=["_merge"]
@@ -1595,14 +1703,20 @@ def replace_annotator_object_img_np_array_with_page_sizes_image_path(
     ):
         if page_sizes_df is None or page_sizes_df.empty:
             page_sizes_df = pd.DataFrame(page_sizes)
-            page_sizes_df[["page"]] = page_sizes_df[["page"]].apply(
-                pd.to_numeric, errors="coerce"
+        if not page_sizes_df.empty and "page" in page_sizes_df.columns:
+            page_sizes_df["page"] = pd.to_numeric(
+                page_sizes_df["page"], errors="coerce"
             )
 
-        # Check for matching pages (single .loc)
-        matching_paths = page_sizes_df.loc[
-            page_sizes_df["page"] == page, "image_path"
-        ].unique()
+        matching_paths = np.array([])
+        if (
+            not page_sizes_df.empty
+            and "page" in page_sizes_df.columns
+            and "image_path" in page_sizes_df.columns
+        ):
+            matching_paths = page_sizes_df.loc[
+                _page_equals(page_sizes_df["page"], page), "image_path"
+            ].unique()
 
         if matching_paths.size > 0:
             image_path = matching_paths[0]
@@ -1655,12 +1769,12 @@ def _ensure_page_image_dims_in_page_sizes_df(
 
         # Coerce width/height to numeric early (handles string "nan", etc.)
         if "image_width" in page_sizes_df.columns:
-            page_sizes_df.loc[mask, "image_width"] = pd.to_numeric(
-                page_sizes_df.loc[mask, "image_width"], errors="coerce"
+            page_sizes_df["image_width"] = pd.to_numeric(
+                page_sizes_df["image_width"], errors="coerce"
             )
         if "image_height" in page_sizes_df.columns:
-            page_sizes_df.loc[mask, "image_height"] = pd.to_numeric(
-                page_sizes_df.loc[mask, "image_height"], errors="coerce"
+            page_sizes_df["image_height"] = pd.to_numeric(
+                page_sizes_df["image_height"], errors="coerce"
             )
 
         img_path = None
@@ -3743,8 +3857,13 @@ def update_selected_review_df_row_colour(
 
         # --- Optimization 3: Use inner merge directly ---
         # Merge to find rows in review_df that match redaction_row_selection
-        merged_reviews = review_df.merge(
+        aligned_review, aligned_selection = _align_merge_key_columns(
+            review_df,
             redaction_row_selection[selected_merge_cols],
+            selected_merge_cols,
+        )
+        merged_reviews = aligned_review.merge(
+            aligned_selection,
             on=selected_merge_cols,
             how="inner",  # Use inner join as we only care about matches
         )
@@ -3764,17 +3883,19 @@ def update_selected_review_df_row_colour(
                     colour
                 )
             else:
-                # More general case using multiple columns - might be slower
-                # Create a temporary key for comparison
+                # Keys already aligned (str page vs int page); update the aligned copy.
                 def create_merge_key(df, cols):
                     return df[cols].astype(str).agg("_".join, axis=1)
 
-                review_df_key = create_merge_key(review_df, selected_merge_cols)
+                review_df_key = create_merge_key(aligned_review, selected_merge_cols)
                 merged_reviews_key = create_merge_key(
                     merged_reviews, selected_merge_cols
                 )
 
-                review_df.loc[review_df_key.isin(merged_reviews_key), "color"] = colour
+                aligned_review.loc[
+                    review_df_key.isin(merged_reviews_key), "color"
+                ] = colour
+                review_df = aligned_review
 
             previous_colour = new_previous_colour
             previous_id = new_previous_id
@@ -4040,6 +4161,9 @@ def create_xfdf(
     if page_sizes:
         page_sizes_df = pd.DataFrame(page_sizes)
         if not page_sizes_df.empty and "mediabox_width" not in review_file_df.columns:
+            if "page" in review_file_df.columns and "page" in page_sizes_df.columns:
+                review_file_df["page"] = _coerce_page_series(review_file_df["page"])
+                page_sizes_df["page"] = _coerce_page_series(page_sizes_df["page"])
             review_file_df = review_file_df.merge(page_sizes_df, how="left", on="page")
         if "xmin" in review_file_df.columns and review_file_df["xmin"].max() <= 1:
             if (

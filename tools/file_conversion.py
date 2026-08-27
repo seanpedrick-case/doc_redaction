@@ -1205,8 +1205,9 @@ def extract_redactions(
     print(f"Found {total_redactions} redactions in the document")
 
     # Convert the gradio annotation boxes to relative coordinates
-    page_sizes_df = pd.DataFrame(page_sizes)
-    page_sizes_df.loc[:, "page"] = pd.to_numeric(page_sizes_df["page"], errors="coerce")
+    page_sizes_df = pd.DataFrame(page_sizes if page_sizes else [])
+    if not page_sizes_df.empty and "page" in page_sizes_df.columns:
+        page_sizes_df["page"] = pd.to_numeric(page_sizes_df["page"], errors="coerce")
 
     all_image_annotations_df = convert_annotation_data_to_dataframe(json_data)
     all_image_annotations_df = divide_coordinates_by_page_sizes(
