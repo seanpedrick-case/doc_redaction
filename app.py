@@ -482,6 +482,7 @@ from tools.redaction_review import (
     update_all_page_annotation_object_based_on_previous_page,
     update_annotator_object_and_filter_df,
     update_annotator_object_for_page_navigation,
+    refresh_annotator_after_external_layout_reflow,
     update_annotator_page_from_review_df,
     update_annotator_page_state_from_review_df,
     update_entities_df_page,
@@ -1657,6 +1658,8 @@ with blocks:
         value=SESSION_SECURITY_HEARTBEAT_SECONDS,
         active=SESSION_SECURITY_ENABLED,
     )
+    # Set True only when the heartbeat updates the notice markdown (layout reflow).
+    session_security_notice_layout_reflow = gr.State(False)
 
     with gr.Accordion("API for agents (quickstart)", open=False, visible=False):
         gr.Markdown("""
@@ -10525,7 +10528,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     def session_security_heartbeat_tick(request: gr.Request):
         if not SESSION_SECURITY_ENABLED:
-            return gr.update(visible=False), gr.update(active=False)
+            return gr.skip(), gr.skip(), gr.skip()
         ip_address = get_client_ip(request)
         headers = getattr(request, "headers", None) or {}
         user_agent = headers.get("user-agent", "") if headers else ""
@@ -10540,18 +10543,66 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             return (
                 gr.update(value=f"**Session ended:** {message}", visible=True),
                 gr.update(active=False),
+                True,
             )
         if result.notice:
             return (
                 gr.update(value=f"**Notice:** {result.notice}", visible=True),
                 gr.update(),
+                True,
             )
-        return gr.update(visible=False), gr.update()
+        # No notice change: skip all outputs. Pushing gr.update(visible=False) every
+        # tick reflows the page and can collapse review-tab annotator boxes.
+        return gr.skip(), gr.skip(), gr.skip()
 
     session_security_heartbeat_timer.tick(
         session_security_heartbeat_tick,
         inputs=[],
-        outputs=[session_security_notice_md, session_security_heartbeat_timer],
+        outputs=[
+            session_security_notice_md,
+            session_security_heartbeat_timer,
+            session_security_notice_layout_reflow,
+        ],
+        api_visibility="undocumented",
+    )
+
+    session_security_notice_layout_reflow.change(
+        refresh_annotator_after_external_layout_reflow,
+        inputs=[
+            session_security_notice_layout_reflow,
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[],
+        api_visibility="undocumented",
+    ).then(
+        lambda: False,
+        inputs=None,
+        outputs=[session_security_notice_layout_reflow],
         api_visibility="undocumented",
     )
 

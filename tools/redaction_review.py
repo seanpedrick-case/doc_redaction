@@ -2538,6 +2538,51 @@ def update_annotator_object_for_page_navigation(
     )
 
 
+def _skip_annotator_navigation_outputs():
+    """Twelve-output tuple matching ``update_annotator_object_for_page_navigation``."""
+    return tuple(gr.skip() for _ in range(12))
+
+
+def refresh_annotator_after_external_layout_reflow(
+    layout_reflow_trigger: bool,
+    all_image_annotations: List[AnnotatedImageData],
+    gradio_annotator_current_page_number: int,
+    recogniser_entities_dropdown_value: str = "ALL",
+    page_dropdown_value: str = "ALL",
+    page_dropdown_redaction_value: str = "1",
+    text_dropdown_value: str = "ALL",
+    recogniser_dataframe_base: pd.DataFrame = None,
+    zoom: int = 100,
+    review_df: pd.DataFrame = None,
+    page_sizes: List[dict] = list(),
+    doc_full_file_name_textbox: str = "",
+    input_folder: str = INPUT_FOLDER,
+):
+    """
+    Re-push review-tab annotator boxes after an unrelated UI update (e.g. a session-security
+    notice) reflowed the layout. No-op when ``layout_reflow_trigger`` is False or there is
+    no active review document.
+    """
+    if not layout_reflow_trigger:
+        return _skip_annotator_navigation_outputs()
+    if not all_image_annotations or not page_sizes:
+        return _skip_annotator_navigation_outputs()
+    return update_annotator_object_for_page_navigation(
+        all_image_annotations,
+        gradio_annotator_current_page_number,
+        recogniser_entities_dropdown_value,
+        page_dropdown_value,
+        page_dropdown_redaction_value,
+        text_dropdown_value,
+        recogniser_dataframe_base,
+        zoom,
+        review_df,
+        page_sizes,
+        doc_full_file_name_textbox,
+        input_folder,
+    )
+
+
 def update_review_filters_after_redaction(
     all_image_annotations: List[AnnotatedImageData],
     gradio_annotator_current_page_number: int,
