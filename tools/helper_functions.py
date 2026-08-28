@@ -93,6 +93,47 @@ def strip_vlm_thinking_tags(text: str) -> str:
     return cleaned.strip()
 
 
+def ensure_annotator_resize_debounce() -> bool:
+    """
+    Debounce the annotator ResizeObserver so rapid layout reflows (many boxes,
+    sibling DataFrames, Gradio progress) do not call setScaleFactor in a tight loop.
+    """
+    marker = "Debounced annotator ResizeObserver"
+    stock = (
+        "let tt = new ResizeObserver(() => {\n" "\t\tH || !x(M) || et(!1);\n" "\t});"
+    )
+    patched = (
+        "let _annotatorResizeDebounce = null;\n"
+        "\tlet tt = new ResizeObserver(() => {\n"
+        f"\t\t// {marker}\n"
+        "\t\tif (H || !x(M)) return;\n"
+        "\t\tclearTimeout(_annotatorResizeDebounce);\n"
+        "\t\t_annotatorResizeDebounce = setTimeout(() => et(!1), 100);\n"
+        "\t});"
+    )
+    try:
+        import gradio_image_annotation_redaction as _annot_pkg
+
+        js_path = (
+            Path(_annot_pkg.__file__).resolve().parent
+            / "templates"
+            / "component"
+            / "index.js"
+        )
+        if not js_path.is_file():
+            return False
+        text = js_path.read_text(encoding="utf-8")
+        if marker in text:
+            return True
+        if stock not in text:
+            return False
+        js_path.write_text(text.replace(stock, patched, 1), encoding="utf-8")
+        return True
+    except Exception as e:
+        print(f"Warning: could not patch annotator ResizeObserver debounce: {e}")
+    return False
+
+
 def extract_balanced_json_array(text: str):
     """Return the first top-level [...] substring, or None."""
     if not text:

@@ -408,6 +408,7 @@ from tools.helper_functions import (
     check_for_relevant_ocr_output_with_words,
     custom_regex_load,
     enforce_cost_codes,
+    ensure_annotator_resize_debounce,
     ensure_folder_exists,
     get_connection_params,
     lifespan,
@@ -482,6 +483,7 @@ from tools.redaction_review import (
     update_annotator_object_and_filter_df,
     update_annotator_object_for_page_navigation,
     update_annotator_page_from_review_df,
+    update_annotator_page_state_from_review_df,
     update_entities_df_page,
     update_entities_df_recogniser_entities,
     update_entities_df_text,
@@ -535,6 +537,9 @@ if MPLCONFIGDIR:
 ensure_folder_exists(FEEDBACK_LOGS_FOLDER)
 ensure_folder_exists(ACCESS_LOGS_FOLDER)
 ensure_folder_exists(USAGE_LOGS_FOLDER)
+
+# Debounce annotator ResizeObserver (many boxes + Gradio reflows can thrash setScaleFactor).
+ensure_annotator_resize_debounce()
 
 # Add custom spacy recognisers to the Comprehend list, so that local Spacy model can be used to pick up e.g. titles, streetnames, UK postcodes that are sometimes missed by comprehend
 CHOSEN_COMPREHEND_ENTITIES.extend(custom_entities)
@@ -5520,7 +5525,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         outputs=[review_file_df, all_image_annotations_state],
         api_visibility="undocumented",
     ).success(
-        update_annotator_page_from_review_df,
+        update_annotator_page_state_from_review_df,
         inputs=[
             review_file_df,
             images_pdf_state,
@@ -5539,10 +5544,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             review_file_df,
             annotate_previous_page,
         ],
-        show_progress_on=[annotator],
+        show_progress_on=[],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_and_filter_df,
+        update_review_filters_after_redaction,
         inputs=[
             all_image_annotations_state,
             annotate_current_page,
@@ -5571,7 +5576,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             page_sizes,
             all_image_annotations_state,
         ],
-        show_progress_on=[annotator],
+        show_progress_on=[],
         api_visibility="undocumented",
     )
 
@@ -6034,7 +6039,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         outputs=[review_file_df, all_image_annotations_state],
         api_visibility="undocumented",
     ).success(
-        update_annotator_page_from_review_df,
+        update_annotator_page_state_from_review_df,
         inputs=[
             review_file_df,
             images_pdf_state,
@@ -6053,10 +6058,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             review_file_df,
             annotate_previous_page,
         ],
-        show_progress_on=[annotator],
+        show_progress_on=[],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_and_filter_df,
+        update_review_filters_after_redaction,
         inputs=[
             all_image_annotations_state,
             annotate_current_page,
@@ -6085,7 +6090,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             page_sizes,
             all_image_annotations_state,
         ],
-        show_progress_on=[annotator],
+        show_progress_on=[],
         api_visibility="undocumented",
     )
 
@@ -6827,7 +6832,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         outputs=[],
         api_visibility="undocumented",
     ).success(
-        update_annotator_page_from_review_df,
+        update_annotator_page_state_from_review_df,
         inputs=[
             review_file_df,
             images_pdf_state,
@@ -6846,10 +6851,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             review_file_df,
             annotate_previous_page,
         ],
-        show_progress_on=[annotator],
+        show_progress_on=[],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_and_filter_df,
+        update_review_filters_after_redaction,
         inputs=[
             all_image_annotations_state,
             annotate_current_page,
@@ -6878,7 +6883,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             page_sizes,
             all_image_annotations_state,
         ],
-        show_progress_on=[annotator],
+        show_progress_on=[],
         api_visibility="undocumented",
     )
 
@@ -7535,7 +7540,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             review_file_df,
             annotate_previous_page,
         ],
-        show_progress_on=[annotator],
+        show_progress_on=[],
         api_visibility="undocumented",
     ).success(
         increase_bottom_page_count_based_on_top,
@@ -7564,6 +7569,38 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             review_file_df,
         ],
         show_progress_on=[input_pdf_for_review],
+        api_visibility="undocumented",
+    ).success(
+        update_annotator_object_for_page_navigation,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[],
         api_visibility="undocumented",
     )
 
@@ -7606,7 +7643,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             page_sizes,
             all_image_annotations_state,
         ],
-        show_progress_on=[annotator],
+        show_progress_on=[],
         api_visibility="undocumented",
     )
 
@@ -8137,7 +8174,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             review_file_df,
             annotate_previous_page,
         ],
-        show_progress_on=[annotator],
+        show_progress_on=[],
         api_visibility="undocumented",
     ).success(
         increase_bottom_page_count_based_on_top,
@@ -8186,7 +8223,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             page_sizes,
             all_image_annotations_state,
         ],
-        show_progress_on=[annotator],
+        show_progress_on=[],
         api_visibility="undocumented",
     )
 
@@ -8638,7 +8675,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             review_file_df,
             annotate_previous_page,
         ],
-        show_progress_on=[annotator],
+        show_progress_on=[],
         api_visibility="undocumented",
     ).success(
         increase_bottom_page_count_based_on_top,
@@ -9304,7 +9341,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         outputs=[review_file_df, all_image_annotations_state],
         api_visibility="undocumented",
     ).success(
-        update_annotator_page_from_review_df,
+        update_annotator_page_state_from_review_df,
         inputs=[
             review_file_df,
             images_pdf_state,
@@ -9323,10 +9360,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             review_file_df,
             annotate_previous_page,
         ],
-        show_progress_on=[annotator],
+        show_progress_on=[],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_and_filter_df,
+        update_review_filters_after_redaction,
         inputs=[
             all_image_annotations_state,
             annotate_current_page,
@@ -9355,7 +9392,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             page_sizes,
             all_image_annotations_state,
         ],
-        show_progress_on=[annotator],
+        show_progress_on=[],
         api_visibility="undocumented",
     )
 
@@ -10160,7 +10197,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         outputs=[review_file_df, all_image_annotations_state],
         api_visibility="undocumented",
     ).success(
-        update_annotator_page_from_review_df,
+        update_annotator_page_state_from_review_df,
         inputs=[
             review_file_df,
             images_pdf_state,
@@ -10179,10 +10216,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             review_file_df,
             annotate_previous_page,
         ],
-        show_progress_on=[annotator],
+        show_progress_on=[],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_and_filter_df,
+        update_review_filters_after_redaction,
         inputs=[
             all_image_annotations_state,
             annotate_current_page,
@@ -10211,7 +10248,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             page_sizes,
             all_image_annotations_state,
         ],
-        show_progress_on=[annotator],
+        show_progress_on=[],
         api_visibility="undocumented",
     )
 

@@ -966,6 +966,44 @@ def update_annotator_page_from_review_df(
     )  # The original page number from selected_recogniser_entity_df_row
 
 
+def update_annotator_page_state_from_review_df(
+    review_df: pd.DataFrame,
+    image_file_paths: List[str],
+    page_sizes: List[dict],
+    current_image_annotations_state: List[dict],
+    current_page_annotator: object,
+    selected_recogniser_entity_df_row: pd.DataFrame,
+    input_folder: str,
+    doc_full_file_name_textbox: str,
+):
+    """Sync annotation state from review_df without pushing the visible annotator (push separately)."""
+    (
+        _page_annotator,
+        state,
+        page_num,
+        page_sizes_out,
+        review_df_out,
+        prev_page,
+    ) = update_annotator_page_from_review_df(
+        review_df,
+        image_file_paths,
+        page_sizes,
+        current_image_annotations_state,
+        current_page_annotator,
+        selected_recogniser_entity_df_row,
+        input_folder,
+        doc_full_file_name_textbox,
+    )
+    return (
+        gr.skip(),
+        state,
+        page_num,
+        page_sizes_out,
+        review_df_out,
+        prev_page,
+    )
+
+
 def _merge_horizontally_adjacent_boxes(
     df: pd.DataFrame,
     x_merge_threshold: float = 0.02,
@@ -2800,10 +2838,6 @@ def update_all_page_annotation_object_based_on_previous_page(
         # Guard: empty/zero-area annotator payloads (common on page turns / resize)
         # must not wipe real redactions already stored for this page.
         if existing_boxes and _annotator_boxes_are_collapsed(incoming_boxes):
-            print(
-                "Warning: ignoring collapsed/empty annotator boxes for page "
-                f"{previous_page}; keeping {len(existing_boxes)} existing redaction(s)."
-            )
             boxes_to_store = existing_boxes
         else:
             boxes_to_store = incoming_boxes
