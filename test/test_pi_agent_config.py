@@ -109,6 +109,18 @@ def test_write_runtime_config_sets_pi_cli_env(tmp_path, monkeypatch, pi_workspac
     )
 
 
+def test_gemini_provider_api_key_uses_pi_env_interpolation(
+    tmp_path, monkeypatch, pi_workspace
+):
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "hf-space")
+    monkeypatch.setenv("AGENT_CODING_AGENT_DIR", str(tmp_path / "agent"))
+
+    models = pac.build_models_config()
+
+    gemini = models["providers"][pac.PROVIDER_GEMINI]
+    assert gemini["apiKey"] == "$GEMINI_API_KEY"
+
+
 def test_gemini_provider_applies_retry_settings(tmp_path, monkeypatch, pi_workspace):
     monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "local-docker")
     monkeypatch.setenv("AGENT_DEFAULT_PROVIDER", "google-gemini")

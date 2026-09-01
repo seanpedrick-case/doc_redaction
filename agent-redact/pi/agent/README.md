@@ -11,7 +11,7 @@ The Pi agent (chat + redaction orchestration) can use:
 | Provider key | Label | Pi API | Auth |
 |--------------|-------|--------|------|
 | `llama-cpp` | Local (llama-cpp) | `openai-completions` | None (local llama-inference) |
-| `google-gemini` | Gemini | `google-generative-ai` | `GEMINI_API_KEY` or `GOOGLE_API_KEY` |
+| `google-gemini` | Gemini | `google-generative-ai` | `$GEMINI_API_KEY` in `models.json` (Pi env interpolation); set via `GEMINI_API_KEY` / `GOOGLE_API_KEY` |
 | `amazon-bedrock` | AWS Bedrock | `bedrock-converse-stream` | AWS SDK credentials (`AWS_ACCESS_KEY_ID`, etc.) |
 
 This is separate from doc_redaction **Pass 2 VLM** (`{VLM_BASE_URL}` in redaction prompts), which still targets local llama-inference by default.
