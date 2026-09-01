@@ -6886,6 +6886,38 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         show_progress_on=[],
         api_visibility="undocumented",
+    ).success(
+        update_annotator_object_for_page_navigation,
+        inputs=[
+            all_image_annotations_state,
+            annotate_current_page,
+            recogniser_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            text_entity_dropdown,
+            recogniser_entity_dataframe_base,
+            annotator_zoom_number,
+            review_file_df,
+            page_sizes,
+            doc_full_file_name_textbox,
+            input_folder_textbox,
+        ],
+        outputs=[
+            annotator,
+            annotate_current_page,
+            annotate_current_page_bottom,
+            annotate_previous_page,
+            recogniser_entity_dropdown,
+            recogniser_entity_dataframe,
+            recogniser_entity_dataframe_base,
+            text_entity_dropdown,
+            page_entity_dropdown,
+            page_entity_dropdown_redaction,
+            page_sizes,
+            all_image_annotations_state,
+        ],
+        show_progress_on=[],
+        api_visibility="undocumented",
     )
 
     # Page number controls
@@ -7413,34 +7445,6 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         api_visibility="undocumented",
     )
 
-    export_review_ocr_visualisation_btn.click(
-        page_ocr_review_image_with_lazy_ocr,
-        inputs=[
-            annotator,
-            annotate_current_page,
-            all_page_line_level_ocr_results_with_words,
-            all_page_line_level_ocr_results_with_words_df_base,
-            doc_full_file_name_textbox,
-            output_folder_textbox,
-            latest_ocr_file_path,
-        ],
-        outputs=[redaction_overlay_output_file],
-        api_name="page_ocr_review_image",
-    )
-
-    export_redaction_overlay_btn.click(
-        page_redaction_review_image,
-        inputs=[
-            annotator,
-            annotate_current_page,
-            review_file_df,
-            doc_full_file_name_textbox,
-            output_folder_textbox,
-        ],
-        outputs=[redaction_overlay_output_file],
-        api_name="page_redaction_review_image",
-    )
-
     ###
     # Review and exclude suggested redactions
     ###
@@ -7489,6 +7493,46 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         doc_full_file_name_textbox,
         input_folder_textbox,
     ]
+
+    export_review_ocr_visualisation_btn.click(
+        page_ocr_review_image_with_lazy_ocr,
+        inputs=[
+            annotator,
+            annotate_current_page,
+            all_page_line_level_ocr_results_with_words,
+            all_page_line_level_ocr_results_with_words_df_base,
+            doc_full_file_name_textbox,
+            output_folder_textbox,
+            latest_ocr_file_path,
+        ],
+        outputs=[redaction_overlay_output_file],
+        api_name="page_ocr_review_image",
+    ).success(
+        update_annotator_object_for_page_navigation,
+        inputs=_review_filter_annotator_refresh_inputs,
+        outputs=_review_filter_annotator_refresh_outputs,
+        show_progress_on=[],
+        api_visibility="undocumented",
+    )
+
+    export_redaction_overlay_btn.click(
+        page_redaction_review_image,
+        inputs=[
+            annotator,
+            annotate_current_page,
+            review_file_df,
+            doc_full_file_name_textbox,
+            output_folder_textbox,
+        ],
+        outputs=[redaction_overlay_output_file],
+        api_name="page_redaction_review_image",
+    ).success(
+        update_annotator_object_for_page_navigation,
+        inputs=_review_filter_annotator_refresh_inputs,
+        outputs=_review_filter_annotator_refresh_outputs,
+        show_progress_on=[],
+        api_visibility="undocumented",
+    )
 
     recogniser_entity_dropdown.select(
         update_entities_df_recogniser_entities,
@@ -8340,6 +8384,12 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         inputs=[annotate_current_page],
         outputs=[annotate_current_page_bottom],
         api_visibility="undocumented",
+    ).success(
+        update_annotator_object_for_page_navigation,
+        inputs=_review_filter_annotator_refresh_inputs,
+        outputs=_review_filter_annotator_refresh_outputs,
+        show_progress_on=[],
+        api_visibility="undocumented",
     )
 
     # Reset dropdowns
@@ -8826,6 +8876,12 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         inputs=[annotate_current_page],
         outputs=[annotate_current_page_bottom],
         api_visibility="undocumented",
+    ).success(
+        update_annotator_object_for_page_navigation,
+        inputs=_review_filter_annotator_refresh_inputs,
+        outputs=_review_filter_annotator_refresh_outputs,
+        show_progress_on=[],
+        api_visibility="undocumented",
     )
 
     # Reset the OCR results filter
@@ -8833,6 +8889,12 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         reset_ocr_base_dataframe,
         inputs=[all_page_line_level_ocr_results_df_base],
         outputs=[all_page_line_level_ocr_results_df],
+        api_visibility="undocumented",
+    ).success(
+        update_annotator_object_for_page_navigation,
+        inputs=_review_filter_annotator_refresh_inputs,
+        outputs=_review_filter_annotator_refresh_outputs,
+        show_progress_on=[],
         api_visibility="undocumented",
     )
 
@@ -8912,6 +8974,12 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         outputs=None,
         api_visibility="undocumented",
+    ).success(
+        update_annotator_object_for_page_navigation,
+        inputs=_review_filter_annotator_refresh_inputs,
+        outputs=_review_filter_annotator_refresh_outputs,
+        show_progress_on=[],
+        api_visibility="undocumented",
     )
 
     # Convert xfdf Adobe file back to review_file.csv
@@ -8979,6 +9047,12 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         outputs=[input_pdf_for_review],
         scroll_to_output=True,
+        api_visibility="undocumented",
+    ).success(
+        update_annotator_object_for_page_navigation,
+        inputs=_review_filter_annotator_refresh_inputs,
+        outputs=_review_filter_annotator_refresh_outputs,
+        show_progress_on=[],
         api_visibility="undocumented",
     )
 
@@ -9536,6 +9610,12 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             page_sizes,
             all_image_annotations_state,
         ],
+        show_progress_on=[],
+        api_visibility="undocumented",
+    ).success(
+        update_annotator_object_for_page_navigation,
+        inputs=_review_filter_annotator_refresh_inputs,
+        outputs=_review_filter_annotator_refresh_outputs,
         show_progress_on=[],
         api_visibility="undocumented",
     )

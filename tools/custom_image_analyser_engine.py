@@ -95,6 +95,7 @@ from tools.config import (
     VLM_MIN_IMAGE_SIZE,
 )
 from tools.helper_functions import (
+    assert_transformers_pp_ocrv6_support,
     clean_unicode_text,
     extract_balanced_json_array,
     extract_last_balanced_json_array,
@@ -561,6 +562,7 @@ def get_or_create_module_paddle_ocr(
             return _module_paddle_ocr
 
         PaddleOCR = _import_paddleocr_class()
+        assert_transformers_pp_ocrv6_support()
         if paddle_kwargs is not None:
             kwargs = dict(paddle_kwargs)
             kwargs.setdefault("lang", _paddle_lang_code(DEFAULT_LANGUAGE))

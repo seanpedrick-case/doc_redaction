@@ -41,7 +41,11 @@ from tools.config import (
     VLM_QWEN3_5_NOTHINK_SUFFIX,
     VLM_SEED,
 )
-from tools.helper_functions import get_system_font_path, strip_vlm_thinking_tags
+from tools.helper_functions import (
+    assert_transformers_pp_ocrv6_support,
+    get_system_font_path,
+    strip_vlm_thinking_tags,
+)
 from tools.inference_attention import (
     log_attn_implementation_choice,
     resolve_attn_implementation,
@@ -80,6 +84,7 @@ if LOAD_PADDLE_AT_STARTUP:
             )
 
     try:
+        assert_transformers_pp_ocrv6_support()
         from paddleocr import PaddleOCR
 
         print("PaddleOCR imported successfully")

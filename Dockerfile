@@ -44,8 +44,8 @@ elif [ "$INSTALL_PADDLEOCR" = "True" ] && [ "$PADDLE_GPU_ENABLED" = "True" ]; th
     pip install --verbose --no-cache-dir --target=/install "protobuf<=7.34.0" && \
     pip install --verbose --no-cache-dir --target=/install "paddlepaddle<=3.2.1" && \
     pip install --verbose --no-cache-dir --target=/install "paddleocr<=3.7.0" && \
-    pip install --verbose --no-cache-dir --target=/install "torch<=2.13.0" --index-url https://download.pytorch.org/whl/cu129 && \
-    pip install --verbose --no-cache-dir --target=/install "torchvision>=0.28.0" --index-url https://download.pytorch.org/whl/cu129 && \
+    pip install --verbose --no-cache-dir --target=/install "torch<=2.13.0" --index-url https://download.pytorch.org/whl/cu130 && \
+    pip install --verbose --no-cache-dir --target=/install "torchvision>=0.28.0" --index-url https://download.pytorch.org/whl/cu130 && \
     pip install --verbose --no-cache-dir --target=/install "transformers<=5.16.1"; \
 fi
 
@@ -66,8 +66,8 @@ RUN if [ "$INSTALL_VLM" = "True" ] && [ "$TORCH_GPU_ENABLED" = "False" ]; then \
     "sentencepiece<=0.2.2" \
     --extra-index-url https://download.pytorch.org/whl/cpu; \
 elif [ "$INSTALL_VLM" = "True" ] && [ "$TORCH_GPU_ENABLED" = "True" ]; then \
-    pip install --verbose --no-cache-dir --target=/install "torch<=2.13.0" --index-url https://download.pytorch.org/whl/cu129 && \
-    pip install --verbose --no-cache-dir --target=/install "torchvision>=0.28.0" --index-url https://download.pytorch.org/whl/cu129 && \
+    pip install --verbose --no-cache-dir --target=/install "torch<=2.13.0" --index-url https://download.pytorch.org/whl/cu130 && \
+    pip install --verbose --no-cache-dir --target=/install "torchvision>=0.28.0" --index-url https://download.pytorch.org/whl/cu130 && \
     pip install --verbose --no-cache-dir --target=/install \
         "transformers<=5.16.1" \
         "accelerate<=1.14.0" \

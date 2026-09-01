@@ -76,6 +76,34 @@ from tools.secure_path_utils import (
     validate_path_safety,
 )
 
+# PP-OCRv6 (PaddleOCR engine=transformers) needs Hugging Face model/processor support.
+_TRANSFORMERS_MIN_PP_OCRV6 = (5, 12, 0)
+
+
+def assert_transformers_pp_ocrv6_support() -> None:
+    """Raise ImportError when transformers is too old for PP-OCRv6."""
+    try:
+        import transformers
+    except ImportError as e:
+        raise ImportError(
+            "PaddleOCR PP-OCRv6 (engine=transformers) requires transformers>=5.12.0. "
+            "Install with: pip install 'transformers>=5.12.0'"
+        ) from e
+
+    installed = tuple(
+        int(m.group(1)) if (m := re.match(r"(\d+)", part)) else 0
+        for part in transformers.__version__.split(".")[:3]
+    )
+    while len(installed) < 3:
+        installed = (*installed, 0)
+    if installed < _TRANSFORMERS_MIN_PP_OCRV6:
+        raise ImportError(
+            "PaddleOCR PP-OCRv6 (engine=transformers) requires transformers>=5.12.0 "
+            f"(installed: {transformers.__version__}). "
+            "Upgrade with: pip install 'transformers>=5.12.0'"
+        )
+
+
 _VLM_THINKING_TAG_BLOCK_RE = re.compile(
     r"<\s*(?:think|thinking)\s*>.*?</\s*(?:think|thinking)\s*>",
     re.IGNORECASE | re.DOTALL,
