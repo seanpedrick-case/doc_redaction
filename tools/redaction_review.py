@@ -2543,6 +2543,91 @@ def _skip_annotator_navigation_outputs():
     return tuple(gr.skip() for _ in range(12))
 
 
+def refresh_annotator_if_review_document_loaded(
+    all_image_annotations: List[AnnotatedImageData],
+    gradio_annotator_current_page_number: int,
+    recogniser_entities_dropdown_value: str = "ALL",
+    page_dropdown_value: str = "ALL",
+    page_dropdown_redaction_value: str = "1",
+    text_dropdown_value: str = "ALL",
+    recogniser_dataframe_base: pd.DataFrame = None,
+    zoom: int = 100,
+    review_df: pd.DataFrame = None,
+    page_sizes: List[dict] = list(),
+    doc_full_file_name_textbox: str = "",
+    input_folder: str = INPUT_FOLDER,
+):
+    """Re-push review-tab annotator boxes from state when a document is loaded."""
+    if not all_image_annotations or not page_sizes:
+        return _skip_annotator_navigation_outputs()
+    return update_annotator_object_for_page_navigation(
+        all_image_annotations,
+        gradio_annotator_current_page_number,
+        recogniser_entities_dropdown_value,
+        page_dropdown_value,
+        page_dropdown_redaction_value,
+        text_dropdown_value,
+        recogniser_dataframe_base,
+        zoom,
+        review_df,
+        page_sizes,
+        doc_full_file_name_textbox,
+        input_folder,
+    )
+
+
+def persist_current_page_and_refresh_annotator(
+    page_image_annotator_object: AnnotatedImageData,
+    gradio_annotator_current_page_number: int,
+    all_image_annotations: List[AnnotatedImageData],
+    page_sizes: List[dict],
+    recogniser_entities_dropdown_value: str = "ALL",
+    page_dropdown_value: str = "ALL",
+    page_dropdown_redaction_value: str = "1",
+    text_dropdown_value: str = "ALL",
+    recogniser_dataframe_base: pd.DataFrame = None,
+    zoom: int = 100,
+    review_df: pd.DataFrame = None,
+    doc_full_file_name_textbox: str = "",
+    input_folder: str = INPUT_FOLDER,
+):
+    """
+    Merge live annotator edits into ``all_image_annotations`` for the current page,
+    then re-push boxes to the canvas. Matches the first step of *Save changes on
+    current page to file* (in-memory persist only — no CSV/PDF export).
+    """
+    if not all_image_annotations or not page_sizes:
+        return _skip_annotator_navigation_outputs()
+
+    try:
+        all_image_annotations, _, _ = (
+            update_all_page_annotation_object_based_on_previous_page(
+                page_image_annotator_object,
+                gradio_annotator_current_page_number,
+                gradio_annotator_current_page_number,
+                all_image_annotations,
+                page_sizes,
+            )
+        )
+    except Warning:
+        return _skip_annotator_navigation_outputs()
+
+    return refresh_annotator_if_review_document_loaded(
+        all_image_annotations,
+        gradio_annotator_current_page_number,
+        recogniser_entities_dropdown_value,
+        page_dropdown_value,
+        page_dropdown_redaction_value,
+        text_dropdown_value,
+        recogniser_dataframe_base,
+        zoom,
+        review_df,
+        page_sizes,
+        doc_full_file_name_textbox,
+        input_folder,
+    )
+
+
 def refresh_annotator_after_external_layout_reflow(
     layout_reflow_trigger: bool,
     all_image_annotations: List[AnnotatedImageData],
@@ -2565,9 +2650,7 @@ def refresh_annotator_after_external_layout_reflow(
     """
     if not layout_reflow_trigger:
         return _skip_annotator_navigation_outputs()
-    if not all_image_annotations or not page_sizes:
-        return _skip_annotator_navigation_outputs()
-    return update_annotator_object_for_page_navigation(
+    return refresh_annotator_if_review_document_loaded(
         all_image_annotations,
         gradio_annotator_current_page_number,
         recogniser_entities_dropdown_value,

@@ -416,16 +416,16 @@ from tools.helper_functions import (
     load_in_default_allow_list,
     load_in_default_cost_codes,
     merge_csv_files,
+    page_ocr_review_image_with_lazy_ocr,
     put_columns_in_df,
+    release_document_session_state,
+    release_post_workflow_ocr_state,
     reset_aws_call_vars,
     reset_base_dataframe,
     reset_data_vars,
     reset_ocr_base_dataframe,
     reset_ocr_with_words_base_dataframe,
     reset_review_vars,
-    release_document_session_state,
-    release_post_workflow_ocr_state,
-    page_ocr_review_image_with_lazy_ocr,
     reveal_feedback_buttons,
     save_default_cost_code_for_session,
     seed_bundled_example_textract_json,
@@ -477,7 +477,8 @@ from tools.redaction_review import (
     increase_bottom_page_count_based_on_top,
     increase_page,
     page_redaction_review_image,
-    refresh_annotator_after_external_layout_reflow,
+    persist_current_page_and_refresh_annotator,
+    refresh_annotator_if_review_document_loaded,
     reset_dropdowns,
     undo_last_removal,
     update_all_entity_df_dropdowns,
@@ -1201,14 +1202,14 @@ if RUN_FASTAPI:
     blocks = gr.Blocks(
         analytics_enabled=False,
         title="Document Redaction App",
-        delete_cache=(43200, 43200),  # Temporary file cache deleted every 12 hours
+        delete_cache=(14400, 14400),  # Temporary file cache deleted every 4 hours
         fill_width=FILL_SCREEN_WIDTH,
     )
 else:
     blocks = gr.Blocks(
         analytics_enabled=False,
         title="Document Redaction App",
-        delete_cache=(43200, 43200),  # Temporary file cache deleted every 12 hours
+        delete_cache=(14400, 14400),  # Temporary file cache deleted every 4 hours
         fill_width=FILL_SCREEN_WIDTH,
     )
 
@@ -1659,8 +1660,6 @@ with blocks:
         value=SESSION_SECURITY_HEARTBEAT_SECONDS,
         active=SESSION_SECURITY_ENABLED,
     )
-    # Set True only when the heartbeat updates the notice markdown (layout reflow).
-    session_security_notice_layout_reflow = gr.State(False)
 
     with gr.Accordion("API for agents (quickstart)", open=False, visible=False):
         gr.Markdown("""
@@ -7476,6 +7475,21 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         page_sizes,
         all_image_annotations_state,
     ]
+    _session_security_heartbeat_annotator_inputs = [
+        annotator,
+        annotate_current_page,
+        all_image_annotations_state,
+        page_sizes,
+        recogniser_entity_dropdown,
+        page_entity_dropdown,
+        page_entity_dropdown_redaction,
+        text_entity_dropdown,
+        recogniser_entity_dataframe_base,
+        annotator_zoom_number,
+        review_file_df,
+        doc_full_file_name_textbox,
+        input_folder_textbox,
+    ]
 
     recogniser_entity_dropdown.select(
         update_entities_df_recogniser_entities,
@@ -10657,7 +10671,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     def session_security_heartbeat_tick(request: gr.Request):
         if not SESSION_SECURITY_ENABLED:
-            return gr.skip(), gr.skip(), gr.skip()
+            return gr.skip(), gr.skip()
         ip_address = get_client_ip(request)
         headers = getattr(request, "headers", None) or {}
         user_agent = headers.get("user-agent", "") if headers else ""
@@ -10672,66 +10686,27 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             return (
                 gr.update(value=f"**Session ended:** {message}", visible=True),
                 gr.update(active=False),
-                True,
             )
         if result.notice:
             return (
                 gr.update(value=f"**Notice:** {result.notice}", visible=True),
                 gr.update(),
-                True,
             )
-        # No notice change: skip all outputs. Pushing gr.update(visible=False) every
-        # tick reflows the page and can collapse review-tab annotator boxes.
-        return gr.skip(), gr.skip(), gr.skip()
+        # No notice change: skip UI updates. Pushing gr.update(visible=False) every
+        # tick reflows the page; the follow-up success step re-pushes annotator boxes
+        # because the Timer tick alone can still collapse the canvas client-side.
+        return gr.skip(), gr.skip()
 
     session_security_heartbeat_timer.tick(
         session_security_heartbeat_tick,
         inputs=[],
-        outputs=[
-            session_security_notice_md,
-            session_security_heartbeat_timer,
-            session_security_notice_layout_reflow,
-        ],
+        outputs=[session_security_notice_md, session_security_heartbeat_timer],
         api_visibility="undocumented",
-    )
-
-    session_security_notice_layout_reflow.change(
-        refresh_annotator_after_external_layout_reflow,
-        inputs=[
-            session_security_notice_layout_reflow,
-            all_image_annotations_state,
-            annotate_current_page,
-            recogniser_entity_dropdown,
-            page_entity_dropdown,
-            page_entity_dropdown_redaction,
-            text_entity_dropdown,
-            recogniser_entity_dataframe_base,
-            annotator_zoom_number,
-            review_file_df,
-            page_sizes,
-            doc_full_file_name_textbox,
-            input_folder_textbox,
-        ],
-        outputs=[
-            annotator,
-            annotate_current_page,
-            annotate_current_page_bottom,
-            annotate_previous_page,
-            recogniser_entity_dropdown,
-            recogniser_entity_dataframe,
-            recogniser_entity_dataframe_base,
-            text_entity_dropdown,
-            page_entity_dropdown,
-            page_entity_dropdown_redaction,
-            page_sizes,
-            all_image_annotations_state,
-        ],
+    ).success(
+        persist_current_page_and_refresh_annotator,
+        inputs=_session_security_heartbeat_annotator_inputs,
+        outputs=_review_filter_annotator_refresh_outputs,
         show_progress_on=[],
-        api_visibility="undocumented",
-    ).then(
-        lambda: False,
-        inputs=None,
-        outputs=[session_security_notice_layout_reflow],
         api_visibility="undocumented",
     )
 

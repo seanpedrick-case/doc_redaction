@@ -13,7 +13,9 @@ pytest.importorskip("gradio_image_annotation_redaction")
 from tools.redaction_review import (
     _annotator_box_has_area,
     _annotator_boxes_are_collapsed,
+    persist_current_page_and_refresh_annotator,
     refresh_annotator_after_external_layout_reflow,
+    refresh_annotator_if_review_document_loaded,
     update_all_page_annotation_object_based_on_previous_page,
 )
 
@@ -225,13 +227,25 @@ def test_refresh_annotator_after_external_layout_reflow_skips_when_inactive():
     assert all(v == gr.skip() for v in result)
 
 
-def test_refresh_annotator_after_external_layout_reflow_skips_without_review_doc():
+def test_refresh_annotator_if_review_document_loaded_skips_without_review_doc():
     import gradio as gr
 
-    result = refresh_annotator_after_external_layout_reflow(
-        layout_reflow_trigger=True,
+    result = refresh_annotator_if_review_document_loaded(
         all_image_annotations=[],
         gradio_annotator_current_page_number=1,
+        page_sizes=[],
+    )
+    assert len(result) == 12
+    assert all(v == gr.skip() for v in result)
+
+
+def test_persist_current_page_and_refresh_annotator_skips_without_review_doc():
+    import gradio as gr
+
+    result = persist_current_page_and_refresh_annotator(
+        page_image_annotator_object={"image": "p.png", "boxes": []},
+        gradio_annotator_current_page_number=1,
+        all_image_annotations=[],
         page_sizes=[],
     )
     assert len(result) == 12

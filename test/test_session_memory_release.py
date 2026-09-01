@@ -1,5 +1,6 @@
 """Tests for Gradio session memory release helpers."""
 
+import os
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -82,8 +83,25 @@ def test_ensure_ocr_word_results_list_returns_existing():
     assert ensure_ocr_word_results_list(existing, "/missing.json") is existing
 
 
-def test_ensure_ocr_word_results_list_lazy_loads(tmp_path):
-    ocr_path = tmp_path / "doc_ocr_results_with_words_tesseract.json"
+def test_ensure_ocr_word_results_list_rejects_unresolved_path():
+    with patch(
+        "tools.helper_functions.resolve_existing_io_path",
+        side_effect=ValueError("Path not allowed"),
+    ):
+        assert ensure_ocr_word_results_list([], "/any/ocr.json") == []
+
+
+def test_ensure_ocr_word_results_list_lazy_loads_under_output_folder(
+    tmp_path, monkeypatch
+):
+    from tools import config
+
+    output_root = tmp_path / "output"
+    output_root.mkdir()
+    monkeypatch.setattr(config, "OUTPUT_FOLDER", str(output_root) + os.sep)
+    monkeypatch.setattr(config, "INPUT_FOLDER", str(tmp_path / "input") + os.sep)
+
+    ocr_path = output_root / "doc_ocr_results_with_words_tesseract.json"
     ocr_path.write_text(
         '[{"page": 1, "results": [{"text": "hello", "boundingBox": []}]}]',
         encoding="utf-8",

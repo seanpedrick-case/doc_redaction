@@ -69,6 +69,7 @@ from tools.config import (
 )
 from tools.gradio_platform import build_s3_outputs_prefix, resolve_session_identity
 from tools.secure_path_utils import (
+    resolve_existing_io_path,
     sanitize_filename,
     secure_path_join,
     validate_folder_containment,
@@ -297,12 +298,16 @@ def ensure_ocr_word_results_list(
     """Return OCR word results from session list or reload from on-disk JSON when cleared."""
     if ocr_results_list:
         return ocr_results_list
-    if not ocr_json_path or not os.path.isfile(ocr_json_path):
+    if not ocr_json_path:
+        return []
+    try:
+        safe_ocr_json_path = resolve_existing_io_path(ocr_json_path)
+    except ValueError:
         return []
     from tools.file_conversion import load_and_convert_ocr_results_with_words_json
 
     loaded, _, _ = load_and_convert_ocr_results_with_words_json(
-        ocr_json_path,
+        safe_ocr_json_path,
         [],
         page_sizes_df if page_sizes_df is not None else pd.DataFrame(),
     )

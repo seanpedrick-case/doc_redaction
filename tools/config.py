@@ -2678,7 +2678,7 @@ SESSION_SECURITY_ANOMALY_ACTION = get_or_create_env_var(
 # Client-side heartbeat poll interval (seconds) used for idle tracking and to surface
 # notifications/terminations to a tab that is not otherwise triggering new requests.
 SESSION_SECURITY_HEARTBEAT_SECONDS = int(
-    get_or_create_env_var("SESSION_SECURITY_HEARTBEAT_SECONDS", "30")
+    get_or_create_env_var("SESSION_SECURITY_HEARTBEAT_SECONDS", "120")
 )
 
 # Optional idle timeout (minutes) after which an inactive session is auto-terminated.
