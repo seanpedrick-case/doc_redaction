@@ -1,3 +1,4 @@
+import gc
 import logging
 import os
 import platform
@@ -177,7 +178,32 @@ def extract_last_balanced_json_array(text: str):
     return last
 
 
-def reset_state_vars():
+SESSION_GC_PAGE_THRESHOLD = 30
+
+
+def release_session_document(doc) -> None:
+    """Close a PyMuPDF Document held in session state, if still open."""
+    if doc is None or doc == []:
+        return
+    if hasattr(doc, "is_closed"):
+        try:
+            if not doc.is_closed:
+                doc.close()
+        except Exception:
+            pass
+
+
+def _session_gc_if_large(doc) -> None:
+    try:
+        if doc is not None and doc != [] and hasattr(doc, "page_count"):
+            if doc.page_count >= SESSION_GC_PAGE_THRESHOLD:
+                gc.collect()
+    except Exception:
+        pass
+
+
+def _empty_redact_reset_values():
+    """Shared empty values for pre-redact session reset (legacy 22-tuple)."""
     return (
         [],
         pd.DataFrame(),
@@ -196,11 +222,116 @@ def reset_state_vars():
         0,
         [],
         [],
-        0,  # latest_file_completed_num: reset to 0 at start of document redaction
-        0,  # LLM total input tokens
-        0,  # LLM total output tokens
-        0,  # VLM total input tokens
-        0,  # VLM total output tokens
+        0,
+        0,
+        0,
+        0,
+        0,
+    )
+
+
+def reset_state_vars(pdf_doc_state=None):
+    """Reset redaction session fields; closes pdf_doc_state when provided."""
+    release_session_document(pdf_doc_state)
+    _session_gc_if_large(pdf_doc_state)
+    return _empty_redact_reset_values()
+
+
+def _empty_full_session_release_values():
+    """Empty values for all heavy Gradio session state cleared on upload / new document."""
+    base = _empty_redact_reset_values()
+    return base + (
+        [],  # all_page_line_level_ocr_results (line-level list)
+        pd.DataFrame(),  # all_page_line_level_ocr_results_with_words_df_base
+        [],  # prepared_pdf_state
+        [],  # images_pdf_state
+        [],  # page_sizes
+        [],  # document_cropboxes
+        [],  # all_img_details_state
+        pd.DataFrame(),  # backup_review_state
+        [],  # backup_image_annotations_state
+        pd.DataFrame(),  # backup_recogniser_entity_dataframe_base
+        pd.DataFrame(),  # backup_all_page_line_level_ocr_results_with_words_df_base
+        {},  # full_duplicate_data_by_file
+        pd.DataFrame(),  # review_file_df
+    )
+
+
+def release_document_session_state(pdf_doc_state=None):
+    """
+    Release heavy document session state before preparing a new file or starting redaction.
+    Closes the open PyMuPDF document and clears thread-local PDF render cache.
+    """
+    release_session_document(pdf_doc_state)
+    try:
+        from tools.file_conversion import clear_threadlocal_pdf_cache
+
+        clear_threadlocal_pdf_cache()
+    except Exception:
+        pass
+    _session_gc_if_large(pdf_doc_state)
+    return _empty_full_session_release_values()
+
+
+def release_post_workflow_ocr_state():
+    """
+    Drop in-memory OCR list copies and review undo backups after redact/review complete.
+    Paths (latest_ocr_file_path) and line-level DataFrames are kept for lazy reload.
+    """
+    gc.collect()
+    return (
+        [],
+        [],
+        pd.DataFrame(),
+        [],
+        pd.DataFrame(),
+        pd.DataFrame(),
+    )
+
+
+def ensure_ocr_word_results_list(
+    ocr_results_list,
+    ocr_json_path: str,
+    page_sizes_df=None,
+):
+    """Return OCR word results from session list or reload from on-disk JSON when cleared."""
+    if ocr_results_list:
+        return ocr_results_list
+    if not ocr_json_path or not os.path.isfile(ocr_json_path):
+        return []
+    from tools.file_conversion import load_and_convert_ocr_results_with_words_json
+
+    loaded, _, _ = load_and_convert_ocr_results_with_words_json(
+        ocr_json_path,
+        [],
+        page_sizes_df if page_sizes_df is not None else pd.DataFrame(),
+    )
+    return loaded or []
+
+
+def page_ocr_review_image_with_lazy_ocr(
+    annotator,
+    current_page,
+    all_page_line_level_ocr_results_with_words,
+    all_page_line_level_ocr_results_with_words_df_base,
+    doc_full_file_name_textbox,
+    output_folder_textbox,
+    latest_ocr_file_path,
+):
+    """Lazy-load word OCR from disk when list state was released to save memory."""
+    from tools.redaction_review import page_ocr_review_image
+
+    ocr_list = ensure_ocr_word_results_list(
+        all_page_line_level_ocr_results_with_words,
+        latest_ocr_file_path,
+    )
+    return page_ocr_review_image(
+        annotator,
+        current_page,
+        ocr_list,
+        all_page_line_level_ocr_results_with_words_df_base,
+        doc_full_file_name_textbox,
+        output_folder_textbox,
     )
 
 

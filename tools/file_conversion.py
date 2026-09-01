@@ -84,6 +84,20 @@ def _get_threadlocal_pymupdf_doc(pdf_path: str) -> Document:
     return doc
 
 
+def clear_threadlocal_pdf_cache() -> None:
+    """Close and drop thread-local PyMuPDF documents opened during batch page rendering."""
+    cache = getattr(_PDF_DOC_CACHE, "docs", None)
+    if not cache:
+        return
+    for doc in cache.values():
+        try:
+            if hasattr(doc, "is_closed") and not doc.is_closed:
+                doc.close()
+        except Exception:
+            pass
+    cache.clear()
+
+
 def _render_pdf_page_to_png_pymupdf_mediabox(
     pdf_path: str,
     page_num: int,
@@ -445,6 +459,7 @@ def convert_pdf_to_images(
     heights = [result[3] for result in results]
 
     print("PDF has been converted to images.")
+    clear_threadlocal_pdf_cache()
     return images, widths, heights, results
 
 
@@ -2024,6 +2039,7 @@ def prepare_image_or_pdf(
         print(f"Finished loading in {file_path_number} file(s)")
         gr.Info(f"Finished loading in {file_path_number} file(s)")
 
+    clear_threadlocal_pdf_cache()
     return (
         combined_out_message,
         converted_file_paths,

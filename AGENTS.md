@@ -28,6 +28,14 @@ For agents operating the deployed app (Gradio Client, review CSV, `/review_apply
 - Gradio/FastAPI entrypoint is [app.py](app.py). With FastAPI enabled, typical pattern is `uvicorn app:app --host 0.0.0.0 --port 7860` (exact host/port from your config).
 - OpenAPI docs: `/docs` when the FastAPI app is mounted.
 
+## Large-document memory (containers)
+
+Gradio session state retains PDF handles and OCR data for the browser session. For large files in long-lived containers:
+
+- **`EFFICIENT_OCR=True`** — defer page PNG creation (default in [`config/app_config.env.example`](config/app_config.env.example)).
+- **`TWO_PASS_REVIEW_PDF_LOW_MEMORY=True`** — lower peak RAM during review apply (~2× apply time); pair with **`RETURN_PDF_FOR_REVIEW=True`**.
+- Session release helpers in [`tools/helper_functions.py`](tools/helper_functions.py) (`release_document_session_state`, `release_post_workflow_ocr_state`) run on upload, redact, and review apply; OCR word lists reload from `latest_ocr_file_path` on demand.
+
 ## Tests
 
 - Run from repo root: `pytest` (optional: `pytest test/`).

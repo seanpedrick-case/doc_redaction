@@ -423,7 +423,9 @@ from tools.helper_functions import (
     reset_ocr_base_dataframe,
     reset_ocr_with_words_base_dataframe,
     reset_review_vars,
-    reset_state_vars,
+    release_document_session_state,
+    release_post_workflow_ocr_state,
+    page_ocr_review_image_with_lazy_ocr,
     reveal_feedback_buttons,
     save_default_cost_code_for_session,
     seed_bundled_example_textract_json,
@@ -474,7 +476,6 @@ from tools.redaction_review import (
     get_and_merge_current_page_annotations,
     increase_bottom_page_count_based_on_top,
     increase_page,
-    page_ocr_review_image,
     page_redaction_review_image,
     refresh_annotator_after_external_layout_reflow,
     reset_dropdowns,
@@ -4791,6 +4792,51 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         )
 
     # Uploading a file writes to state variables
+    _release_document_session_state_outputs = [
+        all_image_annotations_state,
+        all_page_line_level_ocr_results_df_base,
+        all_decision_process_table_state,
+        comprehend_query_number,
+        textract_metadata_textbox,
+        annotator,
+        output_file_list_state,
+        log_files_output_list_state,
+        recogniser_entity_dataframe,
+        recogniser_entity_dataframe_base,
+        pdf_doc_state,
+        duplication_file_path_outputs_list_state,
+        redaction_output_summary_textbox,
+        is_a_textract_api_call,
+        textract_query_number,
+        all_page_line_level_ocr_results_with_words,
+        input_review_files,
+        latest_file_completed_num,
+        llm_total_input_tokens_number,
+        llm_total_output_tokens_number,
+        vlm_total_input_tokens_number,
+        vlm_total_output_tokens_number,
+        all_page_line_level_ocr_results,
+        all_page_line_level_ocr_results_with_words_df_base,
+        prepared_pdf_state,
+        images_pdf_state,
+        page_sizes,
+        document_cropboxes,
+        all_img_details_state,
+        backup_review_state,
+        backup_image_annotations_state,
+        backup_recogniser_entity_dataframe_base,
+        backup_all_page_line_level_ocr_results_with_words_df_base,
+        full_duplicate_data_by_file,
+        review_file_df,
+    ]
+    _release_post_workflow_ocr_outputs = [
+        all_page_line_level_ocr_results,
+        all_page_line_level_ocr_results_with_words,
+        backup_review_state,
+        backup_image_annotations_state,
+        backup_recogniser_entity_dataframe_base,
+        backup_all_page_line_level_ocr_results_with_words_df_base,
+    ]
     _doc_upload_fn = (
         _get_document_file_names_with_walkthrough
         if SHOW_COSTS
@@ -4873,6 +4919,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         outputs=_doc_upload_outputs,
         api_visibility="undocumented",
     ).success(
+        fn=release_document_session_state,
+        inputs=[pdf_doc_state],
+        outputs=_release_document_session_state_outputs,
+        api_visibility="undocumented",
+    ).success(
         fn=_prepare_fn,
         inputs=[
             in_doc_files,
@@ -4946,6 +4997,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         fn=_doc_upload_fn,
         inputs=[walkthrough_file_input],
         outputs=_doc_upload_outputs,
+        api_visibility="undocumented",
+    ).success(
+        fn=release_document_session_state,
+        inputs=[pdf_doc_state],
+        outputs=_release_document_session_state_outputs,
         api_visibility="undocumented",
     ).success(
         fn=_prepare_fn,
@@ -5071,31 +5127,9 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         outputs=tabs,
         api_visibility="undocumented",
     ).then(
-        fn=reset_state_vars,
-        outputs=[
-            all_image_annotations_state,
-            all_page_line_level_ocr_results_df_base,
-            all_decision_process_table_state,
-            comprehend_query_number,
-            textract_metadata_textbox,
-            annotator,
-            output_file_list_state,
-            log_files_output_list_state,
-            recogniser_entity_dataframe,
-            recogniser_entity_dataframe_base,
-            pdf_doc_state,
-            duplication_file_path_outputs_list_state,
-            redaction_output_summary_textbox,
-            is_a_textract_api_call,
-            textract_query_number,
-            all_page_line_level_ocr_results_with_words,
-            input_review_files,
-            latest_file_completed_num,
-            llm_total_input_tokens_number,
-            llm_total_output_tokens_number,
-            vlm_total_input_tokens_number,
-            vlm_total_output_tokens_number,
-        ],
+        fn=release_document_session_state,
+        inputs=[pdf_doc_state],
+        outputs=_release_document_session_state_outputs,
         api_visibility="undocumented",
     ).success(
         fn=enforce_cost_codes,
@@ -5208,6 +5242,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         api_name="redact_document",
         show_progress_on=[redaction_output_summary_textbox],
+    ).success(
+        fn=release_post_workflow_ocr_state,
+        inputs=None,
+        outputs=_release_post_workflow_ocr_outputs,
+        api_visibility="undocumented",
     ).success(
         fn=lambda *args: usage_callback.flag(
             list(args),
@@ -5585,31 +5624,9 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     # Run redaction function from document redaction tab button
     document_redact_btn.click(
-        fn=reset_state_vars,
-        outputs=[
-            all_image_annotations_state,
-            all_page_line_level_ocr_results_df_base,
-            all_decision_process_table_state,
-            comprehend_query_number,
-            textract_metadata_textbox,
-            annotator,
-            output_file_list_state,
-            log_files_output_list_state,
-            recogniser_entity_dataframe,
-            recogniser_entity_dataframe_base,
-            pdf_doc_state,
-            duplication_file_path_outputs_list_state,
-            redaction_output_summary_textbox,
-            is_a_textract_api_call,
-            textract_query_number,
-            all_page_line_level_ocr_results_with_words,
-            input_review_files,
-            latest_file_completed_num,
-            llm_total_input_tokens_number,
-            llm_total_output_tokens_number,
-            vlm_total_input_tokens_number,
-            vlm_total_output_tokens_number,
-        ],
+        fn=release_document_session_state,
+        inputs=[pdf_doc_state],
+        outputs=_release_document_session_state_outputs,
         api_visibility="undocumented",
     ).success(
         fn=enforce_cost_codes,
@@ -5721,6 +5738,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             total_pdf_page_count,
         ],
         show_progress_on=[redaction_output_summary_textbox],
+        api_visibility="undocumented",
+    ).success(
+        fn=release_post_workflow_ocr_state,
+        inputs=None,
+        outputs=_release_post_workflow_ocr_outputs,
         api_visibility="undocumented",
     ).success(
         fn=lambda *args: usage_callback.flag(
@@ -6301,30 +6323,9 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         inputs=[textract_output_found_checkbox],
         api_visibility="undocumented",
     ).success(
-        fn=reset_state_vars,
-        outputs=[
-            all_image_annotations_state,
-            all_page_line_level_ocr_results_df_base,
-            all_decision_process_table_state,
-            comprehend_query_number,
-            textract_metadata_textbox,
-            annotator,
-            output_file_list_state,
-            log_files_output_list_state,
-            recogniser_entity_dataframe,
-            recogniser_entity_dataframe_base,
-            pdf_doc_state,
-            duplication_file_path_outputs_list_state,
-            redaction_output_summary_textbox,
-            is_a_textract_api_call,
-            textract_query_number,
-            all_page_line_level_ocr_results_with_words,
-            input_review_files,
-            llm_total_input_tokens_number,
-            llm_total_output_tokens_number,
-            vlm_total_input_tokens_number,
-            vlm_total_output_tokens_number,
-        ],
+        fn=release_document_session_state,
+        inputs=[pdf_doc_state],
+        outputs=_release_document_session_state_outputs,
         api_visibility="undocumented",
     ).success(
         fn=choose_and_run_redactor,
@@ -6429,6 +6430,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             total_pdf_page_count,
         ],
         show_progress_on=[redaction_output_summary_textbox],
+        api_visibility="undocumented",
+    ).success(
+        fn=release_post_workflow_ocr_state,
+        inputs=None,
+        outputs=_release_post_workflow_ocr_outputs,
         api_visibility="undocumented",
     ).success(
         fn=export_outputs_to_s3,
@@ -7290,6 +7296,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         show_progress_on=[input_pdf_for_review],
         api_name="apply_review_redactions",
     ).success(
+        fn=release_post_workflow_ocr_state,
+        inputs=None,
+        outputs=_release_post_workflow_ocr_outputs,
+        api_visibility="undocumented",
+    ).success(
         fn=lambda: gr.update(open=True),
         inputs=None,
         outputs=[review_upload_accordion],
@@ -7405,7 +7416,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
     )
 
     export_review_ocr_visualisation_btn.click(
-        page_ocr_review_image,
+        page_ocr_review_image_with_lazy_ocr,
         inputs=[
             annotator,
             annotate_current_page,
@@ -7413,6 +7424,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             all_page_line_level_ocr_results_with_words_df_base,
             doc_full_file_name_textbox,
             output_folder_textbox,
+            latest_ocr_file_path,
         ],
         outputs=[redaction_overlay_output_file],
         api_name="page_ocr_review_image",
