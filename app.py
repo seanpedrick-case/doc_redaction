@@ -460,7 +460,7 @@ from tools.quickstart import (
     update_step_4_visibility,
 )
 from tools.redaction_review import (
-    apply_redactions_to_review_df_and_files,
+    apply_redactions_to_review_df_and_files_for_review_ui,
     convert_df_to_xfdf,
     convert_xfdf_to_dataframe,
     create_annotation_objects_from_filtered_ocr_results_with_words,
@@ -478,11 +478,10 @@ from tools.redaction_review import (
     increase_page,
     page_redaction_review_image,
     persist_current_page_and_refresh_annotator,
-    refresh_annotator_if_review_document_loaded,
     reset_dropdowns,
     undo_last_removal,
     update_all_entity_df_dropdowns,
-    update_all_page_annotation_object_based_on_previous_page,
+    update_all_page_annotation_object_from_gradio_client,
     update_annotator_object_and_filter_df,
     update_annotator_object_for_page_navigation,
     update_annotator_page_from_review_df,
@@ -6604,9 +6603,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         show_progress_on=[redaction_output_summary_textbox, input_pdf_for_review],
         api_visibility="undocumented",
     ).success(
-        apply_redactions_to_review_df_and_files,
+        apply_redactions_to_review_df_and_files_for_review_ui,
         inputs=[
-            annotator,
             doc_full_file_name_textbox,
             pdf_doc_state,
             all_image_annotations_state,
@@ -6752,9 +6750,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         show_progress_on=[redaction_output_summary_textbox],
         api_visibility="undocumented",
     ).success(
-        apply_redactions_to_review_df_and_files,
+        apply_redactions_to_review_df_and_files_for_review_ui,
         inputs=[
-            annotator,
             doc_full_file_name_textbox,
             pdf_doc_state,
             all_image_annotations_state,
@@ -6897,7 +6894,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     # Page number controls
     annotate_current_page.submit(
-        update_all_page_annotation_object_based_on_previous_page,
+        update_all_page_annotation_object_from_gradio_client,
         inputs=[
             annotator,
             annotate_current_page,
@@ -6910,6 +6907,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        preprocess=False,
         api_visibility="undocumented",
     ).success(
         update_annotator_object_for_page_navigation,
@@ -6952,7 +6950,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         show_progress_on=[all_image_annotations_state],
         api_visibility="undocumented",
     ).success(
-        update_all_page_annotation_object_based_on_previous_page,
+        update_all_page_annotation_object_from_gradio_client,
         inputs=[
             annotator,
             annotate_current_page,
@@ -6965,6 +6963,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        preprocess=False,
         api_visibility="undocumented",
     ).success(
         update_annotator_object_for_page_navigation,
@@ -7007,7 +7006,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         show_progress_on=[all_image_annotations_state],
         api_visibility="undocumented",
     ).success(
-        update_all_page_annotation_object_based_on_previous_page,
+        update_all_page_annotation_object_from_gradio_client,
         inputs=[
             annotator,
             annotate_current_page,
@@ -7020,6 +7019,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        preprocess=False,
         api_visibility="undocumented",
     ).success(
         update_annotator_object_for_page_navigation,
@@ -7062,7 +7062,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         show_progress_on=[all_image_annotations_state],
         api_visibility="undocumented",
     ).success(
-        update_all_page_annotation_object_based_on_previous_page,
+        update_all_page_annotation_object_from_gradio_client,
         inputs=[
             annotator,
             annotate_current_page,
@@ -7075,6 +7075,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        preprocess=False,
         api_visibility="undocumented",
     ).success(
         update_annotator_object_for_page_navigation,
@@ -7117,7 +7118,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         show_progress_on=[all_image_annotations_state],
         api_visibility="undocumented",
     ).success(
-        update_all_page_annotation_object_based_on_previous_page,
+        update_all_page_annotation_object_from_gradio_client,
         inputs=[
             annotator,
             annotate_current_page,
@@ -7130,6 +7131,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        preprocess=False,
         api_visibility="undocumented",
     ).success(
         update_annotator_object_for_page_navigation,
@@ -7171,7 +7173,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         outputs=[annotate_current_page],
         api_visibility="undocumented",
     ).success(
-        update_all_page_annotation_object_based_on_previous_page,
+        update_all_page_annotation_object_from_gradio_client,
         inputs=[
             annotator,
             annotate_current_page,
@@ -7184,6 +7186,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        preprocess=False,
         api_visibility="undocumented",
     ).success(
         update_annotator_object_for_page_navigation,
@@ -7224,7 +7227,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
     # concurrent layout resize can collapse canvas-scaled box coords to ~0 and
     # wipe the current page's redactions. Open the accordion only after apply.
     annotation_button_apply.click(
-        update_all_page_annotation_object_based_on_previous_page,
+        update_all_page_annotation_object_from_gradio_client,
         inputs=[
             annotator,
             annotate_current_page,
@@ -7237,6 +7240,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        preprocess=False,
         api_visibility="undocumented",
     ).success(
         update_annotator_object_and_filter_df,
@@ -7271,9 +7275,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         show_progress_on=[],
         api_visibility="undocumented",
     ).success(
-        apply_redactions_to_review_df_and_files,
+        apply_redactions_to_review_df_and_files_for_review_ui,
         inputs=[
-            annotator,
             doc_full_file_name_textbox,
             pdf_doc_state,
             all_image_annotations_state,
@@ -7343,7 +7346,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
     # Updating the review DataFrame (or File/progress widgets) after the annotator
     # reflow can call setScaleFactor(~0) and wipe visible boxes after they appear.
     update_current_page_redactions_btn.click(
-        update_all_page_annotation_object_based_on_previous_page,
+        update_all_page_annotation_object_from_gradio_client,
         inputs=[
             annotator,
             annotate_current_page,
@@ -7356,11 +7359,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        preprocess=False,
         api_visibility="undocumented",
     ).success(
-        apply_redactions_to_review_df_and_files,
+        apply_redactions_to_review_df_and_files_for_review_ui,
         inputs=[
-            annotator,
             doc_full_file_name_textbox,
             pdf_doc_state,
             all_image_annotations_state,
@@ -7562,7 +7565,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         outputs=[selected_entity_dataframe_row, selected_entity_dataframe_row_text],
         api_visibility="undocumented",
     ).success(
-        update_all_page_annotation_object_based_on_previous_page,
+        update_all_page_annotation_object_from_gradio_client,
         inputs=[
             annotator,
             annotate_current_page,
@@ -7575,6 +7578,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        preprocess=False,
         api_visibility="undocumented",
     ).success(
         get_and_merge_current_page_annotations,
@@ -7624,9 +7628,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         outputs=[annotate_current_page_bottom],
         api_visibility="undocumented",
     ).success(
-        apply_redactions_to_review_df_and_files,
+        apply_redactions_to_review_df_and_files_for_review_ui,
         inputs=[
-            annotator,
             doc_full_file_name_textbox,
             pdf_doc_state,
             all_image_annotations_state,
@@ -7706,7 +7709,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
     ### Exclude current selection from annotator and outputs
     # Exclude only selected row
     exclude_selected_row_btn.click(
-        update_all_page_annotation_object_based_on_previous_page,
+        update_all_page_annotation_object_from_gradio_client,
         inputs=[
             annotator,
             annotate_current_page,
@@ -7719,6 +7722,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        preprocess=False,
         api_visibility="undocumented",
     ).success(
         get_and_merge_current_page_annotations,
@@ -7750,9 +7754,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         api_visibility="undocumented",
     ).success(
-        apply_redactions_to_review_df_and_files,
+        apply_redactions_to_review_df_and_files_for_review_ui,
         inputs=[
-            annotator,
             doc_full_file_name_textbox,
             pdf_doc_state,
             all_image_annotations_state,
@@ -7840,7 +7843,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     # Exclude all items with same text as selected row
     exclude_text_with_same_as_selected_row_btn.click(
-        update_all_page_annotation_object_based_on_previous_page,
+        update_all_page_annotation_object_from_gradio_client,
         inputs=[
             annotator,
             annotate_current_page,
@@ -7853,6 +7856,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        preprocess=False,
         api_visibility="undocumented",
     ).success(
         get_and_merge_current_page_annotations,
@@ -7892,9 +7896,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         api_visibility="undocumented",
     ).success(
-        apply_redactions_to_review_df_and_files,
+        apply_redactions_to_review_df_and_files_for_review_ui,
         inputs=[
-            annotator,
             doc_full_file_name_textbox,
             pdf_doc_state,
             all_image_annotations_state,
@@ -7982,7 +7985,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     # Exclude everything visible in table
     exclude_selected_btn.click(
-        update_all_page_annotation_object_based_on_previous_page,
+        update_all_page_annotation_object_from_gradio_client,
         inputs=[
             annotator,
             annotate_current_page,
@@ -7995,6 +7998,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        preprocess=False,
         api_visibility="undocumented",
     ).success(
         get_and_merge_current_page_annotations,
@@ -8026,9 +8030,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         api_visibility="undocumented",
     ).success(
-        apply_redactions_to_review_df_and_files,
+        apply_redactions_to_review_df_and_files_for_review_ui,
         inputs=[
-            annotator,
             doc_full_file_name_textbox,
             pdf_doc_state,
             all_image_annotations_state,
@@ -8129,9 +8132,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         api_visibility="undocumented",
     ).success(
-        apply_redactions_to_review_df_and_files,
+        apply_redactions_to_review_df_and_files_for_review_ui,
         inputs=[
-            annotator,
             doc_full_file_name_textbox,
             pdf_doc_state,
             all_image_annotations_state,
@@ -8290,7 +8292,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         api_visibility="undocumented",
     ).success(
-        update_all_page_annotation_object_based_on_previous_page,
+        update_all_page_annotation_object_from_gradio_client,
         inputs=[
             annotator,
             annotate_current_page,
@@ -8303,6 +8305,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        preprocess=False,
         api_visibility="undocumented",
     ).success(
         get_and_merge_current_page_annotations,
@@ -8369,7 +8372,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     # Redact everything visible in table
     redact_selected_btn.click(
-        update_all_page_annotation_object_based_on_previous_page,
+        update_all_page_annotation_object_from_gradio_client,
         inputs=[
             annotator,
             annotate_current_page,
@@ -8382,6 +8385,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        preprocess=False,
         api_visibility="undocumented",
     ).success(
         create_annotation_objects_from_filtered_ocr_results_with_words,
@@ -8406,9 +8410,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         api_visibility="undocumented",
     ).success(
-        apply_redactions_to_review_df_and_files,
+        apply_redactions_to_review_df_and_files_for_review_ui,
         inputs=[
-            annotator,
             doc_full_file_name_textbox,
             pdf_doc_state,
             all_image_annotations_state,
@@ -8498,7 +8501,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     # Redact current selection
     redact_selected_row_btn.click(
-        update_all_page_annotation_object_based_on_previous_page,
+        update_all_page_annotation_object_from_gradio_client,
         inputs=[
             annotator,
             annotate_current_page,
@@ -8511,6 +8514,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        preprocess=False,
         api_visibility="undocumented",
     ).success(
         create_annotation_objects_from_filtered_ocr_results_with_words,
@@ -8535,9 +8539,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         api_visibility="undocumented",
     ).success(
-        apply_redactions_to_review_df_and_files,
+        apply_redactions_to_review_df_and_files_for_review_ui,
         inputs=[
-            annotator,
             doc_full_file_name_textbox,
             pdf_doc_state,
             all_image_annotations_state,
@@ -8607,7 +8610,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     # Redact all items with same text as selected row
     redact_text_with_same_as_selected_row_btn.click(
-        update_all_page_annotation_object_based_on_previous_page,
+        update_all_page_annotation_object_from_gradio_client,
         inputs=[
             annotator,
             annotate_current_page,
@@ -8620,6 +8623,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             annotate_previous_page,
             annotate_current_page_bottom,
         ],
+        preprocess=False,
         api_visibility="undocumented",
     ).success(
         get_all_rows_with_same_text_redact,
@@ -8652,9 +8656,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         api_visibility="undocumented",
     ).success(
-        apply_redactions_to_review_df_and_files,
+        apply_redactions_to_review_df_and_files_for_review_ui,
         inputs=[
-            annotator,
             doc_full_file_name_textbox,
             pdf_doc_state,
             all_image_annotations_state,
@@ -8737,9 +8740,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         api_visibility="undocumented",
     ).success(
-        apply_redactions_to_review_df_and_files,
+        apply_redactions_to_review_df_and_files_for_review_ui,
         inputs=[
-            annotator,
             doc_full_file_name_textbox,
             pdf_doc_state,
             all_image_annotations_state,
@@ -10707,6 +10709,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         inputs=_session_security_heartbeat_annotator_inputs,
         outputs=_review_filter_annotator_refresh_outputs,
         show_progress_on=[],
+        preprocess=False,
         api_visibility="undocumented",
     )
 

@@ -13,6 +13,7 @@ pytest.importorskip("gradio_image_annotation_redaction")
 from tools.redaction_review import (
     _annotator_box_has_area,
     _annotator_boxes_are_collapsed,
+    coerce_gradio_client_annotator_payload,
     persist_current_page_and_refresh_annotator,
     refresh_annotator_after_external_layout_reflow,
     refresh_annotator_if_review_document_loaded,
@@ -250,3 +251,21 @@ def test_persist_current_page_and_refresh_annotator_skips_without_review_doc():
     )
     assert len(result) == 12
     assert all(v == gr.skip() for v in result)
+
+
+def test_coerce_gradio_client_annotator_payload_replaces_stale_gradio_tmp(tmp_path):
+    stable = tmp_path / "doc_1.png"
+    stable.write_bytes(b"png")
+    page_sizes = [{"page": 1, "image_path": str(stable)}]
+    payload = {
+        "image": {
+            "path": "/tmp/gradio_tmp/abc/doc_1.png",
+            "url": "https://example.cloudfront.net/gradio_api/file=...",
+        },
+        "boxes": [{"xmin": 1, "ymin": 2, "xmax": 3, "ymax": 4, "label": "PERSON"}],
+    }
+    coerced = coerce_gradio_client_annotator_payload(
+        payload, 1, [{"image": "/tmp/gradio_tmp/old.png", "boxes": []}], page_sizes
+    )
+    assert coerced["image"] == str(stable)
+    assert coerced["boxes"][0]["label"] == "PERSON"

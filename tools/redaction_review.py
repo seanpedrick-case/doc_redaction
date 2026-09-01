@@ -2599,10 +2599,17 @@ def persist_current_page_and_refresh_annotator(
     if not all_image_annotations or not page_sizes:
         return _skip_annotator_navigation_outputs()
 
+    coerced = coerce_gradio_client_annotator_payload(
+        page_image_annotator_object,
+        gradio_annotator_current_page_number,
+        all_image_annotations,
+        page_sizes,
+    )
+
     try:
         all_image_annotations, _, _ = (
             update_all_page_annotation_object_based_on_previous_page(
-                page_image_annotator_object,
+                coerced,
                 gradio_annotator_current_page_number,
                 gradio_annotator_current_page_number,
                 all_image_annotations,
@@ -2782,6 +2789,117 @@ def _resolve_page_image_dims(
         return row.get("image_width"), row.get("image_height")
 
     return image_width, image_height
+
+
+def _extract_annotator_image_path(image_value: object) -> Optional[str]:
+    """Return a filesystem path string from an annotator image field."""
+    if isinstance(image_value, str):
+        return image_value.strip() or None
+    if isinstance(image_value, dict):
+        for key in ("path", "name", "file_path", "url"):
+            value = image_value.get(key)
+            if value:
+                return str(value).strip()
+    path_attr = getattr(image_value, "path", None) or getattr(image_value, "name", None)
+    if path_attr:
+        return str(path_attr).strip()
+    return None
+
+
+def _is_ephemeral_or_missing_annotator_image_path(path: Optional[str]) -> bool:
+    """True when the annotator image path should not be opened (Gradio tmp / missing)."""
+    if not path:
+        return True
+    norm = os.path.normpath(path).replace("\\", "/").lower()
+    if "gradio_tmp" in norm or "/tmp/gradio/" in norm:
+        return True
+    try:
+        return not os.path.exists(path)
+    except OSError:
+        return True
+
+
+def coerce_gradio_client_annotator_payload(
+    payload: object,
+    current_page: int,
+    all_image_annotations: List[AnnotatedImageData],
+    page_sizes: List[dict],
+) -> AnnotatedImageData:
+    """
+    Normalize raw Gradio client annotator JSON (``preprocess=False``) before server handlers.
+
+    The browser often keeps ``/tmp/gradio_tmp/...`` image paths that are deleted on ECS or
+    after container restarts. Prefer stable ``page_sizes`` / session state paths while
+    keeping box edits from the client payload.
+    """
+    if not isinstance(payload, dict):
+        payload = {}
+
+    boxes = payload.get("boxes")
+    if not isinstance(boxes, list):
+        boxes = []
+
+    page_num = 1
+    try:
+        page_num = int(current_page or 1)
+    except (TypeError, ValueError):
+        page_num = 1
+
+    client_image = _extract_annotator_image_path(payload.get("image"))
+    stable_image = _resolve_page_image_path(page_sizes, page_num)
+
+    state_image = None
+    page_index = page_num - 1
+    if all_image_annotations and 0 <= page_index < len(all_image_annotations):
+        state_image = _extract_annotator_image_path(
+            (all_image_annotations[page_index] or {}).get("image")
+        )
+
+    chosen_image = client_image
+    if _is_ephemeral_or_missing_annotator_image_path(chosen_image):
+        for candidate in (stable_image, state_image, client_image):
+            if candidate and not _is_ephemeral_or_missing_annotator_image_path(
+                candidate
+            ):
+                chosen_image = candidate
+                break
+        else:
+            chosen_image = stable_image or state_image or client_image
+
+    result: AnnotatedImageData = {
+        "boxes": boxes,
+        "image": chosen_image,
+        "orientation": payload.get("orientation", 0),
+    }
+    for key in ("image_width", "image_height"):
+        if key in payload:
+            result[key] = payload[key]
+    return result
+
+
+def update_all_page_annotation_object_from_gradio_client(
+    page_image_annotator_object: object,
+    current_page: int,
+    previous_page: int,
+    all_image_annotations: List[AnnotatedImageData],
+    page_sizes: List[dict] = list(),
+    clear_all: bool = False,
+):
+    """``update_all_page_annotation_object_based_on_previous_page`` for raw client annotator JSON."""
+    coerced = coerce_gradio_client_annotator_payload(
+        page_image_annotator_object,
+        current_page,
+        all_image_annotations,
+        page_sizes,
+    )
+    return update_all_page_annotation_object_based_on_previous_page(
+        coerced,
+        current_page,
+        previous_page,
+        all_image_annotations,
+        page_sizes,
+        clear_all,
+    )
 
 
 def _convert_annotator_boxes_to_relative(
@@ -3844,6 +3962,39 @@ def apply_redactions_to_review_df_and_files(
         return doc, all_image_annotations, gr.skip(), gr.skip(), review_df
 
     return doc, all_image_annotations, output_files, output_log_files, review_df
+
+
+def apply_redactions_to_review_df_and_files_for_review_ui(
+    file_paths: List[str],
+    doc: Document,
+    all_image_annotations: List[AnnotatedImageData],
+    current_page: int,
+    review_file_state: pd.DataFrame,
+    output_folder: str = OUTPUT_FOLDER,
+    save_pdf: bool = True,
+    page_sizes: List[dict] = list(),
+    input_folder: str = INPUT_FOLDER,
+    COMPRESS_REDACTED_PDF: bool = COMPRESS_REDACTED_PDF,
+    progress=gr.Progress(track_tqdm=True),
+):
+    """
+    Review-tab apply without an ``image_annotator`` input (avoids Gradio preprocess on
+    stale ``/tmp/gradio_tmp`` page images). Uses ``all_image_annotations`` state.
+    """
+    return apply_redactions_to_review_df_and_files(
+        None,
+        file_paths,
+        doc,
+        all_image_annotations,
+        current_page,
+        review_file_state,
+        output_folder,
+        save_pdf,
+        page_sizes,
+        input_folder,
+        COMPRESS_REDACTED_PDF,
+        progress,
+    )
 
 
 def get_boxes_json(annotations: AnnotatedImageData):
