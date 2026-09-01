@@ -408,7 +408,6 @@ from tools.helper_functions import (
     check_for_relevant_ocr_output_with_words,
     custom_regex_load,
     enforce_cost_codes,
-    ensure_annotator_resize_debounce,
     ensure_folder_exists,
     get_connection_params,
     lifespan,
@@ -539,9 +538,6 @@ if MPLCONFIGDIR:
 ensure_folder_exists(FEEDBACK_LOGS_FOLDER)
 ensure_folder_exists(ACCESS_LOGS_FOLDER)
 ensure_folder_exists(USAGE_LOGS_FOLDER)
-
-# Debounce annotator ResizeObserver (many boxes + Gradio reflows can thrash setScaleFactor).
-ensure_annotator_resize_debounce()
 
 # Add custom spacy recognisers to the Comprehend list, so that local Spacy model can be used to pick up e.g. titles, streetnames, UK postcodes that are sometimes missed by comprehend
 CHOSEN_COMPREHEND_ENTITIES.extend(custom_entities)
