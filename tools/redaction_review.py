@@ -2813,10 +2813,8 @@ def _is_ephemeral_or_missing_annotator_image_path(path: Optional[str]) -> bool:
     norm = os.path.normpath(path).replace("\\", "/").lower()
     if "gradio_tmp" in norm or "/tmp/gradio/" in norm:
         return True
-    try:
-        return not os.path.exists(path)
-    except OSError:
-        return True
+    # Only check file presence for paths under allowed roots (not arbitrary user paths).
+    return _validated_allowed_file_path(path) is None
 
 
 def coerce_gradio_client_annotator_payload(

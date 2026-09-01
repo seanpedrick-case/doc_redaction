@@ -253,7 +253,12 @@ def test_persist_current_page_and_refresh_annotator_skips_without_review_doc():
     assert all(v == gr.skip() for v in result)
 
 
-def test_coerce_gradio_client_annotator_payload_replaces_stale_gradio_tmp(tmp_path):
+def test_coerce_gradio_client_annotator_payload_replaces_stale_gradio_tmp(
+    tmp_path, monkeypatch
+):
+    import tools.redaction_review as rr
+
+    monkeypatch.setattr(rr, "INPUT_FOLDER", str(tmp_path))
     stable = tmp_path / "doc_1.png"
     stable.write_bytes(b"png")
     page_sizes = [{"page": 1, "image_path": str(stable)}]
