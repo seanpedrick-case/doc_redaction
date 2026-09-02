@@ -810,7 +810,6 @@ def _transformers_input_device(model):
     For device_map='auto' models the embedding weights (index_select) may sit on
     cuda:0 while torch.cuda.current_device() is cuda:1. Generic 'cuda' is not safe.
     """
-    import torch
 
     def _device_of(obj):
         if obj is None:
@@ -840,6 +839,10 @@ def _transformers_input_device(model):
                 return dev
         except Exception:
             pass
+
+    # Fallbacks need torch.device; import only here so unit tests without torch
+    # can still cover the embedding-weight paths used in CI.
+    import torch
 
     device_map = getattr(model, "hf_device_map", None)
     if device_map:
