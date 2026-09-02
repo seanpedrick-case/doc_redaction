@@ -352,6 +352,49 @@ def ensure_ocr_word_results_list(
     return loaded or []
 
 
+def page_ocr_review_image_for_gradio(
+    annotator,
+    current_page,
+    all_page_line_level_ocr_results_with_words,
+    all_page_line_level_ocr_results_with_words_df_base,
+    doc_full_file_name_textbox,
+    output_folder_textbox,
+    latest_ocr_file_path,
+    all_image_annotations_state,
+    page_sizes,
+):
+    """Export OCR visualisation using session state for a stable page image path."""
+    from tools.redaction_review import (
+        build_review_redaction_export_annotator,
+        page_ocr_review_image,
+    )
+
+    ocr_list = all_page_line_level_ocr_results_with_words
+    if not ocr_list and not _ocr_with_words_df_has_page(
+        all_page_line_level_ocr_results_with_words_df_base, current_page
+    ):
+        ocr_list = ensure_ocr_word_results_list(
+            all_page_line_level_ocr_results_with_words,
+            latest_ocr_file_path,
+        )
+
+    export_annotator = build_review_redaction_export_annotator(
+        annotator,
+        current_page,
+        all_image_annotations_state,
+        page_sizes,
+        review_df=None,
+    )
+    return page_ocr_review_image(
+        export_annotator,
+        current_page,
+        ocr_list or [],
+        all_page_line_level_ocr_results_with_words_df_base,
+        doc_full_file_name_textbox,
+        output_folder_textbox,
+    )
+
+
 def page_ocr_review_image_with_lazy_ocr(
     annotator,
     current_page,

@@ -416,7 +416,7 @@ from tools.helper_functions import (
     load_in_default_allow_list,
     load_in_default_cost_codes,
     merge_csv_files,
-    page_ocr_review_image_with_lazy_ocr,
+    page_ocr_review_image_for_gradio,
     page_redaction_review_image_for_gradio,
     put_columns_in_df,
     release_document_session_state,
@@ -7635,7 +7635,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
     ]
 
     export_review_ocr_visualisation_btn.click(
-        page_ocr_review_image_with_lazy_ocr,
+        page_ocr_review_image_for_gradio,
         inputs=[
             annotator,
             annotate_current_page,
@@ -7644,8 +7644,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             doc_full_file_name_textbox,
             output_folder_textbox,
             latest_ocr_file_path,
+            all_image_annotations_state,
+            page_sizes,
         ],
         outputs=[redaction_overlay_output_file],
+        preprocess=False,
         api_name="page_ocr_review_image",
     ).success(
         update_annotator_object_for_page_navigation,
