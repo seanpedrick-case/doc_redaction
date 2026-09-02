@@ -301,6 +301,8 @@ from tools.config import (
     PII_DETECTION_MODELS,
     REDACTION_SETTINGS_ACCORDION_OPEN,
     REMOVE_DUPLICATE_ROWS,
+    REVIEW_ANNOTATOR_AUTO_PERSIST_ENABLED,
+    REVIEW_ANNOTATOR_AUTO_PERSIST_SECONDS,
     ROOT_PATH,
     RUN_ALL_EXAMPLES_THROUGH_AWS,
     RUN_AWS_FUNCTIONS,
@@ -476,6 +478,7 @@ from tools.redaction_review import (
     get_and_merge_current_page_annotations,
     increase_bottom_page_count_based_on_top,
     increase_page,
+    persist_annotator_canvas_and_refresh_review_ui,
     persist_current_page_and_refresh_annotator,
     reset_dropdowns,
     undo_last_removal,
@@ -1182,82 +1185,83 @@ REVIEW_ANNOTATOR_TAB_SELECT_NUDGE_JS = """
 head_html = f"""<base href='{base_href}'>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/iframe-resizer/4.3.1/iframeResizer.contentWindow.min.js" integrity="sha256-62pj+jS8t+leByFOFwjiY0T92YlWwowYgHnFRklgv0M=" crossorigin="anonymous"></script>
-<script>
-(function() {{
-    function nudgeReviewAnnotatorLayout() {{
-        window.dispatchEvent(new Event("resize"));
-        var root = document.getElementById("review-redaction-annotator-viewport")
-            || document.getElementById("review-redaction-annotator");
-        if (root) {{
-            void root.offsetHeight;
-        }}
-        window.dispatchEvent(new Event("resize"));
-    }}
+"""
+# <script>
+# (function() {{
+#     function nudgeReviewAnnotatorLayout() {{
+#         window.dispatchEvent(new Event("resize"));
+#         var root = document.getElementById("review-redaction-annotator-viewport")
+#             || document.getElementById("review-redaction-annotator");
+#         if (root) {{
+#             void root.offsetHeight;
+#         }}
+#         window.dispatchEvent(new Event("resize"));
+#     }}
 
-    function scheduleNudgeReviewAnnotatorLayout() {{
-        [0, 50, 150, 400, 800, 1500].forEach(function(delay) {{
-            setTimeout(nudgeReviewAnnotatorLayout, delay);
-        }});
-    }}
+#     function scheduleNudgeReviewAnnotatorLayout() {{
+#         [0, 50, 150, 400, 800, 1500].forEach(function(delay) {{
+#             setTimeout(nudgeReviewAnnotatorLayout, delay);
+#         }});
+#     }}
 
-    window.nudgeReviewAnnotatorLayout = nudgeReviewAnnotatorLayout;
-    window.scheduleNudgeReviewAnnotatorLayout = scheduleNudgeReviewAnnotatorLayout;
+#     window.nudgeReviewAnnotatorLayout = nudgeReviewAnnotatorLayout;
+#     window.scheduleNudgeReviewAnnotatorLayout = scheduleNudgeReviewAnnotatorLayout;
 
-    function isReviewRedactionsTabSelected() {{
-        var tabs = document.querySelectorAll('button[role="tab"]');
-        for (var i = 0; i < tabs.length; i++) {{
-            var tab = tabs[i];
-            if (tab.getAttribute("aria-selected") === "true") {{
-                return (tab.textContent || "").indexOf("Review redactions") >= 0;
-            }}
-        }}
-        return false;
-    }}
+#     function isReviewRedactionsTabSelected() {{
+#         var tabs = document.querySelectorAll('button[role="tab"]');
+#         for (var i = 0; i < tabs.length; i++) {{
+#             var tab = tabs[i];
+#             if (tab.getAttribute("aria-selected") === "true") {{
+#                 return (tab.textContent || "").indexOf("Review redactions") >= 0;
+#             }}
+#         }}
+#         return false;
+#     }}
 
-    function attachReviewAnnotatorObserver() {{
-        var viewport = document.getElementById("review-redaction-annotator-viewport")
-            || document.getElementById("review-redaction-annotator");
-        if (!viewport || viewport.dataset.reviewAnnotatorObserved) {{
-            return;
-        }}
-        viewport.dataset.reviewAnnotatorObserved = "1";
-        var obs = new MutationObserver(function() {{
-            if (!isReviewRedactionsTabSelected()) {{
-                return;
-            }}
-            clearTimeout(window.__reviewAnnotatorNudgeTimer);
-            window.__reviewAnnotatorNudgeTimer = setTimeout(
-                scheduleNudgeReviewAnnotatorLayout,
-                80
-            );
-        }});
-        obs.observe(viewport, {{
-            childList: true,
-            subtree: true,
-            attributes: true,
-            attributeFilter: ["style", "class", "height", "width"]
-        }});
-    }}
+#     function attachReviewAnnotatorObserver() {{
+#         var viewport = document.getElementById("review-redaction-annotator-viewport")
+#             || document.getElementById("review-redaction-annotator");
+#         if (!viewport || viewport.dataset.reviewAnnotatorObserved) {{
+#             return;
+#         }}
+#         viewport.dataset.reviewAnnotatorObserved = "1";
+#         var obs = new MutationObserver(function() {{
+#             if (!isReviewRedactionsTabSelected()) {{
+#                 return;
+#             }}
+#             clearTimeout(window.__reviewAnnotatorNudgeTimer);
+#             window.__reviewAnnotatorNudgeTimer = setTimeout(
+#                 scheduleNudgeReviewAnnotatorLayout,
+#                 80
+#             );
+#         }});
+#         obs.observe(viewport, {{
+#             childList: true,
+#             subtree: true,
+#             attributes: true,
+#             attributeFilter: ["style", "class", "height", "width"]
+#         }});
+#     }}
 
-    document.addEventListener("click", function(e) {{
-        var target = e.target;
-        if (!target || !target.closest) {{
-            return;
-        }}
-        var tab = target.closest('button[role="tab"]');
-        if (tab && (tab.textContent || "").indexOf("Review redactions") >= 0) {{
-            scheduleNudgeReviewAnnotatorLayout();
-        }}
-    }}, true);
+#     document.addEventListener("click", function(e) {{
+#         var target = e.target;
+#         if (!target || !target.closest) {{
+#             return;
+#         }}
+#         var tab = target.closest('button[role="tab"]');
+#         if (tab && (tab.textContent || "").indexOf("Review redactions") >= 0) {{
+#             scheduleNudgeReviewAnnotatorLayout();
+#         }}
+#     }}, true);
 
-    if (document.readyState === "loading") {{
-        document.addEventListener("DOMContentLoaded", attachReviewAnnotatorObserver);
-    }} else {{
-        attachReviewAnnotatorObserver();
-    }}
-    setInterval(attachReviewAnnotatorObserver, 3000);
-}})();
-</script>"""
+#     if (document.readyState === "loading") {{
+#         document.addEventListener("DOMContentLoaded", attachReviewAnnotatorObserver);
+#     }} else {{
+#         attachReviewAnnotatorObserver();
+#     }}
+#     setInterval(attachReviewAnnotatorObserver, 3000);
+# }})();
+# </script>"""
 
 css = """
 /* Target tab navigation buttons only - not buttons inside tab content */
@@ -1773,6 +1777,10 @@ with blocks:
     session_security_heartbeat_timer = gr.Timer(
         value=SESSION_SECURITY_HEARTBEAT_SECONDS,
         active=SESSION_SECURITY_ENABLED,
+    )
+    review_annotator_auto_persist_timer = gr.Timer(
+        value=REVIEW_ANNOTATOR_AUTO_PERSIST_SECONDS,
+        active=REVIEW_ANNOTATOR_AUTO_PERSIST_ENABLED,
     )
 
     with gr.Accordion("API for agents (quickstart)", open=False, visible=False):
@@ -6969,6 +6977,23 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         api_visibility="undocumented",
     )
 
+    _session_security_heartbeat_annotator_inputs = [
+        annotator,
+        annotate_current_page,
+        all_image_annotations_state,
+        page_sizes,
+        recogniser_entity_dropdown,
+        page_entity_dropdown,
+        page_entity_dropdown_redaction,
+        text_entity_dropdown,
+        recogniser_entity_dataframe_base,
+        annotator_zoom_number,
+        review_file_df,
+        doc_full_file_name_textbox,
+        input_folder_textbox,
+    ]
+    _persist_and_refresh_annotator_inputs = _session_security_heartbeat_annotator_inputs
+
     review_file_df_update_btn.click(
         validate_review_file_df,
         inputs=[review_file_df],
@@ -7620,21 +7645,19 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         page_sizes,
         all_image_annotations_state,
     ]
-    _session_security_heartbeat_annotator_inputs = [
-        annotator,
-        annotate_current_page,
-        all_image_annotations_state,
-        page_sizes,
-        recogniser_entity_dropdown,
-        page_entity_dropdown,
-        page_entity_dropdown_redaction,
-        text_entity_dropdown,
-        recogniser_entity_dataframe_base,
-        annotator_zoom_number,
-        review_file_df,
-        doc_full_file_name_textbox,
-        input_folder_textbox,
-    ]
+
+    # Auto-persist live canvas edits, then re-push boxes from state (same pattern as
+    # session-security heartbeat). Timer ticks alone can collapse the annotator canvas
+    # client-side; refresh restores display. Do not wire annotator.change — it also
+    # fires on server-driven box pushes and races with canvas mount.
+    review_annotator_auto_persist_timer.tick(
+        persist_current_page_and_refresh_annotator,
+        inputs=_persist_and_refresh_annotator_inputs,
+        outputs=_review_filter_annotator_refresh_outputs,
+        preprocess=False,
+        show_progress_on=[],
+        api_visibility="undocumented",
+    )
 
     export_review_ocr_visualisation_btn.click(
         page_ocr_review_image_for_gradio,
@@ -7653,8 +7676,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         preprocess=False,
         api_name="page_ocr_review_image",
     ).success(
-        update_annotator_object_for_page_navigation,
-        inputs=_review_filter_annotator_refresh_inputs,
+        persist_annotator_canvas_and_refresh_review_ui,
+        inputs=_persist_and_refresh_annotator_inputs,
         outputs=_review_filter_annotator_refresh_outputs,
         show_progress_on=[],
         api_visibility="undocumented",
@@ -7675,8 +7698,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         preprocess=False,
         api_name="page_redaction_review_image",
     ).success(
-        update_annotator_object_for_page_navigation,
-        inputs=_review_filter_annotator_refresh_inputs,
+        persist_annotator_canvas_and_refresh_review_ui,
+        inputs=_persist_and_refresh_annotator_inputs,
         outputs=_review_filter_annotator_refresh_outputs,
         show_progress_on=[],
         api_visibility="undocumented",
@@ -7697,8 +7720,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_for_page_navigation,
-        inputs=_review_filter_annotator_refresh_inputs,
+        persist_annotator_canvas_and_refresh_review_ui,
+        inputs=_persist_and_refresh_annotator_inputs,
         outputs=_review_filter_annotator_refresh_outputs,
         show_progress_on=[],
         api_visibility="undocumented",
@@ -7718,8 +7741,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_for_page_navigation,
-        inputs=_review_filter_annotator_refresh_inputs,
+        persist_annotator_canvas_and_refresh_review_ui,
+        inputs=_persist_and_refresh_annotator_inputs,
         outputs=_review_filter_annotator_refresh_outputs,
         show_progress_on=[],
         api_visibility="undocumented",
@@ -7739,8 +7762,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_for_page_navigation,
-        inputs=_review_filter_annotator_refresh_inputs,
+        persist_annotator_canvas_and_refresh_review_ui,
+        inputs=_persist_and_refresh_annotator_inputs,
         outputs=_review_filter_annotator_refresh_outputs,
         show_progress_on=[],
         api_visibility="undocumented",
@@ -7838,21 +7861,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         show_progress_on=[input_pdf_for_review],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_for_page_navigation,
-        inputs=[
-            all_image_annotations_state,
-            annotate_current_page,
-            recogniser_entity_dropdown,
-            page_entity_dropdown,
-            page_entity_dropdown_redaction,
-            text_entity_dropdown,
-            recogniser_entity_dataframe_base,
-            annotator_zoom_number,
-            review_file_df,
-            page_sizes,
-            doc_full_file_name_textbox,
-            input_folder_textbox,
-        ],
+        persist_annotator_canvas_and_refresh_review_ui,
+        inputs=_persist_and_refresh_annotator_inputs,
         outputs=[
             annotator,
             annotate_current_page,
@@ -7887,8 +7897,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         show_progress_on=[],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_for_page_navigation,
-        inputs=_review_filter_annotator_refresh_inputs,
+        persist_annotator_canvas_and_refresh_review_ui,
+        inputs=_persist_and_refresh_annotator_inputs,
         outputs=_review_filter_annotator_refresh_outputs,
         show_progress_on=[],
         api_visibility="undocumented",
@@ -7996,21 +8006,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         show_progress_on=[],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_for_page_navigation,
-        inputs=[
-            all_image_annotations_state,
-            annotate_current_page,
-            recogniser_entity_dropdown,
-            page_entity_dropdown,
-            page_entity_dropdown_redaction,
-            text_entity_dropdown,
-            recogniser_entity_dataframe_base,
-            annotator_zoom_number,
-            review_file_df,
-            page_sizes,
-            doc_full_file_name_textbox,
-            input_folder_textbox,
-        ],
+        persist_annotator_canvas_and_refresh_review_ui,
+        inputs=_persist_and_refresh_annotator_inputs,
         outputs=[
             annotator,
             annotate_current_page,
@@ -8138,21 +8135,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         show_progress_on=[],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_for_page_navigation,
-        inputs=[
-            all_image_annotations_state,
-            annotate_current_page,
-            recogniser_entity_dropdown,
-            page_entity_dropdown,
-            page_entity_dropdown_redaction,
-            text_entity_dropdown,
-            recogniser_entity_dataframe_base,
-            annotator_zoom_number,
-            review_file_df,
-            page_sizes,
-            doc_full_file_name_textbox,
-            input_folder_textbox,
-        ],
+        persist_annotator_canvas_and_refresh_review_ui,
+        inputs=_persist_and_refresh_annotator_inputs,
         outputs=[
             annotator,
             annotate_current_page,
@@ -8272,21 +8256,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         show_progress_on=[],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_for_page_navigation,
-        inputs=[
-            all_image_annotations_state,
-            annotate_current_page,
-            recogniser_entity_dropdown,
-            page_entity_dropdown,
-            page_entity_dropdown_redaction,
-            text_entity_dropdown,
-            recogniser_entity_dataframe_base,
-            annotator_zoom_number,
-            review_file_df,
-            page_sizes,
-            doc_full_file_name_textbox,
-            input_folder_textbox,
-        ],
+        persist_annotator_canvas_and_refresh_review_ui,
+        inputs=_persist_and_refresh_annotator_inputs,
         outputs=[
             annotator,
             annotate_current_page,
@@ -8374,21 +8345,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         show_progress_on=[],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_for_page_navigation,
-        inputs=[
-            all_image_annotations_state,
-            annotate_current_page,
-            recogniser_entity_dropdown,
-            page_entity_dropdown,
-            page_entity_dropdown_redaction,
-            text_entity_dropdown,
-            recogniser_entity_dataframe_base,
-            annotator_zoom_number,
-            review_file_df,
-            page_sizes,
-            doc_full_file_name_textbox,
-            input_folder_textbox,
-        ],
+        persist_annotator_canvas_and_refresh_review_ui,
+        inputs=_persist_and_refresh_annotator_inputs,
         outputs=[
             annotator,
             annotate_current_page,
@@ -8419,8 +8377,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         outputs=[all_page_line_level_ocr_results_with_words_df],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_for_page_navigation,
-        inputs=_review_filter_annotator_refresh_inputs,
+        persist_annotator_canvas_and_refresh_review_ui,
+        inputs=_persist_and_refresh_annotator_inputs,
         outputs=_review_filter_annotator_refresh_outputs,
         show_progress_on=[],
         api_visibility="undocumented",
@@ -8441,8 +8399,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_for_page_navigation,
-        inputs=_review_filter_annotator_refresh_inputs,
+        persist_annotator_canvas_and_refresh_review_ui,
+        inputs=_persist_and_refresh_annotator_inputs,
         outputs=_review_filter_annotator_refresh_outputs,
         show_progress_on=[],
         api_visibility="undocumented",
@@ -8463,8 +8421,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         api_name="word_level_ocr_text_search",
     ).success(
-        update_annotator_object_for_page_navigation,
-        inputs=_review_filter_annotator_refresh_inputs,
+        persist_annotator_canvas_and_refresh_review_ui,
+        inputs=_persist_and_refresh_annotator_inputs,
         outputs=_review_filter_annotator_refresh_outputs,
         show_progress_on=[],
         api_visibility="undocumented",
@@ -8533,8 +8491,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         outputs=[annotate_current_page_bottom],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_for_page_navigation,
-        inputs=_review_filter_annotator_refresh_inputs,
+        persist_annotator_canvas_and_refresh_review_ui,
+        inputs=_persist_and_refresh_annotator_inputs,
         outputs=_review_filter_annotator_refresh_outputs,
         show_progress_on=[],
         api_visibility="undocumented",
@@ -8557,8 +8515,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         show_progress_on=[],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_for_page_navigation,
-        inputs=_review_filter_annotator_refresh_inputs,
+        persist_annotator_canvas_and_refresh_review_ui,
+        inputs=_persist_and_refresh_annotator_inputs,
         outputs=_review_filter_annotator_refresh_outputs,
         show_progress_on=[],
         api_visibility="undocumented",
@@ -8640,21 +8598,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_for_page_navigation,
-        inputs=[
-            all_image_annotations_state,
-            annotate_current_page,
-            recogniser_entity_dropdown,
-            page_entity_dropdown,
-            page_entity_dropdown_redaction,
-            text_entity_dropdown,
-            recogniser_entity_dataframe_base,
-            annotator_zoom_number,
-            review_file_df,
-            page_sizes,
-            doc_full_file_name_textbox,
-            input_folder_textbox,
-        ],
+        persist_annotator_canvas_and_refresh_review_ui,
+        inputs=_persist_and_refresh_annotator_inputs,
         outputs=[
             annotator,
             annotate_current_page,
@@ -8686,8 +8631,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_for_page_navigation,
-        inputs=_review_filter_annotator_refresh_inputs,
+        persist_annotator_canvas_and_refresh_review_ui,
+        inputs=_persist_and_refresh_annotator_inputs,
         outputs=_review_filter_annotator_refresh_outputs,
         show_progress_on=[],
         api_visibility="undocumented",
@@ -8769,21 +8714,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_for_page_navigation,
-        inputs=[
-            all_image_annotations_state,
-            annotate_current_page,
-            recogniser_entity_dropdown,
-            page_entity_dropdown,
-            page_entity_dropdown_redaction,
-            text_entity_dropdown,
-            recogniser_entity_dataframe_base,
-            annotator_zoom_number,
-            review_file_df,
-            page_sizes,
-            doc_full_file_name_textbox,
-            input_folder_textbox,
-        ],
+        persist_annotator_canvas_and_refresh_review_ui,
+        inputs=_persist_and_refresh_annotator_inputs,
         outputs=[
             annotator,
             annotate_current_page,
@@ -8886,21 +8818,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_for_page_navigation,
-        inputs=[
-            all_image_annotations_state,
-            annotate_current_page,
-            recogniser_entity_dropdown,
-            page_entity_dropdown,
-            page_entity_dropdown_redaction,
-            text_entity_dropdown,
-            recogniser_entity_dataframe_base,
-            annotator_zoom_number,
-            review_file_df,
-            page_sizes,
-            doc_full_file_name_textbox,
-            input_folder_textbox,
-        ],
+        persist_annotator_canvas_and_refresh_review_ui,
+        inputs=_persist_and_refresh_annotator_inputs,
         outputs=[
             annotator,
             annotate_current_page,
@@ -8956,21 +8875,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         show_progress_on=[],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_for_page_navigation,
-        inputs=[
-            all_image_annotations_state,
-            annotate_current_page,
-            recogniser_entity_dropdown,
-            page_entity_dropdown,
-            page_entity_dropdown_redaction,
-            text_entity_dropdown,
-            recogniser_entity_dataframe_base,
-            annotator_zoom_number,
-            review_file_df,
-            page_sizes,
-            doc_full_file_name_textbox,
-            input_folder_textbox,
-        ],
+        persist_annotator_canvas_and_refresh_review_ui,
+        inputs=_persist_and_refresh_annotator_inputs,
         outputs=[
             annotator,
             annotate_current_page,
@@ -9025,8 +8931,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         outputs=[annotate_current_page_bottom],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_for_page_navigation,
-        inputs=_review_filter_annotator_refresh_inputs,
+        persist_annotator_canvas_and_refresh_review_ui,
+        inputs=_persist_and_refresh_annotator_inputs,
         outputs=_review_filter_annotator_refresh_outputs,
         show_progress_on=[],
         api_visibility="undocumented",
@@ -9039,8 +8945,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         outputs=[all_page_line_level_ocr_results_df],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_for_page_navigation,
-        inputs=_review_filter_annotator_refresh_inputs,
+        persist_annotator_canvas_and_refresh_review_ui,
+        inputs=_persist_and_refresh_annotator_inputs,
         outputs=_review_filter_annotator_refresh_outputs,
         show_progress_on=[],
         api_visibility="undocumented",
@@ -9123,8 +9029,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         outputs=None,
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_for_page_navigation,
-        inputs=_review_filter_annotator_refresh_inputs,
+        persist_annotator_canvas_and_refresh_review_ui,
+        inputs=_persist_and_refresh_annotator_inputs,
         outputs=_review_filter_annotator_refresh_outputs,
         show_progress_on=[],
         api_visibility="undocumented",
@@ -9197,8 +9103,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         scroll_to_output=True,
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_for_page_navigation,
-        inputs=_review_filter_annotator_refresh_inputs,
+        persist_annotator_canvas_and_refresh_review_ui,
+        inputs=_persist_and_refresh_annotator_inputs,
         outputs=_review_filter_annotator_refresh_outputs,
         show_progress_on=[],
         api_visibility="undocumented",
@@ -9761,8 +9667,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         show_progress_on=[],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_for_page_navigation,
-        inputs=_review_filter_annotator_refresh_inputs,
+        persist_annotator_canvas_and_refresh_review_ui,
+        inputs=_persist_and_refresh_annotator_inputs,
         outputs=_review_filter_annotator_refresh_outputs,
         show_progress_on=[],
         api_visibility="undocumented",

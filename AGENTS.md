@@ -35,6 +35,7 @@ Gradio session state retains PDF handles and OCR data for the browser session. F
 - **`EFFICIENT_OCR=True`** — defer page PNG creation (default in [`config/app_config.env.example`](config/app_config.env.example)).
 - **`TWO_PASS_REVIEW_PDF_LOW_MEMORY=True`** — lower peak RAM during review apply (~2× apply time); pair with **`RETURN_PDF_FOR_REVIEW=True`**.
 - Session release helpers in [`tools/helper_functions.py`](tools/helper_functions.py) (`release_document_session_state`, `release_post_workflow_ocr_state`) run on upload, redact, and review apply; OCR word lists reload from `latest_ocr_file_path` on demand.
+- **Review-tab annotator auto-persist**: live canvas box edits merge into `all_image_annotations_state` on a short `gr.Timer` (`REVIEW_ANNOTATOR_AUTO_PERSIST_*`), then boxes are re-pushed (timer ticks can collapse the canvas client-side). When the canvas still has usable boxes, the refresh reuses the live client payload so view rotation does not re-transform box coordinates. Also persists before filter/export refreshes. Not wired to `annotator.change` (that event also fires on server-driven box pushes and races with canvas mount). **Save changes on current page to file** still writes the review CSV/PDF.
 
 ## Tests
 

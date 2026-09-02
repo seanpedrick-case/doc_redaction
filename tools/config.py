@@ -2714,6 +2714,14 @@ SESSION_SECURITY_HEARTBEAT_SECONDS = int(
     get_or_create_env_var("SESSION_SECURITY_HEARTBEAT_SECONDS", "120")
 )
 
+# Review-tab annotator: merge live canvas box edits into session state (no CSV/PDF write).
+REVIEW_ANNOTATOR_AUTO_PERSIST_ENABLED = convert_string_to_boolean(
+    get_or_create_env_var("REVIEW_ANNOTATOR_AUTO_PERSIST_ENABLED", "False")
+)
+REVIEW_ANNOTATOR_AUTO_PERSIST_SECONDS = int(
+    get_or_create_env_var("REVIEW_ANNOTATOR_AUTO_PERSIST_SECONDS", "20")
+)
+
 # Optional idle timeout (minutes) after which an inactive session is auto-terminated.
 # 0 disables idle-timeout enforcement.
 SESSION_SECURITY_IDLE_TIMEOUT_MINUTES = int(
