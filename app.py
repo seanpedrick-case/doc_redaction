@@ -1164,9 +1164,101 @@ base_href = f"{clean_path}/" if clean_path != "/" else "/"
 if ROOT_PATH:
     print(f"Setting HTML base href for Gradio to: '{base_href}'")
 
+REVIEW_ANNOTATOR_LAYOUT_NUDGE_JS = """
+() => {
+    if (typeof window.scheduleNudgeReviewAnnotatorLayout === "function") {
+        window.scheduleNudgeReviewAnnotatorLayout();
+    }
+}
+"""
+
+REVIEW_ANNOTATOR_TAB_SELECT_NUDGE_JS = """
+(selected) => {
+    if (selected === 2 && typeof window.scheduleNudgeReviewAnnotatorLayout === "function") {
+        window.scheduleNudgeReviewAnnotatorLayout();
+    }
+}
+"""
+
 head_html = f"""<base href='{base_href}'>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/iframe-resizer/4.3.1/iframeResizer.contentWindow.min.js" integrity="sha256-62pj+jS8t+leByFOFwjiY0T92YlWwowYgHnFRklgv0M=" crossorigin="anonymous"></script>"""
+<script src="https://cdnjs.cloudflare.com/ajax/libs/iframe-resizer/4.3.1/iframeResizer.contentWindow.min.js" integrity="sha256-62pj+jS8t+leByFOFwjiY0T92YlWwowYgHnFRklgv0M=" crossorigin="anonymous"></script>
+<script>
+(function() {{
+    function nudgeReviewAnnotatorLayout() {{
+        window.dispatchEvent(new Event("resize"));
+        var root = document.getElementById("review-redaction-annotator-viewport")
+            || document.getElementById("review-redaction-annotator");
+        if (root) {{
+            void root.offsetHeight;
+        }}
+        window.dispatchEvent(new Event("resize"));
+    }}
+
+    function scheduleNudgeReviewAnnotatorLayout() {{
+        [0, 50, 150, 400, 800, 1500].forEach(function(delay) {{
+            setTimeout(nudgeReviewAnnotatorLayout, delay);
+        }});
+    }}
+
+    window.nudgeReviewAnnotatorLayout = nudgeReviewAnnotatorLayout;
+    window.scheduleNudgeReviewAnnotatorLayout = scheduleNudgeReviewAnnotatorLayout;
+
+    function isReviewRedactionsTabSelected() {{
+        var tabs = document.querySelectorAll('button[role="tab"]');
+        for (var i = 0; i < tabs.length; i++) {{
+            var tab = tabs[i];
+            if (tab.getAttribute("aria-selected") === "true") {{
+                return (tab.textContent || "").indexOf("Review redactions") >= 0;
+            }}
+        }}
+        return false;
+    }}
+
+    function attachReviewAnnotatorObserver() {{
+        var viewport = document.getElementById("review-redaction-annotator-viewport")
+            || document.getElementById("review-redaction-annotator");
+        if (!viewport || viewport.dataset.reviewAnnotatorObserved) {{
+            return;
+        }}
+        viewport.dataset.reviewAnnotatorObserved = "1";
+        var obs = new MutationObserver(function() {{
+            if (!isReviewRedactionsTabSelected()) {{
+                return;
+            }}
+            clearTimeout(window.__reviewAnnotatorNudgeTimer);
+            window.__reviewAnnotatorNudgeTimer = setTimeout(
+                scheduleNudgeReviewAnnotatorLayout,
+                80
+            );
+        }});
+        obs.observe(viewport, {{
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ["style", "class", "height", "width"]
+        }});
+    }}
+
+    document.addEventListener("click", function(e) {{
+        var target = e.target;
+        if (!target || !target.closest) {{
+            return;
+        }}
+        var tab = target.closest('button[role="tab"]');
+        if (tab && (tab.textContent || "").indexOf("Review redactions") >= 0) {{
+            scheduleNudgeReviewAnnotatorLayout();
+        }}
+    }}, true);
+
+    if (document.readyState === "loading") {{
+        document.addEventListener("DOMContentLoaded", attachReviewAnnotatorObserver);
+    }} else {{
+        attachReviewAnnotatorObserver();
+    }}
+    setInterval(attachReviewAnnotatorObserver, 3000);
+}})();
+</script>"""
 
 css = f"""
 /* Target tab navigation buttons only - not buttons inside tab content */
@@ -1192,14 +1284,26 @@ div[class*="tab-nav"] button {{
     overflow-wrap: anywhere;
 }}
 
-/* Review tab: cap annotator viewport so high-DPI page PNGs do not stretch the tab */
-#review-redaction-annotator,
-#review-redaction-annotator .block,
-#review-redaction-annotator .image-container,
-#review-redaction-annotator .upload-container,
-#review-redaction-annotator .annotator-container {{
+/* Review tab: fixed viewport so high-DPI PNGs do not push siblings off-screen */
+#review-redaction-annotator-viewport {{
+    height: {REVIEW_ANNOTATOR_MAX_HEIGHT} !important;
     max-height: {REVIEW_ANNOTATOR_MAX_HEIGHT} !important;
     overflow: auto !important;
+    flex-shrink: 0 !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+}}
+#review-redaction-annotator-viewport #review-redaction-annotator,
+#review-redaction-annotator-viewport #review-redaction-annotator .block,
+#review-redaction-annotator-viewport #review-redaction-annotator .image-container,
+#review-redaction-annotator-viewport #review-redaction-annotator .upload-container,
+#review-redaction-annotator-viewport #review-redaction-annotator .annotator-container {{
+    height: 100% !important;
+    max-height: 100% !important;
+    overflow: auto !important;
+}}
+#review-redaction-annotator-viewport canvas.canvas-annotator {{
+    max-height: 100% !important;
 }}
 """ + LOGOUT_FOOTER_CSS
 
@@ -3133,29 +3237,30 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                         )
                         annotation_next_page_button = gr.Button("Next page", scale=4)
 
-                    annotator = image_annotator(
-                        label="Modify redaction boxes",
-                        label_list=["Redaction"],
-                        label_colors=[(0, 0, 0)],
-                        show_label=False,
-                        height=REVIEW_ANNOTATOR_MAX_HEIGHT,
-                        width="100%",
-                        elem_id="review-redaction-annotator",
-                        elem_classes=["review-redaction-annotator"],
-                        boxes_alpha=0.1,
-                        box_min_size=1,
-                        box_selected_thickness=2,
-                        handle_size=4,
-                        sources=None,
-                        show_clear_button=False,
-                        show_share_button=False,
-                        show_remove_button=False,
-                        handles_cursor=True,
-                        interactive=True,
-                        enable_keyboard_shortcuts=True,
-                        use_default_label=False,
-                        image_type="filepath",
-                    )
+                    with gr.Group(elem_id="review-redaction-annotator-viewport"):
+                        annotator = image_annotator(
+                            label="Modify redaction boxes",
+                            label_list=["Redaction"],
+                            label_colors=[(0, 0, 0)],
+                            show_label=False,
+                            height=REVIEW_ANNOTATOR_MAX_HEIGHT,
+                            width="100%",
+                            elem_id="review-redaction-annotator",
+                            elem_classes=["review-redaction-annotator"],
+                            boxes_alpha=0.1,
+                            box_min_size=1,
+                            box_selected_thickness=2,
+                            handle_size=4,
+                            sources=None,
+                            show_clear_button=False,
+                            show_share_button=False,
+                            show_remove_button=False,
+                            handles_cursor=True,
+                            interactive=True,
+                            enable_keyboard_shortcuts=True,
+                            use_default_label=False,
+                            image_type="filepath",
+                        )
 
                     with gr.Row(equal_height=True):
                         annotation_last_page_button_bottom = gr.Button(
@@ -5391,6 +5496,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         show_progress_on=[],
         api_visibility="undocumented",
     ).success(
+        fn=None,
+        js=REVIEW_ANNOTATOR_LAYOUT_NUDGE_JS,
+        queue=False,
+        api_visibility="undocumented",
+    ).success(
         fn=check_for_existing_textract_file,
         inputs=[
             doc_file_name_no_extension_textbox,
@@ -5886,6 +5996,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             all_image_annotations_state,
         ],
         show_progress_on=[],
+        api_visibility="undocumented",
+    ).success(
+        fn=None,
+        js=REVIEW_ANNOTATOR_LAYOUT_NUDGE_JS,
+        queue=False,
         api_visibility="undocumented",
     ).success(
         fn=check_for_existing_textract_file,
@@ -6515,12 +6630,25 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         show_progress_on=[],
         api_visibility="undocumented",
+    ).success(
+        fn=None,
+        js=REVIEW_ANNOTATOR_LAYOUT_NUDGE_JS,
+        queue=False,
+        api_visibility="undocumented",
+    )
+
+    tabs.select(
+        fn=None,
+        js=REVIEW_ANNOTATOR_TAB_SELECT_NUDGE_JS,
+        queue=False,
+        api_visibility="undocumented",
     )
 
     go_to_review_redactions_tab_btn.click(
         fn=change_tab_to_review_redactions,
         inputs=None,
         outputs=tabs,
+        js=REVIEW_ANNOTATOR_LAYOUT_NUDGE_JS,
         api_visibility="undocumented",
     )
 
@@ -9638,6 +9766,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         fn=change_tab_to_review_redactions,
         inputs=None,
         outputs=tabs,
+        js=REVIEW_ANNOTATOR_LAYOUT_NUDGE_JS,
         api_visibility="undocumented",
     )
 
