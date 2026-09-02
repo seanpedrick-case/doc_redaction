@@ -416,6 +416,7 @@ from tools.helper_functions import (
     load_in_default_cost_codes,
     merge_csv_files,
     page_ocr_review_image_with_lazy_ocr,
+    page_redaction_review_image_for_gradio,
     put_columns_in_df,
     release_document_session_state,
     release_post_workflow_ocr_state,
@@ -475,7 +476,6 @@ from tools.redaction_review import (
     get_and_merge_current_page_annotations,
     increase_bottom_page_count_based_on_top,
     increase_page,
-    page_redaction_review_image,
     persist_current_page_and_refresh_annotator,
     reset_dropdowns,
     undo_last_removal,
@@ -7516,15 +7516,18 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
     )
 
     export_redaction_overlay_btn.click(
-        page_redaction_review_image,
+        page_redaction_review_image_for_gradio,
         inputs=[
             annotator,
             annotate_current_page,
             review_file_df,
             doc_full_file_name_textbox,
             output_folder_textbox,
+            all_image_annotations_state,
+            page_sizes,
         ],
         outputs=[redaction_overlay_output_file],
+        preprocess=False,
         api_name="page_redaction_review_image",
     ).success(
         update_annotator_object_for_page_navigation,

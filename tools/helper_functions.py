@@ -277,6 +277,48 @@ def release_post_workflow_ocr_state():
     )
 
 
+def _resolve_word_level_ocr_json_path(ocr_file_path: str) -> str | None:
+    """
+    Map ``latest_ocr_file_path`` (often line-level ``*_ocr_output_*.csv``) to the
+    sibling ``*_ocr_results_with_words_*.json`` when present.
+    """
+    if not ocr_file_path:
+        return None
+    base = os.path.basename(ocr_file_path)
+    lower = base.lower()
+    if "_ocr_results_with_words_" in base and lower.endswith(".json"):
+        return ocr_file_path
+    if "_ocr_output_" in base and lower.endswith(".csv"):
+        word_base = base.replace("_ocr_output_", "_ocr_results_with_words_", 1)
+        word_base = os.path.splitext(word_base)[0] + ".json"
+        candidate = os.path.join(os.path.dirname(ocr_file_path), word_base)
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def _ocr_with_words_df_has_page(
+    ocr_with_words_df, page_num: int, *, page_num_1based: bool = True
+) -> bool:
+    """True when the word-level OCR dataframe contains rows for ``page_num``."""
+    if ocr_with_words_df is None or not isinstance(ocr_with_words_df, pd.DataFrame):
+        return False
+    if ocr_with_words_df.empty or "page" not in ocr_with_words_df.columns:
+        return False
+    try:
+        target = int(page_num)
+    except (TypeError, ValueError):
+        return False
+    if not page_num_1based:
+        target += 1
+    try:
+        return (
+            pd.to_numeric(ocr_with_words_df["page"], errors="coerce") == target
+        ).any()
+    except Exception:
+        return False
+
+
 def ensure_ocr_word_results_list(
     ocr_results_list,
     ocr_json_path: str,
@@ -288,13 +330,16 @@ def ensure_ocr_word_results_list(
     if not ocr_json_path:
         return []
     try:
-        safe_ocr_json_path = resolve_existing_io_path(ocr_json_path)
+        safe_ocr_path = resolve_existing_io_path(ocr_json_path)
     except ValueError:
+        return []
+    word_json_path = _resolve_word_level_ocr_json_path(safe_ocr_path)
+    if not word_json_path:
         return []
     from tools.file_conversion import load_and_convert_ocr_results_with_words_json
 
     loaded, _, _ = load_and_convert_ocr_results_with_words_json(
-        safe_ocr_json_path,
+        word_json_path,
         [],
         page_sizes_df if page_sizes_df is not None else pd.DataFrame(),
     )
@@ -313,15 +358,50 @@ def page_ocr_review_image_with_lazy_ocr(
     """Lazy-load word OCR from disk when list state was released to save memory."""
     from tools.redaction_review import page_ocr_review_image
 
-    ocr_list = ensure_ocr_word_results_list(
-        all_page_line_level_ocr_results_with_words,
-        latest_ocr_file_path,
-    )
+    ocr_list = all_page_line_level_ocr_results_with_words
+    if not ocr_list and not _ocr_with_words_df_has_page(
+        all_page_line_level_ocr_results_with_words_df_base, current_page
+    ):
+        ocr_list = ensure_ocr_word_results_list(
+            all_page_line_level_ocr_results_with_words,
+            latest_ocr_file_path,
+        )
     return page_ocr_review_image(
         annotator,
         current_page,
-        ocr_list,
+        ocr_list or [],
         all_page_line_level_ocr_results_with_words_df_base,
+        doc_full_file_name_textbox,
+        output_folder_textbox,
+    )
+
+
+def page_redaction_review_image_for_gradio(
+    annotator,
+    current_page,
+    review_file_df,
+    doc_full_file_name_textbox,
+    output_folder_textbox,
+    all_image_annotations_state,
+    page_sizes,
+):
+    """Export redaction overlay using session state (stable image path + boxes)."""
+    from tools.redaction_review import (
+        build_review_redaction_export_annotator,
+        export_review_redaction_overlay_for_gradio,
+    )
+
+    export_annotator = build_review_redaction_export_annotator(
+        annotator,
+        current_page,
+        all_image_annotations_state,
+        page_sizes,
+        review_file_df,
+    )
+    return export_review_redaction_overlay_for_gradio(
+        export_annotator,
+        current_page,
+        review_file_df,
         doc_full_file_name_textbox,
         output_folder_textbox,
     )

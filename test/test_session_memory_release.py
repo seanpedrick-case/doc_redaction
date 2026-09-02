@@ -103,12 +103,49 @@ def test_ensure_ocr_word_results_list_lazy_loads_under_output_folder(
 
     ocr_path = output_root / "doc_ocr_results_with_words_tesseract.json"
     ocr_path.write_text(
-        '[{"page": 1, "results": [{"text": "hello", "boundingBox": []}]}]',
+        '[{"page": 1, "results": {"line_1": {"line": 1, "text": "hello", "words": []}}}]',
         encoding="utf-8",
     )
     loaded = ensure_ocr_word_results_list([], str(ocr_path))
     assert len(loaded) == 1
     assert loaded[0]["page"] == 1
+
+
+def test_ensure_ocr_word_results_list_resolves_word_json_from_line_csv(
+    tmp_path, monkeypatch
+):
+    from tools import config
+
+    output_root = tmp_path / "output"
+    output_root.mkdir()
+    monkeypatch.setattr(config, "OUTPUT_FOLDER", str(output_root) + os.sep)
+    monkeypatch.setattr(config, "INPUT_FOLDER", str(tmp_path / "input") + os.sep)
+
+    line_csv = output_root / "doc_ocr_output_tesseract_pages_6-6.csv"
+    line_csv.write_text("page,line,text\n6,1,hello\n", encoding="utf-8")
+    word_json = output_root / "doc_ocr_results_with_words_tesseract_pages_6-6.json"
+    word_json.write_text(
+        '[{"page": 6, "results": {"line_1": {"line": 1, "text": "hello", "words": []}}}]',
+        encoding="utf-8",
+    )
+    loaded = ensure_ocr_word_results_list([], str(line_csv))
+    assert len(loaded) == 1
+    assert loaded[0]["page"] == 6
+
+
+def test_ensure_ocr_word_results_list_skips_line_csv_without_word_json(
+    tmp_path, monkeypatch
+):
+    from tools import config
+
+    output_root = tmp_path / "output"
+    output_root.mkdir()
+    monkeypatch.setattr(config, "OUTPUT_FOLDER", str(output_root) + os.sep)
+    monkeypatch.setattr(config, "INPUT_FOLDER", str(tmp_path / "input") + os.sep)
+
+    line_csv = output_root / "doc_ocr_output_tesseract.csv"
+    line_csv.write_text("page,line,text\n6,1,hello\n", encoding="utf-8")
+    assert ensure_ocr_word_results_list([], str(line_csv)) == []
 
 
 def test_clear_threadlocal_pdf_cache_closes_cached_docs():

@@ -5563,6 +5563,81 @@ def visualise_review_redaction_boxes(
         return None
 
 
+def _review_df_boxes_for_page(review_df: pd.DataFrame, page_num: int) -> list:
+    """Build annotator-style box dicts from review CSV rows for one page."""
+    if review_df is None or not isinstance(review_df, pd.DataFrame) or review_df.empty:
+        return []
+    if "page" not in review_df.columns:
+        return []
+    page_series = pd.to_numeric(review_df["page"], errors="coerce")
+    page_df = review_df.loc[page_series == int(page_num)]
+    if page_df.empty:
+        return []
+    boxes: list = []
+    for _, row in page_df.iterrows():
+        try:
+            boxes.append(
+                {
+                    "label": row.get("label", "Redaction"),
+                    "color": row.get("color", "(0, 0, 0)"),
+                    "xmin": float(row["xmin"]),
+                    "ymin": float(row["ymin"]),
+                    "xmax": float(row["xmax"]),
+                    "ymax": float(row["ymax"]),
+                }
+            )
+        except (TypeError, ValueError, KeyError):
+            continue
+    return boxes
+
+
+def build_review_redaction_export_annotator(
+    client_annotator: object,
+    annotate_current_page: float,
+    all_image_annotations: List[AnnotatedImageData],
+    page_sizes: List[dict],
+    review_df: Optional[pd.DataFrame] = None,
+) -> AnnotatedImageData:
+    """
+    Build a stable annotator payload for redaction overlay export.
+
+    Prefer session ``all_image_annotations`` (image path + boxes) over the live
+    Gradio client payload, which may reference ephemeral ``gradio_tmp`` paths or
+    omit boxes after layout reflow.
+    """
+    coerced = coerce_gradio_client_annotator_payload(
+        client_annotator,
+        annotate_current_page,
+        all_image_annotations,
+        page_sizes,
+    )
+    try:
+        page_num = max(1, int(annotate_current_page or 1))
+    except (TypeError, ValueError):
+        page_num = 1
+    page_idx = page_num - 1
+
+    boxes = coerced.get("boxes") or []
+    if all_image_annotations and 0 <= page_idx < len(all_image_annotations):
+        state_page = all_image_annotations[page_idx] or {}
+        state_boxes = state_page.get("boxes")
+        if isinstance(state_boxes, list) and state_boxes:
+            boxes = state_boxes
+        client_image = _extract_annotator_image_path(coerced.get("image"))
+        if _is_ephemeral_or_missing_annotator_image_path(client_image):
+            state_image = _extract_annotator_image_path(state_page.get("image"))
+            if state_image and not _is_ephemeral_or_missing_annotator_image_path(
+                state_image
+            ):
+                coerced["image"] = state_image
+
+    if not boxes:
+        boxes = _review_df_boxes_for_page(review_df, page_num)
+
+    coerced["boxes"] = boxes
+    return coerced
+
+
 def export_review_redaction_overlay_for_gradio(
     page_annotator: Optional[AnnotatedImageData],
     annotate_current_page: float,
