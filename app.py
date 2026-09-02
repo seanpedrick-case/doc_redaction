@@ -301,6 +301,7 @@ from tools.config import (
     PII_DETECTION_MODELS,
     REDACTION_SETTINGS_ACCORDION_OPEN,
     REMOVE_DUPLICATE_ROWS,
+    REVIEW_ANNOTATOR_MAX_HEIGHT,
     ROOT_PATH,
     RUN_ALL_EXAMPLES_THROUGH_AWS,
     RUN_AWS_FUNCTIONS,
@@ -1167,29 +1168,39 @@ head_html = f"""<base href='{base_href}'>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/iframe-resizer/4.3.1/iframeResizer.contentWindow.min.js" integrity="sha256-62pj+jS8t+leByFOFwjiY0T92YlWwowYgHnFRklgv0M=" crossorigin="anonymous"></script>"""
 
-css = """
+css = f"""
 /* Target tab navigation buttons only - not buttons inside tab content */
 /* Gradio renders tab buttons with role="tab" in the navigation area */
-button[role="tab"] {
+button[role="tab"] {{
     font-size: 1.1em !important;
     padding: 0.75em 1.2em !important;
-}
+}}
 
 /* Alternative selectors for different Gradio versions */
 .tab-nav button,
 nav button[role="tab"],
-div[class*="tab-nav"] button {
+div[class*="tab-nav"] button {{
     font-size: 1.1em !important;
     padding: 0.75em 1.2em !important;
-}
+}}
 
 /* Tabular redaction example: wrap long lines instead of horizontal scroll */
 #text-redaction-example-markdown pre,
-#text-redaction-example-markdown code {
+#text-redaction-example-markdown code {{
     white-space: pre-wrap !important;
     word-break: break-word;
     overflow-wrap: anywhere;
-}
+}}
+
+/* Review tab: cap annotator viewport so high-DPI page PNGs do not stretch the tab */
+#review-redaction-annotator,
+#review-redaction-annotator .block,
+#review-redaction-annotator .image-container,
+#review-redaction-annotator .upload-container,
+#review-redaction-annotator .annotator-container {{
+    max-height: {REVIEW_ANNOTATOR_MAX_HEIGHT} !important;
+    overflow: auto !important;
+}}
 """ + LOGOUT_FOOTER_CSS
 
 # Create the gradio interface.
@@ -3122,15 +3133,15 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                         )
                         annotation_next_page_button = gr.Button("Next page", scale=4)
 
-                    zoom_str = str(annotator_zoom_number) + "%"
-
                     annotator = image_annotator(
                         label="Modify redaction boxes",
                         label_list=["Redaction"],
                         label_colors=[(0, 0, 0)],
                         show_label=False,
-                        height=zoom_str,
-                        width=zoom_str,
+                        height=REVIEW_ANNOTATOR_MAX_HEIGHT,
+                        width="100%",
+                        elem_id="review-redaction-annotator",
+                        elem_classes=["review-redaction-annotator"],
                         boxes_alpha=0.1,
                         box_min_size=1,
                         box_selected_thickness=2,
@@ -3143,7 +3154,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                         interactive=True,
                         enable_keyboard_shortcuts=True,
                         use_default_label=False,
-                        image_type="numpy",
+                        image_type="filepath",
                     )
 
                     with gr.Row(equal_height=True):

@@ -71,6 +71,7 @@ from tools.gradio_platform import build_s3_outputs_prefix, resolve_session_ident
 from tools.secure_path_utils import (
     resolve_existing_io_path,
     sanitize_filename,
+    secure_basename,
     secure_path_join,
     validate_folder_containment,
     validate_path_safety,
@@ -281,19 +282,24 @@ def _resolve_word_level_ocr_json_path(ocr_file_path: str) -> str | None:
     """
     Map ``latest_ocr_file_path`` (often line-level ``*_ocr_output_*.csv``) to the
     sibling ``*_ocr_results_with_words_*.json`` when present.
+
+    ``ocr_file_path`` must already be validated via :func:`resolve_existing_io_path`.
     """
     if not ocr_file_path:
         return None
-    base = os.path.basename(ocr_file_path)
+    base = secure_basename(ocr_file_path)
     lower = base.lower()
     if "_ocr_results_with_words_" in base and lower.endswith(".json"):
         return ocr_file_path
     if "_ocr_output_" in base and lower.endswith(".csv"):
         word_base = base.replace("_ocr_output_", "_ocr_results_with_words_", 1)
-        word_base = os.path.splitext(word_base)[0] + ".json"
-        candidate = os.path.join(os.path.dirname(ocr_file_path), word_base)
-        if os.path.isfile(candidate):
-            return candidate
+        word_base = sanitize_filename(os.path.splitext(word_base)[0]) + ".json"
+        parent_dir = os.path.dirname(ocr_file_path)
+        try:
+            candidate = str(secure_path_join(parent_dir, word_base))
+            return resolve_existing_io_path(candidate)
+        except (ValueError, PermissionError, OSError):
+            return None
     return None
 
 

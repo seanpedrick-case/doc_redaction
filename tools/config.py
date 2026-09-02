@@ -2531,6 +2531,13 @@ REVIEW_OVERLAY_MAX_FILE_BYTES = max(
     50_000, min(20 * 1024 * 1024, _review_overlay_max_bytes)
 )
 
+# Review-tab image annotator viewport cap (CSS length, e.g. 75vh or 900px). Large page
+# PNGs at 300 DPI can exceed 8000px tall; without a cap the tab grows and hides controls
+# below the canvas (especially in Hugging Face Space iframes).
+REVIEW_ANNOTATOR_MAX_HEIGHT = (
+    get_or_create_env_var("REVIEW_ANNOTATOR_MAX_HEIGHT", "75vh").strip() or "75vh"
+)
+
 # When True and multiple file paths are given, process each file in parallel in apply_redactions_to_review_df_and_files. Off by default.
 ENABLE_PARALLEL_FILES_APPLY_REDACTIONS = convert_string_to_boolean(
     get_or_create_env_var("ENABLE_PARALLEL_FILES_APPLY_REDACTIONS", "True")
