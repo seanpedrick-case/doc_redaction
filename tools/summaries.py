@@ -31,7 +31,9 @@ from tools.config import (
     PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS,
     REASONING_SUFFIX,
     RUN_AWS_FUNCTIONS,
+    SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL,
     SUMMARY_PAGE_GROUP_MAX_WORKERS,
+    USE_TRANSFORMERS_VLM_MODEL_AS_LLM,
     model_name_map,
 )
 from tools.file_conversion import is_pdf, word_level_ocr_df_to_line_level_ocr_df
@@ -134,6 +136,44 @@ def _upload_contains_pdf(file_upload):
 ###
 # Document Summarisation Functions
 ###
+def _local_summarisation_model_choice() -> str:
+    """Local summarisation model: reuse the loaded VLM when that flag is on."""
+    if USE_TRANSFORMERS_VLM_MODEL_AS_LLM and SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL:
+        return SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+    return LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+
+
+def _get_loaded_vlm_model_and_tokenizer():
+    from tools.run_vlm import get_loaded_vlm_model_and_tokenizer
+
+    return get_loaded_vlm_model_and_tokenizer()
+
+
+def _load_local_model_for_summarisation():
+    """
+    Return (model, tokenizer, assistant_model) for local summarisation.
+
+    When USE_TRANSFORMERS_VLM_MODEL_AS_LLM is True, reuse the already-loaded VLM
+    instead of downloading/loading LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE.
+    """
+    if USE_TRANSFORMERS_VLM_MODEL_AS_LLM and SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL:
+        vlm_model, vlm_tokenizer = _get_loaded_vlm_model_and_tokenizer()
+        if vlm_model is not None and vlm_tokenizer is not None:
+            print(
+                "Using loaded VLM "
+                f"'{SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}' for summarisation "
+                "(USE_TRANSFORMERS_VLM_MODEL_AS_LLM=True)"
+            )
+            return vlm_model, vlm_tokenizer, None
+        raise RuntimeError(
+            "USE_TRANSFORMERS_VLM_MODEL_AS_LLM is True but the local VLM is not loaded. "
+            "Enable SHOW_VLM_MODEL_OPTIONS and SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL, "
+            "or set USE_TRANSFORMERS_VLM_MODEL_AS_LLM=False to load "
+            f"{LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE}."
+        )
+    return load_model()
+
+
 def get_model_choice_from_inference_method(inference_method: str) -> str:
     """
     Get the default model choice for a given inference method (for summarisation).
@@ -149,7 +189,7 @@ def get_model_choice_from_inference_method(inference_method: str) -> str:
     if inference_method == "aws-bedrock":
         return CLOUD_SUMMARISATION_MODEL_CHOICE
     elif inference_method == "local":
-        return LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+        return _local_summarisation_model_choice()
     elif inference_method == "inference-server":
         return DEFAULT_INFERENCE_SERVER_PII_MODEL
     else:
@@ -172,6 +212,11 @@ def get_model_source_from_model_choice(model_choice: str) -> str:
     """
     # Compare model_choice to the default config values to determine source
     if model_choice == LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
+        return "Local"
+    if (
+        SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+        and model_choice == SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+    ):
         return "Local"
     elif model_choice == DEFAULT_INFERENCE_SERVER_PII_MODEL:
         return "inference-server"
@@ -582,10 +627,10 @@ def summarise_text_chunk(
     # This prevents mismatches that could occur if they're loaded separately
     # Similar to llm_funcs.py pattern (lines 830-839) and llm_entity_detection.py (lines 519-533)
     if (model_source == "Local") & (local_model is None or tokenizer is None):
-        progress(0.1, f"Using model: {LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE}")
-        # Use load_model() to ensure both are loaded atomically
-        # This is safer than calling get_pii_model() and get_pii_tokenizer() separately
-        loaded_model, loaded_tokenizer, loaded_assistant_model = load_model()
+        progress(0.1, f"Using model: {model_choice}")
+        loaded_model, loaded_tokenizer, loaded_assistant_model = (
+            _load_local_model_for_summarisation()
+        )
         if local_model is None:
             local_model = loaded_model
         if tokenizer is None:
@@ -806,8 +851,6 @@ def summarise_document(
     import os
     from datetime import datetime
 
-    from tools.llm_funcs import load_model
-
     output_files = []
     all_prompts = []
     all_responses = []
@@ -839,10 +882,10 @@ def summarise_document(
         # Similar to llm_funcs.py pattern (lines 830-839) and llm_entity_detection.py (lines 519-533)
         if model_source == "Local":
             if local_model is None or tokenizer is None:
-                progress(0.05, "Loading local model...")
-                # Use load_model() to ensure both are loaded atomically
-                # This is safer than calling get_pii_model() and get_pii_tokenizer() separately
-                loaded_model, loaded_tokenizer, loaded_assistant_model = load_model()
+                progress(0.05, f"Loading local model ({model_choice})...")
+                loaded_model, loaded_tokenizer, loaded_assistant_model = (
+                    _load_local_model_for_summarisation()
+                )
                 if local_model is None:
                     local_model = loaded_model
                 if tokenizer is None:
@@ -2044,10 +2087,10 @@ def overall_summary(
     # This prevents mismatches that could occur if they're loaded separately
     # Similar to llm_funcs.py pattern (lines 830-839) and llm_entity_detection.py (lines 519-533)
     if (model_source == "Local") & (local_model is None or tokenizer is None):
-        progress(0.1, f"Using model: {LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE}")
-        # Use load_model() to ensure both are loaded atomically
-        # This is safer than calling get_pii_model() and get_pii_tokenizer() separately
-        loaded_model, loaded_tokenizer, loaded_assistant_model = load_model()
+        progress(0.1, f"Using model: {model_choice}")
+        loaded_model, loaded_tokenizer, loaded_assistant_model = (
+            _load_local_model_for_summarisation()
+        )
         if local_model is None:
             local_model = loaded_model
         if tokenizer is None:
@@ -2253,6 +2296,8 @@ def overall_summary(
                 + formatted_summary_prompt[0]
             )
 
+            conversation_history = []
+            metadata = []
             try:
                 response, conversation_history, metadata, response_text = (
                     summarise_output_topics_query(
@@ -2281,6 +2326,8 @@ def overall_summary(
                 )
                 summarised_output = ""
                 summarised_output_for_df = ""
+                conversation_history = []
+                metadata = []
 
             # Remove multiple consecutive line breaks (2 or more) and replace with single line break
             if summarised_output_for_df:

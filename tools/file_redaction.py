@@ -98,9 +98,11 @@ from tools.config import (
     RUN_AWS_FUNCTIONS,
     SAVE_PAGE_OCR_VISUALISATIONS,
     SELECTABLE_TEXT_EXTRACT_OPTION,
+    SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL,
     TESSERACT_MAX_WORKERS,
     TEXTRACT_TEXT_EXTRACT_OPTION,
     USE_GUI_BOX_COLOURS_FOR_OUTPUTS,
+    USE_TRANSFORMERS_VLM_MODEL_AS_LLM,
     aws_comprehend_language_choices,
     textract_language_choices,
 )
@@ -9364,9 +9366,10 @@ def redact_image_pdf(
                     elif pii_identification_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION:
                         # Set up local transformers LLM parameters
                         text_analyzer_kwargs["inference_method"] = "local"
-                        # Use LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE as default model for local transformers
                         text_analyzer_kwargs["model_choice"] = (
-                            LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+                            SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+                            if USE_TRANSFORMERS_VLM_MODEL_AS_LLM
+                            else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
                         )
 
                     # Optional additional Bedrock VLM pass to detect people

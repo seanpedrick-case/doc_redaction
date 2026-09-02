@@ -800,6 +800,22 @@ SUMMARY_PAGE_GROUP_MAX_WORKERS = max(
     int(get_or_create_env_var("SUMMARY_PAGE_GROUP_MAX_WORKERS", str(MAX_WORKERS))),
 )
 
+# Concurrent tabular LLM PII cell queries for AWS Bedrock (rate-limit friendly cap).
+LLM_PII_MAX_CONCURRENT_REQUESTS = max(
+    1,
+    int(
+        get_or_create_env_var(
+            "LLM_PII_MAX_CONCURRENT_REQUESTS", str(min(MAX_WORKERS, 10))
+        )
+    ),
+)
+# Local transformers and inference-server tabular PII: 1 = one generate()/HTTP call at a time
+# (avoids CUDA contention on a single GPU and saturating one vLLM/llama.cpp replica).
+LLM_PII_LOCAL_MAX_CONCURRENT_REQUESTS = max(
+    1,
+    int(get_or_create_env_var("LLM_PII_LOCAL_MAX_CONCURRENT_REQUESTS", "1")),
+)
+
 SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS", "True")
 )
@@ -1035,10 +1051,10 @@ SHOW_VLM_MODEL_OPTIONS = convert_string_to_boolean(
 )  # Whether to show the VLM model options in the UI
 
 SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL = get_or_create_env_var(
-    "SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL", "Qwen3-VL-8B-Instruct"
-)  # Selected vision model. Choose from:  "Nanonets-OCR2-3B",  "Dots.OCR", "Qwen3-VL-2B-Instruct", "Qwen3-VL-4B-Instruct", "Qwen3-VL-8B-Instruct", "Qwen3-VL-30B-A3B-Instruct", "Qwen3-VL-235B-A22B-Instruct", "PaddleOCR-VL"
+    "SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL", "Qwen3.5-9B"
+)  # Selected vision model. See tools/run_vlm.py for options.
 
-# When True, use the same local transformers VLM model (e.g. Qwen3-VL-4B-Instruct) for LLM tasks (e.g. PII entity detection) as for VLM/OCR. Overrides LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE for local LLM.
+# When True, use the same local transformers VLM model (e.g. Qwen3-VL-4B-Instruct) for LLM tasks (PII entity detection and document summarisation) as for VLM/OCR. Overrides LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE for local LLM.
 USE_TRANSFORMERS_VLM_MODEL_AS_LLM = convert_string_to_boolean(
     get_or_create_env_var("USE_TRANSFORMERS_VLM_MODEL_AS_LLM", "False")
 )
@@ -1748,6 +1764,9 @@ GEMMA4_31B_BNB_REPO_ID = get_or_create_env_var(
     "GEMMA4_31B_BNB_REPO_TRANSFORMERS_ID", "unsloth/gemma-4-31B-it-unsloth-bnb-4bit"
 )
 
+GEMMA4_12B_BNB_REPO_ID = get_or_create_env_var(
+    "GEMMA4_12B_BNB_REPO_TRANSFORMERS_ID", "unsloth/gemma-4-12b-it"
+)
 if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
     # Rename LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE for display on GUI
     model_choice_lower = LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE.lower()
@@ -1886,6 +1905,12 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
     ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GEMMA4_31B_BNB_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Gemma 4 31B bnb"
+    elif (
+        "gemma-4-12b-bnb" in model_choice_lower
+        or GEMMA4_12B_BNB_REPO_ID in model_choice_lower
+    ):
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GEMMA4_12B_BNB_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Gemma 4 12B bnb"
 
 if (
     SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS
@@ -1916,6 +1941,7 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE in [
     "Qwen 3.6 35B-A3B",
     "Qwen 3.5 122B-A10B",
     "Gemma 4 31B bnb",
+    "Gemma 4 12B bnb",
 ]:
     MULTIMODAL_PROMPT_FORMAT = True
 

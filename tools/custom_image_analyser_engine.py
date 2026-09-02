@@ -10845,11 +10845,16 @@ class CustomImageAnalyzerEngine:
                 text_analyzer_kwargs["inference_method"] = "local"
 
             # Set model choice if not already set - use VLM model when USE_TRANSFORMERS_VLM_MODEL_AS_LLM else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
-            if text_analyzer_kwargs.get("model_choice") is None:
+            if (
+                USE_TRANSFORMERS_VLM_MODEL_AS_LLM
+                and SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+            ):
                 text_analyzer_kwargs["model_choice"] = (
                     SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
-                    if USE_TRANSFORMERS_VLM_MODEL_AS_LLM
-                    else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+                )
+            elif text_analyzer_kwargs.get("model_choice") is None:
+                text_analyzer_kwargs["model_choice"] = (
+                    LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
                 )
 
             # Update model_choice to use the value from text_analyzer_kwargs
@@ -12764,11 +12769,11 @@ def run_page_text_redaction(
             text_analyzer_kwargs["inference_method"] = "local"
 
         # Set model choice if not already set - use VLM model when USE_TRANSFORMERS_VLM_MODEL_AS_LLM else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
-        if text_analyzer_kwargs.get("model_choice") is None:
+        if USE_TRANSFORMERS_VLM_MODEL_AS_LLM and SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL:
+            text_analyzer_kwargs["model_choice"] = SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+        elif text_analyzer_kwargs.get("model_choice") is None:
             text_analyzer_kwargs["model_choice"] = (
-                SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
-                if USE_TRANSFORMERS_VLM_MODEL_AS_LLM
-                else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+                LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
             )
 
         # Update model_choice to use the value from text_analyzer_kwargs

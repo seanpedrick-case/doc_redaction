@@ -1002,6 +1002,30 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             model_default_prompt = text_read_default_prompt
             _apply_generation_family_defaults(_GEMMA4_FAMILY_DEFAULTS)
 
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Gemma 4 12B bnb":
+            from transformers import AutoModelForCausalLM, AutoProcessor
+
+            MODEL_ID = (
+                "unsloth/gemma-4-12b-it"  # "thewh1teagle/gemma-4-12B-it-bnb-4bit"
+            )
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "attn_implementation": attn_implementation,
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["dtype"] = "auto"
+            model = AutoModelForCausalLM.from_pretrained(MODEL_ID, **load_kwargs)
+
+            model_default_prompt = text_read_default_prompt
+            _apply_generation_family_defaults(_GEMMA4_FAMILY_DEFAULTS)
+
         elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "None":
             model = None
             processor = None
@@ -1080,7 +1104,7 @@ if SHOW_VLM_MODEL_OPTIONS and LOAD_TRANSFORMERS_VLM_MODEL_AT_START:
 
 def get_loaded_vlm_model_and_tokenizer():
     """
-    Return the currently loaded VLM model and its tokenizer for use by LLM tasks (e.g. entity detection) when USE_TRANSFORMERS_VLM_MODEL_AS_LLM is True.
+    Return the currently loaded VLM model and its tokenizer for use by LLM tasks (e.g. entity detection, summarisation) when USE_TRANSFORMERS_VLM_MODEL_AS_LLM is True.
     Returns (model, tokenizer) or (None, None) if the VLM has not been loaded yet.
     """
     global _loaded_vlm_model, _loaded_vlm_processor

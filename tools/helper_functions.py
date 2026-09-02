@@ -620,6 +620,48 @@ def load_in_default_cost_codes(cost_codes_path: str, default_cost_code: str = ""
     )
 
 
+def _coerce_cost_codes_dataframe(cost_code_df) -> pd.DataFrame:
+    """Normalise Gradio Dataframe / State payloads to a pandas DataFrame."""
+    if cost_code_df is None:
+        return pd.DataFrame()
+    if isinstance(cost_code_df, pd.DataFrame):
+        df = cost_code_df
+    elif isinstance(cost_code_df, dict):
+        headers = cost_code_df.get("headers") or cost_code_df.get("columns")
+        data = cost_code_df.get("data")
+        if headers is not None and data is not None:
+            df = pd.DataFrame(data, columns=headers)
+        else:
+            try:
+                df = pd.DataFrame(cost_code_df)
+            except Exception:
+                return pd.DataFrame()
+    else:
+        try:
+            df = pd.DataFrame(cost_code_df)
+        except Exception:
+            return pd.DataFrame()
+
+    if df is None or df.empty or df.shape[1] == 0:
+        return pd.DataFrame()
+    df = df.dropna(how="all")
+    if df.empty:
+        return pd.DataFrame()
+    first = df.iloc[:, 0].astype(str).str.strip()
+    return df.loc[first.ne("") & first.str.lower().ne("nan")].copy()
+
+
+def _load_cost_codes_from_configured_path() -> pd.DataFrame:
+    """Reload the cost-code CSV if Gradio state did not keep the table."""
+    for path in (COST_CODES_PATH, OUTPUT_COST_CODES_PATH):
+        if path and os.path.isfile(path):
+            try:
+                return _coerce_cost_codes_dataframe(pd.read_csv(path))
+            except Exception as e:
+                print(f"Could not load cost codes from {path}: {e}")
+    return pd.DataFrame()
+
+
 def enforce_cost_codes(
     enforce_cost_code_bool: bool,
     cost_code_choice: str,
@@ -630,20 +672,34 @@ def enforce_cost_codes(
     Check if the enforce cost codes variable is set to True, and then check that a cost cost has been chosen. If not, raise an error. Then, check against the values in the cost code dataframe to ensure that the cost code exists.
     """
 
-    if enforce_cost_code_bool:
-        if not cost_code_choice:
-            raise Exception("Please choose a cost code before continuing")
+    if not enforce_cost_code_bool:
+        return
 
-        if verify_cost_codes:
-            if cost_code_df.empty:
-                raise Exception("No cost codes present in dataframe for verification")
-            else:
-                valid_cost_codes_list = list(cost_code_df.iloc[:, 0].unique())
+    if not cost_code_choice:
+        raise Exception("Please choose a cost code before continuing")
 
-                if cost_code_choice not in valid_cost_codes_list:
-                    raise Exception(
-                        "Selected cost code not found in list. Please contact your system administrator if you cannot find the correct cost code from the given list of suggestions."
-                    )
+    if not verify_cost_codes:
+        return
+
+    df = _coerce_cost_codes_dataframe(cost_code_df)
+    if df.empty:
+        # The visible table and DEFAULT_COST_CODE can be set while
+        # cost_code_dataframe_base (Gradio State) stays empty.
+        df = _load_cost_codes_from_configured_path()
+
+    if df.empty:
+        raise Exception(
+            "No cost codes present in dataframe for verification. "
+            "DEFAULT_COST_CODE only fills the dropdown; load a cost-code CSV via "
+            "COST_CODES_PATH (or S3_COST_CODES_PATH) so the table has rows."
+        )
+
+    valid_cost_codes_list = list(df.iloc[:, 0].astype(str).str.strip().unique())
+    choice = str(cost_code_choice).strip()
+    if choice not in valid_cost_codes_list:
+        raise Exception(
+            "Selected cost code not found in list. Please contact your system administrator if you cannot find the correct cost code from the given list of suggestions."
+        )
     return
 
 

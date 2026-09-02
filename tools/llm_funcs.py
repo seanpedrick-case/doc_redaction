@@ -105,6 +105,59 @@ from tools.config import (
 )
 
 
+def local_llm_task_model_choice() -> str:
+    """Model name for local LLM tasks when USE_TRANSFORMERS_VLM_MODEL_AS_LLM is set."""
+    if USE_TRANSFORMERS_VLM_MODEL_AS_LLM and SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL:
+        return SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+    return LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+
+
+def _get_loaded_vlm_model_and_tokenizer():
+    from tools.run_vlm import get_loaded_vlm_model_and_tokenizer
+
+    return get_loaded_vlm_model_and_tokenizer()
+
+
+def load_local_llm_for_task(model=None, tokenizer=None, assistant_model=None):
+    """
+    Return (model, tokenizer, assistant_model) for local LLM tasks.
+
+    Reuses the already-loaded VLM when USE_TRANSFORMERS_VLM_MODEL_AS_LLM is True
+    instead of downloading LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE.
+    """
+    if model is not None and tokenizer is not None:
+        return model, tokenizer, assistant_model
+
+    if USE_TRANSFORMERS_VLM_MODEL_AS_LLM and SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL:
+        vlm_model, vlm_tokenizer = _get_loaded_vlm_model_and_tokenizer()
+        if vlm_model is not None and vlm_tokenizer is not None:
+            print(
+                "Using loaded VLM "
+                f"'{SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL}' for local LLM task "
+                "(USE_TRANSFORMERS_VLM_MODEL_AS_LLM=True)"
+            )
+            return (
+                model if model is not None else vlm_model,
+                tokenizer if tokenizer is not None else vlm_tokenizer,
+                assistant_model,
+            )
+        raise RuntimeError(
+            "USE_TRANSFORMERS_VLM_MODEL_AS_LLM is True but the local VLM is not loaded. "
+            "Enable SHOW_VLM_MODEL_OPTIONS and SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL, "
+            "or set USE_TRANSFORMERS_VLM_MODEL_AS_LLM=False to load "
+            f"{LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE}."
+        )
+
+    loaded_model, loaded_tokenizer, loaded_assistant = load_model(
+        model=model, tokenizer=tokenizer, assistant_model=assistant_model
+    )
+    return (
+        model if model is not None else loaded_model,
+        tokenizer if tokenizer is not None else loaded_tokenizer,
+        assistant_model if assistant_model is not None else loaded_assistant,
+    )
+
+
 def _stringify_openai_message_content(content) -> str:
     """Normalize message.content from OpenAI-compatible APIs (str, null, or list of parts)."""
     if content is None:
@@ -480,11 +533,14 @@ def load_model(
 
             # Prepare load kwargs
             # Match VLM behavior: always use device_map="auto" for better device handling
+            # Empty HF_TOKEN becomes Authorization: Bearer  which httpx rejects
+            hf_auth = hf_token if hf_token else None
             load_kwargs = {
                 # "max_seq_length": max_context_length,
-                "token": hf_token,
                 "device_map": "auto",  # Always use device_map="auto" like VLM
             }
+            if hf_auth:
+                load_kwargs["token"] = hf_auth
 
             if quantization_config is not None:
                 load_kwargs["quantization_config"] = quantization_config
@@ -499,7 +555,7 @@ def load_model(
             print(f"Loading tokenizer from {model_id}...")
             tokenizer = AutoTokenizer.from_pretrained(
                 model_id,
-                token=hf_token,
+                token=hf_auth,
                 trust_remote_code=True,
             )
 
@@ -732,6 +788,76 @@ if (
         print("PII model will be loaded on-demand when needed.")
 
 
+def _is_accelerate_dispatched_model(model) -> bool:
+    """True when the model is sharded/quantised and must not be moved with .to()."""
+    if model is None:
+        return False
+    if getattr(model, "hf_device_map", None):
+        return True
+    if getattr(model, "hf_hook", None) is not None:
+        return True
+    if getattr(model, "is_loaded_in_8bit", False) or getattr(
+        model, "is_loaded_in_4bit", False
+    ):
+        return True
+    return False
+
+
+def _transformers_input_device(model):
+    """
+    Device for input_ids / attention_mask.
+
+    For device_map='auto' models the embedding weights (index_select) may sit on
+    cuda:0 while torch.cuda.current_device() is cuda:1. Generic 'cuda' is not safe.
+    """
+    import torch
+
+    def _device_of(obj):
+        if obj is None:
+            return None
+        if hasattr(obj, "weight") and getattr(obj.weight, "device", None) is not None:
+            dev = obj.weight.device
+            if getattr(dev, "type", None) != "meta":
+                return dev
+        if hasattr(obj, "device") and getattr(obj.device, "type", None) != "meta":
+            return obj.device
+        return None
+
+    try:
+        dev = _device_of(model.get_input_embeddings())
+        if dev is not None:
+            return dev
+    except Exception:
+        pass
+
+    for attr in ("model", "language_model", "llm"):
+        inner = getattr(model, attr, None)
+        if inner is None or not hasattr(inner, "get_input_embeddings"):
+            continue
+        try:
+            dev = _device_of(inner.get_input_embeddings())
+            if dev is not None:
+                return dev
+        except Exception:
+            pass
+
+    device_map = getattr(model, "hf_device_map", None)
+    if device_map:
+        first = next(iter(device_map.values()))
+        if first in ("cpu", "disk"):
+            return torch.device("cpu")
+        if isinstance(first, int):
+            return torch.device(f"cuda:{first}")
+        return torch.device(first)
+
+    try:
+        return next(model.parameters()).device
+    except (StopIteration, TypeError, AttributeError):
+        pass
+
+    return torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+
 @spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
 def call_transformers_model(
     prompt: str,
@@ -775,13 +901,15 @@ def call_transformers_model(
     # This prevents mismatches that could occur if they're loaded separately
     if model is None or tokenizer is None:
         print("Model not found. Loading model and tokenizer...")
-        # Use get_model_and_tokenizer() to ensure both are loaded atomically
-        # This is safer than calling get_pii_model() and get_pii_tokenizer() separately
-        loaded_model, loaded_tokenizer, assistant_model = load_model()
+        loaded_model, loaded_tokenizer, assistant_model = load_local_llm_for_task(
+            model=model, tokenizer=tokenizer, assistant_model=assistant_model
+        )
         if model is None:
             model = loaded_model
         if tokenizer is None:
             tokenizer = loaded_tokenizer
+        if USE_TRANSFORMERS_VLM_MODEL_AS_LLM and SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL:
+            use_vlm_safe_generation = True
     # if assistant_model is None and speculative_decoding:
     #     assistant_model = # get_assistant_model()
 
@@ -840,10 +968,13 @@ def call_transformers_model(
         print("System prompt:", system_prompt)
         print("User prompt:", prompt)
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model.to(device)
+    device = _transformers_input_device(model)
+    if not _is_accelerate_dispatched_model(model):
+        model.to(device)
 
-    if assistant_model is not None:
+    if assistant_model is not None and not _is_accelerate_dispatched_model(
+        assistant_model
+    ):
         assistant_model = assistant_model.to(device)
 
     if PRINT_TRANSFORMERS_USER_PROMPT:
@@ -1258,7 +1389,7 @@ def send_request(
 
                 time.sleep(timeout_wait)
 
-            if i == number_of_api_retry_attempts:
+            if i == number_of_api_retry_attempts - 1:
                 return (
                     ResponseObject(text="", usage_metadata={"RequestId": "FAILED"}),
                     conversation_history,
@@ -1294,7 +1425,7 @@ def send_request(
                 )
                 time.sleep(timeout_wait)
 
-            if i == number_of_api_retry_attempts:
+            if i == number_of_api_retry_attempts - 1:
                 return (
                     ResponseObject(text="", usage_metadata={"RequestId": "FAILED"}),
                     conversation_history,
@@ -1353,7 +1484,7 @@ def send_request(
                     "seconds and trying again.",
                 )
                 time.sleep(timeout_wait)
-            if i == number_of_api_retry_attempts:
+            if i == number_of_api_retry_attempts - 1:
                 return (
                     ResponseObject(text="", usage_metadata={"RequestId": "FAILED"}),
                     conversation_history,
@@ -1363,6 +1494,9 @@ def send_request(
                 )
     elif "Local" in model_source:
         # This is the local model. When USE_TRANSFORMERS_VLM_MODEL_AS_LLM and model_choice is the VLM model, use the loaded VLM model/tokenizer.
+        def _usable_local_obj(obj):
+            return obj is not None and obj != []
+
         vlm_model, vlm_tokenizer = None, None
         if (
             USE_TRANSFORMERS_VLM_MODEL_AS_LLM
@@ -1376,6 +1510,11 @@ def send_request(
                 print(
                     f"Could not get VLM model for LLM task (USE_TRANSFORMERS_VLM_MODEL_AS_LLM): {e}"
                 )
+            # Fall back to a VLM already passed in by the caller (e.g. summarisation)
+            if not _usable_local_obj(vlm_model) or not _usable_local_obj(vlm_tokenizer):
+                if _usable_local_obj(local_model) and _usable_local_obj(tokenizer):
+                    vlm_model = local_model
+                    vlm_tokenizer = tokenizer
 
         for i in progress_bar:
             try:
@@ -1399,6 +1538,13 @@ def send_request(
                         use_vlm_safe_generation=VLM_DEFAULT_DO_SAMPLE,
                     )
                 else:
+                    call_kwargs = {}
+                    if _usable_local_obj(local_model):
+                        call_kwargs["model"] = local_model
+                    if _usable_local_obj(tokenizer):
+                        call_kwargs["tokenizer"] = tokenizer
+                    if _usable_local_obj(assistant_model):
+                        call_kwargs["assistant_model"] = assistant_model
                     (
                         response,
                         num_transformer_input_tokens,
@@ -1407,6 +1553,7 @@ def send_request(
                         prompt,
                         system_prompt,
                         gen_config,
+                        **call_kwargs,
                     )
                 response_text = response
 
@@ -1423,7 +1570,7 @@ def send_request(
 
                 time.sleep(timeout_wait)
 
-            if i == number_of_api_retry_attempts:
+            if i == number_of_api_retry_attempts - 1:
                 return (
                     ResponseObject(text="", usage_metadata={"RequestId": "FAILED"}),
                     conversation_history,
@@ -1467,7 +1614,7 @@ def send_request(
 
                 time.sleep(timeout_wait)
 
-            if i == number_of_api_retry_attempts:
+            if i == number_of_api_retry_attempts - 1:
                 return (
                     ResponseObject(text="", usage_metadata={"RequestId": "FAILED"}),
                     conversation_history,

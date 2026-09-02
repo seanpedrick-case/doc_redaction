@@ -301,7 +301,6 @@ from tools.config import (
     PII_DETECTION_MODELS,
     REDACTION_SETTINGS_ACCORDION_OPEN,
     REMOVE_DUPLICATE_ROWS,
-    REVIEW_ANNOTATOR_MAX_HEIGHT,
     ROOT_PATH,
     RUN_ALL_EXAMPLES_THROUGH_AWS,
     RUN_AWS_FUNCTIONS,
@@ -1260,54 +1259,57 @@ head_html = f"""<base href='{base_href}'>
 }})();
 </script>"""
 
-css = f"""
+css = """
 /* Target tab navigation buttons only - not buttons inside tab content */
 /* Gradio renders tab buttons with role="tab" in the navigation area */
-button[role="tab"] {{
+button[role="tab"] {
     font-size: 1.1em !important;
     padding: 0.75em 1.2em !important;
-}}
+}
 
 /* Alternative selectors for different Gradio versions */
 .tab-nav button,
 nav button[role="tab"],
-div[class*="tab-nav"] button {{
+div[class*="tab-nav"] button {
     font-size: 1.1em !important;
     padding: 0.75em 1.2em !important;
-}}
+}
 
 /* Tabular redaction example: wrap long lines instead of horizontal scroll */
 #text-redaction-example-markdown pre,
-#text-redaction-example-markdown code {{
+#text-redaction-example-markdown code {
     white-space: pre-wrap !important;
     word-break: break-word;
     overflow-wrap: anywhere;
-}}
-
-/* Review tab: cap annotator height for large scans; shrink to content when smaller */
-#review-redaction-annotator-viewport {{
-    max-height: {REVIEW_ANNOTATOR_MAX_HEIGHT} !important;
-    overflow-x: hidden !important;
-    overflow-y: auto !important;
-    flex-shrink: 0 !important;
-    width: 100% !important;
-    box-sizing: border-box !important;
-}}
-#review-redaction-annotator-viewport #review-redaction-annotator,
-#review-redaction-annotator-viewport #review-redaction-annotator .block,
-#review-redaction-annotator-viewport #review-redaction-annotator .image-container,
-#review-redaction-annotator-viewport #review-redaction-annotator .upload-container,
-#review-redaction-annotator-viewport #review-redaction-annotator .annotator-container,
-#review-redaction-annotator-viewport #review-redaction-annotator .canvas-container {{
-    height: auto !important;
-    max-height: {REVIEW_ANNOTATOR_MAX_HEIGHT} !important;
-    overflow: visible !important;
-}}
-#review-redaction-annotator-viewport canvas.canvas-annotator {{
-    height: auto !important;
-    max-height: {REVIEW_ANNOTATOR_MAX_HEIGHT} !important;
-}}
+}
 """ + LOGOUT_FOOTER_CSS
+
+# Additional test annotator object resize rules, not currently used
+
+# # /* Review tab: cap annotator height for large scans; shrink to content when smaller */
+# #review-redaction-annotator-viewport {{
+#     max-height: {REVIEW_ANNOTATOR_MAX_HEIGHT} !important;
+#     overflow-x: hidden !important;
+#     overflow-y: auto !important;
+#     flex-shrink: 0 !important;
+#     width: 100% !important;
+#     box-sizing: border-box !important;
+# }}
+
+# review-redaction-annotator-viewport #review-redaction-annotator,
+# review-redaction-annotator-viewport #review-redaction-annotator .block,
+# review-redaction-annotator-viewport #review-redaction-annotator .image-container,
+# review-redaction-annotator-viewport #review-redaction-annotator .upload-container,
+# review-redaction-annotator-viewport #review-redaction-annotator .annotator-container,
+# review-redaction-annotator-viewport #review-redaction-annotator .canvas-container {{
+#     height: auto !important;
+#     max-height: {REVIEW_ANNOTATOR_MAX_HEIGHT} !important;
+#     overflow: visible !important;
+# }}
+# #review-redaction-annotator-viewport canvas.canvas-annotator {{
+#     height: auto !important;
+#     max-height: {REVIEW_ANNOTATOR_MAX_HEIGHT} !important;
+# }}
 
 # Create the gradio interface.
 if RUN_FASTAPI:
@@ -5247,7 +5249,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         inputs=[
             enforce_cost_code_bool,
             cost_code_choice_drop,
-            cost_code_dataframe_base,
+            cost_code_dataframe,
         ],
         api_visibility="undocumented",
     ).success(
@@ -5498,7 +5500,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         api_visibility="undocumented",
     ).success(
         fn=None,
-        js=REVIEW_ANNOTATOR_LAYOUT_NUDGE_JS,
+        # js=REVIEW_ANNOTATOR_LAYOUT_NUDGE_JS,
         queue=False,
         api_visibility="undocumented",
     ).success(
@@ -5749,7 +5751,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         inputs=[
             enforce_cost_code_bool,
             cost_code_choice_drop,
-            cost_code_dataframe_base,
+            cost_code_dataframe,
         ],
         api_visibility="undocumented",
     ).success(
@@ -6000,7 +6002,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         api_visibility="undocumented",
     ).success(
         fn=None,
-        js=REVIEW_ANNOTATOR_LAYOUT_NUDGE_JS,
+        # js=REVIEW_ANNOTATOR_LAYOUT_NUDGE_JS,
         queue=False,
         api_visibility="undocumented",
     ).success(
@@ -6633,14 +6635,14 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         api_visibility="undocumented",
     ).success(
         fn=None,
-        js=REVIEW_ANNOTATOR_LAYOUT_NUDGE_JS,
+        # js=REVIEW_ANNOTATOR_LAYOUT_NUDGE_JS,
         queue=False,
         api_visibility="undocumented",
     )
 
     tabs.select(
         fn=None,
-        js=REVIEW_ANNOTATOR_TAB_SELECT_NUDGE_JS,
+        # js=REVIEW_ANNOTATOR_TAB_SELECT_NUDGE_JS,
         queue=False,
         api_visibility="undocumented",
     )
@@ -6649,7 +6651,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         fn=change_tab_to_review_redactions,
         inputs=None,
         outputs=tabs,
-        js=REVIEW_ANNOTATOR_LAYOUT_NUDGE_JS,
+        # js=REVIEW_ANNOTATOR_LAYOUT_NUDGE_JS,
         api_visibility="undocumented",
     )
 
@@ -9770,7 +9772,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         fn=change_tab_to_review_redactions,
         inputs=None,
         outputs=tabs,
-        js=REVIEW_ANNOTATOR_LAYOUT_NUDGE_JS,
+        # js=REVIEW_ANNOTATOR_LAYOUT_NUDGE_JS,
         api_visibility="undocumented",
     )
 
@@ -10331,7 +10333,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         inputs=[
             enforce_cost_code_bool,
             cost_code_choice_drop,
-            cost_code_dataframe_base,
+            cost_code_dataframe,
         ],
         api_visibility="undocumented",
     ).success(
