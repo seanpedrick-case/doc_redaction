@@ -1284,11 +1284,11 @@ div[class*="tab-nav"] button {{
     overflow-wrap: anywhere;
 }}
 
-/* Review tab: fixed viewport so high-DPI PNGs do not push siblings off-screen */
+/* Review tab: cap annotator height for large scans; shrink to content when smaller */
 #review-redaction-annotator-viewport {{
-    height: {REVIEW_ANNOTATOR_MAX_HEIGHT} !important;
     max-height: {REVIEW_ANNOTATOR_MAX_HEIGHT} !important;
-    overflow: auto !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
     flex-shrink: 0 !important;
     width: 100% !important;
     box-sizing: border-box !important;
@@ -1297,13 +1297,15 @@ div[class*="tab-nav"] button {{
 #review-redaction-annotator-viewport #review-redaction-annotator .block,
 #review-redaction-annotator-viewport #review-redaction-annotator .image-container,
 #review-redaction-annotator-viewport #review-redaction-annotator .upload-container,
-#review-redaction-annotator-viewport #review-redaction-annotator .annotator-container {{
-    height: 100% !important;
-    max-height: 100% !important;
-    overflow: auto !important;
+#review-redaction-annotator-viewport #review-redaction-annotator .annotator-container,
+#review-redaction-annotator-viewport #review-redaction-annotator .canvas-container {{
+    height: auto !important;
+    max-height: {REVIEW_ANNOTATOR_MAX_HEIGHT} !important;
+    overflow: visible !important;
 }}
 #review-redaction-annotator-viewport canvas.canvas-annotator {{
-    max-height: 100% !important;
+    height: auto !important;
+    max-height: {REVIEW_ANNOTATOR_MAX_HEIGHT} !important;
 }}
 """ + LOGOUT_FOOTER_CSS
 
@@ -3243,7 +3245,6 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                             label_list=["Redaction"],
                             label_colors=[(0, 0, 0)],
                             show_label=False,
-                            height=REVIEW_ANNOTATOR_MAX_HEIGHT,
                             width="100%",
                             elem_id="review-redaction-annotator",
                             elem_classes=["review-redaction-annotator"],
