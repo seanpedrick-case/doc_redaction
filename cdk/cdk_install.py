@@ -2664,11 +2664,18 @@ def resolve_doc_redaction_gradio_url(answers: InstallAnswers) -> str:
 
 def build_pi_agent_env_values(answers: InstallAnswers) -> Dict[str, str]:
     """Runtime settings for the Agent Gradio app (uploaded to S3 as agent.env)."""
+    env_values = build_env_values(answers)
+    malware_bucket = (env_values.get("S3_MALWARE_SCAN_BUCKET_NAME") or "").strip()
+    if not malware_bucket:
+        prefix = (answers.cdk_prefix or "").strip().lower()
+        malware_bucket = f"{prefix}s3-malware-scan"
     values = {
         "AGENT_DEPLOYMENT_PROFILE": "aws-ecs",
         "AGENT_DEFAULT_PROVIDER": answers.pi_default_provider,
         "DOC_REDACTION_GRADIO_URL": resolve_doc_redaction_gradio_url(answers),
         "RUN_AWS_FUNCTIONS": "True",
+        "SCAN_UPLOADS_FOR_MALWARE": "True",
+        "MALWARE_SCAN_S3_BUCKET": malware_bucket,
         "AWS_REGION": answers.aws_region,
         "AGENT_GRADIO_PORT": answers.agentic_gradio_port,
         "AGENT_DEFAULT_OCR_METHOD": "AWS Textract service - all PDF types",

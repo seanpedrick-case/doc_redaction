@@ -53,6 +53,7 @@ from cdk_config import (
     S3_LOG_CONFIG_BUCKET_NAME,
     S3_MALWARE_SCAN_BUCKET_NAME,
     S3_OUTPUT_BUCKET_NAME,
+    SCAN_UPLOADS_FOR_MALWARE,
     USAGE_LOG_DYNAMODB_TABLE_NAME,
 )
 from constructs import Construct
@@ -3189,6 +3190,8 @@ def build_pi_express_container_environment(
         "FEEDBACK_LOGS_FOLDER": "/tmp/agent-feedback/",
         "RUN_FASTAPI": "True",
         "RUN_AWS_FUNCTIONS": "True",
+        "SCAN_UPLOADS_FOR_MALWARE": SCAN_UPLOADS_FOR_MALWARE,
+        "MALWARE_SCAN_S3_BUCKET": S3_MALWARE_SCAN_BUCKET_NAME,
         "COGNITO_AUTH": "True" if cognito_auth else "False",
     }
     try:
@@ -3693,6 +3696,8 @@ def build_pi_agent_container_environment(
         "FEEDBACK_LOGS_FOLDER": "/tmp/agent-feedback/",
         "RUN_FASTAPI": "True",
         "RUN_AWS_FUNCTIONS": "True",
+        "SCAN_UPLOADS_FOR_MALWARE": SCAN_UPLOADS_FOR_MALWARE,
+        "MALWARE_SCAN_S3_BUCKET": S3_MALWARE_SCAN_BUCKET_NAME,
         "SAVE_OUTPUTS_TO_S3": "True",
         "S3_OUTPUTS_BUCKET": S3_OUTPUT_BUCKET_NAME,
         "COGNITO_AUTH": "False",
