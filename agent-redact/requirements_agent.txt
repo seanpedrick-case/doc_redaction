@@ -6,37 +6,37 @@
 # Version caps align with requirements_lightweight.txt where packages overlap.
 
 # --- Gradio UI + API client ---
-gradio==6.10.0
+gradio==6.26.0
 gradio-pdf-redaction<=0.0.25
 httpx<=0.28.1
 requests<=2.34.2
 
 # --- Config ---
-python-dotenv<=1.2.2
+python-dotenv<=1.2.3
 
 # --- CSV / tabular review (skills, page-review merge) ---
-numpy<=2.4.4
-pandas<=2.3.3
+numpy<=2.5.2
+pandas<=3.0.5
 openpyxl<=3.1.5
 
 # --- PDF helpers (verify_redaction_coverage, preview scripts) ---
-pymupdf<=1.27.1
+pymupdf<=1.28.2
 
 # --- Bedrock AgentCore client/runtime (optional; set AGENT_ORCHESTRATOR=agentcore) ---
-bedrock-agentcore<=1.15.1
+bedrock-agentcore<=1.22.0
 
 # --- LangGraph orchestration (optional; set AGENT_ORCHESTRATOR=langgraph) ---
-langgraph<=1.2.6
-langchain-core<=1.4.8
-langchain-openai<=1.3.3
-langchain-aws<=1.6.1
-langchain-google-genai<=4.2.6
+langgraph<=1.2.11
+langchain-core<=1.6.0
+langchain-openai<=1.6.0
+langchain-aws<=1.7.4
+langchain-google-genai<=4.3.6
 
 # --- Arize AX / Phoenix tracing (optional; LangGraph only — see config/agent.env.example ARIZE_*) ---
-arize-otel>=0.9.0
-arize-phoenix-otel>=0.16.0
-arize-phoenix>=18.0.0
-openinference-instrumentation-langchain>=0.1.0
+arize-otel<=0.13.0
+arize-phoenix-otel<=0.17.1
+arize-phoenix<=20.4.0
+openinference-instrumentation-langchain<=0.1.72
 
 # --- General utilities ---
 tabulate<=0.10.0
@@ -44,7 +44,7 @@ rapidfuzz<=3.14.5
 defusedxml<=0.7.1
 
 # --- Shared platform features (logging, Cognito, S3 via tools/) ---
-boto3<=1.43.47
+boto3<=1.43.81
 bleach<=6.4.0
-fastapi>=0.115.0
-uvicorn>=0.34.0
+fastapi>=0.141.1
+uvicorn>=0.52.4

@@ -72,6 +72,7 @@ from tools.helper_functions import (
     detect_file_type,
     get_file_name_without_type,
     get_ocr_visualisation_font_path,
+    pymupdf_annot_str,
 )
 from tools.secure_path_utils import (
     sanitize_filename,
@@ -165,6 +166,105 @@ def _concat_frames_without_all_na_warning(
     return pd.concat(cleaned, ignore_index=ignore_index).reindex(columns=union_cols)
 
 
+def _coerce_page_series(series: pd.Series) -> pd.Series:
+    """Normalise page numbers to nullable int, accepting str/int/float."""
+    return pd.to_numeric(series, errors="coerce").round().astype("Int64")
+
+
+def _page_equals(series: pd.Series, page) -> pd.Series:
+    """Element-wise page equality that treats ``"1"`` and ``1`` as the same page."""
+    page_num = pd.to_numeric(page, errors="coerce")
+    if pd.isna(page_num):
+        return pd.Series(False, index=series.index)
+    return _coerce_page_series(series) == int(round(float(page_num)))
+
+
+def _ensure_numeric_columns(
+    df: pd.DataFrame,
+    columns: List[str],
+    *,
+    integer: bool = False,
+) -> pd.DataFrame:
+    """Column-assign numeric dtypes so later ``.loc`` writes do not hit StringDtype.
+
+    ``df.loc[mask, col] = floats`` raises TypeError on pandas 3 when ``col`` is
+    ``str``. Assigning with ``df[col] = pd.to_numeric(...)`` changes the dtype.
+    """
+    for col in columns:
+        if col not in df.columns:
+            continue
+        numeric = pd.to_numeric(df[col], errors="coerce")
+        if integer:
+            df[col] = numeric.round().astype("Int64")
+        else:
+            df[col] = numeric.astype("float64")
+    return df
+
+
+def _annotation_records_from_review_df(
+    df: pd.DataFrame, columns: List[str]
+) -> List[dict]:
+    """Convert review rows to annotator box dicts with PyMuPDF-safe string fields.
+
+    Duplicate-page whole-page rows often have missing ``text``, which pandas
+    stores as NaN. ``DataFrame.to_dict`` would leave that as float NaN.
+    """
+    frame = df.loc[:, [c for c in columns if c in df.columns]].copy()
+    for col in ("text", "label", "id"):
+        if col not in frame.columns:
+            continue
+        frame[col] = frame[col].map(lambda v: pymupdf_annot_str(v))
+    return frame.to_dict(orient="records")
+
+
+def _page_to_image_map(page_sizes: List[Dict]) -> Dict:
+    """Map integer page numbers to image paths, ignoring unparseable pages."""
+    mapping = {}
+    for item in page_sizes or []:
+        p = pd.to_numeric(item.get("page"), errors="coerce")
+        if pd.notna(p) and "image_path" in item:
+            mapping[int(p)] = item["image_path"]
+    return mapping
+
+
+def _align_merge_key_columns(
+    left: pd.DataFrame, right: pd.DataFrame, columns: List[str]
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Cast merge-key columns to compatible dtypes on copies of both frames.
+
+    pandas 2.2+/3.0 StringDtype rejects assigning integer Series into ``str``
+    columns via ``df.loc[:, cols] = converted``. Reassigning per column (or
+    canonicalising both sides) is required so duplicate-detection merges do
+    not crash when Gradio/OCR frames store ``page`` as strings while existing
+    review rows store it as int. The same mismatch otherwise makes exclude and
+    row-highlight merges silently match zero rows.
+    """
+    left_out = left.copy()
+    right_out = right.copy()
+    numeric_float_cols = {"xmin", "ymin", "xmax", "ymax"}
+    for col in columns:
+        if col not in left_out.columns or col not in right_out.columns:
+            continue
+        left_num = pd.to_numeric(left_out[col], errors="coerce")
+        right_num = pd.to_numeric(right_out[col], errors="coerce")
+        left_numeric_ok = bool(left_out[col].isna().all() or left_num.notna().all())
+        right_numeric_ok = bool(right_out[col].isna().all() or right_num.notna().all())
+        if left_numeric_ok and right_numeric_ok:
+            if col == "page":
+                left_out[col] = left_num.round().astype("Int64")
+                right_out[col] = right_num.round().astype("Int64")
+            elif col in numeric_float_cols:
+                left_out[col] = left_num.astype("float64")
+                right_out[col] = right_num.astype("float64")
+            else:
+                left_out[col] = left_out[col].astype(str)
+                right_out[col] = right_out[col].astype(str)
+        else:
+            left_out[col] = left_out[col].astype(str)
+            right_out[col] = right_out[col].astype(str)
+    return left_out, right_out
+
+
 def _ensure_box_colour_string(colour):
     """Ensure colour is a string for gradio_image_annotation_redaction (JS expects .startsWith)."""
     if colour is None:
@@ -174,6 +274,50 @@ def _ensure_box_colour_string(colour):
     if isinstance(colour, (tuple, list)) and len(colour) >= 3:
         return f"({int(colour[0])}, {int(colour[1])}, {int(colour[2])})"
     return "(0, 0, 0)"
+
+
+_ANNOTATOR_BOX_OUTPUT_KEYS = frozenset(
+    {"label", "xmin", "ymin", "xmax", "ymax", "color", "id", "text", "page"}
+)
+
+
+def _sanitize_annotator_boxes_for_gradio_output(
+    boxes: Optional[List[dict]],
+) -> List[dict]:
+    """
+    Strip client-only keys (e.g. ``scaleFactor``) and ensure coords are valid for
+    ``gradio_image_annotation_redaction`` postprocess.
+    """
+    sanitized: List[dict] = []
+    for box in boxes or []:
+        if not isinstance(box, dict):
+            continue
+        try:
+            xmin = float(box["xmin"])
+            ymin = float(box["ymin"])
+            xmax = float(box["xmax"])
+            ymax = float(box["ymax"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not all(np.isfinite(v) for v in (xmin, ymin, xmax, ymax)):
+            continue
+        clean = {
+            "xmin": xmin,
+            "ymin": ymin,
+            "xmax": xmax,
+            "ymax": ymax,
+        }
+        for key in ("label", "id", "text", "page"):
+            if key in box and box[key] is not None:
+                clean[key] = box[key]
+        if "color" in box and box["color"] is not None:
+            clean["color"] = _ensure_box_colour_string(box["color"])
+        elif "label" in clean:
+            clean["color"] = _ensure_box_colour_string(CUSTOM_BOX_COLOUR)
+        if not set(clean.keys()).issubset(_ANNOTATOR_BOX_OUTPUT_KEYS):
+            clean = {k: v for k, v in clean.items() if k in _ANNOTATOR_BOX_OUTPUT_KEYS}
+        sanitized.append(clean)
+    return sanitized
 
 
 def decrease_page(number: int, all_annotations: dict):
@@ -555,7 +699,7 @@ def update_annotator_page_from_review_df(
     # Safely access the page number, handling potential errors or empty DataFrame
     gradio_annotator_current_page_number: int = 1
     annotate_previous_page: int = (
-        0  # Renaming for clarity if needed, matches original output
+        1  # 1-based; never 0 (index -1 would overwrite the last page)
     )
 
     if (
@@ -688,8 +832,8 @@ def update_annotator_page_from_review_df(
                         "Using unscaled coordinates for this page."
                     )
 
-                page_boxes = page_review[expected_annotation_keys].to_dict(
-                    orient="records"
+                page_boxes = _annotation_records_from_review_df(
+                    page_review, expected_annotation_keys
                 )
                 out_image_annotations_state[page_idx]["boxes"] = page_boxes
 
@@ -746,9 +890,9 @@ def update_annotator_page_from_review_df(
 
             # Convert filtered DataFrame rows to list of dicts
             # Using .to_dict(orient='records') is efficient for this
-            current_page_annotations_list_raw = current_page_review_df[
-                expected_annotation_keys
-            ].to_dict(orient="records")
+            current_page_annotations_list_raw = _annotation_records_from_review_df(
+                current_page_review_df, expected_annotation_keys
+            )
 
             current_page_annotations_list = current_page_annotations_list_raw
 
@@ -883,6 +1027,44 @@ def update_annotator_page_from_review_df(
     )  # The original page number from selected_recogniser_entity_df_row
 
 
+def update_annotator_page_state_from_review_df(
+    review_df: pd.DataFrame,
+    image_file_paths: List[str],
+    page_sizes: List[dict],
+    current_image_annotations_state: List[dict],
+    current_page_annotator: object,
+    selected_recogniser_entity_df_row: pd.DataFrame,
+    input_folder: str,
+    doc_full_file_name_textbox: str,
+):
+    """Sync annotation state from review_df without pushing the visible annotator (push separately)."""
+    (
+        _page_annotator,
+        state,
+        page_num,
+        page_sizes_out,
+        review_df_out,
+        prev_page,
+    ) = update_annotator_page_from_review_df(
+        review_df,
+        image_file_paths,
+        page_sizes,
+        current_image_annotations_state,
+        current_page_annotator,
+        selected_recogniser_entity_df_row,
+        input_folder,
+        doc_full_file_name_textbox,
+    )
+    return (
+        gr.skip(),
+        state,
+        page_num,
+        page_sizes_out,
+        review_df_out,
+        prev_page,
+    )
+
+
 def _merge_horizontally_adjacent_boxes(
     df: pd.DataFrame,
     x_merge_threshold: float = 0.02,
@@ -908,6 +1090,13 @@ def _merge_horizontally_adjacent_boxes(
     """
     if df.empty:
         return df
+
+    df = df.copy()
+    if "page" in df.columns:
+        df["page"] = _coerce_page_series(df["page"])
+    df = _ensure_numeric_columns(df, ["xmin", "ymin", "xmax", "ymax"])
+    if "line" in df.columns:
+        df["line"] = pd.to_numeric(df["line"], errors="coerce")
 
     # 1. Sort by page, then by vertical position (ymin) then horizontal (xmin)
     #    so that we compare consecutive words on the same visual line.
@@ -989,6 +1178,9 @@ def get_and_merge_current_page_annotations(
         combined = _concat_frames_without_all_na_warning(
             dfs_to_concat, ignore_index=True
         )
+        if "page" in combined.columns:
+            combined["page"] = _coerce_page_series(combined["page"])
+        combined = _ensure_numeric_columns(combined, ["xmin", "ymin", "xmax", "ymax"])
         if "id" in combined.columns:
             has_id = combined["id"].notna()
             if has_id.any():
@@ -1031,22 +1223,31 @@ def get_and_merge_current_page_annotations(
         and "ymax" in updated_df.columns
         and "ymin" in updated_df.columns
     ):
+        coord_cols = [
+            col for col in ["xmin", "xmax", "ymin", "ymax"] if col in updated_df.columns
+        ]
+        updated_df = _ensure_numeric_columns(updated_df, coord_cols)
         ymax_cap = 1.0
-        ymax_vals = pd.to_numeric(updated_df["ymax"], errors="coerce")
-        need_cap = ymax_vals >= 1.0
+        ymax_vals = updated_df["ymax"]
+        # Only cap rows already in relative (0-1) space. Clipping an absolute pixel
+        # row to 1.0 would push ymax below ymin, collapsing the box to zero height
+        # and making it invisible in the annotator.
+        is_relative = pd.Series(True, index=updated_df.index)
+        for col in coord_cols:
+            if col != "ymax":
+                is_relative &= updated_df[col] <= 1
+        need_cap = is_relative & (ymax_vals >= 1.0)
         if need_cap.any():
             updated_df = updated_df.copy()
             updated_df.loc[need_cap, "ymax"] = ymax_vals.loc[need_cap].clip(
                 upper=ymax_cap
             )
             # Keep box valid: ymax must remain > ymin
-            ymin_vals = pd.to_numeric(updated_df.loc[need_cap, "ymin"], errors="coerce")
+            ymin_vals = updated_df.loc[need_cap, "ymin"]
             invalid = updated_df.loc[need_cap, "ymax"].values <= ymin_vals.values
             if invalid.any():
                 idx = updated_df.index[need_cap][invalid]
-                updated_df.loc[idx, "ymax"] = (
-                    pd.to_numeric(updated_df.loc[idx, "ymin"], errors="coerce") + 1e-6
-                )
+                updated_df.loc[idx, "ymax"] = updated_df.loc[idx, "ymin"] + 1e-6
 
     return updated_df
 
@@ -1195,13 +1396,10 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
             print("No new annotations to add.")
             updated_annotations_df = existing_annotations_df.copy()
         else:
-            page_to_image_map = {
-                item["page"]: item["image_path"] for item in page_sizes
-            }
+            page_to_image_map = _page_to_image_map(page_sizes)
 
             # Prepare the initial new annotations DataFrame
             new_annotations_df = new_annotations_df.assign(
-                image=lambda df: df["page"].map(page_to_image_map),
                 label=redaction_label,
                 color=colour_label,
             ).rename(
@@ -1212,6 +1410,16 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
                     "word_y1": "ymax",
                     "word_text": "text",
                 }
+            )
+            if "page" in new_annotations_df.columns:
+                new_annotations_df["page"] = _coerce_page_series(
+                    new_annotations_df["page"]
+                )
+            new_annotations_df = _ensure_numeric_columns(
+                new_annotations_df, ["xmin", "ymin", "xmax", "ymax"]
+            )
+            new_annotations_df["image"] = new_annotations_df["page"].map(
+                page_to_image_map
             )
 
             # Clip box to line-level bounds (all four coordinates) when available
@@ -1345,15 +1553,18 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
             ):
                 unique_new_df = new_annotations_df
             else:
-                # Ensure that columns of both sides have the same type
-                new_annotations_df.loc[:, key_cols] = new_annotations_df.loc[
-                    :, key_cols
-                ].astype(existing_annotations_df.loc[:, key_cols].dtypes)
+                # Align dtypes without loc-assignment into StringDtype columns
+                # (pandas 3 raises TypeError: Invalid value int64 for dtype 'str').
+                aligned_new, aligned_existing_keys = _align_merge_key_columns(
+                    new_annotations_df,
+                    existing_annotations_df[key_cols].drop_duplicates(),
+                    key_cols,
+                )
 
                 # Do not add duplicate redactions
                 merged = pd.merge(
-                    new_annotations_df,
-                    existing_annotations_df[key_cols].drop_duplicates(),
+                    aligned_new,
+                    aligned_existing_keys,
                     on=key_cols,
                     how="left",
                     indicator=True,
@@ -1541,9 +1752,13 @@ def exclude_selected_items_from_redaction(
             subset=selected_merge_cols
         )
 
+        aligned_review, aligned_selected = _align_merge_key_columns(
+            review_df, selected_subset, selected_merge_cols
+        )
+
         # Perform anti-join using merge with indicator
-        merged_df = review_df.merge(
-            selected_subset, on=selected_merge_cols, how="left", indicator=True
+        merged_df = aligned_review.merge(
+            aligned_selected, on=selected_merge_cols, how="left", indicator=True
         )
         out_review_df = merged_df[merged_df["_merge"] == "left_only"].drop(
             columns=["_merge"]
@@ -1595,14 +1810,20 @@ def replace_annotator_object_img_np_array_with_page_sizes_image_path(
     ):
         if page_sizes_df is None or page_sizes_df.empty:
             page_sizes_df = pd.DataFrame(page_sizes)
-            page_sizes_df[["page"]] = page_sizes_df[["page"]].apply(
-                pd.to_numeric, errors="coerce"
+        if not page_sizes_df.empty and "page" in page_sizes_df.columns:
+            page_sizes_df["page"] = pd.to_numeric(
+                page_sizes_df["page"], errors="coerce"
             )
 
-        # Check for matching pages (single .loc)
-        matching_paths = page_sizes_df.loc[
-            page_sizes_df["page"] == page, "image_path"
-        ].unique()
+        matching_paths = np.array([])
+        if (
+            not page_sizes_df.empty
+            and "page" in page_sizes_df.columns
+            and "image_path" in page_sizes_df.columns
+        ):
+            matching_paths = page_sizes_df.loc[
+                _page_equals(page_sizes_df["page"], page), "image_path"
+            ].unique()
 
         if matching_paths.size > 0:
             image_path = matching_paths[0]
@@ -1655,12 +1876,12 @@ def _ensure_page_image_dims_in_page_sizes_df(
 
         # Coerce width/height to numeric early (handles string "nan", etc.)
         if "image_width" in page_sizes_df.columns:
-            page_sizes_df.loc[mask, "image_width"] = pd.to_numeric(
-                page_sizes_df.loc[mask, "image_width"], errors="coerce"
+            page_sizes_df["image_width"] = pd.to_numeric(
+                page_sizes_df["image_width"], errors="coerce"
             )
         if "image_height" in page_sizes_df.columns:
-            page_sizes_df.loc[mask, "image_height"] = pd.to_numeric(
-                page_sizes_df.loc[mask, "image_height"], errors="coerce"
+            page_sizes_df["image_height"] = pd.to_numeric(
+                page_sizes_df["image_height"], errors="coerce"
             )
 
         img_path = None
@@ -1872,6 +2093,8 @@ def update_annotator_object_and_filter_df(
     page_sizes: List[dict] = list(),
     doc_full_file_name_textbox: str = "",
     input_folder: str = INPUT_FOLDER,
+    refresh_filter_ui: bool = True,
+    push_annotator: bool = True,
 ) -> Tuple[
     AnnotatedImageData,
     int,
@@ -1902,6 +2125,13 @@ def update_annotator_object_and_filter_df(
         page_sizes (List[dict], optional): List of dictionaries containing page size information. Defaults to empty list.
         doc_full_file_name_textbox (str, optional): Full file name shown in the textbox. Defaults to empty string.
         input_folder (str, optional): Path to the input folder. Defaults to INPUT_FOLDER.
+        refresh_filter_ui (bool, optional): When False (page navigation), skip refreshing the
+            sibling filter dropdowns/dataframes so their Gradio re-render cannot reflow the
+            annotator and collapse visible boxes. Defaults to True.
+        push_annotator (bool, optional): When False, refresh filter widgets only and return
+            ``gr.skip()`` for the annotator output so a follow-up
+            ``update_annotator_object_for_page_navigation`` can push boxes last (avoids layout
+            reflow wiping the canvas on consecutive document redactions). Defaults to True.
 
     Returns:
         Tuple[
@@ -2156,52 +2386,68 @@ def update_annotator_object_and_filter_df(
                 ).fillna(0.0)
 
         # Convert the processed DataFrame back to the list of dicts format for the annotator
-        processed_current_page_annotations_list = current_page_annotations_df[
-            ["xmin", "xmax", "ymin", "ymax", "label", "color", "text", "id"]
-        ].to_dict(orient="records")
+        processed_current_page_annotations_list = _annotation_records_from_review_df(
+            current_page_annotations_df,
+            ["xmin", "xmax", "ymin", "ymax", "label", "color", "text", "id"],
+        )
 
-        # Construct the final object expected by the Gradio ImageAnnotator value parameter
+        view_orientation = _normalize_view_orientation(
+            page_data_for_display.get("orientation")
+        )
+
+        # Boxes stay in natural image coordinates; the annotator rotates the page
+        # image from ``orientation`` only (see gradio_image_annotation_redaction docs).
         current_page_image_annotator_object: AnnotatedImageData = {
             "image": page_data_for_display.get(
                 "image"
             ),  # Use the (potentially updated) image path
             "boxes": processed_current_page_annotations_list,
+            "orientation": view_orientation,
         }
 
     # --- Update Dropdowns and Review DataFrame ---
-    try:
-        (
-            recogniser_entities_list,
-            recogniser_dataframe_out_gr,
-            recogniser_dataframe_modified,
-            recogniser_entities_dropdown_value,
-            text_entities_drop,
-            page_entities_drop,
-        ) = update_recogniser_dataframes(
-            all_image_annotations,  # Pass the updated full state
-            recogniser_dataframe_base,
-            recogniser_entities_dropdown_value,
-            text_dropdown_value,
-            page_dropdown_value,
-            review_df.copy(),  # Keep the copy as per original function call
-            page_sizes,  # Pass updated page sizes
-        )
-        # Generate default colors for labels (library expects hex string or RGB tuple; tuples are converted to hex)
-        [CUSTOM_BOX_COLOUR for _ in range(len(recogniser_entities_list))]
+    # Page navigation skips this: refreshing the sibling filter DataFrame/dropdowns
+    # reflows the Review layout and the annotator ResizeObserver can collapse boxes.
+    if refresh_filter_ui:
+        try:
+            (
+                recogniser_entities_list,
+                recogniser_dataframe_out_gr,
+                recogniser_dataframe_modified,
+                recogniser_entities_dropdown_value,
+                text_entities_drop,
+                page_entities_drop,
+            ) = update_recogniser_dataframes(
+                all_image_annotations,  # Pass the updated full state
+                recogniser_dataframe_base,
+                recogniser_entities_dropdown_value,
+                text_dropdown_value,
+                page_dropdown_value,
+                review_df.copy(),  # Keep the copy as per original function call
+                page_sizes,  # Pass updated page sizes
+            )
+            # Generate default colors for labels (library expects hex string or RGB tuple; tuples are converted to hex)
+            [CUSTOM_BOX_COLOUR for _ in range(len(recogniser_entities_list))]
 
-    except Exception as e:
-        print(
-            f"Error calling update_recogniser_dataframes: {e}. Returning empty/default filter data."
-        )
+        except Exception as e:
+            print(
+                f"Error calling update_recogniser_dataframes: {e}. Returning empty/default filter data."
+            )
+            recogniser_entities_list = list()
+            recogniser_dataframe_out_gr = pd.DataFrame(
+                columns=["page", "label", "text", "id"]
+            )
+            recogniser_dataframe_modified = pd.DataFrame(
+                columns=["page", "label", "text", "id"]
+            )
+            text_entities_drop = list()
+            page_entities_drop = list()
+    else:
         recogniser_entities_list = list()
-        recogniser_dataframe_out_gr = pd.DataFrame(
-            columns=["page", "label", "text", "id"]
-        )
-        recogniser_dataframe_modified = pd.DataFrame(
-            columns=["page", "label", "text", "id"]
-        )
-        text_entities_drop = list()
-        page_entities_drop = list()
+        recogniser_dataframe_out_gr = None
+        recogniser_dataframe_modified = None
+        text_entities_drop = None
+        page_entities_drop = None
 
     # --- Final Output Components ---
     page_number_update = (
@@ -2273,9 +2519,9 @@ def update_annotator_object_and_filter_df(
                         "id",
                     ]
                     keep_cols = [c for c in keep_cols if c in boxes_df.columns]
-                    current_page_image_annotator_object["boxes"] = boxes_df[
-                        keep_cols
-                    ].to_dict(orient="records")
+                    current_page_image_annotator_object["boxes"] = (
+                        _annotation_records_from_review_df(boxes_df, keep_cols)
+                    )
             except Exception as e:
                 print(
                     f"Warning: failed to re-scale boxes after on-demand render for page {gradio_annotator_current_page_number}: {e}"
@@ -2286,6 +2532,26 @@ def update_annotator_object_and_filter_df(
     page_entities_drop_redaction_list = ["ALL"]
     all_pages_in_doc_list = [str(i) for i in range(1, len(page_sizes) + 1)]
     page_entities_drop_redaction_list.extend(all_pages_in_doc_list)
+
+    if not push_annotator:
+        out_image_annotator = gr.skip()
+
+    if not refresh_filter_ui:
+        # Keep page numbers + annotator/state only; leave filter widgets untouched.
+        return (
+            out_image_annotator,
+            page_number_update,
+            page_number_update,
+            page_num_reported,
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            gr.skip(),
+            page_sizes,
+            all_image_annotations,
+        )
 
     return (
         out_image_annotator,
@@ -2308,6 +2574,738 @@ def update_annotator_object_and_filter_df(
     )  # Return the updated full state
 
 
+def update_annotator_object_for_page_navigation(
+    all_image_annotations: List[AnnotatedImageData],
+    gradio_annotator_current_page_number: int,
+    recogniser_entities_dropdown_value: str = "ALL",
+    page_dropdown_value: str = "ALL",
+    page_dropdown_redaction_value: str = "1",
+    text_dropdown_value: str = "ALL",
+    recogniser_dataframe_base: pd.DataFrame = None,
+    zoom: int = 100,
+    review_df: pd.DataFrame = None,
+    page_sizes: List[dict] = list(),
+    doc_full_file_name_textbox: str = "",
+    input_folder: str = INPUT_FOLDER,
+):
+    """Page Next/Previous: push annotator boxes without refreshing filter DataFrames."""
+    return update_annotator_object_and_filter_df(
+        all_image_annotations,
+        gradio_annotator_current_page_number,
+        recogniser_entities_dropdown_value,
+        page_dropdown_value,
+        page_dropdown_redaction_value,
+        text_dropdown_value,
+        recogniser_dataframe_base,
+        zoom,
+        review_df,
+        page_sizes,
+        doc_full_file_name_textbox,
+        input_folder,
+        refresh_filter_ui=False,
+    )
+
+
+def _skip_annotator_navigation_outputs():
+    """Twelve-output tuple matching ``update_annotator_object_for_page_navigation``."""
+    return tuple(gr.skip() for _ in range(12))
+
+
+def refresh_annotator_if_review_document_loaded(
+    all_image_annotations: List[AnnotatedImageData],
+    gradio_annotator_current_page_number: int,
+    recogniser_entities_dropdown_value: str = "ALL",
+    page_dropdown_value: str = "ALL",
+    page_dropdown_redaction_value: str = "1",
+    text_dropdown_value: str = "ALL",
+    recogniser_dataframe_base: pd.DataFrame = None,
+    zoom: int = 100,
+    review_df: pd.DataFrame = None,
+    page_sizes: List[dict] = list(),
+    doc_full_file_name_textbox: str = "",
+    input_folder: str = INPUT_FOLDER,
+):
+    """Re-push review-tab annotator boxes from state when a document is loaded."""
+    if not all_image_annotations or not page_sizes:
+        return _skip_annotator_navigation_outputs()
+    return update_annotator_object_for_page_navigation(
+        all_image_annotations,
+        gradio_annotator_current_page_number,
+        recogniser_entities_dropdown_value,
+        page_dropdown_value,
+        page_dropdown_redaction_value,
+        text_dropdown_value,
+        recogniser_dataframe_base,
+        zoom,
+        review_df,
+        page_sizes,
+        doc_full_file_name_textbox,
+        input_folder,
+    )
+
+
+def persist_current_page_annotator_to_state(
+    page_image_annotator_object: object,
+    gradio_annotator_current_page_number: int,
+    all_image_annotations: List[AnnotatedImageData],
+    page_sizes: List[dict],
+    previous_page: Optional[int] = None,
+):
+    """
+    Merge live annotator edits into ``all_image_annotations`` for one page (in-memory only).
+
+    When ``previous_page`` is omitted, the current page is updated (same-page edits).
+    When set (e.g. page navigation), boxes from the canvas are stored under
+    ``previous_page`` while ``gradio_annotator_current_page_number`` is the new page index.
+    """
+    page_num = gradio_annotator_current_page_number or 1
+    if previous_page is None:
+        previous_page = page_num
+
+    if not all_image_annotations or not page_sizes:
+        return all_image_annotations, previous_page, page_num
+
+    coerced = coerce_gradio_client_annotator_payload(
+        page_image_annotator_object,
+        page_num,
+        all_image_annotations,
+        page_sizes,
+    )
+
+    incoming_boxes = coerced.get("boxes") or []
+    previous_page_zero_index = previous_page - 1
+    existing_boxes: List[dict] = []
+    if 0 <= previous_page_zero_index < len(all_image_annotations):
+        existing_boxes = list(
+            (all_image_annotations[previous_page_zero_index] or {}).get("boxes") or []
+        )
+
+    # Gradio often emits change/resize with [] or zero-area boxes while the canvas is
+    # mounting or the Review tab is hidden. Never replace stored redactions with that.
+    if existing_boxes and _annotator_boxes_are_collapsed(incoming_boxes):
+        return all_image_annotations, previous_page, page_num
+
+    try:
+        all_image_annotations, _, _ = (
+            update_all_page_annotation_object_based_on_previous_page(
+                coerced,
+                page_num,
+                previous_page,
+                all_image_annotations,
+                page_sizes,
+            )
+        )
+    except Warning:
+        return all_image_annotations, previous_page, page_num
+
+    return all_image_annotations, previous_page, page_num
+
+
+def _client_annotator_payload_is_usable(coerced: AnnotatedImageData) -> bool:
+    """True when the live canvas returned non-collapsed boxes worth re-pushing."""
+    return not _annotator_boxes_are_collapsed(coerced.get("boxes") or [])
+
+
+def _annotator_value_from_client_payload(
+    coerced: AnnotatedImageData,
+    page_num: int,
+    page_sizes: List[dict],
+) -> AnnotatedImageData:
+    """Build an annotator value from the live client payload (display coords + orientation)."""
+    stable_image = _resolve_page_image_path(page_sizes, page_num)
+    image = stable_image or _extract_annotator_image_path(coerced.get("image"))
+    return {
+        "image": image,
+        "boxes": _sanitize_annotator_boxes_for_gradio_output(coerced.get("boxes")),
+        "orientation": _normalize_view_orientation(coerced.get("orientation")),
+    }
+
+
+def _merge_persisted_state_into_refresh_outputs(
+    refresh_outputs: tuple,
+    all_image_annotations: List[AnnotatedImageData],
+    client_annotator_value: Optional[AnnotatedImageData],
+) -> tuple:
+    """Replace annotator + state slots in a 12-output refresh tuple."""
+    outputs = list(refresh_outputs)
+    if client_annotator_value is not None:
+        outputs[0] = client_annotator_value
+    outputs[-1] = all_image_annotations
+    return tuple(outputs)
+
+
+def persist_annotator_canvas_and_refresh_review_ui(
+    page_image_annotator_object: object,
+    gradio_annotator_current_page_number: int,
+    all_image_annotations: List[AnnotatedImageData],
+    page_sizes: List[dict],
+    recogniser_entities_dropdown_value: str = "ALL",
+    page_dropdown_value: str = "ALL",
+    page_dropdown_redaction_value: str = "1",
+    text_dropdown_value: str = "ALL",
+    recogniser_dataframe_base: pd.DataFrame = None,
+    zoom: int = 100,
+    review_df: pd.DataFrame = None,
+    doc_full_file_name_textbox: str = "",
+    input_folder: str = INPUT_FOLDER,
+):
+    """
+    Persist the live canvas into ``all_image_annotations``, then re-push boxes for display.
+
+    Use on Review-tab actions (filters, exports, etc.) that would otherwise refresh the
+    annotator from stale state and wipe unsaved manual edits.
+    """
+    page_num = gradio_annotator_current_page_number or 1
+    coerced = coerce_gradio_client_annotator_payload(
+        page_image_annotator_object,
+        page_num,
+        all_image_annotations,
+        page_sizes,
+    )
+    canvas_usable = _client_annotator_payload_is_usable(coerced)
+
+    all_image_annotations, _, _ = persist_current_page_annotator_to_state(
+        page_image_annotator_object,
+        gradio_annotator_current_page_number,
+        all_image_annotations,
+        page_sizes,
+    )
+    refresh_outputs = update_annotator_object_for_page_navigation(
+        all_image_annotations,
+        gradio_annotator_current_page_number,
+        recogniser_entities_dropdown_value,
+        page_dropdown_value,
+        page_dropdown_redaction_value,
+        text_dropdown_value,
+        recogniser_dataframe_base,
+        zoom,
+        review_df,
+        page_sizes,
+        doc_full_file_name_textbox,
+        input_folder,
+    )
+    if not canvas_usable:
+        return refresh_outputs
+    client_annotator_value = _annotator_value_from_client_payload(
+        coerced, page_num, page_sizes
+    )
+    if not client_annotator_value.get("boxes"):
+        return refresh_outputs
+    return _merge_persisted_state_into_refresh_outputs(
+        refresh_outputs,
+        all_image_annotations,
+        client_annotator_value,
+    )
+
+
+def persist_current_page_and_refresh_annotator(
+    page_image_annotator_object: AnnotatedImageData,
+    gradio_annotator_current_page_number: int,
+    all_image_annotations: List[AnnotatedImageData],
+    page_sizes: List[dict],
+    recogniser_entities_dropdown_value: str = "ALL",
+    page_dropdown_value: str = "ALL",
+    page_dropdown_redaction_value: str = "1",
+    text_dropdown_value: str = "ALL",
+    recogniser_dataframe_base: pd.DataFrame = None,
+    zoom: int = 100,
+    review_df: pd.DataFrame = None,
+    doc_full_file_name_textbox: str = "",
+    input_folder: str = INPUT_FOLDER,
+):
+    """
+    Merge live annotator edits into ``all_image_annotations`` for the current page,
+    then re-push boxes to the canvas. Matches the first step of *Save changes on
+    current page to file* (in-memory persist only — no CSV/PDF export).
+
+    When the canvas still has usable boxes, re-push that live payload (preserving view
+    rotation) instead of rebuilding from canonical state, which would re-rotate coords.
+    """
+    if not all_image_annotations or not page_sizes:
+        return _skip_annotator_navigation_outputs()
+
+    page_num = gradio_annotator_current_page_number or 1
+    coerced = coerce_gradio_client_annotator_payload(
+        page_image_annotator_object,
+        page_num,
+        all_image_annotations,
+        page_sizes,
+    )
+    canvas_usable = _client_annotator_payload_is_usable(coerced)
+
+    all_image_annotations, _, _ = persist_current_page_annotator_to_state(
+        page_image_annotator_object,
+        gradio_annotator_current_page_number,
+        all_image_annotations,
+        page_sizes,
+    )
+
+    refresh_outputs = refresh_annotator_if_review_document_loaded(
+        all_image_annotations,
+        gradio_annotator_current_page_number,
+        recogniser_entities_dropdown_value,
+        page_dropdown_value,
+        page_dropdown_redaction_value,
+        text_dropdown_value,
+        recogniser_dataframe_base,
+        zoom,
+        review_df,
+        page_sizes,
+        doc_full_file_name_textbox,
+        input_folder,
+    )
+    if not canvas_usable:
+        return refresh_outputs
+    client_annotator_value = _annotator_value_from_client_payload(
+        coerced, page_num, page_sizes
+    )
+    if not client_annotator_value.get("boxes"):
+        return refresh_outputs
+    return _merge_persisted_state_into_refresh_outputs(
+        refresh_outputs,
+        all_image_annotations,
+        client_annotator_value,
+    )
+
+
+def refresh_annotator_after_external_layout_reflow(
+    layout_reflow_trigger: bool,
+    all_image_annotations: List[AnnotatedImageData],
+    gradio_annotator_current_page_number: int,
+    recogniser_entities_dropdown_value: str = "ALL",
+    page_dropdown_value: str = "ALL",
+    page_dropdown_redaction_value: str = "1",
+    text_dropdown_value: str = "ALL",
+    recogniser_dataframe_base: pd.DataFrame = None,
+    zoom: int = 100,
+    review_df: pd.DataFrame = None,
+    page_sizes: List[dict] = list(),
+    doc_full_file_name_textbox: str = "",
+    input_folder: str = INPUT_FOLDER,
+):
+    """
+    Re-push review-tab annotator boxes after an unrelated UI update (e.g. a session-security
+    notice) reflowed the layout. No-op when ``layout_reflow_trigger`` is False or there is
+    no active review document.
+    """
+    if not layout_reflow_trigger:
+        return _skip_annotator_navigation_outputs()
+    return refresh_annotator_if_review_document_loaded(
+        all_image_annotations,
+        gradio_annotator_current_page_number,
+        recogniser_entities_dropdown_value,
+        page_dropdown_value,
+        page_dropdown_redaction_value,
+        text_dropdown_value,
+        recogniser_dataframe_base,
+        zoom,
+        review_df,
+        page_sizes,
+        doc_full_file_name_textbox,
+        input_folder,
+    )
+
+
+def update_review_filters_after_redaction(
+    all_image_annotations: List[AnnotatedImageData],
+    gradio_annotator_current_page_number: int,
+    recogniser_entities_dropdown_value: str = "ALL",
+    page_dropdown_value: str = "ALL",
+    page_dropdown_redaction_value: str = "1",
+    text_dropdown_value: str = "ALL",
+    recogniser_dataframe_base: pd.DataFrame = None,
+    zoom: int = 100,
+    review_df: pd.DataFrame = None,
+    page_sizes: List[dict] = list(),
+    doc_full_file_name_textbox: str = "",
+    input_folder: str = INPUT_FOLDER,
+):
+    """After document redaction: refresh filter widgets only; push annotator in a follow-up step."""
+    return update_annotator_object_and_filter_df(
+        all_image_annotations,
+        gradio_annotator_current_page_number,
+        recogniser_entities_dropdown_value,
+        page_dropdown_value,
+        page_dropdown_redaction_value,
+        text_dropdown_value,
+        recogniser_dataframe_base,
+        zoom,
+        review_df,
+        page_sizes,
+        doc_full_file_name_textbox,
+        input_folder,
+        refresh_filter_ui=True,
+        push_annotator=False,
+    )
+
+
+def _normalize_view_orientation(orientation: object) -> int:
+    """Annotator view rotation: 0–3 clockwise quarter-turns from natural image orientation."""
+    try:
+        value = int(orientation or 0)
+    except (TypeError, ValueError):
+        return 0
+    return value if value in (0, 1, 2, 3) else 0
+
+
+def _transform_annotator_boxes_to_orientation_0(
+    boxes: List[dict],
+    orientation: int,
+    image_width: float,
+    image_height: float,
+) -> None:
+    """
+    Convert absolute image-pixel boxes from annotator display orientation to orientation 0.
+
+    Inverse of the client-side onRotate / server push forward transform.
+    """
+    if orientation not in (1, 2, 3) or not boxes:
+        return
+    try:
+        W = float(image_width)
+        H = float(image_height)
+    except (TypeError, ValueError):
+        return
+    if not (np.isfinite(W) and np.isfinite(H)) or W <= 0 or H <= 0:
+        return
+
+    for box in boxes:
+        if not isinstance(box, dict):
+            continue
+        try:
+            xmin_d, ymin_d = float(box["xmin"]), float(box["ymin"])
+            xmax_d, ymax_d = float(box["xmax"]), float(box["ymax"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if orientation == 1:
+            box["xmin"] = ymin_d
+            box["xmax"] = ymax_d
+            box["ymin"] = H - xmax_d
+            box["ymax"] = H - xmin_d
+        elif orientation == 2:
+            box["xmin"] = W - xmax_d
+            box["xmax"] = W - xmin_d
+            box["ymin"] = H - ymax_d
+            box["ymax"] = H - ymin_d
+        elif orientation == 3:
+            box["xmin"] = W - ymax_d
+            box["xmax"] = W - ymin_d
+            box["ymin"] = xmin_d
+            box["ymax"] = xmax_d
+
+
+def _transform_annotator_boxes_from_orientation_0(
+    boxes: List[dict],
+    orientation: int,
+    image_width: float,
+    image_height: float,
+) -> None:
+    """Convert orientation-0 absolute image-pixel boxes into annotator display coordinates."""
+    if orientation not in (1, 2, 3) or not boxes:
+        return
+    try:
+        W = float(image_width)
+        H = float(image_height)
+    except (TypeError, ValueError):
+        return
+    if not (np.isfinite(W) and np.isfinite(H)) or W <= 0 or H <= 0:
+        return
+
+    for box in boxes:
+        if not isinstance(box, dict):
+            continue
+        try:
+            xmin0, ymin0 = float(box["xmin"]), float(box["ymin"])
+            xmax0, ymax0 = float(box["xmax"]), float(box["ymax"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if orientation == 1:
+            box["xmin"] = H - ymax0
+            box["xmax"] = H - ymin0
+            box["ymin"] = xmin0
+            box["ymax"] = xmax0
+        elif orientation == 2:
+            box["xmin"] = W - xmax0
+            box["xmax"] = W - xmin0
+            box["ymin"] = H - ymax0
+            box["ymax"] = H - ymin0
+        elif orientation == 3:
+            box["xmin"] = ymin0
+            box["xmax"] = ymax0
+            box["ymin"] = W - xmax0
+            box["ymax"] = W - xmin0
+
+
+def _box_coords_are_relative(box: dict) -> bool:
+    """True if a box is already in the relative (0-1) system used by the review pipeline."""
+    try:
+        values = [
+            float(box["xmin"]),
+            float(box["ymin"]),
+            float(box["xmax"]),
+            float(box["ymax"]),
+        ]
+    except (KeyError, TypeError, ValueError):
+        # Unusable coordinates: leave them alone rather than scaling garbage.
+        return True
+    return all(value <= 1 for value in values)
+
+
+def _annotator_box_has_area(box: dict) -> bool:
+    """True if a box has finite coords with positive width and height."""
+    try:
+        xmin, ymin = float(box["xmin"]), float(box["ymin"])
+        xmax, ymax = float(box["xmax"]), float(box["ymax"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    if not all(np.isfinite(v) for v in (xmin, ymin, xmax, ymax)):
+        return False
+    return xmax > xmin and ymax > ymin
+
+
+def _annotator_boxes_are_collapsed(boxes: Optional[List[dict]]) -> bool:
+    """
+    True when the annotator payload has no usable boxes (empty or all zero-area).
+
+    A canvas resize can round every box to 0 via setScaleFactor. Gradio can also
+    briefly return an empty box list on page turns while the canvas remounts. Either
+    case must not wipe existing page redactions.
+    """
+    if not boxes:
+        return True
+    return not any(
+        _annotator_box_has_area(box) for box in boxes if isinstance(box, dict)
+    )
+
+
+def _resolve_page_image_path(page_sizes: List[dict], page: int) -> Optional[str]:
+    """Return image_path for a 1-based page from page_sizes, if present."""
+    for row in page_sizes or []:
+        try:
+            if int(row.get("page")) == int(page):
+                path = row.get("image_path")
+                if path:
+                    return str(path)
+        except (AttributeError, TypeError, ValueError):
+            continue
+    index = page - 1
+    if page_sizes and 0 <= index < len(page_sizes):
+        path = (page_sizes[index] or {}).get("image_path")
+        if path:
+            return str(path)
+    return None
+
+
+def _resolve_page_image_dims(
+    page_sizes: List[dict],
+    page: int,
+    image_width: Optional[float] = None,
+    image_height: Optional[float] = None,
+) -> Tuple[Optional[float], Optional[float]]:
+    """Image pixel dimensions for a 1-based page, preferring dims already on the annotator object."""
+    if image_width and image_height:
+        return image_width, image_height
+
+    for row in page_sizes or []:
+        try:
+            if int(row.get("page")) == int(page):
+                return row.get("image_width"), row.get("image_height")
+        except (AttributeError, TypeError, ValueError):
+            continue
+
+    index = page - 1
+    if page_sizes and 0 <= index < len(page_sizes):
+        row = page_sizes[index] or {}
+        return row.get("image_width"), row.get("image_height")
+
+    return image_width, image_height
+
+
+def _extract_annotator_image_path(image_value: object) -> Optional[str]:
+    """Return a filesystem path string from an annotator image field."""
+    if isinstance(image_value, str):
+        return image_value.strip() or None
+    if isinstance(image_value, dict):
+        for key in ("path", "name", "file_path", "url"):
+            value = image_value.get(key)
+            if value:
+                return str(value).strip()
+    path_attr = getattr(image_value, "path", None) or getattr(image_value, "name", None)
+    if path_attr:
+        return str(path_attr).strip()
+    return None
+
+
+def _is_ephemeral_or_missing_annotator_image_path(path: Optional[str]) -> bool:
+    """True when the annotator image path should not be opened (Gradio tmp / missing)."""
+    if not path:
+        return True
+    norm = os.path.normpath(path).replace("\\", "/").lower()
+    if "gradio_tmp" in norm or "/tmp/gradio/" in norm:
+        return True
+    # Only check file presence for paths under allowed roots (not arbitrary user paths).
+    return _validated_allowed_file_path(path) is None
+
+
+def _apply_gradio_client_box_scale_factors(boxes: Optional[List[dict]]) -> None:
+    """
+    Mirror ``gradio_image_annotation_redaction`` ``preprocess_boxes`` for handlers that use
+    ``preprocess=False``.
+
+    The annotator stores box edges in a canvas-scaled coordinate system and attaches a per-box
+    ``scaleFactor``. Gradio's component preprocess divides those values out to recover absolute
+    image pixels; without that step every box is saved too small (shifted up/left on re-display).
+    """
+    if not boxes:
+        return
+    for box in boxes:
+        if not isinstance(box, dict):
+            continue
+        try:
+            scale_factor = float(box.get("scaleFactor", 1) or 1)
+        except (TypeError, ValueError):
+            scale_factor = 1.0
+        if not (np.isfinite(scale_factor) and scale_factor > 0):
+            scale_factor = 1.0
+        if scale_factor == 1.0:
+            continue
+        for key in ("xmin", "ymin", "xmax", "ymax"):
+            if key not in box:
+                continue
+            try:
+                box[key] = round(float(box[key]) / scale_factor)
+            except (TypeError, ValueError):
+                continue
+
+
+def coerce_gradio_client_annotator_payload(
+    payload: object,
+    current_page: int,
+    all_image_annotations: List[AnnotatedImageData],
+    page_sizes: List[dict],
+) -> AnnotatedImageData:
+    """
+    Normalize raw Gradio client annotator JSON (``preprocess=False``) before server handlers.
+
+    The browser often keeps ``/tmp/gradio_tmp/...`` image paths that are deleted on ECS or
+    after container restarts. Prefer stable ``page_sizes`` / session state paths while
+    keeping box edits from the client payload.
+    """
+    if not isinstance(payload, dict):
+        payload = {}
+
+    boxes = payload.get("boxes")
+    if not isinstance(boxes, list):
+        boxes = []
+    else:
+        boxes = [dict(box) if isinstance(box, dict) else box for box in boxes]
+        _apply_gradio_client_box_scale_factors(boxes)
+
+    page_num = 1
+    try:
+        page_num = int(current_page or 1)
+    except (TypeError, ValueError):
+        page_num = 1
+
+    client_image = _extract_annotator_image_path(payload.get("image"))
+    stable_image = _resolve_page_image_path(page_sizes, page_num)
+
+    state_image = None
+    page_index = page_num - 1
+    if all_image_annotations and 0 <= page_index < len(all_image_annotations):
+        state_image = _extract_annotator_image_path(
+            (all_image_annotations[page_index] or {}).get("image")
+        )
+
+    chosen_image = client_image
+    if _is_ephemeral_or_missing_annotator_image_path(chosen_image):
+        for candidate in (stable_image, state_image, client_image):
+            if candidate and not _is_ephemeral_or_missing_annotator_image_path(
+                candidate
+            ):
+                chosen_image = candidate
+                break
+        else:
+            chosen_image = stable_image or state_image or client_image
+
+    result: AnnotatedImageData = {
+        "boxes": boxes,
+        "image": chosen_image,
+        "orientation": payload.get("orientation", 0),
+    }
+    for key in ("image_width", "image_height"):
+        if key in payload:
+            result[key] = payload[key]
+    return result
+
+
+def update_all_page_annotation_object_from_gradio_client(
+    page_image_annotator_object: object,
+    current_page: int,
+    previous_page: int,
+    all_image_annotations: List[AnnotatedImageData],
+    page_sizes: List[dict] = list(),
+    clear_all: bool = False,
+):
+    """``update_all_page_annotation_object_based_on_previous_page`` for raw client annotator JSON."""
+    coerced = coerce_gradio_client_annotator_payload(
+        page_image_annotator_object,
+        current_page,
+        all_image_annotations,
+        page_sizes,
+    )
+    return update_all_page_annotation_object_based_on_previous_page(
+        coerced,
+        current_page,
+        previous_page,
+        all_image_annotations,
+        page_sizes,
+        clear_all,
+    )
+
+
+def _convert_annotator_boxes_to_relative(
+    boxes: List[dict],
+    image_width: Optional[float],
+    image_height: Optional[float],
+) -> None:
+    """
+    Convert absolute image-pixel boxes from the annotator into relative (0-1) coordinates
+    in place. Boxes already in relative space are left untouched.
+
+    The annotator is sent, and returns, absolute image pixels: its backend
+    ``preprocess_boxes`` divides out the canvas scale factor before Gradio hands the
+    value back. The rest of the review pipeline stores boxes relative to the page, so
+    without this conversion pixel values are treated as relative and later clipped to
+    1.0, which collapses each box to zero height.
+    """
+    if not boxes:
+        return
+
+    try:
+        width = float(image_width)
+        height = float(image_height)
+    except (TypeError, ValueError):
+        return
+
+    if not (np.isfinite(width) and np.isfinite(height)) or width <= 0 or height <= 0:
+        print(
+            "Warning: no usable image dimensions; leaving annotator boxes unconverted."
+        )
+        return
+
+    for box in boxes:
+        if _box_coords_are_relative(box):
+            continue
+        try:
+            box["xmin"] = min(max(float(box["xmin"]) / width, 0.0), 1.0)
+            box["xmax"] = min(max(float(box["xmax"]) / width, 0.0), 1.0)
+            box["ymin"] = min(max(float(box["ymin"]) / height, 0.0), 1.0)
+            box["ymax"] = min(max(float(box["ymax"]) / height, 0.0), 1.0)
+        except (KeyError, TypeError, ValueError):
+            continue
+
+
 def update_all_page_annotation_object_based_on_previous_page(
     page_image_annotator_object: AnnotatedImageData,
     current_page: int,
@@ -2320,15 +3318,29 @@ def update_all_page_annotation_object_based_on_previous_page(
     Overwrite image annotations on the page we are moving from with modifications.
 
     Converts annotator output coordinates to relative (0-1) before storing, so that
-    manually added boxes (which the annotator returns in display/canvas pixel space)
-    are stored consistently with existing boxes. Without this, new boxes would be
+    manually added boxes (which the annotator returns in absolute image pixels) are
+    stored consistently with existing boxes. Without this, new boxes would be
     misplaced on the next display (shifted and scaled incorrectly).
     """
+
+    if not page_image_annotator_object:
+        page_image_annotator_object = {"boxes": [], "image": None, "orientation": 0}
 
     if current_page > len(page_sizes):
         raise Warning("Selected page is higher than last page number")
     elif current_page <= 0:
         raise Warning("Selected page is lower than first page")
+
+    # annotate_previous_page is initialised to 0; treat unset/invalid as page 1 so we
+    # never write to index -1 (last page) on the first navigation.
+    try:
+        previous_page = int(previous_page)
+    except (TypeError, ValueError):
+        previous_page = 0
+    if previous_page < 1:
+        previous_page = 1
+    if previous_page > len(all_image_annotations):
+        previous_page = max(1, len(all_image_annotations))
 
     previous_page_zero_index = previous_page - 1
 
@@ -2345,39 +3357,51 @@ def update_all_page_annotation_object_based_on_previous_page(
         image_width = int(img.shape[1])
         page_image_annotator_object["image_height"] = image_height
         page_image_annotator_object["image_width"] = image_width
-    orientation = page_image_annotator_object.get("orientation")
+    orientation = _normalize_view_orientation(
+        page_image_annotator_object.get("orientation")
+    )
+    view_orientation = orientation
 
     # Transform box coordinates from current orientation back to orientation 0.
-    # Matches component: 90° CW new_x = H - old_y, new_y = old_x; 90° CCW new_x = old_y, new_y = W - old_x.
-    if (
-        orientation in (1, 2, 3)
-        and image_height is not None
-        and image_width is not None
-    ):
-        W, H = image_width, image_height
-        boxes = page_image_annotator_object.get("boxes") or []
-        for box in boxes:
-            xmin_d, ymin_d = box["xmin"], box["ymin"]
-            xmax_d, ymax_d = box["xmax"], box["ymax"]
-            if orientation == 1:
-                # 90° CW reverse: old_x = y_d, old_y = H - x_d
-                box["xmin"] = ymin_d
-                box["xmax"] = ymax_d
-                box["ymin"] = H - xmax_d
-                box["ymax"] = H - xmin_d
-            elif orientation == 2:
-                # 180° CW reverse: old_x = W - x_d, old_y = H - y_d
-                box["xmin"] = W - xmax_d
-                box["xmax"] = W - xmin_d
-                box["ymin"] = H - ymax_d
-                box["ymax"] = H - ymin_d
-            elif orientation == 3:
-                # 270° CW (90° CCW) reverse: old_x = W - y_d, old_y = x_d
-                box["xmin"] = W - ymax_d
-                box["xmax"] = W - ymin_d
-                box["ymin"] = xmin_d
-                box["ymax"] = xmax_d
+    page_width, page_height = _resolve_page_image_dims(
+        page_sizes, previous_page, image_width, image_height
+    )
+    if orientation in (1, 2, 3) and page_width and page_height:
+        _transform_annotator_boxes_to_orientation_0(
+            page_image_annotator_object.get("boxes") or [],
+            orientation,
+            page_width,
+            page_height,
+        )
         page_image_annotator_object["orientation"] = 0
+
+    # Boxes arrive from the annotator in absolute image pixels; the review pipeline
+    # stores them relative to the page. Keep a pre-conversion copy so a bad dim
+    # (which would clip every edge to 1.0) can be rolled back.
+    incoming_boxes_raw = list(page_image_annotator_object.get("boxes") or [])
+    boxes_before_convert = [
+        dict(box) for box in incoming_boxes_raw if isinstance(box, dict)
+    ]
+    if clear_all is False:
+        page_width, page_height = _resolve_page_image_dims(
+            page_sizes, previous_page, image_width, image_height
+        )
+        _convert_annotator_boxes_to_relative(
+            page_image_annotator_object.get("boxes") or [],
+            page_width,
+            page_height,
+        )
+        converted = page_image_annotator_object.get("boxes") or []
+        if (
+            boxes_before_convert
+            and not _annotator_boxes_are_collapsed(boxes_before_convert)
+            and _annotator_boxes_are_collapsed(converted)
+        ):
+            print(
+                "Warning: coordinate conversion collapsed annotator boxes for page "
+                f"{previous_page}; keeping pre-conversion coordinates."
+            )
+            page_image_annotator_object["boxes"] = boxes_before_convert
 
     # This replaces the numpy array image object with the image file path
     page_image_annotator_object, all_image_annotations = (
@@ -2389,10 +3413,51 @@ def update_all_page_annotation_object_based_on_previous_page(
         )
     )
 
+    # Always prefer the stable page_sizes path so review_df page extraction (_N.png)
+    # keeps working even when Gradio returns a temp cache path.
+    stable_image_path = _resolve_page_image_path(page_sizes, previous_page)
+    if stable_image_path:
+        page_image_annotator_object["image"] = stable_image_path
+
     if clear_all is False:
-        all_image_annotations[previous_page_zero_index] = page_image_annotator_object
+        incoming_boxes = page_image_annotator_object.get("boxes") or []
+        existing_page = {}
+        existing_boxes = []
+        existing_view_orientation = 0
+        if 0 <= previous_page_zero_index < len(all_image_annotations):
+            existing_page = dict(all_image_annotations[previous_page_zero_index] or {})
+            existing_boxes = list(existing_page.get("boxes") or [])
+            existing_view_orientation = _normalize_view_orientation(
+                existing_page.get("orientation")
+            )
+
+        # Guard: empty/zero-area annotator payloads (common on page turns / resize)
+        # must not wipe real redactions already stored for this page.
+        if existing_boxes and _annotator_boxes_are_collapsed(incoming_boxes):
+            boxes_to_store = existing_boxes
+            if view_orientation == 0 and existing_view_orientation != 0:
+                orientation_to_store = existing_view_orientation
+            else:
+                orientation_to_store = view_orientation
+        else:
+            boxes_to_store = incoming_boxes
+            orientation_to_store = view_orientation
+
+        # Update the existing page dict in place so we keep any extra keys and never
+        # replace the whole list entry with a Gradio-only payload.
+        updated_page = existing_page if existing_page else {}
+        updated_page["boxes"] = boxes_to_store
+        if stable_image_path:
+            updated_page["image"] = stable_image_path
+        elif page_image_annotator_object.get("image") is not None:
+            updated_page["image"] = page_image_annotator_object.get("image")
+        updated_page["orientation"] = orientation_to_store
+
+        if 0 <= previous_page_zero_index < len(all_image_annotations):
+            all_image_annotations[previous_page_zero_index] = updated_page
     else:
-        all_image_annotations[previous_page_zero_index]["boxes"] = list()
+        if 0 <= previous_page_zero_index < len(all_image_annotations):
+            all_image_annotations[previous_page_zero_index]["boxes"] = list()
 
     return all_image_annotations, current_page, current_page
 
@@ -3243,7 +4308,48 @@ def apply_redactions_to_review_df_and_files(
         output_files.extend(o_f)
         output_log_files.extend(o_l)
 
+    # Page navigation / silent save passes save_pdf=False. Refreshing the Gradio File
+    # widget then reflows the Review tab and the annotator's ResizeObserver can call
+    # setScaleFactor(~0), which zeroes every visible box ~0.5s after they appear.
+    # Also skip log file output refresh for the same reason.
+    # Still return review_df so "Save current page" and similar silent saves refresh the table.
+    if not save_pdf:
+        return doc, all_image_annotations, gr.skip(), gr.skip(), review_df
+
     return doc, all_image_annotations, output_files, output_log_files, review_df
+
+
+def apply_redactions_to_review_df_and_files_for_review_ui(
+    file_paths: List[str],
+    doc: Document,
+    all_image_annotations: List[AnnotatedImageData],
+    current_page: int,
+    review_file_state: pd.DataFrame,
+    output_folder: str = OUTPUT_FOLDER,
+    save_pdf: bool = True,
+    page_sizes: List[dict] = list(),
+    input_folder: str = INPUT_FOLDER,
+    COMPRESS_REDACTED_PDF: bool = COMPRESS_REDACTED_PDF,
+    progress=gr.Progress(track_tqdm=True),
+):
+    """
+    Review-tab apply without an ``image_annotator`` input (avoids Gradio preprocess on
+    stale ``/tmp/gradio_tmp`` page images). Uses ``all_image_annotations`` state.
+    """
+    return apply_redactions_to_review_df_and_files(
+        None,
+        file_paths,
+        doc,
+        all_image_annotations,
+        current_page,
+        review_file_state,
+        output_folder,
+        save_pdf,
+        page_sizes,
+        input_folder,
+        COMPRESS_REDACTED_PDF,
+        progress,
+    )
 
 
 def get_boxes_json(annotations: AnnotatedImageData):
@@ -3743,8 +4849,13 @@ def update_selected_review_df_row_colour(
 
         # --- Optimization 3: Use inner merge directly ---
         # Merge to find rows in review_df that match redaction_row_selection
-        merged_reviews = review_df.merge(
+        aligned_review, aligned_selection = _align_merge_key_columns(
+            review_df,
             redaction_row_selection[selected_merge_cols],
+            selected_merge_cols,
+        )
+        merged_reviews = aligned_review.merge(
+            aligned_selection,
             on=selected_merge_cols,
             how="inner",  # Use inner join as we only care about matches
         )
@@ -3764,17 +4875,19 @@ def update_selected_review_df_row_colour(
                     colour
                 )
             else:
-                # More general case using multiple columns - might be slower
-                # Create a temporary key for comparison
+                # Keys already aligned (str page vs int page); update the aligned copy.
                 def create_merge_key(df, cols):
                     return df[cols].astype(str).agg("_".join, axis=1)
 
-                review_df_key = create_merge_key(review_df, selected_merge_cols)
+                review_df_key = create_merge_key(aligned_review, selected_merge_cols)
                 merged_reviews_key = create_merge_key(
                     merged_reviews, selected_merge_cols
                 )
 
-                review_df.loc[review_df_key.isin(merged_reviews_key), "color"] = colour
+                aligned_review.loc[review_df_key.isin(merged_reviews_key), "color"] = (
+                    colour
+                )
+                review_df = aligned_review
 
             previous_colour = new_previous_colour
             previous_id = new_previous_id
@@ -4040,6 +5153,9 @@ def create_xfdf(
     if page_sizes:
         page_sizes_df = pd.DataFrame(page_sizes)
         if not page_sizes_df.empty and "mediabox_width" not in review_file_df.columns:
+            if "page" in review_file_df.columns and "page" in page_sizes_df.columns:
+                review_file_df["page"] = _coerce_page_series(review_file_df["page"])
+                page_sizes_df["page"] = _coerce_page_series(page_sizes_df["page"])
             review_file_df = review_file_df.merge(page_sizes_df, how="left", on="page")
         if "xmin" in review_file_df.columns and review_file_df["xmin"].max() <= 1:
             if (
@@ -4802,6 +5918,81 @@ def visualise_review_redaction_boxes(
         return str(out_path)
     except Exception:
         return None
+
+
+def _review_df_boxes_for_page(review_df: pd.DataFrame, page_num: int) -> list:
+    """Build annotator-style box dicts from review CSV rows for one page."""
+    if review_df is None or not isinstance(review_df, pd.DataFrame) or review_df.empty:
+        return []
+    if "page" not in review_df.columns:
+        return []
+    page_series = pd.to_numeric(review_df["page"], errors="coerce")
+    page_df = review_df.loc[page_series == int(page_num)]
+    if page_df.empty:
+        return []
+    boxes: list = []
+    for _, row in page_df.iterrows():
+        try:
+            boxes.append(
+                {
+                    "label": row.get("label", "Redaction"),
+                    "color": row.get("color", "(0, 0, 0)"),
+                    "xmin": float(row["xmin"]),
+                    "ymin": float(row["ymin"]),
+                    "xmax": float(row["xmax"]),
+                    "ymax": float(row["ymax"]),
+                }
+            )
+        except (TypeError, ValueError, KeyError):
+            continue
+    return boxes
+
+
+def build_review_redaction_export_annotator(
+    client_annotator: object,
+    annotate_current_page: float,
+    all_image_annotations: List[AnnotatedImageData],
+    page_sizes: List[dict],
+    review_df: Optional[pd.DataFrame] = None,
+) -> AnnotatedImageData:
+    """
+    Build a stable annotator payload for redaction overlay export.
+
+    Prefer session ``all_image_annotations`` (image path + boxes) over the live
+    Gradio client payload, which may reference ephemeral ``gradio_tmp`` paths or
+    omit boxes after layout reflow.
+    """
+    coerced = coerce_gradio_client_annotator_payload(
+        client_annotator,
+        annotate_current_page,
+        all_image_annotations,
+        page_sizes,
+    )
+    try:
+        page_num = max(1, int(annotate_current_page or 1))
+    except (TypeError, ValueError):
+        page_num = 1
+    page_idx = page_num - 1
+
+    boxes = coerced.get("boxes") or []
+    if all_image_annotations and 0 <= page_idx < len(all_image_annotations):
+        state_page = all_image_annotations[page_idx] or {}
+        state_boxes = state_page.get("boxes")
+        if isinstance(state_boxes, list) and state_boxes:
+            boxes = state_boxes
+        client_image = _extract_annotator_image_path(coerced.get("image"))
+        if _is_ephemeral_or_missing_annotator_image_path(client_image):
+            state_image = _extract_annotator_image_path(state_page.get("image"))
+            if state_image and not _is_ephemeral_or_missing_annotator_image_path(
+                state_image
+            ):
+                coerced["image"] = state_image
+
+    if not boxes:
+        boxes = _review_df_boxes_for_page(review_df, page_num)
+
+    coerced["boxes"] = boxes
+    return coerced
 
 
 def export_review_redaction_overlay_for_gradio(

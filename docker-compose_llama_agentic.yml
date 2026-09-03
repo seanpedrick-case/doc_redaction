@@ -8,11 +8,13 @@
 
 # docker compose -f docker-compose_llama_agentic.yml --profile 35b_36 up -d
 # docker compose -f docker-compose_llama_agentic.yml --profile 27b_36 up -d
+# docker compose -f docker-compose_llama_agentic.yml --profile 27b_38 up -d
 # docker compose -f docker-compose_llama_agentic.yml --profile gemma4-31b up -d
 # docker compose -f docker-compose_llama_agentic.yml --profile gemma4-26b up -d
 
-# For agentic usage with pi (pi-agent service name matches the active profile):
+# For agentic usage with pi (use the pi-agent* service that matches the profile):
 # docker compose -f docker-compose_llama_agentic.yml --profile 27b_36 up -d pi-agent
+# docker compose -f docker-compose_llama_agentic.yml --profile 27b_38 up -d pi-agent-38
 # docker compose -f docker-compose_llama_agentic.yml --profile 35b_36 up -d pi-agent-35b
 # docker compose -f docker-compose_llama_agentic.yml --profile gemma4-31b up -d pi-agent-gemma-31b
 # docker compose -f docker-compose_llama_agentic.yml --profile gemma4-26b up -d pi-agent-gemma-26b
@@ -92,6 +94,13 @@ x-pi-agent-env: &pi-agent-env
   AWS_PROFILE: ${AWS_PROFILE:-}
   RUN_AWS_FUNCTIONS: ${RUN_AWS_FUNCTIONS:-False}
   PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS: ${PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS:-True}
+  # Optional GuardDuty upload malware scan (needs RUN_AWS_FUNCTIONS=True + bucket)
+  SCAN_UPLOADS_FOR_MALWARE: ${SCAN_UPLOADS_FOR_MALWARE:-False}
+  MALWARE_SCAN_S3_BUCKET: ${MALWARE_SCAN_S3_BUCKET:-}
+  MALWARE_SCAN_S3_PREFIX: ${MALWARE_SCAN_S3_PREFIX:-upload-staging/}
+  MALWARE_SCAN_POLL_INTERVAL_SEC: ${MALWARE_SCAN_POLL_INTERVAL_SEC:-2.0}
+  MALWARE_SCAN_TIMEOUT_SEC: ${MALWARE_SCAN_TIMEOUT_SEC:-300.0}
+  MALWARE_SCAN_SHOW_CHECKING_INFO: ${MALWARE_SCAN_SHOW_CHECKING_INFO:-True}
   # AGENT_VLM_BASE_URL: http://llama-inference:8080
   RUN_FASTAPI: ${RUN_FASTAPI:-False}
   ROOT_PATH: ${ROOT_PATH:-}
@@ -144,7 +153,7 @@ services:
   # Qwen 3.6 27B model setup below requires 40GB of VRAM to run. For 24GB, Change to -hf-file parameter to Qwen3.6-27B-UD-Q4_K_XL.gguf, or Qwen3.6-27B-IQ4_NL.gguf
   qwen36-27b_q4_gguf:
     profiles: ["27b_36"]
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda12
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda13
     command:
       - -hf
       - unsloth/Qwen3.6-27B-MTP-GGUF # For
@@ -230,10 +239,99 @@ services:
         aliases:
           - llama-inference
 
+  # Qwen 3.8 27B model setup below requires 40GB of VRAM to run. For 24GB, Change to -hf-file parameter to Qwen3.8-27B-UD-Q4_K_XL.gguf, or Qwen3.8-27B-IQ4_NL.gguf
+  qwen38-27b_q4_gguf:
+    profiles: ["27b_38"]
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda13
+    command:
+      - -hf
+      - unsloth/Qwen3.8-27B-GGUF # For
+      - --hf-file
+      - Qwen3.8-27B-UD-Q6_K_XL.gguf
+      - --mmproj-url
+      - https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/resolve/main/mmproj-BF16.gguf
+      - --n-gpu-layers
+      - "-1"
+      # - -mg
+      # - "0"
+      # - -dev 
+      # - "cuda0,cuda1"
+      # - -sm
+      # - "row"
+      - --tensor-split
+      - "24,14"
+      - --ctx-size
+      - "114688"
+      - -ub
+      - "512"
+      - --fit
+      - "off"
+      - --temp
+      - "0.6"
+      - --top-k
+      - "20"
+      - --top-p
+      - "0.95"
+      - --min-p
+      - "0.0"
+      - --frequency-penalty
+      - "1"
+      - --presence-penalty
+      - "0.0"
+      - --jinja
+      - --chat-template-file
+      - /templates/chat_template.jinja
+      - --chat-template-kwargs
+      - "{\"preserve_thinking\": true, \"reasoning_effort\": \"medium\"}"
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8080"
+      - --no-warmup
+      - --seed
+      - "42"
+      - --image_min_tokens
+      - "300"
+      - --parallel
+      - "1"
+      - --cache-type-k
+      - "q8_0"
+      - --cache-type-v
+      - "q8_0"
+      - --spec-type
+      - "draft-mtp"
+      - --spec-draft-n-max
+      - "2"
+    ports:
+      - "8001:8080"
+    volumes:
+      - ./models:/models
+      - ./skills/chat_template.jinja:/templates/chat_template.jinja:ro
+      - hf-llama-cache-qwen38-27b:/root/.cache/llama.cpp
+      - hf-hub-cache-qwen38-27b:/root/.cache/huggingface
+    pull_policy: always
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/v1/models >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 8
+      start_period: 1200s
+    networks:
+      redaction-net-llama:
+        aliases:
+          - llama-inference
+
    # Qwen 3.5 35B model setup below requires 24GB of VRAM with n-cpu-moe set to 0. For lower VRAM systems, n-cpu-moe ~ 40 could work for a 12GB VRAM system, and n-cpu-moe ~ 20 for a 16GB VRAM system.
   qwen36-35b_q4_gguf:
     profiles: ["35b_36"]
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda12
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda13
     command:
       - -hf
       - unsloth/Qwen3.6-35B-A3B-GGUF
@@ -312,7 +410,7 @@ services:
    # Gemma 4 31B model setup below requires 40GB of VRAM to run with the following settings
   gemma4-31b_q4_gguf:
     profiles: ["gemma4-31b"]
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda12
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda13
     command:
       - -hf
       - unsloth/gemma-4-31B-it-qat-GGUF
@@ -392,7 +490,7 @@ services:
  # Gemma 4 26B model setup below requires 24GB+ of VRAM to run.
   gemma4-26b_q4_gguf:
     profiles: ["gemma4-26b"]
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda12
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda13
     command:
       - -hf
       - unsloth/gemma-4-26B-A4B-it-GGUF
@@ -470,7 +568,7 @@ services:
 
   redaction-app-llama:
     <<: *redaction-app-env
-    profiles: ["35b_36", "27b_36", "gemma4-31b", "gemma4-26b"]
+    profiles: ["35b_36", "27b_36", "27b_38", "gemma4-31b", "gemma4-26b"]
     image: redaction-app-main
     build:
       context: .              # Look in the current folder
@@ -487,6 +585,9 @@ services:
         condition: service_healthy
         required: false
       qwen36-27b_q4_gguf:
+        condition: service_healthy
+        required: false
+      qwen38-27b_q4_gguf:
         condition: service_healthy
         required: false
       gemma4-31b_q4_gguf:
@@ -666,12 +767,17 @@ services:
         aliases:
           - redaction-app-llama
 
+  # Qwen 3.6 27B agent. Do not pass this service with --profile 27b_38 (that starts 3.6 as well); use pi-agent-38.
   pi-agent:
     <<: *pi-agent-common
     profiles: ["27b_36"]
     depends_on:
       qwen36-27b_q4_gguf:
         condition: service_healthy
+        required: false
+      qwen38-27b_q4_gguf:
+        condition: service_healthy
+        required: false
       redaction-app-llama:
         condition: service_started
     environment:
@@ -680,6 +786,21 @@ services:
       AGENT_LLAMA_CONTEXT_WINDOW: ${AGENT_LLAMA_CONTEXT_WINDOW:-114688}
       AGENT_LLAMA_MAX_TOKENS: ${AGENT_LLAMA_MAX_TOKENS:-32768}
       AGENT_VLM_MODEL: ${AGENT_VLM_MODEL:-unsloth/Qwen3.6-27B-MTP-GGUF}
+
+  pi-agent-38:
+    <<: *pi-agent-common
+    profiles: ["27b_38"]
+    depends_on:
+      qwen38-27b_q4_gguf:
+        condition: service_healthy
+      redaction-app-llama:
+        condition: service_started
+    environment:
+      <<: *pi-agent-env
+      AGENT_LLAMA_MODEL_ID: ${AGENT_LLAMA_MODEL_ID:-unsloth/Qwen3.8-27B-GGUF}
+      AGENT_LLAMA_CONTEXT_WINDOW: ${AGENT_LLAMA_CONTEXT_WINDOW:-114688}
+      AGENT_LLAMA_MAX_TOKENS: ${AGENT_LLAMA_MAX_TOKENS:-32768}
+      AGENT_VLM_MODEL: ${AGENT_VLM_MODEL:-unsloth/Qwen3.8-27B-GGUF}
 
   pi-agent-35b:
     <<: *pi-agent-common
@@ -775,10 +896,12 @@ networks:
 volumes:
   hf-llama-cache-qwen36-35b:
   hf-llama-cache-qwen36-27b:
+  hf-llama-cache-qwen38-27b:
   hf-llama-cache-gemma4-31b:
   hf-llama-cache-gemma4-26b:
   hf-hub-cache-qwen36-35b:
   hf-hub-cache-qwen36-27b:
+  hf-hub-cache-qwen38-27b:
   hf-hub-cache-gemma4-31b:
   hf-hub-cache-gemma4-26b:
   pi-agent-sessions:

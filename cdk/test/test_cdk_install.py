@@ -597,6 +597,8 @@ def test_build_pi_agent_env_values_express_skips_root_path():
     env = inst.build_pi_agent_env_values(answers)
     assert env["RUN_FASTAPI"] == "True"
     assert "AGENT_ROOT_PATH" not in env
+    assert env["SCAN_UPLOADS_FOR_MALWARE"] == "True"
+    assert env["MALWARE_SCAN_S3_BUCKET"].endswith("s3-malware-scan")
 
 
 def test_build_env_values_pi_production_host():
@@ -640,6 +642,9 @@ def test_build_pi_agent_env_values():
     assert values["AGENT_DEPLOYMENT_PROFILE"] == "aws-ecs"
     assert values["DOC_REDACTION_GRADIO_URL"] == "http://redaction:7860"
     assert values["AGENT_ROOT_PATH"] == "/pi"
+    assert values["SCAN_UPLOADS_FOR_MALWARE"] == "True"
+    assert values["MALWARE_SCAN_S3_BUCKET"].endswith("s3-malware-scan")
+    assert values["RUN_AWS_FUNCTIONS"] == "True"
 
 
 def test_apply_agentic_cli_flags_enable_agentic_demo():

@@ -2686,8 +2686,11 @@ def submit_redaction_task(
     try:
         client = _ensure_pi_client_for_redaction(client, session_hash)
     except PiRpcError as exc:
+        history = list(history or [])
+        history.append({"role": "user", "content": chat_summary})
+        history.append({"role": "assistant", "content": str(exc)})
         yield (
-            [],
+            _clone_history(history),
             client,
             "",
             _format_activity([f"**Redaction task error:** {exc}"]),

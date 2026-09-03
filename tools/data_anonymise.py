@@ -41,6 +41,8 @@ from tools.config import (
     FULL_COMPREHEND_ENTITY_LIST,
     INFERENCE_SERVER_PII_OPTION,
     LLM_MAX_NEW_TOKENS,
+    LLM_PII_LOCAL_MAX_CONCURRENT_REQUESTS,
+    LLM_PII_MAX_CONCURRENT_REQUESTS,
     LLM_TEMPERATURE,
     LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
     LOCAL_TRANSFORMERS_LLM_PII_OPTION,
@@ -51,6 +53,8 @@ from tools.config import (
     OUTPUT_FOLDER,
     PRIORITISE_SSO_OVER_AWS_ENV_ACCESS_KEYS,
     RUN_AWS_FUNCTIONS,
+    SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL,
+    USE_TRANSFORMERS_VLM_MODEL_AS_LLM,
     aws_comprehend_language_choices,
 )
 from tools.helper_functions import (
@@ -75,10 +79,17 @@ from tools.secure_path_utils import secure_join
 # AWS Comprehend billing: 1 unit = 100 characters (entity recognition, PII, etc.)
 COMPREHEND_CHARACTERS_PER_UNIT = 100
 
-# Max concurrent API calls for Bedrock/LLM (avoid rate limits; Comprehend uses MAX_WORKERS)
-LLM_PII_MAX_CONCURRENT_REQUESTS = min(MAX_WORKERS, 10)
-
 _COMPREHEND_CONNECTIVITY_PROBE_TEXT = "connectivity check"
+
+
+def tabular_llm_pii_max_workers(pii_identification_method: str) -> int:
+    """Concurrent cell queries for tabular LLM PII. Local GPU / one replica = 1."""
+    if pii_identification_method in (
+        LOCAL_TRANSFORMERS_LLM_PII_OPTION,
+        INFERENCE_SERVER_PII_OPTION,
+    ):
+        return LLM_PII_LOCAL_MAX_CONCURRENT_REQUESTS
+    return LLM_PII_MAX_CONCURRENT_REQUESTS
 
 
 def _is_non_retryable_aws_error(exc: Exception) -> bool:
@@ -804,6 +815,9 @@ def anonymise_files_with_open_text(
     - custom_llm_instructions (str, optional): Custom instructions for LLM entity detection (tabular). Defaults to "".
     - chosen_llm_entities (List[str], optional): Entity types to detect when using LLM PII method (tabular). Defaults to None (uses chosen_redact_comprehend_entities).
     """
+    from tools.malware_scan import require_files_malware_scanned
+
+    require_files_malware_scanned(file_paths)
 
     tic = time.perf_counter()
     comprehend_client = ""
@@ -1887,10 +1901,12 @@ def anonymise_script(
         if text_analyzer_kwargs.get("inference_method") is None:
             text_analyzer_kwargs["inference_method"] = "local"
 
-        # Set model choice if not already set - use LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+        # Set model choice if not already set - use VLM when USE_TRANSFORMERS_VLM_MODEL_AS_LLM
         if text_analyzer_kwargs.get("model_choice") is None:
             text_analyzer_kwargs["model_choice"] = (
-                LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+                SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+                if USE_TRANSFORMERS_VLM_MODEL_AS_LLM
+                else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
             )
 
         # Use the same logic as AWS_LLM_PII_OPTION for the rest
@@ -2057,17 +2073,29 @@ def anonymise_script(
             return (column_name, text_idx, text_str, [], 0, 0, None)
 
         max_llm_workers = (
-            min(LLM_PII_MAX_CONCURRENT_REQUESTS, len(llm_tasks)) if llm_tasks else 1
+            min(tabular_llm_pii_max_workers(pii_identification_method), len(llm_tasks))
+            if llm_tasks
+            else 1
         )
-        with ThreadPoolExecutor(max_workers=max_llm_workers) as executor:
-            llm_results = list(
-                progress.tqdm(
-                    executor.map(_run_llm_task, llm_tasks),
-                    total=len(llm_tasks),
-                    desc="Querying LLM service.",
-                    unit="cells",
+        if max_llm_workers <= 1:
+            llm_results = []
+            for item in progress.tqdm(
+                llm_tasks,
+                total=len(llm_tasks),
+                desc="Querying LLM service.",
+                unit="cells",
+            ):
+                llm_results.append(_run_llm_task(item))
+        else:
+            with ThreadPoolExecutor(max_workers=max_llm_workers) as executor:
+                llm_results = list(
+                    progress.tqdm(
+                        executor.map(_run_llm_task, llm_tasks),
+                        total=len(llm_tasks),
+                        desc="Querying LLM service.",
+                        unit="cells",
+                    )
                 )
-            )
 
         for (
             column_name,

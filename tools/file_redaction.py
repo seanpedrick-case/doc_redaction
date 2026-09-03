@@ -98,9 +98,11 @@ from tools.config import (
     RUN_AWS_FUNCTIONS,
     SAVE_PAGE_OCR_VISUALISATIONS,
     SELECTABLE_TEXT_EXTRACT_OPTION,
+    SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL,
     TESSERACT_MAX_WORKERS,
     TEXTRACT_TEXT_EXTRACT_OPTION,
     USE_GUI_BOX_COLOURS_FOR_OUTPUTS,
+    USE_TRANSFORMERS_VLM_MODEL_AS_LLM,
     aws_comprehend_language_choices,
     textract_language_choices,
 )
@@ -143,6 +145,7 @@ from tools.helper_functions import (
     get_textract_file_suffix,
     line_level_ocr_row,
     normalize_line_level_ocr_df,
+    pymupdf_annot_str,
 )
 from tools.load_spacy_model_custom_recognisers import (
     CustomWordFuzzyRecognizer,
@@ -1023,6 +1026,14 @@ def run_custom_vlm_only_pass(
     )
 
 
+def _mark_generated_ocr_paths_malware_clean(*path_groups: Any) -> None:
+    """Treat redactor-written OCR CSV paths as already scan-clean."""
+    from tools.malware_scan import mark_app_generated_files_malware_clean
+
+    for group in path_groups:
+        mark_app_generated_files_malware_clean(group)
+
+
 def _choose_and_run_redactor_impl(
     file_paths: List[str],
     prepared_pdf_file_paths: Optional[List[str]] = None,
@@ -1460,6 +1471,10 @@ def _choose_and_run_redactor_impl(
 
         page_break_return = True
 
+        _mark_generated_ocr_paths_malware_clean(
+            duplication_file_path_outputs, ocr_review_files
+        )
+
         return (
             combined_out_message,
             out_file_paths,
@@ -1698,6 +1713,10 @@ def _choose_and_run_redactor_impl(
                     review_out_file_paths.append(review_file_path)
 
         page_break_return = False
+
+        _mark_generated_ocr_paths_malware_clean(
+            duplication_file_path_outputs, ocr_review_files
+        )
 
         return (
             combined_out_message,
@@ -4130,6 +4149,10 @@ def _choose_and_run_redactor_impl(
         p for p in ocr_review_files if isinstance(p, str) and os.path.exists(p)
     ]
 
+    _mark_generated_ocr_paths_malware_clean(
+        duplication_file_path_outputs, ocr_review_files
+    )
+
     return (
         combined_out_message,
         out_file_paths,
@@ -5030,8 +5053,10 @@ def redact_single_box(
     pymupdf_x2 = pymupdf_rect[2]
     pymupdf_y2 = pymupdf_rect[3]
 
-    img_annotation_box["text"] = img_annotation_box.get("text") or ""
-    img_annotation_box["label"] = img_annotation_box.get("label") or "Redaction"
+    img_annotation_box["text"] = pymupdf_annot_str(img_annotation_box.get("text"))
+    img_annotation_box["label"] = pymupdf_annot_str(
+        img_annotation_box.get("label"), "Redaction"
+    )
 
     # Full size redaction box for covering all the text of a word
     full_size_redaction_box = Rect(
@@ -5176,6 +5201,7 @@ def redact_whole_pymupdf_page(
     # Match word-level redactions: define_box_colour uses this when GUI/output colours are on.
     whole_page_img_annotation_box["color"] = CUSTOM_BOX_COLOUR
     whole_page_img_annotation_box["label"] = "Whole page"
+    whole_page_img_annotation_box["text"] = ""
 
     if redact_pdf is True:
         redact_single_box(
@@ -5541,15 +5567,17 @@ def redact_page_with_pymupdf(
                         pymupdf_x2 = img_annotation_box["xmax"]
                         pymupdf_y2 = img_annotation_box["ymax"]
 
-                    if "text" in annot and annot["text"]:
-                        img_annotation_box["text"] = str(annot["text"])
-                    else:
-                        img_annotation_box["text"] = ""
-
                     rect = Rect(
                         pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2
                     )  # Create the PyMuPDF Rect (display space when from image/gradio)
                     rect = _rect_display_to_unrotated(page, rect)
+
+                img_annotation_box["text"] = pymupdf_annot_str(
+                    img_annotation_box.get("text")
+                )
+                img_annotation_box["label"] = pymupdf_annot_str(
+                    img_annotation_box.get("label"), "Redaction"
+                )
 
             # Else should be CustomImageRecognizerResult
             elif isinstance(annot, CustomImageRecognizerResult):
@@ -9344,9 +9372,10 @@ def redact_image_pdf(
                     elif pii_identification_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION:
                         # Set up local transformers LLM parameters
                         text_analyzer_kwargs["inference_method"] = "local"
-                        # Use LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE as default model for local transformers
                         text_analyzer_kwargs["model_choice"] = (
-                            LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+                            SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+                            if USE_TRANSFORMERS_VLM_MODEL_AS_LLM
+                            else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
                         )
 
                     # Optional additional Bedrock VLM pass to detect people

@@ -19,9 +19,10 @@ jobs:
       - name: Install Git LFS
         run: git lfs install
 
-      # HF Spaces read Space config from README.md front matter. The repo README
-      # targets GitHub (e.g. docker); patch only this CI checkout before HF push.
-      - name: Apply HF Zero GPU Space README front matter
+      # HF Spaces read Space config from README.md front matter, and ZeroGPU
+      # rejects torch newer than 2.11.0. The GitHub copies stay unchanged;
+      # patch only this CI checkout before HF push.
+      - name: Apply HF Zero GPU Space README and torch pins
         run: python3 tools/apply_hf_zero_gpu_readme_frontmatter.py
 
       - name: Recreate repo history (single-commit force push)

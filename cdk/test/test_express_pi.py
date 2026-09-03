@@ -45,6 +45,9 @@ def test_build_pi_express_container_environment():
     assert env["AGENT_DEPLOYMENT_PROFILE"] == "aws-ecs"
     assert env["COGNITO_AUTH"] == "True"
     assert env["RUN_FASTAPI"] == "True"
+    assert env["RUN_AWS_FUNCTIONS"] == "True"
+    assert env["SCAN_UPLOADS_FOR_MALWARE"]
+    assert env["MALWARE_SCAN_S3_BUCKET"]
 
 
 def test_build_pi_express_container_environment_agentcore_public_url():
