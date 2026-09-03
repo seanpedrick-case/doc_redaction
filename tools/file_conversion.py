@@ -40,6 +40,7 @@ from tools.config import (
 )
 from tools.helper_functions import (
     get_file_name_without_type,
+    pymupdf_annot_str,
     read_file,
 )
 from tools.secure_path_utils import (
@@ -1380,8 +1381,10 @@ def combine_review_pdf_files(file_list, output_folder: str = OUTPUT_FOLDER):
                 rect = annot.rect
                 annot_colors = annot.colors or {}
                 annot_info = annot.info or {}
-                title = annot_info.get("title", "Redaction")
-                content = annot_info.get("content", "")
+                title = pymupdf_annot_str(
+                    annot_info.get("title", "Redaction"), "Redaction"
+                )
+                content = pymupdf_annot_str(annot_info.get("content", ""))
                 # Skip duplicate: same position and same label/text content
                 if _dst_page_has_duplicate_redact(dst_page, rect, title, content):
                     continue
@@ -1393,9 +1396,11 @@ def combine_review_pdf_files(file_list, output_folder: str = OUTPUT_FOLDER):
                 new_annot.set_info(
                     info=title,
                     title=title,
-                    subject=annot_info.get("subject", "Redaction"),
+                    subject=pymupdf_annot_str(
+                        annot_info.get("subject", "Redaction"), "Redaction"
+                    ),
                     content=content,
-                    creationDate=annot_info.get("creationDate", ""),
+                    creationDate=pymupdf_annot_str(annot_info.get("creationDate", "")),
                 )
                 new_annot.update(opacity=0.5, cross_out=False)
         other_doc.close()
@@ -2969,7 +2974,11 @@ def convert_annotation_data_to_dataframe(all_annotations: List[Dict[str, Any]]):
     final_col_order = base_cols + essential_box_cols + extra_box_cols
     final_col_order = [c for c in final_col_order if c in df.columns]
     df = df.select(final_col_order)
-    return df.to_pandas()
+    out_df = df.to_pandas()
+    for col in ("text", "label", "id"):
+        if col in out_df.columns:
+            out_df[col] = out_df[col].fillna("")
+    return out_df
 
 
 def create_annotation_dicts_from_annotation_df(
@@ -3951,6 +3960,11 @@ def convert_review_df_to_annotation_json(
         # Ensure page column is nullable integer type for reliable grouping
         if "page" in review_file_df.columns:
             review_file_df["page"] = review_file_df["page"].astype("Int64")
+        for col in ("text", "label", "id"):
+            if col in review_file_df.columns:
+                review_file_df[col] = review_file_df[col].map(
+                    lambda v: pymupdf_annot_str(v)
+                )
 
     # --- Group Annotations by Page ---
     output_cols_for_boxes = [

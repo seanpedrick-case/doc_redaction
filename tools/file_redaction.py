@@ -145,6 +145,7 @@ from tools.helper_functions import (
     get_textract_file_suffix,
     line_level_ocr_row,
     normalize_line_level_ocr_df,
+    pymupdf_annot_str,
 )
 from tools.load_spacy_model_custom_recognisers import (
     CustomWordFuzzyRecognizer,
@@ -5052,8 +5053,10 @@ def redact_single_box(
     pymupdf_x2 = pymupdf_rect[2]
     pymupdf_y2 = pymupdf_rect[3]
 
-    img_annotation_box["text"] = img_annotation_box.get("text") or ""
-    img_annotation_box["label"] = img_annotation_box.get("label") or "Redaction"
+    img_annotation_box["text"] = pymupdf_annot_str(img_annotation_box.get("text"))
+    img_annotation_box["label"] = pymupdf_annot_str(
+        img_annotation_box.get("label"), "Redaction"
+    )
 
     # Full size redaction box for covering all the text of a word
     full_size_redaction_box = Rect(
@@ -5198,6 +5201,7 @@ def redact_whole_pymupdf_page(
     # Match word-level redactions: define_box_colour uses this when GUI/output colours are on.
     whole_page_img_annotation_box["color"] = CUSTOM_BOX_COLOUR
     whole_page_img_annotation_box["label"] = "Whole page"
+    whole_page_img_annotation_box["text"] = ""
 
     if redact_pdf is True:
         redact_single_box(
@@ -5563,15 +5567,17 @@ def redact_page_with_pymupdf(
                         pymupdf_x2 = img_annotation_box["xmax"]
                         pymupdf_y2 = img_annotation_box["ymax"]
 
-                    if "text" in annot and annot["text"]:
-                        img_annotation_box["text"] = str(annot["text"])
-                    else:
-                        img_annotation_box["text"] = ""
-
                     rect = Rect(
                         pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2
                     )  # Create the PyMuPDF Rect (display space when from image/gradio)
                     rect = _rect_display_to_unrotated(page, rect)
+
+                img_annotation_box["text"] = pymupdf_annot_str(
+                    img_annotation_box.get("text")
+                )
+                img_annotation_box["label"] = pymupdf_annot_str(
+                    img_annotation_box.get("label"), "Redaction"
+                )
 
             # Else should be CustomImageRecognizerResult
             elif isinstance(annot, CustomImageRecognizerResult):

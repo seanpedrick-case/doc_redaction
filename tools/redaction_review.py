@@ -72,6 +72,7 @@ from tools.helper_functions import (
     detect_file_type,
     get_file_name_without_type,
     get_ocr_visualisation_font_path,
+    pymupdf_annot_str,
 )
 from tools.secure_path_utils import (
     sanitize_filename,
@@ -198,6 +199,22 @@ def _ensure_numeric_columns(
         else:
             df[col] = numeric.astype("float64")
     return df
+
+
+def _annotation_records_from_review_df(
+    df: pd.DataFrame, columns: List[str]
+) -> List[dict]:
+    """Convert review rows to annotator box dicts with PyMuPDF-safe string fields.
+
+    Duplicate-page whole-page rows often have missing ``text``, which pandas
+    stores as NaN. ``DataFrame.to_dict`` would leave that as float NaN.
+    """
+    frame = df.loc[:, [c for c in columns if c in df.columns]].copy()
+    for col in ("text", "label", "id"):
+        if col not in frame.columns:
+            continue
+        frame[col] = frame[col].map(lambda v: pymupdf_annot_str(v))
+    return frame.to_dict(orient="records")
 
 
 def _page_to_image_map(page_sizes: List[Dict]) -> Dict:
@@ -815,8 +832,8 @@ def update_annotator_page_from_review_df(
                         "Using unscaled coordinates for this page."
                     )
 
-                page_boxes = page_review[expected_annotation_keys].to_dict(
-                    orient="records"
+                page_boxes = _annotation_records_from_review_df(
+                    page_review, expected_annotation_keys
                 )
                 out_image_annotations_state[page_idx]["boxes"] = page_boxes
 
@@ -873,9 +890,9 @@ def update_annotator_page_from_review_df(
 
             # Convert filtered DataFrame rows to list of dicts
             # Using .to_dict(orient='records') is efficient for this
-            current_page_annotations_list_raw = current_page_review_df[
-                expected_annotation_keys
-            ].to_dict(orient="records")
+            current_page_annotations_list_raw = _annotation_records_from_review_df(
+                current_page_review_df, expected_annotation_keys
+            )
 
             current_page_annotations_list = current_page_annotations_list_raw
 
@@ -2369,9 +2386,10 @@ def update_annotator_object_and_filter_df(
                 ).fillna(0.0)
 
         # Convert the processed DataFrame back to the list of dicts format for the annotator
-        processed_current_page_annotations_list = current_page_annotations_df[
-            ["xmin", "xmax", "ymin", "ymax", "label", "color", "text", "id"]
-        ].to_dict(orient="records")
+        processed_current_page_annotations_list = _annotation_records_from_review_df(
+            current_page_annotations_df,
+            ["xmin", "xmax", "ymin", "ymax", "label", "color", "text", "id"],
+        )
 
         view_orientation = _normalize_view_orientation(
             page_data_for_display.get("orientation")
@@ -2501,9 +2519,9 @@ def update_annotator_object_and_filter_df(
                         "id",
                     ]
                     keep_cols = [c for c in keep_cols if c in boxes_df.columns]
-                    current_page_image_annotator_object["boxes"] = boxes_df[
-                        keep_cols
-                    ].to_dict(orient="records")
+                    current_page_image_annotator_object["boxes"] = (
+                        _annotation_records_from_review_df(boxes_df, keep_cols)
+                    )
             except Exception as e:
                 print(
                     f"Warning: failed to re-scale boxes after on-demand render for page {gradio_annotator_current_page_number}: {e}"

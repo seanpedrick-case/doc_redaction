@@ -30,7 +30,7 @@ services:
   # Qwen 3.6 27B model setup below requires 40GB of VRAM to run. For 24GB, Change to -hf-file parameter to Qwen3.6-27B-UD-Q4_K_XL.gguf, or Qwen3.6-27B-IQ4_NL.gguf
   qwen36-27b_q4_gguf:
     profiles: ["27b_36"]
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda12
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda13
     command:
       - -hf
       - unsloth/Qwen3.6-MTP-27B-GGUF
@@ -109,7 +109,7 @@ services:
   # Qwen 3.8 27B model setup below requires 40GB of VRAM to run. For 24GB, Change to -hf-file parameter to Qwen3.8-27B-UD-Q4_K_XL.gguf, or Qwen3.8-27B-IQ4_NL.gguf
   qwen38-27b_q4_gguf:
     profiles: ["27b_38"]
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda12
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda13
     command:
       - -hf
       - unsloth/Qwen3.8-27B-GGUF
@@ -191,7 +191,7 @@ services:
    # Qwen 3.6 35B model setup below requires 24GB of VRAM with n-cpu-moe set to 0. For lower VRAM systems, n-cpu-moe ~ 40 could work for a 12GB VRAM system, and n-cpu-moe ~ 20 for a 16GB VRAM system.
   qwen36-35b_q4_gguf:
     profiles: ["35b_36"]
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda12
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda13
     command:
       - -hf
       - unsloth/Qwen3.6-35B-A3B-GGUF
@@ -258,7 +258,7 @@ services:
           - llama-inference
   qwen9b_q4_gguf:
     profiles: ["9b"]
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda12
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda13
     command:
       - -hf
       - unsloth/Qwen3.5-9B-GGUF
@@ -327,7 +327,7 @@ services:
    # Gemma 4 31B model setup below requires 24GB+ of VRAM to run.
   gemma4-31b_q4_gguf:
     profiles: ["gemma4-31b"]
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda12
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda13
     command:
       - -hf
       - unsloth/gemma-4-31B-it-GGUF
@@ -398,7 +398,7 @@ services:
  # Gemma 4 26B model setup below requires 24GB+ of VRAM to run.
   gemma4-26b_q4_gguf:
     profiles: ["gemma4-26b"]
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda12
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda13
     command:
       - -hf
       - unsloth/gemma-4-26B-A4B-it-GGUF
@@ -458,7 +458,7 @@ services:
 
   gemma4-12b_q4_gguf:
     profiles: ["gemma4-12b"]
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda12
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda13
     command:
       - -hf
       - unsloth/gemma-4-12B-it-qat-GGUF

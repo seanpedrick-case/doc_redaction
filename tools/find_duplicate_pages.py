@@ -1995,10 +1995,11 @@ def apply_whole_page_redactions_from_list(
         "id",
     ]
     for col in expected_cols:
+        default = "" if col in ("text", "label", "id") else pd.NA
         if col not in review_file_state.columns:
-            review_file_state[col] = pd.NA
+            review_file_state[col] = default
         if col not in whole_page_review_file.columns:
-            whole_page_review_file[col] = pd.NA
+            whole_page_review_file[col] = default
 
     # Avoid concat with empty/all-NA to prevent FutureWarning (pandas 2.1+)
     if review_file_state.empty:
@@ -2013,6 +2014,9 @@ def apply_whole_page_redactions_from_list(
             if col in new_part.columns and new_part[col].isna().all():
                 new_part[col] = new_part[col].astype(object)
         review_file_out = pd.concat([state, new_part], ignore_index=True)
+    for col in ("text", "label", "id"):
+        if col in review_file_out.columns:
+            review_file_out[col] = review_file_out[col].fillna("")
     review_file_out = review_file_out.sort_values(
         by=["page", "ymin", "xmin"]
     ).reset_index(drop=True)

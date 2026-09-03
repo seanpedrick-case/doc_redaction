@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from math import ceil
 from pathlib import Path
-from typing import List, Set
+from typing import Any, List, Set
 
 import gradio as gr
 import numpy as np
@@ -165,6 +165,27 @@ def extract_last_balanced_json_array(text: str):
         else:
             search_from = start_idx + 1
     return last
+
+
+def pymupdf_annot_str(value: Any, default: str = "") -> str:
+    """Coerce annotation title/content to a Python ``str`` for PyMuPDF.
+
+    ``pdf_set_annot_contents`` requires ``char const *``. Missing text from
+    whole-page / duplicate-page review rows often arrives as ``NaN`` (truthy),
+    so ``value or ""`` is not a safe fallback.
+    """
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
 
 
 SESSION_GC_PAGE_THRESHOLD = 30

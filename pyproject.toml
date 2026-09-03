@@ -84,7 +84,6 @@ test = ["pytest", "pytest-cov"]
 # Extra dependencies for PaddleOCR
 # The following installs the CPU version of paddleOCR. paddleOCR is now run via torch, and a GPU version of torch can be installed manually by using: pip install torch==2.13.0 torchvision==0.28.0 --index-url https://download.pytorch.org/whl/cu130 after installation
 paddle = [
-    "protobuf<=7.34.0",
     "paddlepaddle>=3.0.0,<=3.3.1", 
     "paddleocr<=3.7.0",
     "torch<=2.13.0",
