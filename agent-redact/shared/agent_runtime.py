@@ -137,8 +137,9 @@ class AgentRuntime(ABC):
 class PiAgentRuntime(AgentRuntime):
     """Adapter around :class:`pi_rpc_client.PiRpcClient`."""
 
-    def __init__(self, client: Any) -> None:
+    def __init__(self, client: Any, session_hash: str | None = None) -> None:
         self._client = client
+        self._session_hash = session_hash
 
     @property
     def orchestrator(self) -> str:
@@ -168,13 +169,27 @@ class PiAgentRuntime(AgentRuntime):
     def prompt_events(self, message: str) -> Iterator[AgentStreamEvent]:
         from pi_rpc_client import PiStreamEvent
 
-        for event in self._client.prompt_events(message):
-            if isinstance(event, PiStreamEvent):
-                yield _pi_event_to_agent_event(event)
-            elif isinstance(event, AgentStreamEvent):
-                yield event
-            else:
-                yield AgentStreamEvent(kind="status", text=str(event))
+        def _mapped() -> Iterator[AgentStreamEvent]:
+            for event in self._client.prompt_events(message):
+                if isinstance(event, PiStreamEvent):
+                    yield _pi_event_to_agent_event(event)
+                elif isinstance(event, AgentStreamEvent):
+                    yield event
+                else:
+                    yield AgentStreamEvent(kind="status", text=str(event))
+
+        try:
+            from eval.arize_monitoring import iter_pi_events_with_tracing
+        except ImportError:
+            yield from _mapped()
+            return
+
+        yield from iter_pi_events_with_tracing(
+            _mapped(),
+            session_hash=self._session_hash,
+            message=message,
+            get_session_stats=self.get_session_stats,
+        )
 
     def get_state(self) -> dict[str, Any]:
         return dict(self._client.get_state())
@@ -242,9 +257,17 @@ def create_agent_runtime(session_hash: str | None = None) -> AgentRuntime:
         from agentcore_harness_runtime import AgentCoreHarnessRuntime
 
         return AgentCoreHarnessRuntime(session_hash=session_hash)
+    # Pi: register Phoenix/AX exporter without LangChainInstrumentor; spans come
+    # from iter_pi_events_with_tracing over the RPC event stream.
+    try:
+        from eval.arize_monitoring import setup_arize_ax_tracing
+
+        setup_arize_ax_tracing(instrument_langchain=False)
+    except ImportError:
+        pass
     from pi_rpc_client import default_client
 
-    return PiAgentRuntime(default_client(session_hash))
+    return PiAgentRuntime(default_client(session_hash), session_hash=session_hash)
 
 
 def start_agent_prompt_event_worker(

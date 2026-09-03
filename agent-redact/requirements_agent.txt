@@ -32,7 +32,7 @@ langchain-openai<=1.6.0
 langchain-aws<=1.7.4
 langchain-google-genai<=4.3.6
 
-# --- Arize AX / Phoenix tracing (optional; LangGraph only — see config/agent.env.example ARIZE_*) ---
+# --- Arize AX / Phoenix tracing (optional; LangGraph + Pi — see config/agent.env.example ARIZE_*) ---
 arize-otel<=0.13.0
 arize-phoenix-otel<=0.17.1
 arize-phoenix<=20.4.0
