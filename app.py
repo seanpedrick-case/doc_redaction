@@ -462,7 +462,9 @@ from tools.quickstart import (
     update_step_4_visibility,
 )
 from tools.redaction_review import (
+    REVIEW_TAB_ANNOTATOR_REFRESH_DELAY_SECONDS,
     apply_redactions_to_review_df_and_files_for_review_ui,
+    arm_review_tab_annotator_refresh_from_programmatic_open,
     convert_df_to_xfdf,
     convert_xfdf_to_dataframe,
     create_annotation_objects_from_filtered_ocr_results_with_words,
@@ -479,7 +481,9 @@ from tools.redaction_review import (
     increase_bottom_page_count_based_on_top,
     increase_page,
     persist_annotator_canvas_and_refresh_review_ui,
-    persist_current_page_and_refresh_annotator,
+    persist_current_page_and_refresh_annotator_if_review_tab,
+    record_selected_tab_and_arm_review_annotator_refresh,
+    refresh_annotator_on_review_tab_shown,
     reset_dropdowns,
     undo_last_removal,
     update_all_entity_df_dropdowns,
@@ -1782,6 +1786,12 @@ with blocks:
         value=REVIEW_ANNOTATOR_AUTO_PERSIST_SECONDS,
         active=REVIEW_ANNOTATOR_AUTO_PERSIST_ENABLED,
     )
+    # One-shot: re-push Review annotator boxes after the tab has laid out.
+    review_tab_annotator_refresh_timer = gr.Timer(
+        value=REVIEW_TAB_ANNOTATOR_REFRESH_DELAY_SECONDS,
+        active=False,
+    )
+    selected_main_tab_state = gr.State(value=0 if SHOW_QUICKSTART else 1)
 
     with gr.Accordion("API for agents (quickstart)", open=False, visible=False):
         gr.Markdown("""
@@ -6649,8 +6659,9 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
     )
 
     tabs.select(
-        fn=None,
-        # js=REVIEW_ANNOTATOR_TAB_SELECT_NUDGE_JS,
+        record_selected_tab_and_arm_review_annotator_refresh,
+        inputs=None,
+        outputs=[selected_main_tab_state, review_tab_annotator_refresh_timer],
         queue=False,
         api_visibility="undocumented",
     )
@@ -6659,7 +6670,12 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         fn=change_tab_to_review_redactions,
         inputs=None,
         outputs=tabs,
-        # js=REVIEW_ANNOTATOR_LAYOUT_NUDGE_JS,
+        api_visibility="undocumented",
+    ).success(
+        arm_review_tab_annotator_refresh_from_programmatic_open,
+        inputs=None,
+        outputs=[selected_main_tab_state, review_tab_annotator_refresh_timer],
+        queue=False,
         api_visibility="undocumented",
     )
 
@@ -7648,13 +7664,28 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
     # Auto-persist live canvas edits, then re-push boxes from state (same pattern as
     # session-security heartbeat). Timer ticks alone can collapse the annotator canvas
-    # client-side; refresh restores display. Do not wire annotator.change — it also
-    # fires on server-driven box pushes and races with canvas mount.
+    # client-side; refresh restores display. Skip while Review is hidden so a 0-size
+    # canvas is not written. Do not wire annotator.change — it also fires on
+    # server-driven box pushes and races with canvas mount.
     review_annotator_auto_persist_timer.tick(
-        persist_current_page_and_refresh_annotator,
-        inputs=_persist_and_refresh_annotator_inputs,
+        persist_current_page_and_refresh_annotator_if_review_tab,
+        inputs=[
+            selected_main_tab_state,
+            *_persist_and_refresh_annotator_inputs,
+        ],
         outputs=_review_filter_annotator_refresh_outputs,
         preprocess=False,
+        show_progress_on=[],
+        api_visibility="undocumented",
+    )
+
+    review_tab_annotator_refresh_timer.tick(
+        refresh_annotator_on_review_tab_shown,
+        inputs=_review_filter_annotator_refresh_inputs,
+        outputs=[
+            *_review_filter_annotator_refresh_outputs,
+            review_tab_annotator_refresh_timer,
+        ],
         show_progress_on=[],
         api_visibility="undocumented",
     )
@@ -9678,7 +9709,12 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         fn=change_tab_to_review_redactions,
         inputs=None,
         outputs=tabs,
-        # js=REVIEW_ANNOTATOR_LAYOUT_NUDGE_JS,
+        api_visibility="undocumented",
+    ).success(
+        arm_review_tab_annotator_refresh_from_programmatic_open,
+        inputs=None,
+        outputs=[selected_main_tab_state, review_tab_annotator_refresh_timer],
+        queue=False,
         api_visibility="undocumented",
     )
 
@@ -10828,6 +10864,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         # No notice change: skip UI updates. Pushing gr.update(visible=False) every
         # tick reflows the page; the follow-up success step re-pushes annotator boxes
         # because the Timer tick alone can still collapse the canvas client-side.
+        # That re-push is skipped unless Review is the selected tab
+        # (hidden canvas is 0-size).
         return gr.skip(), gr.skip()
 
     session_security_heartbeat_timer.tick(
@@ -10836,8 +10874,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         outputs=[session_security_notice_md, session_security_heartbeat_timer],
         api_visibility="undocumented",
     ).success(
-        persist_current_page_and_refresh_annotator,
-        inputs=_session_security_heartbeat_annotator_inputs,
+        persist_current_page_and_refresh_annotator_if_review_tab,
+        inputs=[
+            selected_main_tab_state,
+            *_session_security_heartbeat_annotator_inputs,
+        ],
         outputs=_review_filter_annotator_refresh_outputs,
         show_progress_on=[],
         preprocess=False,
