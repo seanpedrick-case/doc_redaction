@@ -686,18 +686,18 @@ def test_tick_review_tab_annotator_refresh_counts_down(monkeypatch):
         page_sizes=[{"page": 1, "image_path": "p.png"}],
     )
     assert result[0] == 2
-    assert "active" not in result[1]
+    assert result[1] == gr.skip()
     assert result[2:] == sentinel
 
-    done = tick_review_tab_annotator_refresh(
+    last_push = tick_review_tab_annotator_refresh(
         1,
         [{"image": "p.png", "boxes": []}],
         1,
         page_sizes=[{"page": 1, "image_path": "p.png"}],
     )
-    assert done[0] == 0
-    assert done[1]["active"] is False
-    assert done[2:] == sentinel
+    assert last_push[0] == 0
+    assert last_push[1] == gr.skip()
+    assert last_push[2:] == sentinel
 
     skipped = tick_review_tab_annotator_refresh(0, [], 1, page_sizes=[])
     assert skipped[0] == 0

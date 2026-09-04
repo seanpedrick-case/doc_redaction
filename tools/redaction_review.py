@@ -2613,11 +2613,11 @@ def _skip_annotator_navigation_outputs():
 
 REVIEW_REDACTIONS_TAB_ID = 2
 REVIEW_REDACTIONS_TAB_LABEL = "Review redactions"
-# Re-push boxes several times after Review becomes visible. The annotator
-# ResizeObserver can zero boxes ~0.5s after first paint; later ticks restore them
-# once the canvas has a real size (no custom JS).
-REVIEW_TAB_ANNOTATOR_REFRESH_INTERVAL_SECONDS = 0.5
-REVIEW_TAB_ANNOTATOR_REFRESH_TICKS = 5
+# After Review becomes visible, re-push boxes a couple of times so the first-paint
+# ResizeObserver collapse can recover. Do not stop the Timer in the same payload as
+# a box push: that extra layout update zeroes the boxes on Hugging Face / ECS.
+REVIEW_TAB_ANNOTATOR_REFRESH_INTERVAL_SECONDS = 1.5
+REVIEW_TAB_ANNOTATOR_REFRESH_TICKS = 2
 
 
 def is_review_redactions_tab_selected(selected_tab: object) -> bool:
@@ -2691,6 +2691,10 @@ def tick_review_tab_annotator_refresh(
     One Timer tick: re-push annotator boxes from state, then count down.
 
     Returns ``(ticks_left, timer_update)`` plus the twelve annotator/filter outputs.
+
+    Stopping the Timer is a separate idle tick (remaining already 0) so that
+    ``gr.update(active=False)`` cannot reflow the canvas in the same payload as
+    a box push.
     """
     try:
         remaining = int(ticks_left or 0)
@@ -2714,8 +2718,7 @@ def tick_review_tab_annotator_refresh(
         input_folder,
     )
     remaining -= 1
-    timer_update = gr.update(active=False) if remaining <= 0 else gr.update()
-    return (remaining, timer_update) + tuple(refresh)
+    return (remaining, gr.skip()) + tuple(refresh)
 
 
 def refresh_annotator_if_review_document_loaded(
