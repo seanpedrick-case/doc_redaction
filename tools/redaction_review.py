@@ -2611,6 +2611,56 @@ def _skip_annotator_navigation_outputs():
     return tuple(gr.skip() for _ in range(12))
 
 
+REVIEW_REDACTIONS_TAB_ID = 2
+REVIEW_REDACTIONS_TAB_LABEL = "Review redactions"
+
+
+def is_review_redactions_tab_selected(selected_tab: object) -> bool:
+    """True when the main Blocks tab is Review redactions (id, index, or label)."""
+    if selected_tab is None:
+        return False
+    if selected_tab == REVIEW_REDACTIONS_TAB_ID:
+        return True
+    if isinstance(selected_tab, str):
+        stripped = selected_tab.strip()
+        if stripped.lower() == REVIEW_REDACTIONS_TAB_LABEL.lower():
+            return True
+        try:
+            return int(stripped) == REVIEW_REDACTIONS_TAB_ID
+        except ValueError:
+            return False
+    try:
+        return int(selected_tab) == REVIEW_REDACTIONS_TAB_ID
+    except (TypeError, ValueError):
+        return False
+
+
+def _selected_tab_from_event(selected_or_evt: object) -> object:
+    """Normalize ``tabs.select`` payload (``gr.SelectData`` or a raw tab id/label)."""
+    if selected_or_evt is None:
+        return None
+    if isinstance(selected_or_evt, gr.SelectData):
+        if selected_or_evt.value is not None:
+            return selected_or_evt.value
+        return selected_or_evt.index
+    return selected_or_evt
+
+
+def record_selected_main_tab(evt: gr.SelectData):
+    """
+    Record the selected main tab so timers can skip a hidden annotator canvas.
+
+    The canvas reports zero width while Review is hidden; pushing boxes then
+    leaves them unscaled and invisible.
+    """
+    return _selected_tab_from_event(evt)
+
+
+def mark_review_redactions_tab_selected():
+    """Follow-up for *Go to Review redactions* buttons (``tabs.select`` may not fire)."""
+    return REVIEW_REDACTIONS_TAB_ID
+
+
 def refresh_annotator_if_review_document_loaded(
     all_image_annotations: List[AnnotatedImageData],
     gradio_annotator_current_page_number: int,
@@ -2865,6 +2915,47 @@ def persist_current_page_and_refresh_annotator(
         refresh_outputs,
         all_image_annotations,
         client_annotator_value,
+    )
+
+
+def persist_current_page_and_refresh_annotator_if_review_tab(
+    selected_tab: object,
+    page_image_annotator_object: AnnotatedImageData,
+    gradio_annotator_current_page_number: int,
+    all_image_annotations: List[AnnotatedImageData],
+    page_sizes: List[dict],
+    recogniser_entities_dropdown_value: str = "ALL",
+    page_dropdown_value: str = "ALL",
+    page_dropdown_redaction_value: str = "1",
+    text_dropdown_value: str = "ALL",
+    recogniser_dataframe_base: pd.DataFrame = None,
+    zoom: int = 100,
+    review_df: pd.DataFrame = None,
+    doc_full_file_name_textbox: str = "",
+    input_folder: str = INPUT_FOLDER,
+):
+    """
+    Heartbeat / auto-persist: re-push annotator boxes only while Review is selected.
+
+    Pushing the annotator while that tab is hidden (canvas ~0 size) lets
+    ``setScaleFactor(~0)`` zero the drawn boxes; they then look empty on first visit.
+    """
+    if not is_review_redactions_tab_selected(selected_tab):
+        return _skip_annotator_navigation_outputs()
+    return persist_current_page_and_refresh_annotator(
+        page_image_annotator_object,
+        gradio_annotator_current_page_number,
+        all_image_annotations,
+        page_sizes,
+        recogniser_entities_dropdown_value,
+        page_dropdown_value,
+        page_dropdown_redaction_value,
+        text_dropdown_value,
+        recogniser_dataframe_base,
+        zoom,
+        review_df,
+        doc_full_file_name_textbox,
+        input_folder,
     )
 
 
