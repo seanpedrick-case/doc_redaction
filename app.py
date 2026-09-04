@@ -462,7 +462,6 @@ from tools.quickstart import (
     update_step_4_visibility,
 )
 from tools.redaction_review import (
-    REVIEW_TAB_ANNOTATOR_REFRESH_INTERVAL_SECONDS,
     apply_redactions_to_review_df_and_files_for_review_ui,
     convert_df_to_xfdf,
     convert_xfdf_to_dataframe,
@@ -479,12 +478,11 @@ from tools.redaction_review import (
     get_and_merge_current_page_annotations,
     increase_bottom_page_count_based_on_top,
     increase_page,
-    mark_review_redactions_tab_selected_and_arm_refresh,
+    mark_review_redactions_tab_selected,
     persist_annotator_canvas_and_refresh_review_ui,
     persist_current_page_and_refresh_annotator_if_review_tab,
-    record_selected_main_tab_and_arm_review_refresh,
+    record_selected_main_tab,
     reset_dropdowns,
-    tick_review_tab_annotator_refresh,
     undo_last_removal,
     update_all_entity_df_dropdowns,
     update_all_page_annotation_object_from_gradio_client,
@@ -1788,11 +1786,6 @@ with blocks:
         active=REVIEW_ANNOTATOR_AUTO_PERSIST_ENABLED,
     )
     selected_main_tab_state = gr.State(value=0 if SHOW_QUICKSTART else 1)
-    review_tab_refresh_ticks_left = gr.State(value=0)
-    review_tab_annotator_refresh_timer = gr.Timer(
-        value=REVIEW_TAB_ANNOTATOR_REFRESH_INTERVAL_SECONDS,
-        active=False,
-    )
 
     with gr.Accordion("API for agents (quickstart)", open=False, visible=False):
         gr.Markdown("""
@@ -6652,21 +6645,12 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         show_progress_on=[],
         api_visibility="undocumented",
-    ).success(
-        fn=None,
-        # js=REVIEW_ANNOTATOR_LAYOUT_NUDGE_JS,
-        queue=False,
-        api_visibility="undocumented",
     )
 
     tabs.select(
-        record_selected_main_tab_and_arm_review_refresh,
+        record_selected_main_tab,
         inputs=None,
-        outputs=[
-            selected_main_tab_state,
-            review_tab_refresh_ticks_left,
-            review_tab_annotator_refresh_timer,
-        ],
+        outputs=[selected_main_tab_state],
         queue=False,
         api_visibility="undocumented",
     )
@@ -6677,13 +6661,9 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         outputs=tabs,
         api_visibility="undocumented",
     ).success(
-        mark_review_redactions_tab_selected_and_arm_refresh,
+        mark_review_redactions_tab_selected,
         inputs=None,
-        outputs=[
-            selected_main_tab_state,
-            review_tab_refresh_ticks_left,
-            review_tab_annotator_refresh_timer,
-        ],
+        outputs=[selected_main_tab_state],
         queue=False,
         api_visibility="undocumented",
     )
@@ -7685,24 +7665,6 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         outputs=_review_filter_annotator_refresh_outputs,
         preprocess=False,
         show_progress_on=[],
-        api_visibility="undocumented",
-    )
-
-    review_tab_annotator_refresh_timer.tick(
-        tick_review_tab_annotator_refresh,
-        inputs=[
-            review_tab_refresh_ticks_left,
-            *_review_filter_annotator_refresh_inputs,
-        ],
-        outputs=[
-            review_tab_refresh_ticks_left,
-            review_tab_annotator_refresh_timer,
-            *_review_filter_annotator_refresh_outputs,
-        ],
-        queue=False,
-        show_progress="hidden",
-        show_progress_on=[],
-        trigger_mode="always_last",
         api_visibility="undocumented",
     )
 
@@ -9727,13 +9689,9 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         outputs=tabs,
         api_visibility="undocumented",
     ).success(
-        mark_review_redactions_tab_selected_and_arm_refresh,
+        mark_review_redactions_tab_selected,
         inputs=None,
-        outputs=[
-            selected_main_tab_state,
-            review_tab_refresh_ticks_left,
-            review_tab_annotator_refresh_timer,
-        ],
+        outputs=[selected_main_tab_state],
         queue=False,
         api_visibility="undocumented",
     )

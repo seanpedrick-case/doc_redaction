@@ -2613,11 +2613,6 @@ def _skip_annotator_navigation_outputs():
 
 REVIEW_REDACTIONS_TAB_ID = 2
 REVIEW_REDACTIONS_TAB_LABEL = "Review redactions"
-# After Review becomes visible, re-push boxes a couple of times so the first-paint
-# ResizeObserver collapse can recover. Do not stop the Timer in the same payload as
-# a box push: that extra layout update zeroes the boxes on Hugging Face / ECS.
-REVIEW_TAB_ANNOTATOR_REFRESH_INTERVAL_SECONDS = 1.5
-REVIEW_TAB_ANNOTATOR_REFRESH_TICKS = 2
 
 
 def is_review_redactions_tab_selected(selected_tab: object) -> bool:
@@ -2651,74 +2646,19 @@ def _selected_tab_from_event(selected_or_evt: object) -> object:
     return selected_or_evt
 
 
-def record_selected_main_tab_and_arm_review_refresh(evt: gr.SelectData):
+def record_selected_main_tab(evt: gr.SelectData):
     """
-    Record the selected main tab and start Review-tab annotator refresh ticks.
+    Record the selected main tab so timers can skip a hidden annotator canvas.
 
-    Leaving Review stops the timer so it cannot push boxes onto a hidden canvas.
+    The canvas reports zero width while Review is hidden; pushing boxes then
+    leaves them unscaled and invisible.
     """
-    selected = _selected_tab_from_event(evt)
-    if is_review_redactions_tab_selected(selected):
-        return selected, REVIEW_TAB_ANNOTATOR_REFRESH_TICKS, gr.update(active=True)
-    return selected, 0, gr.update(active=False)
+    return _selected_tab_from_event(evt)
 
 
-def mark_review_redactions_tab_selected_and_arm_refresh():
+def mark_review_redactions_tab_selected():
     """Follow-up for *Go to Review redactions* buttons (``tabs.select`` may not fire)."""
-    return (
-        REVIEW_REDACTIONS_TAB_ID,
-        REVIEW_TAB_ANNOTATOR_REFRESH_TICKS,
-        gr.update(active=True),
-    )
-
-
-def tick_review_tab_annotator_refresh(
-    ticks_left: object,
-    all_image_annotations: List[AnnotatedImageData],
-    gradio_annotator_current_page_number: int,
-    recogniser_entities_dropdown_value: str = "ALL",
-    page_dropdown_value: str = "ALL",
-    page_dropdown_redaction_value: str = "1",
-    text_dropdown_value: str = "ALL",
-    recogniser_dataframe_base: pd.DataFrame = None,
-    zoom: int = 100,
-    review_df: pd.DataFrame = None,
-    page_sizes: List[dict] = list(),
-    doc_full_file_name_textbox: str = "",
-    input_folder: str = INPUT_FOLDER,
-):
-    """
-    One Timer tick: re-push annotator boxes from state, then count down.
-
-    Returns ``(ticks_left, timer_update)`` plus the twelve annotator/filter outputs.
-
-    Stopping the Timer is a separate idle tick (remaining already 0) so that
-    ``gr.update(active=False)`` cannot reflow the canvas in the same payload as
-    a box push.
-    """
-    try:
-        remaining = int(ticks_left or 0)
-    except (TypeError, ValueError):
-        remaining = 0
-    if remaining <= 0:
-        return (0, gr.update(active=False)) + _skip_annotator_navigation_outputs()
-
-    refresh = refresh_annotator_if_review_document_loaded(
-        all_image_annotations,
-        gradio_annotator_current_page_number,
-        recogniser_entities_dropdown_value,
-        page_dropdown_value,
-        page_dropdown_redaction_value,
-        text_dropdown_value,
-        recogniser_dataframe_base,
-        zoom,
-        review_df,
-        page_sizes,
-        doc_full_file_name_textbox,
-        input_folder,
-    )
-    remaining -= 1
-    return (remaining, gr.skip()) + tuple(refresh)
+    return REVIEW_REDACTIONS_TAB_ID
 
 
 def refresh_annotator_if_review_document_loaded(

@@ -32,7 +32,7 @@ presidio-image-redactor<=0.0.57
 # --- Gradio and apps ---
 gradio==6.26.0
 gradio-pdf-redaction<=0.0.25
-gradio_image_annotation_redaction==0.6.0 # Custom annotator version with rotation, zoom, labels, and box IDs
+gradio_image_annotation_redaction==0.7.0 # Custom annotator version with rotation, zoom, labels, and box IDs
 spaces
 
 # --- AWS Lambda runtime ---
@@ -47,4 +47,4 @@ pytest-cov<=7.1.0
 
 # --- LLM libraries ---
 google-genai<=2.20.0
-openai<=3.5.0
+openai<=3.7.0

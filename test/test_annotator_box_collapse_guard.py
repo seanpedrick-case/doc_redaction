@@ -12,7 +12,6 @@ pytest.importorskip("gradio_image_annotation_redaction")
 
 from tools.redaction_review import (
     REVIEW_REDACTIONS_TAB_ID,
-    REVIEW_TAB_ANNOTATOR_REFRESH_TICKS,
     _annotator_box_has_area,
     _annotator_boxes_are_collapsed,
     _sanitize_annotator_boxes_for_gradio_output,
@@ -21,15 +20,14 @@ from tools.redaction_review import (
     _transform_annotator_boxes_to_orientation_0,
     coerce_gradio_client_annotator_payload,
     is_review_redactions_tab_selected,
-    mark_review_redactions_tab_selected_and_arm_refresh,
+    mark_review_redactions_tab_selected,
     persist_annotator_canvas_and_refresh_review_ui,
     persist_current_page_and_refresh_annotator,
     persist_current_page_and_refresh_annotator_if_review_tab,
     persist_current_page_annotator_to_state,
-    record_selected_main_tab_and_arm_review_refresh,
+    record_selected_main_tab,
     refresh_annotator_after_external_layout_reflow,
     refresh_annotator_if_review_document_loaded,
-    tick_review_tab_annotator_refresh,
     update_all_page_annotation_object_based_on_previous_page,
 )
 
@@ -594,33 +592,20 @@ def test_selected_tab_from_event_handles_select_data_and_raw_values():
     assert _selected_tab_from_event("Review redactions") == "Review redactions"
 
 
-def test_record_selected_tab_arms_refresh_only_for_review():
+def test_record_selected_main_tab():
     import gradio as gr
 
     evt = gr.SelectData(target=None, data={"value": "Review redactions", "index": 2})
-    selected, ticks, timer_update = record_selected_main_tab_and_arm_review_refresh(evt)
-    assert selected == "Review redactions"
-    assert ticks == REVIEW_TAB_ANNOTATOR_REFRESH_TICKS
-    assert timer_update["active"] is True
+    assert record_selected_main_tab(evt) == "Review redactions"
 
     evt_other = gr.SelectData(
         target=None, data={"value": "Redact PDFs/images", "index": 1}
     )
-    selected, ticks, timer_update = record_selected_main_tab_and_arm_review_refresh(
-        evt_other
-    )
-    assert selected == "Redact PDFs/images"
-    assert ticks == 0
-    assert timer_update["active"] is False
+    assert record_selected_main_tab(evt_other) == "Redact PDFs/images"
 
 
-def test_mark_review_tab_and_arm_refresh():
-    selected, ticks, timer_update = (
-        mark_review_redactions_tab_selected_and_arm_refresh()
-    )
-    assert selected == REVIEW_REDACTIONS_TAB_ID
-    assert ticks == REVIEW_TAB_ANNOTATOR_REFRESH_TICKS
-    assert timer_update["active"] is True
+def test_mark_review_redactions_tab_selected():
+    assert mark_review_redactions_tab_selected() == REVIEW_REDACTIONS_TAB_ID
 
 
 def test_persist_if_review_tab_skips_when_not_on_review(monkeypatch):
@@ -671,35 +656,9 @@ def test_persist_if_review_tab_runs_when_on_review(monkeypatch):
     assert result == sentinel
 
 
-def test_tick_review_tab_annotator_refresh_counts_down(monkeypatch):
+def test_refresh_annotator_if_review_document_loaded_skips_without_document():
     import gradio as gr
 
-    sentinel = tuple(gr.skip() for _ in range(12))
-    monkeypatch.setattr(
-        "tools.redaction_review.refresh_annotator_if_review_document_loaded",
-        lambda *_args, **_kwargs: sentinel,
-    )
-    result = tick_review_tab_annotator_refresh(
-        3,
-        [{"image": "p.png", "boxes": []}],
-        1,
-        page_sizes=[{"page": 1, "image_path": "p.png"}],
-    )
-    assert result[0] == 2
-    assert result[1] == gr.skip()
-    assert result[2:] == sentinel
-
-    last_push = tick_review_tab_annotator_refresh(
-        1,
-        [{"image": "p.png", "boxes": []}],
-        1,
-        page_sizes=[{"page": 1, "image_path": "p.png"}],
-    )
-    assert last_push[0] == 0
-    assert last_push[1] == gr.skip()
-    assert last_push[2:] == sentinel
-
-    skipped = tick_review_tab_annotator_refresh(0, [], 1, page_sizes=[])
-    assert skipped[0] == 0
-    assert skipped[1]["active"] is False
-    assert all(v == gr.skip() for v in skipped[2:])
+    result = refresh_annotator_if_review_document_loaded([], 1, page_sizes=[])
+    assert len(result) == 12
+    assert all(v == gr.skip() for v in result)
