@@ -101,6 +101,9 @@ x-pi-agent-env: &pi-agent-env
   MALWARE_SCAN_POLL_INTERVAL_SEC: ${MALWARE_SCAN_POLL_INTERVAL_SEC:-2.0}
   MALWARE_SCAN_TIMEOUT_SEC: ${MALWARE_SCAN_TIMEOUT_SEC:-300.0}
   MALWARE_SCAN_SHOW_CHECKING_INFO: ${MALWARE_SCAN_SHOW_CHECKING_INFO:-True}
+  # Arize / Phoenix tracing: set in config/agent.env (env_file). Do not duplicate
+  # ARIZE_* / PHOENIX_* here — compose ``environment`` overrides env_file and would
+  # force ARIZE_TRACING_ENABLED=false when unset in the host shell.
   # AGENT_VLM_BASE_URL: http://llama-inference:8080
   RUN_FASTAPI: ${RUN_FASTAPI:-False}
   ROOT_PATH: ${ROOT_PATH:-}
