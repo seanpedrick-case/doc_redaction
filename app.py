@@ -8015,8 +8015,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         show_progress_on=[],
         api_visibility="undocumented",
     ).success(
-        persist_annotator_canvas_and_refresh_review_ui,
-        inputs=_persist_and_refresh_annotator_inputs,
+        # Push boxes from cleaned state. Do not re-persist the live canvas —
+        # it still holds the excluded box and would undo the removal.
+        update_annotator_object_for_page_navigation,
+        inputs=_review_filter_annotator_refresh_inputs,
         outputs=[
             annotator,
             annotate_current_page,
@@ -8144,8 +8146,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         show_progress_on=[],
         api_visibility="undocumented",
     ).success(
-        persist_annotator_canvas_and_refresh_review_ui,
-        inputs=_persist_and_refresh_annotator_inputs,
+        # Push boxes from cleaned state. Do not re-persist the live canvas —
+        # it still holds excluded boxes and would undo the removal.
+        update_annotator_object_for_page_navigation,
+        inputs=_review_filter_annotator_refresh_inputs,
         outputs=[
             annotator,
             annotate_current_page,
@@ -8265,8 +8269,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         show_progress_on=[],
         api_visibility="undocumented",
     ).success(
-        persist_annotator_canvas_and_refresh_review_ui,
-        inputs=_persist_and_refresh_annotator_inputs,
+        # Push boxes from cleaned state. Do not re-persist the live canvas —
+        # it still holds excluded boxes and would undo the removal.
+        update_annotator_object_for_page_navigation,
+        inputs=_review_filter_annotator_refresh_inputs,
         outputs=[
             annotator,
             annotate_current_page,
@@ -8354,8 +8360,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         show_progress_on=[],
         api_visibility="undocumented",
     ).success(
-        persist_annotator_canvas_and_refresh_review_ui,
-        inputs=_persist_and_refresh_annotator_inputs,
+        # Push boxes from restored state. Do not re-persist the live canvas —
+        # it still reflects the pre-undo view and would undo the restore.
+        update_annotator_object_for_page_navigation,
+        inputs=_review_filter_annotator_refresh_inputs,
         outputs=[
             annotator,
             annotate_current_page,
@@ -8607,8 +8615,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         api_visibility="undocumented",
     ).success(
-        persist_annotator_canvas_and_refresh_review_ui,
-        inputs=_persist_and_refresh_annotator_inputs,
+        # Push boxes from updated state. Do not re-persist the live canvas —
+        # it does not yet include the newly added redactions.
+        update_annotator_object_for_page_navigation,
+        inputs=_review_filter_annotator_refresh_inputs,
         outputs=[
             annotator,
             annotate_current_page,
@@ -8723,8 +8733,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         api_visibility="undocumented",
     ).success(
-        persist_annotator_canvas_and_refresh_review_ui,
-        inputs=_persist_and_refresh_annotator_inputs,
+        # Push boxes from updated state. Do not re-persist the live canvas —
+        # it does not yet include the newly added redactions.
+        update_annotator_object_for_page_navigation,
+        inputs=_review_filter_annotator_refresh_inputs,
         outputs=[
             annotator,
             annotate_current_page,
@@ -8827,8 +8839,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         api_visibility="undocumented",
     ).success(
-        persist_annotator_canvas_and_refresh_review_ui,
-        inputs=_persist_and_refresh_annotator_inputs,
+        # Push boxes from updated state. Do not re-persist the live canvas —
+        # it does not yet include the newly added redactions.
+        update_annotator_object_for_page_navigation,
+        inputs=_review_filter_annotator_refresh_inputs,
         outputs=[
             annotator,
             annotate_current_page,
@@ -8884,8 +8898,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         show_progress_on=[],
         api_visibility="undocumented",
     ).success(
-        persist_annotator_canvas_and_refresh_review_ui,
-        inputs=_persist_and_refresh_annotator_inputs,
+        # Push boxes from restored state. Do not re-persist the live canvas —
+        # it still reflects the pre-undo view and would undo the restore.
+        update_annotator_object_and_filter_df,
+        inputs=_review_filter_annotator_refresh_inputs,
         outputs=[
             annotator,
             annotate_current_page,
