@@ -137,9 +137,26 @@ def safe_clean_text(text: str, remove_html: bool = True) -> str:
     return cleaned
 
 
+_RGB_HEX_CHARS = "0123456789abcdefABCDEF"
+
+
+def _rgb_triple_or_none(r: int, g: int, b: int) -> Optional[tuple]:
+    if 0 <= r <= 255 and 0 <= g <= 255 and 0 <= b <= 255:
+        return (r, g, b)
+    return None
+
+
 def safe_extract_rgb_values(text: str) -> Optional[tuple]:
     """
-    Safely extract RGB values from text like "(255, 255, 255)".
+    Extract RGB 0–255 ints from annotation colour strings.
+
+    Accepts the formats emitted by ``gradio_image_annotation_redaction`` and
+    stored in review CSVs:
+
+    - ``(255, 128, 0)`` / ``255, 128, 0``
+    - ``rgb(255, 128, 0)`` / ``rgba(255, 128, 0, 0.5)`` (alpha ignored)
+    - ``#f80`` / ``#ff8000``
+    - ``[255 128 0]``
 
     Args:
         text: The text to extract RGB values from
@@ -150,21 +167,45 @@ def safe_extract_rgb_values(text: str) -> Optional[tuple]:
     if not text or not isinstance(text, str):
         return None
 
-    # Use a simple, safe pattern
-    pattern = r"\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)"
-    match = re.match(pattern, text.strip())
+    s = text.strip()
+    if not s or len(s) > 120:
+        return None
 
+    if s.startswith("#"):
+        hex_s = s[1:]
+        if len(hex_s) == 3 and all(c in _RGB_HEX_CHARS for c in hex_s):
+            return tuple(int(hex_s[i] * 2, 16) for i in range(3))
+        if len(hex_s) == 6 and all(c in _RGB_HEX_CHARS for c in hex_s):
+            return tuple(int(hex_s[i : i + 2], 16) for i in (0, 2, 4))
+        return None
+
+    # Bounded digits only — no nested quantifiers (ReDoS-safe).
+    # Optional rgb()/rgba( prefix so CSS colours from the annotator colour
+    # picker are accepted as well as "(R, G, B)" review-CSV cells.
+    match = re.search(
+        r"(?:rgba?\s*\(\s*)?(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})",
+        s,
+        re.IGNORECASE,
+    )
     if match:
         try:
-            r = int(match.group(1))
-            g = int(match.group(2))
-            b = int(match.group(3))
-
-            # Validate RGB values
-            if 0 <= r <= 255 and 0 <= g <= 255 and 0 <= b <= 255:
-                return (r, g, b)
+            return _rgb_triple_or_none(
+                int(match.group(1)), int(match.group(2)), int(match.group(3))
+            )
         except (ValueError, TypeError):
-            pass
+            return None
+
+    match = re.match(
+        r"\[\s*(\d{1,3})\s+(\d{1,3})\s+(\d{1,3})\s*\]",
+        s,
+    )
+    if match:
+        try:
+            return _rgb_triple_or_none(
+                int(match.group(1)), int(match.group(2)), int(match.group(3))
+            )
+        except (ValueError, TypeError):
+            return None
 
     return None
 

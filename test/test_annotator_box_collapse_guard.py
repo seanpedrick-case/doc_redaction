@@ -11,15 +11,21 @@ import pytest
 pytest.importorskip("gradio_image_annotation_redaction")
 
 from tools.redaction_review import (
+    REVIEW_REDACTIONS_TAB_ID,
     _annotator_box_has_area,
     _annotator_boxes_are_collapsed,
     _sanitize_annotator_boxes_for_gradio_output,
+    _selected_tab_from_event,
     _transform_annotator_boxes_from_orientation_0,
     _transform_annotator_boxes_to_orientation_0,
     coerce_gradio_client_annotator_payload,
+    is_review_redactions_tab_selected,
+    mark_review_redactions_tab_selected,
     persist_annotator_canvas_and_refresh_review_ui,
     persist_current_page_and_refresh_annotator,
+    persist_current_page_and_refresh_annotator_if_review_tab,
     persist_current_page_annotator_to_state,
+    record_selected_main_tab,
     refresh_annotator_after_external_layout_reflow,
     refresh_annotator_if_review_document_loaded,
     update_all_page_annotation_object_based_on_previous_page,
@@ -566,3 +572,93 @@ def test_sanitize_annotator_boxes_strips_scale_factor():
     assert len(boxes) == 1
     assert "scaleFactor" not in boxes[0]
     assert boxes[0]["xmin"] == 10
+
+
+def test_is_review_redactions_tab_selected():
+    assert is_review_redactions_tab_selected(2) is True
+    assert is_review_redactions_tab_selected("2") is True
+    assert is_review_redactions_tab_selected("Review redactions") is True
+    assert is_review_redactions_tab_selected(1) is False
+    assert is_review_redactions_tab_selected("Redact PDFs/images") is False
+    assert is_review_redactions_tab_selected(None) is False
+
+
+def test_selected_tab_from_event_handles_select_data_and_raw_values():
+    import gradio as gr
+
+    evt = gr.SelectData(target=None, data={"value": "Review redactions", "index": 2})
+    assert _selected_tab_from_event(evt) == "Review redactions"
+    assert _selected_tab_from_event(2) == 2
+    assert _selected_tab_from_event("Review redactions") == "Review redactions"
+
+
+def test_record_selected_main_tab():
+    import gradio as gr
+
+    evt = gr.SelectData(target=None, data={"value": "Review redactions", "index": 2})
+    assert record_selected_main_tab(evt) == "Review redactions"
+
+    evt_other = gr.SelectData(
+        target=None, data={"value": "Redact PDFs/images", "index": 1}
+    )
+    assert record_selected_main_tab(evt_other) == "Redact PDFs/images"
+
+
+def test_mark_review_redactions_tab_selected():
+    assert mark_review_redactions_tab_selected() == REVIEW_REDACTIONS_TAB_ID
+
+
+def test_persist_if_review_tab_skips_when_not_on_review(monkeypatch):
+    import gradio as gr
+
+    called = {"value": False}
+
+    def should_not_run(*_args, **_kwargs):
+        called["value"] = True
+        return tuple(gr.skip() for _ in range(12))
+
+    monkeypatch.setattr(
+        "tools.redaction_review.persist_current_page_and_refresh_annotator",
+        should_not_run,
+    )
+    result = persist_current_page_and_refresh_annotator_if_review_tab(
+        1,
+        {"image": "p.png", "boxes": []},
+        1,
+        [
+            {
+                "image": "p.png",
+                "boxes": [{"xmin": 0.1, "ymin": 0.2, "xmax": 0.3, "ymax": 0.4}],
+            }
+        ],
+        [{"page": 1, "image_path": "p.png"}],
+    )
+    assert called["value"] is False
+    assert len(result) == 12
+    assert all(v == gr.skip() for v in result)
+
+
+def test_persist_if_review_tab_runs_when_on_review(monkeypatch):
+    import gradio as gr
+
+    sentinel = tuple(gr.skip() for _ in range(12))
+    monkeypatch.setattr(
+        "tools.redaction_review.persist_current_page_and_refresh_annotator",
+        lambda *_args, **_kwargs: sentinel,
+    )
+    result = persist_current_page_and_refresh_annotator_if_review_tab(
+        "Review redactions",
+        {"image": "p.png", "boxes": []},
+        1,
+        [{"image": "p.png", "boxes": []}],
+        [{"page": 1, "image_path": "p.png"}],
+    )
+    assert result == sentinel
+
+
+def test_refresh_annotator_if_review_document_loaded_skips_without_document():
+    import gradio as gr
+
+    result = refresh_annotator_if_review_document_loaded([], 1, page_sizes=[])
+    assert len(result) == 12
+    assert all(v == gr.skip() for v in result)

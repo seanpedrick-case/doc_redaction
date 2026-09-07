@@ -175,7 +175,10 @@ from tools.secure_path_utils import (
 )
 
 # Extract numbers before 'seconds' using secure regex
-from tools.secure_regex_utils import safe_extract_numbers_with_seconds
+from tools.secure_regex_utils import (
+    safe_extract_numbers_with_seconds,
+    safe_extract_rgb_values,
+)
 
 ImageFile.LOAD_TRUNCATED_IMAGES = LOAD_TRUNCATED_IMAGES
 if not MAX_IMAGE_PIXELS:
@@ -4861,7 +4864,8 @@ def define_box_colour(
     Determines the color for a bounding box annotation.
 
     If `custom_colours` is True, it attempts to parse the color from `img_annotation_box['color']`.
-    It supports color strings in "(R,G,B)" format (0-255 integers) or tuples/lists of (R,G,B)
+    It supports colour strings from the annotator colour picker and review CSV
+    (``rgb()`` / ``rgba()`` / ``#RRGGBB`` / ``(R,G,B)``) and tuples/lists of (R,G,B)
     where components are either 0-1 floats or 0-255 integers.
     If parsing fails or `custom_colours` is False, it defaults to `CUSTOM_BOX_COLOUR`.
     All output colors are converted to a 0.0-1.0 float range.
@@ -4880,28 +4884,15 @@ def define_box_colour(
         out_colour = (0, 0, 0)  # Initialize with a default black color (0.0-1.0 range)
 
         if isinstance(color_input, str):
-            # Expected format: "(R,G,B)" where R,G,B are integers 0-255 (e.g., "(255,0,0)")
-            try:
-                # Remove parentheses and split by comma, then convert to integers
-                components_str = color_input.strip().strip("()").split(",")
-                colour_tuple_int = tuple(int(c.strip()) for c in components_str)
-
-                # Validate the parsed integer tuple
-                if len(colour_tuple_int) == 3 and not all(
-                    0 <= c <= 1 for c in colour_tuple_int
-                ):
-                    out_colour = convert_color_to_range_0_1(colour_tuple_int)
-                elif len(colour_tuple_int) == 3 and all(
-                    0 <= c <= 1 for c in colour_tuple_int
-                ):
-                    out_colour = colour_tuple_int
-                else:
-                    print(
-                        f"Warning: Invalid color string values or length for '{color_input}'. Expected (R,G,B) with R,G,B in 0-255. Defaulting to black."
-                    )
-            except (ValueError, IndexError):
+            # Annotator colour picker emits CSS rgb()/rgba(); review CSV uses "(R, G, B)".
+            parsed = safe_extract_rgb_values(color_input)
+            if parsed is not None:
+                out_colour = convert_color_to_range_0_1(parsed)
+            else:
                 print(
-                    f"Warning: Could not parse color string '{color_input}'. Expected '(R,G,B)' format. Defaulting to black."
+                    f"Warning: Could not parse color string '{color_input}'. "
+                    "Expected '(R,G,B)', 'rgb(R, G, B)', 'rgba(...)', or '#RRGGBB'. "
+                    "Defaulting to black."
                 )
         elif isinstance(color_input, (tuple, list)) and len(color_input) == 3:
             # Expected formats: (R,G,B) where R,G,B are either 0-1 floats or 0-255 integers
@@ -4927,7 +4918,7 @@ def define_box_colour(
         else:
             # Catch-all for any other unexpected format (e.g., None, dict, etc.)
             print(
-                f"Warning: Unexpected color format for {color_input}. Expected string '(R,G,B)' or tuple/list (R,G,B). Defaulting to black."
+                f"Warning: Unexpected color format for {color_input}. Expected string rgb()/(R,G,B)/#hex or tuple/list (R,G,B). Defaulting to black."
             )
 
         # Final safeguard: Ensure out_colour is always a valid PyMuPDF color tuple (3 floats 0.0-1.0)
