@@ -44,7 +44,7 @@ spacy<=3.8.16
 en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0.tar.gz
 spaczz<=0.6.1
 transformers<=5.16.1
-accelerate<=1.14.0
+accelerate<=1.15.0
 bitsandbytes<=0.50.2
 sentencepiece<=0.2.2
 optimum<=2.1.0
