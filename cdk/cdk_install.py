@@ -895,21 +895,93 @@ def list_availability_zones(region: str) -> List[str]:
 
 
 def list_subnets_in_vpc(vpc_id: str, region: str) -> List[Dict[str, str]]:
+    """List subnets in a VPC (named preferred; unnamed fall back to subnet id as name)."""
+    del region  # region comes from the caller's boto3/session env; kept for API stability
     sys.path.insert(0, str(CDK_DIR))
     from cdk_functions import _get_existing_subnets_in_vpc
 
     data = _get_existing_subnets_in_vpc(vpc_id)
     subnets: List[Dict[str, str]] = []
+    seen_ids: set = set()
     for name, info in data.get("by_name", {}).items():
+        subnet_id = info.get("id", "") or ""
+        seen_ids.add(subnet_id)
         subnets.append(
             {
                 "name": name,
-                "id": info.get("id", ""),
-                "cidr": info.get("cidr", ""),
-                "az": info.get("az", ""),
+                "id": subnet_id,
+                "cidr": info.get("cidr", "") or "",
+                "az": info.get("az", "") or "",
+                "route_table_id": info.get("route_table_id", "") or "",
+                "is_public": "true" if info.get("is_public") else "false",
+                "map_public_ip_on_launch": (
+                    "true" if info.get("map_public_ip_on_launch") else "false"
+                ),
+            }
+        )
+    for subnet_id, info in data.get("by_id", {}).items():
+        if subnet_id in seen_ids:
+            continue
+        # Unnamed subnets: use id as a stable lookup key for PUBLIC_SUBNETS_TO_USE.
+        subnets.append(
+            {
+                "name": subnet_id,
+                "id": subnet_id,
+                "cidr": info.get("cidr", "") or "",
+                "az": info.get("az", "") or "",
+                "route_table_id": info.get("route_table_id", "") or "",
+                "is_public": "true" if info.get("is_public") else "false",
+                "map_public_ip_on_launch": (
+                    "true" if info.get("map_public_ip_on_launch") else "false"
+                ),
             }
         )
     return sorted(subnets, key=lambda x: x["name"])
+
+
+def subnet_entry_is_public(subnet: Dict[str, str]) -> bool:
+    """True when the subnet has an IGW default route (installer list_subnets shape)."""
+    flag = (subnet.get("is_public") or "").strip().lower()
+    if flag in ("true", "1", "yes"):
+        return True
+    if flag in ("false", "0", "no"):
+        return False
+    return False
+
+
+def discover_suitable_subnets_for_tier(
+    vpc_subnets: Sequence[Dict[str, str]],
+    *,
+    want_public: bool,
+    max_subnets: int = 3,
+) -> List[Dict[str, str]]:
+    """
+    Pick one subnet per AZ for auto-discover (public = IGW default route).
+
+    Prefers named, MapPublicIpOnLaunch subnets when choosing within an AZ.
+    """
+    candidates = [
+        s
+        for s in vpc_subnets
+        if subnet_entry_is_public(s) == want_public and (s.get("az") or "").strip()
+    ]
+
+    def _sort_key(subnet: Dict[str, str]) -> tuple:
+        name = (subnet.get("name") or "").strip()
+        unnamed = name.startswith("subnet-")
+        map_public = (subnet.get("map_public_ip_on_launch") or "").lower() == "true"
+        # Prefer: named, map-public, then name for stability
+        return (unnamed, not map_public, name)
+
+    by_az: Dict[str, Dict[str, str]] = {}
+    for subnet in sorted(candidates, key=_sort_key):
+        az = (subnet.get("az") or "").strip()
+        if az and az not in by_az:
+            by_az[az] = subnet
+
+    # Stable AZ order
+    selected = [by_az[az] for az in sorted(by_az.keys())]
+    return selected[:max_subnets]
 
 
 def list_acm_certificates(region: str) -> List[Dict[str, str]]:
@@ -1105,9 +1177,20 @@ def apply_subnet_tier_env(
     azs = answers.public_subnet_azs if tier == "public" else answers.private_subnet_azs
 
     if mode == "auto":
-        values[f"{prefix}_SUBNETS_TO_USE"] = ""
-        values[f"{prefix}_SUBNET_CIDR_BLOCKS"] = ""
-        values[f"{prefix}_SUBNET_AVAILABILITY_ZONES"] = ""
+        # Auto-discover must persist concrete names/CIDRs/AZs: imported VPCs require
+        # availability_zones for Vpc.from_vpc_attributes, and named subnets for import.
+        if names and len(cidrs) == len(names) == len(azs):
+            values[f"{prefix}_SUBNETS_TO_USE"] = format_list_env(names)
+            values[f"{prefix}_SUBNET_CIDR_BLOCKS"] = format_list_env(
+                cidrs, use_single_quotes=True
+            )
+            values[f"{prefix}_SUBNET_AVAILABILITY_ZONES"] = format_list_env(
+                azs, use_single_quotes=True
+            )
+        else:
+            values[f"{prefix}_SUBNETS_TO_USE"] = ""
+            values[f"{prefix}_SUBNET_CIDR_BLOCKS"] = ""
+            values[f"{prefix}_SUBNET_AVAILABILITY_ZONES"] = ""
     elif mode == "existing":
         values[f"{prefix}_SUBNETS_TO_USE"] = format_list_env(names)
         if names and len(cidrs) == len(names) == len(azs):
@@ -1154,6 +1237,19 @@ def validate_subnet_answers(answers: "InstallAnswers") -> List[str]:
             )
         )
     for label, mode, names, cidrs in tiers:
+        if mode == "auto" and not names:
+            errors.append(
+                f"{label} subnets: auto-discover found no suitable subnets (public "
+                "subnets need a 0.0.0.0/0 route via an Internet Gateway). Choose "
+                "'Use existing named subnets' or 'Create new stack-specific subnets'."
+            )
+        if mode == "auto" and names and label == "Public":
+            azs = answers.public_subnet_azs
+            if len({az for az in azs if az}) < 2:
+                errors.append(
+                    "Public subnets: auto-discover needs at least two subnets in "
+                    "different availability zones (ECS Express / ALB requirement)."
+                )
         if mode == "existing" and not names:
             errors.append(
                 f"{label} subnets: provide at least one existing subnet name."
@@ -1200,6 +1296,31 @@ def configure_subnet_tier(
     prefix_label = "Public" if is_public else "Private"
 
     if mode == "auto":
+        selected = discover_suitable_subnets_for_tier(
+            vpc_subnets, want_public=is_public
+        )
+        names = [(s.get("name") or "").strip() for s in selected if s.get("name")]
+        cidrs = [(s.get("cidr") or "").strip() for s in selected]
+        az_list = [(s.get("az") or "").strip() for s in selected]
+        if is_public:
+            answers.public_subnet_names = names
+            answers.public_subnet_cidrs = cidrs
+            answers.public_subnet_azs = az_list
+        else:
+            answers.private_subnet_names = names
+            answers.private_subnet_cidrs = cidrs
+            answers.private_subnet_azs = az_list
+        if selected:
+            print(f"Auto-discovered {label.lower()} subnets:")
+            for subnet in selected:
+                print(
+                    f"  - {subnet.get('name')} ({subnet.get('cidr')}, {subnet.get('az')})"
+                )
+        else:
+            print(
+                f"Auto-discover: no suitable {label.lower()} subnets found in this VPC "
+                "(public = IGW default route)."
+            )
         return
 
     if mode == "existing":
@@ -2454,6 +2575,15 @@ def validate_env_values(
         format_error = validate_new_vpc_cidr_format(new_cidr)
         if format_error:
             errors.append(format_error)
+    elif vpc_name:
+        public_azs = (values.get("PUBLIC_SUBNET_AVAILABILITY_ZONES") or "").strip()
+        private_azs = (values.get("PRIVATE_SUBNET_AVAILABILITY_ZONES") or "").strip()
+        if not public_azs and not private_azs:
+            errors.append(
+                "Existing VPC requires PUBLIC_SUBNET_AVAILABILITY_ZONES and/or "
+                "PRIVATE_SUBNET_AVAILABILITY_ZONES (re-run the installer with "
+                "Auto-discover, or set named subnets explicitly)."
+            )
 
     if express:
         public_cidrs_raw = (values.get("PUBLIC_SUBNET_CIDR_BLOCKS") or "").strip()

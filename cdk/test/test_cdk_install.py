@@ -26,6 +26,10 @@ def _demo_answers() -> inst.InstallAnswers:
         vpc_name="test-vpc",
         public_subnet_mode="auto",
         private_subnet_mode="auto",
+        # Auto-discover persists concrete selections (imported VPC needs AZs).
+        public_subnet_names=["pub-a", "pub-b"],
+        public_subnet_cidrs=["10.0.10.0/27", "10.0.12.0/27"],
+        public_subnet_azs=["eu-west-2a", "eu-west-2b"],
     )
 
 
@@ -35,6 +39,9 @@ def _production_answers() -> inst.InstallAnswers:
     a.acm_cert_arn = "arn:aws:acm:eu-west-2:123:certificate/abc"
     a.ssl_domain = "redaction.example.com"
     a.cloudfront_geo = "GB"
+    a.private_subnet_names = ["priv-a", "priv-b"]
+    a.private_subnet_cidrs = ["10.0.20.0/28", "10.0.21.0/28"]
+    a.private_subnet_azs = ["eu-west-2a", "eu-west-2b"]
     return a
 
 
@@ -49,6 +56,9 @@ def _headless_answers() -> inst.InstallAnswers:
         vpc_name="test-vpc",
         public_subnet_mode="auto",
         private_subnet_mode="auto",
+        public_subnet_names=["pub-a", "pub-b"],
+        public_subnet_cidrs=["10.0.10.0/27", "10.0.12.0/27"],
+        public_subnet_azs=["eu-west-2a", "eu-west-2b"],
         enable_s3_batch=True,
     )
 
@@ -350,6 +360,8 @@ def test_enrich_existing_subnet_details_from_aws(monkeypatch):
     answers.vpc_name = "test-vpc"
     answers.public_subnet_mode = "existing"
     answers.public_subnet_names = ["pub-a", "pub-b"]
+    answers.public_subnet_cidrs = []
+    answers.public_subnet_azs = []
     answers.private_subnet_mode = "create"
 
     monkeypatch.setattr(
@@ -372,9 +384,96 @@ def test_enrich_existing_subnet_details_from_aws(monkeypatch):
     assert answers.public_subnet_azs == ["eu-west-2a", "eu-west-2b"]
 
 
+def test_discover_suitable_subnets_for_tier_one_per_az():
+    vpc_subnets = [
+        {
+            "name": "priv-a",
+            "cidr": "10.0.1.0/24",
+            "az": "eu-west-2a",
+            "is_public": "false",
+        },
+        {
+            "name": "pub-a",
+            "cidr": "10.0.10.0/27",
+            "az": "eu-west-2a",
+            "is_public": "true",
+            "map_public_ip_on_launch": "true",
+        },
+        {
+            "name": "pub-a-extra",
+            "cidr": "10.0.11.0/27",
+            "az": "eu-west-2a",
+            "is_public": "true",
+        },
+        {
+            "name": "pub-b",
+            "cidr": "10.0.12.0/27",
+            "az": "eu-west-2b",
+            "is_public": "true",
+        },
+    ]
+    public = inst.discover_suitable_subnets_for_tier(vpc_subnets, want_public=True)
+    assert [s["name"] for s in public] == ["pub-a", "pub-b"]
+    private = inst.discover_suitable_subnets_for_tier(vpc_subnets, want_public=False)
+    assert [s["name"] for s in private] == ["priv-a"]
+
+
+def test_configure_subnet_tier_auto_populates_public(capsys):
+    answers = _demo_answers()
+    vpc_subnets = [
+        {
+            "name": "pub-a",
+            "cidr": "10.0.10.0/27",
+            "az": "eu-west-2a",
+            "is_public": "true",
+        },
+        {
+            "name": "pub-b",
+            "cidr": "10.0.12.0/27",
+            "az": "eu-west-2b",
+            "is_public": "true",
+        },
+        {
+            "name": "priv-a",
+            "cidr": "10.0.1.0/24",
+            "az": "eu-west-2a",
+            "is_public": "false",
+        },
+    ]
+    inst.configure_subnet_tier(
+        answers,
+        "public",
+        "auto",
+        vpc_subnets,
+        ["eu-west-2a", "eu-west-2b"],
+        interactive=False,
+    )
+    assert answers.public_subnet_names == ["pub-a", "pub-b"]
+    assert answers.public_subnet_azs == ["eu-west-2a", "eu-west-2b"]
+    assert answers.public_subnet_cidrs == ["10.0.10.0/27", "10.0.12.0/27"]
+    values = inst.build_env_values(answers)
+    assert values["PUBLIC_SUBNETS_TO_USE"] == '["pub-a", "pub-b"]'
+    assert values["PUBLIC_SUBNET_AVAILABILITY_ZONES"] == "['eu-west-2a', 'eu-west-2b']"
+    out = capsys.readouterr().out
+    assert "Auto-discovered public subnets" in out
+
+
+def test_validate_subnet_answers_auto_requires_two_azs():
+    answers = _demo_answers()
+    answers.public_subnet_mode = "auto"
+    answers.public_subnet_names = ["pub-a"]
+    answers.public_subnet_cidrs = ["10.0.10.0/27"]
+    answers.public_subnet_azs = ["eu-west-2a"]
+    errors = inst.validate_subnet_answers(answers)
+    assert any("different availability zones" in e for e in errors)
+
+
 def test_validate_subnet_answers_mixed_requires_public_names():
     answers = _demo_answers()
     answers.public_subnet_mode = "existing"
+    answers.public_subnet_names = []
+    answers.public_subnet_cidrs = []
+    answers.public_subnet_azs = []
     answers.private_subnet_mode = "create"
     answers.private_subnet_names = ["new-private"]
     errors = inst.validate_subnet_answers(answers)
@@ -1144,7 +1243,13 @@ def test_main_writes_config_before_smoke_test(monkeypatch, tmp_path):
 
     def fake_wizard(_args):
         call_order.append("wizard")
-        return _demo_answers()
+        answers = _demo_answers()
+        # Auto-discover persists concrete public subnets (required for imported VPC AZs).
+        answers.public_subnet_mode = "auto"
+        answers.public_subnet_names = ["pub-a", "pub-b"]
+        answers.public_subnet_cidrs = ["10.0.10.0/27", "10.0.12.0/27"]
+        answers.public_subnet_azs = ["eu-west-2a", "eu-west-2b"]
+        return answers
 
     def fake_write_env_file(path, values):
         call_order.append("write_config")

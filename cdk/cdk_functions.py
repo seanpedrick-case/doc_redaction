@@ -812,6 +812,13 @@ def create_malware_scan_bucket_and_guardduty_plan(
             bucket_arn=bucket_arn,
         )
 
+    # Permissions match AWS GuardDuty docs:
+    # https://docs.aws.amazon.com/guardduty/latest/ug/malware-protection-s3-iam-policy-prerequisite.html
+    stack = Stack.of(scope)
+    event_rule_arn = (
+        f"arn:{stack.partition}:events:{stack.region}:{stack.account}:"
+        "rule/DO-NOT-DELETE-AmazonGuardDutyMalwareProtectionS3*"
+    )
     guardduty_role = iam.Role(
         scope,
         "GuardDutyMalwareScanRole",
@@ -822,19 +829,87 @@ def create_malware_scan_bucket_and_guardduty_plan(
     )
     guardduty_role.add_to_policy(
         iam.PolicyStatement(
+            sid="AllowManagedRuleToSendS3EventsToGuardDuty",
             effect=iam.Effect.ALLOW,
             actions=[
-                "s3:GetObject",
-                "s3:GetObjectVersion",
-                "s3:ListBucket",
-                "s3:GetObjectTagging",
-                "s3:GetObjectVersionTagging",
-                "s3:PutObjectTagging",
-                "s3:PutObjectVersionTagging",
+                "events:PutRule",
+                "events:DeleteRule",
+                "events:PutTargets",
+                "events:RemoveTargets",
             ],
-            resources=[malware_bucket.bucket_arn, object_arn],
+            resources=[event_rule_arn],
+            conditions={
+                "StringLike": {
+                    "events:ManagedBy": "malware-protection-plan.guardduty.amazonaws.com"
+                }
+            },
         )
     )
+    guardduty_role.add_to_policy(
+        iam.PolicyStatement(
+            sid="AllowGuardDutyToMonitorEventBridgeManagedRule",
+            effect=iam.Effect.ALLOW,
+            actions=["events:DescribeRule", "events:ListTargetsByRule"],
+            resources=[event_rule_arn],
+        )
+    )
+    guardduty_role.add_to_policy(
+        iam.PolicyStatement(
+            sid="AllowPostScanTag",
+            effect=iam.Effect.ALLOW,
+            actions=[
+                "s3:PutObjectTagging",
+                "s3:GetObjectTagging",
+                "s3:PutObjectVersionTagging",
+                "s3:GetObjectVersionTagging",
+            ],
+            resources=[object_arn],
+        )
+    )
+    guardduty_role.add_to_policy(
+        iam.PolicyStatement(
+            sid="AllowEnableS3EventBridgeEvents",
+            effect=iam.Effect.ALLOW,
+            actions=["s3:PutBucketNotification", "s3:GetBucketNotification"],
+            resources=[bucket_arn],
+        )
+    )
+    guardduty_role.add_to_policy(
+        iam.PolicyStatement(
+            sid="AllowPutValidationObject",
+            effect=iam.Effect.ALLOW,
+            actions=["s3:PutObject"],
+            resources=[f"{bucket_arn}/malware-protection-resource-validation-object"],
+        )
+    )
+    guardduty_role.add_to_policy(
+        iam.PolicyStatement(
+            sid="AllowCheckBucketOwnership",
+            effect=iam.Effect.ALLOW,
+            actions=["s3:ListBucket"],
+            resources=[bucket_arn],
+        )
+    )
+    guardduty_role.add_to_policy(
+        iam.PolicyStatement(
+            sid="AllowMalwareScan",
+            effect=iam.Effect.ALLOW,
+            actions=["s3:GetObject", "s3:GetObjectVersion"],
+            resources=[object_arn],
+        )
+    )
+    if use_custom_kms and kms_key is not None:
+        guardduty_role.add_to_policy(
+            iam.PolicyStatement(
+                sid="AllowDecryptForMalwareScan",
+                effect=iam.Effect.ALLOW,
+                actions=["kms:GenerateDataKey", "kms:Decrypt"],
+                resources=[kms_key.key_arn],
+                conditions={
+                    "StringLike": {"kms:ViaService": f"s3.{stack.region}.amazonaws.com"}
+                },
+            )
+        )
 
     malware_plan = guardduty.CfnMalwareProtectionPlan(
         scope,
@@ -852,6 +927,10 @@ def create_malware_scan_bucket_and_guardduty_plan(
         ),
     )
     malware_plan.node.add_dependency(guardduty_role)
+    # Ensure the inline policy is attached before GuardDuty validates the role.
+    default_policy = guardduty_role.node.try_find_child("DefaultPolicy")
+    if default_policy is not None:
+        malware_plan.node.add_dependency(default_policy)
 
     CfnOutput(
         scope,
@@ -1396,12 +1475,24 @@ def get_vpc_id_by_name(vpc_name: str):
         raise
 
 
+def _route_table_dict_has_igw_default(route_table: Dict[str, Any]) -> bool:
+    """True when a describe_route_tables entry has 0.0.0.0/0 via an Internet Gateway."""
+    for route in route_table.get("Routes", []):
+        if route.get("DestinationCidrBlock") != "0.0.0.0/0":
+            continue
+        gateway_id = route.get("GatewayId") or ""
+        if gateway_id.startswith("igw-"):
+            return True
+    return False
+
+
 # --- Helper to fetch all existing subnets in a VPC once ---
 def _get_existing_subnets_in_vpc(vpc_id: str) -> Dict[str, Any]:
     """
     Fetches all subnets in a given VPC.
     Returns a dictionary with 'by_name' (map of name to subnet data),
     'by_id' (map of id to subnet data), and 'cidr_networks' (list of ipaddress.IPv4Network).
+    Each subnet entry includes ``is_public`` (IGW default route on its route table).
     """
     ec2_client = boto3.client("ec2")
     existing_subnets_data = {
@@ -1411,11 +1502,15 @@ def _get_existing_subnets_in_vpc(vpc_id: str) -> Dict[str, Any]:
     }
     try:
         subnet_to_route_table: Dict[str, str] = {}
+        route_table_has_igw: Dict[str, bool] = {}
         rt_response = ec2_client.describe_route_tables(
             Filters=[{"Name": "vpc-id", "Values": [vpc_id]}]
         )
         for route_table in rt_response.get("RouteTables", []):
             route_table_id = route_table["RouteTableId"]
+            route_table_has_igw[route_table_id] = _route_table_dict_has_igw_default(
+                route_table
+            )
             for association in route_table.get("Associations", []):
                 associated_subnet_id = association.get("SubnetId")
                 if associated_subnet_id:
@@ -1433,12 +1528,17 @@ def _get_existing_subnets_in_vpc(vpc_id: str) -> Dict[str, Any]:
                 None,
             )
 
+            route_table_id = subnet_to_route_table.get(subnet_id)
             subnet_info = {
                 "id": subnet_id,
                 "cidr": cidr_block,
                 "name": name_tag,
                 "az": s.get("AvailabilityZone"),
-                "route_table_id": subnet_to_route_table.get(subnet_id),
+                "route_table_id": route_table_id,
+                "map_public_ip_on_launch": bool(s.get("MapPublicIpOnLaunch")),
+                "is_public": bool(
+                    route_table_id and route_table_has_igw.get(route_table_id)
+                ),
             }
 
             if name_tag:
@@ -1790,7 +1890,7 @@ def check_subnet_exists_by_name(
     Checks if a subnet with the given name exists within the pre-fetched data.
 
     Args:
-        subnet_name: The 'Name' tag value of the subnet to check.
+        subnet_name: The 'Name' tag value of the subnet to check (or subnet-xxx id).
         existing_aws_subnets_data: Dictionary containing existing AWS subnet data
                                    (e.g., from _get_existing_subnets_in_vpc).
 
@@ -1800,6 +1900,8 @@ def check_subnet_exists_by_name(
         - The second element is the Subnet ID if found, None otherwise.
     """
     subnet_info = existing_aws_subnets_data["by_name"].get(subnet_name)
+    if not subnet_info and subnet_name.startswith("subnet-"):
+        subnet_info = existing_aws_subnets_data.get("by_id", {}).get(subnet_name)
     if subnet_info:
         print(f"Subnet '{subnet_name}' found with ID: {subnet_info['id']}")
         return True, subnet_info["id"]
@@ -2580,7 +2682,14 @@ def create_ecs_express_infrastructure_role(
     logical_id: str,
     role_name: str,
 ) -> iam.Role:
-    """IAM role for ECS Express Mode to provision ALB, ACM cert, and autoscaling."""
+    """IAM role for ECS Express Mode to provision ALB, ACM cert, and autoscaling.
+
+    Attaches the AWS managed Express Gateway infrastructure policy, plus a small
+    supplemental inline policy. The managed policy gates
+    ``DeregisterScalableTarget`` / ``DeleteAlarms`` on
+    ``aws:ResourceTag/AmazonECSManaged=true``; during failed-create rollback those
+    resources are often untagged, which surfaces as AccessDenied in CloudTrail.
+    """
     role = iam.Role(
         scope,
         logical_id,
@@ -2590,6 +2699,34 @@ def create_ecs_express_infrastructure_role(
     role.add_managed_policy(
         iam.ManagedPolicy.from_aws_managed_policy_name(
             "service-role/AmazonECSInfrastructureRoleforExpressGatewayServices"
+        )
+    )
+    # Cleanup / partial-create paths where AmazonECSManaged tags are missing.
+    role.add_to_policy(
+        iam.PolicyStatement(
+            sid="ExpressAutoscalingCleanupWithoutManagedTag",
+            effect=iam.Effect.ALLOW,
+            actions=[
+                "application-autoscaling:RegisterScalableTarget",
+                "application-autoscaling:DeregisterScalableTarget",
+                "application-autoscaling:TagResource",
+            ],
+            resources=[
+                "arn:aws:application-autoscaling:*:*:scalable-target/*",
+            ],
+        )
+    )
+    role.add_to_policy(
+        iam.PolicyStatement(
+            sid="ExpressCloudWatchAlarmCleanupWithoutManagedTag",
+            effect=iam.Effect.ALLOW,
+            actions=[
+                "cloudwatch:DeleteAlarms",
+                "cloudwatch:DescribeAlarms",
+                "cloudwatch:PutMetricAlarm",
+                "cloudwatch:TagResource",
+            ],
+            resources=["arn:aws:cloudwatch:*:*:alarm:*"],
         )
     )
     return role
