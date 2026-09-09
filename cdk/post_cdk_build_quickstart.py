@@ -42,6 +42,7 @@ from cdk_functions import create_basic_config_env
 from cdk_post_deploy import (
     apply_cognito_secret_fixup_from_stack,
     configure_express_pi_service_connect,
+    create_agentcore_runtime_from_ecr,
     print_headless_deployment_next_steps,
     restrict_express_albs_to_cloudfront,
     seed_headless_batch_s3_layout,
@@ -49,6 +50,7 @@ from cdk_post_deploy import (
     start_ecs_task,
     start_express_gateway_service,
     upload_file_to_s3,
+    wait_for_codebuild_build,
 )
 from tqdm import tqdm
 
@@ -71,7 +73,15 @@ if _enable_pi_image_build:
     start_codebuild_build(project_name=CODEBUILD_PI_PROJECT_NAME)
 
 _enable_agentcore_image_build = (
-    AGENTCORE_CDK_DEPLOY == "True" or ENABLE_AGENTCORE_CDK_RUNTIME == "True"
+    AGENTCORE_CDK_DEPLOY == "True"
+    or ENABLE_AGENTCORE_CDK_RUNTIME == "True"
+    or (
+        # Express agent UI + AgentCore orchestration: refresh the runtime image
+        # whenever quickstart runs (GitHub branch must already contain the code).
+        ENABLE_PI_AGENT_EXPRESS_SERVICE == "True"
+        and ENABLE_AGENTCORE_RUNTIME == "True"
+        and bool(CODEBUILD_AGENTCORE_PROJECT_NAME)
+    )
 )
 agentcore_build_id = None
 if _enable_agentcore_image_build:
@@ -79,7 +89,9 @@ if _enable_agentcore_image_build:
     agentcore_build_id = start_codebuild_build(
         project_name=CODEBUILD_AGENTCORE_PROJECT_NAME
     )
-    if agentcore_build_id and AGENTCORE_CDK_DEPLOY == "True":
+    if agentcore_build_id and (
+        AGENTCORE_CDK_DEPLOY == "True" or ENABLE_AGENTCORE_RUNTIME == "True"
+    ):
         from cdk_post_deploy import _patch_env_key_values
 
         _patch_env_key_values(
@@ -126,8 +138,9 @@ if _enable_pi_image_build:
                 print(
                     "\n--- AgentCore CDK deploy ---\n"
                     "Phase 1: CodeBuild is pushing the runtime image to ECR.\n"
-                    "Phase 2: cdk_install.py will create the Bedrock runtime automatically "
-                    "once the image is ready (no extra flags needed)."
+                    "Phase 2: after the image build finishes, this quickstart will "
+                    "create or UpdateAgentRuntime so Gradio keeps the same "
+                    "AGENTCORE_RUNTIME_URL (DEFAULT endpoint)."
                 )
             elif ENABLE_AGENTCORE_CDK_RUNTIME == "True":
                 print(
@@ -136,10 +149,10 @@ if _enable_pi_image_build:
                     "AGENTCORE_RUNTIME_URL is patched automatically from the ARN."
                 )
             else:
-                print("\n--- AgentCore manual deploy ---")
+                print("\n--- AgentCore runtime image refresh ---")
                 print(
-                    "Package and deploy with the agentcore CLI, then set "
-                    "AGENTCORE_RUNTIME_URL — see agent-redact/agentcore/README.md"
+                    "CodeBuild will rebuild the AgentCore ECR image; quickstart will "
+                    "UpdateAgentRuntime when the build succeeds."
                 )
             print(
                 "DOC_REDACTION_GRADIO_URL is set automatically on agentic Express when "
@@ -156,6 +169,33 @@ print("Waiting 8 minutes for CodeBuild container image(s) to build.")
 # tqdm iterates over a range, and you perform a small sleep in each iteration
 for i in tqdm(range(total_seconds), desc="Building container"):
     time.sleep(update_interval)
+
+# AgentCore: wait for the build we started, then create/update the runtime so
+# Express Gradio (same AGENTCORE_RUNTIME_URL) picks up the new image version.
+if agentcore_build_id and (
+    AGENTCORE_CDK_DEPLOY == "True" or ENABLE_AGENTCORE_RUNTIME == "True"
+):
+    print("\n--- AgentCore runtime create/update ---")
+    print(f"Waiting for AgentCore CodeBuild build {agentcore_build_id} ...")
+    if wait_for_codebuild_build(agentcore_build_id, aws_region=AWS_REGION):
+        url = create_agentcore_runtime_from_ecr(
+            stack_name="RedactionStack",
+            region=AWS_REGION,
+            update_existing_image=True,
+        )
+        if url:
+            print(f"AgentCore runtime ready: {url}")
+        else:
+            print(
+                "Warning: AgentCore CodeBuild succeeded but runtime create/update "
+                "failed. Retry with: python cdk/cdk_install.py --complete-agentcore"
+            )
+    else:
+        print(
+            "Warning: AgentCore CodeBuild did not succeed in time. "
+            "When the image is in ECR, run:\n"
+            "  python cdk/cdk_install.py --complete-agentcore"
+        )
 
 # Scale main ECS service to one task (skipped for headless batch-only deployments)
 if ENABLE_HEADLESS_DEPLOYMENT != "True":

@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from collections import deque
 from collections.abc import Iterator
@@ -25,6 +26,10 @@ class PiRpcError(RuntimeError):
 # of hanging forever.
 _PI_PROCESS_EXIT = object()
 
+# After ``agent_end``, wait briefly for ``agent_settled`` / further activity.
+# Older Pi builds may omit ``agent_settled``; a quiet grace period still finishes.
+_AGENT_SETTLE_GRACE_S = float(os.environ.get("AGENT_SETTLE_GRACE_S", "2"))
+_AGENT_SETTLE_MAX_S = float(os.environ.get("AGENT_SETTLE_MAX_S", "120"))
 
 # Pi RPC is JSONL over pipes; always UTF-8 (Windows default locale is cp1252).
 _PI_SUBPROCESS_ENCODING = "utf-8"
@@ -710,7 +715,7 @@ class PiRpcClient:
         self.start()
 
     def prompt_events(self, message: str) -> Iterator[PiStreamEvent]:
-        """Send a user message and yield structured events until ``agent_end``."""
+        """Send a user message and yield structured events until the session settles."""
         self._prompt_stream_depth += 1
         try:
             yield from self._prompt_events_impl(message)
@@ -743,12 +748,54 @@ class PiRpcClient:
 
         yield from self._iter_agent_events()
 
+    def _emit_agent_done(self, *, aborted: bool) -> PiStreamEvent:
+        self.clear_abort()
+        return PiStreamEvent(
+            kind="done",
+            text="Agent aborted." if aborted else "Agent finished.",
+        )
+
     def _iter_agent_events(self) -> Iterator[PiStreamEvent]:
+        """
+        Consume Pi RPC agent events until the session is fully idle.
+
+        ``agent_end`` only ends one low-level run; compaction, auto-retry, or
+        queued follow-ups may still run. Prefer ``agent_settled``. If that event
+        is missing (older Pi), finish after a quiet grace period following
+        ``agent_end``.
+        """
+        awaiting_settled = False
+        settled_aborted = False
+        grace_deadline: float | None = None
+        max_deadline: float | None = None
+
         while True:
-            event = self._events.get()
+            timeout: float | None = None
+            if (
+                awaiting_settled
+                and grace_deadline is not None
+                and max_deadline is not None
+            ):
+                timeout = max(0.0, min(grace_deadline, max_deadline) - time.time())
+            try:
+                if timeout is None:
+                    event = self._events.get()
+                else:
+                    event = self._events.get(timeout=timeout)
+            except queue.Empty:
+                yield self._emit_agent_done(aborted=settled_aborted)
+                return
+
             if event is _PI_PROCESS_EXIT:
                 raise self._process_exit_error()
             event_type = event.get("type")
+
+            if awaiting_settled and event_type not in (
+                "agent_settled",
+                "agent_end",
+            ):
+                # Compaction / retry / continuation after agent_end — keep waiting.
+                grace_deadline = max_deadline
 
             if event_type == "agent_start":
                 yield PiStreamEvent(kind="status", text="Agent started…")
@@ -896,20 +943,37 @@ class PiRpcClient:
                 )
 
             elif event_type == "agent_end":
-                # Pi delivers queued ``follow_up`` messages after ``agent_end`` and
-                # continues streaming; do not stop the stdout consumer until they run.
+                # Pi may still run auto-retry, compaction, or queued follow-ups after
+                # agent_end. Keep consuming until agent_settled (or a quiet grace).
                 if self._pending_follow_ups > 0:
                     self._pending_follow_ups -= 1
+                    awaiting_settled = False
+                    grace_deadline = None
+                    max_deadline = None
                     yield PiStreamEvent(
                         kind="status",
                         text="Follow-up queued — continuing…",
                     )
                     continue
-                aborted = self._abort_requested
-                self.clear_abort()
-                yield PiStreamEvent(
-                    kind="done",
-                    text="Agent aborted." if aborted else "Agent finished.",
+                if event.get("willRetry"):
+                    awaiting_settled = False
+                    grace_deadline = None
+                    max_deadline = None
+                    yield PiStreamEvent(
+                        kind="status",
+                        text="Agent run ended — retrying…",
+                    )
+                    continue
+                awaiting_settled = True
+                settled_aborted = self._abort_requested
+                now = time.time()
+                grace_deadline = now + _AGENT_SETTLE_GRACE_S
+                max_deadline = now + _AGENT_SETTLE_MAX_S
+                continue
+
+            elif event_type == "agent_settled":
+                yield self._emit_agent_done(
+                    aborted=self._abort_requested or settled_aborted
                 )
                 return
 

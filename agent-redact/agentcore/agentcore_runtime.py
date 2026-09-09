@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import codecs
+import hashlib
 import json
 import os
 from collections.abc import Iterator
@@ -55,6 +57,13 @@ def parse_agentcore_runtime_url(url: str) -> tuple[str, str]:
             f"Could not parse runtime ARN from AgentCore URL: {url!r}"
         )
     return region_from_agentcore_arn(arn, resource_label="runtime"), arn
+
+
+def agentcore_runtime_session_id(session_hash: str | None) -> str:
+    """Stable InvokeAgentRuntime session id (AgentCore expects a long unique id)."""
+    base = (session_hash or "default").strip() or "default"
+    digest = hashlib.sha256(base.encode("utf-8")).hexdigest()
+    return f"gradio-{digest}"
 
 
 def _agentcore_api_key() -> str:
@@ -213,18 +222,28 @@ class AgentCoreAgentRuntime(AgentRuntime):
     def _prompt_events_boto3(
         self, payload: dict[str, Any]
     ) -> Iterator[AgentStreamEvent]:
-        from botocore.exceptions import ClientError
+        from botocore.exceptions import BotoCoreError, ClientError, ReadTimeoutError
+        from urllib3.exceptions import ProtocolError as Urllib3ProtocolError
 
         region, runtime_arn = parse_agentcore_runtime_url(agentcore_runtime_url())
         client = _bedrock_agentcore_client(region)
         body = json.dumps(payload).encode("utf-8")
+        session_id = agentcore_runtime_session_id(self._session_hash)
         try:
             response = client.invoke_agent_runtime(
                 agentRuntimeArn=runtime_arn,
+                runtimeSessionId=session_id,
                 payload=body,
                 contentType="application/json",
                 accept="text/event-stream",
             )
+        except ReadTimeoutError as exc:
+            raise AgentRuntimeError(
+                "Timed out waiting for AgentCore runtime SSE (cold start or a long "
+                "Bedrock turn). Increase AGENTCORE_BOTO_READ_TIMEOUT_S if needed, and "
+                "check CloudWatch logs for the runtime. "
+                f"({exc})"
+            ) from exc
         except ClientError as exc:
             code = exc.response.get("Error", {}).get("Code", "")
             message = exc.response.get("Error", {}).get("Message", str(exc))
@@ -240,6 +259,10 @@ class AgentCoreAgentRuntime(AgentRuntime):
                     " then re-run package_runtime.py and agentcore deploy."
                 )
             raise AgentRuntimeError(f"{code}: {message}.{hint}") from exc
+        except BotoCoreError as exc:
+            raise AgentRuntimeError(
+                f"AgentCore invoke failed ({type(exc).__name__}): {exc}"
+            ) from exc
 
         status_code = int(response.get("statusCode") or 200)
         if status_code >= 400:
@@ -250,22 +273,50 @@ class AgentCoreAgentRuntime(AgentRuntime):
         stream = response.get("response")
         if stream is None:
             return
-        if hasattr(stream, "iter_lines"):
-            yield from self._iter_sse_response(
-                (
-                    line.decode("utf-8", errors="replace")
-                    if isinstance(line, (bytes, bytearray))
-                    else str(line)
-                )
-                for line in stream.iter_lines()
-            )
-            return
-        raw = stream.read() if hasattr(stream, "read") else stream
+
+        content_type = str(response.get("contentType") or "").lower()
+        try:
+            if "text/event-stream" in content_type or hasattr(stream, "iter_lines"):
+                # Small chunks so SSE events reach the Gradio UI as the runtime yields
+                # them (default 1024-byte buffering hides progress for long tool runs).
+                if hasattr(stream, "iter_lines"):
+                    lines = (
+                        (
+                            line.decode("utf-8", errors="replace")
+                            if isinstance(line, (bytes, bytearray))
+                            else str(line)
+                        )
+                        for line in stream.iter_lines(chunk_size=1)
+                    )
+                    yield from self._iter_sse_response(lines)
+                    return
+                yield from self._iter_sse_chunks(stream)
+                return
+            raw = stream.read() if hasattr(stream, "read") else stream
+        except ReadTimeoutError as exc:
+            raise AgentRuntimeError(
+                "Timed out while reading the AgentCore response stream. The runtime may "
+                "still be cold-starting or waiting on Bedrock. Increase "
+                "AGENTCORE_BOTO_READ_TIMEOUT_S (default 1800s) or check CloudWatch logs. "
+                f"({exc})"
+            ) from exc
+        except Exception as exc:
+            from http.client import IncompleteRead
+
+            from urllib3.exceptions import ProtocolError as Urllib3ProtocolError
+
+            if isinstance(exc, (Urllib3ProtocolError, IncompleteRead, OSError)):
+                raise AgentRuntimeError(
+                    "Connection to AgentCore response stream was interrupted "
+                    f"({exc}). If the chat stayed blank, redeploy the AgentCore "
+                    "runtime so it streams LangGraph events instead of buffering "
+                    "the whole turn."
+                ) from exc
+            raise
         if isinstance(raw, str):
             raw_bytes = raw.encode("utf-8")
         else:
             raw_bytes = bytes(raw or b"")
-        content_type = str(response.get("contentType") or "").lower()
         if "event-stream" in content_type or raw_bytes.strip().startswith(b"data:"):
             yield from self._iter_sse_lines(
                 line.decode("utf-8", errors="replace")
@@ -274,14 +325,59 @@ class AgentCoreAgentRuntime(AgentRuntime):
         else:
             yield from self._iter_json_response(raw_bytes)
 
+    def _iter_sse_chunks(self, stream: Any) -> Iterator[AgentStreamEvent]:
+        """Parse SSE/NDJSON from a raw StreamingBody byte iterator."""
+        decoder = codecs.getincrementaldecoder("utf-8")("replace")
+        buffer = ""
+        try:
+            for chunk in stream:
+                if self._abort_requested:
+                    yield AgentStreamEvent(kind="done", text="Agent aborted.")
+                    return
+                raw_bytes: bytes | None
+                if isinstance(chunk, (bytes, bytearray)):
+                    raw_bytes = bytes(chunk)
+                elif isinstance(chunk, str):
+                    buffer += chunk
+                    raw_bytes = None
+                else:
+                    continue
+                if raw_bytes is not None:
+                    buffer += decoder.decode(raw_bytes, final=False)
+                lines = buffer.split("\n")
+                buffer = lines.pop()
+                yield from self._iter_sse_response(lines)
+            buffer += decoder.decode(b"", final=True)
+            if buffer.strip():
+                yield from self._iter_sse_response([buffer])
+        except Exception as exc:
+            from urllib3.exceptions import ProtocolError as Urllib3ProtocolError
+
+            if isinstance(exc, (Urllib3ProtocolError, OSError)):
+                yield AgentStreamEvent(
+                    kind="error",
+                    text=(
+                        "AgentCore stream interrupted before completion "
+                        f"({exc}). Partial progress above may still be valid."
+                    ),
+                    is_error=True,
+                )
+                return
+            raise
+
     def _iter_sse_response(self, lines: Iterator[str]) -> Iterator[AgentStreamEvent]:
         for line in lines:
             if self._abort_requested:
                 yield AgentStreamEvent(kind="done", text="Agent aborted.")
                 return
-            if not line or not line.startswith("data:"):
+            text = (line or "").strip()
+            if not text:
                 continue
-            data = line[5:].strip()
+            if text.startswith("data:"):
+                data = text[5:].strip()
+            else:
+                # Some AgentCore transports emit bare NDJSON lines.
+                data = text
             if not data or data == "[DONE]":
                 continue
             try:
@@ -289,7 +385,10 @@ class AgentCoreAgentRuntime(AgentRuntime):
             except json.JSONDecodeError:
                 yield AgentStreamEvent(kind="text_delta", text=data)
                 continue
-            yield from self._map_agentcore_event(event)
+            if isinstance(event, dict):
+                yield from self._map_agentcore_event(event)
+            else:
+                yield AgentStreamEvent(kind="text_snapshot", text=str(event))
 
     def _iter_sse_lines(self, lines: Iterator[str]) -> Iterator[AgentStreamEvent]:
         yield from self._iter_sse_response(lines)

@@ -67,6 +67,7 @@ from output_files import (
     gradio_allowed_paths,
     latest_redacted_pdf_path,
     preview_pdf_path_for_gradio,
+    read_summary_markdown,
     refresh_workspace_output_files_stub,
     refresh_workspace_panel,
     workspace_files_download_fn,
@@ -191,12 +192,13 @@ AGENT_FINISH_SIGNAL_ABORTED = "aborted"
 AGENT_FINISH_SIGNAL_ERROR = "error"
 
 # Must match ``chat_outputs`` in :func:`build_ui` (Gradio validates return count).
-_CHAT_OUTPUT_COMPONENT_COUNT = 15
+_CHAT_OUTPUT_COMPONENT_COUNT = 16
 # Index of ``agent_finish_signal`` in ``chat_outputs`` (for finish-notification JS).
 _CHAT_OUTPUT_AGENT_FINISH_SIGNAL_IDX = 13
 # File/PDF slots in ``chat_outputs`` — must not be ``.then()`` *inputs* (Gradio 6 stores
 # prior ``gr.skip()`` as ``{'__type__': 'update'}``, which fails FileData validation).
 _CHAT_FILE_OUTPUT_INDICES = frozenset({10, 11, 12})
+_SUMMARY_MARKDOWN_EMPTY = "_No summary markdown found yet._"
 
 PI_AGENT_FINISH_HEAD_HTML = """
 <script>
@@ -1266,6 +1268,10 @@ def _pi_agent_is_streaming(client: AgentRuntime | None) -> bool:
 
 _PI_IDLE_POLL_INTERVAL_S = 0.25
 _PI_IDLE_MAX_WAIT_S = float(os.environ.get("AGENT_IDLE_MAX_WAIT_S", "5"))
+# Follow-up turns wait longer for post-``agent_end`` compaction / settle.
+_PI_FOLLOWUP_IDLE_MAX_WAIT_S = float(
+    os.environ.get("AGENT_FOLLOWUP_IDLE_MAX_WAIT_S", "30")
+)
 
 
 def _pi_wait_until_idle(
@@ -1334,9 +1340,11 @@ def _should_queue_agent_message(
     Route Send to steer only while this UI owns an active prompt stream.
 
     Uses :attr:`AgentRuntime.prompt_stream_active` (authoritative) plus Pi
-    ``isStreaming``. After the agent is finished, Send goes through the normal
-    chat path instead of queuing a follow-up event. Gradio ``agent_running`` and
-    stale ``isStreaming`` alone are not reliable after llama.cpp runs.
+    ``isStreaming``. After the session settles (``agent_settled`` / idle grace),
+    Send starts a new prompt via the queued chat path. Do not treat
+    ``isStreaming`` alone as steer-worthy when the Gradio stream has ended —
+    there is no event consumer for a queued steer/follow-up in that window;
+    :func:`_run_pi_chat` waits for idle instead.
     """
     if not (message or "").strip():
         return False
@@ -1519,6 +1527,7 @@ def _fresh_task_chat_outputs(
         latest_redacted_pdf_path(session_hash) or gr.skip(),
         AGENT_FINISH_SIGNAL_NONE,
         False,
+        read_summary_markdown(session_hash),
     )
 
 
@@ -1575,13 +1584,16 @@ def _chat_yield(
 ):
     final_files: list[str] | None | dict[str, Any]
     session_log: str | None | dict[str, Any]
+    summary_md: str | dict[str, Any]
     if refresh_final_files:
         final_files = collect_final_output_files(session_hash)
         session_log = collect_session_log_download(client)
+        summary_md = read_summary_markdown(session_hash)
     else:
         # Gradio 6 File components reject ``gr.update()`` as a stored value on replay.
         final_files = gr.skip()
         session_log = gr.skip()
+        summary_md = gr.update()
 
     if refresh_pdf_preview or refresh_final_files:
         path = preview_pdf_path_for_gradio(session_hash)
@@ -1608,6 +1620,7 @@ def _chat_yield(
         pdf_preview,
         agent_finish_signal,
         agent_running,
+        summary_md,
     )
 
 
@@ -1635,6 +1648,7 @@ def _steer_yield(
         gr.skip(),
         gr.skip(),
         gr.skip(),
+        gr.update(),
         gr.update(),
         gr.update(),
     )
@@ -1720,6 +1734,7 @@ def _followup_queued_skip_yield() -> tuple[Any, ...]:
         gr.skip(),
         gr.skip(),
         gr.skip(),
+        gr.update(),
         gr.update(),
         gr.update(),
     )
@@ -1895,6 +1910,7 @@ def _run_pi_chat(
                 gr.skip(),
                 AGENT_FINISH_SIGNAL_NONE,
                 False,
+                gr.update(),
             )
         return
 
@@ -1928,6 +1944,34 @@ def _run_pi_chat(
             refresh_final_files=True,
         )
         return
+
+    # Prior turn may still be compacting/retrying after agent_end; wait before a
+    # bare prompt (Pi rejects prompt without streamingBehavior while busy).
+    if client.running and not client.prompt_stream_active:
+        if not _pi_wait_until_idle(client, max_wait_s=_PI_FOLLOWUP_IDLE_MAX_WAIT_S):
+            busy_msg = (
+                "**Error:** Agent is still settling from the previous turn "
+                "(compaction or retry). Wait a moment and send again."
+            )
+            history.append(
+                {"role": "user", "content": chat_user_message or message.strip()}
+            )
+            history.append({"role": "assistant", "content": busy_msg})
+            yield _chat_yield(
+                history,
+                client,
+                [busy_msg],
+                "",
+                "",
+                "",
+                msg="" if chat_user_message is None else None,
+                send_enabled=True,
+                abort_enabled=False,
+                redact_enabled=True,
+                session_info=_session_summary(client),
+                session_hash=session_hash,
+            )
+            return
 
     activity: list[str] = []
     thinking = ""
@@ -2589,6 +2633,7 @@ def submit_redaction_task(
             gr.skip(),
             AGENT_FINISH_SIGNAL_NONE,
             False,
+            gr.update(),
         )
         return
     except MalwareScanRejectedError as exc:
@@ -2624,6 +2669,7 @@ def submit_redaction_task(
             gr.skip(),
             AGENT_FINISH_SIGNAL_NONE,
             False,
+            gr.update(),
         )
         return
     try:
@@ -2664,6 +2710,7 @@ def submit_redaction_task(
             gr.skip(),
             AGENT_FINISH_SIGNAL_NONE,
             False,
+            gr.update(),
         )
         return
 
@@ -2705,6 +2752,7 @@ def submit_redaction_task(
             gr.skip(),
             AGENT_FINISH_SIGNAL_NONE,
             False,
+            gr.update(),
         )
         return
 
@@ -3045,7 +3093,7 @@ def build_ui():
                     gr.Markdown(
                         "While the agent is **running**, **Send** steers it after the "
                         "current step. After **Agent finished**, **Send** starts a new "
-                        "normal chat turn in the same session."
+                        "chat turn in the same session (waits for Pi to fully settle)."
                     )
                     msg = gr.Textbox(
                         label="Message",
@@ -3099,6 +3147,7 @@ def build_ui():
                     ".xlsx",
                     ".xls",
                     ".txt",
+                    ".md",
                     ".doc",
                     ".docx",
                     ".json",
@@ -3135,6 +3184,7 @@ def build_ui():
                         ".xlsx",
                         ".xls",
                         ".txt",
+                        ".md",
                         ".doc",
                         ".docx",
                         ".json",
@@ -3157,6 +3207,15 @@ def build_ui():
                 file_types=[".jsonl"],
                 interactive=False,
             )
+            with gr.Accordion("Redaction summary", open=False):
+                gr.Markdown(
+                    "Shows the newest workspace markdown whose filename contains "
+                    "`summary` (for example `SUMMARY.md` under `review/`)."
+                )
+                summary_markdown = gr.Markdown(
+                    value=_SUMMARY_MARKDOWN_EMPTY,
+                    elem_classes=["summary-markdown-panel"],
+                )
             agent_finish_signal = gr.State(AGENT_FINISH_SIGNAL_NONE)
             agent_running_state = gr.State(False)
             pending_followup_message = gr.State("")
@@ -3177,6 +3236,7 @@ def build_ui():
             pdf_preview,
             agent_finish_signal,
             agent_running_state,
+            summary_markdown,
         ]
 
         _followup_route_inputs = [
@@ -3359,7 +3419,11 @@ def build_ui():
         ).success(
             fn=refresh_workspace_panel,
             inputs=[session_hash_state],
-            outputs=[workspace_output_explorer, workspace_output_explorer_download],
+            outputs=[
+                workspace_output_explorer,
+                workspace_output_download,
+                summary_markdown,
+            ],
             api_visibility="undocumented",
         ).success(
             fn=preview_pdf_path_for_gradio,

@@ -4504,9 +4504,10 @@ def _run_complete_agentcore(args: argparse.Namespace) -> int:
 
     Assumes the AgentCore runtime image is already in ECR (built by CodeBuild or
     pushed manually) and that phase 1 created the execution role. Creates the
-    Bedrock AgentCore runtime via the bedrock-agentcore-control API (boto3), then
-    derives ``AGENTCORE_RUNTIME_URL``, patches config, re-uploads ``agent.env``
-    and recycles the agent Express service.
+    Bedrock AgentCore runtime via the bedrock-agentcore-control API (boto3), or
+    updates an existing runtime of the same name to the current ECR ``:latest``
+    image. Then derives ``AGENTCORE_RUNTIME_URL``, patches config, re-uploads
+    ``agent.env`` and recycles the agent Express service.
 
     This deliberately does NOT run ``cdk deploy``. A second ``cdk deploy`` of
     RedactionStack would re-run the precheck and flip the stack's own managed

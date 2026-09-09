@@ -81,6 +81,10 @@ INVOKE_RUNTIME_CONFIG_KEYS = frozenset(
         "DOC_REDACTION_AUTH_COOKIE_NAME",
         "AGENT_DEFAULT_OCR_METHOD",
         "AGENT_DEFAULT_PII_METHOD",
+        "AGENT_DEFAULT_PROVIDER",
+        "AGENT_DEFAULT_MODEL",
+        "AWS_REGION",
+        "AWS_DEFAULT_REGION",
         "HF_TOKEN",
         "DOC_REDACTION_HF_TOKEN",
     }
@@ -172,9 +176,8 @@ async def invoke_redaction_agent(request: dict) -> AsyncIterator[dict]:
         session_hash, recursion_limit=graph_recursion_limit()
     )
 
-    def _emit_stream(active_graph, active_inputs) -> list[dict]:
-        """Collect stream events; callers yield them and handle errors."""
-        out: list[dict] = []
+    def _emit_stream(active_graph, active_inputs):
+        """Yield LangGraph node updates as they complete (do not buffer the run)."""
         reset_trim_stats()
         compaction_noted = False
         for event in active_graph.stream(
@@ -183,15 +186,13 @@ async def invoke_redaction_agent(request: dict) -> AsyncIterator[dict]:
             stats = get_trim_stats()
             if stats is not None and stats.trimmed and not compaction_noted:
                 compaction_noted = True
-                out.append(
-                    {
-                        "type": "status",
-                        "message": (
-                            f"Context compaction ({stats.tokens_before:,} → "
-                            f"{stats.tokens_after:,} tokens)."
-                        ),
-                    }
-                )
+                yield {
+                    "type": "status",
+                    "message": (
+                        f"Context compaction ({stats.tokens_before:,} → "
+                        f"{stats.tokens_after:,} tokens)."
+                    ),
+                }
             for node, update in event.items():
                 messages = update.get("messages") or []
                 for message in messages:
@@ -199,36 +200,29 @@ async def invoke_redaction_agent(request: dict) -> AsyncIterator[dict]:
                         text = stringify_message_content(message.content)
                         if text:
                             assistant_chunks.append(text)
-                        out.append(
-                            {
-                                "type": "message_update",
-                                "node": node,
-                                "role": "assistant",
-                                "content": text,
-                                "tool_calls": message.tool_calls or [],
-                            }
-                        )
+                        yield {
+                            "type": "message_update",
+                            "node": node,
+                            "role": "assistant",
+                            "content": text,
+                            "tool_calls": message.tool_calls or [],
+                        }
                     elif isinstance(message, ToolMessage):
-                        out.append(
-                            {
-                                "type": "message_update",
-                                "node": node,
-                                "role": "tool",
-                                "content": stringify_message_content(message.content),
-                                "tool_name": str(message.name or "tool"),
-                            }
-                        )
+                        yield {
+                            "type": "message_update",
+                            "node": node,
+                            "role": "tool",
+                            "content": stringify_message_content(message.content),
+                            "tool_name": str(message.name or "tool"),
+                        }
                     else:
                         content = getattr(message, "content", "")
-                        out.append(
-                            {
-                                "type": "message_update",
-                                "node": node,
-                                "role": getattr(message, "type", "unknown"),
-                                "content": content,
-                            }
-                        )
-        return out
+                        yield {
+                            "type": "message_update",
+                            "node": node,
+                            "role": getattr(message, "type", "unknown"),
+                            "content": content,
+                        }
 
     try:
         with arize_session_context(session_hash):

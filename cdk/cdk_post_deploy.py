@@ -2321,6 +2321,11 @@ def _find_existing_agentcore_runtime_arn(client, runtime_name: str) -> Optional[
     return None
 
 
+def _agentcore_runtime_id_from_arn(runtime_arn: str) -> str:
+    """Extract ``agentRuntimeId`` from a runtime ARN (``…:runtime/<id>``)."""
+    return (runtime_arn or "").rstrip("/").rsplit("/", 1)[-1]
+
+
 def create_agentcore_runtime_from_ecr(
     *,
     stack_name: str = "RedactionStack",
@@ -2328,15 +2333,20 @@ def create_agentcore_runtime_from_ecr(
     pi_agent_env_path: Optional[Path] = None,
     cdk_env_path: Optional[Path] = None,
     recycle_agent_service: bool = True,
+    update_existing_image: bool = True,
 ) -> Optional[str]:
-    """Create the Bedrock AgentCore runtime from an existing ECR image (no CDK).
+    """Create or update the Bedrock AgentCore runtime from an ECR image (no CDK).
 
     This is the no-stack-update phase 2: it calls the bedrock-agentcore-control
     API directly (mirroring the CDK ``CfnRuntime`` parameters), so it never runs
     ``cdk deploy`` and cannot mutate/delete the RedactionStack's managed
     resources. It then derives ``AGENTCORE_RUNTIME_URL``, patches the local env
     files, re-uploads ``agent.env`` to S3, and recycles the agent Express
-    service. Idempotent: reuses an existing runtime of the same name.
+    service.
+
+    When a runtime with ``AGENTCORE_RUNTIME_NAME`` already exists and
+    ``update_existing_image`` is True (default), calls ``UpdateAgentRuntime`` so
+    DEFAULT continues to serve the same ARN/URL with the new ``:latest`` image.
     """
     from cdk_config import (
         AGENTCORE_BEDROCK_MODEL,
@@ -2388,16 +2398,49 @@ def create_agentcore_runtime_from_ecr(
         "AWS_REGION": aws_region,
         "AWS_DEFAULT_REGION": aws_region,
         "AGENT_WORKSPACE_DIR": "/tmp/agentcore-workspace",
+        "LANGGRAPH_RECURSION_LIMIT": "150",
     }
 
+    network_mode = (AGENTCORE_NETWORK_MODE or "PUBLIC").upper()
     runtime_arn = _find_existing_agentcore_runtime_arn(client, runtime_name)
     if runtime_arn:
-        print(f"Reusing existing AgentCore runtime '{runtime_name}': {runtime_arn}")
-        print(
-            "  Note: an existing runtime's model is not changed here. To switch the "
-            f"Bedrock model (env AGENT_DEFAULT_MODEL='{bedrock_model}'), delete and "
-            "recreate the runtime."
-        )
+        runtime_id = _agentcore_runtime_id_from_arn(runtime_arn)
+        if update_existing_image:
+            print(
+                f"Updating existing AgentCore runtime '{runtime_name}' "
+                f"({runtime_id}) to {container_uri} ..."
+            )
+            try:
+                existing = client.get_agent_runtime(agentRuntimeId=runtime_id)
+                merged_env = dict(existing.get("environmentVariables") or {})
+                merged_env.update(runtime_env_vars)
+                resp = client.update_agent_runtime(
+                    agentRuntimeId=runtime_id,
+                    agentRuntimeArtifact={
+                        "containerConfiguration": {"containerUri": container_uri}
+                    },
+                    roleArn=existing.get("roleArn") or role_arn,
+                    networkConfiguration=existing.get("networkConfiguration")
+                    or {"networkMode": network_mode},
+                    environmentVariables=merged_env,
+                )
+                runtime_arn = resp.get("agentRuntimeArn") or runtime_arn
+                version = resp.get("agentRuntimeVersion")
+                print(
+                    f"Updated AgentCore runtime {runtime_id}"
+                    + (f" → version {version}" if version else "")
+                    + f" ({container_uri})"
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(f"Failed to update AgentCore runtime: {exc}")
+                return None
+        else:
+            print(f"Reusing existing AgentCore runtime '{runtime_name}': {runtime_arn}")
+            print(
+                "  Note: image/env not updated (update_existing_image=False). "
+                "To roll a new ECR image onto this runtime, re-run with "
+                "update_existing_image=True or call UpdateAgentRuntime."
+            )
     else:
         print(f"Creating AgentCore runtime '{runtime_name}' from {container_uri} ...")
         print(f"  Bedrock model: {bedrock_model} (AGENT_DEFAULT_MODEL)")
@@ -2408,9 +2451,7 @@ def create_agentcore_runtime_from_ecr(
                     "containerConfiguration": {"containerUri": container_uri}
                 },
                 roleArn=role_arn,
-                networkConfiguration={
-                    "networkMode": (AGENTCORE_NETWORK_MODE or "PUBLIC").upper()
-                },
+                networkConfiguration={"networkMode": network_mode},
                 environmentVariables=runtime_env_vars,
             )
         except Exception as exc:  # noqa: BLE001

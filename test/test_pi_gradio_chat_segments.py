@@ -490,6 +490,7 @@ def test_submit_followup_chat_queued_runs_pi_chat(monkeypatch):
             gr.skip(),
             "",
             False,
+            gr.update(),
         )
 
     monkeypatch.setattr("gradio_app._run_pi_chat", _fake_run_pi_chat)
@@ -521,6 +522,75 @@ def test_should_queue_only_while_pi_streaming(monkeypatch):
     assert _should_queue_agent_message(idle, message="") is False
     assert _pi_agent_is_streaming(None) is False
     assert _pi_agent_is_streaming(_FakePiClient(running=False, streaming=True)) is False
+
+
+def test_run_pi_chat_waits_for_idle_before_followup_prompt(monkeypatch):
+    from gradio_app import _run_pi_chat
+
+    waits: list[float] = []
+
+    class _Client:
+        running = True
+        prompt_stream_active = False
+
+        def get_state(self):
+            return {"isStreaming": False}
+
+        def get_messages(self):
+            return []
+
+        def drain_pending_ui_history(self):
+            return []
+
+        def stage_ui_chat_notice(self, *_a, **_k):
+            return None
+
+    def _fake_wait(client, *, max_wait_s=None):
+        waits.append(max_wait_s if max_wait_s is not None else -1)
+        return True
+
+    monkeypatch.setattr("gradio_app._ensure_client", lambda c, _s: c or _Client())
+    monkeypatch.setattr("gradio_app._refresh_pi_client_model", lambda _c: None)
+    monkeypatch.setattr(
+        "gradio_app._prepare_llama_before_orchestration_prompt", lambda: None
+    )
+    monkeypatch.setattr("gradio_app._pi_wait_until_idle", _fake_wait)
+    monkeypatch.setattr("gradio_app.resolve_session_token_usage", lambda _c: None)
+    monkeypatch.setattr(
+        "gradio_app.start_agent_prompt_event_worker",
+        lambda client, event_queue, prompt: event_queue.put(
+            PiStreamEvent(kind="done", text="Agent finished.")
+        )
+        or event_queue.put(None),
+    )
+    monkeypatch.setattr("gradio_app._session_summary", lambda _c: "_ok_")
+    monkeypatch.setattr("gradio_app._agent_status_markdown", lambda _c: "_ok_")
+    monkeypatch.setattr("gradio_app._notify_agent_finished", lambda **_k: "")
+    monkeypatch.setattr("gradio_app._schedule_post_pi_task", lambda **_k: None)
+    monkeypatch.setattr(
+        "gradio_app._finalize_assistant_chat",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        "gradio_app._build_pi_prompt_message",
+        lambda *_a, **_k: "prompt",
+    )
+    monkeypatch.setattr(
+        "gradio_app._stage_agentcore_workspace_upload", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr("gradio_app._stage_harness_input", lambda *_a, **_k: None)
+    monkeypatch.setattr("gradio_app._uses_local_llama_orchestrator", lambda: False)
+
+    outputs = list(
+        _run_pi_chat(
+            "Did you get stuck?",
+            [],
+            _Client(),
+            session_hash="sess",
+        )
+    )
+    assert waits and waits[0] == 30.0
+    assert outputs
 
 
 def test_refresh_pi_client_model_calls_set_model(monkeypatch):

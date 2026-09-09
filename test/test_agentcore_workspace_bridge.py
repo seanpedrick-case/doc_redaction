@@ -104,10 +104,17 @@ def test_collect_upload_skips_oversized_files(tmp_path, monkeypatch):
 def test_build_agentcore_invoke_runtime_config_uses_pi_env(monkeypatch):
     monkeypatch.setenv("DOC_REDACTION_GRADIO_URL", "http://host.docker.internal:7861")
     monkeypatch.setenv("AGENT_DEFAULT_OCR_METHOD", "paddle")
+    monkeypatch.setenv("AGENT_DEFAULT_PROVIDER", "amazon-bedrock")
+    monkeypatch.setenv("AGENT_DEFAULT_MODEL", "mistral.devstral-2-123b")
+    monkeypatch.setenv("AWS_REGION", "eu-west-2")
     monkeypatch.setenv("HF_TOKEN", "should-not-pass")
     config = bridge.build_agentcore_invoke_runtime_config()
     assert config["DOC_REDACTION_GRADIO_URL"] == "http://host.docker.internal:7861"
     assert config["AGENT_DEFAULT_OCR_METHOD"] == "paddle"
+    assert config["AGENT_DEFAULT_PROVIDER"] == "amazon-bedrock"
+    assert config["AGENT_DEFAULT_MODEL"] == "mistral.devstral-2-123b"
+    assert config["AWS_REGION"] == "eu-west-2"
+    assert config["AWS_DEFAULT_REGION"] == "eu-west-2"
     assert "HF_TOKEN" not in config
 
 

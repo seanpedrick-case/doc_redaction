@@ -148,7 +148,7 @@ def _collect_raw_final_output_files(
 ) -> list[Path] | None:
     """
     Collect deliverable files from ``review/output_review_final/`` (and aliases)
-    anywhere under the session workspace.
+    anywhere under the session workspace, plus summary markdown files.
     """
     root = workspace_root_from(session_hash)
     if not root.is_dir():
@@ -166,7 +166,10 @@ def _collect_raw_final_output_files(
                 continue
             if download_folder in relative.parts:
                 continue
-            if not _is_under_final_output_dir(relative):
+            if ".pi" in relative.parts:
+                continue
+            under_final = _is_under_final_output_dir(relative)
+            if not under_final and not _is_summary_markdown_name(path.name):
                 continue
             try:
                 path.resolve(strict=False).relative_to(root)
@@ -217,6 +220,70 @@ def collect_final_output_files(
 ) -> list[str] | None:
     """Return deduplicated, prefix-stripped deliverables for download and S3 export."""
     return build_final_download_files(session_hash)
+
+
+_SUMMARY_MARKDOWN_EMPTY = "_No summary markdown found yet._"
+
+
+def _is_summary_markdown_name(name: str) -> bool:
+    """True for ``*.md`` filenames whose stem contains ``summary`` (any case)."""
+    path = Path(name)
+    if path.suffix.lower() != ".md":
+        return False
+    return "summary" in path.stem.lower()
+
+
+def find_summary_markdown_path(session_hash: str | None = None) -> Path | None:
+    """
+    Newest session-workspace markdown whose filename contains ``summary``.
+
+    Prefers files under a ``review/`` folder (task prompt location) when timestamps
+    tie; skips ``output_final_download/`` and ``.pi/``.
+    """
+    root = workspace_root_from(session_hash)
+    if not root.is_dir():
+        return None
+
+    download_folder = final_download_folder_name()
+    candidates: list[tuple[float, int, Path]] = []
+    try:
+        for path in root.rglob("*.md"):
+            if not path.is_file() or not _is_summary_markdown_name(path.name):
+                continue
+            try:
+                relative = path.relative_to(root)
+            except ValueError:
+                continue
+            if download_folder in relative.parts or ".pi" in relative.parts:
+                continue
+            try:
+                path.resolve(strict=False).relative_to(root)
+            except ValueError:
+                continue
+            # Prefer review/ paths slightly when mtimes are equal.
+            review_bonus = 1 if "review" in relative.parts else 0
+            candidates.append((_file_created_timestamp(path), review_bonus, path))
+    except OSError:
+        return None
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (item[0], item[1]))
+    return candidates[-1][2]
+
+
+def read_summary_markdown(session_hash: str | None = None) -> str:
+    """Return summary markdown text for the Gradio viewer, or a placeholder."""
+    path = find_summary_markdown_path(session_hash)
+    if path is None:
+        return _SUMMARY_MARKDOWN_EMPTY
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return _SUMMARY_MARKDOWN_EMPTY
+    if not text:
+        return f"_Empty summary file:_ `{path.name}`"
+    return f"_Source:_ `{path.name}`\n\n{text}"
 
 
 _REDACTED_PDF_SUFFIX = "_redacted.pdf"
@@ -481,12 +548,13 @@ def gradio_allowed_paths() -> list[str]:
 def refresh_workspace_panel(
     session_hash: str = "",
     request: gr.Request | None = None,
-) -> tuple[Any, list[str] | None]:
-    """Refresh file explorer and auto-detected final deliverables."""
+) -> tuple[Any, list[str] | None, str]:
+    """Refresh file explorer, final deliverables, and summary markdown viewer."""
     resolved = effective_session_hash(session_hash or "", request)
     return (
         load_workspace_output_files(resolved, request),
         collect_final_output_files(resolved),
+        read_summary_markdown(resolved),
     )
 
 

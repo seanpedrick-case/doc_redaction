@@ -346,10 +346,18 @@ def build_agentcore_invoke_runtime_config() -> dict[str, str]:
         "DOC_REDACTION_AUTH_COOKIE_NAME",
         "AGENT_DEFAULT_OCR_METHOD",
         "AGENT_DEFAULT_PII_METHOD",
+        "AGENT_DEFAULT_PROVIDER",
+        "AGENT_DEFAULT_MODEL",
+        "AWS_REGION",
+        "AWS_DEFAULT_REGION",
     ):
         value = (os.environ.get(key) or "").strip()
         if value:
             config[key] = value
+    if config.get("AWS_REGION") and not config.get("AWS_DEFAULT_REGION"):
+        config["AWS_DEFAULT_REGION"] = config["AWS_REGION"]
+    if config.get("AWS_DEFAULT_REGION") and not config.get("AWS_REGION"):
+        config["AWS_REGION"] = config["AWS_DEFAULT_REGION"]
     if "hf.space" in url.lower():
         token = (
             os.environ.get("HF_TOKEN") or os.environ.get("DOC_REDACTION_HF_TOKEN") or ""
