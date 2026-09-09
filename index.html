@@ -229,21 +229,25 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <p>Navigate through the sections to learn how to install, use, and manage the application. Below is a brief introduction to the app, followed by <strong>complete installation instructions</strong> (PyPI, source, and Docker overview).</p>
 <section id="document-redaction" class="level2">
 <h2 class="anchored" data-anchor-id="document-redaction">Document redaction</h2>
-<p>Redact personally identifiable information (PII) from documents (pdf, png, jpg), Word files (docx), or tabular data (xlsx/csv/parquet). Please see the <a href="https://seanpedrick-case.github.io/doc_redaction/src/user_guide.html">User Guide</a> for a full walkthrough of all the features in the app.</p>
+<p><a href="https://pypi.org/project/doc-redaction/" target="_blank"><img alt="PyPI - Version" src="https://img.shields.io/pypi/v/doc-redaction"></a></p>
+<p>Redact personally identifiable information (PII) from documents (PDF, PNG, JPG), Word files (DOCX), or tabular data (XLSX/CSV/Parquet). Please see the <a href="https://seanpedrick-case.github.io/doc_redaction/src/user_guide.html">User Guide</a> for a full walkthrough of all the features in the app.</p>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="https://raw.githubusercontent.com/seanpedrick-case/document_redaction_examples/refs/heads/main/review_redactions/Signatures%20and%20handwriting%20found.PNG" class="img-fluid figure-img"></p>
 <figcaption>Handwriting and signatures redacted example</figcaption>
 </figure>
 </div>
-<p>To identify text in documents, the ‘Local’ text extraction uses PikePDF, and OCR image analysis uses Tesseract, and works well only for documents with typed text or scanned PDFs with clear text. Use AWS Textract to extract more complex elements e.g.&nbsp;handwriting, signatures, or unclear text. For PII identification, ‘Local’ (based on spaCy) gives good results if you are looking for common names or terms, or a custom list of terms to redact (see Redaction settings). AWS Comprehend gives better results at a small cost.</p>
-<p>Additional options include, choosing the type of information to redact (e.g.&nbsp;people, places), custom terms to include/ exclude from redaction, fuzzy matching, language settings, and whole page redaction. After redaction is complete, you can view and modify suggested redactions on the ‘Review redactions’ tab to quickly create a final redacted document.</p>
+<p>To extract text from documents, the ‘Local’ options are PikePDF for PDFs with selectable text, and OCR with Tesseract. Use AWS Textract to extract more complex elements e.g.&nbsp;handwriting, signatures, or unclear text. PaddleOCR and VLM support is also provided (see the installation instructions below).</p>
+<p>For PII identification, ‘Local’ (based on spaCy) gives good results if you are looking for common names or terms, or a custom list of terms to redact (see Redaction settings). AWS Comprehend gives better results at a small cost.</p>
+<p>Additional options on the ‘Redaction settings’ include, the type of information to redact (e.g.&nbsp;people, places), custom terms to include/ exclude from redaction, fuzzy matching, language settings, and whole page redaction. After redaction is complete, you can view and modify suggested redactions on the ‘Review rededctions’ tab to quickly create a final redacted document.</p>
 <p>NOTE: The app is not 100% accurate, and it will miss some personal information. It is essential that all outputs are reviewed <strong>by a human</strong> before using the final outputs.</p>
 <hr>
 </section>
 <section id="quick-start---installation-and-first-run" class="level2">
 <h2 class="anchored" data-anchor-id="quick-start---installation-and-first-run">🚀 Quick Start - Installation and first run</h2>
-<p>Follow these instructions to get the document redaction application running on your local machine. ### 1. Installation</p>
+<p>Follow these instructions to get the document redaction application running on your local machine.</p>
+<section id="installation" class="level3">
+<h3 class="anchored" data-anchor-id="installation">1. Installation</h3>
 <section id="option-1---recommended-install-from-source-repo" class="level4">
 <h4 class="anchored" data-anchor-id="option-1---recommended-install-from-source-repo">Option 1 - Recommended: Install from source repo</h4>
 <p>Clone the repository and install in editable mode:</p>
@@ -257,7 +261,7 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <p>If you want to run VLMs / LLMs with the transformers package:</p>
 <div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb3"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install <span class="at">-e</span> <span class="st">".[vlm]"</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>Note that the versions of both PaddleOCR and Torch installed by default are the CPU-only versions. If you want to install the GPU-enabled version of torch, it is advised to install the following version:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb4"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install torch==2.9.1 torchvision==0.24.1 <span class="at">--index-url</span> https://download.pytorch.org/whl/cu129</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb4"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install torch==2.13.0 torchvision==0.28.0 <span class="at">--index-url</span> https://download.pytorch.org/whl/cu130</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </section>
 </section>
 <section id="option-2---install-from-pypi" class="level4">
@@ -301,40 +305,15 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb10"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> build <span class="at">-f</span> Dockerfile <span class="at">--target</span> gradio <span class="at">-t</span> doc-redaction-gradio .</span>
 <span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> build <span class="at">-f</span> Dockerfile <span class="at">--target</span> lambda <span class="at">-t</span> doc-redaction-lambda .</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </section>
-<section id="pi-agent-agentic-redaction" class="level5">
-<h5 class="anchored" data-anchor-id="pi-agent-agentic-redaction">Pi agent (agentic redaction)</h5>
-<p>The <a href="https://github.com/earendil-works/pi">Pi</a> orchestration UI uses a separate multi-stage image at <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/agent-redact/pi-agent/Dockerfile">agent-redact/pi-agent/Dockerfile</a>. It shares the same Python 3.12 slim base as the main app; a small Node stage installs the <code>pi</code> CLI, which is copied into the runtime image.</p>
-<table class="caption-top table">
-<thead>
-<tr class="header">
-<th>Build target</th>
-<th>Typical use</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td><strong><code>dev</code></strong></td>
-<td>Local development with <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_llama_agentic.yml">docker-compose_llama_agentic.yml</a> — the repo is bind-mounted; only Pi CLI + Python deps are in the image.</td>
-</tr>
-<tr class="even">
-<td><strong><code>runtime</code></strong></td>
-<td><a href="https://huggingface.co/spaces/seanpedrickcase/agentic_document_redaction">Hugging Face Space</a> and AWS ECS — agent code is baked in; runs as non-root <code>user</code> with <strong>named volumes</strong> for workspace, uploads, and session dirs (read-only root filesystem friendly).</td>
-</tr>
-</tbody>
-</table>
-<p>Build from the repository root:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb11"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> build <span class="at">-f</span> agent-redact/pi-agent/Dockerfile <span class="at">--target</span> dev <span class="at">-t</span> pi-agent-dev .</span>
-<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> build <span class="at">-f</span> agent-redact/pi-agent/Dockerfile <span class="at">--target</span> runtime <span class="at">-t</span> pi-agent-runtime .</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<p>For llama.cpp + Pi together, see the compose examples at the top of <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_llama_agentic.yml">docker-compose_llama_agentic.yml</a>. Further detail: <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/agent-redact/README.md">agent-redact/README.md</a>.</p>
-</section>
 </section>
 <section id="option-4---installation-on-aws-with-cdk" class="level4">
 <h4 class="anchored" data-anchor-id="option-4---installation-on-aws-with-cdk">Option 4 - Installation on AWS with CDK</h4>
-<p>The repo contains a <a href="https://github.com/seanpedrick-case/doc_redaction/tree/main/cdk">CDK folder</a>, that contains all the files you need to setup and deploy to an AWS environment with CDK. The installation wizard is <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/cdk/cdk_install.py">cdk_install.py</a>, which provides a number of options to deploy the Document Redaction App to AWS for demonstration or production. More details on CDK deployment can be found in the <a href="https://seanpedrick-case.github.io/doc_redaction/src/installation_guide.html">Installation Guide</a>.</p>
+<p>The repo contains a <a href="https://github.com/seanpedrick-case/doc_redaction/tree/main/cdk">CDK folder</a>, that contains all the files you need to setup and deploy to an AWS environment with CDK. The installation wizard is <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/cdk/cdk_install.py">cdk_install.py</a>, which provides a number of options to deploy the Document Redaction App to AWS for demonstration or production. CDK-specific notes (including CloudFront CSP/CORS and the post-deploy refresh deploy) are in <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/cdk/README.md">cdk/README.md</a>. More details on CDK deployment can be found in the <a href="https://seanpedrick-case.github.io/doc_redaction/src/installation_guide.html">Installation Guide</a>.</p>
+</section>
 </section>
 <section id="install-prerequisites-tesseract-and-poppler" class="level3">
 <h3 class="anchored">2. Install prerequisites: Tesseract and Poppler</h3>
-<p>This application relies on two external tools for OCR (Tesseract) and PDF processing (Poppler). Please install them on your system before proceeding.</p>
+<p>This application relies on two external tools for OCR (Tesseract) and PDF processing (Poppler). If not using a Docker-based deployment, you will need to install them on your system before proceeding. To run the Document Redaction app successfully, these tools need to be installed and either 1. added to PATH, or 2. be in a folder that is directly referenced in the config/app_config.env file with the variables TESSERACT_FOLDER and POPPLER_FOLDER (defined <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/tools/config.py">here</a> if you want to see the code). The instructions below will guide you through different ways to install these dependencies.</p>
 <hr>
 <section id="automated-dependency-setup-recommended" class="level4">
 <h4 class="anchored" data-anchor-id="automated-dependency-setup-recommended">Automated dependency setup (recommended)</h4>
@@ -345,10 +324,10 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <li><strong>PyPI install</strong>: <code>pip install doc_redaction</code> and run from a writable folder where you want <code>redaction_deps/</code> and <code>config/app_config.env</code> to be created/updated.</li>
 </ul>
 <p>From the repository root (or your chosen working folder) after creating/activating your venv and installing Python requirements:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb12"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> doc_redaction.install_deps</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb11"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> doc_redaction.install_deps</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>This writes <code>TESSERACT_FOLDER</code> / <code>POPPLER_FOLDER</code> into <code>config/app_config.env</code> so the app can find the binaries without you editing your system PATH.</p>
 <p>To just check whether your machine can already see the tools:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb13"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> doc_redaction.install_deps <span class="at">--verify-only</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb12"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-m</span> doc_redaction.install_deps <span class="at">--verify-only</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </section>
 <section id="on-windows" class="level4">
 <h4 class="anchored"><strong>On Windows</strong></h4>
@@ -379,58 +358,218 @@ gtag('config', 'G-9JNEKNN14K', { 'anonymize_ip': true});
 <section id="on-linux-debianubuntu" class="level4">
 <h4 class="anchored" data-anchor-id="on-linux-debianubuntu"><strong>On Linux (Debian/Ubuntu)</strong></h4>
 <p>Open your terminal and run the following command to install Tesseract and Poppler:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb14"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> apt-get update <span class="kw">&amp;&amp;</span> <span class="fu">sudo</span> apt-get install <span class="at">-y</span> tesseract-ocr poppler-utils</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb13"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> apt-get update <span class="kw">&amp;&amp;</span> <span class="fu">sudo</span> apt-get install <span class="at">-y</span> tesseract-ocr poppler-utils</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </section>
 <section id="on-linux-fedoracentosrhel" class="level4">
 <h4 class="anchored" data-anchor-id="on-linux-fedoracentosrhel"><strong>On Linux (Fedora/CentOS/RHEL)</strong></h4>
 <p>Open your terminal and use the <code>dnf</code> or <code>yum</code> package manager:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb15"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> dnf install <span class="at">-y</span> tesseract poppler-utils</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb14"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> dnf install <span class="at">-y</span> tesseract poppler-utils</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <hr>
 </section>
 </section>
 <section id="run-the-application" class="level3">
 <h3 class="anchored" data-anchor-id="run-the-application">3. Run the Application</h3>
-<p>With all dependencies installed, you can now start the Gradio application.</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb16"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> app.py</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<p>After running the command, the application will start, and you will see a local URL in your terminal (usually <code>http://127.0.0.1:7860</code>).</p>
-<p>Open this URL in your web browser to use the document redaction tool</p>
-<section id="command-line-interface" class="level4">
-<h4 class="anchored" data-anchor-id="command-line-interface">Command line interface</h4>
-<p>If you installed from <strong>PyPI</strong>, use the installed console script:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb17"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="ex">cli_redact</span> <span class="at">--help</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<p>From a <strong>repository checkout</strong>, you can also run:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb18"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--help</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<p>For Python examples that mirror each Gradio <code>api_name</code>, see <a href="https://seanpedrick-case.github.io/doc_redaction/src/python_package_usage.html">Python Package usage (Python)</a>.</p>
-<hr>
-</section>
-</section>
-<section id="run-the-application-1" class="level3">
-<h3 class="anchored" data-anchor-id="run-the-application-1">3. Run the Application</h3>
 <p>With all dependencies installed, you can now start the Gradio application GUI. For a guide on how to use this, please go <a href="https://seanpedrick-case.github.io/doc_redaction/src/user_guide.html">here</a>.</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb19"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> app.py</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb15"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> app.py</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>After running the command, the application will start, and you will see a local URL in your terminal (usually <code>http://127.0.0.1:7860</code>).</p>
 <p>Open this URL in your web browser to use the document redaction tool</p>
-<section id="command-line-interface-1" class="level4">
-<h4 class="anchored" data-anchor-id="command-line-interface-1">Command line interface</h4>
+</section>
+<section id="agentic-redaction-pi-langgraph-agentcore" class="level3">
+<h3 class="anchored" data-anchor-id="agentic-redaction-pi-langgraph-agentcore">Agentic redaction (Pi, LangGraph, AgentCore)</h3>
+<p>The <a href="https://github.com/seanpedrick-case/doc_redaction/tree/main/agent-redact">agent-redact/</a> folder (repository checkout, not the PyPI wheel) adds a separate Gradio UI that orchestrates redaction (Pass 1 review CSV, optional Pass 2 VLM, <code>/review_apply</code>) against the main doc_redaction app. Heavy OCR and PII detection stay in the main app; the agent UI only drives the workflow.</p>
+<p>Choose the orchestration backend with <code>AGENT_ORCHESTRATOR</code> in <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/config/agent.env.example"><code>config/agent.env</code></a> (copy from <code>config/agent.env.example</code>):</p>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th><code>AGENT_ORCHESTRATOR</code></th>
+<th>Runtime</th>
+<th>Typical use</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong><code>pi</code></strong> (default)</td>
+<td><a href="https://github.com/earendil-works/pi">Pi</a> coding agent (<code>pi --mode rpc</code>)</td>
+<td>Full bash + skills; <a href="https://huggingface.co/spaces/seanpedrickcase/agentic_document_redaction">Hugging Face Space</a>; local Docker / ECS</td>
+</tr>
+<tr class="even">
+<td><strong><code>langgraph</code></strong></td>
+<td>LangGraph ReAct agent in <a href="https://github.com/seanpedrick-case/doc_redaction/tree/main/agent-redact/redaction_langgraph"><code>redaction_langgraph/</code></a></td>
+<td>Same Docker image as Pi; curated Python tools only (no shell); local llama.cpp, Gemini, or Bedrock</td>
+</tr>
+<tr class="odd">
+<td><strong><code>agentcore</code></strong></td>
+<td><a href="https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/">Amazon Bedrock AgentCore</a> <strong>Runtime</strong></td>
+<td>Managed AWS runtime wrapping the LangGraph bundle; the Gradio UI proxies prompts via <code>AGENTCORE_RUNTIME_URL</code></td>
+</tr>
+<tr class="even">
+<td><strong><code>agentcore-harness</code></strong></td>
+<td>Bedrock AgentCore <strong>Harness</strong></td>
+<td>Console-managed loop (<code>AGENTCORE_HARNESS_ARN</code>); Pi-like skills/shell; S3 file bridge for uploads</td>
+</tr>
+</tbody>
+</table>
+<p>The Gradio agent UI and the Pi / LangGraph in-container runtimes share one multi-stage image at <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/agent-redact/pi-agent/Dockerfile">agent-redact/pi-agent/Dockerfile</a>. It uses the same Python 3.12 slim base as the main app; a small Node stage installs the <code>pi</code> CLI, which is copied into the runtime image.</p>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>Build target</th>
+<th>Typical use</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong><code>dev</code></strong></td>
+<td>Local development with <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_llama_agentic.yml">docker-compose_llama_agentic.yml</a> — the repo is bind-mounted; only Pi CLI + Python deps are in the image.</td>
+</tr>
+<tr class="even">
+<td><strong><code>runtime</code></strong></td>
+<td><a href="https://huggingface.co/spaces/seanpedrickcase/agentic_document_redaction">Hugging Face Space</a> and AWS ECS — agent code is baked in; runs as non-root <code>user</code> with <strong>named volumes</strong> for workspace, uploads, and session dirs (read-only root filesystem friendly).</td>
+</tr>
+</tbody>
+</table>
+<p>Build from the repository root:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb16"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> build <span class="at">-f</span> agent-redact/pi-agent/Dockerfile <span class="at">--target</span> dev <span class="at">-t</span> pi-agent-dev .</span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> build <span class="at">-f</span> agent-redact/pi-agent/Dockerfile <span class="at">--target</span> runtime <span class="at">-t</span> pi-agent-runtime .</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p><strong>LangGraph (in-container).</strong> Set <code>AGENT_ORCHESTRATOR=langgraph</code> in <code>config/agent.env</code> (or compose) and start the same <code>pi-agent</code> service as for Pi. Optional: <code>LANGGRAPH_REQUIRE_REVIEW_APPROVAL=true</code> to gate <code>/review_apply</code> until the agent calls an explicit approve tool. A headless Pass 1 spike is <code>python agent-redact/redaction_langgraph/headless_pass1.py --pdf path/to.pdf --direct-tool</code>. Optional tracing (Arize AX / Phoenix) lives under <a href="https://github.com/seanpedrick-case/doc_redaction/tree/main/agent-redact/eval"><code>agent-redact/eval/</code></a>.</p>
+<p><strong>Bedrock AgentCore.</strong> Deploy the LangGraph agent as a managed runtime, then point the Gradio UI at it:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb17"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="va">AGENT_ORCHESTRATOR</span><span class="op">=</span>agentcore</span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a><span class="va">AGENTCORE_RUNTIME_URL</span><span class="op">=</span>https://bedrock-agentcore.<span class="op">&lt;</span>region<span class="op">&gt;</span>.amazonaws.com/runtimes/<span class="op">&lt;</span>URL-encoded-ARN<span class="op">&gt;</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<p>The CDK demo installer can also build an ARM64 runtime image and create the AgentCore resource (<code>python cdk/cdk_install.py --profile demo --enable-agentic --enable-agentcore-cdk-deploy</code>). For a console Harness instead of the LangGraph bundle, use <code>AGENT_ORCHESTRATOR=agentcore-harness</code> with <code>AGENTCORE_HARNESS_ARN</code>. Full deploy, auth, and troubleshooting: <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/agent-redact/agentcore/README.md">agent-redact/agentcore/README.md</a>.</p>
+<p>For llama.cpp + the agent UI together, see the compose examples at the top of <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_llama_agentic.yml">docker-compose_llama_agentic.yml</a>. Layout of the agent tree: <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/agent-redact/README.md">agent-redact/README.md</a>. LLM providers, env vars, and Gradio usage: <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/agent-redact/pi/agent/README.md">agent-redact/pi/agent/README.md</a>.</p>
+</section>
+<section id="command-line-interface" class="level3">
+<h3 class="anchored" data-anchor-id="command-line-interface">Command line interface</h3>
 <p>For example CLI commands, please refer to <a href="https://seanpedrick-case.github.io/doc_redaction/src/user_guide.html#command-line-interface-cli">this guide</a> or the examples in <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/cli_redact.py#L321">cli_redact.py</a></p>
 <p>If you installed from <strong>PyPI</strong>, use the installed console script:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb20"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="ex">cli_redact</span> <span class="at">--help</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb18"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="ex">cli_redact</span> <span class="at">--help</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <p>From a <strong>repository checkout</strong>, you can also run:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb21"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--help</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb19"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> cli_redact.py <span class="at">--help</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </section>
-<section id="python-package-commands" class="level4">
-<h4 class="anchored" data-anchor-id="python-package-commands">Python package commands</h4>
+<section id="python-package-commands" class="level3">
+<h3 class="anchored" data-anchor-id="python-package-commands">Python package commands</h3>
 <p>For Python examples in using the Python package, please see <a href="https://seanpedrick-case.github.io/doc_redaction/src/python_package_usage.html">Python Package usage (Python)</a>.</p>
 <hr>
 </section>
+<section id="configuration-optional" class="level3">
+<h3 class="anchored" data-anchor-id="configuration-optional">⚙️ Configuration (Optional)</h3>
+<p>You can customise the application’s behavior by creating a configuration file. This allows you to change settings without modifying the source code, such as enabling AWS features, changing logging behavior, or pointing to local Tesseract/Poppler installations. A full overview of all the potential settings you can modify in the app_config.env file can be seen in tools/config.py, with explanation on the documentation website for <a href="https://seanpedrick-case.github.io/doc_redaction/">the github repo</a></p>
+<p>To get started: 1. Copy <code>config/app_config.env.example</code> to <code>config/app_config.env</code>. 2. Modify the values in <code>config/app_config.env</code> to suit your needs. The application will automatically load these settings on startup.</p>
+<p>If you do not create this file, the application will run with default settings.</p>
+<section id="configuration-breakdown" class="level4">
+<h4 class="anchored" data-anchor-id="configuration-breakdown">Configuration Breakdown</h4>
+<p>Here is an overview of the most important settings, separated by whether they are for local use or require AWS.</p>
+<hr>
 </section>
-<section id="docker-and-cloud-deployment" class="level3">
-<h3 class="anchored" data-anchor-id="docker-and-cloud-deployment">Docker and cloud deployment</h3>
-<p>For container-based installs, AWS CDK, and advanced deployment, see the <a href="https://seanpedrick-case.github.io/doc_redaction/src/installation_guide.html">App installation guide (with CDK)</a> and the <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/Dockerfile">Dockerfile</a> in the repository. You can also use one of the <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_llama.yml">Docker compose files</a> and <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_vllm.yml">docker-compose_vllm.yml</a> in the repository to run the application with a Llama.cpp or vLLM inference server.</p>
+<section id="local-general-settings-no-aws-required" class="level4">
+<h4 class="anchored" data-anchor-id="local-general-settings-no-aws-required"><strong>Local &amp; General Settings (No AWS Required)</strong></h4>
+<p>These settings are useful for all users, regardless of whether you are using AWS.</p>
+<ul>
+<li><code>TESSERACT_FOLDER</code> / <code>POPPLER_FOLDER</code>
+<ul>
+<li>Use these if you installed Tesseract or Poppler to a custom location on <strong>Windows</strong> and did not add them to the system PATH.</li>
+<li>Provide the path to the respective installation folders (for Poppler, point to the <code>bin</code> sub-directory).</li>
+<li><strong>Examples:</strong> <code>POPPLER_FOLDER=C:/Program Files/poppler-24.02.0/bin/</code> <code>TESSERACT_FOLDER=tesseract/</code></li>
+</ul></li>
+<li><code>TESSERACT_DATA_FOLDER</code>
+<ul>
+<li>If Tesseract runs but you see an error like <code>Error opening data file ./eng.traineddata</code> or <code>Tesseract couldn't load any languages</code>, this is usually because it can’t find the <code>tessdata/</code> language files.</li>
+<li>Set this to the folder that contains <code>eng.traineddata</code> (typically a <code>tessdata</code> directory).</li>
+<li><strong>Examples (Windows):</strong> <code>TESSERACT_DATA_FOLDER=C:/Program Files/Tesseract-OCR/tessdata</code></li>
+</ul></li>
+<li><code>SHOW_LANGUAGE_SELECTION=True</code>
+<ul>
+<li>Set to <code>True</code> to display a language selection dropdown in the UI for OCR processing.</li>
+</ul></li>
+<li><code>DEFAULT_LOCAL_OCR_MODEL=tesseract</code>
+<ul>
+<li>Choose the backend for local OCR. Options are <code>tesseract</code>, <code>paddle</code>, or <code>hybrid</code>. “Tesseract” is the default, and is recommended. “hybrid-paddle” is a combination of the two - first pass through the redaction will be done with Tesseract, and then a second pass will be done with PaddleOCR on words with low confidence. “paddle” will only return whole line text extraction, and so will only work for OCR, not redaction.</li>
+</ul></li>
+<li><code>SESSION_OUTPUT_FOLDER=False</code>
+<ul>
+<li>If <code>True</code>, redacted files will be saved in unique subfolders within the <code>output/</code> directory for each session.</li>
+</ul></li>
+<li><code>DISPLAY_FILE_NAMES_IN_LOGS=False</code>
+<ul>
+<li>For privacy, file names are not recorded in usage logs by default. Set to <code>True</code> to include them.</li>
+</ul></li>
+</ul>
+<hr>
 </section>
-<section id="configuration" class="level3">
-<h3 class="anchored" data-anchor-id="configuration">Configuration</h3>
-<p>Application settings are typically loaded from <code>config/app_config.env</code>. A full variable reference is on the site under <a href="https://seanpedrick-case.github.io/doc_redaction/src/app_settings.html">App settings management guide</a> and in the GitHub repository documentation.</p>
+<section id="aws-specific-settings" class="level4">
+<h4 class="anchored" data-anchor-id="aws-specific-settings"><strong>AWS-Specific Settings</strong></h4>
+<p>These settings are only relevant if you intend to use AWS services like Textract for OCR and Comprehend for PII detection.</p>
+<ul>
+<li><code>RUN_AWS_FUNCTIONS=True</code>
+<ul>
+<li><strong>This is the master switch.</strong> You must set this to <code>True</code> to enable any AWS functionality. If it is <code>False</code>, all other AWS settings will be ignored.</li>
+</ul></li>
+<li><strong>UI Options:</strong>
+<ul>
+<li><code>SHOW_AWS_TEXT_EXTRACTION_OPTIONS=True</code>: Adds “AWS Textract” as an option in the text extraction dropdown.</li>
+<li><code>SHOW_AWS_PII_DETECTION_OPTIONS=True</code>: Adds “AWS Comprehend” as an option in the PII detection dropdown.</li>
+</ul></li>
+<li><strong>Core AWS Configuration:</strong>
+<ul>
+<li><code>AWS_REGION=example-region</code>: Set your AWS region (e.g., <code>us-east-1</code>).</li>
+<li><code>DOCUMENT_REDACTION_BUCKET=example-bucket</code>: The name of the S3 bucket the application will use for temporary file storage and processing.</li>
+</ul></li>
+<li><strong>AWS Logging:</strong>
+<ul>
+<li><code>SAVE_LOGS_TO_DYNAMODB=True</code>: If enabled, usage and feedback logs will be saved to DynamoDB tables.</li>
+<li><code>ACCESS_LOG_DYNAMODB_TABLE_NAME</code>, <code>USAGE_LOG_DYNAMODB_TABLE_NAME</code>, etc.: Specify the names of your DynamoDB tables for logging.</li>
+</ul></li>
+<li><strong>Advanced AWS Textract Features:</strong>
+<ul>
+<li><code>SHOW_WHOLE_DOCUMENT_TEXTRACT_CALL_OPTIONS=True</code>: Enables UI components for large-scale, asynchronous document processing via Textract.</li>
+<li><code>TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET=example-bucket-output</code>: A separate S3 bucket for the final output of asynchronous Textract jobs.</li>
+<li><code>LOAD_PREVIOUS_TEXTRACT_JOBS_S3=True</code>: If enabled, the app will try to load the status of previously submitted asynchronous jobs from S3.</li>
+</ul></li>
+<li><strong>Cost Tracking (for internal accounting):</strong>
+<ul>
+<li><code>SHOW_COSTS=True</code>: Displays an estimated cost for AWS operations. Can be enabled even if AWS functions are off.</li>
+<li><code>GET_COST_CODES=True</code>: Enables a dropdown for users to select a cost code before running a job.</li>
+<li><code>COST_CODES_PATH=config/cost_codes.csv</code>: The local path to a CSV file containing your cost codes.</li>
+<li><code>ENFORCE_COST_CODES=True</code>: Makes selecting a cost code mandatory before starting a redaction.</li>
+</ul></li>
+</ul>
+<p>Now you have the app installed, please refer to the <a href="https://seanpedrick-case.github.io/doc_redaction/src/user_guide.html">User Guide</a> for more information on how to use it for basic and advanced redaction.</p>
+</section>
+</section>
+</section>
+<section id="for-agents-api-quickstart" class="level2">
+<h2 class="anchored" data-anchor-id="for-agents-api-quickstart">For agents (API quickstart)</h2>
+<p>If you are an LLM/agent interacting with this app over HTTP (e.g.&nbsp;Hugging Face Spaces), <strong>do not guess inputs</strong> from the UI. Use the Gradio schema as the source of truth:</p>
+<ul>
+<li><strong>Discover schema</strong>: <code>GET /gradio_api/info</code></li>
+<li><strong>Upload files</strong>: <code>POST /gradio_api/upload</code> (multipart field <code>files</code>) → returns server-internal paths like <code>/tmp/gradio_tmp/...</code></li>
+<li><strong>Call</strong>: <code>POST /gradio_api/call/{api_name}</code> with body <code>{"data":[...]}</code> (argument order must match <code>/gradio_api/info</code>)</li>
+<li><strong>Poll</strong>: <code>GET /gradio_api/call/{api_name}/{event_id}</code> until complete</li>
+<li><strong>Download outputs</strong>: <code>GET /gradio_api/file={path}</code> (note: some deployments return 403 without session cookies)</li>
+</ul>
+<section id="choose-the-correct-route-prefer-short-gr.api-endpoints" class="level3">
+<h3 class="anchored" data-anchor-id="choose-the-correct-route-prefer-short-gr.api-endpoints">Choose the correct route (prefer short <code>gr.api</code> endpoints)</h3>
+<p>Fetch <code>/gradio_api/info</code> and then prefer the simplest route that exists:</p>
+<ul>
+<li><strong>Apply edited review CSV to a PDF</strong>: <code>/review_apply</code></li>
+<li><strong>Redact a PDF/image document</strong>: <code>/doc_redact</code> — optional <code>handwrite_signature_checkbox</code> for AWS Textract (e.g.&nbsp;<code>Extract handwriting</code>, <code>Extract signatures</code>)</li>
+<li><strong>Summarise a PDF</strong>: <code>/pdf_summarise</code></li>
+<li><strong>Redact tabular files (CSV/XLSX/Parquet/DOCX)</strong>: <code>/tabular_redact</code></li>
+</ul>
+<p>If those endpoints are not present in your deployment, fall back to the long UI-chained routes (<code>/apply_review_redactions</code>, <code>/redact_data</code>, etc.) and build <code>data[]</code> strictly from <code>/gradio_api/info</code>.</p>
+</section>
+<section id="common-gotchas" class="level3">
+<h3 class="anchored" data-anchor-id="common-gotchas">Common gotchas</h3>
+<ul>
+<li><strong>Arity errors</strong> (<code>needed: N, got: M</code>) mean you called a session-heavy UI handler with the wrong <code>data[]</code>. Prefer the short endpoints above.</li>
+<li><strong><code>handle_file()</code> gotcha</strong> (for <code>gradio_client</code> users): do <strong>not</strong> wrap server-internal upload paths (e.g.&nbsp;<code>/tmp/gradio_tmp/...</code>) with <code>handle_file()</code>. Pass them as plain strings.</li>
+<li><strong>Container-only outputs</strong>: outputs may be written to container paths (e.g.&nbsp;<code>/home/user/app/output/</code>). Plan to download via <code>file=...</code> or use a mounted output directory in Docker.</li>
+</ul>
+</section>
+<section id="optional-mcp-server" class="level3">
+<h3 class="anchored" data-anchor-id="optional-mcp-server">Optional: MCP server</h3>
+<p>If you want external agents to call this app reliably without re-implementing Gradio upload/call/poll/download details, consider an <strong>MCP server</strong> that wraps the main tasks (<code>redact_document</code>, <code>apply_review_redactions</code>, <code>redact_tabular</code>, <code>summarise_document</code>) behind a small tool interface. See the <a href="https://github.com/seanpedrick-case/doc_redaction/blob/main/mcp_doc_redaction/README.md">relevant documentation</a>.</p>
+<p><strong>Use as a library:</strong> After installing from <a href="https://pypi.org/project/doc-redaction/">PyPI</a> (<code>pip install doc_redaction</code>), you can call the same workflows as the Gradio <code>api_name</code> routes from Python. See the documentation: <a href="https://seanpedrick-case.github.io/doc_redaction/src/python_package_usage.html">Python Package usage (Python)</a>.</p>
 <hr>
 </section>
 </section>
