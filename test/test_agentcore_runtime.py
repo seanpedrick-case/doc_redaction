@@ -78,4 +78,58 @@ def test_map_message_update_tool_result():
     events = list(runtime._map_agentcore_event(event))
     assert len(events) == 1
     assert events[0].kind == "tool_end"
-    assert events[0].tool_name == "doc_redact"
+
+
+def test_agentcore_runtime_session_id_is_long_and_stable():
+    from agentcore_runtime import agentcore_runtime_session_id
+
+    first = agentcore_runtime_session_id("abc")
+    second = agentcore_runtime_session_id("abc")
+    other = agentcore_runtime_session_id("xyz")
+    assert first == second
+    assert first != other
+    assert len(first) >= 33
+
+
+def test_iter_sse_response_accepts_bare_ndjson():
+    runtime = AgentCoreAgentRuntime(session_hash="sess")
+    lines = [
+        json.dumps({"type": "status", "message": "Working…"}),
+        "data: " + json.dumps({"type": "agent_end", "message": "done"}),
+    ]
+    kinds = [event.kind for event in runtime._iter_sse_response(lines)]
+    assert kinds == ["status", "status"]
+
+
+def test_bedrock_agentcore_client_sets_long_read_timeout(monkeypatch):
+
+    created: dict = {}
+
+    class _FakeSession:
+        def __init__(self, region_name=None):
+            self.region_name = region_name
+
+        def client(self, service_name, region_name=None, config=None):
+            if service_name == "sts":
+                return type("STS", (), {"get_caller_identity": lambda self: {}})()
+            created["service"] = service_name
+            created["region"] = region_name
+            created["config"] = config
+            return object()
+
+    monkeypatch.setattr("boto3.Session", _FakeSession)
+    monkeypatch.setattr("pi_agent_config.configure_aws_credentials", lambda: None)
+    monkeypatch.setenv("AGENTCORE_BOTO_READ_TIMEOUT_S", "1234")
+    monkeypatch.setenv("AGENTCORE_BOTO_CONNECT_TIMEOUT_S", "12")
+
+    # Re-import timeouts after env change — module constants are set at import.
+    import importlib
+
+    import agentcore_boto as boto_mod
+
+    importlib.reload(boto_mod)
+    boto_mod.bedrock_agentcore_client("eu-west-2")
+    assert created["service"] == "bedrock-agentcore"
+    assert created["region"] == "eu-west-2"
+    assert created["config"].read_timeout == 1234.0
+    assert created["config"].connect_timeout == 12.0

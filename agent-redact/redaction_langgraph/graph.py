@@ -72,7 +72,12 @@ def _build_llm():
             os.environ.get("AGENT_DEFAULT_MODEL") or "anthropic.claude-sonnet-4-6"
         ).strip()
         return ChatBedrockConverse(
-            model=model_id, region_name=os.environ.get("AWS_REGION")
+            model=model_id,
+            region_name=(
+                os.environ.get("AWS_REGION")
+                or os.environ.get("AWS_DEFAULT_REGION")
+                or "eu-west-2"
+            ),
         )
     if provider in {"google-gemini", "gemini"}:
         from langchain_google_genai import ChatGoogleGenerativeAI
@@ -131,8 +136,10 @@ def build_redaction_agent(
 
 
 def graph_recursion_limit() -> int:
-    raw = (os.environ.get("LANGGRAPH_RECURSION_LIMIT") or "50").strip()
+    # Default 150: multi-tool redaction turns exhaust LangGraph's ReAct step budget
+    # quickly (surface as "Sorry, need more steps to process this request.").
+    raw = (os.environ.get("LANGGRAPH_RECURSION_LIMIT") or "150").strip()
     try:
         return max(10, int(raw))
     except ValueError:
-        return 50
+        return 150

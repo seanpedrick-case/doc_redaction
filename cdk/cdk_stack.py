@@ -1450,7 +1450,7 @@ class CdkStack(Stack):
                                     },
                                     "build": {
                                         "commands": [
-                                            "docker build -f agent-redact/pi-agent/Dockerfile -t $ECR_REPO_NAME:latest .",
+                                            "docker build -f agent-redact/pi-agent/Dockerfile --target runtime -t $ECR_REPO_NAME:latest .",
                                             "docker tag $ECR_REPO_NAME:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPO_NAME:latest",
                                         ]
                                     },

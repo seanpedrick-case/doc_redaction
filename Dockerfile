@@ -59,7 +59,7 @@ RUN if [ "$INSTALL_VLM" = "True" ] && [ "$TORCH_GPU_ENABLED" = "False" ]; then \
     "torch==2.13.0+cpu" \
     "torchvision==0.28.0+cpu" \
     "transformers<=5.16.1" \
-    "accelerate<=1.14.0" \
+    "accelerate<=1.15.0" \
     "bitsandbytes<=0.50.2" \
     "sentencepiece<=0.2.2" \
     --extra-index-url https://download.pytorch.org/whl/cpu; \
@@ -68,7 +68,7 @@ elif [ "$INSTALL_VLM" = "True" ] && [ "$TORCH_GPU_ENABLED" = "True" ]; then \
     pip install --verbose --no-cache-dir --target=/install "torchvision<=0.28.0" --index-url https://download.pytorch.org/whl/cu130 && \
     pip install --verbose --no-cache-dir --target=/install \
         "transformers<=5.16.1" \
-        "accelerate<=1.14.0" \
+        "accelerate<=1.15.0" \
         "bitsandbytes<=0.50.2" \
         "sentencepiece<=0.2.2" && \
     pip install --verbose --no-cache-dir --target=/install "optimum<=2.1.0" && \

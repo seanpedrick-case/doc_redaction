@@ -165,20 +165,115 @@ def test_wait_for_codebuild_build_succeeds(monkeypatch):
     assert wait_for_codebuild_build("proj:build-id", timeout_sec=60) is True
 
 
-def test_wait_for_agentcore_ecr_image_uses_existing_image(monkeypatch):
-    from cdk_post_deploy import wait_for_agentcore_ecr_image
+def test_agentcore_runtime_id_from_arn():
+    from cdk_post_deploy import _agentcore_runtime_id_from_arn
 
-    monkeypatch.setattr(
-        "cdk_post_deploy.ecr_image_with_tag_exists",
-        lambda *a, **k: True,
+    arn = (
+        "arn:aws:bedrock-agentcore:eu-west-2:404053085091:"
+        "runtime/Demo_Redaction_RedactionAgent-FYUnrI4PqN"
     )
     assert (
-        wait_for_agentcore_ecr_image(
-            repository_name="repo",
-            codebuild_project="proj",
-        )
-        is True
+        _agentcore_runtime_id_from_arn(arn)
+        == "Demo_Redaction_RedactionAgent-FYUnrI4PqN"
     )
+
+
+def test_create_agentcore_runtime_from_ecr_updates_existing(monkeypatch, tmp_path):
+    import cdk_post_deploy as post
+
+    calls = {}
+
+    class FakeClient:
+        def list_agent_runtimes(self):
+            return {
+                "agentRuntimes": [
+                    {
+                        "agentRuntimeName": "Demo_Redaction_RedactionAgent",
+                        "agentRuntimeArn": (
+                            "arn:aws:bedrock-agentcore:eu-west-2:123:"
+                            "runtime/Demo_Redaction_RedactionAgent-abc123XYZ0"
+                        ),
+                    }
+                ]
+            }
+
+        def get_agent_runtime(self, agentRuntimeId):
+            calls["get"] = agentRuntimeId
+            return {
+                "agentRuntimeId": agentRuntimeId,
+                "roleArn": "arn:aws:iam::123:role/AgentCoreRole",
+                "networkConfiguration": {"networkMode": "PUBLIC"},
+                "environmentVariables": {"AWS_REGION": "eu-west-2"},
+            }
+
+        def update_agent_runtime(self, **kwargs):
+            calls["update"] = kwargs
+            return {
+                "agentRuntimeArn": (
+                    "arn:aws:bedrock-agentcore:eu-west-2:123:"
+                    "runtime/Demo_Redaction_RedactionAgent-abc123XYZ0"
+                ),
+                "agentRuntimeVersion": "2",
+            }
+
+        def create_agent_runtime(self, **kwargs):
+            raise AssertionError("create_agent_runtime should not be called")
+
+    monkeypatch.setattr(
+        post.boto3,
+        "client",
+        lambda *a, **k: FakeClient(),
+    )
+    monkeypatch.setattr(
+        post,
+        "_resolve_agentcore_container_uri",
+        lambda *a, **k: "123.dkr.ecr.eu-west-2.amazonaws.com/repo:latest",
+    )
+    monkeypatch.setattr(
+        post,
+        "_resolve_agentcore_execution_role_arn",
+        lambda *a, **k: "arn:aws:iam::123:role/AgentCoreRole",
+    )
+    monkeypatch.setattr(post, "upload_file_to_s3", lambda *a, **k: None)
+    monkeypatch.setattr(post, "recycle_express_gateway_tasks", lambda *a, **k: None)
+    monkeypatch.setattr(post, "resolve_agentcore_backend_env", lambda *a, **k: {})
+    monkeypatch.setattr(
+        "cdk_config.AGENTCORE_RUNTIME_NAME",
+        "Demo_Redaction_RedactionAgent",
+        raising=False,
+    )
+    monkeypatch.setattr("cdk_config.AGENTCORE_BEDROCK_MODEL", "m", raising=False)
+    monkeypatch.setattr("cdk_config.AGENTCORE_NETWORK_MODE", "PUBLIC", raising=False)
+    monkeypatch.setattr("cdk_config.ECR_AGENTCORE_REPO_NAME", "repo", raising=False)
+    monkeypatch.setattr(
+        "cdk_config.ENABLE_PI_AGENT_EXPRESS_SERVICE", "False", raising=False
+    )
+    monkeypatch.setattr("cdk_config.S3_LOG_CONFIG_BUCKET_NAME", "", raising=False)
+
+    pi_env = tmp_path / "agent.env"
+    cdk_env = tmp_path / "cdk_config.env"
+    pi_env.write_text("", encoding="utf-8")
+    cdk_env.write_text("", encoding="utf-8")
+
+    url = post.create_agentcore_runtime_from_ecr(
+        pi_agent_env_path=pi_env,
+        cdk_env_path=cdk_env,
+        recycle_agent_service=False,
+        update_existing_image=True,
+    )
+    assert url
+    assert calls["get"] == "Demo_Redaction_RedactionAgent-abc123XYZ0"
+    assert (
+        calls["update"]["agentRuntimeId"] == "Demo_Redaction_RedactionAgent-abc123XYZ0"
+    )
+    assert (
+        calls["update"]["agentRuntimeArtifact"]["containerConfiguration"][
+            "containerUri"
+        ]
+        == "123.dkr.ecr.eu-west-2.amazonaws.com/repo:latest"
+    )
+    assert calls["update"]["environmentVariables"]["LANGGRAPH_RECURSION_LIMIT"] == "150"
+    assert "AGENTCORE_RUNTIME_URL=" in pi_env.read_text(encoding="utf-8")
 
 
 def test_maybe_complete_agentcore_skips_when_image_not_ready(monkeypatch, tmp_path):

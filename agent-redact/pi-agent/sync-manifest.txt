@@ -2,6 +2,9 @@
 agent-redact/requirements_agent.txt
 agent-redact/shared
 agent-redact/pi
+agent-redact/agentcore
+agent-redact/redaction_langgraph
+agent-redact/eval
 agent-redact/pi-agent/entrypoint.sh
 agent-redact/pi-agent/entrypoint-ecs.sh
 skills

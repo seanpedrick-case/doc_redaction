@@ -180,3 +180,46 @@ def test_follow_up_increments_pending_delivery_counter(monkeypatch):
     assert commands[-1]["type"] == "follow_up"
     client.follow_up("Also verify coverage")
     assert client._pending_follow_ups == 2
+
+
+def test_iter_agent_events_waits_for_agent_settled(monkeypatch):
+    client = PiRpcClient()
+    monkeypatch.setattr("pi_rpc_client._AGENT_SETTLE_GRACE_S", 5.0)
+    monkeypatch.setattr("pi_rpc_client._AGENT_SETTLE_MAX_S", 30.0)
+    client._events.put({"type": "agent_end", "messages": []})
+    client._events.put({"type": "compaction_start", "reason": "context limit"})
+    client._events.put({"type": "compaction_end", "result": {"tokensBefore": 1000}})
+    client._events.put({"type": "agent_settled"})
+
+    kinds = [event.kind for event in client._iter_agent_events()]
+    assert kinds == ["compaction_start", "compaction_end", "done"]
+
+
+def test_iter_agent_events_grace_finishes_without_settled(monkeypatch):
+    client = PiRpcClient()
+    monkeypatch.setattr("pi_rpc_client._AGENT_SETTLE_GRACE_S", 0.01)
+    monkeypatch.setattr("pi_rpc_client._AGENT_SETTLE_MAX_S", 1.0)
+    client._events.put({"type": "agent_end", "messages": []})
+
+    events = list(client._iter_agent_events())
+    assert len(events) == 1
+    assert events[0].kind == "done"
+    assert events[0].text == "Agent finished."
+
+
+def test_iter_agent_events_will_retry_continues(monkeypatch):
+    client = PiRpcClient()
+    monkeypatch.setattr("pi_rpc_client._AGENT_SETTLE_GRACE_S", 0.01)
+    monkeypatch.setattr("pi_rpc_client._AGENT_SETTLE_MAX_S", 1.0)
+    client._events.put({"type": "agent_end", "willRetry": True, "messages": []})
+    client._events.put({"type": "agent_start"})
+    client._events.put({"type": "agent_end", "messages": []})
+    client._events.put({"type": "agent_settled"})
+
+    events = list(client._iter_agent_events())
+    kinds = [event.kind for event in events]
+    assert kinds[0] == "status"
+    assert "retry" in events[0].text.lower()
+    assert "Agent started" in events[1].text
+    assert kinds[-1] == "done"
+    assert kinds.count("done") == 1
