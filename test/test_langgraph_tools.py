@@ -938,3 +938,24 @@ def test_run_verify_coverage_rejects_csv_as_redacted_pdf(tmp_path, monkeypatch):
     assert "error" in data
     assert "PDF" in data["error"]
     assert "hint" in data
+
+
+def test_request_clarification_payload():
+    from redaction_langgraph.tools import request_clarification
+    from redaction_langgraph.workflow_continue import CLARIFICATION_NEEDED_MARKER
+
+    reset_langgraph_tool_session_state("clar-sess")
+    raw = request_clarification(
+        "All PERSON names or named parties only?",
+        options=["A: all PERSON", "B: named parties only"],
+        default_if_no_reply="A",
+        session_hash="clar-sess",
+    )
+    data = json.loads(raw)
+    assert data["awaiting_clarification"] is True
+    assert data["marker"] == CLARIFICATION_NEEDED_MARKER
+    assert data["default_if_no_reply"] == "A"
+    assert len(data["options"]) == 2
+
+    empty = json.loads(request_clarification("", session_hash="clar-sess"))
+    assert "error" in empty

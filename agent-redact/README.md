@@ -1,14 +1,14 @@
 # Pi-based agentic document redaction: local Docker orchestration and Hugging Face Space packaging.
 
-Supports three orchestration backends via `AGENT_ORCHESTRATOR` (`pi` default, `langgraph`, `agentcore`). See [`pi/agent/README.md`](pi/agent/README.md).
+Supports four orchestration backends via `AGENT_ORCHESTRATOR` (`pi` default, `langgraph`, `agentcore`, `agentcore-harness`). See [`pi/agent/README.md`](pi/agent/README.md) and [AgentCore options](agentcore/OPTIONS.md).
 
 | Path | Purpose |
 |------|---------|
 | [`shared/`](shared/) | Gradio UI, runtime factory, session workspace, remote redaction helpers |
 | [`pi/`](pi/) | Pi RPC client, Pi config generation, skills sync, `agent/*.json` templates |
-| [`redaction_langgraph/`](redaction_langgraph/) | LangGraph ReAct agent (curated tools, no shell) |
-| [`agentcore/`](agentcore/) | Bedrock AgentCore runtime + Gradio AgentCore clients + **[install guide](agentcore/README.md)** |
-| [`eval/`](eval/) | Arize AX / Phoenix tracing for LangGraph |
+| [`redaction_langgraph/`](redaction_langgraph/) | LangGraph ReAct agent (curated tools, no shell) — see [overview](redaction_langgraph/README.md) |
+| [`agentcore/`](agentcore/) | Bedrock AgentCore — [options overview](agentcore/OPTIONS.md) + [install guide](agentcore/README.md) |
+| [`eval/`](eval/) | Arize AX / Phoenix tracing + **[evaluation strategy](eval/README.md)** (policy gate, gold review CSV F1) |
 | [`pi-agent/`](pi-agent/) | Docker image (`dev` + `runtime` targets), sync script, and manifest |
 | [`requirements_agent.txt`](requirements_agent.txt) | Python deps for agent-redact Docker images |
 

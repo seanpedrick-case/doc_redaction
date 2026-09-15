@@ -36,12 +36,21 @@ Smoke check
 5. Send a follow-up in the same Gradio session; both turns should share one
    Sessions row (``session.id`` = Gradio ``session_hash``).
 6. With tracing disabled: confirm no errors and no collector traffic.
+
+Process KPIs and product-quality gates (gold review CSV F1, policy
+``verify_coverage``) are documented in ``agent-redact/eval/README.md``.
+
+``verify_coverage`` reports set first-class span attributes
+(``redaction.pass_strict``, ``redaction.final_pass_strict``, etc.) on TOOL
+and root AGENT spans via :func:`annotate_current_span_with_coverage` and
+:func:`agent_turn_span`.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import threading
 import warnings
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -50,6 +59,19 @@ from typing import Any
 _INITIALIZED = False
 _TRACER_NAME = "doc_redaction.agent"
 _MAX_ATTR_CHARS = 4000
+
+# First-class product-gate attributes (Phoenix / AX / AgentCore OTEL).
+ATTR_PASS_STRICT = "redaction.pass_strict"
+ATTR_PASS_WITH_CLEANUP = "redaction.pass_with_cleanup"
+ATTR_PAGES_FLAGGED_COUNT = "redaction.pages_flagged_for_vlm_count"
+ATTR_PAGES_CLEANUP_COUNT = "redaction.pages_needing_csv_cleanup_count"
+ATTR_HAS_REDACTED_PDF = "redaction.verify_has_redacted_pdf"
+ATTR_FINAL_PASS_STRICT = "redaction.final_pass_strict"
+ATTR_ANY_VERIFY_FAIL = "redaction.any_verify_fail"
+ATTR_VERIFY_CALLS = "redaction.verify_coverage_calls"
+ATTR_WORKFLOW_INCOMPLETE = "redaction.workflow_incomplete"
+
+_coverage_tls = threading.local()
 
 
 def _env_truthy(name: str) -> bool:
@@ -149,6 +171,184 @@ def arize_session_context(session_hash: str | None) -> Iterator[None]:
         return
     with using_session(session_id=sid):
         yield
+
+
+def reset_coverage_trace_state() -> None:
+    """Clear per-turn ``verify_coverage`` results stored for the root span."""
+    _coverage_tls.results = []
+
+
+def get_recorded_coverage_results() -> list[dict[str, Any]]:
+    """Return coverage payloads recorded during the current turn."""
+    return list(getattr(_coverage_tls, "results", None) or [])
+
+
+def record_verify_coverage_result(payload: dict[str, Any]) -> None:
+    """Append a ``verify_coverage`` report dict for root-span aggregation."""
+    results = getattr(_coverage_tls, "results", None)
+    if results is None:
+        _coverage_tls.results = []
+        results = _coverage_tls.results
+    results.append(dict(payload))
+
+
+def parse_verify_coverage_payload(raw: Any) -> dict[str, Any] | None:
+    """Extract a coverage report from tool JSON, or None if not a report."""
+    if isinstance(raw, dict):
+        data = raw
+    else:
+        text = (raw if isinstance(raw, str) else str(raw or "")).strip()
+        if not text or text[0] not in "{[":
+            return None
+        try:
+            data = json.loads(text)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        if not isinstance(data, dict):
+            return None
+    if "pass_strict" not in data and "pass" not in data:
+        return None
+    return data
+
+
+def set_coverage_attributes_on_span(
+    span: Any,
+    payload: dict[str, Any],
+    *,
+    as_final: bool = False,
+) -> None:
+    """Set ``redaction.*`` attributes from a coverage report on *span*."""
+    if span is None:
+        return
+    pass_strict = payload.get("pass_strict", payload.get("pass"))
+    if isinstance(pass_strict, bool):
+        span.set_attribute(ATTR_PASS_STRICT, pass_strict)
+        if as_final:
+            span.set_attribute(ATTR_FINAL_PASS_STRICT, pass_strict)
+    cleanup = payload.get("pass_with_cleanup")
+    if isinstance(cleanup, bool):
+        span.set_attribute(ATTR_PASS_WITH_CLEANUP, cleanup)
+    flagged = payload.get("pages_flagged_for_vlm")
+    if isinstance(flagged, list):
+        span.set_attribute(ATTR_PAGES_FLAGGED_COUNT, len(flagged))
+    needing = payload.get("pages_needing_csv_cleanup")
+    if isinstance(needing, list):
+        span.set_attribute(ATTR_PAGES_CLEANUP_COUNT, len(needing))
+    has_pdf = bool(payload.get("redacted_pdf"))
+    span.set_attribute(ATTR_HAS_REDACTED_PDF, has_pdf)
+
+
+def annotate_span_with_recorded_coverage(
+    span: Any,
+    *,
+    workflow_incomplete: bool | None = None,
+) -> None:
+    """Write aggregated ``verify_coverage`` KPIs onto a root AGENT span."""
+    if span is None:
+        return
+    results = get_recorded_coverage_results()
+    span.set_attribute(ATTR_VERIFY_CALLS, len(results))
+    if results:
+        any_fail = any(r.get("pass_strict", r.get("pass")) is False for r in results)
+        span.set_attribute(ATTR_ANY_VERIFY_FAIL, any_fail)
+        set_coverage_attributes_on_span(span, results[-1], as_final=True)
+    if workflow_incomplete is not None:
+        span.set_attribute(ATTR_WORKFLOW_INCOMPLETE, bool(workflow_incomplete))
+
+
+def annotate_current_span_with_coverage(payload: dict[str, Any] | str) -> None:
+    """Record coverage and set attributes on the current OTEL span (tool span).
+
+    Safe no-op when tracing is off or OpenTelemetry is unavailable.
+    """
+    report = parse_verify_coverage_payload(payload)
+    if report is None:
+        return
+    record_verify_coverage_result(report)
+    try:
+        from opentelemetry import trace
+    except ImportError:
+        return
+    try:
+        span = trace.get_current_span()
+        set_coverage_attributes_on_span(span, report)
+    except Exception:  # pragma: no cover - never break tool execution
+        return
+
+
+def maybe_annotate_coverage_from_tool_output(
+    span: Any,
+    output: Any,
+    *,
+    tool_name: str | None = None,
+) -> None:
+    """If *output* is a coverage report, annotate *span* and record it."""
+    report = parse_verify_coverage_payload(output)
+    if report is None:
+        return
+    # Prefer explicit verify tool names; still accept any JSON with pass_strict
+    # (agents sometimes wrap the same payload under a script tool).
+    _ = tool_name  # reserved for future filtering
+    record_verify_coverage_result(report)
+    set_coverage_attributes_on_span(span, report)
+
+
+@contextmanager
+def agent_turn_span(
+    name: str,
+    *,
+    session_hash: str | None,
+    message: str,
+    agent_name: str,
+) -> Iterator[dict[str, Any]]:
+    """Root OpenInference AGENT span for one turn; yields a mutable meta dict.
+
+    Callers may set ``meta["workflow_incomplete"]`` before exit. When tracing is
+    disabled, yields ``{"span": None}`` and does not touch OTEL.
+    """
+    reset_coverage_trace_state()
+    meta: dict[str, Any] = {
+        "span": None,
+        "workflow_incomplete": None,
+    }
+    if not _INITIALIZED:
+        yield meta
+        return
+    try:
+        from openinference.semconv.trace import (
+            OpenInferenceSpanKindValues,
+            SpanAttributes,
+        )
+        from opentelemetry import trace
+    except ImportError:
+        yield meta
+        return
+
+    tracer = trace.get_tracer(_TRACER_NAME)
+    with tracer.start_as_current_span(name) as root:
+        meta["span"] = root
+        try:
+            root.set_attribute(
+                SpanAttributes.OPENINFERENCE_SPAN_KIND,
+                OpenInferenceSpanKindValues.AGENT.value,
+            )
+            root.set_attribute(SpanAttributes.AGENT_NAME, agent_name)
+            root.set_attribute(SpanAttributes.INPUT_VALUE, _truncate(message))
+            sid = arize_session_id(session_hash)
+            if sid:
+                root.set_attribute(SpanAttributes.SESSION_ID, sid)
+        except Exception:  # pragma: no cover
+            pass
+        try:
+            yield meta
+        finally:
+            try:
+                annotate_span_with_recorded_coverage(
+                    root,
+                    workflow_incomplete=meta.get("workflow_incomplete"),
+                )
+            except Exception:  # pragma: no cover
+                pass
 
 
 def _instrument_langchain(tracer_provider: Any) -> None:
@@ -371,6 +571,13 @@ def iter_pi_events_with_tracing(
         output = getattr(event, "tool_output", None) or getattr(event, "text", "") or ""
         if output:
             span.set_attribute(SpanAttributes.OUTPUT_VALUE, _truncate(str(output)))
+        tool_name = getattr(event, "tool_name", None)
+        try:
+            maybe_annotate_coverage_from_tool_output(
+                span, output, tool_name=str(tool_name) if tool_name else None
+            )
+        except Exception:  # pragma: no cover
+            pass
         if getattr(event, "is_error", False):
             span.set_status(Status(StatusCode.ERROR))
             had_error = True
@@ -422,6 +629,7 @@ def iter_pi_events_with_tracing(
         if getattr(event, "is_error", False) or kind == "error":
             had_error = True
 
+    reset_coverage_trace_state()
     with arize_session_context(session_hash):
         with tracer.start_as_current_span("pi.agent") as root:
             root.set_attribute(
@@ -459,5 +667,9 @@ def iter_pi_events_with_tracing(
                             _apply_session_stats_to_span(root, stats)
                     except Exception:  # pragma: no cover
                         pass
+                try:
+                    annotate_span_with_recorded_coverage(root)
+                except Exception:  # pragma: no cover
+                    pass
                 if had_error:
                     root.set_status(Status(StatusCode.ERROR))

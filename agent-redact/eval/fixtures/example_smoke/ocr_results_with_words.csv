@@ -1,0 +1,5 @@
+page,word_text,word_x0,word_y0,word_x1,word_y1
+1,Alice,0.10,0.20,0.20,0.28
+1,Example,0.21,0.20,0.35,0.28
+1,Example,0.40,0.50,0.55,0.58
+1,Council,0.56,0.50,0.70,0.58
