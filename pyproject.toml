@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc_redaction"
-version = "2.7.1"
+version = "2.8.0"
 description = "Redact PDF/image-based documents, Word, or CSV/XLSX files using a Gradio-based GUI interface"
 readme = "README_PYPI.md"
 authors = [
@@ -50,9 +50,9 @@ dependencies = [
     "pandas<=3.0.5",
     "scikit-learn<=1.9.0",
     "spacy<=3.8.16",
-    "gradio==6.26.0",
+    "gradio==6.27.0",
     "gradio-pdf-redaction<=0.0.25",
-    "boto3<=1.43.81",
+    "boto3<=1.43.95",
     "pyarrow<=25.0.1",
     "openpyxl<=3.1.5",
     "Faker<=40.37.0",
@@ -104,7 +104,7 @@ vlm = [
 
 # Run Gradio as an mcp server
 mcp = [
-    "gradio[mcp]==6.26.0"
+    "gradio[mcp]==6.27.0"
 ]
 
 [project.urls]

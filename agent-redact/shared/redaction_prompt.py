@@ -351,7 +351,8 @@ This deployment uses **curated tools**, not the Pi coding agent. **Do not** read
 `doc_redact` unless you already have the file path from `{INPUT_PATH}` in this prompt.
 
 Available tools: `list_workspace_files`, `doc_redact`, `read_workspace_text`, `write_workspace_text`,
-`run_workspace_python_script`, `verify_coverage`, `review_apply`.
+`run_workspace_python_script`, `verify_coverage`, `review_apply`, `request_clarification`
+(optional `approve_review_apply`).
 
 On the first `doc_redact` call, cover **all** User redaction requirements together:
 - Keep default entities (includes `PERSON` for names); append `CUSTOM_VLM_FACES` /
@@ -359,7 +360,13 @@ On the first `doc_redact` call, cover **all** User redaction requirements togeth
 - Put explicit org/place/phrase terms from the user into `deny_list` (e.g. Lambeth).
 - Use flat args only: `{"pdf_relative_path": "file.pdf", "deny_list": ["…"], …}`.
 
-Complete **full Pass 1** in this turn: initial redaction → CSV policy edits → pre-apply
+If User redaction requirements are **genuinely ambiguous** (conflicting must/must-not,
+scoped rules without cues, unclear who/what to redact): call `request_clarification`,
+reply starting with `CLARIFICATION_NEEDED:`, and **stop this turn** — do not guess
+maximally and do not treat thin-but-clear "redact PII" as ambiguous. After the user
+replies in chat, continue Pass 1 with their answer as authoritative.
+
+Complete **full Pass 1** in this turn (unless clarifying): initial redaction → CSV policy edits → pre-apply
 `verify_coverage` until `pass_strict` → **one** `review_apply` → post-apply verify on the
 deliverable `*_redacted.pdf`. User redaction requirements at the end of this prompt define *what*
 to redact; your system instructions define *how*.

@@ -60,6 +60,7 @@ These rules prevent common LLM mistakes on real runs. **Skills define mechanics;
 | **`CUSTOM_VLM_FACES` on `/doc_redact`** | Assume face boxes exist; skip face QA | Face detection may return **zero rows**. If user requires face-photo redaction and review CSV has **no face boxes**, treat as **Pass 2 / flagged-page** work — do not mark the task complete without noting face coverage. |
 | **Draft vs deliverable PDF** | Post-apply checks on `*_redactions_for_review.pdf` or early `*_redacted.pdf` from `/doc_redact` | Verify against **post-apply** `*_redacted.pdf` from **`/review_apply`**, basename ending in `_redacted.pdf`. |
 | **Initial `/doc_redact` output** | Treat first-run `*_redacted.pdf` as final | Treat as **draft**. Pass 1 review + **`/review_apply`** is required unless the user explicitly waives review. |
+| **Ambiguous policy** | Guess maximally / redact everything searchable | **Do not** maximise. If requirements conflict or scope is unclear (e.g. "only in Financial Assessment" with no section cues; "any names" with no allow-list), **ask** with 2–3 options + a default (`request_clarification` / `CLARIFICATION_NEEDED:` for LangGraph). Thin-but-clear "redact PII" → use default entities and proceed. |
 
 **Delivery exception (only if `pass_strict` cannot be reached after one apply + one fix pass):**
 
