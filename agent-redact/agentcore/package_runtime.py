@@ -216,10 +216,12 @@ AGENT_DEFAULT_PROVIDER=amazon-bedrock
 AGENT_DEFAULT_MODEL=anthropic.claude-sonnet-4-6
 AWS_REGION=eu-west-2
 AGENT_WORKSPACE_DIR=/tmp/agentcore-workspace
+LANGGRAPH_RECURSION_LIMIT=150
 AGENT_DEFAULT_OCR_METHOD=paddle
 AGENT_DEFAULT_PII_METHOD=Local
 # Optional Arize AX / Phoenix tracing for in-process LangGraph
-# (see agent-redact/eval/arize_monitoring.py).
+# (see agent-redact/eval/arize_monitoring.py). LangGraph gets LangChain
+# auto-instrumentation; Pi gets custom AGENT/TOOL spans from the RPC stream.
 # ARIZE_TRACING_ENABLED=true
 # ARIZE_BACKEND=ax
 # ARIZE_BACKEND=phoenix

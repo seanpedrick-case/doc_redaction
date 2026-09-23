@@ -40,6 +40,7 @@ from tools.config import (
 )
 from tools.helper_functions import (
     get_file_name_without_type,
+    pymupdf_annot_str,
     read_file,
 )
 from tools.secure_path_utils import (
@@ -48,7 +49,10 @@ from tools.secure_path_utils import (
     secure_join,
     secure_zip_member_read,
 )
-from tools.secure_regex_utils import safe_extract_page_number_from_path
+from tools.secure_regex_utils import (
+    safe_extract_page_number_from_path,
+    safe_extract_rgb_values,
+)
 
 IMAGE_NUM_REGEX = re.compile(r"_(\d+)\.png$")
 
@@ -82,6 +86,20 @@ def _get_threadlocal_pymupdf_doc(pdf_path: str) -> Document:
         doc = pymupdf.open(pdf_path)
         cache[pdf_path] = doc
     return doc
+
+
+def clear_threadlocal_pdf_cache() -> None:
+    """Close and drop thread-local PyMuPDF documents opened during batch page rendering."""
+    cache = getattr(_PDF_DOC_CACHE, "docs", None)
+    if not cache:
+        return
+    for doc in cache.values():
+        try:
+            if hasattr(doc, "is_closed") and not doc.is_closed:
+                doc.close()
+        except Exception:
+            pass
+    cache.clear()
 
 
 def _render_pdf_page_to_png_pymupdf_mediabox(
@@ -445,6 +463,7 @@ def convert_pdf_to_images(
     heights = [result[3] for result in results]
 
     print("PDF has been converted to images.")
+    clear_threadlocal_pdf_cache()
     return images, widths, heights, results
 
 
@@ -1205,8 +1224,9 @@ def extract_redactions(
     print(f"Found {total_redactions} redactions in the document")
 
     # Convert the gradio annotation boxes to relative coordinates
-    page_sizes_df = pd.DataFrame(page_sizes)
-    page_sizes_df.loc[:, "page"] = pd.to_numeric(page_sizes_df["page"], errors="coerce")
+    page_sizes_df = pd.DataFrame(page_sizes if page_sizes else [])
+    if not page_sizes_df.empty and "page" in page_sizes_df.columns:
+        page_sizes_df["page"] = pd.to_numeric(page_sizes_df["page"], errors="coerce")
 
     all_image_annotations_df = convert_annotation_data_to_dataframe(json_data)
     all_image_annotations_df = divide_coordinates_by_page_sizes(
@@ -1321,6 +1341,10 @@ def combine_review_pdf_files(file_list, output_folder: str = OUTPUT_FOLDER):
     if not file_list:
         return []
 
+    from tools.malware_scan import require_files_malware_scanned
+
+    require_files_malware_scanned(file_list)
+
     # Normalise to paths (Gradio may pass FileData with .name or dict with "name")
     paths = []
     for f in file_list:
@@ -1360,8 +1384,10 @@ def combine_review_pdf_files(file_list, output_folder: str = OUTPUT_FOLDER):
                 rect = annot.rect
                 annot_colors = annot.colors or {}
                 annot_info = annot.info or {}
-                title = annot_info.get("title", "Redaction")
-                content = annot_info.get("content", "")
+                title = pymupdf_annot_str(
+                    annot_info.get("title", "Redaction"), "Redaction"
+                )
+                content = pymupdf_annot_str(annot_info.get("content", ""))
                 # Skip duplicate: same position and same label/text content
                 if _dst_page_has_duplicate_redact(dst_page, rect, title, content):
                     continue
@@ -1373,9 +1399,11 @@ def combine_review_pdf_files(file_list, output_folder: str = OUTPUT_FOLDER):
                 new_annot.set_info(
                     info=title,
                     title=title,
-                    subject=annot_info.get("subject", "Redaction"),
+                    subject=pymupdf_annot_str(
+                        annot_info.get("subject", "Redaction"), "Redaction"
+                    ),
                     content=content,
-                    creationDate=annot_info.get("creationDate", ""),
+                    creationDate=pymupdf_annot_str(annot_info.get("creationDate", "")),
                 )
                 new_annot.update(opacity=0.5, cross_out=False)
         other_doc.close()
@@ -2019,6 +2047,7 @@ def prepare_image_or_pdf(
         print(f"Finished loading in {file_path_number} file(s)")
         gr.Info(f"Finished loading in {file_path_number} file(s)")
 
+    clear_threadlocal_pdf_cache()
     return (
         combined_out_message,
         converted_file_paths,
@@ -2850,54 +2879,8 @@ def convert_annotation_data_to_dataframe(all_annotations: List[Dict[str, Any]]):
                             if isinstance(v, (list, tuple)) and len(v) >= 3:
                                 v = [int(float(x)) for x in v[:3]]
                             elif isinstance(v, str):
-                                s_raw = v.strip()
-                                s_lower = s_raw.lower()
-                                # rgba(0,0,0,1) / rgb(0,0,0) from browsers and annotators
-                                if s_lower.startswith("rgba") or s_lower.startswith(
-                                    "rgb"
-                                ):
-                                    lp = s_raw.find("(")
-                                    rp = s_raw.rfind(")")
-                                    if lp != -1 and rp != -1 and rp > lp:
-                                        inner = s_raw[lp + 1 : rp]
-                                        parts = [
-                                            p.strip()
-                                            for p in inner.split(",")
-                                            if p.strip()
-                                        ]
-                                        if len(parts) >= 3:
-                                            try:
-                                                v = [
-                                                    int(float(parts[i]))
-                                                    for i in range(3)
-                                                ]
-                                            except (TypeError, ValueError):
-                                                v = [0, 0, 0]
-                                        else:
-                                            v = [0, 0, 0]
-                                    else:
-                                        v = [0, 0, 0]
-                                else:
-                                    s = s_raw.strip("()").replace(" ", "")
-                                    # e.g. "(128,128,128)" or "128,128,128"
-                                    parts = s.split(",")
-                                    if len(parts) >= 3:
-                                        v = [int(float(p)) for p in parts[:3]]
-                                    elif s.startswith("#") and len(s) in (4, 7):
-                                        # Hex #rgb or #rrggbb (from gradio_image_annotation_redaction label_colors)
-                                        hex_s = s[1:]
-                                        if len(hex_s) == 3:
-                                            v = [
-                                                int(hex_s[i : i + 1] * 2, 16)
-                                                for i in (0, 1, 2)
-                                            ]
-                                        else:
-                                            v = [
-                                                int(hex_s[i : i + 2], 16)
-                                                for i in (0, 2, 4)
-                                            ]
-                                    else:
-                                        v = [0, 0, 0]
+                                parsed = safe_extract_rgb_values(v)
+                                v = list(parsed) if parsed is not None else [0, 0, 0]
                             else:
                                 v = [0, 0, 0]
                         elif k == "color" and v is None:
@@ -2948,7 +2931,11 @@ def convert_annotation_data_to_dataframe(all_annotations: List[Dict[str, Any]]):
     final_col_order = base_cols + essential_box_cols + extra_box_cols
     final_col_order = [c for c in final_col_order if c in df.columns]
     df = df.select(final_col_order)
-    return df.to_pandas()
+    out_df = df.to_pandas()
+    for col in ("text", "label", "id"):
+        if col in out_df.columns:
+            out_df[col] = out_df[col].fillna("")
+    return out_df
 
 
 def create_annotation_dicts_from_annotation_df(
@@ -3930,6 +3917,11 @@ def convert_review_df_to_annotation_json(
         # Ensure page column is nullable integer type for reliable grouping
         if "page" in review_file_df.columns:
             review_file_df["page"] = review_file_df["page"].astype("Int64")
+        for col in ("text", "label", "id"):
+            if col in review_file_df.columns:
+                review_file_df[col] = review_file_df[col].map(
+                    lambda v: pymupdf_annot_str(v)
+                )
 
     # --- Group Annotations by Page ---
     output_cols_for_boxes = [

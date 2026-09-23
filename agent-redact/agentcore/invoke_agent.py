@@ -81,6 +81,10 @@ INVOKE_RUNTIME_CONFIG_KEYS = frozenset(
         "DOC_REDACTION_AUTH_COOKIE_NAME",
         "AGENT_DEFAULT_OCR_METHOD",
         "AGENT_DEFAULT_PII_METHOD",
+        "AGENT_DEFAULT_PROVIDER",
+        "AGENT_DEFAULT_MODEL",
+        "AWS_REGION",
+        "AWS_DEFAULT_REGION",
         "HF_TOKEN",
         "DOC_REDACTION_HF_TOKEN",
     }
@@ -149,7 +153,11 @@ async def invoke_redaction_agent(request: dict) -> AsyncIterator[dict]:
             "message": f"Redaction backend for this turn: {backend_url}",
         }
 
-    from eval.arize_monitoring import arize_session_context, langgraph_trace_config
+    from eval.arize_monitoring import (
+        agent_turn_span,
+        arize_session_context,
+        langgraph_trace_config,
+    )
     from redaction_langgraph.graph import build_redaction_agent, graph_recursion_limit
     from redaction_langgraph.llm_errors import (
         is_context_overflow_error,
@@ -172,9 +180,8 @@ async def invoke_redaction_agent(request: dict) -> AsyncIterator[dict]:
         session_hash, recursion_limit=graph_recursion_limit()
     )
 
-    def _emit_stream(active_graph, active_inputs) -> list[dict]:
-        """Collect stream events; callers yield them and handle errors."""
-        out: list[dict] = []
+    def _emit_stream(active_graph, active_inputs):
+        """Yield LangGraph node updates as they complete (do not buffer the run)."""
         reset_trim_stats()
         compaction_noted = False
         for event in active_graph.stream(
@@ -183,15 +190,13 @@ async def invoke_redaction_agent(request: dict) -> AsyncIterator[dict]:
             stats = get_trim_stats()
             if stats is not None and stats.trimmed and not compaction_noted:
                 compaction_noted = True
-                out.append(
-                    {
-                        "type": "status",
-                        "message": (
-                            f"Context compaction ({stats.tokens_before:,} → "
-                            f"{stats.tokens_after:,} tokens)."
-                        ),
-                    }
-                )
+                yield {
+                    "type": "status",
+                    "message": (
+                        f"Context compaction ({stats.tokens_before:,} → "
+                        f"{stats.tokens_after:,} tokens)."
+                    ),
+                }
             for node, update in event.items():
                 messages = update.get("messages") or []
                 for message in messages:
@@ -199,80 +204,81 @@ async def invoke_redaction_agent(request: dict) -> AsyncIterator[dict]:
                         text = stringify_message_content(message.content)
                         if text:
                             assistant_chunks.append(text)
-                        out.append(
-                            {
-                                "type": "message_update",
-                                "node": node,
-                                "role": "assistant",
-                                "content": text,
-                                "tool_calls": message.tool_calls or [],
-                            }
-                        )
+                        yield {
+                            "type": "message_update",
+                            "node": node,
+                            "role": "assistant",
+                            "content": text,
+                            "tool_calls": message.tool_calls or [],
+                        }
                     elif isinstance(message, ToolMessage):
-                        out.append(
-                            {
-                                "type": "message_update",
-                                "node": node,
-                                "role": "tool",
-                                "content": stringify_message_content(message.content),
-                                "tool_name": str(message.name or "tool"),
-                            }
-                        )
+                        yield {
+                            "type": "message_update",
+                            "node": node,
+                            "role": "tool",
+                            "content": stringify_message_content(message.content),
+                            "tool_name": str(message.name or "tool"),
+                        }
                     else:
                         content = getattr(message, "content", "")
-                        out.append(
-                            {
-                                "type": "message_update",
-                                "node": node,
-                                "role": getattr(message, "type", "unknown"),
-                                "content": content,
-                            }
-                        )
-        return out
+                        yield {
+                            "type": "message_update",
+                            "node": node,
+                            "role": getattr(message, "type", "unknown"),
+                            "content": content,
+                        }
 
     try:
         with arize_session_context(session_hash):
-            try:
-                for item in _emit_stream(graph, inputs):
-                    yield item
-            except Exception as exc:
-                if is_context_overflow_error(exc):
-                    assistant_chunks.clear()
-                    yield {
-                        "type": "status",
-                        "message": (
-                            "Prompt exceeded model context — retrying once with "
-                            "aggressive compaction…"
-                        ),
-                    }
-                    set_aggressive_trim(True)
-                    try:
-                        graph, _ = build_redaction_agent(
-                            session_hash, aggressive_compaction=True
-                        )
-                        for item in _emit_stream(graph, inputs):
-                            yield item
-                    finally:
-                        set_aggressive_trim(False)
-                elif is_tool_call_json_parse_error(exc):
-                    assistant_chunks.clear()
-                    yield {
-                        "type": "status",
-                        "message": (
-                            "Tool-call JSON was truncated or invalid — retrying once "
-                            "with a compact-script nudge…"
-                        ),
-                    }
-                    retry_inputs = {
-                        "messages": [
-                            *(inputs.get("messages") or []),
-                            HumanMessage(content=build_tool_call_json_retry_prompt()),
-                        ]
-                    }
-                    for item in _emit_stream(graph, retry_inputs):
+            with agent_turn_span(
+                "agentcore.agent",
+                session_hash=session_hash,
+                message=prompt,
+                agent_name="agentcore",
+            ):
+                try:
+                    for item in _emit_stream(graph, inputs):
                         yield item
-                else:
-                    raise
+                except Exception as exc:
+                    if is_context_overflow_error(exc):
+                        assistant_chunks.clear()
+                        yield {
+                            "type": "status",
+                            "message": (
+                                "Prompt exceeded model context — retrying once with "
+                                "aggressive compaction…"
+                            ),
+                        }
+                        set_aggressive_trim(True)
+                        try:
+                            graph, _ = build_redaction_agent(
+                                session_hash, aggressive_compaction=True
+                            )
+                            for item in _emit_stream(graph, inputs):
+                                yield item
+                        finally:
+                            set_aggressive_trim(False)
+                    elif is_tool_call_json_parse_error(exc):
+                        assistant_chunks.clear()
+                        yield {
+                            "type": "status",
+                            "message": (
+                                "Tool-call JSON was truncated or invalid — retrying once "
+                                "with a compact-script nudge…"
+                            ),
+                        }
+                        retry_inputs = {
+                            "messages": [
+                                *(inputs.get("messages") or []),
+                                HumanMessage(
+                                    content=build_tool_call_json_retry_prompt()
+                                ),
+                            ]
+                        }
+                        for item in _emit_stream(graph, retry_inputs):
+                            yield item
+                    else:
+                        raise
     except Exception as exc:
         yield {"type": "error", "message": f"LangGraph agent failed: {exc}"}
         return

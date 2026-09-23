@@ -35,6 +35,8 @@ def test_build_pi_agent_container_environment():
     assert env["ACCESS_LOGS_FOLDER"] == "/tmp/agent-logs/"
     assert env["RUN_FASTAPI"] == "True"
     assert env["RUN_AWS_FUNCTIONS"] == "True"
+    assert env["SCAN_UPLOADS_FOR_MALWARE"]
+    assert env["MALWARE_SCAN_S3_BUCKET"]
     assert env["SAVE_OUTPUTS_TO_S3"] == "True"
     assert env["S3_OUTPUTS_BUCKET"]
 

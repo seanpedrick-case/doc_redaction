@@ -327,7 +327,8 @@ def _gemini_provider() -> dict[str, Any]:
     return {
         "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
         "api": "google-generative-ai",
-        "apiKey": "GEMINI_API_KEY",
+        # Pi 0.84+ resolves env vars only with "$VAR" interpolation; bare names are literals.
+        "apiKey": "$GEMINI_API_KEY",
         "models": [
             _model_entry(
                 model_id, name, context_window=ctx, max_tokens=8192, reasoning=reasoning

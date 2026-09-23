@@ -98,9 +98,11 @@ from tools.config import (
     RUN_AWS_FUNCTIONS,
     SAVE_PAGE_OCR_VISUALISATIONS,
     SELECTABLE_TEXT_EXTRACT_OPTION,
+    SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL,
     TESSERACT_MAX_WORKERS,
     TEXTRACT_TEXT_EXTRACT_OPTION,
     USE_GUI_BOX_COLOURS_FOR_OUTPUTS,
+    USE_TRANSFORMERS_VLM_MODEL_AS_LLM,
     aws_comprehend_language_choices,
     textract_language_choices,
 )
@@ -143,6 +145,7 @@ from tools.helper_functions import (
     get_textract_file_suffix,
     line_level_ocr_row,
     normalize_line_level_ocr_df,
+    pymupdf_annot_str,
 )
 from tools.load_spacy_model_custom_recognisers import (
     CustomWordFuzzyRecognizer,
@@ -172,7 +175,10 @@ from tools.secure_path_utils import (
 )
 
 # Extract numbers before 'seconds' using secure regex
-from tools.secure_regex_utils import safe_extract_numbers_with_seconds
+from tools.secure_regex_utils import (
+    safe_extract_numbers_with_seconds,
+    safe_extract_rgb_values,
+)
 
 ImageFile.LOAD_TRUNCATED_IMAGES = LOAD_TRUNCATED_IMAGES
 if not MAX_IMAGE_PIXELS:
@@ -1023,6 +1029,14 @@ def run_custom_vlm_only_pass(
     )
 
 
+def _mark_generated_ocr_paths_malware_clean(*path_groups: Any) -> None:
+    """Treat redactor-written OCR CSV paths as already scan-clean."""
+    from tools.malware_scan import mark_app_generated_files_malware_clean
+
+    for group in path_groups:
+        mark_app_generated_files_malware_clean(group)
+
+
 def _choose_and_run_redactor_impl(
     file_paths: List[str],
     prepared_pdf_file_paths: Optional[List[str]] = None,
@@ -1460,6 +1474,10 @@ def _choose_and_run_redactor_impl(
 
         page_break_return = True
 
+        _mark_generated_ocr_paths_malware_clean(
+            duplication_file_path_outputs, ocr_review_files
+        )
+
         return (
             combined_out_message,
             out_file_paths,
@@ -1698,6 +1716,10 @@ def _choose_and_run_redactor_impl(
                     review_out_file_paths.append(review_file_path)
 
         page_break_return = False
+
+        _mark_generated_ocr_paths_malware_clean(
+            duplication_file_path_outputs, ocr_review_files
+        )
 
         return (
             combined_out_message,
@@ -4130,6 +4152,10 @@ def _choose_and_run_redactor_impl(
         p for p in ocr_review_files if isinstance(p, str) and os.path.exists(p)
     ]
 
+    _mark_generated_ocr_paths_malware_clean(
+        duplication_file_path_outputs, ocr_review_files
+    )
+
     return (
         combined_out_message,
         out_file_paths,
@@ -4838,7 +4864,8 @@ def define_box_colour(
     Determines the color for a bounding box annotation.
 
     If `custom_colours` is True, it attempts to parse the color from `img_annotation_box['color']`.
-    It supports color strings in "(R,G,B)" format (0-255 integers) or tuples/lists of (R,G,B)
+    It supports colour strings from the annotator colour picker and review CSV
+    (``rgb()`` / ``rgba()`` / ``#RRGGBB`` / ``(R,G,B)``) and tuples/lists of (R,G,B)
     where components are either 0-1 floats or 0-255 integers.
     If parsing fails or `custom_colours` is False, it defaults to `CUSTOM_BOX_COLOUR`.
     All output colors are converted to a 0.0-1.0 float range.
@@ -4857,28 +4884,15 @@ def define_box_colour(
         out_colour = (0, 0, 0)  # Initialize with a default black color (0.0-1.0 range)
 
         if isinstance(color_input, str):
-            # Expected format: "(R,G,B)" where R,G,B are integers 0-255 (e.g., "(255,0,0)")
-            try:
-                # Remove parentheses and split by comma, then convert to integers
-                components_str = color_input.strip().strip("()").split(",")
-                colour_tuple_int = tuple(int(c.strip()) for c in components_str)
-
-                # Validate the parsed integer tuple
-                if len(colour_tuple_int) == 3 and not all(
-                    0 <= c <= 1 for c in colour_tuple_int
-                ):
-                    out_colour = convert_color_to_range_0_1(colour_tuple_int)
-                elif len(colour_tuple_int) == 3 and all(
-                    0 <= c <= 1 for c in colour_tuple_int
-                ):
-                    out_colour = colour_tuple_int
-                else:
-                    print(
-                        f"Warning: Invalid color string values or length for '{color_input}'. Expected (R,G,B) with R,G,B in 0-255. Defaulting to black."
-                    )
-            except (ValueError, IndexError):
+            # Annotator colour picker emits CSS rgb()/rgba(); review CSV uses "(R, G, B)".
+            parsed = safe_extract_rgb_values(color_input)
+            if parsed is not None:
+                out_colour = convert_color_to_range_0_1(parsed)
+            else:
                 print(
-                    f"Warning: Could not parse color string '{color_input}'. Expected '(R,G,B)' format. Defaulting to black."
+                    f"Warning: Could not parse color string '{color_input}'. "
+                    "Expected '(R,G,B)', 'rgb(R, G, B)', 'rgba(...)', or '#RRGGBB'. "
+                    "Defaulting to black."
                 )
         elif isinstance(color_input, (tuple, list)) and len(color_input) == 3:
             # Expected formats: (R,G,B) where R,G,B are either 0-1 floats or 0-255 integers
@@ -4904,7 +4918,7 @@ def define_box_colour(
         else:
             # Catch-all for any other unexpected format (e.g., None, dict, etc.)
             print(
-                f"Warning: Unexpected color format for {color_input}. Expected string '(R,G,B)' or tuple/list (R,G,B). Defaulting to black."
+                f"Warning: Unexpected color format for {color_input}. Expected string rgb()/(R,G,B)/#hex or tuple/list (R,G,B). Defaulting to black."
             )
 
         # Final safeguard: Ensure out_colour is always a valid PyMuPDF color tuple (3 floats 0.0-1.0)
@@ -5030,8 +5044,10 @@ def redact_single_box(
     pymupdf_x2 = pymupdf_rect[2]
     pymupdf_y2 = pymupdf_rect[3]
 
-    img_annotation_box["text"] = img_annotation_box.get("text") or ""
-    img_annotation_box["label"] = img_annotation_box.get("label") or "Redaction"
+    img_annotation_box["text"] = pymupdf_annot_str(img_annotation_box.get("text"))
+    img_annotation_box["label"] = pymupdf_annot_str(
+        img_annotation_box.get("label"), "Redaction"
+    )
 
     # Full size redaction box for covering all the text of a word
     full_size_redaction_box = Rect(
@@ -5176,6 +5192,7 @@ def redact_whole_pymupdf_page(
     # Match word-level redactions: define_box_colour uses this when GUI/output colours are on.
     whole_page_img_annotation_box["color"] = CUSTOM_BOX_COLOUR
     whole_page_img_annotation_box["label"] = "Whole page"
+    whole_page_img_annotation_box["text"] = ""
 
     if redact_pdf is True:
         redact_single_box(
@@ -5541,15 +5558,17 @@ def redact_page_with_pymupdf(
                         pymupdf_x2 = img_annotation_box["xmax"]
                         pymupdf_y2 = img_annotation_box["ymax"]
 
-                    if "text" in annot and annot["text"]:
-                        img_annotation_box["text"] = str(annot["text"])
-                    else:
-                        img_annotation_box["text"] = ""
-
                     rect = Rect(
                         pymupdf_x1, pymupdf_y1, pymupdf_x2, pymupdf_y2
                     )  # Create the PyMuPDF Rect (display space when from image/gradio)
                     rect = _rect_display_to_unrotated(page, rect)
+
+                img_annotation_box["text"] = pymupdf_annot_str(
+                    img_annotation_box.get("text")
+                )
+                img_annotation_box["label"] = pymupdf_annot_str(
+                    img_annotation_box.get("label"), "Redaction"
+                )
 
             # Else should be CustomImageRecognizerResult
             elif isinstance(annot, CustomImageRecognizerResult):
@@ -9344,9 +9363,10 @@ def redact_image_pdf(
                     elif pii_identification_method == LOCAL_TRANSFORMERS_LLM_PII_OPTION:
                         # Set up local transformers LLM parameters
                         text_analyzer_kwargs["inference_method"] = "local"
-                        # Use LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE as default model for local transformers
                         text_analyzer_kwargs["model_choice"] = (
-                            LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
+                            SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL
+                            if USE_TRANSFORMERS_VLM_MODEL_AS_LLM
+                            else LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
                         )
 
                     # Optional additional Bedrock VLM pass to detect people

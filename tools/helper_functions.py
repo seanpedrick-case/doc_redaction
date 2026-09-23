@@ -1,3 +1,4 @@
+import gc
 import logging
 import os
 import platform
@@ -12,7 +13,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from math import ceil
 from pathlib import Path
-from typing import List, Set
+from typing import Any, List, Set
 
 import gradio as gr
 import numpy as np
@@ -68,11 +69,41 @@ from tools.config import (
 )
 from tools.gradio_platform import build_s3_outputs_prefix, resolve_session_identity
 from tools.secure_path_utils import (
+    resolve_existing_io_path,
     sanitize_filename,
+    secure_basename,
     secure_path_join,
     validate_folder_containment,
     validate_path_safety,
 )
+
+# PP-OCRv6 (PaddleOCR engine=transformers) needs Hugging Face model/processor support.
+_TRANSFORMERS_MIN_PP_OCRV6 = (5, 12, 0)
+
+
+def assert_transformers_pp_ocrv6_support() -> None:
+    """Raise ImportError when transformers is too old for PP-OCRv6."""
+    try:
+        import transformers
+    except ImportError as e:
+        raise ImportError(
+            "PaddleOCR PP-OCRv6 (engine=transformers) requires transformers>=5.12.0. "
+            "Install with: pip install 'transformers>=5.12.0'"
+        ) from e
+
+    installed = tuple(
+        int(m.group(1)) if (m := re.match(r"(\d+)", part)) else 0
+        for part in transformers.__version__.split(".")[:3]
+    )
+    while len(installed) < 3:
+        installed = (*installed, 0)
+    if installed < _TRANSFORMERS_MIN_PP_OCRV6:
+        raise ImportError(
+            "PaddleOCR PP-OCRv6 (engine=transformers) requires transformers>=5.12.0 "
+            f"(installed: {transformers.__version__}). "
+            "Upgrade with: pip install 'transformers>=5.12.0'"
+        )
+
 
 _VLM_THINKING_TAG_BLOCK_RE = re.compile(
     r"<\s*(?:think|thinking)\s*>.*?</\s*(?:think|thinking)\s*>",
@@ -112,7 +143,77 @@ def extract_balanced_json_array(text: str):
     return None
 
 
-def reset_state_vars():
+def extract_last_balanced_json_array(text: str):
+    """Return the last complete top-level [...] substring, or None.
+
+    Qwen thinking traces often draft a JSON array before the final answer. Preferring
+    the last complete array avoids parsing an incomplete draft. Incomplete ``[``
+    prefixes are skipped so a later complete array can still be found.
+    """
+    if not text:
+        return None
+    last = None
+    search_from = 0
+    while True:
+        start_idx = text.find("[", search_from)
+        if start_idx < 0:
+            break
+        chunk = extract_balanced_json_array(text[start_idx:])
+        if chunk:
+            last = chunk
+            search_from = start_idx + len(chunk)
+        else:
+            search_from = start_idx + 1
+    return last
+
+
+def pymupdf_annot_str(value: Any, default: str = "") -> str:
+    """Coerce annotation title/content to a Python ``str`` for PyMuPDF.
+
+    ``pdf_set_annot_contents`` requires ``char const *``. Missing text from
+    whole-page / duplicate-page review rows often arrives as ``NaN`` (truthy),
+    so ``value or ""`` is not a safe fallback.
+    """
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+SESSION_GC_PAGE_THRESHOLD = 30
+
+
+def release_session_document(doc) -> None:
+    """Close a PyMuPDF Document held in session state, if still open."""
+    if doc is None or doc == []:
+        return
+    if hasattr(doc, "is_closed"):
+        try:
+            if not doc.is_closed:
+                doc.close()
+        except Exception:
+            pass
+
+
+def _session_gc_if_large(doc) -> None:
+    try:
+        if doc is not None and doc != [] and hasattr(doc, "page_count"):
+            if doc.page_count >= SESSION_GC_PAGE_THRESHOLD:
+                gc.collect()
+    except Exception:
+        pass
+
+
+def _empty_redact_reset_values():
+    """Shared empty values for pre-redact session reset (legacy 22-tuple)."""
     return (
         [],
         pd.DataFrame(),
@@ -131,11 +232,248 @@ def reset_state_vars():
         0,
         [],
         [],
-        0,  # latest_file_completed_num: reset to 0 at start of document redaction
-        0,  # LLM total input tokens
-        0,  # LLM total output tokens
-        0,  # VLM total input tokens
-        0,  # VLM total output tokens
+        0,
+        0,
+        0,
+        0,
+        0,
+    )
+
+
+def reset_state_vars(pdf_doc_state=None):
+    """Reset redaction session fields; closes pdf_doc_state when provided."""
+    release_session_document(pdf_doc_state)
+    _session_gc_if_large(pdf_doc_state)
+    return _empty_redact_reset_values()
+
+
+def _empty_full_session_release_values():
+    """Empty values for all heavy Gradio session state cleared on upload / new document."""
+    base = _empty_redact_reset_values()
+    return base + (
+        [],  # all_page_line_level_ocr_results (line-level list)
+        pd.DataFrame(),  # all_page_line_level_ocr_results_with_words_df_base
+        [],  # prepared_pdf_state
+        [],  # images_pdf_state
+        [],  # page_sizes
+        [],  # document_cropboxes
+        [],  # all_img_details_state
+        pd.DataFrame(),  # backup_review_state
+        [],  # backup_image_annotations_state
+        pd.DataFrame(),  # backup_recogniser_entity_dataframe_base
+        pd.DataFrame(),  # backup_all_page_line_level_ocr_results_with_words_df_base
+        {},  # full_duplicate_data_by_file
+        pd.DataFrame(),  # review_file_df
+    )
+
+
+def release_document_session_state(pdf_doc_state=None):
+    """
+    Release heavy document session state before preparing a new file or starting redaction.
+    Closes the open PyMuPDF document and clears thread-local PDF render cache.
+    """
+    release_session_document(pdf_doc_state)
+    try:
+        from tools.file_conversion import clear_threadlocal_pdf_cache
+
+        clear_threadlocal_pdf_cache()
+    except Exception:
+        pass
+    _session_gc_if_large(pdf_doc_state)
+    return _empty_full_session_release_values()
+
+
+def release_post_workflow_ocr_state():
+    """
+    Drop in-memory OCR list copies and review undo backups after redact/review complete.
+    Paths (latest_ocr_file_path) and line-level DataFrames are kept for lazy reload.
+    """
+    gc.collect()
+    return (
+        [],
+        [],
+        pd.DataFrame(),
+        [],
+        pd.DataFrame(),
+        pd.DataFrame(),
+    )
+
+
+def _resolve_word_level_ocr_json_path(ocr_file_path: str) -> str | None:
+    """
+    Map ``latest_ocr_file_path`` (often line-level ``*_ocr_output_*.csv``) to the
+    sibling ``*_ocr_results_with_words_*.json`` when present.
+
+    ``ocr_file_path`` must already be validated via :func:`resolve_existing_io_path`.
+    """
+    if not ocr_file_path:
+        return None
+    base = secure_basename(ocr_file_path)
+    lower = base.lower()
+    if "_ocr_results_with_words_" in base and lower.endswith(".json"):
+        return ocr_file_path
+    if "_ocr_output_" in base and lower.endswith(".csv"):
+        word_base = base.replace("_ocr_output_", "_ocr_results_with_words_", 1)
+        word_base = sanitize_filename(os.path.splitext(word_base)[0]) + ".json"
+        parent_dir = os.path.dirname(ocr_file_path)
+        try:
+            candidate = str(secure_path_join(parent_dir, word_base))
+            return resolve_existing_io_path(candidate)
+        except (ValueError, PermissionError, OSError):
+            return None
+    return None
+
+
+def _ocr_with_words_df_has_page(
+    ocr_with_words_df, page_num: int, *, page_num_1based: bool = True
+) -> bool:
+    """True when the word-level OCR dataframe contains rows for ``page_num``."""
+    if ocr_with_words_df is None or not isinstance(ocr_with_words_df, pd.DataFrame):
+        return False
+    if ocr_with_words_df.empty or "page" not in ocr_with_words_df.columns:
+        return False
+    try:
+        target = int(page_num)
+    except (TypeError, ValueError):
+        return False
+    if not page_num_1based:
+        target += 1
+    try:
+        return (
+            pd.to_numeric(ocr_with_words_df["page"], errors="coerce") == target
+        ).any()
+    except Exception:
+        return False
+
+
+def ensure_ocr_word_results_list(
+    ocr_results_list,
+    ocr_json_path: str,
+    page_sizes_df=None,
+):
+    """Return OCR word results from session list or reload from on-disk JSON when cleared."""
+    if ocr_results_list:
+        return ocr_results_list
+    if not ocr_json_path:
+        return []
+    try:
+        safe_ocr_path = resolve_existing_io_path(ocr_json_path)
+    except ValueError:
+        return []
+    word_json_path = _resolve_word_level_ocr_json_path(safe_ocr_path)
+    if not word_json_path:
+        return []
+    from tools.file_conversion import load_and_convert_ocr_results_with_words_json
+
+    loaded, _, _ = load_and_convert_ocr_results_with_words_json(
+        word_json_path,
+        [],
+        page_sizes_df if page_sizes_df is not None else pd.DataFrame(),
+    )
+    return loaded or []
+
+
+def page_ocr_review_image_for_gradio(
+    annotator,
+    current_page,
+    all_page_line_level_ocr_results_with_words,
+    all_page_line_level_ocr_results_with_words_df_base,
+    doc_full_file_name_textbox,
+    output_folder_textbox,
+    latest_ocr_file_path,
+    all_image_annotations_state,
+    page_sizes,
+):
+    """Export OCR visualisation using session state for a stable page image path."""
+    from tools.redaction_review import (
+        build_review_redaction_export_annotator,
+        page_ocr_review_image,
+    )
+
+    ocr_list = all_page_line_level_ocr_results_with_words
+    if not ocr_list and not _ocr_with_words_df_has_page(
+        all_page_line_level_ocr_results_with_words_df_base, current_page
+    ):
+        ocr_list = ensure_ocr_word_results_list(
+            all_page_line_level_ocr_results_with_words,
+            latest_ocr_file_path,
+        )
+
+    export_annotator = build_review_redaction_export_annotator(
+        annotator,
+        current_page,
+        all_image_annotations_state,
+        page_sizes,
+        review_df=None,
+    )
+    return page_ocr_review_image(
+        export_annotator,
+        current_page,
+        ocr_list or [],
+        all_page_line_level_ocr_results_with_words_df_base,
+        doc_full_file_name_textbox,
+        output_folder_textbox,
+    )
+
+
+def page_ocr_review_image_with_lazy_ocr(
+    annotator,
+    current_page,
+    all_page_line_level_ocr_results_with_words,
+    all_page_line_level_ocr_results_with_words_df_base,
+    doc_full_file_name_textbox,
+    output_folder_textbox,
+    latest_ocr_file_path,
+):
+    """Lazy-load word OCR from disk when list state was released to save memory."""
+    from tools.redaction_review import page_ocr_review_image
+
+    ocr_list = all_page_line_level_ocr_results_with_words
+    if not ocr_list and not _ocr_with_words_df_has_page(
+        all_page_line_level_ocr_results_with_words_df_base, current_page
+    ):
+        ocr_list = ensure_ocr_word_results_list(
+            all_page_line_level_ocr_results_with_words,
+            latest_ocr_file_path,
+        )
+    return page_ocr_review_image(
+        annotator,
+        current_page,
+        ocr_list or [],
+        all_page_line_level_ocr_results_with_words_df_base,
+        doc_full_file_name_textbox,
+        output_folder_textbox,
+    )
+
+
+def page_redaction_review_image_for_gradio(
+    annotator,
+    current_page,
+    review_file_df,
+    doc_full_file_name_textbox,
+    output_folder_textbox,
+    all_image_annotations_state,
+    page_sizes,
+):
+    """Export redaction overlay using session state (stable image path + boxes)."""
+    from tools.redaction_review import (
+        build_review_redaction_export_annotator,
+        export_review_redaction_overlay_for_gradio,
+    )
+
+    export_annotator = build_review_redaction_export_annotator(
+        annotator,
+        current_page,
+        all_image_annotations_state,
+        page_sizes,
+        review_file_df,
+    )
+    return export_review_redaction_overlay_for_gradio(
+        export_annotator,
+        current_page,
+        review_file_df,
+        doc_full_file_name_textbox,
+        output_folder_textbox,
     )
 
 
@@ -303,6 +641,48 @@ def load_in_default_cost_codes(cost_codes_path: str, default_cost_code: str = ""
     )
 
 
+def _coerce_cost_codes_dataframe(cost_code_df) -> pd.DataFrame:
+    """Normalise Gradio Dataframe / State payloads to a pandas DataFrame."""
+    if cost_code_df is None:
+        return pd.DataFrame()
+    if isinstance(cost_code_df, pd.DataFrame):
+        df = cost_code_df
+    elif isinstance(cost_code_df, dict):
+        headers = cost_code_df.get("headers") or cost_code_df.get("columns")
+        data = cost_code_df.get("data")
+        if headers is not None and data is not None:
+            df = pd.DataFrame(data, columns=headers)
+        else:
+            try:
+                df = pd.DataFrame(cost_code_df)
+            except Exception:
+                return pd.DataFrame()
+    else:
+        try:
+            df = pd.DataFrame(cost_code_df)
+        except Exception:
+            return pd.DataFrame()
+
+    if df is None or df.empty or df.shape[1] == 0:
+        return pd.DataFrame()
+    df = df.dropna(how="all")
+    if df.empty:
+        return pd.DataFrame()
+    first = df.iloc[:, 0].astype(str).str.strip()
+    return df.loc[first.ne("") & first.str.lower().ne("nan")].copy()
+
+
+def _load_cost_codes_from_configured_path() -> pd.DataFrame:
+    """Reload the cost-code CSV if Gradio state did not keep the table."""
+    for path in (COST_CODES_PATH, OUTPUT_COST_CODES_PATH):
+        if path and os.path.isfile(path):
+            try:
+                return _coerce_cost_codes_dataframe(pd.read_csv(path))
+            except Exception as e:
+                print(f"Could not load cost codes from {path}: {e}")
+    return pd.DataFrame()
+
+
 def enforce_cost_codes(
     enforce_cost_code_bool: bool,
     cost_code_choice: str,
@@ -313,20 +693,34 @@ def enforce_cost_codes(
     Check if the enforce cost codes variable is set to True, and then check that a cost cost has been chosen. If not, raise an error. Then, check against the values in the cost code dataframe to ensure that the cost code exists.
     """
 
-    if enforce_cost_code_bool:
-        if not cost_code_choice:
-            raise Exception("Please choose a cost code before continuing")
+    if not enforce_cost_code_bool:
+        return
 
-        if verify_cost_codes:
-            if cost_code_df.empty:
-                raise Exception("No cost codes present in dataframe for verification")
-            else:
-                valid_cost_codes_list = list(cost_code_df.iloc[:, 0].unique())
+    if not cost_code_choice:
+        raise Exception("Please choose a cost code before continuing")
 
-                if cost_code_choice not in valid_cost_codes_list:
-                    raise Exception(
-                        "Selected cost code not found in list. Please contact your system administrator if you cannot find the correct cost code from the given list of suggestions."
-                    )
+    if not verify_cost_codes:
+        return
+
+    df = _coerce_cost_codes_dataframe(cost_code_df)
+    if df.empty:
+        # The visible table and DEFAULT_COST_CODE can be set while
+        # cost_code_dataframe_base (Gradio State) stays empty.
+        df = _load_cost_codes_from_configured_path()
+
+    if df.empty:
+        raise Exception(
+            "No cost codes present in dataframe for verification. "
+            "DEFAULT_COST_CODE only fills the dropdown; load a cost-code CSV via "
+            "COST_CODES_PATH (or S3_COST_CODES_PATH) so the table has rows."
+        )
+
+    valid_cost_codes_list = list(df.iloc[:, 0].astype(str).str.strip().unique())
+    choice = str(cost_code_choice).strip()
+    if choice not in valid_cost_codes_list:
+        raise Exception(
+            "Selected cost code not found in list. Please contact your system administrator if you cannot find the correct cost code from the given list of suggestions."
+        )
     return
 
 
@@ -1036,9 +1430,12 @@ def custom_regex_load(in_file: List[str], file_type: str = "allow_list"):
     When file is loaded, update the column dropdown choices and write to relevant data states.
     Returns a list for Dropdown components (instead of DataFrame).
     """
+    from tools.malware_scan import require_files_malware_scanned
+
     custom_regex_list = list()
 
     if in_file:
+        require_files_malware_scanned(in_file)
         file_list = [string.name for string in in_file]
 
         regex_file_names = [string for string in file_list if "csv" in string.lower()]
@@ -1339,6 +1736,10 @@ def _merge_csv_input_path(file) -> str:
 
 
 def merge_csv_files(file_list: List, output_folder: str = OUTPUT_FOLDER):
+
+    from tools.malware_scan import require_files_malware_scanned
+
+    require_files_malware_scanned(file_list)
 
     # Initialise an empty list to hold DataFrames
     dataframes = []

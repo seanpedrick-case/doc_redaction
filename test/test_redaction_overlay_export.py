@@ -19,6 +19,7 @@ from tools.file_redaction import (
 from tools.redaction_review import (
     _box_coords_to_pixel_rect,
     build_label_to_pattern_map,
+    build_review_redaction_export_annotator,
     visualise_review_redaction_boxes,
 )
 
@@ -170,3 +171,34 @@ def test_visualise_review_redaction_boxes_returns_none_without_boxes(tmp_path):
     rgb = np.full((20, 20, 3), 200, dtype=np.uint8)
     page = {"image": rgb, "boxes": []}
     assert visualise_review_redaction_boxes(page, output_folder=str(tmp_path)) is None
+
+
+def test_build_review_redaction_export_annotator_prefers_state_boxes():
+    client = {"image": "/tmp/gradio_tmp/stale.png", "boxes": []}
+    state = [
+        None,
+        None,
+        None,
+        None,
+        None,
+        {
+            "image": "/stable/page6.png",
+            "boxes": [
+                {
+                    "label": "PERSON",
+                    "color": "(255, 0, 0)",
+                    "xmin": 0.1,
+                    "ymin": 0.1,
+                    "xmax": 0.4,
+                    "ymax": 0.3,
+                }
+            ],
+        },
+    ]
+    page_sizes = [{"page": 6, "image_path": "/stable/page6.png"}]
+    built = build_review_redaction_export_annotator(
+        client, 6, state, page_sizes, pd.DataFrame()
+    )
+    assert len(built["boxes"]) == 1
+    assert built["boxes"][0]["label"] == "PERSON"
+    assert built["image"] == "/stable/page6.png"

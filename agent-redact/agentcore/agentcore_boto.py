@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
+import os
+
 from agent_runtime import AgentRuntimeError
+
+# AgentCore SSE streams can stay quiet during cold start + first Bedrock call.
+# Default botocore read_timeout (60s) then fails as:
+#   Read timeout on endpoint URL: "None"
+# (urllib3 leaves e.url unset while reading a streaming response body).
+_DEFAULT_READ_TIMEOUT_S = float(os.environ.get("AGENTCORE_BOTO_READ_TIMEOUT_S", "1800"))
+_DEFAULT_CONNECT_TIMEOUT_S = float(
+    os.environ.get("AGENTCORE_BOTO_CONNECT_TIMEOUT_S", "30")
+)
 
 
 def bedrock_agentcore_client(region: str):
     import boto3
+    from botocore.config import Config
     from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
     from pi_agent_config import configure_aws_credentials
 
@@ -21,7 +33,15 @@ def bedrock_agentcore_client(region: str):
             "or paste session keys under **Agent backend** → **Apply backend**. "
             "For HTTP runtime auth with CUSTOM_JWT, set AGENTCORE_API_KEY instead."
         ) from exc
-    return session.client("bedrock-agentcore", region_name=region)
+    return session.client(
+        "bedrock-agentcore",
+        region_name=region,
+        config=Config(
+            connect_timeout=_DEFAULT_CONNECT_TIMEOUT_S,
+            read_timeout=_DEFAULT_READ_TIMEOUT_S,
+            tcp_keepalive=True,
+        ),
+    )
 
 
 def region_from_agentcore_arn(arn: str, *, resource_label: str) -> str:

@@ -800,6 +800,22 @@ SUMMARY_PAGE_GROUP_MAX_WORKERS = max(
     int(get_or_create_env_var("SUMMARY_PAGE_GROUP_MAX_WORKERS", str(MAX_WORKERS))),
 )
 
+# Concurrent tabular LLM PII cell queries for AWS Bedrock (rate-limit friendly cap).
+LLM_PII_MAX_CONCURRENT_REQUESTS = max(
+    1,
+    int(
+        get_or_create_env_var(
+            "LLM_PII_MAX_CONCURRENT_REQUESTS", str(min(MAX_WORKERS, 10))
+        )
+    ),
+)
+# Local transformers and inference-server tabular PII: 1 = one generate()/HTTP call at a time
+# (avoids CUDA contention on a single GPU and saturating one vLLM/llama.cpp replica).
+LLM_PII_LOCAL_MAX_CONCURRENT_REQUESTS = max(
+    1,
+    int(get_or_create_env_var("LLM_PII_LOCAL_MAX_CONCURRENT_REQUESTS", "1")),
+)
+
 SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS = convert_string_to_boolean(
     get_or_create_env_var("SHOW_LOCAL_TEXT_EXTRACTION_OPTIONS", "True")
 )
@@ -1035,10 +1051,10 @@ SHOW_VLM_MODEL_OPTIONS = convert_string_to_boolean(
 )  # Whether to show the VLM model options in the UI
 
 SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL = get_or_create_env_var(
-    "SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL", "Qwen3-VL-8B-Instruct"
-)  # Selected vision model. Choose from:  "Nanonets-OCR2-3B",  "Dots.OCR", "Qwen3-VL-2B-Instruct", "Qwen3-VL-4B-Instruct", "Qwen3-VL-8B-Instruct", "Qwen3-VL-30B-A3B-Instruct", "Qwen3-VL-235B-A22B-Instruct", "PaddleOCR-VL"
+    "SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL", "Qwen3.5-9B"
+)  # Selected vision model. See tools/run_vlm.py for options.
 
-# When True, use the same local transformers VLM model (e.g. Qwen3-VL-4B-Instruct) for LLM tasks (e.g. PII entity detection) as for VLM/OCR. Overrides LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE for local LLM.
+# When True, use the same local transformers VLM model (e.g. Qwen3-VL-4B-Instruct) for LLM tasks (PII entity detection and document summarisation) as for VLM/OCR. Overrides LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE for local LLM.
 USE_TRANSFORMERS_VLM_MODEL_AS_LLM = convert_string_to_boolean(
     get_or_create_env_var("USE_TRANSFORMERS_VLM_MODEL_AS_LLM", "False")
 )
@@ -1075,6 +1091,18 @@ MAX_INPUT_TOKEN_LENGTH = int(
 ADD_VLM_BOUNDING_BOX_RULES = convert_string_to_boolean(
     get_or_create_env_var("ADD_VLM_BOUNDING_BOX_RULES", "True")
 )  # Whether to add bounding box rules to the VLM prompt. Does not apply to Qwen models as they have already been trained in this coordinate system.
+
+# How to interpret VLM OCR bounding-box arrays before scaling to pixels.
+# - "auto": Gemma / Gemini / PaliGemma use native [y1, x1, y2, x2]; others [x1, y1, x2, y2]
+# - "xyxy": always treat as [x1, y1, x2, y2] (Qwen / COCO)
+# - "yxyx": always treat as [y1, x1, y2, x2] (Google / TensorFlow)
+_VLM_BBOX_COORD_ORDER_RAW = (
+    get_or_create_env_var("VLM_BBOX_COORD_ORDER", "auto").strip().lower()
+)
+if _VLM_BBOX_COORD_ORDER_RAW not in ("auto", "xyxy", "yxyx"):
+    VLM_BBOX_COORD_ORDER = "auto"
+else:
+    VLM_BBOX_COORD_ORDER = _VLM_BBOX_COORD_ORDER_RAW
 
 # Bedrock VLM OCR cost estimation (used when text extraction method is "AWS Bedrock VLM OCR - all PDF types")
 BEDROCK_VLM_INPUT_COST = float(
@@ -1241,8 +1269,11 @@ else:
     VLM_DEFAULT_PRESENCE_PENALTY = None
 
 VLM_DISABLE_QWEN3_5_THINKING = convert_string_to_boolean(
-    get_or_create_env_var("VLM_DISABLE_QWEN3_5_THINKING", "False")
-)  # Whether to disable Qwen3.5 thinking for local transformers VLM calls.
+    get_or_create_env_var("VLM_DISABLE_QWEN3_5_THINKING", "True")
+)  # Disable Qwen 3.5/3.6/3.8 thinking for local transformers VLM OCR. Must be passed as
+# enable_thinking=False to apply_chat_template (Qwen3.8 defaults thinking on with
+# reasoning_effort=xhigh). If thinking is left on, reasoning often consumes MAX_NEW_TOKENS
+# and the JSON OCR payload is truncated, producing empty OCR CSVs.
 
 # Suffix appended to the generation prompt when Qwen3.5 thinking is disabled (used in run_vlm and llm_funcs).
 VLM_QWEN3_5_NOTHINK_SUFFIX = "<think></think>"
@@ -1713,6 +1744,12 @@ QWEN36_27B_BNB_4BIT_REPO_ID = get_or_create_env_var(
 QWEN36_35B_A3B_REPO_ID = get_or_create_env_var(
     "QWEN36_35B_A3B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-35B-A3B"
 )
+QWEN38_27B_REPO_ID = get_or_create_env_var(
+    "QWEN38_27B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.8-27B"
+)
+QWEN38_27B_BNB_4BIT_REPO_ID = get_or_create_env_var(
+    "QWEN38_27B_BNB_4BIT_REPO_TRANSFORMERS_ID", "unsloth/Qwen3.8-27B-unsloth-bnb-4bit"
+)
 
 QWEN35_122B_A10B_REPO_ID = get_or_create_env_var(
     "QWEN35_122B_A10B_REPO_TRANSFORMERS_ID", "Qwen/Qwen3.5-122B-A10B"
@@ -1727,6 +1764,9 @@ GEMMA4_31B_BNB_REPO_ID = get_or_create_env_var(
     "GEMMA4_31B_BNB_REPO_TRANSFORMERS_ID", "unsloth/gemma-4-31B-it-unsloth-bnb-4bit"
 )
 
+GEMMA4_12B_BNB_REPO_ID = get_or_create_env_var(
+    "GEMMA4_12B_BNB_REPO_TRANSFORMERS_ID", "unsloth/gemma-4-12b-it"
+)
 if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
     # Rename LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE for display on GUI
     model_choice_lower = LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE.lower()
@@ -1826,6 +1866,20 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN36_27B_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.6 27B"
     elif (
+        "qwen3.8-27b-bnb" in model_choice_lower
+        or QWEN38_27B_BNB_4BIT_REPO_ID in model_choice_lower
+        or "qwen3.8-27b-4bit" in model_choice_lower
+    ):
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN38_27B_BNB_4BIT_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.8 27B (4-bit)"
+    elif (
+        "qwen3.8-27b" in model_choice_lower
+        or "qwen-3.8-27b"
+        or QWEN38_27B_REPO_ID in model_choice_lower
+    ):
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN38_27B_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.8 27B"
+    elif (
         "qwen3.6-35b-a3b" in model_choice_lower
         or QWEN36_35B_A3B_REPO_ID in model_choice_lower
     ):
@@ -1851,12 +1905,17 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
     ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GEMMA4_31B_BNB_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Gemma 4 31B bnb"
+    elif (
+        "gemma-4-12b-bnb" in model_choice_lower
+        or GEMMA4_12B_BNB_REPO_ID in model_choice_lower
+    ):
+        LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GEMMA4_12B_BNB_REPO_ID
+        LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Gemma 4 12B bnb"
 
 if (
     SHOW_TRANSFORMERS_LLM_PII_DETECTION_OPTIONS
     and LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
 ):
-
     display_name = LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE
     model_full_names.append(display_name)
     model_short_names.append(display_name)
@@ -1877,9 +1936,12 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE in [
     "Qwen 3.5 35B-A3B",
     "Qwen 3.6 27B (4-bit)",
     "Qwen 3.6 27B",
+    "Qwen 3.8 27B (4-bit)",
+    "Qwen 3.8 27B",
     "Qwen 3.6 35B-A3B",
     "Qwen 3.5 122B-A10B",
     "Gemma 4 31B bnb",
+    "Gemma 4 12B bnb",
 ]:
     MULTIMODAL_PROMPT_FORMAT = True
 
@@ -2495,6 +2557,13 @@ REVIEW_OVERLAY_MAX_FILE_BYTES = max(
     50_000, min(20 * 1024 * 1024, _review_overlay_max_bytes)
 )
 
+# Review-tab image annotator viewport cap (CSS length, e.g. 75vh or 900px). Large page
+# PNGs at 300 DPI can exceed 8000px tall; without a cap the tab grows and hides controls
+# below the canvas (especially in Hugging Face Space iframes).
+REVIEW_ANNOTATOR_MAX_HEIGHT = (
+    get_or_create_env_var("REVIEW_ANNOTATOR_MAX_HEIGHT", "75vh").strip() or "75vh"
+)
+
 # When True and multiple file paths are given, process each file in parallel in apply_redactions_to_review_df_and_files. Off by default.
 ENABLE_PARALLEL_FILES_APPLY_REDACTIONS = convert_string_to_boolean(
     get_or_create_env_var("ENABLE_PARALLEL_FILES_APPLY_REDACTIONS", "True")
@@ -2642,7 +2711,15 @@ SESSION_SECURITY_ANOMALY_ACTION = get_or_create_env_var(
 # Client-side heartbeat poll interval (seconds) used for idle tracking and to surface
 # notifications/terminations to a tab that is not otherwise triggering new requests.
 SESSION_SECURITY_HEARTBEAT_SECONDS = int(
-    get_or_create_env_var("SESSION_SECURITY_HEARTBEAT_SECONDS", "30")
+    get_or_create_env_var("SESSION_SECURITY_HEARTBEAT_SECONDS", "120")
+)
+
+# Review-tab annotator: merge live canvas box edits into session state (no CSV/PDF write).
+REVIEW_ANNOTATOR_AUTO_PERSIST_ENABLED = convert_string_to_boolean(
+    get_or_create_env_var("REVIEW_ANNOTATOR_AUTO_PERSIST_ENABLED", "False")
+)
+REVIEW_ANNOTATOR_AUTO_PERSIST_SECONDS = int(
+    get_or_create_env_var("REVIEW_ANNOTATOR_AUTO_PERSIST_SECONDS", "20")
 )
 
 # Optional idle timeout (minutes) after which an inactive session is auto-terminated.

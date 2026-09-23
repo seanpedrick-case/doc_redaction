@@ -45,6 +45,9 @@ def test_build_pi_express_container_environment():
     assert env["AGENT_DEPLOYMENT_PROFILE"] == "aws-ecs"
     assert env["COGNITO_AUTH"] == "True"
     assert env["RUN_FASTAPI"] == "True"
+    assert env["RUN_AWS_FUNCTIONS"] == "True"
+    assert env["SCAN_UPLOADS_FOR_MALWARE"]
+    assert env["MALWARE_SCAN_S3_BUCKET"]
 
 
 def test_build_pi_express_container_environment_agentcore_public_url():
@@ -359,6 +362,18 @@ def test_express_infrastructure_role_uses_service_role_managed_policy():
             )
         },
     )
+    policies = template.find_resources("AWS::IAM::Policy")
+    all_actions: set[str] = set()
+    for policy in policies.values():
+        for statement in (
+            policy.get("Properties", {}).get("PolicyDocument", {}).get("Statement", [])
+        ):
+            actions = statement.get("Action", [])
+            if isinstance(actions, str):
+                actions = [actions]
+            all_actions.update(actions)
+    assert "application-autoscaling:DeregisterScalableTarget" in all_actions
+    assert "cloudwatch:DeleteAlarms" in all_actions
 
 
 def test_express_listener_helpers_synth_without_reference_error():

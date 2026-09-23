@@ -41,7 +41,11 @@ from tools.config import (
     VLM_QWEN3_5_NOTHINK_SUFFIX,
     VLM_SEED,
 )
-from tools.helper_functions import get_system_font_path, strip_vlm_thinking_tags
+from tools.helper_functions import (
+    assert_transformers_pp_ocrv6_support,
+    get_system_font_path,
+    strip_vlm_thinking_tags,
+)
 from tools.inference_attention import (
     log_attn_implementation_choice,
     resolve_attn_implementation,
@@ -80,6 +84,7 @@ if LOAD_PADDLE_AT_STARTUP:
             )
 
     try:
+        assert_transformers_pp_ocrv6_support()
         from paddleocr import PaddleOCR
 
         print("PaddleOCR imported successfully")
@@ -843,7 +848,57 @@ if SHOW_VLM_MODEL_OPTIONS is True:
 
             model_default_prompt = text_read_default_prompt
             _apply_generation_family_defaults(_QWEN3_5_FAMILY_DEFAULTS)
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.8-27B":
+            from transformers import (
+                AutoProcessor,
+                Qwen3_5ForConditionalGeneration,
+            )
 
+            MODEL_ID = "Qwen/Qwen3.8-27B"
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "attn_implementation": attn_implementation,
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["dtype"] = "auto"
+            model = Qwen3_5ForConditionalGeneration.from_pretrained(
+                MODEL_ID, **load_kwargs
+            )
+            model_default_prompt = text_read_default_prompt
+            _apply_generation_family_defaults(_QWEN3_5_FAMILY_DEFAULTS)
+
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.8-27B-bnb-4bit":
+            from transformers import (
+                AutoProcessor,
+                Qwen3_5ForConditionalGeneration,
+            )
+
+            MODEL_ID = "unsloth/Qwen3.8-27B-unsloth-bnb-4bit"
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "attn_implementation": attn_implementation,
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["dtype"] = "auto"
+            model = Qwen3_5ForConditionalGeneration.from_pretrained(
+                MODEL_ID, **load_kwargs
+            )
+            model_default_prompt = text_read_default_prompt
+            _apply_generation_family_defaults(_QWEN3_5_FAMILY_DEFAULTS)
         elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Qwen3.6-35B-A3B":
             from transformers import (
                 AutoProcessor,
@@ -947,6 +1002,30 @@ if SHOW_VLM_MODEL_OPTIONS is True:
             model_default_prompt = text_read_default_prompt
             _apply_generation_family_defaults(_GEMMA4_FAMILY_DEFAULTS)
 
+        elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "Gemma 4 12B bnb":
+            from transformers import AutoModelForCausalLM, AutoProcessor
+
+            MODEL_ID = (
+                "unsloth/gemma-4-12b-it"  # "thewh1teagle/gemma-4-12B-it-bnb-4bit"
+            )
+            if OVERRIDE_VLM_REPO_ID:
+                MODEL_ID = OVERRIDE_VLM_REPO_ID
+            processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
+            load_kwargs = {
+                "attn_implementation": attn_implementation,
+                "device_map": "auto",
+                "trust_remote_code": True,
+                "config": _get_vlm_config_capped_length(MODEL_ID),
+            }
+            if quantization_config is not None:
+                load_kwargs["quantization_config"] = quantization_config
+            else:
+                load_kwargs["dtype"] = "auto"
+            model = AutoModelForCausalLM.from_pretrained(MODEL_ID, **load_kwargs)
+
+            model_default_prompt = text_read_default_prompt
+            _apply_generation_family_defaults(_GEMMA4_FAMILY_DEFAULTS)
+
         elif SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL == "None":
             model = None
             processor = None
@@ -1025,7 +1104,7 @@ if SHOW_VLM_MODEL_OPTIONS and LOAD_TRANSFORMERS_VLM_MODEL_AT_START:
 
 def get_loaded_vlm_model_and_tokenizer():
     """
-    Return the currently loaded VLM model and its tokenizer for use by LLM tasks (e.g. entity detection) when USE_TRANSFORMERS_VLM_MODEL_AS_LLM is True.
+    Return the currently loaded VLM model and its tokenizer for use by LLM tasks (e.g. entity detection, summarisation) when USE_TRANSFORMERS_VLM_MODEL_AS_LLM is True.
     Returns (model, tokenizer) or (None, None) if the VLM has not been loaded yet.
     """
     global _loaded_vlm_model, _loaded_vlm_processor
@@ -1034,6 +1113,38 @@ def get_loaded_vlm_model_and_tokenizer():
         return None, None
     tokenizer = getattr(_loaded_vlm_processor, "tokenizer", _loaded_vlm_processor)
     return _loaded_vlm_model, tokenizer
+
+
+def render_vlm_generation_prompt(
+    processor, messages, disable_thinking: bool = None
+) -> str:
+    """Render the VLM chat template, disabling Qwen thinking when requested.
+
+    Qwen3.8's template defaults ``enable_thinking`` to on and only emits an empty
+    ``<think></think>`` block when ``enable_thinking=False`` is passed into
+    ``apply_chat_template``. Appending ``<think></think>`` *after* a template that
+    already opened ``<think>\\n`` leaves the model inside a think block, so reasoning
+    consumes ``MAX_NEW_TOKENS`` and the JSON OCR payload never completes.
+    """
+    if disable_thinking is None:
+        disable_thinking = VLM_DISABLE_QWEN3_5_THINKING
+
+    template_kwargs = {
+        "tokenize": False,
+        "add_generation_prompt": True,
+    }
+    if disable_thinking:
+        template_kwargs["enable_thinking"] = False
+
+    try:
+        prompt_full = processor.apply_chat_template(messages, **template_kwargs)
+    except TypeError:
+        template_kwargs.pop("enable_thinking", None)
+        prompt_full = processor.apply_chat_template(messages, **template_kwargs)
+
+    if disable_thinking and "</think>" not in prompt_full[-80:].lower():
+        prompt_full = prompt_full + VLM_QWEN3_5_NOTHINK_SUFFIX
+    return prompt_full
 
 
 @spaces.GPU(duration=MAX_SPACES_GPU_RUN_TIME)
@@ -1208,15 +1319,9 @@ def extract_text_from_image_vlm(
             ],
         }
     ]
-    # Build prompt: when disabling Qwen3.5 thinking we append <think></think> after the generation
-    # prompt so the model sees it and continues with the answer (avoids continue_final_message
-    # which can fail when the chat template does not include the final assistant message in the
-    # rendered string).
-    prompt_full = processor.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True
+    prompt_full = render_vlm_generation_prompt(
+        processor, messages, disable_thinking=VLM_DISABLE_QWEN3_5_THINKING
     )
-    if VLM_DISABLE_QWEN3_5_THINKING:
-        prompt_full = prompt_full + VLM_QWEN3_5_NOTHINK_SUFFIX
 
     # Cap max_pixels so image tokens + text fit within MAX_INPUT_TOKEN_LENGTH (image token count scales with resolution).
     # Reserve ~1k tokens for prompt; allow max_pixels below VLM_MIN_IMAGE_SIZE when context is small to avoid VRAM spike.

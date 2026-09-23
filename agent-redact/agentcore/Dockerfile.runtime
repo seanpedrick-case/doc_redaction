@@ -14,6 +14,7 @@ ENV APP_TYPE=agent
 ENV APP_HOME=/app
 ENV PYTHONPATH=${APP_HOME}:${APP_HOME}/agent-redact:${APP_HOME}/agent-redact/shared:${APP_HOME}/agent-redact/pi:${APP_HOME}/agent-redact/agentcore
 ENV AGENT_WORKSPACE_DIR=/tmp/agentcore-workspace
+ENV LANGGRAPH_RECURSION_LIMIT=150
 ENV AWS_REGION=eu-west-2
 ENV AWS_DEFAULT_REGION=${AWS_REGION}
 

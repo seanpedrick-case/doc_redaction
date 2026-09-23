@@ -1,5 +1,5 @@
 # Stage 1: Build dependencies and download models
-FROM public.ecr.aws/docker/library/python:3.12.13-slim-trixie AS builder
+FROM public.ecr.aws/docker/library/python:3.13.15-slim-trixie AS builder
 
 # Install system dependencies
 RUN apt-get update \
@@ -25,7 +25,7 @@ ARG INSTALL_GRADIO_MCP=False
 ENV INSTALL_GRADIO_MCP=${INSTALL_GRADIO_MCP}
 
 RUN if [ "$INSTALL_GRADIO_MCP" = "True" ]; then \
-    pip install --verbose --no-cache-dir --force-reinstall --target=/install "gradio[mcp]>=6.16.0"; \
+    pip install --verbose --no-cache-dir --force-reinstall --target=/install "gradio[mcp]<=6.28.0"; \
 fi
 
 # Optionally install PaddleOCR if the INSTALL_PADDLEOCR environment variable is set to True. Note that GPU-enabled PaddleOCR is unlikely to work in the same environment as a GPU-enabled version of PyTorch, so it is recommended to install PaddleOCR as a CPU-only version if you want to use GPU-enabled PyTorch.
@@ -37,16 +37,14 @@ ARG PADDLE_GPU_ENABLED=False
 ENV PADDLE_GPU_ENABLED=${PADDLE_GPU_ENABLED}
 
 RUN if [ "$INSTALL_PADDLEOCR" = "True" ] && [ "$PADDLE_GPU_ENABLED" = "False" ]; then \
-    pip install --verbose --no-cache-dir --target=/install "protobuf<=7.34.0" && \
-    pip install --verbose --no-cache-dir --target=/install "paddlepaddle<=3.2.1" && \
+    pip install --verbose --no-cache-dir --target=/install "paddlepaddle<=3.3.1" && \
     pip install --verbose --no-cache-dir --target=/install "paddleocr<=3.7.0"; \
 elif [ "$INSTALL_PADDLEOCR" = "True" ] && [ "$PADDLE_GPU_ENABLED" = "True" ]; then \
-    pip install --verbose --no-cache-dir --target=/install "protobuf<=7.34.0" && \
-    pip install --verbose --no-cache-dir --target=/install "paddlepaddle<=3.2.1" && \
+    pip install --verbose --no-cache-dir --target=/install "paddlepaddle<=3.3.1" && \
     pip install --verbose --no-cache-dir --target=/install "paddleocr<=3.7.0" && \
-    pip install --verbose --no-cache-dir --target=/install "torch<=2.10.0" --index-url https://download.pytorch.org/whl/cu129 && \
-    pip install --verbose --no-cache-dir --target=/install "torchvision<=0.25.0" --index-url https://download.pytorch.org/whl/cu129 && \
-    pip install --verbose --no-cache-dir --target=/install "transformers<=5.12.0"; \
+    pip install --verbose --no-cache-dir --target=/install "torch<=2.13.0" --index-url https://download.pytorch.org/whl/cu130 && \
+    pip install --verbose --no-cache-dir --target=/install "torchvision<=0.28.0" --index-url https://download.pytorch.org/whl/cu130 && \
+    pip install --verbose --no-cache-dir --target=/install "transformers<=5.16.1"; \
 fi
 
 ARG INSTALL_VLM=False
@@ -58,21 +56,21 @@ ENV TORCH_GPU_ENABLED=${TORCH_GPU_ENABLED}
 # Optionally install VLM/LLM packages if the INSTALL_VLM environment variable is set to True.
 RUN if [ "$INSTALL_VLM" = "True" ] && [ "$TORCH_GPU_ENABLED" = "False" ]; then \
     pip install --verbose --no-cache-dir --target=/install \
-    "torch==2.10.0+cpu" \
-    "torchvision==0.25.0+cpu" \
-    "transformers<=5.12.0" \
-    "accelerate<=1.13.0" \
-    "bitsandbytes<=0.49.2" \
-    "sentencepiece<=0.2.1" \
+    "torch==2.13.0+cpu" \
+    "torchvision==0.28.0+cpu" \
+    "transformers<=5.16.1" \
+    "accelerate<=1.15.0" \
+    "bitsandbytes<=0.50.2" \
+    "sentencepiece<=0.2.2" \
     --extra-index-url https://download.pytorch.org/whl/cpu; \
 elif [ "$INSTALL_VLM" = "True" ] && [ "$TORCH_GPU_ENABLED" = "True" ]; then \
-    pip install --verbose --no-cache-dir --target=/install "torch<=2.10.0" --index-url https://download.pytorch.org/whl/cu129 && \
-    pip install --verbose --no-cache-dir --target=/install "torchvision<=0.25.0" --index-url https://download.pytorch.org/whl/cu129 && \
+    pip install --verbose --no-cache-dir --target=/install "torch<=2.13.0" --index-url https://download.pytorch.org/whl/cu130 && \
+    pip install --verbose --no-cache-dir --target=/install "torchvision<=0.28.0" --index-url https://download.pytorch.org/whl/cu130 && \
     pip install --verbose --no-cache-dir --target=/install \
-        "transformers<=5.12.0" \
-        "accelerate<=1.13.0" \
-        "bitsandbytes<=0.49.2" \
-        "sentencepiece<=0.2.1" && \
+        "transformers<=5.16.1" \
+        "accelerate<=1.15.0" \
+        "bitsandbytes<=0.50.2" \
+        "sentencepiece<=0.2.2" && \
     pip install --verbose --no-cache-dir --target=/install "optimum<=2.1.0" && \
     pip install --verbose --no-cache-dir --target=/install  https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp312-cp312-linux_x86_64.whl && \
     pip install --verbose --no-cache-dir --target=/install  https://github.com/ModelCloud/GPTQModel/releases/download/v5.8.0/gptqmodel-5.8.0+cu128torch2.8-cp312-cp312-linux_x86_64.whl; \
@@ -81,7 +79,7 @@ fi
 # ===================================================================
 # Stage 2: A common base for both Lambda and Gradio
 # ===================================================================
-FROM public.ecr.aws/docker/library/python:3.12.13-slim-trixie AS base
+FROM public.ecr.aws/docker/library/python:3.13.15-slim-trixie AS base
 
 # MUST re-declare ARGs in every stage where they are used in RUN commands
 ARG TORCH_GPU_ENABLED=False
@@ -124,12 +122,12 @@ ENV GRADIO_TEMP_DIR=/tmp/gradio_tmp/ \
     GRADIO_ANALYTICS_ENABLED=False
 
 # Copy Python packages from the builder stage
-COPY --from=builder /install /usr/local/lib/python3.12/site-packages/
+COPY --from=builder /install /usr/local/lib/python3.13/site-packages/
 COPY --from=builder /install/bin /usr/local/bin/
 
 # Reinstall protobuf into the final site-packages. Builder uses multiple `pip install --target=/install`
 # passes; that can break the `google` namespace so `google.protobuf` is missing and Paddle fails at import.
-RUN pip install --no-cache-dir "protobuf<=7.34.0"
+# RUN pip install --no-cache-dir "protobuf"
 
 # English pipeline is not a normal PyPI dependency; bundle it in the image so runtime works offline.
 # Placed before COPY app code so application changes do not invalidate this layer.

@@ -10,9 +10,11 @@ from pi_test_support import ensure_agent_redact_paths
 ensure_agent_redact_paths()
 
 from redaction_langgraph.workflow_continue import (  # noqa: E402
+    CLARIFICATION_NEEDED_MARKER,
     build_identical_error_breaker_prompt,
     build_tool_call_json_retry_prompt,
     build_workflow_continue_prompt,
+    clarification_requested,
     consecutive_python_writes_without_run,
     identical_tool_error_streak,
     redaction_workflow_incomplete,
@@ -36,6 +38,49 @@ def test_incomplete_false_for_explore_only():
 def test_incomplete_pass1_doc_redact_without_apply():
     assert redaction_workflow_incomplete({"doc_redact"}, []) is True
     assert redaction_workflow_incomplete({"doc_redact", "review_apply"}, []) is False
+
+
+def test_incomplete_false_when_clarification_tool_used():
+    tools = {"list_workspace_files", "request_clarification"}
+    outputs = [
+        (
+            "request_clarification",
+            json.dumps(
+                {
+                    "awaiting_clarification": True,
+                    "marker": CLARIFICATION_NEEDED_MARKER,
+                    "question": "All PERSON names, or named parties only?",
+                    "options": ["A: all PERSON", "B: named parties only"],
+                    "default_if_no_reply": "A",
+                }
+            ),
+        )
+    ]
+    assert clarification_requested(outputs) is True
+    assert redaction_workflow_incomplete(tools, outputs) is False
+
+
+def test_incomplete_false_when_clarification_after_doc_redact():
+    """Auto-continue must not nudge past a policy pause mid Pass 1."""
+    tools = {"doc_redact", "request_clarification"}
+    outputs = [
+        ("doc_redact", json.dumps({"ok": True})),
+        (
+            "request_clarification",
+            json.dumps({"awaiting_clarification": True, "question": "Scope?"}),
+        ),
+    ]
+    assert redaction_workflow_incomplete(tools, outputs) is False
+
+
+def test_incomplete_false_for_clarification_marker_in_assistant_text():
+    tools = {"doc_redact"}
+    text = (
+        f"{CLARIFICATION_NEEDED_MARKER} Should we redact all names or only "
+        "in Financial Assessment sections?\nA) all\nB) section only (default A)"
+    )
+    assert clarification_requested([], assistant_text=text) is True
+    assert redaction_workflow_incomplete(tools, [], assistant_text=text) is False
 
 
 def test_incomplete_followup_pending_python_script():

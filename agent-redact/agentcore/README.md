@@ -1,8 +1,10 @@
 # Bedrock AgentCore install guide
 
-This folder contains the **AgentCore Runtime entrypoint** ([`entrypoint.py`](entrypoint.py)) — a LangGraph redaction agent wrapped in `BedrockAgentCoreApp`.
+**Architecture overview (Runtime vs Harness):** see [OPTIONS.md](OPTIONS.md).
 
-The **Gradio agent UI** (Pi Express / legacy ECS from [`cdk/cdk_install.py`](../../cdk/cdk_install.py)) stays the user-facing app. When `AGENT_ORCHESTRATOR=agentcore`, that UI proxies prompts to a **separately deployed** AgentCore Runtime via `AGENTCORE_RUNTIME_URL`.
+This folder contains the **AgentCore Runtime entrypoint** ([`entrypoint.py`](entrypoint.py)) — a LangGraph redaction agent wrapped in `BedrockAgentCoreApp` — plus Gradio clients for both Runtime and Harness.
+
+The **Gradio agent UI** (Pi Express / legacy ECS from [`cdk/cdk_install.py`](../../cdk/cdk_install.py)) stays the user-facing app. When `AGENT_ORCHESTRATOR=agentcore`, that UI proxies prompts to a **separately deployed** AgentCore Runtime via `AGENTCORE_RUNTIME_URL`. For skills-based orchestration, use `AGENT_ORCHESTRATOR=agentcore-harness` and `AGENTCORE_HARNESS_ARN` ([OPTIONS.md](OPTIONS.md)).
 
 You do **not** define `AGENTCORE_RUNTIME_URL` manually in the AWS console beforehand. It is the **invoke endpoint AWS returns after you deploy** an AgentCore Runtime.
 

@@ -7,6 +7,9 @@ import os
 import re
 from typing import Any
 
+# Assistant / tool marker: auto-continue must not nudge past a policy pause.
+CLARIFICATION_NEEDED_MARKER = "CLARIFICATION_NEEDED:"
+
 _WORKFLOW_CONTINUE_PROMPT = """Redaction work is NOT complete yet. Continue now:
 1. Edit the *_review_file.csv for the user requirements (write ONE .py script, then run_workspace_python_script once)
 2. Run verify_coverage until pass_strict is true
@@ -287,21 +290,65 @@ def langgraph_identical_error_stop_streak() -> int:
         return 3
 
 
+def clarification_marker_in_text(text: str | None) -> bool:
+    """True when assistant prose uses the fixed clarification pause marker."""
+    if not text:
+        return False
+    return CLARIFICATION_NEEDED_MARKER in text
+
+
+def clarification_requested(
+    tool_outputs: list[tuple[str, str]] | None = None,
+    *,
+    assistant_text: str | None = None,
+) -> bool:
+    """True when the agent intentionally paused for user policy clarification.
+
+    Prefers a successful ``request_clarification`` tool result; also accepts the
+    fixed ``CLARIFICATION_NEEDED:`` marker in assistant text (fallback when the
+    model asks in prose without the tool).
+    """
+    if clarification_marker_in_text(assistant_text):
+        return True
+    for name, output in reversed(tool_outputs or []):
+        if name != "request_clarification":
+            continue
+        data = _parse_write_workspace_payload(output)
+        if isinstance(data, dict) and data.get("awaiting_clarification"):
+            return True
+        # Tolerant fallback if the tool returned plain text.
+        if CLARIFICATION_NEEDED_MARKER in (output or ""):
+            return True
+        if (
+            '"awaiting_clarification"' in (output or "")
+            and "true" in (output or "").lower()
+        ):
+            return True
+    return False
+
+
 def redaction_workflow_incomplete(
     tool_names: set[str],
     tool_outputs: list[tuple[str, str]] | None = None,
+    *,
+    assistant_text: str | None = None,
 ) -> bool:
     """True when this turn started redaction work but stopped before review_apply.
 
     Covers Pass 1 (doc_redact without review_apply) and follow-ups that write a
     pending .py script, run a workspace script, or edit a review CSV without apply.
     Explore-only turns (list/read) are treated as complete.
+
+    A deliberate clarification pause is **not** incomplete: auto-continue must
+    not nudge past ``request_clarification`` / ``CLARIFICATION_NEEDED:``.
     """
+    outputs = tool_outputs or []
+    if clarification_requested(outputs, assistant_text=assistant_text):
+        return False
     if "review_apply" in tool_names:
         return False
     if "doc_redact" in tool_names:
         return True
-    outputs = tool_outputs or []
     if pending_python_script(tool_names, outputs):
         return True
     if "run_workspace_python_script" in tool_names:

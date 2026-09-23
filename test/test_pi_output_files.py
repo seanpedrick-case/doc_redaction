@@ -210,6 +210,57 @@ def test_collect_final_output_files_finds_review_final_folder(tmp_path, monkeypa
     ).read_bytes() == b"%PDF"
 
 
+def test_collect_final_output_files_includes_review_summary_markdown(
+    tmp_path, monkeypatch
+):
+    base = tmp_path / "workspace"
+    session_dir = base / "session"
+    review_dir = session_dir / "redact" / "doc.pdf" / "review"
+    final_dir = review_dir / "output_review_final"
+    final_dir.mkdir(parents=True)
+    (final_dir / "doc_redacted.pdf").write_bytes(b"%PDF")
+    (review_dir / "SUMMARY.md").write_text("# Summary\n\nDone.\n", encoding="utf-8")
+    (session_dir / "notes.md").write_text("not a summary", encoding="utf-8")
+
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "true")
+
+    result = of.collect_final_output_files("session")
+    download_dir = session_dir / "output_final_download"
+    assert result is not None
+    names = {Path(path).name for path in result}
+    assert names == {"SUMMARY.md", "doc_redacted.pdf"}
+    assert (
+        (download_dir / "SUMMARY.md")
+        .read_text(encoding="utf-8")
+        .startswith("# Summary")
+    )
+
+
+def test_read_summary_markdown_prefers_newest_summary_file(tmp_path, monkeypatch):
+    import time
+
+    base = tmp_path / "workspace"
+    session_dir = base / "session"
+    review_dir = session_dir / "redact" / "doc.pdf" / "review"
+    review_dir.mkdir(parents=True)
+    older = review_dir / "old_summary.md"
+    older.write_text("old", encoding="utf-8")
+    time.sleep(0.02)
+    newer = review_dir / "SUMMARY.md"
+    newer.write_text("# Latest summary", encoding="utf-8")
+
+    monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(base))
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "true")
+
+    text = of.read_summary_markdown("session")
+    assert "Latest summary" in text
+    assert "SUMMARY.md" in text
+    found = of.find_summary_markdown_path("session")
+    assert found is not None
+    assert found.resolve() == newer.resolve()
+
+
 def test_collect_final_output_files_supports_output_final_alias(tmp_path, monkeypatch):
     base = tmp_path / "workspace"
     session_dir = base / "session"

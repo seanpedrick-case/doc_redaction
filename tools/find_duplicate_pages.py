@@ -1403,6 +1403,11 @@ def run_duplicate_analysis(
     elif not files:
         raise Warning("Please upload files to analyse.")
 
+    if not isinstance(files, pd.DataFrame):
+        from tools.malware_scan import require_files_malware_scanned
+
+        require_files_malware_scanned(files)
+
     if isinstance(files, str):
         files = [files]
 
@@ -1990,10 +1995,11 @@ def apply_whole_page_redactions_from_list(
         "id",
     ]
     for col in expected_cols:
+        default = "" if col in ("text", "label", "id") else pd.NA
         if col not in review_file_state.columns:
-            review_file_state[col] = pd.NA
+            review_file_state[col] = default
         if col not in whole_page_review_file.columns:
-            whole_page_review_file[col] = pd.NA
+            whole_page_review_file[col] = default
 
     # Avoid concat with empty/all-NA to prevent FutureWarning (pandas 2.1+)
     if review_file_state.empty:
@@ -2008,6 +2014,9 @@ def apply_whole_page_redactions_from_list(
             if col in new_part.columns and new_part[col].isna().all():
                 new_part[col] = new_part[col].astype(object)
         review_file_out = pd.concat([state, new_part], ignore_index=True)
+    for col in ("text", "label", "id"):
+        if col in review_file_out.columns:
+            review_file_out[col] = review_file_out[col].fillna("")
     review_file_out = review_file_out.sort_values(
         by=["page", "ymin", "xmin"]
     ).reset_index(drop=True)
@@ -2071,12 +2080,22 @@ def create_annotation_objects_from_duplicates(
         )
 
     if combine_pages is False:
-        page_to_image_map = {item["page"]: item["image_path"] for item in page_sizes}
+        page_to_image_map = {}
+        for item in page_sizes or []:
+            p = pd.to_numeric(item.get("page"), errors="coerce")
+            if pd.notna(p) and "image_path" in item:
+                page_to_image_map[int(p)] = item["image_path"]
 
         # Prepare OCR Data: line_number_by_page must match the duplicate detection
-        # pipeline.
+        # pipeline. Coerce page so Gradio/CSV string pages still match int filters.
+        ocr_results_df = ocr_results_df.copy()
+        if "page" in ocr_results_df.columns:
+            ocr_results_df["page"] = (
+                pd.to_numeric(ocr_results_df["page"], errors="coerce")
+                .round()
+                .astype("Int64")
+            )
         if "line" in ocr_results_df.columns:
-            ocr_results_df = ocr_results_df.copy()
             ocr_results_df["line_number_by_page"] = (
                 pd.to_numeric(ocr_results_df["line"], errors="coerce")
                 .fillna(0)
@@ -2145,8 +2164,9 @@ def create_annotation_objects_from_duplicates(
                     "id": "",  # to be filled in after
                 }
                 page_number = line_row["page"]
-
-                annotations_by_page[page_number].append(box)
+                if pd.isna(page_number):
+                    continue
+                annotations_by_page[int(page_number)].append(box)
 
         # --- Format the final output list using the page-to-image map ---
 

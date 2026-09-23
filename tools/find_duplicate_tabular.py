@@ -622,6 +622,10 @@ def run_tabular_duplicate_detection(
         print("No files uploaded")
         return pd.DataFrame(), [], gr.Dropdown(choices=[]), 0, "deduplicate"
 
+    from tools.malware_scan import require_files_malware_scanned
+
+    require_files_malware_scanned(files)
+
     start_time = time.time()
 
     task_textbox = "deduplicate"

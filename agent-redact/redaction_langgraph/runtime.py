@@ -38,6 +38,7 @@ from redaction_langgraph.tools import reset_langgraph_tool_session_state  # noqa
 from redaction_langgraph.workflow_continue import (  # noqa: E402
     build_tool_call_json_retry_prompt,
     build_workflow_continue_prompt,
+    clarification_requested,
     identical_tool_error_streak,
     langgraph_auto_continue_enabled,
     langgraph_identical_error_stop_streak,
@@ -289,6 +290,7 @@ class LangGraphAgentRuntime(AgentRuntime):
                 raise AgentRuntimeError("LangGraph agent is not initialized.")
 
             from eval.arize_monitoring import (
+                agent_turn_span,
                 arize_session_context,
                 langgraph_trace_config,
             )
@@ -296,170 +298,200 @@ class LangGraphAgentRuntime(AgentRuntime):
             from redaction_langgraph.graph import graph_recursion_limit
 
             with arize_session_context(self._session_hash):
-                yield AgentStreamEvent(kind="status", text="LangGraph agent started…")
-                graph_messages: list[Any] = [
-                    self._system_message,
-                    *self._messages,
-                    HumanMessage(content=message),
-                ]
-                self._messages.append(HumanMessage(content=message))
+                with agent_turn_span(
+                    "langgraph.agent",
+                    session_hash=self._session_hash,
+                    message=message,
+                    agent_name="langgraph",
+                ) as turn_meta:
+                    yield AgentStreamEvent(
+                        kind="status", text="LangGraph agent started…"
+                    )
+                    graph_messages: list[Any] = [
+                        self._system_message,
+                        *self._messages,
+                        HumanMessage(content=message),
+                    ]
+                    self._messages.append(HumanMessage(content=message))
 
-                assistant_chunks: list[str] = []
-                tool_names_seen: set[str] = set()
-                tool_outputs: list[tuple[str, str]] = []
-                stream_config = langgraph_trace_config(
-                    self._session_hash,
-                    recursion_limit=graph_recursion_limit(),
-                )
-                max_rounds = 1 + (
-                    langgraph_max_continuations()
-                    if langgraph_auto_continue_enabled()
-                    else 0
-                )
+                    assistant_chunks: list[str] = []
+                    tool_names_seen: set[str] = set()
+                    tool_outputs: list[tuple[str, str]] = []
+                    stream_config = langgraph_trace_config(
+                        self._session_hash,
+                        recursion_limit=graph_recursion_limit(),
+                    )
+                    max_rounds = 1 + (
+                        langgraph_max_continuations()
+                        if langgraph_auto_continue_enabled()
+                        else 0
+                    )
 
-                for round_idx in range(max_rounds):
-                    if round_idx > 0:
-                        yield AgentStreamEvent(
-                            kind="status",
-                            text="Workflow incomplete — nudging agent to continue…",
-                        )
-                    round_messages_start = len(graph_messages)
-                    chunks_at_round_start = len(assistant_chunks)
-                    tools_at_round_start = set(tool_names_seen)
-                    outputs_at_round_start = len(tool_outputs)
-                    overflow_retried = False
-                    tool_json_retried = False
-                    loop_break_requested = [False]
-                    user_aborted = False
-                    while True:
-                        try:
-                            self._abort_requested = False
-                            for evt in self._stream_graph_round(
-                                self._graph,
-                                graph_messages,
-                                stream_config,
-                                assistant_chunks=assistant_chunks,
-                                tool_names_seen=tool_names_seen,
-                                tool_outputs=tool_outputs,
-                                loop_break_requested=loop_break_requested,
-                            ):
-                                if evt.kind == "done":
-                                    if loop_break_requested[0]:
-                                        # Soft stop: keep messages, continue outer rounds.
-                                        yield AgentStreamEvent(
-                                            kind="status",
-                                            text=evt.text
-                                            or "Breaking tool-error loop…",
-                                        )
+                    for round_idx in range(max_rounds):
+                        if round_idx > 0:
+                            yield AgentStreamEvent(
+                                kind="status",
+                                text="Workflow incomplete — nudging agent to continue…",
+                            )
+                        round_messages_start = len(graph_messages)
+                        chunks_at_round_start = len(assistant_chunks)
+                        tools_at_round_start = set(tool_names_seen)
+                        outputs_at_round_start = len(tool_outputs)
+                        overflow_retried = False
+                        tool_json_retried = False
+                        loop_break_requested = [False]
+                        user_aborted = False
+                        while True:
+                            try:
+                                self._abort_requested = False
+                                for evt in self._stream_graph_round(
+                                    self._graph,
+                                    graph_messages,
+                                    stream_config,
+                                    assistant_chunks=assistant_chunks,
+                                    tool_names_seen=tool_names_seen,
+                                    tool_outputs=tool_outputs,
+                                    loop_break_requested=loop_break_requested,
+                                ):
+                                    if evt.kind == "done":
+                                        if loop_break_requested[0]:
+                                            # Soft stop: keep messages, continue outer rounds.
+                                            yield AgentStreamEvent(
+                                                kind="status",
+                                                text=evt.text
+                                                or "Breaking tool-error loop…",
+                                            )
+                                            break
+                                        user_aborted = True
+                                        yield evt
                                         break
-                                    user_aborted = True
                                     yield evt
+                                else:
+                                    # stream finished without done
                                     break
-                                yield evt
-                            else:
-                                # stream finished without done
+                                if user_aborted:
+                                    return
+                                if loop_break_requested[0]:
+                                    break
                                 break
-                            if user_aborted:
-                                return
-                            if loop_break_requested[0]:
-                                break
-                            break
-                        except Exception as exc:
-                            # Roll back state from the failed stream attempt.
-                            def _rollback_round() -> None:
-                                del graph_messages[round_messages_start:]
-                                del assistant_chunks[chunks_at_round_start:]
-                                tool_names_seen.clear()
-                                tool_names_seen.update(tools_at_round_start)
-                                del tool_outputs[outputs_at_round_start:]
+                            except Exception as exc:
+                                # Roll back state from the failed stream attempt.
+                                def _rollback_round() -> None:
+                                    del graph_messages[round_messages_start:]
+                                    del assistant_chunks[chunks_at_round_start:]
+                                    tool_names_seen.clear()
+                                    tool_names_seen.update(tools_at_round_start)
+                                    del tool_outputs[outputs_at_round_start:]
 
-                            if not overflow_retried and is_context_overflow_error(exc):
-                                overflow_retried = True
-                                _rollback_round()
-                                yield AgentStreamEvent(
-                                    kind="status",
-                                    text=(
-                                        "Prompt exceeded model context — retrying once "
-                                        "with aggressive compaction…"
-                                    ),
-                                )
-                                set_aggressive_trim(True)
-                                try:
-                                    self._rebuild_graph(aggressive_compaction=True)
-                                except Exception:
-                                    set_aggressive_trim(False)
-                                    raise
-                                continue
-
-                            if not tool_json_retried and is_tool_call_json_parse_error(
-                                exc
-                            ):
-                                tool_json_retried = True
-                                _rollback_round()
-                                yield AgentStreamEvent(
-                                    kind="status",
-                                    text=(
-                                        "Tool-call JSON was truncated or invalid — "
-                                        "retrying once with a compact-script nudge…"
-                                    ),
-                                )
-                                graph_messages.append(
-                                    HumanMessage(
-                                        content=build_tool_call_json_retry_prompt()
+                                if not overflow_retried and is_context_overflow_error(
+                                    exc
+                                ):
+                                    overflow_retried = True
+                                    _rollback_round()
+                                    yield AgentStreamEvent(
+                                        kind="status",
+                                        text=(
+                                            "Prompt exceeded model context — retrying once "
+                                            "with aggressive compaction…"
+                                        ),
                                     )
+                                    set_aggressive_trim(True)
+                                    try:
+                                        self._rebuild_graph(aggressive_compaction=True)
+                                    except Exception:
+                                        set_aggressive_trim(False)
+                                        raise
+                                    continue
+
+                                if (
+                                    not tool_json_retried
+                                    and is_tool_call_json_parse_error(exc)
+                                ):
+                                    tool_json_retried = True
+                                    _rollback_round()
+                                    yield AgentStreamEvent(
+                                        kind="status",
+                                        text=(
+                                            "Tool-call JSON was truncated or invalid — "
+                                            "retrying once with a compact-script nudge…"
+                                        ),
+                                    )
+                                    graph_messages.append(
+                                        HumanMessage(
+                                            content=build_tool_call_json_retry_prompt()
+                                        )
+                                    )
+                                    # Keep the nudge if a later overflow rollback runs.
+                                    round_messages_start = len(graph_messages)
+                                    chunks_at_round_start = len(assistant_chunks)
+                                    tools_at_round_start = set(tool_names_seen)
+                                    outputs_at_round_start = len(tool_outputs)
+                                    continue
+
+                                raise
+                        if overflow_retried:
+                            set_aggressive_trim(False)
+                            # Restore normal (non-aggressive) graph for later rounds.
+                            self._rebuild_graph(aggressive_compaction=False)
+
+                        streak = identical_tool_error_streak(
+                            tool_outputs,
+                            min_streak=langgraph_identical_error_stop_streak(),
+                        )
+                        assistant_so_far = "\n".join(assistant_chunks)
+                        workflow_incomplete = redaction_workflow_incomplete(
+                            tool_names_seen,
+                            tool_outputs,
+                            assistant_text=assistant_so_far,
+                        )
+                        if not workflow_incomplete and not streak:
+                            break
+                        if round_idx >= max_rounds - 1:
+                            break
+                        # Always prefer the identical-error / pending-script continue prompt.
+                        graph_messages.append(
+                            HumanMessage(
+                                content=build_workflow_continue_prompt(
+                                    tool_names_seen, tool_outputs
                                 )
-                                # Keep the nudge if a later overflow rollback runs.
-                                round_messages_start = len(graph_messages)
-                                chunks_at_round_start = len(assistant_chunks)
-                                tools_at_round_start = set(tool_names_seen)
-                                outputs_at_round_start = len(tool_outputs)
-                                continue
-
-                            raise
-                    if overflow_retried:
-                        set_aggressive_trim(False)
-                        # Restore normal (non-aggressive) graph for later rounds.
-                        self._rebuild_graph(aggressive_compaction=False)
-
-                    streak = identical_tool_error_streak(
-                        tool_outputs,
-                        min_streak=langgraph_identical_error_stop_streak(),
-                    )
-                    workflow_incomplete = redaction_workflow_incomplete(
-                        tool_names_seen, tool_outputs
-                    )
-                    if not workflow_incomplete and not streak:
-                        break
-                    if round_idx >= max_rounds - 1:
-                        break
-                    # Always prefer the identical-error / pending-script continue prompt.
-                    graph_messages.append(
-                        HumanMessage(
-                            content=build_workflow_continue_prompt(
-                                tool_names_seen, tool_outputs
                             )
                         )
-                    )
-                    self._abort_requested = False
+                        self._abort_requested = False
 
-                if assistant_chunks:
-                    self._messages.append(
-                        AIMessage(content="\n".join(assistant_chunks))
+                    if assistant_chunks:
+                        self._messages.append(
+                            AIMessage(content="\n".join(assistant_chunks))
+                        )
+                    assistant_final = "\n".join(assistant_chunks)
+                    awaiting_clarification = clarification_requested(
+                        tool_outputs, assistant_text=assistant_final
                     )
-                workflow_incomplete = redaction_workflow_incomplete(
-                    tool_names_seen, tool_outputs
-                )
-                done_text = "Agent finished."
-                if workflow_incomplete:
-                    done_text = (
-                        "Agent finished (workflow incomplete — review_apply not run; "
-                        "use **Send** to continue or restart the task)."
+                    workflow_incomplete = redaction_workflow_incomplete(
+                        tool_names_seen,
+                        tool_outputs,
+                        assistant_text=assistant_final,
                     )
-                yield AgentStreamEvent(
-                    kind="done",
-                    text=done_text,
-                    meta={"workflow_incomplete": workflow_incomplete},
-                )
+                    turn_meta["workflow_incomplete"] = workflow_incomplete
+                    turn_meta["awaiting_clarification"] = awaiting_clarification
+                    done_text = "Agent finished."
+                    if awaiting_clarification:
+                        done_text = (
+                            "Agent paused — awaiting your clarification "
+                            "(reply in chat to continue Pass 1)."
+                        )
+                    elif workflow_incomplete:
+                        done_text = (
+                            "Agent finished (workflow incomplete — review_apply not run; "
+                            "use **Send** to continue or restart the task)."
+                        )
+                    yield AgentStreamEvent(
+                        kind="done",
+                        text=done_text,
+                        meta={
+                            "workflow_incomplete": workflow_incomplete,
+                            "awaiting_clarification": awaiting_clarification,
+                        },
+                    )
         finally:
             set_aggressive_trim(False)
             self._is_compacting = False

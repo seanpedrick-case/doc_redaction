@@ -6,7 +6,8 @@
 #
 # Targets:
 #   dev     — docker-compose: Pi CLI + Python deps; app tree bind-mounted at runtime.
-#   runtime — HF Space / AWS ECS: baked agent-redact tree, non-root user, named volumes.
+#   runtime — HF Space / AWS ECS: baked agent-redact tree (shared/pi/agentcore/
+#             redaction_langgraph/eval), non-root user, named volumes.
 
 # ===================================================================
 # Stage 1: Pi CLI (Node) — isolated so the runtime base stays Python 3.12
@@ -119,6 +120,11 @@ WORKDIR ${AGENT_WORKDIR}
 
 COPY agent-redact/shared agent-redact/shared
 COPY agent-redact/pi agent-redact/pi
+# Gradio factory imports these when AGENT_ORCHESTRATOR is agentcore / langgraph
+# (PYTHONPATH already includes agent-redact/agentcore).
+COPY agent-redact/agentcore agent-redact/agentcore
+COPY agent-redact/redaction_langgraph agent-redact/redaction_langgraph
+COPY agent-redact/eval agent-redact/eval
 COPY skills skills
 COPY tools tools
 # Committed template only (see sync-manifest.txt); runtime secrets come from S3/env on ECS.
@@ -127,7 +133,9 @@ COPY intros intros
 COPY AGENTS.md AGENTS.md
 COPY doc_redaction/example_data doc_redaction/example_data
 
-RUN test -f doc_redaction/example_data/example_of_emails_sent_to_a_professor_before_applying.pdf \
+RUN test -f agent-redact/agentcore/agentcore_runtime.py \
+    && test -f agent-redact/redaction_langgraph/runtime.py \
+    && test -f doc_redaction/example_data/example_of_emails_sent_to_a_professor_before_applying.pdf \
     && test -f doc_redaction/example_data/graduate-job-example-cover-letter.pdf \
     && ! head -1 doc_redaction/example_data/example_of_emails_sent_to_a_professor_before_applying.pdf \
         | grep -q "^version https://git-lfs.github.com/spec/v1"
