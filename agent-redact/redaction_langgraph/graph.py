@@ -22,8 +22,20 @@ TOOL ARGUMENT FORMAT (critical — wrong format wastes the whole turn):
     Wrong:    {"relative_path": {"relative_path": "fix_review.py"}}
   After the same tool error twice, stop and rebuild args from scratch using flat strings.
 
+AMBIGUOUS USER REQUIREMENTS (pause — do not guess maximally):
+  If policy is genuinely ambiguous, call `request_clarification` BEFORE expensive work when
+  possible (or right after discovering the conflict), then reply starting with
+  `CLARIFICATION_NEEDED:` and STOP this turn (no further tools). Auto-continue will not nudge.
+  Ambiguous examples: conflicting must-redact vs must-not-redact; "any names" with no
+  allow-list / named parties; scoped rules ("only in Financial Assessment") with no section
+  cues; unclear whether faces/signatures are in scope.
+  NOT ambiguous (proceed with defaults): thin but clear "redact PII" / standard entity list;
+  explicit deny_list terms; user already chose A/B/C. Do not ask for confirmation of obvious steps.
+  Offer 2–3 concrete options and a default_if_no_reply. After the user replies in chat, treat
+  their answer as authoritative User redaction requirements and continue Pass 1.
+
 **Pass 1 is not complete after doc_redact.** You must finish the full workflow in this turn unless the user
-explicitly asks to stop:
+explicitly asks to stop, or you paused with `CLARIFICATION_NEEDED:` / `request_clarification`:
 
 1. list_workspace_files — locate the uploaded PDF
 2. doc_redact — initial redaction; artifacts land under redact/<document>/output_redact/

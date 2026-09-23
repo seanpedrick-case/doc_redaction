@@ -147,10 +147,15 @@ def reset_langgraph_tool_session_state(session_hash: str | None = None) -> None:
         _PY_WRITE_STORM.clear()
         _RECENT_TOOL_ERRORS.clear()
         _SESSION_ARTIFACTS.clear()
+        _REVIEW_APPROVED.clear()
+        _CLARIFICATION_PENDING.clear()
         return
     _clear_python_write_storm(session_hash)
     _clear_tool_errors(session_hash)
-    _SESSION_ARTIFACTS.pop(_session_key(session_hash), None)
+    key = _session_key(session_hash)
+    _SESSION_ARTIFACTS.pop(key, None)
+    _REVIEW_APPROVED.pop(key, None)
+    _CLARIFICATION_PENDING.pop(key, None)
 
 
 def _remember_session_artifacts(
@@ -1958,6 +1963,7 @@ def run_workspace_python_script(
 
 
 _REVIEW_APPROVED: dict[str, bool] = {}
+_CLARIFICATION_PENDING: dict[str, dict[str, Any]] = {}
 
 
 def approve_review_apply(session_hash: str | None = None) -> str:
@@ -1965,6 +1971,69 @@ def approve_review_apply(session_hash: str | None = None) -> str:
     key = session_hash or ""
     _REVIEW_APPROVED[key] = True
     return json.dumps({"approved": True, "session": key})
+
+
+def request_clarification(
+    question: str,
+    options: Any = None,
+    default_if_no_reply: str | None = None,
+    *,
+    session_hash: str | None = None,
+) -> str:
+    """
+    Pause Pass 1 for user policy clarification (auto-continue will not nudge).
+
+    Call only for genuine ambiguity — not for routine confirmations. After the
+    tool returns, reply with a short chat message that starts with
+    ``CLARIFICATION_NEEDED:`` listing the options, then stop (no further tools).
+    """
+    from redaction_langgraph.workflow_continue import CLARIFICATION_NEEDED_MARKER
+
+    q = (question or "").strip()
+    if not q:
+        return _tool_error_payload(
+            session_hash,
+            "request_clarification",
+            "question must be a non-empty string describing what is ambiguous.",
+            fix_example={
+                "question": (
+                    "Should we redact all PERSON names, or only named parties "
+                    "in Financial Assessment sections?"
+                ),
+                "options": [
+                    "A: all PERSON (default PII entities)",
+                    "B: named parties only (list names)",
+                    "C: names only in Financial Assessment sections",
+                ],
+                "default_if_no_reply": "A",
+            },
+        )
+
+    option_list: list[str] = []
+    if isinstance(options, str) and options.strip():
+        # Allow newline- or semicolon-separated options from local models.
+        raw = options.replace(";", "\n")
+        option_list = [line.strip(" -\t") for line in raw.splitlines() if line.strip()]
+    elif isinstance(options, (list, tuple)):
+        option_list = [str(item).strip() for item in options if str(item).strip()]
+
+    default = (default_if_no_reply or "").strip() or None
+    key = _session_key(session_hash)
+    payload = {
+        "awaiting_clarification": True,
+        "marker": CLARIFICATION_NEEDED_MARKER,
+        "question": q,
+        "options": option_list,
+        "default_if_no_reply": default,
+        "session": key,
+        "instruction": (
+            f"Reply to the user starting with {CLARIFICATION_NEEDED_MARKER} "
+            "then the question and numbered options. Do not call further tools "
+            "this turn; wait for their chat reply."
+        ),
+    }
+    _CLARIFICATION_PENDING[key] = payload
+    return json.dumps(payload, indent=2)
 
 
 def run_review_apply(
@@ -2246,6 +2315,12 @@ def run_verify_coverage(
     payload["ocr_words_csv"] = str(ocr_words_csv)
     if redacted_pdf is not None:
         payload["redacted_pdf"] = str(redacted_pdf)
+    try:
+        from eval.arize_monitoring import annotate_current_span_with_coverage
+
+        annotate_current_span_with_coverage(payload)
+    except Exception:  # noqa: BLE001 — never break the tool for telemetry
+        pass
     _clear_tool_errors(session_hash, "verify_coverage")
     return json.dumps(payload, indent=2, default=str)
 
@@ -2378,6 +2453,22 @@ def build_langgraph_tools(session_hash: str | None):
             session_hash=session_hash,
         )
 
+    def _request_clarification(question, options=None, default_if_no_reply=None):
+        args = normalize_tool_args(
+            "request_clarification",
+            {
+                "question": question,
+                "options": options,
+                "default_if_no_reply": default_if_no_reply,
+            },
+        )
+        return request_clarification(
+            args.get("question", question),
+            args.get("options", options),
+            args.get("default_if_no_reply", default_if_no_reply),
+            session_hash=session_hash,
+        )
+
     return [
         StructuredTool.from_function(
             name="list_workspace_files",
@@ -2412,6 +2503,19 @@ def build_langgraph_tools(session_hash: str | None):
             name="approve_review_apply",
             description="Approve review_apply when LANGGRAPH_REQUIRE_REVIEW_APPROVAL is enabled.",
             func=lambda: approve_review_apply(session_hash),
+        ),
+        StructuredTool.from_function(
+            name="request_clarification",
+            description=(
+                "Pause for user policy clarification when requirements are ambiguous "
+                "(conflicting must/must-not, scoped rules without section cues, "
+                "or unclear who/what to redact). "
+                "Args: question (string), options (list or newline-separated string), "
+                "optional default_if_no_reply. "
+                "After calling, reply with CLARIFICATION_NEEDED: … and stop this turn — "
+                "do not use for routine confirmations."
+            ),
+            func=_request_clarification,
         ),
         StructuredTool.from_function(
             name="review_apply",

@@ -1,0 +1,2 @@
+page,label,xmin,ymin,xmax,ymax,text,id,color
+1,PERSON,0.10,0.20,0.35,0.28,Alice Example,g1,"(0, 0, 0)"

@@ -32,7 +32,7 @@ def test_patch_requirements_pins_zerogpu_torch_and_drops_cuda_index(tmp_path: Pa
     requirements.write_text(
         "\n".join(
             [
-                "gradio==6.26.0",
+                "gradio==6.27.0",
                 "",
                 "# --- PyTorch (CUDA 12.8) ---",
                 "--extra-index-url https://download.pytorch.org/whl/cu128",
@@ -55,7 +55,7 @@ def test_patch_requirements_pins_zerogpu_torch_and_drops_cuda_index(tmp_path: Pa
     assert "torchvision>=0.28.0" not in text
     assert "download.pytorch.org/whl/cu128" not in text
     assert "ZeroGPU-compatible pin" in text
-    assert "gradio==6.26.0" in text
+    assert "gradio==6.27.0" in text
     assert "torchaudio==2.13.0" in text
 
 

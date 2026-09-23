@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import sys
 from contextlib import contextmanager
 from pathlib import Path
@@ -368,3 +369,198 @@ def test_iter_pi_events_emits_agent_and_tool_spans(monkeypatch):
     root_span.set_attribute.assert_any_call(span_attrs.OUTPUT_VALUE, "hello")
     root_span.set_attribute.assert_any_call(span_attrs.LLM_TOKEN_COUNT_PROMPT, 3)
     root_span.set_attribute.assert_any_call(span_attrs.LLM_TOKEN_COUNT_COMPLETION, 2)
+
+
+def test_parse_verify_coverage_payload():
+    mod = _reload_arize_monitoring()
+    assert mod.parse_verify_coverage_payload("") is None
+    assert mod.parse_verify_coverage_payload('{"error": "nope"}') is None
+    payload = {
+        "pass_strict": False,
+        "pass_with_cleanup": False,
+        "pages_flagged_for_vlm": [1, 2],
+        "pages_needing_csv_cleanup": [3],
+        "redacted_pdf": "/tmp/x_redacted.pdf",
+    }
+    parsed = mod.parse_verify_coverage_payload(json.dumps(payload))
+    assert parsed is not None
+    assert parsed["pass_strict"] is False
+
+
+def test_annotate_current_and_root_coverage_attrs():
+    mod = _reload_arize_monitoring()
+    mod.reset_coverage_trace_state()
+    tool_span = MagicMock()
+    root_span = MagicMock()
+
+    otel_trace = ModuleType("opentelemetry.trace")
+    otel_trace.get_current_span = MagicMock(return_value=tool_span)
+    otel_pkg = ModuleType("opentelemetry")
+    otel_pkg.trace = otel_trace
+    with patch.dict(
+        sys.modules, {"opentelemetry": otel_pkg, "opentelemetry.trace": otel_trace}
+    ):
+        mod.annotate_current_span_with_coverage(
+            {
+                "pass_strict": True,
+                "pass_with_cleanup": False,
+                "pages_flagged_for_vlm": [],
+                "pages_needing_csv_cleanup": [1],
+            }
+        )
+        mod.annotate_current_span_with_coverage(
+            json.dumps(
+                {
+                    "pass_strict": False,
+                    "pass_with_cleanup": False,
+                    "pages_flagged_for_vlm": [2],
+                    "pages_needing_csv_cleanup": [],
+                    "redacted_pdf": "a.pdf",
+                }
+            )
+        )
+
+    tool_span.set_attribute.assert_any_call(mod.ATTR_PASS_STRICT, True)
+    tool_span.set_attribute.assert_any_call(mod.ATTR_PASS_STRICT, False)
+    mod.annotate_span_with_recorded_coverage(root_span, workflow_incomplete=True)
+    root_span.set_attribute.assert_any_call(mod.ATTR_VERIFY_CALLS, 2)
+    root_span.set_attribute.assert_any_call(mod.ATTR_ANY_VERIFY_FAIL, True)
+    root_span.set_attribute.assert_any_call(mod.ATTR_FINAL_PASS_STRICT, False)
+    root_span.set_attribute.assert_any_call(mod.ATTR_WORKFLOW_INCOMPLETE, True)
+
+
+def test_agent_turn_span_noop_when_not_initialized():
+    mod = _reload_arize_monitoring()
+    with mod.agent_turn_span(
+        "langgraph.agent",
+        session_hash="s1",
+        message="hi",
+        agent_name="langgraph",
+    ) as meta:
+        assert meta["span"] is None
+        meta["workflow_incomplete"] = True
+    assert mod.get_recorded_coverage_results() == []
+
+
+def test_iter_pi_events_sets_coverage_attrs_from_tool_output(monkeypatch):
+    monkeypatch.setenv("ARIZE_TRACING_ENABLED", "true")
+    monkeypatch.setenv("ARIZE_BACKEND", "phoenix")
+    mod = _reload_arize_monitoring()
+
+    mock_register = MagicMock(return_value=SimpleNamespace(name="provider"))
+    phoenix_otel = ModuleType("phoenix.otel")
+    phoenix_otel.register = mock_register
+    phoenix_pkg = ModuleType("phoenix")
+    phoenix_pkg.otel = phoenix_otel
+
+    with patch.dict(
+        sys.modules,
+        {"phoenix": phoenix_pkg, "phoenix.otel": phoenix_otel},
+    ):
+        assert mod.setup_arize_ax_tracing(instrument_langchain=False) is True
+
+    root_span = MagicMock()
+    tool_span = MagicMock()
+    mock_tracer = MagicMock()
+    mock_tracer.start_as_current_span.return_value.__enter__.return_value = root_span
+    mock_tracer.start_as_current_span.return_value.__exit__.return_value = None
+    mock_tracer.start_span.return_value = tool_span
+
+    span_attrs = SimpleNamespace(
+        OUTPUT_VALUE="output.value",
+        LLM_TOKEN_COUNT_PROMPT="llm.token_count.prompt",
+        LLM_TOKEN_COUNT_COMPLETION="llm.token_count.completion",
+        OPENINFERENCE_SPAN_KIND="openinference.span.kind",
+        TOOL_NAME="tool.name",
+        TOOL_ID="tool.id",
+        TOOL_PARAMETERS="tool.parameters",
+        INPUT_VALUE="input.value",
+        SESSION_ID="session.id",
+        AGENT_NAME="agent.name",
+    )
+    oi_semconv_trace = ModuleType("openinference.semconv.trace")
+    oi_semconv_trace.SpanAttributes = span_attrs
+    oi_semconv_trace.OpenInferenceSpanKindValues = SimpleNamespace(
+        TOOL=SimpleNamespace(value="TOOL"),
+        AGENT=SimpleNamespace(value="AGENT"),
+    )
+    oi_semconv = ModuleType("openinference.semconv")
+    oi_semconv.trace = oi_semconv_trace
+    oi_instrumentation = ModuleType("openinference.instrumentation")
+
+    @contextmanager
+    def _using_session(*, session_id: str):
+        yield
+
+    oi_instrumentation.using_session = _using_session
+    oi_pkg = ModuleType("openinference")
+    oi_pkg.semconv = oi_semconv
+    oi_pkg.instrumentation = oi_instrumentation
+
+    otel_trace = ModuleType("opentelemetry.trace")
+    otel_trace.get_tracer = MagicMock(return_value=mock_tracer)
+    otel_trace.Status = MagicMock(side_effect=lambda status: status)
+    otel_trace.StatusCode = SimpleNamespace(ERROR="ERROR")
+    otel_trace.get_current_span = MagicMock(return_value=MagicMock())
+    otel_trace.set_span_in_context = MagicMock(side_effect=lambda span: span)
+    otel_pkg = ModuleType("opentelemetry")
+    otel_pkg.trace = otel_trace
+
+    coverage_json = json.dumps(
+        {
+            "pass_strict": True,
+            "pass_with_cleanup": True,
+            "pages_flagged_for_vlm": [],
+            "pages_needing_csv_cleanup": [],
+        }
+    )
+    events = [
+        SimpleNamespace(
+            kind="tool_start",
+            tool_name="verify_coverage",
+            tool_call_id="v1",
+            tool_args={"must_redact": ["Alice"]},
+            text="",
+            is_error=False,
+            tool_output=None,
+        ),
+        SimpleNamespace(
+            kind="tool_end",
+            tool_name="verify_coverage",
+            tool_call_id="v1",
+            tool_output=coverage_json,
+            text="",
+            is_error=False,
+            tool_args=None,
+        ),
+        SimpleNamespace(
+            kind="done",
+            text="done",
+            is_error=False,
+            tool_name=None,
+            tool_call_id=None,
+            tool_args=None,
+            tool_output=None,
+        ),
+    ]
+
+    with patch.dict(
+        sys.modules,
+        {
+            "opentelemetry": otel_pkg,
+            "opentelemetry.trace": otel_trace,
+            "openinference": oi_pkg,
+            "openinference.semconv": oi_semconv,
+            "openinference.semconv.trace": oi_semconv_trace,
+            "openinference.instrumentation": oi_instrumentation,
+        },
+    ):
+        list(
+            mod.iter_pi_events_with_tracing(
+                iter(events), session_hash="sess-cov", message="verify"
+            )
+        )
+
+    tool_span.set_attribute.assert_any_call(mod.ATTR_PASS_STRICT, True)
+    root_span.set_attribute.assert_any_call(mod.ATTR_FINAL_PASS_STRICT, True)
+    root_span.set_attribute.assert_any_call(mod.ATTR_VERIFY_CALLS, 1)

@@ -1,5 +1,5 @@
 # Stage 1: Build dependencies and download models
-FROM public.ecr.aws/docker/library/python:3.12.13-slim-trixie AS builder
+FROM public.ecr.aws/docker/library/python:3.13.15-slim-trixie AS builder
 
 # Install system dependencies
 RUN apt-get update \
@@ -25,7 +25,7 @@ ARG INSTALL_GRADIO_MCP=False
 ENV INSTALL_GRADIO_MCP=${INSTALL_GRADIO_MCP}
 
 RUN if [ "$INSTALL_GRADIO_MCP" = "True" ]; then \
-    pip install --verbose --no-cache-dir --force-reinstall --target=/install "gradio[mcp]>=6.16.0"; \
+    pip install --verbose --no-cache-dir --force-reinstall --target=/install "gradio[mcp]<=6.27.0"; \
 fi
 
 # Optionally install PaddleOCR if the INSTALL_PADDLEOCR environment variable is set to True. Note that GPU-enabled PaddleOCR is unlikely to work in the same environment as a GPU-enabled version of PyTorch, so it is recommended to install PaddleOCR as a CPU-only version if you want to use GPU-enabled PyTorch.
@@ -79,7 +79,7 @@ fi
 # ===================================================================
 # Stage 2: A common base for both Lambda and Gradio
 # ===================================================================
-FROM public.ecr.aws/docker/library/python:3.12.13-slim-trixie AS base
+FROM public.ecr.aws/docker/library/python:3.13.15-slim-trixie AS base
 
 # MUST re-declare ARGs in every stage where they are used in RUN commands
 ARG TORCH_GPU_ENABLED=False
@@ -122,7 +122,7 @@ ENV GRADIO_TEMP_DIR=/tmp/gradio_tmp/ \
     GRADIO_ANALYTICS_ENABLED=False
 
 # Copy Python packages from the builder stage
-COPY --from=builder /install /usr/local/lib/python3.12/site-packages/
+COPY --from=builder /install /usr/local/lib/python3.13/site-packages/
 COPY --from=builder /install/bin /usr/local/bin/
 
 # Reinstall protobuf into the final site-packages. Builder uses multiple `pip install --target=/install`
