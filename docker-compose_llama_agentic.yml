@@ -490,7 +490,7 @@ services:
         aliases:
           - llama-inference
 
- # Gemma 4 26B model setup below requires 24GB+ of VRAM to run.
+ # Gemma 4 26B model setup below requires 24GB of VRAM to run.
   gemma4-26b_q4_gguf:
     profiles: ["gemma4-26b"]
     image: ghcr.io/ggml-org/llama.cpp:server-cuda13
