@@ -10,6 +10,8 @@ import pytest
 
 pytest.importorskip("gradio_image_annotation_redaction")
 
+import pandas as pd
+
 from tools.redaction_review import (
     REVIEW_REDACTIONS_TAB_ID,
     _annotator_box_has_area,
@@ -29,6 +31,7 @@ from tools.redaction_review import (
     refresh_annotator_after_external_layout_reflow,
     refresh_annotator_if_review_document_loaded,
     update_all_page_annotation_object_based_on_previous_page,
+    update_all_page_annotation_object_from_gradio_client,
 )
 
 
@@ -393,6 +396,7 @@ def test_coerce_gradio_client_applies_scale_factor_before_relative_storage():
         "orientation": 0,
     }
     coerced = coerce_gradio_client_annotator_payload(payload, 1, [], page_sizes)
+    assert "scaleFactor" not in coerced["boxes"][0]
     updated, _, _ = update_all_page_annotation_object_based_on_previous_page(
         coerced,
         current_page=1,
@@ -405,6 +409,122 @@ def test_coerce_gradio_client_applies_scale_factor_before_relative_storage():
     assert box["ymin"] == pytest.approx(0.2)
     assert box["xmax"] == pytest.approx(0.4)
     assert box["ymax"] == pytest.approx(0.3)
+    assert "scaleFactor" not in box
+
+
+def test_coerce_does_not_reapply_scalefactor_to_relative_boxes():
+    """Leftover scaleFactor on relative state boxes must not collapse them on re-coerce."""
+    page_sizes = [
+        {
+            "page": 1,
+            "image_path": "p.png",
+            "image_width": 2000,
+            "image_height": 3000,
+        }
+    ]
+    # Relative box as stored after a prior save, still carrying client scaleFactor.
+    payload = {
+        "image": "p.png",
+        "boxes": [
+            {
+                "xmin": 0.2,
+                "ymin": 0.2,
+                "xmax": 0.4,
+                "ymax": 0.3,
+                "scaleFactor": 0.5,
+                "label": "Redaction",
+                "id": "new1",
+            }
+        ],
+        "orientation": 0,
+    }
+    coerced = coerce_gradio_client_annotator_payload(payload, 1, [], page_sizes)
+    box = coerced["boxes"][0]
+    assert "scaleFactor" not in box
+    assert box["xmin"] == pytest.approx(0.2)
+    assert box["xmax"] == pytest.approx(0.4)
+    assert box["ymin"] == pytest.approx(0.2)
+    assert box["ymax"] == pytest.approx(0.3)
+
+
+def test_save_current_page_keeps_new_manual_box_in_state_and_review_df():
+    """Manual box on page 2 must survive persist → review_df conversion (Save path)."""
+    from tools.file_conversion import convert_annotation_json_to_review_df
+
+    page_sizes = [
+        {
+            "page": 1,
+            "image_path": "doc.pdf_0.png",
+            "image_width": 1000,
+            "image_height": 1400,
+        },
+        {
+            "page": 2,
+            "image_path": "doc.pdf_1.png",
+            "image_width": 1000,
+            "image_height": 1400,
+        },
+    ]
+    state = [
+        {
+            "image": "doc.pdf_0.png",
+            "boxes": [
+                {
+                    "xmin": 0.1,
+                    "ymin": 0.1,
+                    "xmax": 0.2,
+                    "ymax": 0.15,
+                    "label": "PERSON",
+                    "id": "p1",
+                    "color": "(0, 0, 0)",
+                    "text": "Alice",
+                }
+            ],
+            "orientation": 0,
+        },
+        {"image": "doc.pdf_1.png", "boxes": [], "orientation": 0},
+    ]
+    # Canvas payload after drawing a new box on page 2 (absolute px + scaleFactor).
+    # Annotator create-path historically omitted ``page`` and passed boxMinSize (1) as
+    # page, which must not force the saved row onto page 1.
+    payload = {
+        "image": "doc.pdf_1.png",
+        "orientation": 0,
+        "boxes": [
+            {
+                "xmin": 200,
+                "ymin": 280,
+                "xmax": 400,
+                "ymax": 420,
+                "scaleFactor": 0.5,
+                "label": "Redaction",
+                "id": "manual1",
+                "color": "(0, 0, 0)",
+                "page": 1,  # bogus value from boxMinSize shift
+            }
+        ],
+    }
+    updated, _, _ = update_all_page_annotation_object_from_gradio_client(
+        payload,
+        current_page=2,
+        previous_page=2,
+        all_image_annotations=state,
+        page_sizes=page_sizes,
+    )
+    page2_boxes = updated[1]["boxes"]
+    assert len(page2_boxes) == 1
+    assert page2_boxes[0]["id"] == "manual1"
+    assert page2_boxes[0]["xmin"] == pytest.approx(0.4)  # 200/0.5/1000
+    assert page2_boxes[0]["page"] == 2
+    assert "scaleFactor" not in page2_boxes[0]
+
+    review_df = convert_annotation_json_to_review_df(
+        updated, pd.DataFrame(), page_sizes=page_sizes
+    )
+    page2 = review_df[review_df["page"].astype(int) == 2]
+    assert len(page2) >= 1
+    assert "manual1" in set(page2["id"].astype(str))
+    assert int(page2[page2["id"].astype(str) == "manual1"]["page"].iloc[0]) == 2
 
 
 def test_coerce_gradio_client_annotator_payload_replaces_stale_gradio_tmp(
