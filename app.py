@@ -7542,9 +7542,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
     )
 
     # Save current page manual redactions.
-    # Order: persist annotator → write review CSV/DF → re-push boxes last.
+    # Order: persist annotator → write review CSV/DF → refresh filters + re-push boxes last.
     # Updating the review DataFrame (or File/progress widgets) after the annotator
     # reflow can call setScaleFactor(~0) and wipe visible boxes after they appear.
+    # Final step mirrors Apply: refresh filter list and annotator from state so new
+    # manual boxes stay visible and appear in "list of current redaction boxes".
     update_current_page_redactions_btn.click(
         update_all_page_annotation_object_from_gradio_client,
         inputs=[
@@ -7584,7 +7586,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         show_progress_on=[],
         api_visibility="undocumented",
     ).success(
-        update_annotator_object_for_page_navigation,
+        update_annotator_object_and_filter_df,
         inputs=[
             all_image_annotations_state,
             annotate_current_page,

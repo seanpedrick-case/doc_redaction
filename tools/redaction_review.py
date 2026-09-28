@@ -3246,6 +3246,10 @@ def _apply_gradio_client_box_scale_factors(boxes: Optional[List[dict]]) -> None:
     The annotator stores box edges in a canvas-scaled coordinate system and attaches a per-box
     ``scaleFactor``. Gradio's component preprocess divides those values out to recover absolute
     image pixels; without that step every box is saved too small (shifted up/left on re-display).
+
+    Always strip ``scaleFactor`` afterwards. If it is left on boxes that are later stored as
+    relative (0–1) coords, a subsequent coerce would divide again (``round(0.2/0.5) -> 0``)
+    and collapse the box.
     """
     if not boxes:
         return
@@ -3258,15 +3262,16 @@ def _apply_gradio_client_box_scale_factors(boxes: Optional[List[dict]]) -> None:
             scale_factor = 1.0
         if not (np.isfinite(scale_factor) and scale_factor > 0):
             scale_factor = 1.0
-        if scale_factor == 1.0:
-            continue
-        for key in ("xmin", "ymin", "xmax", "ymax"):
-            if key not in box:
-                continue
-            try:
-                box[key] = round(float(box[key]) / scale_factor)
-            except (TypeError, ValueError):
-                continue
+        # Relative boxes must not be divided again (leftover scaleFactor from a prior save).
+        if scale_factor != 1.0 and not _box_coords_are_relative(box):
+            for key in ("xmin", "ymin", "xmax", "ymax"):
+                if key not in box:
+                    continue
+                try:
+                    box[key] = round(float(box[key]) / scale_factor)
+                except (TypeError, ValueError):
+                    continue
+        box.pop("scaleFactor", None)
 
 
 def coerce_gradio_client_annotator_payload(
@@ -3533,6 +3538,22 @@ def update_all_page_annotation_object_based_on_previous_page(
         else:
             boxes_to_store = incoming_boxes
             orientation_to_store = view_orientation
+
+        # Drop client-only keys so a later coerce cannot re-apply scaleFactor to
+        # already-relative stored coordinates (which collapses boxes to ~0).
+        # Stamp each box with this page's 1-based index. Newly drawn boxes from the
+        # annotator historically omitted ``page`` and shifted ``boxMinSize`` into that
+        # slot (often ``1``), so convert_annotation_data_to_dataframe attributed them
+        # to page 1 regardless of which page was being edited.
+        cleaned_boxes: List[dict] = []
+        for box in boxes_to_store:
+            if not isinstance(box, dict):
+                continue
+            clean = dict(box)
+            clean.pop("scaleFactor", None)
+            clean["page"] = previous_page
+            cleaned_boxes.append(clean)
+        boxes_to_store = cleaned_boxes
 
         # Update the existing page dict in place so we keep any extra keys and never
         # replace the whole list entry with a Gradio-only payload.
