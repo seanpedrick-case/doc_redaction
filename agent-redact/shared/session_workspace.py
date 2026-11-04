@@ -16,6 +16,8 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 _SESSION_ID_RE = re.compile(r"[^a-zA-Z0-9_@.+-]+")
+# Path-segment allowlist after :func:`sanitize_session_id` (CodeQL / traversal guard).
+_SESSION_ID_SAFE_RE = re.compile(r"^[a-zA-Z0-9_@.+-]{1,128}$")
 
 
 def workspace_base_dir() -> Path:
@@ -62,6 +64,32 @@ def workspace_base_dir_resolved() -> Path:
 def sanitize_session_id(raw: str) -> str:
     cleaned = _SESSION_ID_RE.sub("_", (raw or "").strip())[:128].strip("_")
     return cleaned or "default"
+
+
+def validated_sanitize_session_id(raw: str) -> str | None:
+    """
+    Sanitize a Gradio session id and require a single safe path-segment name.
+
+    Returns None when the value cannot be used as ``{workspace_base}/{id}/``.
+    """
+    if not (raw or "").strip():
+        return None
+    safe_id = sanitize_session_id(raw)
+    if not _SESSION_ID_SAFE_RE.fullmatch(safe_id):
+        return None
+    if any(part in ("", ".", "..") for part in Path(safe_id).parts):
+        return None
+    return safe_id
+
+
+def _session_workspace_from_safe_id(base: Path, safe_id: str) -> Path:
+    """Resolve ``base / safe_id``; fall back to ``base / default`` if it escapes *base*."""
+    candidate = base.joinpath(safe_id).resolve()
+    try:
+        candidate.relative_to(base)
+    except ValueError:
+        return base.joinpath("default").resolve()
+    return candidate
 
 
 def resolve_session_hash(request: gr.Request | None) -> str:
@@ -146,13 +174,8 @@ def session_workspace_dir(session_hash: str) -> Path:
     base = workspace_base_dir().resolve()
     if not session_workspace_enabled():
         return base
-    safe_id = sanitize_session_id(session_hash)
-    candidate = (base / safe_id).resolve()
-    try:
-        candidate.relative_to(base)
-    except ValueError:
-        return (base / "default").resolve()
-    return candidate
+    safe_id = validated_sanitize_session_id(session_hash) or "default"
+    return _session_workspace_from_safe_id(base, safe_id)
 
 
 def ensure_session_workspace(session_hash: str) -> Path:
@@ -161,34 +184,26 @@ def ensure_session_workspace(session_hash: str) -> Path:
     return workspace
 
 
-_ACTIVE_REDACTION_TASK_REL = Path("eval") / "active_redaction_task.json"
-
-
 def active_redaction_task_path(session_hash: str) -> Path | None:
     """
     Resolved path for ``eval/active_redaction_task.json`` under the session workspace.
 
-    Built from ``sanitize_session_id`` and fixed path segments under
-    ``workspace_base_dir()`` so user input cannot escape the workspace root.
+    User input is reduced to a validated path segment via
+    :func:`validated_sanitize_session_id`; fixed literals ``eval/`` and the filename
+    are appended under ``workspace_base_dir()``.
     """
-    if not (session_hash or "").strip():
-        return None
     base = workspace_base_dir().resolve()
-    workspace = session_workspace_dir(session_hash).resolve()
-    try:
-        workspace.relative_to(base)
-    except ValueError:
-        return None
     if session_workspace_enabled():
-        safe_id = sanitize_session_id(session_hash)
-        target = (base / safe_id / "eval" / "active_redaction_task.json").resolve()
+        safe_id = validated_sanitize_session_id(session_hash) or "default"
+        rel_parts = (safe_id, "eval", "active_redaction_task.json")
     else:
-        target = (base / "eval" / "active_redaction_task.json").resolve()
+        if not (session_hash or "").strip():
+            return None
+        rel_parts = ("eval", "active_redaction_task.json")
+    target = base.joinpath(*rel_parts).resolve()
     try:
         target.relative_to(base)
     except ValueError:
-        return None
-    if target != (workspace / _ACTIVE_REDACTION_TASK_REL).resolve():
         return None
     return target
 

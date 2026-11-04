@@ -24,6 +24,7 @@ from session_workspace import (  # noqa: E402
     resolve_session_hash,
     sanitize_session_id,
     session_workspace_dir,
+    validated_sanitize_session_id,
     workspace_context_prefix,
     write_active_redaction_task_file,
 )
@@ -86,6 +87,15 @@ def test_ensure_session_workspace_creates_directory(workspace_base):
 
 def test_sanitize_session_id_strips_unsafe_chars():
     assert sanitize_session_id("foo@bar/baz") == "foo@bar_baz"
+
+
+def test_validated_sanitize_session_id_accepts_gradio_ids():
+    assert validated_sanitize_session_id("abc123session") == "abc123session"
+    assert validated_sanitize_session_id("  ") is None
+
+
+def test_validated_sanitize_session_id_normalizes_traversal_like_input():
+    assert validated_sanitize_session_id("../../etc/passwd") == ".._.._etc_passwd"
 
 
 def test_workspace_context_prefix_includes_path(workspace_base):

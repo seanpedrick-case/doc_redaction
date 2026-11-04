@@ -57,7 +57,7 @@ ENV TORCH_GPU_ENABLED=${TORCH_GPU_ENABLED}
 # GPU + VLM does not install flash-attn (no official cp313 + cu130/torch wheel); see tools/inference_attention.py (sdpa fallback).
 RUN if [ "$INSTALL_VLM" = "True" ] && [ "$TORCH_GPU_ENABLED" = "False" ]; then \
     pip install --verbose --no-cache-dir --target=/install \
-    "torch<=2.14.1+cpu" \
+    "torch==2.14.1+cpu" \
     "torchvision" \
     "transformers>=5.19.0,<6" \
     "accelerate>=1.15.0,<2" \
@@ -65,7 +65,7 @@ RUN if [ "$INSTALL_VLM" = "True" ] && [ "$TORCH_GPU_ENABLED" = "False" ]; then \
     "sentencepiece>=0.2.2,<1" \
     --extra-index-url https://download.pytorch.org/whl/cpu; \
 elif [ "$INSTALL_VLM" = "True" ] && [ "$TORCH_GPU_ENABLED" = "True" ]; then \
-    pip install --verbose --no-cache-dir --target=/install "torch<=2.14.1" --index-url https://download.pytorch.org/whl/cu130 && \
+    pip install --verbose --no-cache-dir --target=/install "torch==2.14.1" --index-url https://download.pytorch.org/whl/cu130 && \
     pip install --verbose --no-cache-dir --target=/install "torchvision" --index-url https://download.pytorch.org/whl/cu130 && \
     pip install --verbose --no-cache-dir --target=/install \
         "transformers>=5.19.0,<6" \
