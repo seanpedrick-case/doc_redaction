@@ -13,12 +13,12 @@ if str(_SHARED) not in sys.path:
 
 from agent_runtime import AgentStreamEvent  # noqa: E402
 from eval_task_context import (  # noqa: E402
-    _resolved_active_task_path,
     append_turn_tool_calls,
     begin_redaction_task,
     get_active_task_for_eval,
     note_follow_up_or_steer_message,
 )
+from session_workspace import active_redaction_task_path  # noqa: E402
 
 
 def test_begin_task_and_follow_up_steer_count(monkeypatch, tmp_path):
@@ -84,9 +84,10 @@ def test_append_turn_tool_calls_accumulates(monkeypatch, tmp_path):
     ]
 
 
-def test_resolved_active_task_path_stays_under_workspace(monkeypatch, tmp_path):
+def test_active_redaction_task_path_stays_under_workspace(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_WORKSPACE_DIR", str(tmp_path))
-    path = _resolved_active_task_path("../../etc/passwd")
+    monkeypatch.setenv("AGENT_SESSION_WORKSPACE", "true")
+    path = active_redaction_task_path("../../etc/passwd")
     assert path is not None
     assert path.resolve().is_relative_to(tmp_path.resolve())
     assert path.name == "active_redaction_task.json"

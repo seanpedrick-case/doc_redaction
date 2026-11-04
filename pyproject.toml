@@ -60,7 +60,7 @@ dependencies = [
     "Faker>=40.44.0,<50",
     "python-levenshtein>=0.27.5,<1",
     "spaczz>=0.6.1,<1",
-    "rapidfuzz>=3.14.6,<4",
+    "rapidfuzz>=3.10.0,<=3.14.5",
     "python-dotenv>=1.2.4,<2",
     "awslambdaric>=4.2.3,<5",
     "python-docx>=1.2.0,<2",

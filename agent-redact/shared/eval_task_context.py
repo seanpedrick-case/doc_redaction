@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-import json
 import threading
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
+from session_workspace import (
+    read_active_redaction_task_file,
+    write_active_redaction_task_file,
+)
+
 _LOCK = threading.Lock()
-_ACTIVE_REL = Path("eval") / "active_redaction_task.json"
 
 
 @dataclass
@@ -20,41 +22,7 @@ class ActiveRedactionTask:
     cumulative_tool_calls: list[dict[str, Any]] = field(default_factory=list)
 
 
-def _resolved_active_task_path(session_hash: str) -> Path | None:
-    """
-    Resolve the active-task JSON path under the session workspace.
-
-    Returns None when *session_hash* does not resolve to a directory under
-    ``AGENT_WORKSPACE_DIR`` (path traversal / escape).
-    """
-    from session_workspace import session_workspace_dir, workspace_base_dir
-
-    if not (session_hash or "").strip():
-        return None
-    base = workspace_base_dir().resolve()
-    workspace = session_workspace_dir(session_hash).resolve()
-    try:
-        workspace.relative_to(base)
-    except ValueError:
-        return None
-    target = (workspace / _ACTIVE_REL).resolve()
-    try:
-        target.relative_to(workspace)
-    except ValueError:
-        return None
-    return target
-
-
-def _read_task(session_hash: str) -> ActiveRedactionTask | None:
-    path = _resolved_active_task_path(session_hash)
-    if path is None or not path.is_file():
-        return None
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(raw, dict):
-        return None
+def _task_from_raw(raw: dict[str, Any]) -> ActiveRedactionTask | None:
     doc = str(raw.get("document_name") or "").strip()
     if not doc:
         return None
@@ -78,19 +46,21 @@ def _read_task(session_hash: str) -> ActiveRedactionTask | None:
     )
 
 
+def _read_task(session_hash: str) -> ActiveRedactionTask | None:
+    raw = read_active_redaction_task_file(session_hash)
+    if raw is None:
+        return None
+    return _task_from_raw(raw)
+
+
 def _write_task(session_hash: str, task: ActiveRedactionTask) -> bool:
-    path = _resolved_active_task_path(session_hash)
-    if path is None:
-        return False
-    path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "document_name": task.document_name,
         "task_instructions": task.task_instructions,
         "follow_up_steer_count": task.follow_up_steer_count,
         "cumulative_tool_calls": task.cumulative_tool_calls,
     }
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    return True
+    return write_active_redaction_task_file(session_hash, payload)
 
 
 def begin_redaction_task(
