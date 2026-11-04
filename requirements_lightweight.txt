@@ -49,5 +49,5 @@ pytest<=9.0.3
 pytest-cov<=7.1.0
 
 # --- LLM libraries ---
-google-genai>=2.34.0,<3
-openai>=3.45.0,<4
+google-genai>=2.33.0,<3
+openai>=3.26.1,<4

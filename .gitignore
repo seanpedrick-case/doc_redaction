@@ -74,6 +74,8 @@ skills/example_prompts/*
 agent-redact/pi/agent/sessions/
 agent-redact/RedactionAgent/*
 agent-redact/eval/runs/
+agent-redact/RedactionAgent/__pycache__/*
+agent-redact/eval/fixtures/*
 agent-redact/eval/outputs/*.csv
 .env
 .certs/*

@@ -82,9 +82,19 @@ def validated_sanitize_session_id(raw: str) -> str | None:
     return safe_id
 
 
-def _session_workspace_from_safe_id(base: Path, safe_id: str) -> Path:
-    """Resolve ``base / safe_id``; fall back to ``base / default`` if it escapes *base*."""
-    candidate = base.joinpath(safe_id).resolve()
+def coerce_safe_session_segment(session_hash: str) -> str:
+    """
+    Directory name for ``{workspace_base}/{segment}/`` (always a validated segment).
+
+    Falls back to ``default`` when *session_hash* is missing or unsafe.
+    """
+    return validated_sanitize_session_id(session_hash) or "default"
+
+
+def _session_dir_under_base(base: Path, session_hash: str) -> Path:
+    """``base / coerce_safe_session_segment(session_hash)``, confined to *base*."""
+    segment = coerce_safe_session_segment(session_hash)
+    candidate = base.joinpath(segment).resolve()
     try:
         candidate.relative_to(base)
     except ValueError:
@@ -174,8 +184,7 @@ def session_workspace_dir(session_hash: str) -> Path:
     base = workspace_base_dir().resolve()
     if not session_workspace_enabled():
         return base
-    safe_id = validated_sanitize_session_id(session_hash) or "default"
-    return _session_workspace_from_safe_id(base, safe_id)
+    return _session_dir_under_base(base, session_hash)
 
 
 def ensure_session_workspace(session_hash: str) -> Path:
@@ -194,13 +203,12 @@ def active_redaction_task_path(session_hash: str) -> Path | None:
     """
     base = workspace_base_dir().resolve()
     if session_workspace_enabled():
-        safe_id = validated_sanitize_session_id(session_hash) or "default"
-        rel_parts = (safe_id, "eval", "active_redaction_task.json")
+        segment = coerce_safe_session_segment(session_hash)
+        target = base.joinpath(segment, "eval", "active_redaction_task.json").resolve()
     else:
         if not (session_hash or "").strip():
             return None
-        rel_parts = ("eval", "active_redaction_task.json")
-    target = base.joinpath(*rel_parts).resolve()
+        target = base.joinpath("eval", "active_redaction_task.json").resolve()
     try:
         target.relative_to(base)
     except ValueError:

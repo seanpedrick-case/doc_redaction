@@ -24,6 +24,7 @@ from session_workspace import (  # noqa: E402
     resolve_session_hash,
     sanitize_session_id,
     session_workspace_dir,
+    coerce_safe_session_segment,
     validated_sanitize_session_id,
     workspace_context_prefix,
     write_active_redaction_task_file,
@@ -92,6 +93,7 @@ def test_sanitize_session_id_strips_unsafe_chars():
 def test_validated_sanitize_session_id_accepts_gradio_ids():
     assert validated_sanitize_session_id("abc123session") == "abc123session"
     assert validated_sanitize_session_id("  ") is None
+    assert coerce_safe_session_segment("  ") == "default"
 
 
 def test_validated_sanitize_session_id_normalizes_traversal_like_input():

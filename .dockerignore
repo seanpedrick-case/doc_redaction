@@ -58,3 +58,5 @@ skills/example_prompts/*
 agent-redact/RedactionAgent/*
 .env
 .certs/*
+agent-redact/RedactionAgent/__pycache__/*
+agent-redact/eval/fixtures/*
