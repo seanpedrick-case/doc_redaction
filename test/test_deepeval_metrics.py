@@ -36,9 +36,9 @@ def test_build_tool_correctness_metric_deepeval_4(monkeypatch):
     monkeypatch.setenv("OPENAI_BASE_URL", "http://127.0.0.1:8000/v1")
     monkeypatch.setenv("OPENAI_API_KEY", "local")
     monkeypatch.setenv("OPENAI_MODEL_NAME", "test-model")
-    fixture = _EVAL / "fixtures" / "example_live"
+    gold_case = _EVAL / "gold" / "example_live"
     metrics = build_regression_deepeval_metrics(
-        fixture,
+        gold_case,
         include_policy_strict=False,
         include_tool_correctness=True,
         include_task_completion=False,

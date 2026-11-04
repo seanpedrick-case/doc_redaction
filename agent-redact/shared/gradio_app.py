@@ -2078,6 +2078,35 @@ def _run_pi_chat(
             return _append_activity(act, f"**S3 upload:** {warning}")
         return act
 
+    is_redaction_task_turn = bool((document_name or "").strip())
+    gold_match_activity = ""
+    if is_redaction_task_turn:
+        try:
+            from eval_task_context import begin_redaction_task
+            from session_workspace import session_workspace_dir
+
+            pdf_path = None
+            doc = document_name.strip()
+            if doc:
+                candidate = session_workspace_dir(session_hash) / doc
+                if candidate.is_file():
+                    pdf_path = candidate
+            gold_match_activity = begin_redaction_task(
+                session_hash,
+                doc,
+                (redaction_instructions or message).strip(),
+                pdf_path=pdf_path,
+            )
+        except Exception:
+            gold_match_activity = ""
+    elif (message or "").strip():
+        try:
+            from eval_task_context import note_follow_up_or_steer_message
+
+            note_follow_up_or_steer_message(session_hash)
+        except Exception:
+            pass
+
     history = _prepend_pending_chat_notices(history, client)
     history.append({"role": "user", "content": chat_user_message or message.strip()})
     history.append({"role": "assistant", "content": ""})
@@ -2087,6 +2116,8 @@ def _run_pi_chat(
     if _uses_local_llama_orchestrator():
         prompt_activity += " Waiting for orchestration model."
     activity = _append_activity(activity, prompt_activity)
+    if gold_match_activity.strip():
+        activity = _append_activity(activity, gold_match_activity)
     if initial_session_info:
         activity = _append_activity(
             activity,
@@ -2136,26 +2167,6 @@ def _run_pi_chat(
         sys.stderr.write(
             f"DEBUG-FOLLOWUP send_prompt: session_hash={session_hash} preview={preview!r}\n"
         )
-
-    is_redaction_task_turn = bool((document_name or "").strip())
-    if is_redaction_task_turn:
-        try:
-            from eval_task_context import begin_redaction_task
-
-            begin_redaction_task(
-                session_hash,
-                document_name.strip(),
-                (redaction_instructions or message).strip(),
-            )
-        except Exception:
-            pass
-    elif (message or "").strip():
-        try:
-            from eval_task_context import note_follow_up_or_steer_message
-
-            note_follow_up_or_steer_message(session_hash)
-        except Exception:
-            pass
 
     _stage_agentcore_workspace_upload(client, session_hash, document_name)
     _stage_harness_input(client, session_hash, document_name)

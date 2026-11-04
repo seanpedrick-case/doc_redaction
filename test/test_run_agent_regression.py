@@ -13,12 +13,12 @@ if str(_EVAL) not in sys.path:
 from run_agent_regression import main as regression_main  # noqa: E402
 from run_agent_regression import run_regression  # noqa: E402
 
-_FIXTURE = _EVAL / "fixtures" / "example_smoke"
+_GOLD = _EVAL / "gold" / "example_smoke"
 
 
 def test_run_regression_gates_only_example_smoke():
     summary, run_dir = run_regression(
-        fixture_dir=_FIXTURE,
+        gold_case_dir=_GOLD,
         gates_only=True,
         orchestrator="langgraph",
     )
@@ -29,5 +29,5 @@ def test_run_regression_gates_only_example_smoke():
 
 
 def test_regression_cli_gates_only():
-    code = regression_main(["--fixture", str(_FIXTURE), "--gates-only"])
+    code = regression_main(["--gold", str(_GOLD), "--gates-only"])
     assert code == 0

@@ -22,7 +22,7 @@ from compare_policy_lists import (
     main as compare_main,
 )
 
-_FIXTURE = _EVAL / "fixtures" / "example_smoke"
+_GOLD = _EVAL / "gold" / "example_smoke"
 
 
 def test_normalize_phrase():
@@ -91,7 +91,7 @@ def test_fixture_extraction_cli():
     code = compare_main(
         [
             "--fixture",
-            str(_FIXTURE),
+            str(_GOLD),
             "--min-must-redact-recall",
             "0.9",
             "--min-must-not-redact-recall",

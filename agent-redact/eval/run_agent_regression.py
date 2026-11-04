@@ -4,10 +4,10 @@
 Example::
 
     python agent-redact/eval/run_agent_regression.py \\
-        --fixture agent-redact/eval/fixtures/example_smoke --gates-only
+        --gold agent-redact/eval/gold/example_smoke --gates-only
 
     python agent-redact/eval/run_agent_regression.py \\
-        --fixture agent-redact/eval/fixtures/example_live \\
+        --gold agent-redact/eval/gold/example_live \\
         --orchestrator langgraph
 """
 
@@ -58,9 +58,9 @@ def _read_text(path: Path | None) -> str:
     return path.read_text(encoding="utf-8").strip()
 
 
-def resolve_fixture_pdf(fixture_dir: Path) -> Path:
-    """Return PDF path for a fixture (input.pdf or manifest ``input_pdf``)."""
-    root = fixture_dir.resolve()
+def resolve_gold_case_pdf(gold_case_dir: Path) -> Path:
+    """Return PDF path for a gold case (input.pdf or manifest ``input_pdf``)."""
+    root = gold_case_dir.resolve()
     direct = root / "input.pdf"
     if direct.is_file():
         return direct
@@ -80,8 +80,11 @@ def resolve_fixture_pdf(fixture_dir: Path) -> Path:
     if matches:
         return matches[0]
     raise FileNotFoundError(
-        f"No input PDF for fixture {root}. Add input.pdf or manifest input_pdf."
+        f"No input PDF for gold case {root}. Add input.pdf or manifest input_pdf."
     )
+
+
+resolve_fixture_pdf = resolve_gold_case_pdf  # deprecated alias
 
 
 def discover_artifacts(search_root: Path) -> dict[str, Path | None]:
@@ -132,8 +135,42 @@ class GateSummary:
     policy_gate: dict[str, Any] | None = None
     policy_extraction: dict[str, Any] | None = None
     gold_geometry: dict[str, Any] | None = None
+    ocr_gold: dict[str, Any] | None = None
     exit_code: int = 0
     messages: list[str] = field(default_factory=list)
+
+
+def _env_truthy(name: str, *, default: bool = False) -> bool:
+    raw = (os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _env_float(name: str) -> float | None:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def gold_geometry_compare_options() -> dict[str, Any]:
+    """Env-driven options for ``compare_review_csvs`` (see eval README)."""
+    mode = (os.environ.get("AGENT_EVAL_GOLD_MATCH_MODE") or "gold_contained").strip()
+    if mode not in {"iou", "gold_contained", "agent_contained"}:
+        mode = "gold_contained"
+    threshold = _env_float("AGENT_EVAL_GOLD_IOU_THRESHOLD")
+    if threshold is None:
+        threshold = 0.85
+    many_to_one = _env_truthy("AGENT_EVAL_GOLD_MANY_TO_ONE", default=True)
+    return {
+        "mode": mode,
+        "threshold": threshold,
+        "many_to_one": many_to_one,
+    }
 
 
 def _apply_orchestrator_env(orchestrator: str) -> None:
@@ -221,12 +258,12 @@ def run_agent_turn(
     return result
 
 
-def seed_fixture_workspace(
-    fixture_dir: Path,
+def seed_gold_case_workspace(
+    gold_case_dir: Path,
     session_hash: str,
 ) -> tuple[Path, str, str]:
     """
-    Copy fixture PDF + build redaction prompt into the session workspace.
+    Copy gold case PDF + build redaction prompt into the session workspace.
 
     Returns ``(workspace_dir, pdf_basename, full_prompt)``.
     """
@@ -237,11 +274,11 @@ def seed_fixture_workspace(
     from redaction_prompt import prepare_redaction_task
     from session_workspace import ensure_session_workspace
 
-    fixture_dir = fixture_dir.resolve()
-    instructions = _read_text(fixture_dir / "instructions.txt")
+    gold_case_dir = gold_case_dir.resolve()
+    instructions = _read_text(gold_case_dir / "instructions.txt")
     if not instructions:
-        instructions = _read_text(fixture_dir / "instruction.txt")
-    pdf_path = resolve_fixture_pdf(fixture_dir)
+        instructions = _read_text(gold_case_dir / "instruction.txt")
+    pdf_path = resolve_gold_case_pdf(gold_case_dir)
     workspace = ensure_session_workspace(session_hash)
     file_name, prompt, _renamed = prepare_redaction_task(
         pdf_path,
@@ -251,12 +288,15 @@ def seed_fixture_workspace(
     return workspace, file_name, prompt
 
 
+seed_fixture_workspace = seed_gold_case_workspace  # deprecated alias
+
+
 def write_run_artifacts(
     run_dir: Path,
     *,
     turn: TurnResult | None,
     discovered: dict[str, Path | None],
-    fixture_dir: Path,
+    gold_case_dir: Path,
 ) -> dict[str, Path | None]:
     """Persist agent outputs and metadata under *run_dir*."""
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -297,9 +337,9 @@ def write_run_artifacts(
         paths[key] = dest
 
     # Fall back to fixture offline artifacts for gates-only runs.
-    from run_policy_gate import _discover_fixture_files
+    from run_policy_gate import _discover_gold_case_files
 
-    fixture_files = _discover_fixture_files(fixture_dir)
+    gold_files = _discover_gold_case_files(gold_case_dir)
     for key, fixture_key in (
         ("review_csv", "review_csv"),
         ("ocr_words_csv", "ocr_words_csv"),
@@ -307,7 +347,7 @@ def write_run_artifacts(
     ):
         if paths.get(key) is not None:
             continue
-        src = fixture_files.get(fixture_key)
+        src = gold_files.get(fixture_key)
         if src is not None and src.is_file():
             if key == "review_csv":
                 dest = run_dir / "agent_review_file.csv"
@@ -319,7 +359,7 @@ def write_run_artifacts(
                 shutil.copy2(src, dest)
             paths[key] = dest
 
-    manifest_src = fixture_dir / "manifest.json"
+    manifest_src = gold_case_dir / "manifest.json"
     if manifest_src.is_file():
         shutil.copy2(manifest_src, run_dir / "manifest.json")
     return paths
@@ -327,7 +367,7 @@ def write_run_artifacts(
 
 def run_deterministic_gates(
     run_dir: Path,
-    fixture_dir: Path,
+    gold_case_dir: Path,
     *,
     min_gold_f1: float | None = None,
     require_pass_strict: bool = True,
@@ -337,7 +377,7 @@ def run_deterministic_gates(
     from compare_policy_lists import compare_policy_extraction, load_observed_tool_args
     from compare_review_csvs import compare_review_csvs
     from run_policy_gate import (
-        _discover_fixture_files,
+        _discover_gold_case_files,
         _read_pattern_file,
         run_policy_gate,
     )
@@ -345,7 +385,7 @@ def run_deterministic_gates(
     summary = GateSummary()
     exit_code = 0
     run_dir = run_dir.resolve()
-    fixture_dir = fixture_dir.resolve()
+    gold_case_dir = gold_case_dir.resolve()
     artifact_paths = {
         "review_csv": run_dir / "agent_review_file.csv",
         "ocr_words_csv": run_dir / "ocr_results_with_words.csv",
@@ -356,10 +396,10 @@ def run_deterministic_gates(
         if not path.is_file():
             artifact_paths[key] = None  # type: ignore[assignment]
 
-    fixture_discovered = _discover_fixture_files(fixture_dir)
-    review_csv = artifact_paths["review_csv"] or fixture_discovered.get("review_csv")
-    ocr_csv = artifact_paths["ocr_words_csv"] or fixture_discovered.get("ocr_words_csv")
-    redacted = artifact_paths["redacted_pdf"] or fixture_discovered.get("redacted_pdf")
+    gold_discovered = _discover_gold_case_files(gold_case_dir)
+    review_csv = artifact_paths["review_csv"] or gold_discovered.get("review_csv")
+    ocr_csv = artifact_paths["ocr_words_csv"] or gold_discovered.get("ocr_words_csv")
+    redacted = artifact_paths["redacted_pdf"] or gold_discovered.get("redacted_pdf")
 
     if review_csv is None or not Path(review_csv).is_file():
         summary.messages.append("Missing review CSV for policy gate.")
@@ -370,8 +410,8 @@ def run_deterministic_gates(
         summary.exit_code = 2
         return summary
 
-    must_redact = _read_pattern_file(fixture_discovered.get("must_redact_file"))
-    must_not = _read_pattern_file(fixture_discovered.get("must_not_redact_file"))
+    must_redact = _read_pattern_file(gold_discovered.get("must_redact_file"))
+    must_not = _read_pattern_file(gold_discovered.get("must_not_redact_file"))
 
     summary.policy_gate = run_policy_gate(
         review_csv=Path(review_csv),
@@ -387,12 +427,12 @@ def run_deterministic_gates(
         summary.messages.append("Policy gate: pass_strict is false.")
         exit_code = 1
 
-    tool_args_path = artifact_paths["tool_args"] or fixture_discovered.get("tool_args")
-    gold_must = fixture_discovered.get("must_redact_file")
-    gold_not = fixture_discovered.get("must_not_redact_file")
-    gold_deny = fixture_dir / "expected_deny_list.txt"
+    tool_args_path = artifact_paths["tool_args"] or gold_discovered.get("tool_args")
+    gold_must = gold_discovered.get("must_redact_file")
+    gold_not = gold_discovered.get("must_not_redact_file")
+    gold_deny = gold_case_dir / "expected_deny_list.txt"
     if not gold_deny.is_file():
-        gold_deny = fixture_dir / "deny_list.txt"
+        gold_deny = gold_case_dir / "deny_list.txt"
 
     if compare_extraction and tool_args_path and Path(tool_args_path).is_file():
         if gold_must and gold_must.is_file():
@@ -422,17 +462,42 @@ def run_deterministic_gates(
                 )
                 exit_code = max(exit_code, 1)
 
-    ideal = fixture_dir / "ideal_review_file.csv"
+    ideal = gold_case_dir / "ideal_review_file.csv"
     agent_review = artifact_paths["review_csv"] or review_csv
     if ideal.is_file() and agent_review and Path(agent_review).is_file():
-        report = compare_review_csvs(ideal, agent_review)
+        geo_opts = gold_geometry_compare_options()
+        report = compare_review_csvs(
+            ideal,
+            agent_review,
+            threshold=geo_opts["threshold"],
+            mode=geo_opts["mode"],
+            many_to_one=geo_opts["many_to_one"],
+        )
         summary.gold_geometry = asdict(report)
         (run_dir / "gold_geometry.json").write_text(
             json.dumps(summary.gold_geometry, indent=2, default=str), encoding="utf-8"
         )
-        if min_gold_f1 is not None and report.f1 < min_gold_f1:
-            summary.messages.append(f"Gold F1 {report.f1} below {min_gold_f1}.")
+        min_gold = (
+            min_gold_f1
+            if min_gold_f1 is not None
+            else _env_float("AGENT_EVAL_MIN_GOLD_F1")
+        )
+        if min_gold is not None and report.f1 < min_gold:
+            summary.messages.append(f"Gold F1 {report.f1} below {min_gold}.")
             exit_code = 1
+
+    from compare_ocr_words_csvs import compare_ocr_gold_for_run
+
+    ocr_report = compare_ocr_gold_for_run(gold_case_dir=gold_case_dir, run_dir=run_dir)
+    summary.ocr_gold = ocr_report.to_dict()
+    (run_dir / "ocr_gold.json").write_text(
+        json.dumps(summary.ocr_gold, indent=2, default=str), encoding="utf-8"
+    )
+    if not ocr_report.skipped:
+        min_ocr = _env_float("AGENT_EVAL_MIN_OCR_F1")
+        if min_ocr is not None and ocr_report.f1 < min_ocr:
+            summary.messages.append(f"OCR gold F1 {ocr_report.f1} below {min_ocr}.")
+            exit_code = max(exit_code, 1)
 
     summary.exit_code = exit_code
     return summary
@@ -440,7 +505,7 @@ def run_deterministic_gates(
 
 def run_regression(
     *,
-    fixture_dir: Path,
+    gold_case_dir: Path,
     orchestrator: OrchestratorChoice = "langgraph",
     session_hash: str | None = None,
     run_dir: Path | None = None,
@@ -452,8 +517,8 @@ def run_regression(
 ) -> tuple[GateSummary, Path]:
     """Full regression pipeline; returns gate summary and output directory."""
     repo_root, _, eval_dir = _ensure_agent_imports()
-    fixture_dir = fixture_dir.resolve()
-    case_id = fixture_dir.name
+    gold_case_dir = gold_case_dir.resolve()
+    case_id = gold_case_dir.name
     stamp = time.strftime("%Y%m%d_%H%M%S")
     short_id = uuid.uuid4().hex[:8]
     out = run_dir or (eval_dir / "runs" / f"{case_id}_{stamp}_{short_id}")
@@ -464,7 +529,7 @@ def run_regression(
     workspace_for_search = repo_root / "workspace"
 
     if not gates_only:
-        workspace, _pdf_name, prompt = seed_fixture_workspace(fixture_dir, session)
+        workspace, _pdf_name, prompt = seed_gold_case_workspace(gold_case_dir, session)
         workspace_for_search = workspace
         orchestrators: list[str]
         if orchestrator == "both":
@@ -486,7 +551,10 @@ def run_regression(
             )
             discovered = discover_artifacts(workspace)
             write_run_artifacts(
-                orch_out, turn=last_turn, discovered=discovered, fixture_dir=fixture_dir
+                orch_out,
+                turn=last_turn,
+                discovered=discovered,
+                gold_case_dir=gold_case_dir,
             )
             if last_turn.error:
                 summary = GateSummary(
@@ -503,12 +571,12 @@ def run_regression(
             out,
             turn=None,
             discovered=discover_artifacts(workspace_for_search),
-            fixture_dir=fixture_dir,
+            gold_case_dir=gold_case_dir,
         )
 
     gates = run_deterministic_gates(
         out,
-        fixture_dir,
+        gold_case_dir,
         min_gold_f1=min_gold_f1,
     )
     if turn and turn.error:
@@ -518,7 +586,14 @@ def run_regression(
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Local agent regression harness.")
-    p.add_argument("--fixture", type=Path, required=True, help="Fixture directory.")
+    p.add_argument(
+        "--gold",
+        "--fixture",
+        type=Path,
+        dest="gold_case_dir",
+        required=True,
+        help="Gold case directory.",
+    )
     p.add_argument(
         "--orchestrator",
         choices=("langgraph", "pi", "both"),
@@ -552,7 +627,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
         summary, out_dir = run_regression(
-            fixture_dir=args.fixture,
+            gold_case_dir=args.gold_case_dir,
             orchestrator=args.orchestrator,  # type: ignore[arg-type]
             session_hash=args.session_hash,
             run_dir=args.run_dir,
@@ -582,7 +657,7 @@ def main(argv: list[str] | None = None) -> int:
         append_regression_run_row(
             gates=summary,
             run_dir=out_dir,
-            fixture_dir=args.fixture.resolve(),
+            gold_case_dir=args.gold_case_dir.resolve(),
             orchestrator=args.orchestrator,
         )
     except ImportError:

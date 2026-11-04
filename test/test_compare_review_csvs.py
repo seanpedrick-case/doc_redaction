@@ -24,7 +24,7 @@ from compare_review_csvs import (
     main as compare_main,
 )
 
-_FIXTURE = _EVAL / "fixtures" / "example_smoke"
+_GOLD = _EVAL / "gold" / "example_smoke"
 
 
 def test_box_iou_identical():
@@ -98,13 +98,13 @@ def test_many_to_one_covers_gold_with_split_agent_boxes():
 
 
 def test_load_and_compare_example_smoke_fixture():
-    gold = load_review_boxes(_FIXTURE / "ideal_review_file.csv")
-    agent = load_review_boxes(_FIXTURE / "agent_review_file.csv")
+    gold = load_review_boxes(_GOLD / "ideal_review_file.csv")
+    agent = load_review_boxes(_GOLD / "agent_review_file.csv")
     assert len(gold) == 1
     assert len(agent) == 1
     report = compare_review_csvs(
-        _FIXTURE / "ideal_review_file.csv",
-        _FIXTURE / "agent_review_file.csv",
+        _GOLD / "ideal_review_file.csv",
+        _GOLD / "agent_review_file.csv",
         threshold=0.5,
     )
     assert report.f1 >= 0.9
@@ -115,8 +115,8 @@ def test_cli_min_f1_and_json(tmp_path: Path):
     out = tmp_path / "report.json"
     code = compare_main(
         [
-            str(_FIXTURE / "ideal_review_file.csv"),
-            str(_FIXTURE / "agent_review_file.csv"),
+            str(_GOLD / "ideal_review_file.csv"),
+            str(_GOLD / "agent_review_file.csv"),
             "--min-f1",
             "0.9",
             "--json-out",

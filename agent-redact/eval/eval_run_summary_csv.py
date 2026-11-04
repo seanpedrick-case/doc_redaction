@@ -24,7 +24,7 @@ SUMMARY_CSV_COLUMNS: tuple[str, ...] = (
     "task_instructions_preview",
     "orchestrator",
     "model_name",
-    "fixture_path",
+    "gold_case_path",
     "eval_turn_kind",
     "follow_up_steer_count",
     "run_source",
@@ -42,6 +42,16 @@ SUMMARY_CSV_COLUMNS: tuple[str, ...] = (
     "task_completion_score",
     "task_completion_skipped",
     "pass_strict_from_gate",
+    "gold_geometry_f1",
+    "gold_geometry_recall",
+    "gold_geometry_precision",
+    "gold_geometry_skipped",
+    "ocr_gold_f1",
+    "ocr_gold_recall",
+    "ocr_gold_precision",
+    "ocr_gold_skipped",
+    "policy_extraction_must_redact_f1",
+    "policy_extraction_deny_list_f1",
     "run_dir",
     "eval_summary_file",
     "output_files",
@@ -123,6 +133,80 @@ def _metric_field(metrics: list[dict[str, Any]], name: str, field: str) -> Any:
     return ""
 
 
+def _read_run_json(run_dir: Path, filename: str) -> dict[str, Any] | None:
+    path = run_dir / filename
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _is_truthy_metric(val: Any) -> bool:
+    if val is True:
+        return True
+    if isinstance(val, str) and val.strip().lower() in {"true", "1", "yes"}:
+        return True
+    return False
+
+
+def _fill_deterministic_tier_columns(
+    row: dict[str, Any],
+    *,
+    run_dir: Path,
+    metrics: list[dict[str, Any]],
+) -> None:
+    """Populate gold geometry, OCR gold, and policy extraction columns."""
+    geo = _read_run_json(run_dir, "gold_geometry.json")
+    if geo is not None:
+        row["gold_geometry_f1"] = geo.get("f1", "")
+        row["gold_geometry_recall"] = geo.get("recall", "")
+        row["gold_geometry_precision"] = geo.get("precision", "")
+        row["gold_geometry_skipped"] = False
+    elif _is_truthy_metric(_metric_field(metrics, "gold_geometry", "skipped")):
+        row["gold_geometry_skipped"] = True
+    else:
+        score = _metric_field(metrics, "gold_geometry", "score")
+        if score != "" and score is not None:
+            row["gold_geometry_f1"] = score
+            row["gold_geometry_skipped"] = False
+        else:
+            row["gold_geometry_skipped"] = True
+
+    ocr = _read_run_json(run_dir, "ocr_gold.json")
+    if ocr is not None:
+        if ocr.get("skipped"):
+            row["ocr_gold_skipped"] = True
+        else:
+            row["ocr_gold_f1"] = ocr.get("f1", "")
+            row["ocr_gold_recall"] = ocr.get("recall", "")
+            row["ocr_gold_precision"] = ocr.get("precision", "")
+            row["ocr_gold_skipped"] = False
+    elif _is_truthy_metric(_metric_field(metrics, "ocr_gold", "skipped")):
+        row["ocr_gold_skipped"] = True
+    else:
+        score = _metric_field(metrics, "ocr_gold", "score")
+        if score != "" and score is not None:
+            row["ocr_gold_f1"] = score
+            row["ocr_gold_skipped"] = False
+        else:
+            row["ocr_gold_skipped"] = True
+
+    ext = _read_run_json(run_dir, "policy_extraction.json")
+    if ext is not None:
+        must = ext.get("must_redact") or {}
+        row["policy_extraction_must_redact_f1"] = must.get("f1", "")
+        deny = ext.get("deny_list")
+        if isinstance(deny, dict):
+            row["policy_extraction_deny_list_f1"] = deny.get("f1", "")
+    else:
+        score = _metric_field(metrics, "policy_extraction", "score")
+        if score != "" and score is not None:
+            row["policy_extraction_must_redact_f1"] = score
+
+
 def _read_pass_strict_from_gate(run_dir: Path) -> str:
     gate_path = run_dir / "policy_gate.json"
     if not gate_path.is_file():
@@ -192,7 +276,7 @@ def append_eval_run_summary_row(
         "task_instructions_preview": (task_instructions or "")[:500],
         "orchestrator": (os.environ.get("AGENT_ORCHESTRATOR") or "").strip(),
         "model_name": _model_label(),
-        "fixture_path": summary.get("fixture") or "",
+        "gold_case_path": summary.get("gold_case") or summary.get("fixture") or "",
         "eval_turn_kind": summary.get("eval_turn_kind") or "",
         "follow_up_steer_count": summary.get("follow_up_steer_count", ""),
         "run_source": run_source,
@@ -219,6 +303,7 @@ def append_eval_run_summary_row(
         "output_files": output_files,
         "intermediate_files": intermediate_files,
     }
+    _fill_deterministic_tier_columns(row, run_dir=run_dir, metrics=metrics)
 
     if csv_paths is not None:
         paths = list(csv_paths)
@@ -244,7 +329,7 @@ def append_regression_run_row(
     *,
     gates: GateSummary,
     run_dir: Path,
-    fixture_dir: Path,
+    gold_case_dir: Path,
     orchestrator: str,
     run_source: str = "regression",
 ) -> Path | None:
@@ -277,15 +362,15 @@ def append_regression_run_row(
     ]
     overall = gates.exit_code == 0 and bool(pass_strict)
     summary = {
-        "document_name": fixture_dir.name,
-        "fixture": str(fixture_dir.resolve()),
+        "document_name": gold_case_dir.name,
+        "gold_case": str(gold_case_dir.resolve()),
         "workflow_incomplete": False,
         "overall_pass": overall,
         "metrics": metrics,
         "eval_turn_kind": "regression",
         "follow_up_steer_count": 0,
     }
-    instructions_path = fixture_dir / "instructions.txt"
+    instructions_path = gold_case_dir / "instructions.txt"
     task = ""
     if instructions_path.is_file():
         task = instructions_path.read_text(encoding="utf-8")[:500]

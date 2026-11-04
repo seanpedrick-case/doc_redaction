@@ -1,6 +1,8 @@
 # Local agent regression (Windows). Requires Docker compose stack + config/agent.env.
 param(
-    [string]$Fixture = "agent-redact/eval/fixtures/example_live",
+    [string]$Gold = "agent-redact/eval/gold/example_live",
+    [Alias("Fixture")]
+    [string]$Fixture = "",
     [ValidateSet("langgraph", "pi", "both")]
     [string]$Orchestrator = "langgraph",
     [switch]$GatesOnly,
@@ -16,9 +18,10 @@ if (-not (Test-Path "config/agent.env")) {
     Write-Warning "config/agent.env not found — copy from config/agent.env.example and set AGENT_* / LLM URLs."
 }
 
+if ($Fixture) { $Gold = $Fixture }
 $args = @(
     "agent-redact/eval/run_agent_regression.py",
-    "--fixture", $Fixture,
+    "--gold", $Gold,
     "--orchestrator", $Orchestrator
 )
 if ($GatesOnly) { $args += "--gates-only" }

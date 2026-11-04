@@ -7,7 +7,7 @@ optional post-apply text-layer checks on ``*_redacted.pdf``.
 
 Fixture mode (recommended)::
 
-    python agent-redact/eval/run_policy_gate.py --fixture agent-redact/eval/fixtures/example_smoke
+    python agent-redact/eval/run_policy_gate.py --gold agent-redact/eval/gold/example_smoke
 
 Direct mode::
 
@@ -53,11 +53,11 @@ def _read_pattern_file(path: Path | None) -> list[str]:
     return lines
 
 
-def _discover_fixture_files(fixture_dir: Path) -> dict[str, Path | None]:
-    """Resolve standard fixture filenames under *fixture_dir*."""
-    root = fixture_dir.resolve()
+def _discover_gold_case_files(gold_case_dir: Path) -> dict[str, Path | None]:
+    """Resolve standard gold case filenames under *gold_case_dir*."""
+    root = gold_case_dir.resolve()
     if not root.is_dir():
-        raise FileNotFoundError(f"Fixture directory not found: {root}")
+        raise FileNotFoundError(f"Gold case directory not found: {root}")
 
     def first(*names: str) -> Path | None:
         for name in names:
@@ -144,9 +144,11 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Policy quality gate via verify_redaction_coverage."
     )
     parser.add_argument(
+        "--gold",
         "--fixture",
         type=Path,
-        help="Fixture directory (see agent-redact/eval/fixtures/README.md).",
+        dest="gold_case_dir",
+        help="Gold case directory (see agent-redact/eval/gold/README.md).",
     )
     parser.add_argument(
         "--review-csv", type=Path, help="Agent or candidate review CSV."
@@ -219,8 +221,8 @@ def main(argv: list[str] | None = None) -> int:
     redacted_pdf = args.redacted_pdf
     tool_args_path = args.agent_tool_args
 
-    if args.fixture:
-        discovered = _discover_fixture_files(args.fixture)
+    if args.gold_case_dir:
+        discovered = _discover_gold_case_files(args.gold_case_dir)
         review_csv = review_csv or discovered["review_csv"]
         ocr_words_csv = ocr_words_csv or discovered["ocr_words_csv"]
         must_redact_file = must_redact_file or discovered["must_redact_file"]
@@ -231,11 +233,11 @@ def main(argv: list[str] | None = None) -> int:
         tool_args_path = tool_args_path or discovered.get("tool_args")
 
     if review_csv is None or not Path(review_csv).is_file():
-        print("review CSV is required (--review-csv or --fixture)", file=sys.stderr)
+        print("review CSV is required (--review-csv or --gold)", file=sys.stderr)
         return 2
     if ocr_words_csv is None or not Path(ocr_words_csv).is_file():
         print(
-            "OCR words CSV is required (--ocr-words-csv or --fixture "
+            "OCR words CSV is required (--ocr-words-csv or --gold "
             "with ocr_results_with_words.csv)",
             file=sys.stderr,
         )
@@ -347,6 +349,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.require_pass_strict and not compliance:
         return 1
     return 0
+
+
+# Backward compatibility for imports.
+_discover_fixture_files = _discover_gold_case_files
 
 
 if __name__ == "__main__":

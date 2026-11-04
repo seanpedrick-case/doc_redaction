@@ -229,10 +229,10 @@ def _path_confined_to_workspace_base(path: Path) -> Path | None:
 def read_active_redaction_task_file(session_hash: str) -> dict[str, Any] | None:
     """Load active redaction task JSON for *session_hash* (path validated under workspace)."""
     path = active_redaction_task_path(session_hash)
-    if path is None or not path.is_file():
+    if path is None:
         return None
     safe_path = _path_confined_to_workspace_base(path)
-    if safe_path is None:
+    if safe_path is None or not safe_path.is_file():
         return None
     try:
         with safe_path.open(encoding="utf-8") as handle:

@@ -1,4 +1,0 @@
-{
-  "tools": ["doc_redact", "verify_coverage"],
-  "notes": "Minimal tools recorded in example_smoke tool_args.json; live Pass 1 may also call review_apply and helpers."
-}

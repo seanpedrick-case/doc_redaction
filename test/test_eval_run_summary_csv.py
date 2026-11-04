@@ -27,7 +27,7 @@ def test_append_eval_run_summary_row(tmp_path, monkeypatch):
     run_dir.mkdir()
     summary = {
         "document_name": "doc.pdf",
-        "fixture": "/fixtures/example_live",
+        "gold_case": "/gold/example_live",
         "overall_pass": False,
         "workflow_incomplete": False,
         "eval_turn_kind": "initial_task",
@@ -41,6 +41,23 @@ def test_append_eval_run_summary_row(tmp_path, monkeypatch):
     (run_dir / "eval_summary.json").write_text(json.dumps(summary), encoding="utf-8")
     (run_dir / "policy_gate.json").write_text(
         json.dumps({"pass_strict": False}), encoding="utf-8"
+    )
+    (run_dir / "gold_geometry.json").write_text(
+        json.dumps({"f1": 0.9, "recall": 0.88, "precision": 0.92}),
+        encoding="utf-8",
+    )
+    (run_dir / "ocr_gold.json").write_text(
+        json.dumps({"skipped": False, "f1": 0.95, "recall": 0.94, "precision": 0.96}),
+        encoding="utf-8",
+    )
+    (run_dir / "policy_extraction.json").write_text(
+        json.dumps(
+            {
+                "must_redact": {"f1": 1.0},
+                "deny_list": {"f1": 0.8},
+            }
+        ),
+        encoding="utf-8",
     )
 
     out = append_eval_run_summary_row(
@@ -58,10 +75,17 @@ def test_append_eval_run_summary_row(tmp_path, monkeypatch):
     row = rows[0]
     assert row["run_id"] == "gradio_abc_20261104_122626"
     assert row["document_name"] == "doc.pdf"
+    assert row["gold_case_path"] == "/gold/example_live"
     assert row["run_timestamp_utc"] == "2026-11-04T12:26:26Z"
     assert row["policy_strict_pass"] == "False"
     assert row["tool_correctness_pass"] == "True"
     assert row["pass_strict_from_gate"] == "false"
+    assert float(row["gold_geometry_f1"]) == 0.9
+    assert row["gold_geometry_skipped"] == "False"
+    assert float(row["ocr_gold_f1"]) == 0.95
+    assert row["ocr_gold_skipped"] == "False"
+    assert float(row["policy_extraction_must_redact_f1"]) == 1.0
+    assert float(row["policy_extraction_deny_list_f1"]) == 0.8
     assert "eval_summary.json" in row["output_files"]
     assert set(row.keys()) == set(SUMMARY_CSV_COLUMNS)
 

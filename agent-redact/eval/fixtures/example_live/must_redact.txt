@@ -1,4 +1,0 @@
-# Word-level OCR patterns (one per line). Adjust after inspecting OCR on the fixture PDF.
-@
-\+?\d
-\d{5}

@@ -29,7 +29,7 @@ from deepeval_metrics import (  # noqa: E402
 )
 from run_agent_regression import run_regression  # noqa: E402
 
-_SMOKE_FIXTURE = _EVAL / "fixtures" / "example_smoke"
+_SMOKE_GOLD = _EVAL / "gold" / "example_smoke"
 
 
 @pytest.fixture
@@ -47,7 +47,7 @@ def test_deepeval_policy_strict_gates_only(smoke_golden: Golden):
     @observe()
     def _run_offline_gate() -> str:
         summary, run_dir = run_regression(
-            fixture_dir=_SMOKE_FIXTURE,
+            gold_case_dir=_SMOKE_GOLD,
             gates_only=True,
             orchestrator="langgraph",
         )
@@ -91,14 +91,14 @@ def test_deepeval_langgraph_live_tool_and_task_metrics():
     pytest.importorskip("langchain_core")
     import os
 
-    live_fixture = _EVAL / "fixtures" / "example_live"
-    if not live_fixture.is_dir():
+    live_gold = _EVAL / "gold" / "example_live"
+    if not live_gold.is_dir():
         pytest.skip("example_live fixture missing")
 
-    instructions = (live_fixture / "instructions.txt").read_text(encoding="utf-8")
+    instructions = (live_gold / "instructions.txt").read_text(encoding="utf-8")
     golden = Golden(
         input=instructions,
-        expected_output=json.dumps({"fixture": str(live_fixture)}),
+        expected_output=json.dumps({"fixture": str(live_gold)}),
     )
 
     os.environ["AGENT_EVAL_DEEPEVAL_TRACING"] = "1"
@@ -107,7 +107,7 @@ def test_deepeval_langgraph_live_tool_and_task_metrics():
     @observe()
     def _run_live() -> str:
         summary, run_dir = run_regression(
-            fixture_dir=live_fixture,
+            gold_case_dir=live_gold,
             orchestrator="langgraph",
             gates_only=False,
         )
@@ -129,11 +129,11 @@ def test_deepeval_langgraph_live_tool_and_task_metrics():
     scored_golden = Golden(
         input=golden.input,
         expected_output=json.dumps(
-            {"fixture": str(live_fixture), "run_dir": str(run_dir_path)}
+            {"fixture": str(live_gold), "run_dir": str(run_dir_path)}
         ),
     )
     metrics = build_regression_deepeval_metrics(
-        live_fixture,
+        live_gold,
         include_policy_strict=True,
         include_tool_correctness=True,
         include_task_completion=True,
@@ -150,16 +150,16 @@ def test_deepeval_langgraph_live_tool_and_task_metrics():
 @pytest.mark.skip(reason="Requires Node pi CLI and orchestrator LLM.")
 def test_deepeval_pi_live_observe_wrapper():
     """Pi path uses manual @observe at the Python orchestration boundary."""
-    live_fixture = _EVAL / "fixtures" / "example_live"
+    live_gold = _EVAL / "gold" / "example_live"
     golden = Golden(
         input="Pi live regression",
-        expected_output=json.dumps({"fixture": str(live_fixture)}),
+        expected_output=json.dumps({"fixture": str(live_gold)}),
     )
 
     @observe()
     def _run_pi() -> None:
         summary, run_dir = run_regression(
-            fixture_dir=live_fixture,
+            gold_case_dir=live_gold,
             orchestrator="pi",
             gates_only=False,
         )
@@ -174,8 +174,8 @@ def test_deepeval_pi_live_observe_wrapper():
     assert_test(
         golden=golden,
         metrics=build_regression_deepeval_metrics(
-            live_fixture,
+            live_gold,
             include_task_completion=False,
-            task=(live_fixture / "instructions.txt").read_text(encoding="utf-8"),
+            task=(live_gold / "instructions.txt").read_text(encoding="utf-8"),
         ),
     )

@@ -37,20 +37,29 @@ class PolicyStrictMetric(BaseMetric):
 
     def measure(self, test_case: LLMTestCase) -> float:  # type: ignore[override]
         payload = _parse_expected_payload(test_case)
-        fixture = Path(payload["fixture"]).resolve()
-        run_dir = Path(payload.get("run_dir") or fixture).resolve()
+        gold_key = payload.get("gold_case") or payload.get("fixture")
+        if not gold_key:
+            raise ValueError('expected_output JSON must include "gold_case" path')
+        gold_case = Path(str(gold_key)).resolve()
+        run_dir = Path(payload.get("run_dir") or gold_case).resolve()
 
-        from run_agent_regression import run_deterministic_gates
+        gate_path = run_dir / "policy_gate.json"
+        if gate_path.is_file():
+            try:
+                data = json.loads(gate_path.read_text(encoding="utf-8"))
+                passed = bool(data.get("pass_strict"))
+            except (OSError, json.JSONDecodeError, TypeError):
+                passed = False
+        else:
+            from run_agent_regression import run_deterministic_gates
 
-        summary = run_deterministic_gates(
-            run_dir,
-            fixture,
-            require_pass_strict=True,
-            compare_extraction=bool(payload.get("compare_extraction", True)),
-        )
-        passed = summary.exit_code == 0 and bool(
-            (summary.policy_gate or {}).get("pass_strict")
-        )
+            summary = run_deterministic_gates(
+                run_dir,
+                gold_case,
+                require_pass_strict=True,
+                compare_extraction=bool(payload.get("compare_extraction", True)),
+            )
+            passed = bool((summary.policy_gate or {}).get("pass_strict"))
         self.success = passed
         self.score = 1.0 if passed else 0.0
         if passed:
@@ -225,6 +234,8 @@ def _parse_expected_payload(test_case: LLMTestCase) -> dict[str, Any]:
         data = json.loads(str(raw))
     except json.JSONDecodeError as exc:
         raise ValueError(f"expected_output must be JSON: {raw}") from exc
-    if not isinstance(data, dict) or "fixture" not in data:
-        raise ValueError('expected_output JSON must include "fixture" path')
+    if not isinstance(data, dict) or (
+        "gold_case" not in data and "fixture" not in data
+    ):
+        raise ValueError('expected_output JSON must include "gold_case" path')
     return data

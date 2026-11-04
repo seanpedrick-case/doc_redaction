@@ -5,7 +5,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO_ROOT"
 
-FIXTURE="${FIXTURE:-agent-redact/eval/fixtures/example_live}"
+GOLD="${GOLD:-${FIXTURE:-agent-redact/eval/gold/example_live}}"
 ORCHESTRATOR="${ORCHESTRATOR:-langgraph}"
 GATES_ONLY="${GATES_ONLY:-0}"
 PROVIDER="${PROVIDER:-}"
@@ -17,7 +17,7 @@ fi
 
 args=(
   agent-redact/eval/run_agent_regression.py
-  --fixture "$FIXTURE"
+  --gold "$GOLD"
   --orchestrator "$ORCHESTRATOR"
 )
 if [[ "$GATES_ONLY" == "1" ]]; then
