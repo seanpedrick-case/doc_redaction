@@ -3,7 +3,7 @@
 #
 # Core agent stack should already be installed from requirements_agent.txt.
 
-deepeval>=4.0.0
+deepeval>=4.3.2,<5
 
 # Terminal trace viewer (`deepeval inspect`) — large optional extra; dev machines only:
 # pip install "deepeval[inspect]"

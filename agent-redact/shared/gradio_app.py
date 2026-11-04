@@ -3315,7 +3315,7 @@ def build_ui():
             agent_running_state = gr.State(False)
             pending_followup_message = gr.State("")
 
-        with gr.Accordion("Redaction summary", open=False):
+        with gr.Accordion("Redaction summary", open=True):
             gr.Markdown(
                 "Shows the newest workspace markdown whose filename contains "
                 "`summary` (for example `SUMMARY.md` under `review/`)."
