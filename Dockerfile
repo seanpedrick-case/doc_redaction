@@ -1,5 +1,5 @@
 # Stage 1: Build dependencies and download models
-FROM public.ecr.aws/docker/library/python:3.13.15-slim-trixie AS builder
+FROM public.ecr.aws/docker/library/python:3.13.18-slim-trixie AS builder
 
 # Install system dependencies
 RUN apt-get update \
@@ -78,7 +78,7 @@ fi
 # ===================================================================
 # Stage 2: A common base for both Lambda and Gradio
 # ===================================================================
-FROM public.ecr.aws/docker/library/python:3.13.15-slim-trixie AS base
+FROM public.ecr.aws/docker/library/python:3.13.18-slim-trixie AS base
 
 # MUST re-declare ARGs in every stage where they are used in RUN commands
 ARG TORCH_GPU_ENABLED=False

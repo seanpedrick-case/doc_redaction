@@ -526,7 +526,9 @@ def _schedule_post_pi_task(
                     sys.path.insert(0, str(_eval_dir))
                 from post_run_eval import write_session_post_run_eval
 
-                summary_path = write_session_post_run_eval(**post_run_eval)
+                summary_path = write_session_post_run_eval(
+                    **post_run_eval,
+                )
                 if summary_path and _logger.isEnabledFor(logging.INFO):
                     _logger.info("Post-run eval summary: %s", summary_path)
             except Exception:
@@ -1755,6 +1757,12 @@ def _steer_agent_message_sync(
                 f"DEBUG-FOLLOWUP queued_steer_failed: session_hash={session_hash} error={exc!r}\n"
             )
         return _steer_yield()
+    try:
+        from eval_task_context import note_follow_up_or_steer_message
+
+        note_follow_up_or_steer_message(session_hash)
+    except Exception:
+        pass
     rpc.stage_ui_chat_notice("Steer", message.strip())
     history, _, _ = _integrate_pending_chat_notices(
         list(history or []),
@@ -2129,6 +2137,26 @@ def _run_pi_chat(
             f"DEBUG-FOLLOWUP send_prompt: session_hash={session_hash} preview={preview!r}\n"
         )
 
+    is_redaction_task_turn = bool((document_name or "").strip())
+    if is_redaction_task_turn:
+        try:
+            from eval_task_context import begin_redaction_task
+
+            begin_redaction_task(
+                session_hash,
+                document_name.strip(),
+                (redaction_instructions or message).strip(),
+            )
+        except Exception:
+            pass
+    elif (message or "").strip():
+        try:
+            from eval_task_context import note_follow_up_or_steer_message
+
+            note_follow_up_or_steer_message(session_hash)
+        except Exception:
+            pass
+
     _stage_agentcore_workspace_upload(client, session_hash, document_name)
     _stage_harness_input(client, session_hash, document_name)
 
@@ -2428,7 +2456,19 @@ def _run_pi_chat(
         ),
     )
     post_run_eval_payload: dict[str, Any] | None = None
-    if document_name.strip() and done_event_received:
+    active_eval_task = None
+    if done_event_received:
+        try:
+            from eval_task_context import (
+                append_turn_tool_calls,
+                get_active_task_for_eval,
+            )
+
+            append_turn_tool_calls(session_hash, captured_eval_events)
+            active_eval_task = get_active_task_for_eval(session_hash)
+        except Exception:
+            active_eval_task = None
+    if active_eval_task and done_event_received:
         try:
             from eval.arize_monitoring import agent_eval_deepeval_tracing_enabled
 
@@ -2443,10 +2483,17 @@ def _run_pi_chat(
                 post_run_eval_payload = {
                     "session_hash": session_hash,
                     "tool_events": list(captured_eval_events),
-                    "task_instructions": (redaction_instructions or message).strip(),
+                    "cumulative_tool_calls": list(
+                        active_eval_task.cumulative_tool_calls
+                    ),
+                    "task_instructions": active_eval_task.task_instructions,
                     "assistant_output": assistant_output,
-                    "document_name": document_name,
+                    "document_name": active_eval_task.document_name,
                     "workflow_incomplete": finish_incomplete,
+                    "follow_up_steer_count": active_eval_task.follow_up_steer_count,
+                    "eval_turn_kind": (
+                        "initial_task" if is_redaction_task_turn else "follow_up"
+                    ),
                 }
         except Exception:
             post_run_eval_payload = None

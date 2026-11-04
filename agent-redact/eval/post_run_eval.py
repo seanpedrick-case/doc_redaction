@@ -54,12 +54,20 @@ def write_session_post_run_eval(
     assistant_output: str,
     document_name: str = "",
     workflow_incomplete: bool = False,
+    follow_up_steer_count: int = 0,
+    eval_turn_kind: str = "initial_task",
+    cumulative_tool_calls: list[dict[str, Any]] | None = None,
 ) -> Path | None:
     """
     Persist artifacts under ``{session_workspace}/eval/run_<ts>/`` and ``eval_summary.json``.
 
     Runs when :func:`agent_eval_deepeval_tracing_enabled` is true (see ``arize_monitoring``).
     Policy / tool metrics need ``AGENT_EVAL_FIXTURE``; task completion uses *task_instructions*.
+
+    Gradio emits a new ``run_<ts>/`` folder after each completed turn (initial **Start
+    redaction task** or follow-up/steer). ``follow_up_steer_count`` counts user
+    follow-up and in-run steer messages since the last task start (see
+    ``eval_task_context``).
     """
     try:
         from eval.arize_monitoring import agent_eval_deepeval_tracing_enabled
@@ -77,7 +85,10 @@ def write_session_post_run_eval(
     run_dir = (workspace / "eval" / f"run_{stamp}").resolve()
     fixture_dir = resolve_eval_fixture_dir()
 
-    tool_args = record_tool_calls_from_events(tool_events)
+    if cumulative_tool_calls is not None:
+        tool_args = {"tool_calls": list(cumulative_tool_calls)}
+    else:
+        tool_args = record_tool_calls_from_events(tool_events)
     discovered = discover_artifacts(workspace)
     run_dir.mkdir(parents=True, exist_ok=True)
     if fixture_dir is not None:
@@ -98,6 +109,8 @@ def write_session_post_run_eval(
         "workflow_incomplete": workflow_incomplete,
         "fixture": str(fixture_dir) if fixture_dir else None,
         "task_instructions_preview": (task_instructions or "")[:500],
+        "follow_up_steer_count": max(0, int(follow_up_steer_count)),
+        "eval_turn_kind": (eval_turn_kind or "initial_task").strip() or "initial_task",
     }
     (run_dir / "gradio_run_meta.json").write_text(
         json.dumps(meta, indent=2), encoding="utf-8"
@@ -125,6 +138,8 @@ def write_session_post_run_eval(
         "fixture": str(fixture_dir) if fixture_dir else None,
         "overall_pass": overall_pass,
         "metrics": metrics,
+        "follow_up_steer_count": max(0, int(follow_up_steer_count)),
+        "eval_turn_kind": (eval_turn_kind or "initial_task").strip() or "initial_task",
     }
     summary_path = run_dir / "eval_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")

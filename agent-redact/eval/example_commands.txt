@@ -10,6 +10,8 @@ pytest test/agent/test_agent_deepeval.py -k policy_strict
 # Live DeepEval: ToolCorrectness + TaskCompletion + PolicyStrict
 # - Orchestrator LLM: AGENT_* in config/agent.env
 # - LangGraph tool trace + Gradio eval_summary.json: AGENT_EVAL_DEEPEVAL_TRACING=1
+#   (new run_<ts>/ after each task turn and after each follow-up/steer completion;
+#    eval_summary.json includes follow_up_steer_count)
 # - Gold policy/tools for Gradio scoring: AGENT_EVAL_FIXTURE=agent-redact/eval/fixtures/example_live
 # - TaskCompletion judge: USE_OPENAI_MODEL=1; OPENAI_BASE_URL or AGENT_LLAMA_BASE_URL
 #   (when OPENAI_BASE_URL is unset, eval uses AGENT_LLAMA_BASE_URL for the judge)
