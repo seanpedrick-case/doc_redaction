@@ -84,7 +84,9 @@ def _write_task(session_hash: str, task: ActiveRedactionTask) -> bool:
     return write_active_redaction_task_file(session_hash, payload)
 
 
-def _resolve_pdf_path(session_hash: str, document_name: str, pdf_path: Path | None) -> Path | None:
+def _resolve_pdf_path(
+    session_hash: str, document_name: str, pdf_path: Path | None
+) -> Path | None:
     if pdf_path is not None and pdf_path.is_file():
         return pdf_path
     candidate = session_workspace_dir(session_hash) / document_name
@@ -140,7 +142,9 @@ def begin_redaction_task(
                         f"**Eval skipped:** {result.reason or 'no matching gold case'}"
                     )
             else:
-                task.eval_gold_match_reason = "upload PDF not found in session workspace"
+                task.eval_gold_match_reason = (
+                    "upload PDF not found in session workspace"
+                )
                 log_line = f"**Eval skipped:** {task.eval_gold_match_reason}"
     except Exception as exc:
         task.eval_gold_match_reason = f"gold match error: {exc}"

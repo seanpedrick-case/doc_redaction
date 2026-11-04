@@ -36,7 +36,7 @@ _SMOKE_GOLD = _EVAL / "gold" / "example_smoke"
 def smoke_golden() -> Golden:
     return Golden(
         input="Synthetic smoke fixture (offline policy gate).",
-        expected_output=json.dumps({"fixture": str(_SMOKE_FIXTURE)}),
+        expected_output=json.dumps({"fixture": str(_SMOKE_GOLD)}),
     )
 
 
@@ -69,7 +69,7 @@ def test_deepeval_policy_strict_gates_only(smoke_golden: Golden):
         input=smoke_golden.input,
         expected_output=json.dumps(
             {
-                "fixture": str(_SMOKE_FIXTURE),
+                "fixture": str(_SMOKE_GOLD),
                 "run_dir": str(run_dir_holder["run_dir"]),
             }
         ),

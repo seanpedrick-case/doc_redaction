@@ -123,9 +123,11 @@ def test_manifest_hashes_strict(tmp_path):
     case.mkdir()
     (case / "input.pdf").write_bytes(pdf.read_bytes())
     (case / "instructions.txt").write_text(instructions, encoding="utf-8")
-    inst_hash = __import__("hashlib").sha256(
-        normalize_instructions_text(instructions).encode("utf-8")
-    ).hexdigest()
+    inst_hash = (
+        __import__("hashlib")
+        .sha256(normalize_instructions_text(instructions).encode("utf-8"))
+        .hexdigest()
+    )
     (case / "manifest.json").write_text(
         json.dumps(
             {

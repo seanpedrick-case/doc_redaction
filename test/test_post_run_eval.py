@@ -14,7 +14,6 @@ if str(_REPO / "agent-redact" / "shared") not in sys.path:
     sys.path.insert(0, str(_REPO / "agent-redact" / "shared"))
 
 from post_run_eval import (
-    resolve_eval_gold_dir,
     score_post_run_metrics,
     write_session_post_run_eval,
 )  # noqa: E402

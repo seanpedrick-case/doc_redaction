@@ -18,7 +18,9 @@ from compare_ocr_words_csvs import (  # noqa: E402
 )
 
 
-def _write_ocr_csv(path: Path, rows: list[tuple[int, str, float, float, float, float]]) -> None:
+def _write_ocr_csv(
+    path: Path, rows: list[tuple[int, str, float, float, float, float]]
+) -> None:
     lines = ["page,line,word_text,word_x0,word_y0,word_x1,word_y1"]
     for page, word, x0, y0, x1, y1 in rows:
         lines.append(f"{page},1,{word},{x0},{y0},{x1},{y1}")

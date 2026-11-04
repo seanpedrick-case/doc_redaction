@@ -21,7 +21,9 @@ from eval_run_summary_csv import (  # noqa: E402
 
 def test_append_eval_run_summary_row(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_EVAL_DEEPEVAL_TRACING", "1")
-    monkeypatch.setenv("AGENT_EVAL_RUN_SUMMARY_CSV_PATH", str(tmp_path / "eval_run_summary.csv"))
+    monkeypatch.setenv(
+        "AGENT_EVAL_RUN_SUMMARY_CSV_PATH", str(tmp_path / "eval_run_summary.csv")
+    )
 
     run_dir = tmp_path / "run_20261104_122626"
     run_dir.mkdir()
@@ -102,7 +104,9 @@ def test_rebuild_from_runs(tmp_path, monkeypatch):
     }
     (run_dir / "eval_summary.json").write_text(json.dumps(summary), encoding="utf-8")
 
-    count = rebuild_eval_run_summary_csv(search_root=runs, dest=tmp_path / "rebuilt.csv")
+    count = rebuild_eval_run_summary_csv(
+        search_root=runs, dest=tmp_path / "rebuilt.csv"
+    )
     assert count == 1
     text = (tmp_path / "rebuilt.csv").read_text(encoding="utf-8")
     assert "a.pdf" in text

@@ -17,6 +17,7 @@ ensure_gradio_importable()
 
 from session_workspace import (  # noqa: E402
     active_redaction_task_path,
+    coerce_safe_session_segment,
     effective_session_hash,
     ensure_session_workspace,
     prepare_session_workspace,
@@ -24,7 +25,6 @@ from session_workspace import (  # noqa: E402
     resolve_session_hash,
     sanitize_session_id,
     session_workspace_dir,
-    coerce_safe_session_segment,
     validated_sanitize_session_id,
     workspace_context_prefix,
     write_active_redaction_task_file,

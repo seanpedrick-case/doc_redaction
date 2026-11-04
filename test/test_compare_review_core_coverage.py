@@ -16,7 +16,6 @@ from compare_review_csvs import (  # noqa: E402
     Box,
     compare_review_csvs,
     extract_core_box_indices,
-    match_boxes,
     match_boxes_core_coverage,
     union_gold_coverage,
 )
