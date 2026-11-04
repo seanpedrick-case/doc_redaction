@@ -87,6 +87,7 @@ from pi_agent_config import (
     models_for_provider,
     normalize_backend_model,
     normalize_provider,
+    orchestrator_is_pi,
     pi_model_fallback_notice_from_state,
     provider_choices,
     provider_label,
@@ -117,6 +118,15 @@ from session_logs import collect_session_log_download, persist_session_log
 # empty AWS_REGION= which would freeze a blank region in tools.config.AWS_REGION.
 mirror_hf_token_from_env()
 configure_aws_credentials()
+
+try:
+    from eval.arize_monitoring import setup_arize_ax_tracing
+
+    setup_arize_ax_tracing(instrument_langchain=normalize_orchestrator() == "langgraph")
+except ImportError:
+    pass
+except Exception as exc:  # noqa: BLE001 — tracing must never block the UI
+    _logger.warning("Arize/Phoenix tracing setup skipped: %s", exc)
 
 # AgentCore + CloudFront: overlay the post-deploy backend URL + magic-link token
 # from S3 (task env is fixed at synth time and can't carry the CloudFront domain).
@@ -173,9 +183,10 @@ from tools.malware_scan import (
     make_malware_scan_upload_start,
 )
 
-# After ``tools.config`` import: it may set ``AGENT_DEFAULT_PROVIDER`` / ``AGENT_DEFAULT_MODEL``
-# when unset (must match ``pi_agent_config.get_default_provider``, not always Gemini).
-write_runtime_config()
+# After ``tools.config`` import: Pi CLI config (models/settings/skills). LangGraph /
+# AgentCore do not need workspace skills sync at import time.
+if orchestrator_is_pi():
+    write_runtime_config()
 
 from tools.gradio_platform import (
     log_agent_usage_event,
@@ -190,6 +201,11 @@ AGENT_FINISH_SIGNAL_NONE = ""
 AGENT_FINISH_SIGNAL_FINISHED = "finished"
 AGENT_FINISH_SIGNAL_ABORTED = "aborted"
 AGENT_FINISH_SIGNAL_ERROR = "error"
+
+_DEFAULT_MSG_PLACEHOLDER = "e.g. Stop — only redact names on page 3, not addresses"
+_CLARIFICATION_MSG_PLACEHOLDER = (
+    "Reply to the agent's question (e.g. A or B), then press Send"
+)
 
 # Must match ``chat_outputs`` in :func:`build_ui` (Gradio validates return count).
 _CHAT_OUTPUT_COMPONENT_COUNT = 16
@@ -269,6 +285,7 @@ def _agent_finish_chat_notice(
     aborted: bool = False,
     error: bool = False,
     incomplete: bool = False,
+    awaiting_clarification: bool = False,
 ) -> str:
     if aborted:
         return (
@@ -281,6 +298,13 @@ def _agent_finish_chat_notice(
             "---\n\n"
             "**Agent stopped** — the run ended with an error. Review the activity log "
             "and send a follow-up if needed."
+        )
+    if awaiting_clarification:
+        return (
+            "---\n\n"
+            "**Agent paused — your answer is needed.** The agent asked a policy question "
+            "above (`CLARIFICATION_NEEDED:`). Open **Follow-up / steer chat** below, "
+            "type your choice (e.g. **A** or **B**), and press **Send** to continue Pass 1."
         )
     if incomplete:
         return (
@@ -302,12 +326,18 @@ def _show_agent_finish_toast(
     aborted: bool = False,
     error: bool = False,
     incomplete: bool = False,
+    awaiting_clarification: bool = False,
 ) -> None:
     try:
         if aborted:
             gr.Info("Agent stopped (aborted).", duration=8)
         elif error:
             gr.Info("Agent stopped with an error.", duration=8)
+        elif awaiting_clarification:
+            gr.Info(
+                "Agent paused — reply in Follow-up / steer chat below.",
+                duration=12,
+            )
         elif incomplete:
             gr.Info("Agent paused — workflow incomplete.", duration=8)
         else:
@@ -329,9 +359,15 @@ def _notify_agent_finished(
     aborted: bool = False,
     error: bool = False,
     incomplete: bool = False,
+    awaiting_clarification: bool = False,
 ) -> str:
     """Show Gradio toast and return browser-notify signal for the finish handler."""
-    _show_agent_finish_toast(aborted=aborted, error=error, incomplete=incomplete)
+    _show_agent_finish_toast(
+        aborted=aborted,
+        error=error,
+        incomplete=incomplete,
+        awaiting_clarification=awaiting_clarification,
+    )
     return _agent_finish_signal_value(aborted=aborted, error=error)
 
 
@@ -343,9 +379,13 @@ def _append_agent_finish_notice(
     aborted: bool = False,
     error: bool = False,
     incomplete: bool = False,
+    awaiting_clarification: bool = False,
 ) -> tuple[list[dict[str, Any]], list[str], str]:
     note = _agent_finish_chat_notice(
-        aborted=aborted, error=error, incomplete=incomplete
+        aborted=aborted,
+        error=error,
+        incomplete=incomplete,
+        awaiting_clarification=awaiting_clarification,
     )
     completed_segments, streaming_text = _append_chat_segment(
         completed_segments, streaming_text, note
@@ -440,6 +480,7 @@ def _schedule_post_pi_task(
     total_page_count: int = 0,
     vlm_model_name: str | None = None,
     usage_baseline: Any = None,
+    post_run_eval: dict[str, Any] | None = None,
 ) -> None:
     """
     Run usage logging, session-log export, and optional S3 upload off the hot path.
@@ -478,6 +519,19 @@ def _schedule_post_pi_task(
             )
         except Exception:
             pass
+        if post_run_eval:
+            try:
+                _eval_dir = _AGENT_REDACT / "eval"
+                if str(_eval_dir) not in sys.path:
+                    sys.path.insert(0, str(_eval_dir))
+                from post_run_eval import write_session_post_run_eval
+
+                summary_path = write_session_post_run_eval(**post_run_eval)
+                if summary_path and _logger.isEnabledFor(logging.INFO):
+                    _logger.info("Post-run eval summary: %s", summary_path)
+            except Exception:
+                if _logger.isEnabledFor(logging.DEBUG):
+                    _logger.exception("Post-run eval failed")
 
     threading.Thread(target=_work, daemon=True).start()
 
@@ -716,6 +770,7 @@ def _is_agent_finish_notice_only(content: str) -> bool:
     markers = (
         "**Agent finished**",
         "**Agent stopped**",
+        "**Agent paused**",
     )
     return any(marker in stripped for marker in markers) and len(stripped) < 400
 
@@ -1157,6 +1212,8 @@ def _apply_event(
                 completed_segments,
                 streaming_text,
                 aborted=aborted,
+                incomplete=bool(event.meta.get("workflow_incomplete")),
+                awaiting_clarification=bool(event.meta.get("awaiting_clarification")),
             )
 
     return (
@@ -1581,6 +1638,7 @@ def _chat_yield(
     refresh_final_files: bool = False,
     refresh_pdf_preview: bool = False,
     agent_finish_signal: str = AGENT_FINISH_SIGNAL_NONE,
+    msg_placeholder: str | None = None,
 ):
     final_files: list[str] | None | dict[str, Any]
     session_log: str | None | dict[str, Any]
@@ -1602,7 +1660,12 @@ def _chat_yield(
     else:
         pdf_preview = gr.skip()
 
-    msg_out: str | dict[str, Any] = gr.update() if msg is None else msg
+    if msg is not None:
+        msg_out: str | dict[str, Any] = msg
+    elif msg_placeholder is not None:
+        msg_out = gr.update(placeholder=msg_placeholder)
+    else:
+        msg_out = gr.update()
 
     return (
         _clone_history(history),
@@ -1874,6 +1937,7 @@ def _run_pi_chat(
     total_page_count: int = 0,
     vlm_model_name: str | None = None,
     redact_file: str | None = None,
+    redaction_instructions: str = "",
 ):
     if not message or not message.strip():
         client = client if client and client.running else None
@@ -2074,7 +2138,9 @@ def _run_pi_chat(
     quota_failures = 0
     finish_aborted = False
     finish_incomplete = False
+    finish_awaiting_clarification = False
     done_event_received = False
+    captured_eval_events: list[AgentStreamEvent] = []
 
     try:
         while True:
@@ -2084,6 +2150,7 @@ def _run_pi_chat(
                     event = event_queue.get()
                     if event is None:
                         break
+                    captured_eval_events.append(event)
                     history, completed_segments, streaming_text = (
                         _integrate_pending_chat_notices(
                             history,
@@ -2098,6 +2165,9 @@ def _run_pi_chat(
                             event.text.strip().lower().startswith("agent aborted")
                         )
                         finish_incomplete = bool(event.meta.get("workflow_incomplete"))
+                        finish_awaiting_clarification = bool(
+                            event.meta.get("awaiting_clarification")
+                        )
                         done_event_received = True
                     (
                         history,
@@ -2319,6 +2389,7 @@ def _run_pi_chat(
             streaming_text,
             aborted=finish_aborted,
             incomplete=finish_incomplete,
+            awaiting_clarification=finish_awaiting_clarification,
         )
 
     _finalize_assistant_chat(
@@ -2330,7 +2401,9 @@ def _run_pi_chat(
     )
 
     finish_signal = _notify_agent_finished(
-        aborted=finish_aborted, incomplete=finish_incomplete
+        aborted=finish_aborted,
+        incomplete=finish_incomplete,
+        awaiting_clarification=finish_awaiting_clarification,
     )
     yield _chat_yield(
         history,
@@ -2348,7 +2421,36 @@ def _run_pi_chat(
         refresh_final_files=True,
         refresh_pdf_preview=True,
         agent_finish_signal=finish_signal,
+        msg_placeholder=(
+            _CLARIFICATION_MSG_PLACEHOLDER
+            if finish_awaiting_clarification
+            else _DEFAULT_MSG_PLACEHOLDER
+        ),
     )
+    post_run_eval_payload: dict[str, Any] | None = None
+    if document_name.strip() and done_event_received:
+        try:
+            from eval.arize_monitoring import agent_eval_deepeval_tracing_enabled
+
+            if agent_eval_deepeval_tracing_enabled():
+                assistant_output = ""
+                for msg in reversed(history):
+                    if msg.get("role") == "assistant":
+                        assistant_output = str(msg.get("content") or "")
+                        break
+                if not assistant_output.strip():
+                    assistant_output = "\n".join(completed_segments)
+                post_run_eval_payload = {
+                    "session_hash": session_hash,
+                    "tool_events": list(captured_eval_events),
+                    "task_instructions": (redaction_instructions or message).strip(),
+                    "assistant_output": assistant_output,
+                    "document_name": document_name,
+                    "workflow_incomplete": finish_incomplete,
+                }
+        except Exception:
+            post_run_eval_payload = None
+
     _schedule_post_pi_task(
         session_hash=session_hash,
         client=client,
@@ -2362,6 +2464,7 @@ def _run_pi_chat(
         total_page_count=total_page_count,
         vlm_model_name=vlm_model_name,
         usage_baseline=usage_baseline,
+        post_run_eval=post_run_eval_payload,
     )
 
 
@@ -2788,6 +2891,7 @@ def submit_redaction_task(
         pii_method=settings.pii_method,
         total_page_count=page_count,
         vlm_model_name=os.environ.get("AGENT_VLM_MODEL"),
+        redaction_instructions=user_instructions.strip(),
     )
 
 
@@ -3092,14 +3196,14 @@ def build_ui():
                 with gr.Accordion("Follow-up / steer chat (optional)", open=False):
                     gr.Markdown(
                         "While the agent is **running**, **Send** steers it after the "
-                        "current step. After **Agent finished**, **Send** starts a new "
-                        "chat turn in the same session (waits for Pi to fully settle)."
+                        "current step. After the run ends, **Send** continues the session "
+                        "(LangGraph: new turn; Pi: waits for the subprocess to settle). "
+                        "When the agent asks a **policy question** (`CLARIFICATION_NEEDED:`), "
+                        "reply here with your choice (e.g. **A** / **B**) and press **Send**."
                     )
                     msg = gr.Textbox(
                         label="Message",
-                        placeholder=(
-                            "e.g. Stop — only redact names on page 3, not addresses"
-                        ),
+                        placeholder=_DEFAULT_MSG_PLACEHOLDER,
                     )
                     send = gr.Button("Send", variant="secondary")
 
@@ -3207,18 +3311,19 @@ def build_ui():
                 file_types=[".jsonl"],
                 interactive=False,
             )
-            with gr.Accordion("Redaction summary", open=False):
-                gr.Markdown(
-                    "Shows the newest workspace markdown whose filename contains "
-                    "`summary` (for example `SUMMARY.md` under `review/`)."
-                )
-                summary_markdown = gr.Markdown(
-                    value=_SUMMARY_MARKDOWN_EMPTY,
-                    elem_classes=["summary-markdown-panel"],
-                )
             agent_finish_signal = gr.State(AGENT_FINISH_SIGNAL_NONE)
             agent_running_state = gr.State(False)
             pending_followup_message = gr.State("")
+
+        with gr.Accordion("Redaction summary", open=False):
+            gr.Markdown(
+                "Shows the newest workspace markdown whose filename contains "
+                "`summary` (for example `SUMMARY.md` under `review/`)."
+            )
+            summary_markdown = gr.Markdown(
+                value=_SUMMARY_MARKDOWN_EMPTY,
+                elem_classes=["summary-markdown-panel"],
+            )
 
         chat_outputs = [
             chatbot,

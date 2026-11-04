@@ -309,18 +309,76 @@ Treat it as **reporting / triage**, not the source of truth:
 
 ---
 
-## 5. Suggested CI usage
+## 5. Local agent regression (DeepEval-ready)
 
-Unit tests cover the comparator (`test/test_compare_review_csvs.py`) on synthetic CSVs (no PDF/OCR stack required).
+Fast **offline** tests (no LLM) run in default `pytest`: comparators and [`run_agent_regression.py --gates-only`](run_agent_regression.py) on [`fixtures/example_smoke/`](fixtures/example_smoke/).
 
-For a nightly or manual agent regression (not in default lightweight CI):
+**Live** regression runs on your machine only (not GitHub Actions in this phase): Docker compose + the same orchestrator models as the Gradio agent (`AGENT_DEFAULT_PROVIDER` / `AGENT_DEFAULT_MODEL` in [`config/agent.env`](../../config/agent.env.example)).
 
-1. Run agent (or LangGraph headless) on each fixture with pinned backend settings.  
-2. Persist `tool_args.json` from the run; score extraction with `compare_policy_lists.py --fixture …`.  
-3. Copy output `*_review_file.csv` → compare to `ideal_review_file.csv` with `--min-f1` (when gold boxes exist).  
-4. Run `run_policy_gate.py --fixture …` (gold lists); optionally `--dual` with recorded tool args.  
-5. Optionally assert process KPIs from Phoenix export / AgentCore evaluation results.  
-6. Optionally attach an LLM-as-judge summary on failures only ([§4](#4-llm-as-judge-optional-reporting)).
+### Orchestrator providers (same as Gradio)
+
+| Provider | `AGENT_DEFAULT_PROVIDER` | Typical local setup |
+|----------|--------------------------|---------------------|
+| llama.cpp | `llama-cpp` | [`docker-compose_llama_agentic.yml`](../../docker-compose_llama_agentic.yml) + `AGENT_LLAMA_BASE_URL` |
+| Gemini | `google-gemini` | `GOOGLE_API_KEY` (or project env) in `config/agent.env` |
+| Bedrock | `amazon-bedrock` | AWS creds + `AGENT_DEFAULT_MODEL` |
+
+Set **`AGENT_ORCHESTRATOR`** to `langgraph` or `pi` before running the harness (or pass `--orchestrator`).
+
+### Recipe
+
+1. Start stack (example):
+
+   ```bash
+   docker compose -f docker-compose_llama_agentic.yml --profile 27b_38 up -d
+   # Pi: also start the matching pi-agent-* service
+   ```
+
+2. Configure [`config/agent.env`](../../config/agent.env.example) (never commit secrets).
+
+3. Run regression:
+
+   ```powershell
+   # Windows
+   .\agent-redact\eval\run_local_agent_eval.ps1 -Fixture agent-redact/eval/fixtures/example_live -Orchestrator langgraph
+
+   # Linux/macOS
+   FIXTURE=agent-redact/eval/fixtures/example_live ORCHESTRATOR=langgraph \
+     ./agent-redact/eval/run_local_agent_eval.sh
+   ```
+
+   Or directly:
+
+   ```bash
+   python agent-redact/eval/run_agent_regression.py \
+     --fixture agent-redact/eval/fixtures/example_live \
+     --orchestrator langgraph
+
+   # Offline scoring only (recorded CSVs / example_smoke):
+   python agent-redact/eval/run_agent_regression.py \
+     --fixture agent-redact/eval/fixtures/example_smoke --gates-only
+   ```
+
+4. Outputs land under [`eval/runs/`](runs/) (`agent_review_file.csv`, `tool_args.json`, `policy_gate.json`, …).
+
+5. **Optional DeepEval** (dev venv):
+
+   ```bash
+   pip install -r agent-redact/requirements_agent.txt -r agent-redact/requirements_agent_eval.txt
+   deepeval test run test/agent/test_agent_deepeval.py
+   deepeval inspect   # requires pip install "deepeval[inspect]"
+   ```
+
+   **DeepEval metrics:** offline pytest uses custom **`PolicyStrictMetric`** only. Live runs can add DeepEval **`ToolCorrectnessMetric`** + **`TaskCompletionMetric`** via [`build_regression_deepeval_metrics()`](deepeval_metrics.py) (set `AGENT_EVAL_DEEPEVAL_TRACING=1` for LangGraph tool traces; judge API for task completion). See [`example_commands.txt`](example_commands.txt). Product pass/fail should still rely on policy gate / gold F1 ([§4](#4-llm-as-judge-optional-reporting)).
+
+   **Gradio agent UI:** with `AGENT_EVAL_DEEPEVAL_TRACING=1`, each completed **Start redaction task** writes `{session_workspace}/eval/run_<timestamp>/eval_summary.json` (pass/fail/score for **policy_strict**, **tool_correctness**, **task_completion**). Set **`AGENT_EVAL_FIXTURE`** to a fixture dir for gold policy and expected tools; task completion uses your redaction instructions and needs judge API credentials when DeepEval is installed. Optional **`AGENT_EVAL_MIRROR_RUNS=1`** copies the folder to [`eval/runs/`](runs/).
+
+### Fixtures
+
+- [`example_smoke/`](fixtures/example_smoke/) — synthetic CSVs, no PDF (`--gates-only`).
+- [`example_live/`](fixtures/example_live/) — small public PDF via `manifest.json` `input_pdf`; tune gold lists after a blessed run.
+
+GitHub Actions can reuse the same CLI later; default repo CI remains lightweight ([`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)).
 
 ---
 
@@ -329,7 +387,11 @@ For a nightly or manual agent regression (not in default lightweight CI):
 | Path | Role |
 |------|------|
 | [`arize_monitoring.py`](arize_monitoring.py) | OTEL setup for Gradio agent runtimes |
+| [`post_run_eval.py`](post_run_eval.py) | Gradio post-task `eval_summary.json` when `AGENT_EVAL_DEEPEVAL_TRACING=1` |
 | [`compare_review_csvs.py`](compare_review_csvs.py) | Gold vs agent box F1 CLI / library |
 | [`compare_policy_lists.py`](compare_policy_lists.py) | Gold vs observed must_redact / deny_list extraction F1 + guardrail |
 | [`run_policy_gate.py`](run_policy_gate.py) | Fixture-friendly coverage gate (+ `--dual`) |
-| [`fixtures/`](fixtures/) | Case layout + `example_smoke` synthetic CSVs / tool_args |
+| [`run_agent_regression.py`](run_agent_regression.py) | Local live/offline harness → deterministic gates |
+| [`deepeval_metrics.py`](deepeval_metrics.py) | DeepEval metric wired to `pass_strict` |
+| [`run_local_agent_eval.ps1`](run_local_agent_eval.ps1) / [`.sh`](run_local_agent_eval.sh) | Thin wrappers for local runs |
+| [`fixtures/`](fixtures/) | Case layout + `example_smoke` / `example_live` |

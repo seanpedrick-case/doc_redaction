@@ -171,16 +171,41 @@ def resolve_agent_env_file(config_dir: Path) -> Path:
     return new_path
 
 
+def _agent_env_file_overrides_process_env() -> bool:
+    """
+    When True, keys in ``agent.env`` replace same-named process env vars on load.
+
+    Local Docker bind-mounts ``config/agent.env`` but Compose also injects that file
+    at **container create** time; ``docker compose restart`` does not refresh those
+    vars, so stale values (e.g. old ``ARIZE_PROJECT_NAME``) would otherwise win over
+    an edited mounted file when ``override=False``.
+
+    ECS / HF task env should still win over the file — keep ``override=False`` there.
+    """
+    raw = (os.environ.get("AGENT_ENV_FILE_OVERRIDES_PROCESS_ENV") or "").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    profile = os.environ.get("AGENT_DEPLOYMENT_PROFILE", "local-docker").strip().lower()
+    return profile in ("local-docker",)
+
+
 def load_pi_agent_env_file(config_path: str | Path | None = None) -> bool:
     """
-    Load ``config/agent.env`` into ``os.environ`` (does not override existing vars).
+    Load ``config/agent.env`` into ``os.environ``.
 
     Must run before ``import pi_agent_config`` so module-level defaults see the file.
+
+    Under ``AGENT_DEPLOYMENT_PROFILE=local-docker`` (default), the mounted file
+    overrides existing process env so edits apply after ``compose restart`` without
+    ``--force-recreate``. Set ``AGENT_ENV_FILE_OVERRIDES_PROCESS_ENV=false`` to
+    keep container/task env authoritative (legacy behaviour).
     """
     path = Path(config_path or os.environ.get("APP_CONFIG_PATH", "")).expanduser()
     if not path.is_file():
         return False
-    load_dotenv(path, override=False)
+    load_dotenv(path, override=_agent_env_file_overrides_process_env())
     return True
 
 
@@ -212,8 +237,8 @@ def ensure_pi_config_env(repo_root: Path | None = None) -> str:
     Set process env so ``tools.config`` loads the Pi agent env file.
 
     Must run before any ``from pi_agent_config import ...`` or ``tools.config`` import
-    that depends on Pi env vars. Safe to call multiple times; does not override
-    existing environment variables.
+    that depends on Pi env vars. Safe to call multiple times; see
+    :func:`load_pi_agent_env_file` for override behaviour.
     """
     root = (repo_root or Path(__file__).resolve().parents[2]).resolve()
     migrate_legacy_pi_env_vars()

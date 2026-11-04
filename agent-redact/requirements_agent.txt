@@ -6,7 +6,7 @@
 # Version caps align with requirements_lightweight.txt where packages overlap.
 
 # --- Gradio UI + API client ---
-gradio==6.28.0
+gradio==6.31.0
 gradio-pdf-redaction<=0.0.25
 httpx<=0.28.1
 requests<=2.34.2
@@ -33,9 +33,9 @@ langchain-aws<=1.7.4
 langchain-google-genai<=4.3.6
 
 # --- Arize AX / Phoenix tracing (optional; LangGraph + Pi — see config/agent.env.example ARIZE_*) ---
-arize-otel<=0.13.0
-arize-phoenix-otel<=0.17.1
-arize-phoenix<=20.4.0
+arize-otel>=0.13.0
+arize-phoenix-otel>=0.17.1
+arize-phoenix<=21.0.0
 openinference-instrumentation-langchain<=0.1.72
 
 # --- General utilities ---

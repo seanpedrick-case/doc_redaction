@@ -73,5 +73,6 @@ skills/example_prompts/*
 .pi/sessions/
 agent-redact/pi/agent/sessions/
 agent-redact/RedactionAgent/*
+agent-redact/eval/runs/
 .env
 .certs/*

@@ -1,0 +1,9 @@
+# Optional dev dependencies for local agent eval (not used in HF Space runtime).
+# Install: pip install -r agent-redact/requirements_agent.txt -r agent-redact/requirements_agent_eval.txt
+#
+# Core agent stack should already be installed from requirements_agent.txt.
+
+deepeval>=4.0.0
+
+# Terminal trace viewer (`deepeval inspect`) — large optional extra; dev machines only:
+# pip install "deepeval[inspect]"
