@@ -22,7 +22,7 @@ pillow>=12.3.0,<13
 pdfminer.six<=20260107
 pdf2image>=1.17.0,<2
 pymupdf>=1.26.2,<2
-pikepdf>=10.17.0,<11
+pikepdf>=10.12.0,<11
 opencv-python>=4.14.0.94,<5
 presidio_analyzer==2.2.365
 presidio_anonymizer==2.2.365

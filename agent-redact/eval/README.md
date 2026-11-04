@@ -373,6 +373,8 @@ Set **`AGENT_ORCHESTRATOR`** to `langgraph` or `pi` before running the harness (
 
    **Gradio agent UI:** with `AGENT_EVAL_DEEPEVAL_TRACING=1`, each completed **Start redaction task** writes `{session_workspace}/eval/run_<timestamp>/eval_summary.json` (pass/fail/score for **policy_strict**, **tool_correctness**, **task_completion**). Set **`AGENT_EVAL_FIXTURE`** to a fixture dir for gold policy and expected tools; task completion uses your redaction instructions and needs judge API credentials when DeepEval is installed. Optional **`AGENT_EVAL_MIRROR_RUNS=1`** copies the folder to [`eval/runs/`](runs/).
 
+   **Run summary CSV:** when tracing is on (opt out with `AGENT_EVAL_RUN_SUMMARY_CSV=0`), each run appends one row to [`eval/outputs/eval_run_summary.csv`](outputs/eval_run_summary.csv) and `{session_workspace}/eval/eval_run_summary.csv` — same idea as topic-modeller `eval_run_summary.csv` (timestamps, pass/score columns, `output_files` / `intermediate_files`). Rebuild from mirrored runs: `python -c "from eval_run_summary_csv import rebuild_eval_run_summary_csv; print(rebuild_eval_run_summary_csv())"` from `agent-redact/eval/`.
+
 ### Fixtures
 
 - [`example_smoke/`](fixtures/example_smoke/) — synthetic CSVs, no PDF (`--gates-only`).
@@ -388,6 +390,7 @@ GitHub Actions can reuse the same CLI later; default repo CI remains lightweight
 |------|------|
 | [`arize_monitoring.py`](arize_monitoring.py) | OTEL setup for Gradio agent runtimes |
 | [`post_run_eval.py`](post_run_eval.py) | Gradio post-task `eval_summary.json` when `AGENT_EVAL_DEEPEVAL_TRACING=1` |
+| [`eval_run_summary_csv.py`](eval_run_summary_csv.py) | Append-only `eval_run_summary.csv` across Gradio + regression runs |
 | [`compare_review_csvs.py`](compare_review_csvs.py) | Gold vs agent box F1 CLI / library |
 | [`compare_policy_lists.py`](compare_policy_lists.py) | Gold vs observed must_redact / deny_list extraction F1 + guardrail |
 | [`run_policy_gate.py`](run_policy_gate.py) | Fixture-friendly coverage gate (+ `--dual`) |

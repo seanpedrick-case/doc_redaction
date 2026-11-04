@@ -576,6 +576,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     for msg in summary.messages:
         print(msg, file=sys.stderr)
+    try:
+        from eval_run_summary_csv import append_regression_run_row
+
+        append_regression_run_row(
+            gates=summary,
+            run_dir=out_dir,
+            fixture_dir=args.fixture.resolve(),
+            orchestrator=args.orchestrator,
+        )
+    except ImportError:
+        pass
     if args.allow_fail:
         return 0
     return int(summary.exit_code)

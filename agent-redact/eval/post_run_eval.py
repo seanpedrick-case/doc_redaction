@@ -161,6 +161,26 @@ def write_session_post_run_eval(
         except OSError:
             pass
 
+    try:
+        from eval_run_summary_csv import append_eval_run_summary_row
+    except ImportError:
+        append_eval_run_summary_row = None  # type: ignore[misc, assignment]
+
+    if append_eval_run_summary_row is not None:
+        session_csv = workspace / "eval" / "eval_run_summary.csv"
+        mirrored = summary.get("mirrored_to")
+        run_id = (
+            Path(mirrored).name if mirrored else f"gradio_{session_hash[:8]}_{stamp}"
+        )
+        append_eval_run_summary_row(
+            summary=summary,
+            run_dir=run_dir,
+            task_instructions=task_instructions,
+            run_id=run_id,
+            run_source="gradio",
+            extra_csv_paths=[session_csv],
+        )
+
     return summary_path
 
 
