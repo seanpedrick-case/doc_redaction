@@ -246,39 +246,48 @@ Layout under [`gold/<case>/`](gold/):
 
 Version gold CSVs with PDF content hash + instruction text so fixtures stay reproducible. Pin `ocr_method` / `pii_method` / redaction backend URL when comparing orchestrators (`pi` vs `langgraph`).
 
-### Matching rules ([`compare_review_csvs.py`](compare_review_csvs.py))
+### Gold geometry scoring ([`compare_review_csvs.py`](compare_review_csvs.py))
 
-| Mode | Score | Use when |
+**Default (Gradio + regression):** `AGENT_EVAL_GOLD_GEOMETRY_SCORING=core_coverage` (set `legacy_box_match` for the old greedy 1:1 row matcher).
+
+| Scoring | Meaning |
+|---------|---------|
+| **`core_coverage`** | Derive **core** rows from ideal/agent CSV (drop nested sub-spans like `Dr` inside `Dr David R.`). **Recall** = fraction of core gold spans whose area is covered by the **union** of agent boxes (≥ threshold). **Precision** = fraction of core agent boxes that overlap a core gold span. |
+| **`legacy_box_match`** | Every CSV row counts; greedy pairwise match with containment/IoU modes below. |
+
+Core coverage answers “are blessed **spans** redacted?” without requiring duplicate PII-detector layers. Tier 2 **policy gate** still answers “are **words** covered per regex lists?”
+
+| Legacy mode (`AGENT_EVAL_GOLD_GEOMETRY_CONTAINMENT`) | Score | Use when |
 |------|-------|----------|
-| `iou` (default) | Intersection-over-union | Strict geometric agreement |
 | `gold_contained` | ∩ / area(gold) | Agent may draw larger boxes |
 | `agent_contained` | ∩ / area(agent) | Penalize huge unnecessary boxes |
+| `iou` | Intersection-over-union | Strict geometric agreement |
 
-Default threshold **0.5**. Reports **precision**, **recall**, **F1**, and **strict_pass** (every gold matched and no unmatched agent boxes).
+Threshold **0.85** default (`AGENT_EVAL_GOLD_IOU_THRESHOLD`). Legacy also supports **`AGENT_EVAL_GOLD_MANY_TO_ONE=true`**.
 
-Post-run eval defaults (Gradio + regression gates): **`gold_contained`**, threshold **0.85**, **`many_to_one=true`** via env (see below).
+| Env | Default | Role |
+|-----|---------|------|
+| `AGENT_EVAL_GOLD_GEOMETRY_SCORING` | `core_coverage` | `core_coverage` or `legacy_box_match` |
+| `AGENT_EVAL_GOLD_GEOMETRY_CONTAINMENT` | `gold_contained` | Legacy matcher only (replaces overloading `AGENT_EVAL_GOLD_MATCH_MODE` for geometry) |
+| `AGENT_EVAL_GOLD_CORE_SUBSUME_THRESHOLD` | `0.9` | Drop nested core rows when smaller box is ≥90% inside larger + text sub-span |
+| `AGENT_EVAL_GOLD_CORE_AGENT_OVERLAP` | `0.05` | Min intersection/area(agent) for precision TP |
 
 ```bash
 python agent-redact/eval/compare_review_csvs.py \
   gold/example_smoke/ideal_review_file.csv \
   gold/example_smoke/agent_review_file.csv \
-  --iou-threshold 0.5 --min-f1 0.9
+  --scoring core_coverage --iou-threshold 0.85
 
-# Smoke subset: require perfect 1:1 coverage
-python agent-redact/eval/compare_review_csvs.py gold.csv agent.csv --require-strict
-
-# Merged agent boxes vs one gold span
+# Legacy greedy matcher
 python agent-redact/eval/compare_review_csvs.py gold.csv agent.csv \
-  --mode gold_contained --many-to-one --min-f1 0.85
+  --scoring legacy_box_match --mode gold_contained --many-to-one --min-f1 0.85
 ```
 
 ### Brittleness mitigations
 
-- Prefer F1 + containment modes over exact coordinate equality.  
-- Use `--many-to-one` when agents split or merge word boxes.  
-- Geometry-only by default; add `--require-label-match` for a separate label gate.  
-- Keep fixtures small; re-generate gold after OCR pipeline changes.  
-- Always run the **policy gate** on the same case — policy can pass when gold F1 fails (acceptable alternate boxing).
+- Prefer **core_coverage** for agentic runs; use **legacy** only when you need strict CSV row parity.  
+- Keep gold CSVs as exported from review (PII stack rows OK — core is derived at score time).  
+- Always run the **policy gate** on the same case — policy can pass when geometry F1 is low (alternate boxing).
 
 ---
 
@@ -384,9 +393,11 @@ Set **`AGENT_ORCHESTRATOR`** to `langgraph` or `pi` before running the harness (
 
    | Variable | Default | Role |
    |----------|---------|------|
-   | `AGENT_EVAL_GOLD_MATCH_MODE` | `gold_contained` | `iou`, `gold_contained`, or `agent_contained` for ideal vs agent review CSV |
-   | `AGENT_EVAL_GOLD_IOU_THRESHOLD` | `0.85` | Minimum match score for gold geometry |
-   | `AGENT_EVAL_GOLD_MANY_TO_ONE` | `true` | Allow multiple agent boxes per gold box |
+   | `AGENT_EVAL_GOLD_GEOMETRY_SCORING` | `core_coverage` | `core_coverage` or `legacy_box_match` |
+   | `AGENT_EVAL_GOLD_GEOMETRY_CONTAINMENT` | `gold_contained` | Legacy matcher: `iou`, `gold_contained`, `agent_contained` |
+   | `AGENT_EVAL_GOLD_IOU_THRESHOLD` | `0.85` | Coverage threshold (core union recall + legacy match) |
+   | `AGENT_EVAL_GOLD_MANY_TO_ONE` | `true` | Legacy: multiple agent boxes per gold box |
+   | `AGENT_EVAL_GOLD_MATCH_MODE` | `strict_then_soft` | **Task auto-match only** (PDF + instructions), not geometry |
    | `AGENT_EVAL_MIN_GOLD_F1` | *(unset)* | Fail gates / optional `overall_pass` when below |
    | `AGENT_EVAL_MIN_OCR_F1` | *(unset)* | Fail gates when OCR gold F1 below threshold |
    | `AGENT_EVAL_OCR_IOU_THRESHOLD` | *(unset)* | Require word bbox IoU for OCR token matches |

@@ -1,0 +1,8 @@
+{
+  "case_id": "example_smoke",
+  "description": "Synthetic geometry + policy smoke fixture (no PDF).",
+  "pdf_sha256": null,
+  "ocr_method": "synthetic",
+  "pii_method": "synthetic",
+  "notes": "Ideal and agent boxes nearly overlap; OCR includes Alice Example (must_redact) and Example Council (must_not_redact)."
+}

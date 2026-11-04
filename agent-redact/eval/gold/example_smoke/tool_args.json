@@ -1,0 +1,19 @@
+{
+  "tool_calls": [
+    {
+      "tool": "doc_redact",
+      "args": {
+        "pdf_relative_path": "example.pdf",
+        "deny_list": ["Alice"]
+      }
+    },
+    {
+      "tool": "verify_coverage",
+      "args": {
+        "review_csv_relative_path": "agent_review_file.csv",
+        "must_redact": ["Alice"],
+        "must_not_redact": ["Example Council"]
+      }
+    }
+  ]
+}

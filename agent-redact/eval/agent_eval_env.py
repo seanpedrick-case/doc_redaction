@@ -80,3 +80,29 @@ def gold_match_mode() -> str:
     if mode in {"strict_only", "soft_only", "strict_then_soft"}:
         return mode
     return "strict_then_soft"
+
+
+def gold_geometry_scoring_mode() -> str:
+    raw = (os.environ.get("AGENT_EVAL_GOLD_GEOMETRY_SCORING") or "").strip().lower()
+    if raw in {"legacy", "legacy_box_match", "box_match"}:
+        return "legacy_box_match"
+    if raw in {"core", "core_coverage"}:
+        return "core_coverage"
+    return "core_coverage"
+
+
+def gold_geometry_containment_mode() -> str:
+    """IoU/containment metric for legacy_box_match geometry only."""
+    raw = _env_raw("AGENT_EVAL_GOLD_GEOMETRY_CONTAINMENT")
+    if not raw:
+        legacy = (os.environ.get("AGENT_EVAL_GOLD_MATCH_MODE") or "").strip()
+        if legacy in {"iou", "gold_contained", "agent_contained"}:
+            _warn_legacy_once(
+                "AGENT_EVAL_GOLD_MATCH_MODE (geometry)",
+                "AGENT_EVAL_GOLD_GEOMETRY_CONTAINMENT",
+            )
+            return legacy
+        return "gold_contained"
+    if raw not in {"iou", "gold_contained", "agent_contained"}:
+        return "gold_contained"
+    return raw

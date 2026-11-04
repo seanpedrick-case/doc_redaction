@@ -60,3 +60,9 @@ agent-redact/RedactionAgent/*
 .certs/*
 agent-redact/RedactionAgent/__pycache__/*
 agent-redact/eval/gold/*
+!agent-redact/eval/gold/README.md
+!agent-redact/eval/gold/example_smoke/
+!agent-redact/eval/gold/example_smoke/**
+!agent-redact/eval/gold/example_live/
+!agent-redact/eval/gold/example_live/**
+agent-redact/eval/gold/**/*.pdf

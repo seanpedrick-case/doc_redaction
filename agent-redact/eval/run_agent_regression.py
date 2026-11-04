@@ -159,17 +159,20 @@ def _env_float(name: str) -> float | None:
 
 def gold_geometry_compare_options() -> dict[str, Any]:
     """Env-driven options for ``compare_review_csvs`` (see eval README)."""
-    mode = (os.environ.get("AGENT_EVAL_GOLD_MATCH_MODE") or "gold_contained").strip()
-    if mode not in {"iou", "gold_contained", "agent_contained"}:
-        mode = "gold_contained"
+    from agent_eval_env import (
+        gold_geometry_containment_mode,
+        gold_geometry_scoring_mode,
+    )
+
     threshold = _env_float("AGENT_EVAL_GOLD_IOU_THRESHOLD")
     if threshold is None:
         threshold = 0.85
     many_to_one = _env_truthy("AGENT_EVAL_GOLD_MANY_TO_ONE", default=True)
     return {
-        "mode": mode,
+        "mode": gold_geometry_containment_mode(),
         "threshold": threshold,
         "many_to_one": many_to_one,
+        "scoring": gold_geometry_scoring_mode(),
     }
 
 
@@ -472,8 +475,9 @@ def run_deterministic_gates(
             threshold=geo_opts["threshold"],
             mode=geo_opts["mode"],
             many_to_one=geo_opts["many_to_one"],
+            scoring=geo_opts["scoring"],
         )
-        summary.gold_geometry = asdict(report)
+        summary.gold_geometry = report.to_dict()
         (run_dir / "gold_geometry.json").write_text(
             json.dumps(summary.gold_geometry, indent=2, default=str), encoding="utf-8"
         )

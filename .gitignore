@@ -75,7 +75,14 @@ agent-redact/pi/agent/sessions/
 agent-redact/RedactionAgent/*
 agent-redact/eval/runs/
 agent-redact/RedactionAgent/__pycache__/*
+# Gold catalog: only whitelisted cases are tracked (CI smoke/live). Other case dirs stay local.
 agent-redact/eval/gold/*
+!agent-redact/eval/gold/README.md
+!agent-redact/eval/gold/example_smoke/
+!agent-redact/eval/gold/example_smoke/**
+!agent-redact/eval/gold/example_live/
+!agent-redact/eval/gold/example_live/**
+agent-redact/eval/gold/**/*.pdf
 agent-redact/eval/outputs/*.csv
 .env
 .certs/*
