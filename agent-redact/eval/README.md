@@ -331,7 +331,7 @@ Set **`AGENT_ORCHESTRATOR`** to `langgraph` or `pi` before running the harness (
 
    ```bash
    docker compose -f docker-compose_llama_agentic.yml --profile 27b_38 up -d
-   # Pi: also start the matching pi-agent-* service
+   # Also start the matching agent-* compose service
    ```
 
 2. Configure [`config/agent.env`](../../config/agent.env.example) (never commit secrets).

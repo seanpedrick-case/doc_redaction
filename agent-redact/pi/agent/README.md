@@ -104,7 +104,7 @@ After the llama.cpp service is healthy, confirm the model id:
 curl http://localhost:8000/v1/models
 ```
 
-If the returned `id` differs from `unsloth/Qwen3.6-27B-MTP-GGUF`, set `AGENT_LLAMA_MODEL_ID` in `config/agent.env` or compose environment and restart `pi-agent`.
+If the returned `id` differs from `unsloth/Qwen3.6-27B-MTP-GGUF`, set `AGENT_LLAMA_MODEL_ID` in `config/agent.env` or compose environment and restart the agent service (e.g. `agent` on profile `27b_36`).
 
 ### llama.cpp / llama-swap and back-to-back redaction tasks
 
@@ -115,7 +115,7 @@ If the **first** redaction task succeeds but a **second** task in the same brows
 3. **llama-swap GPU monitor** — on newer NVIDIA drivers, older llama-swap builds fail `nvidia-smi -loop` and can log `failed reading from gpuCh`. Upgrade to [llama-swap v213+](https://github.com/mostlygeek/llama-swap) (or disable performance monitoring in your swap config).
 4. **Concurrent load** — Pi orchestration and doc_redaction VLM may share one llama endpoint; `--parallel 1` allows only one generation. Wait until the first task shows **Agent finished** before starting another.
 
-For Gemma 4 31B, `pi-agent-gemma-31b` sets lower compaction defaults (`AGENT_COMPACTION_RESERVE_TOKENS=16384`) to match `AGENT_LLAMA_CONTEXT_WINDOW=65536`.
+For Gemma 4 31B, `agent-gemma-31b` sets lower compaction defaults (`AGENT_COMPACTION_RESERVE_TOKENS=16384`) to match `AGENT_LLAMA_CONTEXT_WINDOW=65536`.
 
 ## In-container URLs for task prompts
 
@@ -141,7 +141,7 @@ docker compose -f docker-compose_llama_agentic.yml --profile 27b_36 up -d --buil
 Interactive Pi TUI:
 
 ```powershell
-docker compose -f docker-compose_llama_agentic.yml exec -it pi-agent pi
+docker compose -f docker-compose_llama_agentic.yml exec -it agent pi
 ```
 
 Gradio chat UI (browser):
@@ -158,7 +158,7 @@ The UI also shows:
 - **Abort** — sends Pi RPC `abort` and cancels the in-flight Gradio handler
 - **Workspace output files** — browse and download redaction artifacts
 
-Optional env vars on `pi-agent`: `AGENT_GRADIO_SHOW_THINKING`, `AGENT_GRADIO_SHOW_TOOL_OUTPUT`, `AGENT_GRADIO_TOOL_OUTPUT_MAX`, `AGENT_GRADIO_ACTIVITY_MAX_LINES`.
+Optional env vars on the agent service: `AGENT_GRADIO_SHOW_THINKING`, `AGENT_GRADIO_SHOW_TOOL_OUTPUT`, `AGENT_GRADIO_TOOL_OUTPUT_MAX`, `AGENT_GRADIO_ACTIVITY_MAX_LINES`.
 
 When a Pi run completes, the chat shows an **Agent finished** (or **Agent stopped**) line, a Gradio info toast appears, and the browser tab title flashes for ~15 seconds. Desktop notifications are shown when the browser has granted notification permission (requested on first click/keypress in the Pi UI).
 
@@ -178,12 +178,12 @@ python gradio_app.py
 RPC mode (automation, no Gradio):
 
 ```powershell
-docker compose -f docker-compose_llama_agentic.yml exec -T pi-agent pi --mode rpc
+docker compose -f docker-compose_llama_agentic.yml exec -T agent pi --mode rpc
 ```
 
 Skills are synced from the repo `skills/` tree into **`{AGENT_WORKSPACE_DIR}/.pi/skills/`** on startup (read-only). Pi runs with `cwd` in the user’s session subfolder and `--no-skills` so it does not load skills from the git checkout. Use `/skill:doc-redaction-app` etc. Set `AGENT_SKILLS_RESYNC=true` to refresh copies from the repo.
 
-Sessions persist in the **`pi-agent-sessions`** Docker volume at **`~/.pi/agent/sessions/`** (Pi’s default session location inside the container). Override with `AGENT_SESSION_DIR` if needed.
+Sessions persist in the **`agent-sessions`** Docker volume at **`~/.pi/agent/sessions/`** (Pi’s default session location inside the container). Override with `AGENT_SESSION_DIR` if needed.
 
 On **HF Space** (`AGENT_DEPLOYMENT_PROFILE=hf-space`), sessions go to **`/tmp/agent-sessions`** instead (ephemeral; lost on restart).
 
@@ -194,7 +194,7 @@ The agent image installs [`requirements_agent.txt`](../requirements_agent.txt) �
 Rebuild after changing that file:
 
 ```powershell
-docker compose -f docker-compose_llama_agentic.yml --profile 27b_36 build pi-agent
+docker compose -f docker-compose_llama_agentic.yml --profile 27b_36 build agent
 ```
 
 ## HF Space profile (remote redaction backend)

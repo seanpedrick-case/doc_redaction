@@ -22,10 +22,10 @@ pytest test/agent/test_agent_deepeval.py -k policy_strict
 # If running pi agent in a container, can use the following commands to run DeepEval within:
 
 # With eval deps baked in (DeepEval / eval_summary.json):
-# INSTALL_AGENT_EVAL=1 docker compose -f docker-compose_llama_agentic.yml --profile <profile> up -d --build pi-agent-38
+# INSTALL_AGENT_EVAL=1 docker compose -f docker-compose_llama_agentic.yml --profile <profile> up -d --build agent-38
 # Or set AGENT_INSTALL_EVAL_DEPS=true in config/agent.env (installs on container start).
 docker compose -f docker-compose_llama_agentic.yml --profile <your-profile> up -d
-docker compose -f docker-compose_llama_agentic.yml exec pi-agent-38 bash
+docker compose -f docker-compose_llama_agentic.yml exec agent-38 bash
 
 python agent-redact/eval/run_agent_regression.py `
   --fixture agent-redact/eval/fixtures/example_live `

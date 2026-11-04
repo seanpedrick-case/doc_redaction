@@ -12,25 +12,25 @@
 # docker compose -f docker-compose_llama_agentic.yml --profile gemma4-26b up -d
 
 # Optional Gradio post-run eval (DeepEval / eval_summary.json): set INSTALL_AGENT_EVAL=1
-# in .env (or the shell) and rebuild the pi-agent image:
-#   INSTALL_AGENT_EVAL=1 docker compose -f docker-compose_llama_agentic.yml --profile 27b_38 up -d --build pi-agent-38
+# in .env (or the shell) and rebuild the agent image:
+#   INSTALL_AGENT_EVAL=1 docker compose -f docker-compose_llama_agentic.yml --profile 27b_38 up -d --build agent-38
 # Runtime-only (no rebuild): AGENT_INSTALL_EVAL_DEPS=true in config/agent.env (start.sh pip install).
 #
-# For agentic usage with pi (use the pi-agent* service that matches the profile):
-# docker compose -f docker-compose_llama_agentic.yml --profile 27b_38 up -d pi-agent-38
-# docker compose -f docker-compose_llama_agentic.yml --profile 35b_36 up -d pi-agent-35b
-# docker compose -f docker-compose_llama_agentic.yml --profile gemma4-31b up -d pi-agent-gemma-31b
-# docker compose -f docker-compose_llama_agentic.yml --profile gemma4-26b up -d pi-agent-gemma-26b
+# Agentic UI (Pi, LangGraph, or AgentCore — use the agent* service that matches the profile):
+# docker compose -f docker-compose_llama_agentic.yml --profile 27b_38 up -d agent-38
+# docker compose -f docker-compose_llama_agentic.yml --profile 35b_36 up -d agent-35b
+# docker compose -f docker-compose_llama_agentic.yml --profile gemma4-31b up -d agent-gemma-31b
+# docker compose -f docker-compose_llama_agentic.yml --profile gemma4-26b up -d agent-gemma-26b
 
-# Cloud-only Pi agent (no local llama.cpp GPU model; redaction app still runs locally):
-# Set GEMINI_API_KEY (and optionally GOOGLE_API_KEY) in .env or config/agent.env before starting pi-gemini.
-# docker compose -f docker-compose_llama_agentic.yml --profile pi-gemini up -d
+# Cloud-backed agent (no local llama.cpp GPU model; redaction app still runs locally):
+# Set GEMINI_API_KEY (and optionally GOOGLE_API_KEY) in .env or config/agent.env before starting agent-gemini.
+# docker compose -f docker-compose_llama_agentic.yml --profile agent-gemini up -d
 
-# Set AWS_REGION plus AWS credentials (or AWS_PROFILE via mounted ~/.aws) before starting pi-bedrock.
+# Set AWS_REGION plus AWS credentials (or AWS_PROFILE via mounted ~/.aws) before starting agent-bedrock.
 # SSO (recommended): mount host ~/.aws (read-write — SSO token refresh writes to sso/cache),
 # set AWS_PROFILE (or AGENT_AWS_PROFILE) to your SSO profile name, run `aws sso login` on the host.
-# Pi requires AWS_PROFILE in the container env — mounting ~/.aws alone is not enough for Pi's auth check.
-# docker compose -f docker-compose_llama_agentic.yml --profile pi-bedrock up -d
+# Pi orchestrator requires AWS_PROFILE in the container env — mounting ~/.aws alone is not enough for Pi's auth check.
+# docker compose -f docker-compose_llama_agentic.yml --profile agent-bedrock up -d
 #
 # Optional Docker-only settings for redaction-app services: copy settings into
 # config/docker_app_config.env (see config/docker_app_config.env.example). Loaded
@@ -41,14 +41,14 @@ x-redaction-app-env: &redaction-app-env
     - path: config/docker_app_config.env
       required: false
 
-x-pi-agent-common: &pi-agent-common
+x-agent-common: &agent-common
   build:
     context: .
     dockerfile: agent-redact/pi-agent/Dockerfile
     target: dev
     args:
       INSTALL_AGENT_EVAL: ${INSTALL_AGENT_EVAL:-0}
-  image: pi-agent-doc-redaction${INSTALL_AGENT_EVAL:+-eval}
+  image: agent-doc-redaction${INSTALL_AGENT_EVAL:+-eval}
   env_file:
     - path: config/agent.env
       required: false
@@ -59,7 +59,7 @@ x-pi-agent-common: &pi-agent-common
   volumes:
     - .:/workspace/doc_redaction:rw
     - ./workspace:/home/user/app/workspace:rw
-    - pi-agent-sessions:/home/user/.pi/agent/sessions
+    - agent-sessions:/home/user/.pi/agent/sessions
   working_dir: /workspace/doc_redaction
   stdin_open: true
   tty: true
@@ -67,7 +67,7 @@ x-pi-agent-common: &pi-agent-common
   networks:
     - redaction-net-llama
 
-x-pi-agent-env: &pi-agent-env
+x-agent-env: &agent-env
   APP_TYPE: agent
   APP_CONFIG_PATH: /workspace/doc_redaction/config/agent.env
   HOME: /home/user
@@ -662,10 +662,10 @@ services:
     networks:
       - redaction-net-llama
 
-  # Cloud-backed redaction app (no llama.cpp). Network alias keeps pi-agent URL unchanged.
+  # Cloud-backed redaction app (no llama.cpp). Network alias keeps agent DOC_REDACTION_GRADIO_URL unchanged.
   redaction-app-llama-gemini:
     <<: *redaction-app-build
-    profiles: ["pi-gemini"]
+    profiles: ["agent-gemini"]
     environment:
       - FLAGS_fraction_of_gpu_memory_to_use=0.05
       - RUN_FASTAPI=True
@@ -713,7 +713,7 @@ services:
 
   redaction-app-llama-bedrock:
     <<: *redaction-app-build
-    profiles: ["pi-bedrock"]
+    profiles: ["agent-bedrock"]
     environment:
       - FLAGS_fraction_of_gpu_memory_to_use=0.05
       - RUN_FASTAPI=True
@@ -776,9 +776,9 @@ services:
         aliases:
           - redaction-app-llama
 
-  # Qwen 3.6 27B agent. Do not pass this service with --profile 27b_38 (that starts 3.6 as well); use pi-agent-38.
-  pi-agent:
-    <<: *pi-agent-common
+  # Qwen 3.6 27B agent. Do not pass this service with --profile 27b_38 (that starts 3.8 as well); use agent-38.
+  agent:
+    <<: *agent-common
     profiles: ["27b_36"]
     depends_on:
       qwen36-27b_q4_gguf:
@@ -790,14 +790,14 @@ services:
       redaction-app-llama:
         condition: service_started
     environment:
-      <<: *pi-agent-env
+      <<: *agent-env
       AGENT_LLAMA_MODEL_ID: ${AGENT_LLAMA_MODEL_ID:-unsloth/Qwen3.6-27B-MTP-GGUF}
       AGENT_LLAMA_CONTEXT_WINDOW: ${AGENT_LLAMA_CONTEXT_WINDOW:-114688}
       AGENT_LLAMA_MAX_TOKENS: ${AGENT_LLAMA_MAX_TOKENS:-32768}
       AGENT_VLM_MODEL: ${AGENT_VLM_MODEL:-unsloth/Qwen3.6-27B-MTP-GGUF}
 
-  pi-agent-38:
-    <<: *pi-agent-common
+  agent-38:
+    <<: *agent-common
     profiles: ["27b_38"]
     depends_on:
       qwen38-27b_q4_gguf:
@@ -805,14 +805,14 @@ services:
       redaction-app-llama:
         condition: service_started
     environment:
-      <<: *pi-agent-env
+      <<: *agent-env
       AGENT_LLAMA_MODEL_ID: ${AGENT_LLAMA_MODEL_ID:-unsloth/Qwen3.8-27B-GGUF}
       AGENT_LLAMA_CONTEXT_WINDOW: ${AGENT_LLAMA_CONTEXT_WINDOW:-114688}
       AGENT_LLAMA_MAX_TOKENS: ${AGENT_LLAMA_MAX_TOKENS:-32768}
       AGENT_VLM_MODEL: ${AGENT_VLM_MODEL:-unsloth/Qwen3.8-27B-GGUF}
 
-  pi-agent-35b:
-    <<: *pi-agent-common
+  agent-35b:
+    <<: *agent-common
     profiles: ["35b_36"]
     depends_on:
       qwen36-35b_q4_gguf:
@@ -820,14 +820,14 @@ services:
       redaction-app-llama:
         condition: service_started
     environment:
-      <<: *pi-agent-env
+      <<: *agent-env
       AGENT_LLAMA_MODEL_ID: ${AGENT_LLAMA_MODEL_ID:-unsloth/Qwen3.6-35B-A3B-GGUF}
       AGENT_LLAMA_CONTEXT_WINDOW: ${AGENT_LLAMA_CONTEXT_WINDOW:-196608}
       AGENT_LLAMA_MAX_TOKENS: ${AGENT_LLAMA_MAX_TOKENS:-65536}
       AGENT_VLM_MODEL: ${AGENT_VLM_MODEL:-unsloth/Qwen3.6-35B-A3B-GGUF}
 
-  pi-agent-gemma-31b:
-    <<: *pi-agent-common
+  agent-gemma-31b:
+    <<: *agent-common
     profiles: ["gemma4-31b"]
     depends_on:
       gemma4-31b_q4_gguf:
@@ -835,7 +835,7 @@ services:
       redaction-app-llama:
         condition: service_started
     environment:
-      <<: *pi-agent-env
+      <<: *agent-env
       AGENT_LLAMA_MODEL_ID: ${AGENT_LLAMA_MODEL_ID:-unsloth/gemma-4-31B-it-GGUF}
       AGENT_LLAMA_CONTEXT_WINDOW: ${AGENT_LLAMA_CONTEXT_WINDOW:-65536}
       AGENT_LLAMA_MAX_TOKENS: ${AGENT_LLAMA_MAX_TOKENS:-32768}
@@ -843,8 +843,8 @@ services:
       AGENT_COMPACTION_KEEP_RECENT_TOKENS: ${AGENT_COMPACTION_KEEP_RECENT_TOKENS:-12288}
       AGENT_VLM_MODEL: ${AGENT_VLM_MODEL:-unsloth/gemma-4-31B-it-GGUF}
 
-  pi-agent-gemma-26b:
-    <<: *pi-agent-common
+  agent-gemma-26b:
+    <<: *agent-common
     profiles: ["gemma4-26b"]
     depends_on:
       gemma4-26b_q4_gguf:
@@ -852,20 +852,20 @@ services:
       redaction-app-llama:
         condition: service_started
     environment:
-      <<: *pi-agent-env
+      <<: *agent-env
       AGENT_LLAMA_MODEL_ID: ${AGENT_LLAMA_MODEL_ID:-unsloth/gemma-4-26B-A4B-it-GGUF}
       AGENT_LLAMA_CONTEXT_WINDOW: ${AGENT_LLAMA_CONTEXT_WINDOW:-65536}
       AGENT_LLAMA_MAX_TOKENS: ${AGENT_LLAMA_MAX_TOKENS:-32768}
       AGENT_VLM_MODEL: ${AGENT_VLM_MODEL:-unsloth/gemma-4-26B-A4B-it-GGUF}
 
-  pi-agent-gemini:
-    <<: *pi-agent-common
-    profiles: ["pi-gemini"]
+  agent-gemini:
+    <<: *agent-common
+    profiles: ["agent-gemini"]
     depends_on:
       redaction-app-llama-gemini:
         condition: service_started
     environment:
-      <<: *pi-agent-env
+      <<: *agent-env
       AGENT_DEFAULT_PROVIDER: google-gemini
       AGENT_DEFAULT_MODEL: ${AGENT_DEFAULT_MODEL:-gemini-flash-latest}
       AGENT_DEFAULT_OCR_METHOD: hybrid-paddle-vlm
@@ -873,19 +873,19 @@ services:
       AGENT_VLM_BASE_URL: http://redaction-app-llama:7860
       AGENT_VLM_MODEL: ${AGENT_VLM_MODEL:-gemini-flash-latest}
 
-  pi-agent-bedrock:
-    <<: *pi-agent-common
-    profiles: ["pi-bedrock"]
+  agent-bedrock:
+    <<: *agent-common
+    profiles: ["agent-bedrock"]
     volumes:
       - .:/workspace/doc_redaction:rw
       - ./workspace:/home/user/app/workspace:rw
-      - pi-agent-sessions:/home/user/.pi/agent/sessions
+      - agent-sessions:/home/user/.pi/agent/sessions
       - ${USERPROFILE}/.aws:/home/user/.aws:rw
     depends_on:
       redaction-app-llama-bedrock:
         condition: service_started
     environment:
-      <<: *pi-agent-env
+      <<: *agent-env
       AGENT_DEFAULT_PROVIDER: amazon-bedrock
       # AGENT_DEFAULT_MODEL: ${AGENT_DEFAULT_MODEL:-anthropic.claude-sonnet-4-6}
       # AGENT_DEFAULT_OCR_METHOD: AWS Textract service - all PDF types
@@ -913,4 +913,4 @@ volumes:
   hf-hub-cache-qwen38-27b:
   hf-hub-cache-gemma4-31b:
   hf-hub-cache-gemma4-26b:
-  pi-agent-sessions:
+  agent-sessions:

@@ -20,14 +20,34 @@ class ActiveRedactionTask:
     cumulative_tool_calls: list[dict[str, Any]] = field(default_factory=list)
 
 
-def _active_task_path(session_hash: str) -> Path:
-    from session_workspace import session_workspace_dir
+def _resolved_active_task_path(session_hash: str) -> Path | None:
+    """
+    Resolve the active-task JSON path under the session workspace.
 
-    return session_workspace_dir(session_hash) / _ACTIVE_REL
+    Returns None when *session_hash* does not resolve to a directory under
+    ``AGENT_WORKSPACE_DIR`` (path traversal / escape).
+    """
+    from session_workspace import session_workspace_dir, workspace_base_dir
+
+    if not (session_hash or "").strip():
+        return None
+    base = workspace_base_dir().resolve()
+    workspace = session_workspace_dir(session_hash).resolve()
+    try:
+        workspace.relative_to(base)
+    except ValueError:
+        return None
+    target = (workspace / _ACTIVE_REL).resolve()
+    try:
+        target.relative_to(workspace)
+    except ValueError:
+        return None
+    return target
 
 
-def _read_task(path: Path) -> ActiveRedactionTask | None:
-    if not path.is_file():
+def _read_task(session_hash: str) -> ActiveRedactionTask | None:
+    path = _resolved_active_task_path(session_hash)
+    if path is None or not path.is_file():
         return None
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -58,7 +78,10 @@ def _read_task(path: Path) -> ActiveRedactionTask | None:
     )
 
 
-def _write_task(path: Path, task: ActiveRedactionTask) -> None:
+def _write_task(session_hash: str, task: ActiveRedactionTask) -> bool:
+    path = _resolved_active_task_path(session_hash)
+    if path is None:
+        return False
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "document_name": task.document_name,
@@ -67,6 +90,7 @@ def _write_task(path: Path, task: ActiveRedactionTask) -> None:
         "cumulative_tool_calls": task.cumulative_tool_calls,
     }
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return True
 
 
 def begin_redaction_task(
@@ -84,9 +108,8 @@ def begin_redaction_task(
         follow_up_steer_count=0,
         cumulative_tool_calls=[],
     )
-    path = _active_task_path(session_hash)
     with _LOCK:
-        _write_task(path, task)
+        _write_task(session_hash, task)
 
 
 def note_follow_up_or_steer_message(session_hash: str) -> bool:
@@ -97,14 +120,12 @@ def note_follow_up_or_steer_message(session_hash: str) -> bool:
     """
     if not (session_hash or "").strip():
         return False
-    path = _active_task_path(session_hash)
     with _LOCK:
-        task = _read_task(path)
+        task = _read_task(session_hash)
         if task is None:
             return False
         task.follow_up_steer_count += 1
-        _write_task(path, task)
-        return True
+        return _write_task(session_hash, task)
 
 
 def _tool_calls_from_events(events: list[Any]) -> list[dict[str, Any]]:
@@ -128,17 +149,16 @@ def append_turn_tool_calls(session_hash: str, events: list[Any]) -> None:
     new_calls = _tool_calls_from_events(events)
     if not new_calls:
         return
-    path = _active_task_path(session_hash)
     with _LOCK:
-        task = _read_task(path)
+        task = _read_task(session_hash)
         if task is None:
             return
         task.cumulative_tool_calls.extend(new_calls)
-        _write_task(path, task)
+        _write_task(session_hash, task)
 
 
 def get_active_task_for_eval(session_hash: str) -> ActiveRedactionTask | None:
     """Return the current task snapshot for post-run eval (or None)."""
     if not (session_hash or "").strip():
         return None
-    return _read_task(_active_task_path(session_hash))
+    return _read_task(session_hash)

@@ -852,7 +852,7 @@ def pi_model_fallback_notice(
         f"The configured orchestration model {intended_label} was not found or could "
         f"not be selected. Pi is using **{active_label}** instead.{llama_hint}"
         f"{cloud_hint} Click **Apply backend** with the correct model, or recreate "
-        f"`pi-agent` after updating `config/agent.env`."
+        f"the agent compose service after updating `config/agent.env`."
     )
 
 
