@@ -14,9 +14,9 @@
 #   or compose: INSTALL_AGENT_EVAL=1 docker compose ... --build up -d pi-agent-38
 
 # ===================================================================
-# Stage 1: Pi CLI (Node) — isolated so the runtime base stays Python 3.12
+# Stage 1: Pi CLI (Node) — isolated so the runtime base stays Python 3.13
 # ===================================================================
-FROM public.ecr.aws/docker/library/node:24.16.0-slim AS pi-cli
+FROM public.ecr.aws/docker/library/node:24.22.2-slim AS pi-cli
 
 ENV NPM_CONFIG_PREFIX=/opt/pi
 ENV PATH="/opt/pi/bin:${PATH}"
@@ -26,7 +26,7 @@ RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 # ===================================================================
 # Stage 2: Shared Python base (aligned with main app Dockerfile)
 # ===================================================================
-FROM public.ecr.aws/docker/library/python:3.12.13-slim-trixie AS pi-base
+FROM public.ecr.aws/docker/library/python:3.13.18-slim-trixie AS pi-base
 
 ENV NODE_ENV=production
 ENV DEBIAN_FRONTEND=noninteractive
