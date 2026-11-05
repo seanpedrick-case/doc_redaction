@@ -156,6 +156,7 @@ def _external_dep_warning_markdown() -> str | None:
     )
 
 
+from tools.app_eval_hook import choose_and_run_redactor_with_app_eval
 from tools.auth import authenticate_user
 from tools.aws_functions import (
     download_file_from_s3,
@@ -376,7 +377,7 @@ from tools.file_conversion import (
     prepare_image_or_pdf,
     prepare_image_or_pdf_with_efficient_ocr,
 )
-from tools.file_redaction import choose_and_run_redactor, run_redaction
+from tools.file_redaction import run_redaction
 from tools.find_duplicate_pages import (
     apply_whole_page_redactions_from_list,
     create_annotation_objects_from_duplicates,
@@ -5265,7 +5266,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         api_visibility="undocumented",
     ).success(
-        fn=choose_and_run_redactor,
+        fn=choose_and_run_redactor_with_app_eval,
         inputs=[
             in_doc_files,
             prepared_pdf_state,
@@ -5767,7 +5768,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ],
         api_visibility="undocumented",
     ).success(
-        fn=choose_and_run_redactor,
+        fn=choose_and_run_redactor_with_app_eval,
         inputs=[
             in_doc_files,
             prepared_pdf_state,
@@ -6463,7 +6464,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         outputs=_release_document_session_state_outputs,
         api_visibility="undocumented",
     ).success(
-        fn=choose_and_run_redactor,
+        fn=choose_and_run_redactor_with_app_eval,
         inputs=[
             in_doc_files,
             prepared_pdf_state,

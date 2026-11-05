@@ -63,6 +63,41 @@ def resolve_eval_gold_dir(session_hash: str | None = None) -> Path | None:
 resolve_eval_fixture_dir = resolve_eval_gold_dir  # deprecated alias
 
 
+def _merge_run_manifest_stack(
+    run_dir: Path,
+    *,
+    ocr_method: str = "",
+    pii_method: str = "",
+    orchestrator: str = "",
+    model_name: str = "",
+    encourage_vlm_faces: bool | None = None,
+    encourage_vlm_signatures: bool | None = None,
+) -> None:
+    """Overlay actual run stack onto ``manifest.json`` (gold copy may already exist)."""
+    path = run_dir / "manifest.json"
+    data: dict[str, Any] = {}
+    if path.is_file():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                data = loaded
+        except (OSError, json.JSONDecodeError, TypeError):
+            data = {}
+    if ocr_method.strip():
+        data["run_ocr_method"] = ocr_method.strip()
+    if pii_method.strip():
+        data["run_pii_method"] = pii_method.strip()
+    if orchestrator.strip():
+        data["run_orchestrator"] = orchestrator.strip()
+    if model_name.strip():
+        data["run_model_name"] = model_name.strip()
+    if encourage_vlm_faces is not None:
+        data["encourage_vlm_faces"] = bool(encourage_vlm_faces)
+    if encourage_vlm_signatures is not None:
+        data["encourage_vlm_signatures"] = bool(encourage_vlm_signatures)
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
 def write_session_post_run_eval(
     *,
     session_hash: str,
@@ -74,6 +109,12 @@ def write_session_post_run_eval(
     follow_up_steer_count: int = 0,
     eval_turn_kind: str = "initial_task",
     cumulative_tool_calls: list[dict[str, Any]] | None = None,
+    ocr_method: str = "",
+    pii_method: str = "",
+    orchestrator: str = "",
+    model_name: str = "",
+    encourage_vlm_faces: bool = False,
+    encourage_vlm_signatures: bool = False,
 ) -> Path | None:
     """
     Persist artifacts under ``{session_workspace}/eval/run_<ts>/`` and ``eval_summary.json``.
@@ -120,6 +161,13 @@ def write_session_post_run_eval(
     tool_path = run_dir / "tool_args.json"
     tool_path.write_text(json.dumps(tool_args, indent=2), encoding="utf-8")
 
+    stack_orchestrator = (
+        orchestrator or os.environ.get("AGENT_ORCHESTRATOR") or ""
+    ).strip()
+    stack_ocr = (ocr_method or "").strip()
+    stack_pii = (pii_method or "").strip()
+    stack_model = (model_name or "").strip()
+
     meta = {
         "session_hash": session_hash,
         "document_name": document_name,
@@ -128,9 +176,24 @@ def write_session_post_run_eval(
         "task_instructions_preview": (task_instructions or "")[:500],
         "follow_up_steer_count": max(0, int(follow_up_steer_count)),
         "eval_turn_kind": (eval_turn_kind or "initial_task").strip() or "initial_task",
+        "orchestrator": stack_orchestrator or None,
+        "model_name": stack_model or None,
+        "ocr_method": stack_ocr or None,
+        "pii_method": stack_pii or None,
+        "encourage_vlm_faces": bool(encourage_vlm_faces),
+        "encourage_vlm_signatures": bool(encourage_vlm_signatures),
     }
     (run_dir / "gradio_run_meta.json").write_text(
         json.dumps(meta, indent=2), encoding="utf-8"
+    )
+    _merge_run_manifest_stack(
+        run_dir,
+        ocr_method=stack_ocr,
+        pii_method=stack_pii,
+        orchestrator=stack_orchestrator,
+        model_name=stack_model,
+        encourage_vlm_faces=encourage_vlm_faces,
+        encourage_vlm_signatures=encourage_vlm_signatures,
     )
 
     gate_summary: GateSummary | None = None
@@ -172,6 +235,12 @@ def write_session_post_run_eval(
         "metrics": metrics,
         "follow_up_steer_count": max(0, int(follow_up_steer_count)),
         "eval_turn_kind": (eval_turn_kind or "initial_task").strip() or "initial_task",
+        "orchestrator": stack_orchestrator or None,
+        "model_name": stack_model or None,
+        "ocr_method": stack_ocr or None,
+        "pii_method": stack_pii or None,
+        "encourage_vlm_faces": bool(encourage_vlm_faces),
+        "encourage_vlm_signatures": bool(encourage_vlm_signatures),
     }
     summary_path = run_dir / "eval_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")

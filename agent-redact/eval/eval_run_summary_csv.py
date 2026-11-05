@@ -24,6 +24,10 @@ SUMMARY_CSV_COLUMNS: tuple[str, ...] = (
     "task_instructions_preview",
     "orchestrator",
     "model_name",
+    "ocr_method",
+    "pii_method",
+    "encourage_vlm_faces",
+    "encourage_vlm_signatures",
     "gold_case_path",
     "eval_turn_kind",
     "follow_up_steer_count",
@@ -75,6 +79,12 @@ def agent_eval_run_summary_csv_enabled() -> bool:
     except ImportError:
         from arize_monitoring import agent_eval_deepeval_tracing_enabled
 
+    try:
+        from app_eval_env import app_eval_run_summary_csv_enabled as app_csv
+    except ImportError:
+        app_csv = None
+    if app_csv is not None and app_csv():
+        return True
     return agent_eval_deepeval_tracing_enabled()
 
 
@@ -124,6 +134,114 @@ def _model_label() -> str:
     if provider and model:
         return f"{provider}/{model}"
     return model or provider or ""
+
+
+def _coerce_bool_csv(val: Any) -> str:
+    if val is True:
+        return "true"
+    if val is False:
+        return "false"
+    if isinstance(val, str) and val.strip().lower() in {"true", "1", "yes"}:
+        return "true"
+    if isinstance(val, str) and val.strip().lower() in {"false", "0", "no"}:
+        return "false"
+    return ""
+
+
+def _first_bool_csv(*values: Any) -> str:
+    for val in values:
+        text = _coerce_bool_csv(val)
+        if text:
+            return text
+    return ""
+
+
+def _first_non_empty_str(*values: Any) -> str:
+    for val in values:
+        if val is None:
+            continue
+        text = str(val).strip()
+        if text:
+            return text
+    return ""
+
+
+def run_stack_from_dir(run_dir: Path) -> dict[str, str]:
+    """
+    Resolve orchestrator, model, OCR, and PII for a run from persisted artifacts.
+
+    Prefers ``gradio_run_meta.json`` (actual Gradio task settings), then
+    ``eval_summary.json``, then ``manifest.json`` (gold case defaults / overlays).
+    """
+    run_dir = run_dir.resolve()
+    meta = _read_run_json(run_dir, "gradio_run_meta.json") or {}
+    app_meta = _read_run_json(run_dir, "app_run_meta.json") or {}
+    summary = _read_run_json(run_dir, "eval_summary.json") or {}
+    manifest = _read_run_json(run_dir, "manifest.json") or {}
+
+    orchestrator = _first_non_empty_str(
+        meta.get("orchestrator"),
+        summary.get("orchestrator"),
+        manifest.get("orchestrator"),
+        manifest.get("run_orchestrator"),
+    )
+    model_name = _first_non_empty_str(
+        meta.get("model_name"),
+        summary.get("model_name"),
+        manifest.get("model_name"),
+        manifest.get("run_model_name"),
+        manifest.get("agent_model"),
+    )
+    ocr_method = _first_non_empty_str(
+        meta.get("ocr_method"),
+        app_meta.get("ocr_method"),
+        summary.get("ocr_method"),
+        manifest.get("run_ocr_method"),
+        manifest.get("ocr_method"),
+    )
+    pii_method = _first_non_empty_str(
+        meta.get("pii_method"),
+        app_meta.get("pii_method"),
+        summary.get("pii_method"),
+        manifest.get("run_pii_method"),
+        manifest.get("pii_method"),
+    )
+    encourage_vlm_faces = _first_bool_csv(
+        meta.get("encourage_vlm_faces"),
+        summary.get("encourage_vlm_faces"),
+        manifest.get("encourage_vlm_faces"),
+    )
+    encourage_vlm_signatures = _first_bool_csv(
+        meta.get("encourage_vlm_signatures"),
+        summary.get("encourage_vlm_signatures"),
+        manifest.get("encourage_vlm_signatures"),
+    )
+    return {
+        "orchestrator": orchestrator,
+        "model_name": model_name,
+        "ocr_method": ocr_method,
+        "pii_method": pii_method,
+        "encourage_vlm_faces": encourage_vlm_faces,
+        "encourage_vlm_signatures": encourage_vlm_signatures,
+    }
+
+
+def _apply_run_stack_to_row(row: dict[str, Any], *, run_dir: Path) -> None:
+    stack = run_stack_from_dir(run_dir)
+    if stack["orchestrator"]:
+        row["orchestrator"] = stack["orchestrator"]
+    elif not row.get("orchestrator"):
+        row["orchestrator"] = (os.environ.get("AGENT_ORCHESTRATOR") or "").strip()
+
+    if stack["model_name"]:
+        row["model_name"] = stack["model_name"]
+    elif not row.get("model_name"):
+        row["model_name"] = _model_label()
+
+    row["ocr_method"] = stack["ocr_method"]
+    row["pii_method"] = stack["pii_method"]
+    row["encourage_vlm_faces"] = stack["encourage_vlm_faces"]
+    row["encourage_vlm_signatures"] = stack["encourage_vlm_signatures"]
 
 
 def _metric_field(metrics: list[dict[str, Any]], name: str, field: str) -> Any:
@@ -302,7 +420,12 @@ def append_eval_run_summary_row(
         ),
         "output_files": output_files,
         "intermediate_files": intermediate_files,
+        "ocr_method": "",
+        "pii_method": "",
+        "encourage_vlm_faces": "",
+        "encourage_vlm_signatures": "",
     }
+    _apply_run_stack_to_row(row, run_dir=run_dir)
     _fill_deterministic_tier_columns(row, run_dir=run_dir, metrics=metrics)
 
     if csv_paths is not None:

@@ -24,7 +24,35 @@ gold/<case_id>/
 1. **Application** — [`run_policy_gate.py`](../run_policy_gate.py) scores the agent review CSV against these lists.  
 2. **Extraction** — [`compare_policy_lists.py`](../compare_policy_lists.py) scores whether the agent’s tool args matched the same lists.
 
-In the live Gradio app, users only type `instructions.txt` content; the agent must derive tool args. Offline eval uses curated `.txt` files so scoring is not self-graded.
+In the **agent** Gradio app, users type free-form `instructions.txt` content; the agent must derive tool args. Offline eval uses curated `.txt` files so scoring is not self-graded.
+
+## Main app (entity / deny-list UI)
+
+When `APP_EVAL_ENABLED=1` on the **main** redaction app ([`app.py`](../../../app.py)), each **Extract text and redact document** / **Redact document** run derives canonical bullets from the UI (entities, deny/allow, extract-only flag) via [`derive_app_eval_instructions.py`](../derive_app_eval_instructions.py). Gold auto-match uses the **same** PDF + `instructions.txt` rules as agent eval.
+
+Authoring workflow:
+
+1. Configure the main app (entities, deny list, OCR/PII).
+2. `python agent-redact/eval/print_derived_app_instructions.py --entities PERSON,ADDRESS --deny "Mr Smith"` → paste into `instructions.txt`.
+3. Bless `ideal_review_file.csv`, `ocr_results_with_words.csv`, `must_redact.txt` (include deny phrases and document-specific terms), optional `expected_deny_list.txt`.
+4. `python agent-redact/eval/update_gold_manifest_hashes.py --gold agent-redact/eval/gold/<case_id>`
+5. Re-run with the same UI settings; outputs score under `{output_dir}/eval/run_<ts>/` and optionally `eval/runs/app_*` when `APP_EVAL_MIRROR_RUNS=1`.
+
+Synthetic `tool_args.json` is generated from UI settings for **policy extraction** compare (no LLM).
+
+### App.py Gradio examples (scaffold)
+
+Ten cases mirroring `SHOW_EXAMPLES` and `SHOW_DIFFICULT_OCR_EXAMPLES` in [`app.py`](../../../app.py) live under `gold/show_ex_*` and `gold/difficult_ocr_*`. Regenerate scaffolds with:
+
+```bash
+python agent-redact/eval/scaffold_app_show_example_gold.py
+```
+
+See [`APP_SHOW_EXAMPLES_INDEX.md`](APP_SHOW_EXAMPLES_INDEX.md). Each folder includes `instructions.txt`, `manifest.json`, `app_eval_settings.json`, and **partial** `must_redact.txt` (deny terms, LLM literals, optional bootstrap from shipped `example_outputs/*review_file.csv`, entity heuristics). Deny-list cases also get `expected_deny_list.txt`. Add `ideal_review_file.csv` and `ocr_results_with_words.csv` locally, then:
+
+```bash
+python agent-redact/eval/update_gold_manifest_hashes.py --gold agent-redact/eval/gold/<case_id>
+```
 
 After editing a case PDF or `instructions.txt`, refresh manifest hashes:
 

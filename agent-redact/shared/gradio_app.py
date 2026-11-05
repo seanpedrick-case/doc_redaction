@@ -1946,6 +1946,8 @@ def _run_pi_chat(
     vlm_model_name: str | None = None,
     redact_file: str | None = None,
     redaction_instructions: str = "",
+    encourage_vlm_faces: bool = False,
+    encourage_vlm_signatures: bool = False,
 ):
     if not message or not message.strip():
         client = client if client and client.running else None
@@ -2096,6 +2098,8 @@ def _run_pi_chat(
                 doc,
                 (redaction_instructions or message).strip(),
                 pdf_path=pdf_path,
+                encourage_vlm_faces=encourage_vlm_faces,
+                encourage_vlm_signatures=encourage_vlm_signatures,
             )
         except Exception:
             gold_match_activity = ""
@@ -2504,6 +2508,16 @@ def _run_pi_chat(
                     "follow_up_steer_count": active_eval_task.follow_up_steer_count,
                     "eval_turn_kind": (
                         "initial_task" if is_redaction_task_turn else "follow_up"
+                    ),
+                    "ocr_method": ocr_method,
+                    "pii_method": pii_method,
+                    "orchestrator": (
+                        os.environ.get("AGENT_ORCHESTRATOR") or ""
+                    ).strip(),
+                    "model_name": _llm_model_label(client),
+                    "encourage_vlm_faces": bool(active_eval_task.encourage_vlm_faces),
+                    "encourage_vlm_signatures": bool(
+                        active_eval_task.encourage_vlm_signatures
                     ),
                 }
         except Exception:
@@ -2950,6 +2964,8 @@ def submit_redaction_task(
         total_page_count=page_count,
         vlm_model_name=os.environ.get("AGENT_VLM_MODEL"),
         redaction_instructions=user_instructions.strip(),
+        encourage_vlm_faces=settings.encourage_vlm_faces,
+        encourage_vlm_signatures=settings.encourage_vlm_signatures,
     )
 
 

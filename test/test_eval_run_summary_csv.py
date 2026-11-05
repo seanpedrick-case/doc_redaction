@@ -16,6 +16,7 @@ from eval_run_summary_csv import (  # noqa: E402
     SUMMARY_CSV_COLUMNS,
     append_eval_run_summary_row,
     rebuild_eval_run_summary_csv,
+    run_stack_from_dir,
 )
 
 
@@ -90,6 +91,77 @@ def test_append_eval_run_summary_row(tmp_path, monkeypatch):
     assert float(row["policy_extraction_deny_list_f1"]) == 0.8
     assert "eval_summary.json" in row["output_files"]
     assert set(row.keys()) == set(SUMMARY_CSV_COLUMNS)
+
+
+def test_run_stack_from_artifacts_and_csv_columns(tmp_path, monkeypatch):
+    monkeypatch.delenv("AGENT_DEFAULT_MODEL", raising=False)
+    monkeypatch.delenv("AGENT_DEFAULT_PROVIDER", raising=False)
+    monkeypatch.setenv("AGENT_EVAL_DEEPEVAL_TRACING", "1")
+    monkeypatch.setenv(
+        "AGENT_EVAL_RUN_SUMMARY_CSV_PATH", str(tmp_path / "eval_run_summary.csv")
+    )
+
+    run_dir = tmp_path / "run_20261104_170815"
+    run_dir.mkdir()
+    (run_dir / "gradio_run_meta.json").write_text(
+        json.dumps(
+            {
+                "orchestrator": "langgraph",
+                "model_name": "llama/gemma-4-31b",
+                "ocr_method": "paddle",
+                "pii_method": "aws_comprehend",
+                "encourage_vlm_faces": True,
+                "encourage_vlm_signatures": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    summary = {
+        "document_name": "doc.pdf",
+        "overall_pass": True,
+        "workflow_incomplete": False,
+        "metrics": [],
+    }
+    (run_dir / "eval_summary.json").write_text(json.dumps(summary), encoding="utf-8")
+
+    stack = run_stack_from_dir(run_dir)
+    assert stack["model_name"] == "llama/gemma-4-31b"
+    assert stack["ocr_method"] == "paddle"
+
+    append_eval_run_summary_row(
+        summary=summary,
+        run_dir=run_dir,
+        run_id="gradio_test",
+    )
+    with (tmp_path / "eval_run_summary.csv").open(
+        encoding="utf-8", newline=""
+    ) as handle:
+        row = next(csv.DictReader(handle))
+    assert row["model_name"] == "llama/gemma-4-31b"
+    assert row["orchestrator"] == "langgraph"
+    assert row["ocr_method"] == "paddle"
+    assert row["pii_method"] == "aws_comprehend"
+    assert row["encourage_vlm_faces"] == "true"
+    assert row["encourage_vlm_signatures"] == "false"
+
+
+def test_run_stack_manifest_fallback(tmp_path):
+    run_dir = tmp_path / "run_manifest"
+    run_dir.mkdir()
+    (run_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "ocr_method": "pymupdf",
+                "pii_method": "spacy",
+                "run_model_name": "openai/gpt-4o",
+            }
+        ),
+        encoding="utf-8",
+    )
+    stack = run_stack_from_dir(run_dir)
+    assert stack["ocr_method"] == "pymupdf"
+    assert stack["pii_method"] == "spacy"
+    assert stack["model_name"] == "openai/gpt-4o"
 
 
 def test_rebuild_from_runs(tmp_path, monkeypatch):

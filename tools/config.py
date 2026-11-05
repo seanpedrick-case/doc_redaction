@@ -2461,6 +2461,14 @@ POST_REDACT_PASS1_INCLUDE_IN_OUTPUTS = convert_string_to_boolean(
     get_or_create_env_var("POST_REDACT_PASS1_INCLUDE_IN_OUTPUTS", "True")
 )
 
+# Main Gradio app gold eval (reuse agent-redact/eval gold cases + CSV).
+APP_EVAL_ENABLED = convert_string_to_boolean(
+    get_or_create_env_var("APP_EVAL_ENABLED", "False")
+)
+APP_EVAL_AUTO_GOLD = convert_string_to_boolean(
+    get_or_create_env_var("APP_EVAL_AUTO_GOLD", "True")
+)
+
 COMPRESS_REDACTED_PDF = convert_string_to_boolean(
     get_or_create_env_var("COMPRESS_REDACTED_PDF", "False")
 )  # On low memory systems, the compression options in pymupdf can cause the app to crash if the PDF is longer than 500 pages or so. Setting this to False will save the PDF only with a basic cleaning option enabled

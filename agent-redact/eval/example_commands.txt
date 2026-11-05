@@ -1,6 +1,9 @@
 # Offline (no LLM) — policy gate only in DeepEval test
 python agent-redact/eval/run_agent_regression.py --gold agent-redact/eval/gold/example_smoke --gates-only
 
+# Recompute gold_geometry (core coverage) + rebuild eval_run_summary.csv from eval/runs/
+python agent-redact/eval/refresh_eval_geometry.py
+
 # Live (compose + config/agent.env first)
 .\agent-redact\eval\run_local_agent_eval.ps1 -Orchestrator langgraph
 
