@@ -414,7 +414,9 @@ GitHub Actions can reuse the same CLI later; default repo CI remains lightweight
 
 ### Main redaction app (`APP_EVAL_ENABLED`)
 
-The **base** Gradio app ([`app.py`](../../app.py)) reuses this eval tree when `APP_EVAL_ENABLED=1` in [`config/app_config.env`](../../config/app_config.env):
+The **base** Gradio app ([`app.py`](../../app.py)) reuses this eval tree when `APP_EVAL_ENABLED=1` in [`config/app_config.env`](../../config/app_config.env) (or `config/docker_app_config.env` for Compose):
+
+- **Docker (`docker-compose_llama_agentic.yml`):** host [`agent-redact/eval/gold`](gold) is mounted at `/home/user/app/agent-redact/eval/gold`. Eval Python deps: set `INSTALL_APP_EVAL=1` and rebuild `redaction-app-llama`, or `APP_EVAL_ENABLED=True` / `APP_INSTALL_EVAL_DEPS=true` in `docker_app_config.env` for a one-time `pip install` at container start ([`entrypoint.sh`](../../entrypoint.sh)).
 
 - **Trigger:** **Extract text and redact document**, **Redact document**, and extract-text-only paths (via [`tools/app_eval_hook.py`](../../tools/app_eval_hook.py)).
 - **Match:** PDF + derived instructions from entity/deny/OCR settings ([`derive_app_eval_instructions.py`](derive_app_eval_instructions.py)); same [`gold_match.py`](gold_match.py) tiers as the agent (`APP_EVAL_AUTO_GOLD`, `APP_EVAL_GOLD`, `APP_EVAL_GOLD_ROOT`).

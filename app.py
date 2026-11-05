@@ -1814,7 +1814,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         with gr.Accordion(
             "Try a redaction with example documents", open=False, visible=True
         ):
-            gr.Markdown("""### Try an example below""")
+            # gr.Markdown("""### Try an example below""")
             if SHOW_EXAMPLES:
                 # gr.Markdown(
                 #     "### Try out general redaction tasks - click on an example below and then the 'Extract text and redact document' button:"

@@ -23,6 +23,29 @@ for dir in \
     fi
 done
 
+# Optional main-app eval deps (APP_EVAL_ENABLED / APP_INSTALL_EVAL_DEPS in docker_app_config.env).
+# Prefer INSTALL_APP_EVAL=1 at image build; this installs at start when deepeval is missing.
+_install_app_eval_deps_if_requested() {
+    case "${APP_INSTALL_EVAL_DEPS:-}" in
+        1|true|True|yes|Yes|on|On) ;;
+        *) case "${APP_EVAL_ENABLED:-}" in
+            1|true|True|yes|Yes|on|On) ;;
+            *) return 0 ;;
+           esac ;;
+    esac
+    if python3 -c "import deepeval" 2>/dev/null; then
+        return 0
+    fi
+    _req="${APP_HOME:-/home/user/app}/app/agent-redact/requirements_agent_eval.txt"
+    if [ ! -f "$_req" ]; then
+        echo "WARNING: APP eval enabled but $_req not found; skipping pip install." >&2
+        return 0
+    fi
+    echo "APP eval deps requested — installing agent-redact/requirements_agent_eval.txt ..."
+    pip install --user -r "$_req"
+}
+_install_app_eval_deps_if_requested
+
 # --- Start the app based on mode ---
 
 if [ "$APP_MODE" = "lambda" ]; then

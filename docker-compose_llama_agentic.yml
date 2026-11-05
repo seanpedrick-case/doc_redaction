@@ -16,6 +16,10 @@
 #   INSTALL_AGENT_EVAL=1 docker compose -f docker-compose_llama_agentic.yml --profile 27b_38 up -d --build agent-38
 # Runtime-only (no rebuild): AGENT_INSTALL_EVAL_DEPS=true in config/agent.env (start.sh pip install).
 #
+# Main redaction app eval (APP_EVAL_ENABLED): host gold is mounted (x-redaction-app-volumes).
+#   INSTALL_APP_EVAL=1 docker compose ... up -d --build redaction-app-llama
+# Or APP_EVAL_ENABLED=True in config/docker_app_config.env (entrypoint pip install once).
+#
 # Agentic UI (Pi, LangGraph, or AgentCore — use the agent* service that matches the profile):
 # docker compose -f docker-compose_llama_agentic.yml --profile 27b_38 up -d agent-38
 # docker compose -f docker-compose_llama_agentic.yml --profile 35b_36 up -d agent-35b
@@ -40,6 +44,10 @@ x-redaction-app-env: &redaction-app-env
   env_file:
     - path: config/docker_app_config.env
       required: false
+
+x-redaction-app-volumes: &redaction-app-volumes
+  - ./workspace:/home/user/app/workspace:rw
+  - ./agent-redact/eval/gold:/home/user/app/agent-redact/eval/gold:ro
 
 x-agent-common: &agent-common
   build:
@@ -142,6 +150,7 @@ x-redaction-app-build: &redaction-app-build
       - INSTALL_VLM=False
       - PADDLE_GPU_ENABLED=True
       - INSTALL_PADDLEOCR=True
+      - INSTALL_APP_EVAL=${INSTALL_APP_EVAL:-0}
   shm_size: '8gb'
   deploy:
     resources:
@@ -152,8 +161,7 @@ x-redaction-app-build: &redaction-app-build
             capabilities: [gpu]
   ports:
     - "7861:7860"
-  volumes:
-    - ./workspace:/home/user/app/workspace:rw
+  volumes: *redaction-app-volumes
   networks:
     - redaction-net-llama
 
@@ -588,6 +596,7 @@ services:
         - INSTALL_VLM=False
         - PADDLE_GPU_ENABLED=True
         - INSTALL_PADDLEOCR=True
+        - INSTALL_APP_EVAL=${INSTALL_APP_EVAL:-0}
     shm_size: '8gb'
     depends_on:
       qwen36-35b_q4_gguf:
@@ -657,8 +666,7 @@ services:
               capabilities: [gpu]
     ports:
       - "7861:7860"
-    volumes:
-      - ./workspace:/home/user/app/workspace:rw
+    volumes: *redaction-app-volumes
     networks:
       - redaction-net-llama
 
@@ -770,6 +778,7 @@ services:
 
     volumes:
       - ./workspace:/home/user/app/workspace:rw
+      - ./agent-redact/eval/gold:/home/user/app/agent-redact/eval/gold:ro
       - ${USERPROFILE}/.aws:/home/user/.aws:rw
     networks:
       redaction-net-llama:
