@@ -11,6 +11,20 @@ from gold_match import normalize_instructions_text
 DERIVED_INSTRUCTIONS_VERSION = 1
 
 
+def _pii_method_includes_llm_entities(pii_method: str) -> bool:
+    """LLM entity checkboxes apply only when PII is not plain Local (matches SHOW_EXAMPLES)."""
+    key = (pii_method or "").strip().casefold()
+    if not key or key == "local":
+        return False
+    if "llm" in key:
+        return True
+    if "inference server" in key or "transformers" in key:
+        return True
+    if "bedrock" in key and "vlm" not in key:
+        return True
+    return False
+
+
 def _quote_term(term: str) -> str:
     text = (term or "").strip()
     if not text:
@@ -71,11 +85,14 @@ class AppEvalRedactionSettings:
     custom_llm_instructions: str = ""
 
     def merged_entities(self) -> list[str]:
-        return _merge_entities(
+        """Entity labels that affect derived instructions / gold strict match."""
+        parts: list[Sequence[str] | None] = [
             self.chosen_redact_entities,
             self.chosen_redact_comprehend_entities,
-            self.chosen_llm_entities,
-        )
+        ]
+        if _pii_method_includes_llm_entities(self.pii_identification_method):
+            parts.append(self.chosen_llm_entities)
+        return _merge_entities(*parts)
 
     def to_settings_dict(self) -> dict[str, Any]:
         data = asdict(self)

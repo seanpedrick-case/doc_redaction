@@ -58,3 +58,67 @@ def test_legacy_kwargs_mapping():
     assert settings.deny_list == ["x"]
     tool = synthetic_doc_redact_tool_args(settings)
     assert tool["tool_calls"][0]["args"]["deny_list"] == ["x"]
+
+
+def test_local_pii_ignores_llm_entity_checkboxes_for_gold_match():
+    """Gradio keeps CHOSEN_LLM_ENTITIES in state; Local PII must not change instructions.txt hash."""
+    settings = AppEvalRedactionSettings(
+        chosen_redact_entities=["TITLES", "PERSON"],
+        chosen_redact_comprehend_entities=["EMAIL", "NAME"],
+        chosen_llm_entities=["PERSON_NAME", "STREET_ADDRESS"],
+        pii_identification_method="Local",
+    )
+    assert settings.merged_entities() == ["EMAIL", "NAME", "PERSON", "TITLES"]
+    assert "PERSON_NAME" not in derive_app_eval_instructions(settings)
+
+
+def test_show_ex_professor_example_matches_gold_instructions():
+    repo = Path(__file__).resolve().parents[1]
+    gold = repo / "agent-redact/eval/gold/show_ex_professor_emails_selectable_text"
+    if not (gold / "instructions.txt").is_file():
+        return
+    import json
+
+    settings = AppEvalRedactionSettings(
+        **{
+            k: v
+            for k, v in json.loads(
+                (gold / "app_eval_settings.json").read_text(encoding="utf-8")
+            ).items()
+            if k
+            in {
+                "chosen_redact_entities",
+                "chosen_redact_comprehend_entities",
+                "chosen_llm_entities",
+                "deny_list",
+                "allow_list",
+                "text_extraction_method",
+                "pii_identification_method",
+                "page_min",
+                "page_max",
+                "text_extraction_only",
+                "handwrite_signature_checkbox",
+                "custom_llm_instructions",
+            }
+        }
+    )
+    # Simulate UI state: LLM entities still selected while PII is Local.
+    settings = AppEvalRedactionSettings(
+        chosen_redact_entities=settings.chosen_redact_entities,
+        chosen_redact_comprehend_entities=settings.chosen_redact_comprehend_entities,
+        chosen_llm_entities=[
+            "EMAIL_ADDRESS",
+            "STREET_ADDRESS",
+            "PERSON_NAME",
+            "PHONE_NUMBER",
+        ],
+        deny_list=settings.deny_list,
+        allow_list=settings.allow_list,
+        text_extraction_method=settings.text_extraction_method,
+        pii_identification_method="Local",
+        page_min=settings.page_min,
+        page_max=settings.page_max,
+        text_extraction_only=settings.text_extraction_only,
+    )
+    gold_text = (gold / "instructions.txt").read_text(encoding="utf-8-sig").strip()
+    assert derive_app_eval_instructions(settings).strip() == gold_text

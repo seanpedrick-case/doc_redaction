@@ -16,6 +16,17 @@ logger = logging.getLogger(__name__)
 _EVAL_DIR = Path(__file__).resolve().parents[1] / "agent-redact" / "eval"
 
 
+def _report_app_eval_to_console(message: str, *, failed: bool = False) -> None:
+    """Always print app eval status (Gradio console); also log when logging is configured."""
+    prefix = "App eval failed" if failed else "App eval"
+    line = message if message.startswith(prefix) else f"{prefix}: {message}"
+    print(line, flush=True)
+    if failed:
+        logger.warning("%s", line)
+    else:
+        logger.info("%s", line)
+
+
 def _schedule_app_eval(flat: dict[str, Any]) -> None:
     if not APP_EVAL_ENABLED:
         return
@@ -30,6 +41,10 @@ def _schedule_app_eval(flat: dict[str, Any]) -> None:
             from post_run_app_eval import write_app_post_run_eval
 
             settings = settings_from_legacy_redactor_kwargs(flat)
+            pii = (settings.pii_identification_method or "").strip() or "unknown"
+            _report_app_eval_to_console(
+                f"post-run eval started (PII={pii})…",
+            )
             file_paths = flat.get("file_paths")
             if not file_paths:
                 return
@@ -44,10 +59,11 @@ def _schedule_app_eval(flat: dict[str, Any]) -> None:
                 settings=settings,
                 search_root=search_root,
             )
-            if status and logger.isEnabledFor(logging.INFO):
-                logger.info("App eval: %s", status)
-        except Exception:
-            logger.debug("App post-run eval failed", exc_info=True)
+            if status:
+                _report_app_eval_to_console(status)
+        except Exception as exc:
+            logger.warning("App post-run eval failed", exc_info=True)
+            _report_app_eval_to_console(str(exc), failed=True)
 
     threading.Thread(target=_work, daemon=True).start()
 
@@ -125,9 +141,10 @@ def choose_and_run_redactor_with_app_eval(*args: Any, **kwargs: Any):
     if "file_paths" not in flat and args:
         flat["file_paths"] = args[0]
 
-    result = choose_and_run_redactor(*args, **kwargs)
-    _schedule_app_eval(flat)
-    return result
+    try:
+        return choose_and_run_redactor(*args, **kwargs)
+    finally:
+        _schedule_app_eval(flat)
 
 
 def _load_list_file(path: str | None) -> list[str]:

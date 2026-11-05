@@ -712,11 +712,9 @@ def _score_deepeval_metric(
             from deepeval_metrics import _deepeval_judge_model
 
             if _deepeval_judge_model() is None:
-                return _skipped(
-                    name,
-                    "Set USE_OPENAI_MODEL=1 and OPENAI_BASE_URL or AGENT_LLAMA_BASE_URL "
-                    "for the DeepEval task-completion judge.",
-                )
+                from deepeval_metrics import deepeval_judge_setup_hint
+
+                return _skipped(name, deepeval_judge_setup_hint())
         return _skipped(name, "No metric configured for this run.")
 
     metric = metrics[-1]

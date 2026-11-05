@@ -843,6 +843,7 @@ text_extract_method_radio = gr.Radio(
     value=DEFAULT_TEXT_EXTRACTION_MODEL,
     choices=TEXT_EXTRACTION_MODELS,
     visible=SHOW_OCR_GUI_OPTIONS,
+    show_label=False,
 )
 
 # Set initial value for local OCR method based on default text extraction method
@@ -1809,424 +1810,433 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             """)
 
     # Examples for PDF/image redaction
-    if SHOW_EXAMPLES:
-        # gr.Markdown(
-        #     "### Try out general redaction tasks - click on an example below and then the 'Extract text and redact document' button:"
-        # )
-
-        available_examples = list()
-        example_labels = list()
-
-        # Check each example file and add to examples if it exists
-        if os.path.exists(example_files[0]):
-            available_examples.append(
-                [
-                    [example_files[0]],
-                    "Local model - selectable text",
-                    "Local",
-                    [],
-                    CHOSEN_REDACT_ENTITIES,
-                    CHOSEN_COMPREHEND_ENTITIES,
-                    [example_files[0]],
-                    example_files[0],
-                    os.path.splitext(os.path.basename(example_files[0]))[0],
-                    [],
-                    [],
-                    [],
-                    [],
-                    2,
-                ]
-            )
-            example_labels.append("PDF with selectable text redaction")
-
-        if os.path.exists(example_files[1]):
-            available_examples.append(
-                [
-                    [example_files[1]],
-                    "Local OCR model - PDFs without selectable text",
-                    "Local",
-                    [],
-                    CHOSEN_REDACT_ENTITIES,
-                    CHOSEN_COMPREHEND_ENTITIES,
-                    [example_files[1]],
-                    example_files[1],
-                    os.path.splitext(os.path.basename(example_files[1]))[0],
-                    [],
-                    [],
-                    [],
-                    [],
-                    1,
-                ]
-            )
-            example_labels.append("Image redaction with local OCR")
-
-        if os.path.exists(example_files[2]):
-            available_examples.append(
-                [
-                    [example_files[2]],
-                    "Local OCR model - PDFs without selectable text",
-                    "Local",
-                    [],
-                    ["TITLES", "PERSON", "DATE_TIME"],
-                    ["TITLES", "NAME", "DATE_TIME"],
-                    [example_files[2]],
-                    example_files[2],
-                    os.path.splitext(os.path.basename(example_files[2]))[0],
-                    [],
-                    [],
-                    [],
-                    [],
-                    1,
-                ]
-            )
-            example_labels.append(
-                "PDF redaction with custom entities (Titles, Person, Dates)"
-            )
-
-        if os.path.exists(example_files[3]):
-            if SHOW_AWS_EXAMPLES:
-                available_examples.append(
-                    [
-                        [example_files[3]],
-                        "AWS Textract service - all PDF types",
-                        "AWS Comprehend",
-                        ["Extract handwriting", "Extract signatures"],
-                        CHOSEN_REDACT_ENTITIES,
-                        CHOSEN_COMPREHEND_ENTITIES,
-                        [example_files[3]],
-                        example_files[3],
-                        os.path.splitext(os.path.basename(example_files[3]))[0],
-                        [],
-                        [],
-                        [],
-                        [],
-                        7,
-                    ]
-                )
-                example_labels.append(
-                    "PDF redaction with AWS services and signature detection"
-                )
-
-        # Add new example for custom deny list and whole page redaction
-        if (
-            os.path.exists(example_files[3])
-            and os.path.exists(example_files[4])
-            and os.path.exists(example_files[5])
+    if SHOW_EXAMPLES or SHOW_DIFFICULT_OCR_EXAMPLES:
+        with gr.Accordion(
+            "Try a redaction with example documents", open=False, visible=True
         ):
-            available_examples.append(
-                [
-                    [example_files[3]],
-                    "Local OCR model - PDFs without selectable text",
-                    "Local",
-                    ["Extract handwriting", "Extract signatures"],
-                    ["CUSTOM"],  # Use CUSTOM entity to enable deny list functionality
-                    ["CUSTOM"],
-                    [example_files[3]],
-                    example_files[3],
-                    os.path.splitext(os.path.basename(example_files[3]))[0],
-                    [example_files[4]],
-                    [
-                        "Sister",
-                        "Sister City",
-                        "Sister Cities",
-                        "Friendship City",
-                    ],
-                    [example_files[5]],
-                    [
-                        2,
-                        5,
-                    ],  # pd.DataFrame(data={"fully_redacted_pages_list": [2, 5]}),
-                    7,
-                ],
-            )
-            example_labels.append("PDF redaction with deny list and page redaction")
+            gr.Markdown("""### Try an example below""")
+            if SHOW_EXAMPLES:
+                # gr.Markdown(
+                #     "### Try out general redaction tasks - click on an example below and then the 'Extract text and redact document' button:"
+                # )
 
-        # When RUN_ALL_EXAMPLES_THROUGH_AWS, replace text extraction with AWS Textract and PII with AWS Comprehend (except "Only extract text")
-        if RUN_ALL_EXAMPLES_THROUGH_AWS:
-            for ex in available_examples:
-                ex[1] = TEXTRACT_TEXT_EXTRACT_OPTION
-                if ex[2] != NO_REDACTION_PII_OPTION:
-                    ex[2] = AWS_PII_OPTION
+                available_examples = list()
+                example_labels = list()
 
-        # Only create examples if we have available files
-        if available_examples:
+                # Check each example file and add to examples if it exists
+                if os.path.exists(example_files[0]):
+                    available_examples.append(
+                        [
+                            [example_files[0]],
+                            "Local model - selectable text",
+                            "Local",
+                            [],
+                            CHOSEN_REDACT_ENTITIES,
+                            CHOSEN_COMPREHEND_ENTITIES,
+                            [example_files[0]],
+                            example_files[0],
+                            os.path.splitext(os.path.basename(example_files[0]))[0],
+                            [],
+                            [],
+                            [],
+                            [],
+                            2,
+                        ]
+                    )
+                    example_labels.append("PDF with selectable text redaction")
 
-            redaction_examples = gr.Examples(
-                examples=available_examples,
-                inputs=[
-                    in_doc_files,
-                    text_extract_method_radio,
-                    pii_identification_method_drop,
-                    handwrite_signature_checkbox,
-                    in_redact_entities,
-                    in_redact_comprehend_entities,
-                    prepared_pdf_state,
-                    doc_full_file_name_textbox,
-                    doc_file_name_no_extension_textbox,
-                    in_deny_list,
-                    in_deny_list_state,
-                    in_fully_redacted_list,
-                    in_fully_redacted_list_state,
-                    total_pdf_page_count,
-                ],
-                outputs=[
-                    walkthrough_file_input,
-                    walkthrough_in_redact_entities,
-                    walkthrough_in_redact_comprehend_entities,
-                    walkthrough_text_extract_method_radio,
-                    walkthrough_local_ocr_method_radio,
-                    walkthrough_handwrite_signature_checkbox,
-                    walkthrough_pii_identification_method_drop,
-                    walkthrough_allow_list_state,
-                    walkthrough_deny_list_state,
-                    walkthrough_fully_redacted_list_state,
-                    in_redact_entities,  # Main component - update visibility
-                    in_redact_comprehend_entities,  # Main component - update visibility
-                    in_redact_llm_entities,  # Main component - update visibility
-                    custom_llm_instructions_textbox,  # Main component - update visibility
-                ],
-                example_labels=example_labels,
-                fn=show_info_box_on_click,
-                run_on_click=True,
-                cache_examples=False,
-            )
+                if os.path.exists(example_files[1]):
+                    available_examples.append(
+                        [
+                            [example_files[1]],
+                            "Local OCR model - PDFs without selectable text",
+                            "Local",
+                            [],
+                            CHOSEN_REDACT_ENTITIES,
+                            CHOSEN_COMPREHEND_ENTITIES,
+                            [example_files[1]],
+                            example_files[1],
+                            os.path.splitext(os.path.basename(example_files[1]))[0],
+                            [],
+                            [],
+                            [],
+                            [],
+                            1,
+                        ]
+                    )
+                    example_labels.append("Image redaction with local OCR")
 
-    def _ocr_method_for_difficult_example(desired: str) -> str:
-        """Use *desired* for difficult-OCR examples if it exists on the local OCR radio; else first available fallback."""
-        if desired in LOCAL_OCR_MODEL_OPTIONS:
-            return desired
-        chains = {
-            "vlm": (
-                "vlm",
-                "inference-server",
-                "paddle",
-                "tesseract",
-            ),
-            "hybrid-paddle-vlm": (
-                "hybrid-paddle-vlm",
-                "hybrid-paddle-inference-server",
-                "vlm",
-                "inference-server",
-                "paddle",
-                "tesseract",
-            ),
-            "paddle": ("paddle", "tesseract"),
-            "tesseract": ("tesseract",),
-        }
-        for candidate in chains.get(desired, ("tesseract",)):
-            if candidate in LOCAL_OCR_MODEL_OPTIONS:
-                return candidate
-        return "tesseract"
+                if os.path.exists(example_files[2]):
+                    available_examples.append(
+                        [
+                            [example_files[2]],
+                            "Local OCR model - PDFs without selectable text",
+                            "Local",
+                            [],
+                            ["TITLES", "PERSON", "DATE_TIME"],
+                            ["TITLES", "NAME", "DATE_TIME"],
+                            [example_files[2]],
+                            example_files[2],
+                            os.path.splitext(os.path.basename(example_files[2]))[0],
+                            [],
+                            [],
+                            [],
+                            [],
+                            1,
+                        ]
+                    )
+                    example_labels.append(
+                        "PDF redaction with custom entities (Titles, Person, Dates)"
+                    )
 
-    def _pii_method_for_difficult_example(desired: str) -> str:
-        """Map intended PII method to one present on pii_identification_method_drop (PII_DETECTION_MODELS)."""
-        if desired in PII_DETECTION_MODELS:
-            return desired
-        available = set(PII_DETECTION_MODELS)
-        chains = {
-            LOCAL_TRANSFORMERS_LLM_PII_OPTION: (
-                LOCAL_TRANSFORMERS_LLM_PII_OPTION,
-                INFERENCE_SERVER_PII_OPTION,
-                AWS_LLM_PII_OPTION,
-                LOCAL_PII_OPTION,
-                NO_REDACTION_PII_OPTION,
-            ),
-            INFERENCE_SERVER_PII_OPTION: (
-                INFERENCE_SERVER_PII_OPTION,
-                LOCAL_TRANSFORMERS_LLM_PII_OPTION,
-                AWS_LLM_PII_OPTION,
-                LOCAL_PII_OPTION,
-                NO_REDACTION_PII_OPTION,
-            ),
-            AWS_LLM_PII_OPTION: (
-                AWS_LLM_PII_OPTION,
-                LOCAL_TRANSFORMERS_LLM_PII_OPTION,
-                INFERENCE_SERVER_PII_OPTION,
-                LOCAL_PII_OPTION,
-                NO_REDACTION_PII_OPTION,
-            ),
-            AWS_PII_OPTION: (
-                AWS_PII_OPTION,
-                LOCAL_PII_OPTION,
-                NO_REDACTION_PII_OPTION,
-            ),
-            LOCAL_PII_OPTION: (
-                LOCAL_PII_OPTION,
-                INFERENCE_SERVER_PII_OPTION,
-                LOCAL_TRANSFORMERS_LLM_PII_OPTION,
-                AWS_LLM_PII_OPTION,
-                AWS_PII_OPTION,
-                NO_REDACTION_PII_OPTION,
-            ),
-            NO_REDACTION_PII_OPTION: (
-                NO_REDACTION_PII_OPTION,
-                LOCAL_PII_OPTION,
-            ),
-        }
-        for candidate in chains.get(desired, ()):
-            if candidate in available:
-                return candidate
-        return PII_DETECTION_MODELS[0] if PII_DETECTION_MODELS else desired
+                if os.path.exists(example_files[3]):
+                    if SHOW_AWS_EXAMPLES:
+                        available_examples.append(
+                            [
+                                [example_files[3]],
+                                "AWS Textract service - all PDF types",
+                                "AWS Comprehend",
+                                ["Extract handwriting", "Extract signatures"],
+                                CHOSEN_REDACT_ENTITIES,
+                                CHOSEN_COMPREHEND_ENTITIES,
+                                [example_files[3]],
+                                example_files[3],
+                                os.path.splitext(os.path.basename(example_files[3]))[0],
+                                [],
+                                [],
+                                [],
+                                [],
+                                7,
+                            ]
+                        )
+                        example_labels.append(
+                            "PDF redaction with AWS services and signature detection"
+                        )
 
-    if SHOW_DIFFICULT_OCR_EXAMPLES:
-        gr.Markdown(
-            "### Test out the different OCR methods available. Click on an example below and then the 'Extract text and redact document' button:"
-        )
+                # Add new example for custom deny list and whole page redaction
+                if (
+                    os.path.exists(example_files[3])
+                    and os.path.exists(example_files[4])
+                    and os.path.exists(example_files[5])
+                ):
+                    available_examples.append(
+                        [
+                            [example_files[3]],
+                            "Local OCR model - PDFs without selectable text",
+                            "Local",
+                            ["Extract handwriting", "Extract signatures"],
+                            [
+                                "CUSTOM"
+                            ],  # Use CUSTOM entity to enable deny list functionality
+                            ["CUSTOM"],
+                            [example_files[3]],
+                            example_files[3],
+                            os.path.splitext(os.path.basename(example_files[3]))[0],
+                            [example_files[4]],
+                            [
+                                "Sister",
+                                "Sister City",
+                                "Sister Cities",
+                                "Friendship City",
+                            ],
+                            [example_files[5]],
+                            [
+                                2,
+                                5,
+                            ],  # pd.DataFrame(data={"fully_redacted_pages_list": [2, 5]}),
+                            7,
+                        ],
+                    )
+                    example_labels.append(
+                        "PDF redaction with deny list and page redaction"
+                    )
 
-        available_ocr_examples = list()
-        ocr_example_labels = list()
-        if os.path.exists(ocr_example_files[0]):
-            available_ocr_examples.append(
-                [
-                    [ocr_example_files[0]],
-                    "Local OCR model - PDFs without selectable text",
-                    "Only extract text (no redaction)",
-                    [],
-                    [ocr_example_files[0]],
-                    ocr_example_files[0],
-                    os.path.splitext(os.path.basename(ocr_example_files[0]))[0],
-                    7,
-                    1,
-                    1,
-                    _ocr_method_for_difficult_example("tesseract"),
-                    CHOSEN_REDACT_ENTITIES,
-                    CHOSEN_LLM_ENTITIES,
-                    "",
-                ],
-            )
-            ocr_example_labels.append("Baseline 'easy' document page")
+                # When RUN_ALL_EXAMPLES_THROUGH_AWS, replace text extraction with AWS Textract and PII with AWS Comprehend (except "Only extract text")
+                if RUN_ALL_EXAMPLES_THROUGH_AWS:
+                    for ex in available_examples:
+                        ex[1] = TEXTRACT_TEXT_EXTRACT_OPTION
+                        if ex[2] != NO_REDACTION_PII_OPTION:
+                            ex[2] = AWS_PII_OPTION
 
-            available_ocr_examples.append(
-                [
-                    [ocr_example_files[0]],
-                    "Local OCR model - PDFs without selectable text",
-                    "Local",
-                    ["Extract handwriting", "Extract signatures"],
-                    [ocr_example_files[0]],
-                    ocr_example_files[0],
-                    os.path.splitext(os.path.basename(ocr_example_files[0]))[0],
-                    7,
-                    6,
-                    6,
-                    _ocr_method_for_difficult_example("hybrid-paddle-vlm"),
-                    CHOSEN_REDACT_ENTITIES + ["CUSTOM_VLM_SIGNATURE"],
-                    CHOSEN_LLM_ENTITIES,
-                    "",
-                ],
-            )
-            ocr_example_labels.append("Scanned document page with signatures")
+                # Only create examples if we have available files
+                if available_examples:
 
-        if os.path.exists(ocr_example_files[1]):
-            available_ocr_examples.append(
-                [
-                    [ocr_example_files[1]],
-                    "Local OCR model - PDFs without selectable text",
-                    "Only extract text (no redaction)",
-                    ["Extract handwriting"],
-                    [ocr_example_files[1]],
-                    ocr_example_files[1],
-                    os.path.splitext(os.path.basename(ocr_example_files[1]))[0],
-                    1,
-                    0,
-                    0,
-                    _ocr_method_for_difficult_example("vlm"),
-                    CHOSEN_REDACT_ENTITIES,
-                    CHOSEN_LLM_ENTITIES,
-                    "",
-                ],
-            )
-            ocr_example_labels.append("Unclear text on handwritten note")
+                    redaction_examples = gr.Examples(
+                        examples=available_examples,
+                        inputs=[
+                            in_doc_files,
+                            text_extract_method_radio,
+                            pii_identification_method_drop,
+                            handwrite_signature_checkbox,
+                            in_redact_entities,
+                            in_redact_comprehend_entities,
+                            prepared_pdf_state,
+                            doc_full_file_name_textbox,
+                            doc_file_name_no_extension_textbox,
+                            in_deny_list,
+                            in_deny_list_state,
+                            in_fully_redacted_list,
+                            in_fully_redacted_list_state,
+                            total_pdf_page_count,
+                        ],
+                        outputs=[
+                            walkthrough_file_input,
+                            walkthrough_in_redact_entities,
+                            walkthrough_in_redact_comprehend_entities,
+                            walkthrough_text_extract_method_radio,
+                            walkthrough_local_ocr_method_radio,
+                            walkthrough_handwrite_signature_checkbox,
+                            walkthrough_pii_identification_method_drop,
+                            walkthrough_allow_list_state,
+                            walkthrough_deny_list_state,
+                            walkthrough_fully_redacted_list_state,
+                            in_redact_entities,  # Main component - update visibility
+                            in_redact_comprehend_entities,  # Main component - update visibility
+                            in_redact_llm_entities,  # Main component - update visibility
+                            custom_llm_instructions_textbox,  # Main component - update visibility
+                        ],
+                        example_labels=example_labels,
+                        fn=show_info_box_on_click,
+                        run_on_click=True,
+                        cache_examples=False,
+                    )
 
-        if os.path.exists(ocr_example_files[2]):
-            available_ocr_examples.append(
-                [
-                    [ocr_example_files[2]],
-                    "Local OCR model - PDFs without selectable text",
-                    "Local",
-                    ["Extract handwriting"],
-                    [ocr_example_files[2]],
-                    ocr_example_files[2],
-                    os.path.splitext(os.path.basename(ocr_example_files[2]))[0],
-                    1,
-                    0,
-                    0,
-                    _ocr_method_for_difficult_example("hybrid-paddle-vlm"),
-                    CHOSEN_REDACT_ENTITIES + ["CUSTOM_VLM_FACES"],
-                    CHOSEN_LLM_ENTITIES,
-                    "",
-                ],
-            )
-            ocr_example_labels.append("CV with photo - face identification")
+            def _ocr_method_for_difficult_example(desired: str) -> str:
+                """Use *desired* for difficult-OCR examples if it exists on the local OCR radio; else first available fallback."""
+                if desired in LOCAL_OCR_MODEL_OPTIONS:
+                    return desired
+                chains = {
+                    "vlm": (
+                        "vlm",
+                        "inference-server",
+                        "paddle",
+                        "tesseract",
+                    ),
+                    "hybrid-paddle-vlm": (
+                        "hybrid-paddle-vlm",
+                        "hybrid-paddle-inference-server",
+                        "vlm",
+                        "inference-server",
+                        "paddle",
+                        "tesseract",
+                    ),
+                    "paddle": ("paddle", "tesseract"),
+                    "tesseract": ("tesseract",),
+                }
+                for candidate in chains.get(desired, ("tesseract",)):
+                    if candidate in LOCAL_OCR_MODEL_OPTIONS:
+                        return candidate
+                return "tesseract"
 
-        if os.path.exists(example_files[0]):
-            available_ocr_examples.append(
-                [
-                    [example_files[0]],
-                    "Local model - selectable text",
-                    LOCAL_TRANSFORMERS_LLM_PII_OPTION,
-                    [],
-                    [example_files[0]],
-                    example_files[0],
-                    os.path.splitext(os.path.basename(example_files[0]))[0],
-                    1,
-                    0,
-                    0,
-                    _ocr_method_for_difficult_example("paddle"),
-                    ["CUSTOM"],
-                    ["CUSTOM"],
-                    "Redact Lauren's name (always cover the full name if available), email addresses, and phone numbers with the label LAUREN. Redact university names with the label UNIVERSITY. Always include the full university name if available.",
-                ],
-            )
-            ocr_example_labels.append("Example email LLM PII detection")
+            def _pii_method_for_difficult_example(desired: str) -> str:
+                """Map intended PII method to one present on pii_identification_method_drop (PII_DETECTION_MODELS)."""
+                if desired in PII_DETECTION_MODELS:
+                    return desired
+                available = set(PII_DETECTION_MODELS)
+                chains = {
+                    LOCAL_TRANSFORMERS_LLM_PII_OPTION: (
+                        LOCAL_TRANSFORMERS_LLM_PII_OPTION,
+                        INFERENCE_SERVER_PII_OPTION,
+                        AWS_LLM_PII_OPTION,
+                        LOCAL_PII_OPTION,
+                        NO_REDACTION_PII_OPTION,
+                    ),
+                    INFERENCE_SERVER_PII_OPTION: (
+                        INFERENCE_SERVER_PII_OPTION,
+                        LOCAL_TRANSFORMERS_LLM_PII_OPTION,
+                        AWS_LLM_PII_OPTION,
+                        LOCAL_PII_OPTION,
+                        NO_REDACTION_PII_OPTION,
+                    ),
+                    AWS_LLM_PII_OPTION: (
+                        AWS_LLM_PII_OPTION,
+                        LOCAL_TRANSFORMERS_LLM_PII_OPTION,
+                        INFERENCE_SERVER_PII_OPTION,
+                        LOCAL_PII_OPTION,
+                        NO_REDACTION_PII_OPTION,
+                    ),
+                    AWS_PII_OPTION: (
+                        AWS_PII_OPTION,
+                        LOCAL_PII_OPTION,
+                        NO_REDACTION_PII_OPTION,
+                    ),
+                    LOCAL_PII_OPTION: (
+                        LOCAL_PII_OPTION,
+                        INFERENCE_SERVER_PII_OPTION,
+                        LOCAL_TRANSFORMERS_LLM_PII_OPTION,
+                        AWS_LLM_PII_OPTION,
+                        AWS_PII_OPTION,
+                        NO_REDACTION_PII_OPTION,
+                    ),
+                    NO_REDACTION_PII_OPTION: (
+                        NO_REDACTION_PII_OPTION,
+                        LOCAL_PII_OPTION,
+                    ),
+                }
+                for candidate in chains.get(desired, ()):
+                    if candidate in available:
+                        return candidate
+                return PII_DETECTION_MODELS[0] if PII_DETECTION_MODELS else desired
 
-        # When RUN_ALL_EXAMPLES_THROUGH_AWS, use AWS Textract for text extraction and AWS Bedrock LLM for PII (except "Only extract text")
-        if RUN_ALL_EXAMPLES_THROUGH_AWS:
-            for ex in available_ocr_examples:
-                ex[1] = TEXTRACT_TEXT_EXTRACT_OPTION
-                if ex[2] != NO_REDACTION_PII_OPTION:
-                    ex[2] = AWS_LLM_PII_OPTION
+            if SHOW_DIFFICULT_OCR_EXAMPLES:
+                gr.Markdown(
+                    "### Test out the different OCR methods available. Click on an example below and then the 'Extract text and redact document' button:"
+                )
 
-        for ex in available_ocr_examples:
-            ex[2] = _pii_method_for_difficult_example(ex[2])
+                available_ocr_examples = list()
+                ocr_example_labels = list()
+                if os.path.exists(ocr_example_files[0]):
+                    available_ocr_examples.append(
+                        [
+                            [ocr_example_files[0]],
+                            "Local OCR model - PDFs without selectable text",
+                            "Only extract text (no redaction)",
+                            [],
+                            [ocr_example_files[0]],
+                            ocr_example_files[0],
+                            os.path.splitext(os.path.basename(ocr_example_files[0]))[0],
+                            7,
+                            1,
+                            1,
+                            _ocr_method_for_difficult_example("tesseract"),
+                            CHOSEN_REDACT_ENTITIES,
+                            CHOSEN_LLM_ENTITIES,
+                            "",
+                        ],
+                    )
+                    ocr_example_labels.append("Baseline 'easy' document page")
 
-        # Only create examples if we have available files
-        if available_ocr_examples:
+                    available_ocr_examples.append(
+                        [
+                            [ocr_example_files[0]],
+                            "Local OCR model - PDFs without selectable text",
+                            "Local",
+                            ["Extract handwriting", "Extract signatures"],
+                            [ocr_example_files[0]],
+                            ocr_example_files[0],
+                            os.path.splitext(os.path.basename(ocr_example_files[0]))[0],
+                            7,
+                            6,
+                            6,
+                            _ocr_method_for_difficult_example("hybrid-paddle-vlm"),
+                            CHOSEN_REDACT_ENTITIES + ["CUSTOM_VLM_SIGNATURE"],
+                            CHOSEN_LLM_ENTITIES,
+                            "",
+                        ],
+                    )
+                    ocr_example_labels.append("Scanned document page with signatures")
 
-            ocr_examples = gr.Examples(
-                examples=available_ocr_examples,
-                inputs=[
-                    in_doc_files,
-                    text_extract_method_radio,
-                    pii_identification_method_drop,
-                    handwrite_signature_checkbox,
-                    prepared_pdf_state,
-                    doc_full_file_name_textbox,
-                    doc_file_name_no_extension_textbox,
-                    total_pdf_page_count,
-                    page_min,
-                    page_max,
-                    local_ocr_method_radio,
-                    in_redact_entities,
-                    in_redact_llm_entities,
-                    custom_llm_instructions_textbox,
-                ],
-                outputs=[
-                    walkthrough_file_input,
-                    walkthrough_in_redact_entities,
-                    walkthrough_text_extract_method_radio,
-                    walkthrough_local_ocr_method_radio,
-                    walkthrough_handwrite_signature_checkbox,
-                    walkthrough_pii_identification_method_drop,
-                    walkthrough_in_redact_llm_entities,
-                    walkthrough_custom_llm_instructions_textbox,
-                    in_redact_llm_entities,  # Main component
-                    custom_llm_instructions_textbox,  # Main component
-                ],
-                example_labels=ocr_example_labels,
-                fn=show_info_box_on_click_ocr_examples,
-                run_on_click=True,
-                cache_examples=False,
-            )
+                if os.path.exists(ocr_example_files[1]):
+                    available_ocr_examples.append(
+                        [
+                            [ocr_example_files[1]],
+                            "Local OCR model - PDFs without selectable text",
+                            "Only extract text (no redaction)",
+                            ["Extract handwriting"],
+                            [ocr_example_files[1]],
+                            ocr_example_files[1],
+                            os.path.splitext(os.path.basename(ocr_example_files[1]))[0],
+                            1,
+                            0,
+                            0,
+                            _ocr_method_for_difficult_example("vlm"),
+                            CHOSEN_REDACT_ENTITIES,
+                            CHOSEN_LLM_ENTITIES,
+                            "",
+                        ],
+                    )
+                    ocr_example_labels.append("Unclear text on handwritten note")
+
+                if os.path.exists(ocr_example_files[2]):
+                    available_ocr_examples.append(
+                        [
+                            [ocr_example_files[2]],
+                            "Local OCR model - PDFs without selectable text",
+                            "Local",
+                            ["Extract handwriting"],
+                            [ocr_example_files[2]],
+                            ocr_example_files[2],
+                            os.path.splitext(os.path.basename(ocr_example_files[2]))[0],
+                            1,
+                            0,
+                            0,
+                            _ocr_method_for_difficult_example("hybrid-paddle-vlm"),
+                            CHOSEN_REDACT_ENTITIES + ["CUSTOM_VLM_FACES"],
+                            CHOSEN_LLM_ENTITIES,
+                            "",
+                        ],
+                    )
+                    ocr_example_labels.append("CV with photo - face identification")
+
+                if os.path.exists(example_files[0]):
+                    available_ocr_examples.append(
+                        [
+                            [example_files[0]],
+                            "Local model - selectable text",
+                            LOCAL_TRANSFORMERS_LLM_PII_OPTION,
+                            [],
+                            [example_files[0]],
+                            example_files[0],
+                            os.path.splitext(os.path.basename(example_files[0]))[0],
+                            1,
+                            0,
+                            0,
+                            _ocr_method_for_difficult_example("paddle"),
+                            ["CUSTOM"],
+                            ["CUSTOM"],
+                            "Redact Lauren's name (always cover the full name if available), email addresses, and phone numbers with the label LAUREN. Redact university names with the label UNIVERSITY. Always include the full university name if available.",
+                        ],
+                    )
+                    ocr_example_labels.append("Example email LLM PII detection")
+
+                # When RUN_ALL_EXAMPLES_THROUGH_AWS, use AWS Textract for text extraction and AWS Bedrock LLM for PII (except "Only extract text")
+                if RUN_ALL_EXAMPLES_THROUGH_AWS:
+                    for ex in available_ocr_examples:
+                        ex[1] = TEXTRACT_TEXT_EXTRACT_OPTION
+                        if ex[2] != NO_REDACTION_PII_OPTION:
+                            ex[2] = AWS_LLM_PII_OPTION
+
+                for ex in available_ocr_examples:
+                    ex[2] = _pii_method_for_difficult_example(ex[2])
+
+                # Only create examples if we have available files
+                if available_ocr_examples:
+
+                    ocr_examples = gr.Examples(
+                        examples=available_ocr_examples,
+                        inputs=[
+                            in_doc_files,
+                            text_extract_method_radio,
+                            pii_identification_method_drop,
+                            handwrite_signature_checkbox,
+                            prepared_pdf_state,
+                            doc_full_file_name_textbox,
+                            doc_file_name_no_extension_textbox,
+                            total_pdf_page_count,
+                            page_min,
+                            page_max,
+                            local_ocr_method_radio,
+                            in_redact_entities,
+                            in_redact_llm_entities,
+                            custom_llm_instructions_textbox,
+                        ],
+                        outputs=[
+                            walkthrough_file_input,
+                            walkthrough_in_redact_entities,
+                            walkthrough_text_extract_method_radio,
+                            walkthrough_local_ocr_method_radio,
+                            walkthrough_handwrite_signature_checkbox,
+                            walkthrough_pii_identification_method_drop,
+                            walkthrough_in_redact_llm_entities,
+                            walkthrough_custom_llm_instructions_textbox,
+                            in_redact_llm_entities,  # Main component
+                            custom_llm_instructions_textbox,  # Main component
+                        ],
+                        example_labels=ocr_example_labels,
+                        fn=show_info_box_on_click_ocr_examples,
+                        run_on_click=True,
+                        cache_examples=False,
+                    )
 
     # Render walkthrough components in a hidden container when SHOW_QUICKSTART is False
     # This ensures they exist for examples and event handlers even when Quickstart tab is hidden
@@ -3392,7 +3402,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                                     type="pandas",
                                     visible=True,
                                     headers=["page", "label", "text", "id"],
-                                    wrap=True,
+                                    wrap=False,
                                 )
                                 exclude_selected_row_btn = gr.Button(
                                     value="Exclude specific redaction row"

@@ -117,6 +117,21 @@ def run_app_deterministic_gates(
     return summary
 
 
+def _app_eval_overall_pass(metrics: list[dict[str, Any]]) -> bool:
+    """Deterministic metrics drive overall_pass; task_completion optional (env)."""
+    from app_eval_env import app_eval_task_completion_affects_overall
+
+    include_task = app_eval_task_completion_affects_overall()
+    for metric in metrics:
+        if metric.get("skipped"):
+            continue
+        if not include_task and metric.get("name") == "task_completion":
+            continue
+        if metric.get("pass") is not True:
+            return False
+    return True
+
+
 def score_app_post_run_metrics(
     *,
     run_dir: Path,
@@ -124,6 +139,8 @@ def score_app_post_run_metrics(
     derived_instructions: str,
     tool_args: dict[str, Any],
     gate_summary: GateSummary | None,
+    settings: AppEvalRedactionSettings,
+    document_name: str,
 ) -> list[dict[str, Any]]:
     from post_run_eval import (
         _metrics_from_gate_summary,
@@ -155,6 +172,19 @@ def score_app_post_run_metrics(
     )
 
     if app_eval_deepeval_enabled() and gold_case_dir is not None:
+        from app_task_completion_output import build_app_task_completion_actual_output
+
+        gold_case_id = gold_case_dir.name
+        synthetic_output = build_app_task_completion_actual_output(
+            run_dir=run_dir,
+            settings=settings,
+            document_name=document_name,
+            gate_summary=gate_summary,
+            gold_case_id=gold_case_id,
+        )
+        (run_dir / "task_completion_actual_output.txt").write_text(
+            synthetic_output, encoding="utf-8"
+        )
         results.append(
             _score_deepeval_metric(
                 name="task_completion",
@@ -162,7 +192,7 @@ def score_app_post_run_metrics(
                 run_dir=run_dir,
                 task=task,
                 tool_args=tool_args,
-                assistant_output="",
+                assistant_output=synthetic_output,
                 include_policy=False,
                 include_tool=False,
                 include_task=True,
@@ -266,6 +296,8 @@ def write_app_post_run_eval(
         derived_instructions=derived,
         tool_args=tool_args,
         gate_summary=gate_summary,
+        settings=settings,
+        document_name=document_name or pdf_path.name,
     )
     active = [m for m in metrics if not m.get("skipped")]
     overall_pass: bool | None
@@ -274,7 +306,7 @@ def write_app_post_run_eval(
     elif gold_case_dir is None:
         overall_pass = None
     else:
-        overall_pass = all(m.get("pass") is True for m in active)
+        overall_pass = _app_eval_overall_pass(metrics)
 
     summary = {
         "document_name": document_name or pdf_path.name,
@@ -306,7 +338,10 @@ def write_app_post_run_eval(
         except OSError:
             pass
 
+    pii_label = (settings.pii_identification_method or "").strip()
     status = match_msg
+    if pii_label:
+        status = f"PII={pii_label}. {status}"
     if gold_case_dir is not None and gate_summary and gate_summary.policy_gate:
         ps = gate_summary.policy_gate.get("pass_strict")
         status += f" pass_strict={ps}."

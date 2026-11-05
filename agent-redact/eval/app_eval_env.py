@@ -71,6 +71,14 @@ def app_eval_run_summary_csv_enabled() -> bool:
     return True
 
 
+def app_eval_task_completion_affects_overall() -> bool:
+    """When false (default), ``overall_pass`` ignores DeepEval task_completion."""
+    raw = (os.environ.get("APP_EVAL_TASK_COMPLETION_AFFECTS_OVERALL") or "").strip()
+    if not raw:
+        return False
+    return _env_truthy("APP_EVAL_TASK_COMPLETION_AFFECTS_OVERALL")
+
+
 def app_eval_deepeval_enabled() -> bool:
     if not app_eval_enabled():
         return False
