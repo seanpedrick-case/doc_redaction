@@ -235,7 +235,7 @@ docker build -f agent-redact/pi-agent/Dockerfile --target dev -t pi-agent-dev .
 docker build -f agent-redact/pi-agent/Dockerfile --target runtime -t pi-agent-runtime .
 ```
 
-**LangGraph (in-container).** Set `AGENT_ORCHESTRATOR=langgraph` in `config/agent.env` (or compose) and start the same `pi-agent` service as for Pi. Optional: `LANGGRAPH_REQUIRE_REVIEW_APPROVAL=true` to gate `/review_apply` until the agent calls an explicit approve tool. A headless Pass 1 spike is `python agent-redact/redaction_langgraph/headless_pass1.py --pdf path/to.pdf --direct-tool`. Optional tracing (Arize AX / Phoenix) lives under [`agent-redact/eval/`](https://github.com/seanpedrick-case/doc_redaction/tree/main/agent-redact/eval).
+**LangGraph (in-container).** Set `AGENT_ORCHESTRATOR=langgraph` in `config/agent.env` (or compose) and start the same `agent*` compose service as for Pi. Optional: `LANGGRAPH_REQUIRE_REVIEW_APPROVAL=true` to gate `/review_apply` until the agent calls an explicit approve tool. A headless Pass 1 spike is `python agent-redact/redaction_langgraph/headless_pass1.py --pdf path/to.pdf --direct-tool`. Optional tracing (Arize AX / Phoenix) lives under [`agent-redact/eval/`](https://github.com/seanpedrick-case/doc_redaction/tree/main/agent-redact/eval).
 
 **Bedrock AgentCore.** Deploy the LangGraph agent as a managed runtime, then point the Gradio UI at it:
 

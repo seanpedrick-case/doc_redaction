@@ -40,7 +40,7 @@ _PI_INSTALL_HINT = (
     "`npm install -g @earendil-works/pi-coding-agent`  \n"
     "On Windows, ensure Node.js/npm are on PATH (or set `AGENT_EXECUTABLE` to the "
     "full path to `pi.cmd`, e.g. `%APPDATA%\\npm\\pi.cmd`).  \n"
-    "Docker users: run the Pi UI via `docker compose` (`pi-agent` service) instead "
+    "Docker users: run the agent UI via `docker compose` (`agent*` service) instead "
     "of `python gradio_app.py` on the host."
 )
 

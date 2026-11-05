@@ -227,3 +227,31 @@ def test_ensure_pi_workspace_dir_honours_explicit_env(monkeypatch, tmp_path):
 
     assert resolved == str(custom.resolve())
     assert custom.is_dir()
+
+
+def test_load_pi_agent_env_file_overrides_stale_container_env_local_docker(
+    monkeypatch, tmp_path
+):
+    bootstrap = _import_bootstrap(monkeypatch, tmp_path)
+    env_file = tmp_path / "agent.env"
+    env_file.write_text(
+        "ARIZE_PROJECT_NAME=doc-redaction-langgraph\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "local-docker")
+    monkeypatch.setenv("ARIZE_PROJECT_NAME", "doc-redaction-pi")
+
+    assert bootstrap.load_pi_agent_env_file(env_file) is True
+    assert os.environ["ARIZE_PROJECT_NAME"] == "doc-redaction-langgraph"
+
+
+def test_load_pi_agent_env_file_does_not_override_on_aws_ecs(monkeypatch, tmp_path):
+    bootstrap = _import_bootstrap(monkeypatch, tmp_path)
+    env_file = tmp_path / "agent.env"
+    env_file.write_text(
+        "ARIZE_PROJECT_NAME=doc-redaction-langgraph\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("AGENT_DEPLOYMENT_PROFILE", "aws-ecs")
+    monkeypatch.setenv("ARIZE_PROJECT_NAME", "doc-redaction-pi")
+
+    assert bootstrap.load_pi_agent_env_file(env_file) is True
+    assert os.environ["ARIZE_PROJECT_NAME"] == "doc-redaction-pi"

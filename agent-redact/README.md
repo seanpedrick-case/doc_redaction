@@ -16,7 +16,7 @@ Per-user output isolation uses Gradio `session_hash` subfolders under `AGENT_WOR
 
 ## Local Docker
 
-Use the `pi-agent` service in [`docker-compose_llama_agentic.yml`](../docker-compose_llama_agentic.yml) (profile `27b_36`). See [`pi/agent/README.md`](pi/agent/README.md).
+Use the `agent` service in [`docker-compose_llama_agentic.yml`](../docker-compose_llama_agentic.yml) (profile `27b_36`). See [`pi/agent/README.md`](pi/agent/README.md).
 
 ## Hugging Face Space
 

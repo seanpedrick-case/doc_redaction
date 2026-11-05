@@ -15,12 +15,16 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
+import re
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
 MatchMode = Literal["iou", "gold_contained", "agent_contained"]
+ScoringMode = Literal["core_coverage", "legacy_box_match"]
+Rect = tuple[float, float, float, float]
 
 
 @dataclass(frozen=True)
@@ -70,6 +74,12 @@ class CompareReport:
     require_label_match: bool = False
     label_agreement: float | None = None
     pages: list[int] = field(default_factory=list)
+    scoring: str = "legacy_box_match"
+    core_gold_count: int = 0
+    core_agent_count: int = 0
+    removed_gold_indices: list[int] = field(default_factory=list)
+    removed_agent_indices: list[int] = field(default_factory=list)
+    per_core_gold: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -202,6 +212,283 @@ def pair_score(gold: Box, agent: Box, mode: MatchMode) -> float:
     raise ValueError(f"Unknown match mode: {mode}")
 
 
+def _collapse_text(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip()).casefold()
+
+
+def _text_tokens(text: str) -> list[str]:
+    return [t for t in _collapse_text(text).split(" ") if t]
+
+
+def _text_subsumed_by(inner: Box, outer: Box) -> bool:
+    """True when inner text is considered a sub-span of outer (for core extraction)."""
+    a = _collapse_text(inner.text)
+    b = _collapse_text(outer.text)
+    if not a:
+        return True
+    if not b:
+        return False
+    if a in b:
+        return True
+    tok_a = _text_tokens(inner.text)
+    tok_b = _text_tokens(outer.text)
+    if tok_a and len(tok_a) <= len(tok_b) and tok_a == tok_b[: len(tok_a)]:
+        return True
+    return False
+
+
+def _box_subsumed(
+    inner: Box,
+    outer: Box,
+    *,
+    subume_threshold: float,
+) -> bool:
+    if inner.page != outer.page:
+        return False
+    if outer.area <= 0 or inner.area <= 0:
+        return False
+    if gold_containment(inner, outer) < subume_threshold:
+        return False
+    return _text_subsumed_by(inner, outer)
+
+
+def extract_core_box_indices(
+    boxes: list[Box],
+    *,
+    subume_threshold: float = 0.9,
+) -> tuple[list[int], list[int]]:
+    """
+    Return (core_indices, removed_indices) into *boxes*.
+
+    Larger boxes are kept; smaller boxes on the same page drop when subsumed.
+    """
+    by_page: dict[int, list[int]] = {}
+    for i, b in enumerate(boxes):
+        by_page.setdefault(b.page, []).append(i)
+    core: list[int] = []
+    removed: list[int] = []
+    for page in sorted(by_page):
+        indices = by_page[page]
+        indices.sort(key=lambda i: boxes[i].area, reverse=True)
+        page_core: list[int] = []
+        for i in indices:
+            b = boxes[i]
+            if any(
+                _box_subsumed(b, boxes[j], subume_threshold=subume_threshold)
+                for j in page_core
+            ):
+                removed.append(i)
+            else:
+                page_core.append(i)
+        core.extend(page_core)
+    core.sort()
+    removed.sort()
+    return core, removed
+
+
+def _rect_area(rect: Rect) -> float:
+    x0, y0, x1, y1 = rect
+    return max(0.0, x1 - x0) * max(0.0, y1 - y0)
+
+
+def _rects_overlap(a: Rect, b: Rect) -> bool:
+    ax0, ay0, ax1, ay1 = a
+    bx0, by0, bx1, by1 = b
+    return ax0 < bx1 and bx0 < ax1 and ay0 < by1 and by0 < ay1
+
+
+def _merge_rect(a: Rect, b: Rect) -> Rect:
+    ax0, ay0, ax1, ay1 = a
+    bx0, by0, bx1, by1 = b
+    return (
+        min(ax0, bx0),
+        min(ay0, by0),
+        max(ax1, bx1),
+        max(ay1, by1),
+    )
+
+
+def _union_rect_area(rects: list[Rect]) -> float:
+    if not rects:
+        return 0.0
+    merged: list[Rect] = list(rects)
+    while True:
+        merged_any = False
+        for i in range(len(merged)):
+            for j in range(i + 1, len(merged)):
+                if _rects_overlap(merged[i], merged[j]):
+                    merged[i] = _merge_rect(merged[i], merged[j])
+                    merged.pop(j)
+                    merged_any = True
+                    break
+            if merged_any:
+                break
+        if not merged_any:
+            break
+    return sum(_rect_area(r) for r in merged)
+
+
+def _clip_agent_rect_to_gold(agent: Box, gold: Box) -> Rect | None:
+    if agent.page != gold.page:
+        return None
+    x0 = max(gold.xmin, agent.xmin)
+    y0 = max(gold.ymin, agent.ymin)
+    x1 = min(gold.xmax, agent.xmax)
+    y1 = min(gold.ymax, agent.ymax)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return (x0, y0, x1, y1)
+
+
+def union_gold_coverage(
+    gold: Box,
+    agent_boxes: list[Box],
+) -> float:
+    """Fraction of *gold* area covered by the union of (gold ∩ agent) clips."""
+    if gold.area <= 0:
+        return 0.0
+    clips: list[Rect] = []
+    for agent in agent_boxes:
+        if agent.page != gold.page:
+            continue
+        clip = _clip_agent_rect_to_gold(agent, gold)
+        if clip is not None:
+            clips.append(clip)
+    return _union_rect_area(clips) / gold.area
+
+
+def env_core_subume_threshold() -> float:
+    raw = (os.environ.get("AGENT_EVAL_GOLD_CORE_SUBSUME_THRESHOLD") or "").strip()
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    return 0.9
+
+
+def env_agent_overlap_epsilon() -> float:
+    raw = (os.environ.get("AGENT_EVAL_GOLD_CORE_AGENT_OVERLAP") or "").strip()
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    return 0.05
+
+
+def match_boxes_core_coverage(
+    gold_boxes: list[Box],
+    agent_boxes: list[Box],
+    *,
+    threshold: float = 0.85,
+    subume_threshold: float | None = None,
+    agent_overlap_epsilon: float | None = None,
+) -> CompareReport:
+    """Core gold spans + union agent coverage (recall); core agent precision."""
+    subume = (
+        env_core_subume_threshold() if subume_threshold is None else subume_threshold
+    )
+    overlap_eps = (
+        env_agent_overlap_epsilon()
+        if agent_overlap_epsilon is None
+        else agent_overlap_epsilon
+    )
+
+    core_gold_idx, removed_gold = extract_core_box_indices(
+        gold_boxes, subume_threshold=subume
+    )
+    core_agent_idx, removed_agent = extract_core_box_indices(
+        agent_boxes, subume_threshold=subume
+    )
+
+    per_core: list[dict[str, Any]] = []
+    matched_core_gold = 0
+    unmatched_core_gold: list[int] = []
+
+    for ci, gi in enumerate(core_gold_idx):
+        g = gold_boxes[gi]
+        cov = union_gold_coverage(g, agent_boxes)
+        matched = cov >= threshold
+        if matched:
+            matched_core_gold += 1
+        else:
+            unmatched_core_gold.append(ci)
+        per_core.append(
+            {
+                "core_index": ci,
+                "source_index": gi,
+                "page": g.page,
+                "text": g.text,
+                "label": g.label,
+                "union_coverage": cov,
+                "matched": matched,
+            }
+        )
+
+    core_gold_n = len(core_gold_idx)
+    recall = (matched_core_gold / core_gold_n) if core_gold_n else 1.0
+
+    matched_core_agent = 0
+    unmatched_core_agent: list[int] = []
+    for ci, ai in enumerate(core_agent_idx):
+        a = agent_boxes[ai]
+        tp = False
+        for gi in core_gold_idx:
+            g = gold_boxes[gi]
+            if g.page != a.page:
+                continue
+            inter = box_intersection_area(g, a)
+            if a.area > 0 and (inter / a.area) >= overlap_eps:
+                tp = True
+                break
+        if tp:
+            matched_core_agent += 1
+        else:
+            unmatched_core_agent.append(ci)
+
+    core_agent_n = len(core_agent_idx)
+    precision = (matched_core_agent / core_agent_n) if core_agent_n else 1.0
+
+    if precision + recall <= 0:
+        f1 = 0.0
+    else:
+        f1 = 2 * precision * recall / (precision + recall)
+
+    pages = sorted({b.page for b in gold_boxes} | {b.page for b in agent_boxes})
+    strict_pass = (
+        core_gold_n == matched_core_gold
+        and core_agent_n == matched_core_agent
+        and not unmatched_core_gold
+        and not unmatched_core_agent
+    )
+
+    return CompareReport(
+        gold_count=len(gold_boxes),
+        agent_count=len(agent_boxes),
+        matched_gold=matched_core_gold,
+        matched_agent=matched_core_agent,
+        unmatched_gold_indices=unmatched_core_gold,
+        unmatched_agent_indices=unmatched_core_agent,
+        matches=[],
+        precision=precision,
+        recall=recall,
+        f1=f1,
+        strict_pass=strict_pass,
+        iou_threshold=threshold,
+        match_mode="core_coverage_union",
+        require_label_match=False,
+        label_agreement=None,
+        pages=pages,
+        scoring="core_coverage",
+        core_gold_count=core_gold_n,
+        core_agent_count=core_agent_n,
+        removed_gold_indices=removed_gold,
+        removed_agent_indices=removed_agent,
+        per_core_gold=per_core,
+    )
+
+
 def _labels_compatible(gold: Box, agent: Box, require_label_match: bool) -> bool:
     if not require_label_match:
         return True
@@ -303,6 +590,9 @@ def match_boxes(
         require_label_match=require_label_match,
         label_agreement=label_agreement,
         pages=pages,
+        scoring="legacy_box_match",
+        core_gold_count=gold_n,
+        core_agent_count=agent_n,
     )
 
 
@@ -314,11 +604,20 @@ def compare_review_csvs(
     mode: MatchMode = "iou",
     require_label_match: bool = False,
     many_to_one: bool = False,
+    scoring: ScoringMode = "legacy_box_match",
 ) -> CompareReport:
     """Load two review CSVs and return a geometric comparison report."""
+    gold_boxes = load_review_boxes(gold_csv)
+    agent_boxes = load_review_boxes(agent_csv)
+    if scoring == "core_coverage":
+        return match_boxes_core_coverage(
+            gold_boxes,
+            agent_boxes,
+            threshold=threshold,
+        )
     return match_boxes(
-        load_review_boxes(gold_csv),
-        load_review_boxes(agent_csv),
+        gold_boxes,
+        agent_boxes,
         threshold=threshold,
         mode=mode,
         require_label_match=require_label_match,
@@ -355,6 +654,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Allow multiple agent boxes to cover one gold box.",
     )
     parser.add_argument(
+        "--scoring",
+        choices=("core_coverage", "legacy_box_match"),
+        default="legacy_box_match",
+        help="core_coverage: core spans + union recall; legacy_box_match: greedy pairwise.",
+    )
+    parser.add_argument(
         "--min-f1",
         type=float,
         default=None,
@@ -383,6 +688,7 @@ def main(argv: list[str] | None = None) -> int:
         mode=args.mode,
         require_label_match=args.require_label_match,
         many_to_one=args.many_to_one,
+        scoring=args.scoring,
     )
     summary = {
         "precision": round(report.precision, 4),
@@ -396,6 +702,9 @@ def main(argv: list[str] | None = None) -> int:
         "label_agreement": report.label_agreement,
         "mode": report.match_mode,
         "threshold": report.iou_threshold,
+        "scoring": report.scoring,
+        "core_gold_count": report.core_gold_count,
+        "core_agent_count": report.core_agent_count,
     }
     print(json.dumps(summary, indent=2))
     if args.json_out:

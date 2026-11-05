@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 import gradio as gr
 
@@ -14,6 +16,8 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 _SESSION_ID_RE = re.compile(r"[^a-zA-Z0-9_@.+-]+")
+# Path-segment allowlist after :func:`sanitize_session_id` (CodeQL / traversal guard).
+_SESSION_ID_SAFE_RE = re.compile(r"^[a-zA-Z0-9_@.+-]{1,128}$")
 
 
 def workspace_base_dir() -> Path:
@@ -60,6 +64,42 @@ def workspace_base_dir_resolved() -> Path:
 def sanitize_session_id(raw: str) -> str:
     cleaned = _SESSION_ID_RE.sub("_", (raw or "").strip())[:128].strip("_")
     return cleaned or "default"
+
+
+def validated_sanitize_session_id(raw: str) -> str | None:
+    """
+    Sanitize a Gradio session id and require a single safe path-segment name.
+
+    Returns None when the value cannot be used as ``{workspace_base}/{id}/``.
+    """
+    if not (raw or "").strip():
+        return None
+    safe_id = sanitize_session_id(raw)
+    if not _SESSION_ID_SAFE_RE.fullmatch(safe_id):
+        return None
+    if any(part in ("", ".", "..") for part in Path(safe_id).parts):
+        return None
+    return safe_id
+
+
+def coerce_safe_session_segment(session_hash: str) -> str:
+    """
+    Directory name for ``{workspace_base}/{segment}/`` (always a validated segment).
+
+    Falls back to ``default`` when *session_hash* is missing or unsafe.
+    """
+    return validated_sanitize_session_id(session_hash) or "default"
+
+
+def _session_dir_under_base(base: Path, session_hash: str) -> Path:
+    """``base / coerce_safe_session_segment(session_hash)``, confined to *base*."""
+    segment = coerce_safe_session_segment(session_hash)
+    candidate = base.joinpath(segment).resolve()
+    try:
+        candidate.relative_to(base)
+    except ValueError:
+        return base.joinpath("default").resolve()
+    return candidate
 
 
 def resolve_session_hash(request: gr.Request | None) -> str:
@@ -144,19 +184,77 @@ def session_workspace_dir(session_hash: str) -> Path:
     base = workspace_base_dir().resolve()
     if not session_workspace_enabled():
         return base
-    safe_id = sanitize_session_id(session_hash)
-    candidate = (base / safe_id).resolve()
-    try:
-        candidate.relative_to(base)
-    except ValueError:
-        return (base / "default").resolve()
-    return candidate
+    return _session_dir_under_base(base, session_hash)
 
 
 def ensure_session_workspace(session_hash: str) -> Path:
     workspace = session_workspace_dir(session_hash)
     workspace.mkdir(parents=True, exist_ok=True)
     return workspace
+
+
+def active_redaction_task_path(session_hash: str) -> Path | None:
+    """
+    Resolved path for ``eval/active_redaction_task.json`` under the session workspace.
+
+    User input is reduced to a validated path segment via
+    :func:`validated_sanitize_session_id`; fixed literals ``eval/`` and the filename
+    are appended under ``workspace_base_dir()``.
+    """
+    base = workspace_base_dir().resolve()
+    if session_workspace_enabled():
+        segment = coerce_safe_session_segment(session_hash)
+        target = base.joinpath(segment, "eval", "active_redaction_task.json").resolve()
+    else:
+        if not (session_hash or "").strip():
+            return None
+        target = base.joinpath("eval", "active_redaction_task.json").resolve()
+    try:
+        target.relative_to(base)
+    except ValueError:
+        return None
+    return target
+
+
+def _path_confined_to_workspace_base(path: Path) -> Path | None:
+    base = workspace_base_dir().resolve()
+    resolved = path.resolve()
+    try:
+        resolved.relative_to(base)
+    except ValueError:
+        return None
+    return resolved
+
+
+def read_active_redaction_task_file(session_hash: str) -> dict[str, Any] | None:
+    """Load active redaction task JSON for *session_hash* (path validated under workspace)."""
+    path = active_redaction_task_path(session_hash)
+    if path is None:
+        return None
+    safe_path = _path_confined_to_workspace_base(path)
+    if safe_path is None or not safe_path.is_file():
+        return None
+    try:
+        with safe_path.open(encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def write_active_redaction_task_file(
+    session_hash: str, payload: dict[str, Any]
+) -> bool:
+    """Write active redaction task JSON for *session_hash* (path validated under workspace)."""
+    path = active_redaction_task_path(session_hash)
+    if path is None:
+        return False
+    safe_path = _path_confined_to_workspace_base(path)
+    if safe_path is None:
+        return False
+    safe_path.parent.mkdir(parents=True, exist_ok=True)
+    safe_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return True
 
 
 def init_session_workspace(

@@ -424,7 +424,7 @@ If invoke returns **401** or **403**, check AgentCore inbound auth configuration
 | Issue | What to check |
 |-------|----------------|
 | Runtime init timeout / `RuntimeClientError: initialization time exceeded` | Container failed to import `main.py` within 30s. Check CloudWatch `/aws/bedrock-agentcore/runtimes/RedactionAgent_RedactionAgent-ye5Jfw7gKj/` **runtime-logs**. Common cause: packaged bootstrap calling Pi-only modules (`pi_workspace_skills`). Re-run `package_runtime.py` and redeploy. |
-| 403 on `/invocations` | Runtime uses **AWS IAM**; Gradio must call via SigV4 (`boto3` `invoke_agent_runtime`) or set `AGENTCORE_API_KEY` for CUSTOM_JWT. Ensure `AGENT_AWS_PROFILE` / `~/.aws` in the pi-agent container and `bedrock-agentcore:InvokeAgentRuntime` on the runtime ARN. |
+| 403 on `/invocations` | Runtime uses **AWS IAM**; Gradio must call via SigV4 (`boto3` `invoke_agent_runtime`) or set `AGENTCORE_API_KEY` for CUSTOM_JWT. Ensure `AGENT_AWS_PROFILE` / `~/.aws` in the agent container and `bedrock-agentcore:InvokeAgentRuntime` on the runtime ARN. |
 | Agent cannot reach doc_redaction | `DOC_REDACTION_GRADIO_URL` must be the **main app HTTPS URL** for AgentCore (not Service Connect). Check `CloudFrontDistributionURL` (when CloudFront is enabled) or `AgenticDocRedactionBackendUrl` stack output and activity log `Redaction backend for this turn: …` |
 | CDK deploy fails | `cdk bootstrap`; `agentcore deploy -v` for verbose AgentCore errors |
 | `Failed to parse: \`-\`` during **Synthesize CloudFormation** | Windows + path with spaces (e.g. `OneDrive - Lambeth Council`). AgentCore CDK runs `uv` with `shell: true` and unquoted paths; the `-` in the folder name is passed to `uv` as a bogus package. See below. |

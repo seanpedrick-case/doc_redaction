@@ -70,6 +70,39 @@ def test_setup_disabled_when_env_unset():
     assert mod.setup_arize_ax_tracing() is False
 
 
+def test_setup_idempotent_across_duplicate_module_imports(monkeypatch):
+    """``agent-redact/eval`` on sys.path loads the same file as two module names."""
+    monkeypatch.setenv("ARIZE_TRACING_ENABLED", "true")
+    monkeypatch.setenv("ARIZE_BACKEND", "phoenix")
+    monkeypatch.setenv("PHOENIX_COLLECTOR_ENDPOINT", "http://127.0.0.1:6006")
+
+    eval_dir = _AGENT_REDACT / "eval"
+    agent_dir = _AGENT_REDACT
+    for path in (str(agent_dir), str(eval_dir)):
+        if path not in sys.path:
+            sys.path.insert(0, path)
+
+    for name in ("eval.arize_monitoring", "arize_monitoring"):
+        sys.modules.pop(name, None)
+
+    mock_register = MagicMock(return_value=SimpleNamespace(name="provider"))
+    phoenix_otel = ModuleType("phoenix.otel")
+    phoenix_otel.register = mock_register
+    phoenix_pkg = ModuleType("phoenix")
+    phoenix_pkg.otel = phoenix_otel
+
+    with patch.dict(
+        sys.modules, {"phoenix": phoenix_pkg, "phoenix.otel": phoenix_otel}
+    ):
+        from arize_monitoring import setup_arize_ax_tracing as setup_flat
+        from eval.arize_monitoring import setup_arize_ax_tracing as setup_eval
+
+        assert setup_eval(instrument_langchain=False) is True
+        assert setup_flat(instrument_langchain=False) is True
+
+    assert mock_register.call_count == 1
+
+
 def test_setup_ax_path_registers_with_space_and_key(monkeypatch):
     monkeypatch.setenv("ARIZE_TRACING_ENABLED", "true")
     monkeypatch.setenv("ARIZE_BACKEND", "ax")
@@ -158,6 +191,7 @@ def test_setup_phoenix_path_registers_local_collector(monkeypatch):
         project_name="proj-px",
         endpoint="http://127.0.0.1:6006/v1/traces",
         api_key="px-key",
+        verbose=False,
     )
     mock_instrumentor.instrument.assert_called_once()
 

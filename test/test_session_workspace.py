@@ -16,13 +16,18 @@ ensure_agent_redact_paths()
 ensure_gradio_importable()
 
 from session_workspace import (  # noqa: E402
+    active_redaction_task_path,
+    coerce_safe_session_segment,
     effective_session_hash,
     ensure_session_workspace,
     prepare_session_workspace,
+    read_active_redaction_task_file,
     resolve_session_hash,
     sanitize_session_id,
     session_workspace_dir,
+    validated_sanitize_session_id,
     workspace_context_prefix,
+    write_active_redaction_task_file,
 )
 
 
@@ -67,6 +72,15 @@ def test_session_workspace_dir_uses_hash(workspace_base):
     assert path == workspace_base / "abc123session"
 
 
+def test_active_redaction_task_path_and_io(workspace_base):
+    session = "abc123session"
+    task_path = active_redaction_task_path(session)
+    assert task_path == workspace_base / session / "eval" / "active_redaction_task.json"
+    assert write_active_redaction_task_file(session, {"document_name": "a.pdf", "x": 1})
+    data = read_active_redaction_task_file(session)
+    assert data == {"document_name": "a.pdf", "x": 1}
+
+
 def test_ensure_session_workspace_creates_directory(workspace_base):
     created = ensure_session_workspace("user_session_1")
     assert created.is_dir()
@@ -74,6 +88,16 @@ def test_ensure_session_workspace_creates_directory(workspace_base):
 
 def test_sanitize_session_id_strips_unsafe_chars():
     assert sanitize_session_id("foo@bar/baz") == "foo@bar_baz"
+
+
+def test_validated_sanitize_session_id_accepts_gradio_ids():
+    assert validated_sanitize_session_id("abc123session") == "abc123session"
+    assert validated_sanitize_session_id("  ") is None
+    assert coerce_safe_session_segment("  ") == "default"
+
+
+def test_validated_sanitize_session_id_normalizes_traversal_like_input():
+    assert validated_sanitize_session_id("../../etc/passwd") == ".._.._etc_passwd"
 
 
 def test_workspace_context_prefix_includes_path(workspace_base):
