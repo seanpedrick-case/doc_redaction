@@ -12,7 +12,7 @@ from typing import Any
 
 from app_eval_env import (
     app_eval_auto_gold_enabled,
-    app_eval_deepeval_enabled,
+    app_eval_deepeval_metrics_enabled,
     app_eval_enabled,
     app_eval_mirror_runs_enabled,
     app_eval_run_summary_csv_enabled,
@@ -171,7 +171,7 @@ def score_app_post_run_metrics(
         )
     )
 
-    if app_eval_deepeval_enabled() and gold_case_dir is not None:
+    if app_eval_deepeval_metrics_enabled() and gold_case_dir is not None:
         from app_task_completion_output import build_app_task_completion_actual_output
 
         gold_case_id = gold_case_dir.name
@@ -199,11 +199,15 @@ def score_app_post_run_metrics(
             )
         )
     else:
-        reason = (
-            "Enable AGENT_EVAL_DEEPEVAL_TRACING=1 for task completion."
-            if gold_case_dir
-            else "No gold case."
-        )
+        if gold_case_dir is None:
+            reason = "No gold case."
+        elif not app_eval_deepeval_metrics_enabled():
+            reason = (
+                "DeepEval metrics off (APP_EVAL_DEEPEVAL_METRICS=0); "
+                "deterministic gates still recorded."
+            )
+        else:
+            reason = "task_completion skipped."
         results.append(_skipped("task_completion", reason))
 
     results.extend(

@@ -79,14 +79,25 @@ def app_eval_task_completion_affects_overall() -> bool:
     return _env_truthy("APP_EVAL_TASK_COMPLETION_AFFECTS_OVERALL")
 
 
-def app_eval_deepeval_enabled() -> bool:
+def app_eval_deepeval_metrics_enabled() -> bool:
+    """Whether main-app post-run eval runs DeepEval ``task_completion`` (judge).
+
+    This is **not** tied to ``AGENT_EVAL_DEEPEVAL_TRACING`` (that flag only enables
+    LangChain/DeepEval callbacks on the **agent** orchestrator).
+
+    Default: **on** when ``APP_EVAL_ENABLED`` is true. Opt out with
+    ``APP_EVAL_DEEPEVAL_METRICS=0`` if you only want deterministic gates in
+    ``eval_summary.json``.
+    """
     if not app_eval_enabled():
         return False
-    try:
-        from eval.arize_monitoring import agent_eval_deepeval_tracing_enabled
-    except ImportError:
-        from arize_monitoring import agent_eval_deepeval_tracing_enabled
-    return agent_eval_deepeval_tracing_enabled()
+    raw = (os.environ.get("APP_EVAL_DEEPEVAL_METRICS") or "").strip().lower()
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    # Unset: run DeepEval when app eval is on (do not require agent tracing flag).
+    return True
 
 
 def app_gold_match_mode() -> str:
