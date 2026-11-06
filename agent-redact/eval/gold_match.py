@@ -16,6 +16,16 @@ from run_agent_regression import resolve_gold_case_pdf
 
 MatchLevel = Literal["strict", "soft", "none"]
 
+# Main-app eval: Comprehend vs Local label synonyms (NAME ~ PERSON, etc.)
+ENTITY_EVAL_CANONICAL: dict[str, str] = {
+    "NAME": "PERSON",
+    "PERSON_NAME": "PERSON",
+    "STREETNAME": "ADDRESS",
+    "STREET_ADDRESS": "ADDRESS",
+    "PHONE_NUMBER": "PHONE",
+    "EMAIL_ADDRESS": "EMAIL",
+}
+
 
 def normalize_instructions_text(raw: str) -> str:
     text = (raw or "").replace("\r\n", "\n").replace("\r", "\n")
@@ -99,18 +109,66 @@ def pdf_matches_soft(
     return upload_base == _pdf_basename(case_dir, manifest)
 
 
+def _canonical_entity_label(label: str) -> str:
+    key = (label or "").strip().upper().replace(" ", "_")
+    return ENTITY_EVAL_CANONICAL.get(key, key)
+
+
+def _parse_entity_redact_tokens(line: str) -> frozenset[str] | None:
+    stripped = line.strip()
+    prefix = "- redact any instance of "
+    if not stripped.casefold().startswith(prefix):
+        return None
+    body = stripped[len(prefix) :]
+    tokens = [_canonical_entity_label(part) for part in body.split(",") if part.strip()]
+    return frozenset(tokens)
+
+
+def app_eval_entity_instructions_equivalent(gold_text: str, user_text: str) -> bool:
+    """True when bullet lines match, allowing Local/Comprehend entity synonym labels."""
+    gold_lines = [
+        ln.strip()
+        for ln in normalize_instructions_text(gold_text).split("\n")
+        if ln.strip()
+    ]
+    user_lines = [
+        ln.strip()
+        for ln in normalize_instructions_text(user_text).split("\n")
+        if ln.strip()
+    ]
+    if len(gold_lines) != len(user_lines):
+        return False
+    for gold_line, user_line in zip(gold_lines, user_lines):
+        gold_ent = _parse_entity_redact_tokens(gold_line)
+        user_ent = _parse_entity_redact_tokens(user_line)
+        if gold_ent is not None and user_ent is not None:
+            if gold_ent != user_ent:
+                return False
+        elif gold_line != user_line:
+            return False
+    return True
+
+
 def instructions_match_strict(
     case_dir: Path, task_instructions: str, manifest: dict[str, Any]
 ) -> bool:
+    user = normalize_instructions_text(task_instructions)
+    user_hash = hashlib.sha256(user.encode("utf-8")).hexdigest().lower()
     pinned = str(manifest.get("instructions_sha256") or "").strip().lower()
-    if pinned:
-        user_bytes = normalize_instructions_text(task_instructions).encode("utf-8")
-        return hashlib.sha256(user_bytes).hexdigest().lower() == pinned
     gold_path = case_dir / "instructions.txt"
+    gold = ""
+    if gold_path.is_file():
+        gold = normalize_instructions_text(gold_path.read_text(encoding="utf-8"))
+    if pinned and user_hash == pinned:
+        return True
+    if gold and gold == user:
+        return True
+    if gold and app_eval_entity_instructions_equivalent(gold, user):
+        return True
+    if pinned:
+        return False
     if not gold_path.is_file():
         return False
-    gold = normalize_instructions_text(gold_path.read_text(encoding="utf-8"))
-    user = normalize_instructions_text(task_instructions)
     return gold == user
 
 

@@ -381,11 +381,11 @@ Set **`AGENT_ORCHESTRATOR`** to `langgraph` or `pi` before running the harness (
    deepeval inspect   # requires pip install "deepeval[inspect]"
    ```
 
-   **DeepEval metrics:** offline pytest uses custom **`PolicyStrictMetric`** only. Live runs can add DeepEval **`ToolCorrectnessMetric`** + **`TaskCompletionMetric`** via [`build_regression_deepeval_metrics()`](deepeval_metrics.py) (set `AGENT_EVAL_DEEPEVAL_TRACING=1` for LangGraph tool traces; judge API for task completion). See [`example_commands.txt`](example_commands.txt). Product pass/fail should still rely on policy gate / gold F1 ([§4](#4-llm-as-judge-optional-reporting)).
+   **DeepEval metrics:** offline pytest uses custom **`PolicyStrictMetric`** only. Live runs can add DeepEval **`ToolCorrectnessMetric`** + **`TaskCompletionMetric`** via [`build_regression_deepeval_metrics()`](deepeval_metrics.py) (set `AGENT_EVAL_DEEPEVAL_TRACING=1` for LangGraph tool traces; **TaskCompletion** judge via **`USE_BEDROCK_JUDGE=1`** / Bedrock provider auto-select, or OpenAI-compatible **`USE_OPENAI_MODEL`** / **`USE_LOCAL_MODEL`**). See [`example_commands.txt`](example_commands.txt). Product pass/fail should still rely on policy gate / gold F1 ([§4](#4-llm-as-judge-optional-reporting)).
 
    **Gradio agent UI:** with `AGENT_EVAL_DEEPEVAL_TRACING=1`, each completed **Start redaction task** writes `{session_workspace}/eval/run_<timestamp>/eval_summary.json` (pass/fail/score for **policy_strict**, **tool_correctness**, **task_completion**, plus deterministic **gold_geometry**, **ocr_gold**, **policy_extraction** when a gold case applies). With **`AGENT_EVAL_AUTO_GOLD=1`**, the UI matches upload + instructions to one case under **`AGENT_EVAL_GOLD_ROOT`** at task start (see [`gold/README.md`](gold/README.md)); no unique match skips gold-tied metrics (fail closed). Legacy: **`AGENT_EVAL_GOLD=<case_dir>`** with auto off scores every task against that case. Task completion uses your redaction instructions and needs judge API credentials when DeepEval is installed. Optional **`AGENT_EVAL_MIRROR_RUNS=1`** copies the folder to [`eval/runs/`](runs/).
 
-   **Run summary CSV:** when tracing is on (opt out with `AGENT_EVAL_RUN_SUMMARY_CSV=0`), each run appends one row to [`eval/outputs/eval_run_summary.csv`](outputs/eval_run_summary.csv) and `{session_workspace}/eval/eval_run_summary.csv` — same idea as topic-modeller `eval_run_summary.csv` (timestamps, pass/score columns, `output_files` / `intermediate_files`). Rebuild from mirrored runs: `python -c "from eval_run_summary_csv import rebuild_eval_run_summary_csv; print(rebuild_eval_run_summary_csv())"` from `agent-redact/eval/`.
+   **Run summary CSV:** when tracing is on (opt out with `AGENT_EVAL_RUN_SUMMARY_CSV=0`), each run appends one row to [`eval/outputs/eval_run_summary.csv`](outputs/eval_run_summary.csv) and `{session_workspace}/eval/eval_run_summary.csv` — same idea as topic-modeller `eval_run_summary.csv` (timestamps, pass/score columns, `output_files` / `intermediate_files`). Columns **`orchestrator`**, **`model_name`**, **`ocr_method`**, **`pii_method`**, **`encourage_vlm_faces`**, and **`encourage_vlm_signatures`** (Gradio “Encourage CUSTOM_VLM_*…” checkboxes at task start) are taken from the run folder’s `gradio_run_meta.json` (written at post-run eval from the Gradio task), then `eval_summary.json`, then `manifest.json` (`run_*` overlays or gold defaults). Rebuilds without meta still get OCR/PII from a copied gold `manifest.json`. Refresh geometry + rebuild from mirrored runs: [`refresh_eval_geometry.py`](refresh_eval_geometry.py) (or `rebuild_eval_run_summary_csv()` alone if JSON is already current).
 
    **Deterministic CSV columns** (from `gold_geometry.json`, `ocr_gold.json`, `policy_extraction.json` under each run dir): `gold_geometry_f1` / `_recall` / `_precision`, `ocr_gold_f1` / `_recall` / `_precision`, `policy_extraction_must_redact_f1`, `policy_extraction_deny_list_f1`, plus `*_skipped` flags when comparison did not run.
 
@@ -412,6 +412,22 @@ Set **`AGENT_ORCHESTRATOR`** to `langgraph` or `pi` before running the harness (
 
 GitHub Actions can reuse the same CLI later; default repo CI remains lightweight ([`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)).
 
+### Main redaction app (`APP_EVAL_ENABLED`)
+
+The **base** Gradio app ([`app.py`](../../app.py)) reuses this eval tree when `APP_EVAL_ENABLED=1` in [`config/app_config.env`](../../config/app_config.env) (or `config/docker_app_config.env` for Compose):
+
+- **Docker (`docker-compose_llama_agentic.yml`):** host [`agent-redact/eval/gold`](gold) and [`agent-redact/eval/outputs`](outputs) are mounted (gold read-only, outputs read-write for `eval_run_summary.csv`). Eval Python deps: set `INSTALL_APP_EVAL=1` and rebuild `redaction-app-llama`, or `APP_EVAL_ENABLED=True` / `APP_INSTALL_EVAL_DEPS=true` in `docker_app_config.env` for a one-time `pip install` at container start ([`entrypoint.sh`](../../entrypoint.sh)).
+
+- **Trigger:** **Extract text and redact document**, **Redact document**, and extract-text-only paths (via [`tools/app_eval_hook.py`](../../tools/app_eval_hook.py)).
+- **Match:** PDF + derived instructions from entity/deny/OCR settings ([`derive_app_eval_instructions.py`](derive_app_eval_instructions.py)); same [`gold_match.py`](gold_match.py) tiers as the agent (`APP_EVAL_AUTO_GOLD`, `APP_EVAL_GOLD`, `APP_EVAL_GOLD_ROOT`).
+- **Gates:** [`post_run_app_eval.py`](post_run_app_eval.py) → [`run_deterministic_gates`](run_agent_regression.py) (full redact) or OCR gold only (extract-text-only).
+- **Policy gate:** still [`verify_redaction_coverage`](../../tools/verify_redaction_coverage.py) via [`run_policy_gate.py`](run_policy_gate.py) and gold `must_redact.txt`.
+- **Metrics:** deterministic tiers + DeepEval **task_completion** by default when `APP_EVAL_ENABLED` is on (opt out with `APP_EVAL_DEEPEVAL_METRICS=0`); **tool_correctness** skipped. This does **not** require `AGENT_EVAL_DEEPEVAL_TRACING` (that flag is for the **agent** LangGraph/LangChain trace hooks only). Task completion uses a **synthetic** `actual_output` ([`app_task_completion_output.py`](app_task_completion_output.py): QA summary from gates/artifacts, no Gradio chat). By default **no uncovered-term text** is sent to the judge; set `APP_EVAL_TASK_COMPLETION_INCLUDE_TERM_SAMPLES=1` for length-only placeholders. **`overall_pass`** ignores `task_completion` unless `APP_EVAL_TASK_COMPLETION_AFFECTS_OVERALL=1` — treat policy gate / gold F1 as authoritative.
+- **CSV:** `run_source=main_app` in [`eval_run_summary.csv`](outputs/eval_run_summary.csv) when `APP_EVAL_RUN_SUMMARY_CSV` is not off (agentic Gradio uses `run_source=agent_gradio`). Docker: mount `agent-redact/eval/outputs` (see compose `x-redaction-app-volumes`) so rows land on the host.
+- **CLI:** `python cli_redact.py … --app-eval` or offline `python agent-redact/eval/run_app_eval.py --pdf … --settings-json …`.
+
+See [`gold/README.md`](gold/README.md) (main app authoring).
+
 ---
 
 ## Module map
@@ -420,6 +436,9 @@ GitHub Actions can reuse the same CLI later; default repo CI remains lightweight
 |------|------|
 | [`arize_monitoring.py`](arize_monitoring.py) | OTEL setup for Gradio agent runtimes |
 | [`post_run_eval.py`](post_run_eval.py) | Gradio post-task `eval_summary.json` when `AGENT_EVAL_DEEPEVAL_TRACING=1` |
+| [`post_run_app_eval.py`](post_run_app_eval.py) | Main app post-redact eval when `APP_EVAL_ENABLED=1` |
+| [`derive_app_eval_instructions.py`](derive_app_eval_instructions.py) | Canonical instructions from main-app UI settings |
+| [`app_eval_env.py`](app_eval_env.py) | `APP_EVAL_*` environment helpers |
 | [`eval_run_summary_csv.py`](eval_run_summary_csv.py) | Append-only `eval_run_summary.csv` across Gradio + regression runs |
 | [`compare_review_csvs.py`](compare_review_csvs.py) | Gold vs agent box F1 CLI / library |
 | [`compare_ocr_words_csvs.py`](compare_ocr_words_csvs.py) | Gold vs run word OCR F1 CLI / library |
