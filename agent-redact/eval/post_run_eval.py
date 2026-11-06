@@ -278,7 +278,7 @@ def write_session_post_run_eval(
             run_dir=run_dir,
             task_instructions=task_instructions,
             run_id=run_id,
-            run_source="gradio",
+            run_source="agent_gradio",
             extra_csv_paths=[session_csv],
         )
 

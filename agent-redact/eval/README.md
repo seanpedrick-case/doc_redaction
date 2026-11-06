@@ -416,14 +416,14 @@ GitHub Actions can reuse the same CLI later; default repo CI remains lightweight
 
 The **base** Gradio app ([`app.py`](../../app.py)) reuses this eval tree when `APP_EVAL_ENABLED=1` in [`config/app_config.env`](../../config/app_config.env) (or `config/docker_app_config.env` for Compose):
 
-- **Docker (`docker-compose_llama_agentic.yml`):** host [`agent-redact/eval/gold`](gold) is mounted at `/home/user/app/agent-redact/eval/gold`. Eval Python deps: set `INSTALL_APP_EVAL=1` and rebuild `redaction-app-llama`, or `APP_EVAL_ENABLED=True` / `APP_INSTALL_EVAL_DEPS=true` in `docker_app_config.env` for a one-time `pip install` at container start ([`entrypoint.sh`](../../entrypoint.sh)).
+- **Docker (`docker-compose_llama_agentic.yml`):** host [`agent-redact/eval/gold`](gold) and [`agent-redact/eval/outputs`](outputs) are mounted (gold read-only, outputs read-write for `eval_run_summary.csv`). Eval Python deps: set `INSTALL_APP_EVAL=1` and rebuild `redaction-app-llama`, or `APP_EVAL_ENABLED=True` / `APP_INSTALL_EVAL_DEPS=true` in `docker_app_config.env` for a one-time `pip install` at container start ([`entrypoint.sh`](../../entrypoint.sh)).
 
 - **Trigger:** **Extract text and redact document**, **Redact document**, and extract-text-only paths (via [`tools/app_eval_hook.py`](../../tools/app_eval_hook.py)).
 - **Match:** PDF + derived instructions from entity/deny/OCR settings ([`derive_app_eval_instructions.py`](derive_app_eval_instructions.py)); same [`gold_match.py`](gold_match.py) tiers as the agent (`APP_EVAL_AUTO_GOLD`, `APP_EVAL_GOLD`, `APP_EVAL_GOLD_ROOT`).
 - **Gates:** [`post_run_app_eval.py`](post_run_app_eval.py) → [`run_deterministic_gates`](run_agent_regression.py) (full redact) or OCR gold only (extract-text-only).
 - **Policy gate:** still [`verify_redaction_coverage`](../../tools/verify_redaction_coverage.py) via [`run_policy_gate.py`](run_policy_gate.py) and gold `must_redact.txt`.
 - **Metrics:** deterministic tiers + DeepEval **task_completion** by default when `APP_EVAL_ENABLED` is on (opt out with `APP_EVAL_DEEPEVAL_METRICS=0`); **tool_correctness** skipped. This does **not** require `AGENT_EVAL_DEEPEVAL_TRACING` (that flag is for the **agent** LangGraph/LangChain trace hooks only). Task completion uses a **synthetic** `actual_output` ([`app_task_completion_output.py`](app_task_completion_output.py): QA summary from gates/artifacts, no Gradio chat). By default **no uncovered-term text** is sent to the judge; set `APP_EVAL_TASK_COMPLETION_INCLUDE_TERM_SAMPLES=1` for length-only placeholders. **`overall_pass`** ignores `task_completion` unless `APP_EVAL_TASK_COMPLETION_AFFECTS_OVERALL=1` — treat policy gate / gold F1 as authoritative.
-- **CSV:** `run_source=app_gradio` in [`eval_run_summary.csv`](outputs/eval_run_summary.csv) when `APP_EVAL_RUN_SUMMARY_CSV` is not off.
+- **CSV:** `run_source=main_app` in [`eval_run_summary.csv`](outputs/eval_run_summary.csv) when `APP_EVAL_RUN_SUMMARY_CSV` is not off (agentic Gradio uses `run_source=agent_gradio`). Docker: mount `agent-redact/eval/outputs` (see compose `x-redaction-app-volumes`) so rows land on the host.
 - **CLI:** `python cli_redact.py … --app-eval` or offline `python agent-redact/eval/run_app_eval.py --pdf … --settings-json …`.
 
 See [`gold/README.md`](gold/README.md) (main app authoring).

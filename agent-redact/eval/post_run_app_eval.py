@@ -365,7 +365,7 @@ def write_app_post_run_eval(
                 run_dir=run_dir,
                 task_instructions=derived,
                 run_id=run_id,
-                run_source="app_gradio",
+                run_source="main_app",
                 skip_enabled_check=True,
             )
         except Exception:

@@ -21,7 +21,8 @@
 # (see config/docker_app_config.env.example). Loaded at container start; the
 # service environment: block overrides values from that file.
 # Host paths (x-redaction-app-volumes): workspace session data, ./output for
-# GRADIO_OUTPUT_FOLDER (incl. eval artifacts), gold cases for APP_EVAL_AUTO_GOLD.
+# GRADIO_OUTPUT_FOLDER (incl. eval artifacts), gold cases for APP_EVAL_AUTO_GOLD,
+# ./agent-redact/eval/outputs for eval_run_summary.csv.
 
 x-redaction-app-env: &redaction-app-env
   env_file:
@@ -32,6 +33,7 @@ x-redaction-app-volumes: &redaction-app-volumes
   - ./workspace:/home/user/app/workspace:rw
   - ./output:/home/user/app/output:rw
   - ./agent-redact/eval/gold:/home/user/app/agent-redact/eval/gold:ro
+  - ./agent-redact/eval/outputs:/home/user/app/agent-redact/eval/outputs:rw
 
 services:
   # Qwen 3.6 27B model setup below requires 40GB of VRAM to run. For 24GB, Change to -hf-file parameter to Qwen3.6-27B-UD-Q4_K_XL.gguf, or Qwen3.6-27B-IQ4_NL.gguf

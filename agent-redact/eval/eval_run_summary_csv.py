@@ -365,13 +365,26 @@ def _append_row(csv_path: Path, row: dict[str, Any]) -> None:
         writer.writerow({k: row.get(k, "") for k in SUMMARY_CSV_COLUMNS})
 
 
+def _run_source_from_rebuild_run(summary: dict[str, Any], run_dir: Path) -> str:
+    """Infer CSV ``run_source`` when rebuilding from ``eval_summary.json`` on disk."""
+    etk = str(summary.get("eval_turn_kind") or "").strip().lower()
+    if etk == "app_redact":
+        return "main_app"
+    run_dir = run_dir.resolve()
+    has_app = (run_dir / "app_run_meta.json").is_file()
+    has_agent = (run_dir / "gradio_run_meta.json").is_file()
+    if has_app and not has_agent:
+        return "main_app"
+    return "agent_gradio"
+
+
 def append_eval_run_summary_row(
     *,
     summary: dict[str, Any],
     run_dir: Path,
     task_instructions: str = "",
     run_id: str | None = None,
-    run_source: str = "gradio",
+    run_source: str = "agent_gradio",
     csv_paths: list[Path] | None = None,
     extra_csv_paths: list[Path] | None = None,
     skip_enabled_check: bool = False,
@@ -555,7 +568,7 @@ def rebuild_eval_run_summary_csv(
             run_dir=summary_path.parent,
             task_instructions=task,
             run_id=run_id,
-            run_source="gradio",
+            run_source=_run_source_from_rebuild_run(data, summary_path.parent),
             csv_paths=[out],
             skip_enabled_check=True,
         )
