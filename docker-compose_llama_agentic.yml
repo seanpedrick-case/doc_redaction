@@ -16,7 +16,8 @@
 #   INSTALL_AGENT_EVAL=1 docker compose -f docker-compose_llama_agentic.yml --profile 27b_38 up -d --build agent-38
 # Runtime-only (no rebuild): AGENT_INSTALL_EVAL_DEPS=true in config/agent.env (start.sh pip install).
 #
-# Main redaction app eval (APP_EVAL_ENABLED): host gold is mounted (x-redaction-app-volumes).
+# Main redaction app eval (APP_EVAL_ENABLED): host gold + ./output (GRADIO_OUTPUT_FOLDER)
+# are mounted (x-redaction-app-volumes) so session outputs and eval_summary.json stay on disk.
 #   INSTALL_APP_EVAL=1 docker compose ... up -d --build redaction-app-llama
 # Or APP_EVAL_ENABLED=True in config/docker_app_config.env (entrypoint pip install once).
 #
@@ -47,6 +48,7 @@ x-redaction-app-env: &redaction-app-env
 
 x-redaction-app-volumes: &redaction-app-volumes
   - ./workspace:/home/user/app/workspace:rw
+  - ./output:/home/user/app/output:rw
   - ./agent-redact/eval/gold:/home/user/app/agent-redact/eval/gold:ro
 
 x-agent-common: &agent-common
@@ -778,6 +780,7 @@ services:
 
     volumes:
       - ./workspace:/home/user/app/workspace:rw
+      - ./output:/home/user/app/output:rw
       - ./agent-redact/eval/gold:/home/user/app/agent-redact/eval/gold:ro
       - ${USERPROFILE}/.aws:/home/user/.aws:rw
     networks:
