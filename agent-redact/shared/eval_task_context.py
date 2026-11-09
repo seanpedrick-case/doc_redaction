@@ -34,6 +34,8 @@ class ActiveRedactionTask:
     eval_gold_path: str | None = None
     eval_gold_match_level: str = "none"
     eval_gold_match_reason: str = ""
+    encourage_vlm_faces: bool = False
+    encourage_vlm_signatures: bool = False
 
 
 def _task_from_raw(raw: dict[str, Any]) -> ActiveRedactionTask | None:
@@ -61,6 +63,8 @@ def _task_from_raw(raw: dict[str, Any]) -> ActiveRedactionTask | None:
         eval_gold_path=eval_gold_path,
         eval_gold_match_level=str(raw.get("eval_gold_match_level") or "none"),
         eval_gold_match_reason=str(raw.get("eval_gold_match_reason") or ""),
+        encourage_vlm_faces=bool(raw.get("encourage_vlm_faces")),
+        encourage_vlm_signatures=bool(raw.get("encourage_vlm_signatures")),
     )
 
 
@@ -80,6 +84,8 @@ def _write_task(session_hash: str, task: ActiveRedactionTask) -> bool:
         "eval_gold_path": task.eval_gold_path,
         "eval_gold_match_level": task.eval_gold_match_level,
         "eval_gold_match_reason": task.eval_gold_match_reason,
+        "encourage_vlm_faces": bool(task.encourage_vlm_faces),
+        "encourage_vlm_signatures": bool(task.encourage_vlm_signatures),
     }
     return write_active_redaction_task_file(session_hash, payload)
 
@@ -99,6 +105,8 @@ def begin_redaction_task(
     task_instructions: str,
     *,
     pdf_path: Path | None = None,
+    encourage_vlm_faces: bool = False,
+    encourage_vlm_signatures: bool = False,
 ) -> str:
     """
     Start a new redaction task in *session_hash* (resets steer count and tool trace).
@@ -113,6 +121,8 @@ def begin_redaction_task(
         task_instructions=(task_instructions or "").strip(),
         follow_up_steer_count=0,
         cumulative_tool_calls=[],
+        encourage_vlm_faces=bool(encourage_vlm_faces),
+        encourage_vlm_signatures=bool(encourage_vlm_signatures),
     )
     log_line = ""
     try:

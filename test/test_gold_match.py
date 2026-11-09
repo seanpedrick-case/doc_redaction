@@ -16,6 +16,7 @@ if str(_SHARED) not in sys.path:
     sys.path.insert(0, str(_SHARED))
 
 from gold_match import (  # noqa: E402
+    app_eval_entity_instructions_equivalent,
     normalize_instructions_text,
     resolve_gold_case_for_task,
     sha256_file,
@@ -153,6 +154,49 @@ def test_manifest_hashes_strict(tmp_path):
         match_mode="strict_only",
     )
     assert result.match_level == "strict"
+
+
+def test_app_eval_entity_synonyms_equivalent():
+    gold = "- Redact any instance of PERSON, NAME, PHONE, PHONE_NUMBER"
+    user = "- Redact any instance of PERSON, PHONE_NUMBER"
+    assert app_eval_entity_instructions_equivalent(gold, user)
+
+
+def test_app_eval_entity_synonyms_strict_match_with_pinned_hash(tmp_path):
+    pdf = tmp_path / "input.pdf"
+    pdf.write_bytes(b"entity-alias-pdf")
+    gold_inst = "- Redact any instance of PERSON, NAME, PHONE, PHONE_NUMBER"
+    user_inst = "- Redact any instance of PERSON, PHONE_NUMBER"
+    case = tmp_path / "alias_case"
+    case.mkdir()
+    (case / "input.pdf").write_bytes(pdf.read_bytes())
+    (case / "instructions.txt").write_text(gold_inst, encoding="utf-8")
+    wrong_hash = "0" * 64
+    (case / "manifest.json").write_text(
+        json.dumps(
+            {
+                "case_id": "alias_case",
+                "input_pdf": "input.pdf",
+                "input_pdf_sha256": sha256_file(pdf),
+                "instructions_sha256": wrong_hash,
+            }
+        ),
+        encoding="utf-8",
+    )
+    root = tmp_path / "gold_root"
+    root.mkdir()
+    shutil.copytree(case, root / "alias_case")
+    upload = tmp_path / "upload.pdf"
+    upload.write_bytes(pdf.read_bytes())
+    result = resolve_gold_case_for_task(
+        pdf_path=upload,
+        document_name="upload.pdf",
+        task_instructions=user_inst,
+        gold_root=root,
+        match_mode="strict_only",
+    )
+    assert result.match_level == "strict"
+    assert result.case_id == "alias_case"
 
 
 def test_resolve_eval_gold_dir_auto_fail_closed(monkeypatch, tmp_path):

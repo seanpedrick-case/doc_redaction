@@ -205,6 +205,13 @@ RUN mkdir -p /tmp/gradio_tmp /tmp/tld /tmp/matplotlib_cache /tmp /var/tmp ${XDG_
 # Fix apply user ownership to all files in the home directory
 RUN chown -R user:user /home/user
 
+# Optional main-app post-run eval (DeepEval / APP_EVAL_ENABLED). Compose: INSTALL_APP_EVAL=1 ... --build
+ARG INSTALL_APP_EVAL=0
+RUN if [ "$INSTALL_APP_EVAL" = "1" ] || [ "$INSTALL_APP_EVAL" = "true" ] || [ "$INSTALL_APP_EVAL" = "True" ]; then \
+      pip install --no-cache-dir -r ${APP_HOME}/app/agent-redact/requirements_agent_eval.txt; \
+    fi
+ENV APP_INSTALL_EVAL_DEPS=${INSTALL_APP_EVAL}
+
 # Set permissions for Python executable
 RUN chmod 755 /usr/local/bin/python
 

@@ -8,14 +8,14 @@ bleach>=6.4.0,<7
 polars>=1.44,<2
 pyarrow>=25.0.1,<26
 openpyxl>=3.1.5,<4
-boto3>=1.43.123,<2
+boto3>=1.43.117,<2
 python-dotenv>=1.2.4,<2
 defusedxml>=0.7.1,<1
 Faker>=40.44.0,<50
 python-levenshtein>=0.27.4,<1
 rapidfuzz>=3.10.0,<=3.14.5
 markdown>=3.10.3,<4
-tabulate>=0.10.0,<1
+tabulate>=0.9.0,<1
 pillow>=12.3.0,<13
 
 # --- PDF / OCR / Redaction tools ---

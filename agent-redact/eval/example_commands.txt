@@ -1,6 +1,9 @@
 # Offline (no LLM) — policy gate only in DeepEval test
 python agent-redact/eval/run_agent_regression.py --gold agent-redact/eval/gold/example_smoke --gates-only
 
+# Recompute gold_geometry (core coverage) + rebuild eval_run_summary.csv from eval/runs/
+python agent-redact/eval/refresh_eval_geometry.py
+
 # Live (compose + config/agent.env first)
 .\agent-redact\eval\run_local_agent_eval.ps1 -Orchestrator langgraph
 
@@ -13,8 +16,11 @@ pytest test/agent/test_agent_deepeval.py -k policy_strict
 #   (new run_<ts>/ after each task turn and after each follow-up/steer completion;
 #    eval_summary.json includes follow_up_steer_count)
 # - Gold policy/tools for Gradio scoring: AGENT_EVAL_GOLD=agent-redact/eval/gold/example_live
-# - TaskCompletion judge: USE_OPENAI_MODEL=1; OPENAI_BASE_URL or AGENT_LLAMA_BASE_URL
-#   (when OPENAI_BASE_URL is unset, eval uses AGENT_LLAMA_BASE_URL for the judge)
+# - TaskCompletion judge (pick one):
+#   Bedrock: USE_BEDROCK_JUDGE=1 + AWS_REGION + DEEPEVAL_BEDROCK_MODEL or AGENT_DEFAULT_MODEL
+#     (or AGENT_DEFAULT_PROVIDER=amazon-bedrock with no USE_OPENAI/USE_LOCAL)
+#   OpenAI-compatible: USE_OPENAI_MODEL=1; OPENAI_BASE_URL or AGENT_LLAMA_BASE_URL
+#     (when OPENAI_BASE_URL is unset, eval uses AGENT_LLAMA_BASE_URL for the judge)
 # $env:AGENT_EVAL_DEEPEVAL_TRACING="1"
 # pytest test/agent/test_agent_deepeval.py -m "live_agent and deepeval_judge" --run-live-agent
 # Or: deepeval test run test/agent/test_agent_deepeval.py

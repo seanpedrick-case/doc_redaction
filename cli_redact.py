@@ -708,6 +708,12 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
         post_redact_pass1_auto_prune=None,
     )
     pdf_group.add_argument(
+        "--app-eval",
+        dest="app_eval",
+        action="store_true",
+        help="After redaction, score outputs against agent-redact/eval gold (see APP_EVAL_* env).",
+    )
+    pdf_group.add_argument(
         "--deny_list_file",
         default=DENY_LIST_PATH,
         help="Custom words file to recognize for redaction.",
@@ -1614,6 +1620,13 @@ def main(direct_mode_args={}):
                 print("Generated Files:", sorted(output_files))
                 if log_files:
                     print("Log Files:", sorted(log_files))
+
+                try:
+                    from tools.app_eval_hook import run_cli_app_eval_if_requested
+
+                    run_cli_app_eval_if_requested(args)
+                except Exception:
+                    pass
 
                 # Upload output files to S3 if enabled
                 if args.save_outputs_to_s3 and s3_output_folder and output_files:

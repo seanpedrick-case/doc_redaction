@@ -121,8 +121,100 @@ def _agent_llama_model_id() -> str:
     ).strip()
 
 
+def deepeval_judge_setup_hint() -> str:
+    """Human-readable hint when no TaskCompletion judge is configured."""
+    return (
+        "Configure a DeepEval judge: USE_BEDROCK_JUDGE=1 with AWS_REGION and "
+        "AGENT_DEFAULT_MODEL (or DEEPEVAL_BEDROCK_MODEL); or USE_OPENAI_MODEL=1 "
+        "with OPENAI_BASE_URL or AGENT_LLAMA_BASE_URL; or USE_LOCAL_MODEL=1."
+    )
+
+
+def _agent_default_provider() -> str:
+    return (os.environ.get("AGENT_DEFAULT_PROVIDER") or "").strip().lower()
+
+
+def _should_try_bedrock_judge() -> bool:
+    if _env_truthy("USE_BEDROCK_JUDGE") or _env_truthy("DEEPEVAL_USE_BEDROCK"):
+        return True
+    if _env_truthy("USE_OPENAI_MODEL") or _env_truthy("USE_LOCAL_MODEL"):
+        return False
+    return _agent_default_provider() in {"amazon-bedrock", "bedrock"}
+
+
+def _bedrock_region() -> str:
+    for key in (
+        "DEEPEVAL_BEDROCK_REGION",
+        "AWS_BEDROCK_REGION",
+        "AWS_REGION",
+    ):
+        raw = (os.environ.get(key) or "").strip()
+        if raw:
+            return raw
+    try:
+        from tools.config import AWS_REGION
+
+        return str(AWS_REGION or "").strip()
+    except ImportError:
+        return ""
+
+
+def _bedrock_model_id() -> str:
+    for key in (
+        "DEEPEVAL_BEDROCK_MODEL",
+        "AWS_BEDROCK_MODEL_NAME",
+        "AGENT_DEFAULT_MODEL",
+    ):
+        raw = (os.environ.get(key) or "").strip()
+        if raw:
+            return raw
+    return ""
+
+
+def _build_amazon_bedrock_judge() -> Any | None:
+    """DeepEval ``AmazonBedrockModel`` (aiobotocore / default AWS credential chain)."""
+    try:
+        from deepeval.models import AmazonBedrockModel
+    except ImportError:
+        return None
+
+    model_id = _bedrock_model_id()
+    region = _bedrock_region()
+    if not model_id or not region:
+        return None
+
+    kwargs: dict[str, Any] = {}
+    for env_key, arg in (
+        ("AWS_ACCESS_KEY_ID", "aws_access_key_id"),
+        ("AWS_SECRET_ACCESS_KEY", "aws_secret_access_key"),
+        ("AWS_SESSION_TOKEN", "aws_session_token"),
+    ):
+        val = (os.environ.get(env_key) or "").strip()
+        if val:
+            kwargs[arg] = val
+    if not kwargs:
+        try:
+            from tools.config import AWS_ACCESS_KEY, AWS_SECRET_KEY
+
+            if AWS_ACCESS_KEY and AWS_SECRET_KEY:
+                kwargs["aws_access_key_id"] = str(AWS_ACCESS_KEY).strip()
+                kwargs["aws_secret_access_key"] = str(AWS_SECRET_KEY).strip()
+        except ImportError:
+            pass
+
+    try:
+        return AmazonBedrockModel(model=model_id, region=region, **kwargs)
+    except Exception:
+        return None
+
+
 def _deepeval_judge_model() -> Any | None:
-    """OpenAI-compatible judge for DeepEval 4.x metrics (local llama or OpenAI)."""
+    """Judge for DeepEval 4.x metrics (Bedrock, OpenAI-compatible local, or OpenAI)."""
+    if _should_try_bedrock_judge():
+        bedrock = _build_amazon_bedrock_judge()
+        if bedrock is not None:
+            return bedrock
+
     try:
         from deepeval.models import LocalModel, OpenAIModel
     except ImportError:
@@ -180,8 +272,9 @@ def build_regression_deepeval_metrics(
     - ``PolicyStrictMetric`` — deterministic policy gate (always safe offline).
     - ``ToolCorrectnessMetric`` — needs a LangGraph trace with tool spans
       (set ``AGENT_EVAL_DEEPEVAL_TRACING=1`` for LangGraph live runs).
-    - ``TaskCompletionMetric`` — LLM judge over the full trace; requires judge
-      API credentials (see DeepEval docs), not the orchestrator model.
+    - ``TaskCompletionMetric`` — LLM judge over the full trace (Bedrock via
+      ``USE_BEDROCK_JUDGE=1``, OpenAI-compatible local server, or OpenAI); not
+      necessarily the same runtime as the orchestrator unless env aligns them.
     """
     if ToolCorrectnessMetric is None or TaskCompletionMetric is None:
         raise ImportError("deepeval is not installed")

@@ -5,5 +5,8 @@
 
 deepeval>=4.3.2,<5
 
+# DeepEval AmazonBedrockModel judge (USE_BEDROCK_JUDGE=1 / AGENT_DEFAULT_PROVIDER=amazon-bedrock)
+aiobotocore>=2.13.0
+
 # Terminal trace viewer (`deepeval inspect`) — large optional extra; dev machines only:
 # pip install "deepeval[inspect]"
