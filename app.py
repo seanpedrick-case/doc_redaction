@@ -369,6 +369,10 @@ from tools.data_anonymise import (
     REDACTION_EXAMPLE_PLACEHOLDER,
     anonymise_files_with_open_text,
 )
+from tools.example_data_paths import (
+    bundled_example_asset_available,
+    gradio_example_allowed_paths,
+)
 from tools.file_conversion import (
     combine_review_pdf_files,
     get_document_file_names,
@@ -1824,7 +1828,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                 example_labels = list()
 
                 # Check each example file and add to examples if it exists
-                if os.path.exists(example_files[0]):
+                if bundled_example_asset_available(example_files[0]):
                     available_examples.append(
                         [
                             [example_files[0]],
@@ -1845,7 +1849,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                     )
                     example_labels.append("PDF with selectable text redaction")
 
-                if os.path.exists(example_files[1]):
+                if bundled_example_asset_available(example_files[1]):
                     available_examples.append(
                         [
                             [example_files[1]],
@@ -1866,7 +1870,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                     )
                     example_labels.append("Image redaction with local OCR")
 
-                if os.path.exists(example_files[2]):
+                if bundled_example_asset_available(example_files[2]):
                     available_examples.append(
                         [
                             [example_files[2]],
@@ -1889,7 +1893,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                         "PDF redaction with custom entities (Titles, Person, Dates)"
                     )
 
-                if os.path.exists(example_files[3]):
+                if bundled_example_asset_available(example_files[3]):
                     if SHOW_AWS_EXAMPLES:
                         available_examples.append(
                             [
@@ -1915,9 +1919,9 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
                 # Add new example for custom deny list and whole page redaction
                 if (
-                    os.path.exists(example_files[3])
-                    and os.path.exists(example_files[4])
-                    and os.path.exists(example_files[5])
+                    bundled_example_asset_available(example_files[3])
+                    and bundled_example_asset_available(example_files[4])
+                    and bundled_example_asset_available(example_files[5])
                 ):
                     available_examples.append(
                         [
@@ -1994,6 +1998,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                             in_redact_comprehend_entities,  # Main component - update visibility
                             in_redact_llm_entities,  # Main component - update visibility
                             custom_llm_instructions_textbox,  # Main component - update visibility
+                            in_doc_files,  # Stable bundled paths (HF /tmp/gradio cache)
+                            prepared_pdf_state,
                         ],
                         example_labels=example_labels,
                         fn=show_info_box_on_click,
@@ -2085,7 +2091,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
                 available_ocr_examples = list()
                 ocr_example_labels = list()
-                if os.path.exists(ocr_example_files[0]):
+                if bundled_example_asset_available(ocr_example_files[0]):
                     available_ocr_examples.append(
                         [
                             [ocr_example_files[0]],
@@ -2126,7 +2132,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                     )
                     ocr_example_labels.append("Scanned document page with signatures")
 
-                if os.path.exists(ocr_example_files[1]):
+                if bundled_example_asset_available(ocr_example_files[1]):
                     available_ocr_examples.append(
                         [
                             [ocr_example_files[1]],
@@ -2147,7 +2153,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                     )
                     ocr_example_labels.append("Unclear text on handwritten note")
 
-                if os.path.exists(ocr_example_files[2]):
+                if bundled_example_asset_available(ocr_example_files[2]):
                     available_ocr_examples.append(
                         [
                             [ocr_example_files[2]],
@@ -2168,7 +2174,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                     )
                     ocr_example_labels.append("CV with photo - face identification")
 
-                if os.path.exists(example_files[0]):
+                if bundled_example_asset_available(example_files[0]):
                     available_ocr_examples.append(
                         [
                             [example_files[0]],
@@ -2231,6 +2237,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                             walkthrough_custom_llm_instructions_textbox,
                             in_redact_llm_entities,  # Main component
                             custom_llm_instructions_textbox,  # Main component
+                            in_doc_files,  # Stable bundled paths (HF /tmp/gradio cache)
+                            prepared_pdf_state,
                         ],
                         example_labels=ocr_example_labels,
                         fn=show_info_box_on_click_ocr_examples,
@@ -3600,7 +3608,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                     "example_outputs/doubled_output_joined.pdf_ocr_output.csv"
                 )
 
-                if os.path.exists(duplicate_example_file):
+                if bundled_example_asset_available(duplicate_example_file):
 
                     duplicate_examples = gr.Examples(
                         examples=[
@@ -3760,7 +3768,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                 tabular_example_labels = list()
 
                 # Check each tabular example file and add to examples if it exists
-                if os.path.exists(tabular_example_files[0]):
+                if bundled_example_asset_available(tabular_example_files[0]):
                     available_tabular_examples.append(
                         [
                             [tabular_example_files[0]],
@@ -3776,7 +3784,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                         "CSV file redaction with specific columns - remove text"
                     )
 
-                if os.path.exists(tabular_example_files[1]):
+                if bundled_example_asset_available(tabular_example_files[1]):
                     available_tabular_examples.append(
                         [
                             [tabular_example_files[1]],
@@ -3792,7 +3800,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                         "Word document redaction - replace with REDACTED"
                     )
 
-                if os.path.exists(tabular_example_files[2]):
+                if bundled_example_asset_available(tabular_example_files[2]):
                     available_tabular_examples.append(
                         [
                             [tabular_example_files[2]],
@@ -3831,6 +3839,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                             walkthrough_file_input,
                             walkthrough_pii_identification_method_drop_tabular,
                             walkthrough_anon_strategy,
+                            in_data_files,  # Stable bundled paths (HF /tmp/gradio cache)
                         ],
                         example_labels=tabular_example_labels,
                         fn=show_tabular_info_box_on_click,
@@ -11336,6 +11345,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             str(Path(OUTPUT_FOLDER).resolve()),
             str(Path(INPUT_FOLDER).resolve()),
         ]
+        _gradio_file_allowed_paths.extend(gradio_example_allowed_paths())
         if GRADIO_TEMP_DIR:
             _gradio_file_allowed_paths.append(str(Path(GRADIO_TEMP_DIR).resolve()))
         # Pi agent + local dev: /redact_document may return paths under workspace/.gradio_uploads
