@@ -361,6 +361,7 @@ from tools.config import (
     USAGE_LOG_DYNAMODB_TABLE_NAME,
     USAGE_LOG_FILE_NAME,
     USAGE_LOGS_FOLDER,
+    USE_AGENTCORE,
     USE_GREEDY_DUPLICATE_DETECTION,
     WHOLE_PAGE_REDACTION_LIST_PATH,
 )
@@ -2852,6 +2853,21 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
                 with gr.Accordion("Load in file"):
                     in_doc_files.render()
+                    agent_redaction_instructions_textbox = gr.Textbox(
+                        label="AI agent redaction instructions (optional)",
+                        info=(
+                            "Leave blank for standard redaction. If filled in, an AWS AgentCore "
+                            "agent redacts, reviews and applies the redactions following these "
+                            "instructions, using the settings below as defaults."
+                        ),
+                        placeholder=(
+                            "- Redact all personal names\n"
+                            "- Remove organisation addresses\n"
+                            "- Keep publication titles visible"
+                        ),
+                        lines=5,
+                        visible=USE_AGENTCORE,
+                    )
 
                 with gr.Accordion(
                     "Redaction settings",
@@ -3142,6 +3158,19 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                     scale=4,
                     elem_id="document-redact-btn",
                 )
+                agent_redact_btn = gr.Button(
+                    "Redact with AI agent (follows the instructions above)",
+                    variant="primary",
+                    scale=4,
+                    visible=False,
+                    elem_id="agent-redact-btn",
+                )
+                with gr.Accordion(
+                    "AI agent activity", open=False, visible=USE_AGENTCORE
+                ):
+                    agent_activity_markdown = gr.Markdown(
+                        "No agent run yet.", container=True
+                    )
 
                 with gr.Row(equal_height=True):
                     with gr.Column(scale=1):
@@ -5771,6 +5800,60 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         show_progress_on=[],
         api_visibility="undocumented",
     )
+
+    if USE_AGENTCORE:
+        from tools.agentcore_harness import agentic_redact_for_gradio
+
+        def _toggle_agent_redact_buttons(instructions: str):
+            use_agent = bool((instructions or "").strip())
+            return gr.update(visible=not use_agent), gr.update(visible=use_agent)
+
+        agent_redaction_instructions_textbox.change(
+            fn=_toggle_agent_redact_buttons,
+            inputs=[agent_redaction_instructions_textbox],
+            outputs=[document_redact_btn, agent_redact_btn],
+            queue=False,
+            api_visibility="undocumented",
+        )
+
+        agent_redact_btn.click(
+            fn=release_document_session_state,
+            inputs=[pdf_doc_state],
+            outputs=_release_document_session_state_outputs,
+            api_visibility="undocumented",
+        ).success(
+            fn=enforce_cost_codes,
+            inputs=[
+                enforce_cost_code_bool,
+                cost_code_choice_drop,
+                cost_code_dataframe,
+            ],
+            api_visibility="undocumented",
+        ).success(
+            fn=agentic_redact_for_gradio,
+            inputs=[
+                in_doc_files,
+                agent_redaction_instructions_textbox,
+                text_extract_method_radio,
+                local_ocr_method_radio,
+                pii_identification_method_drop,
+                in_redact_entities,
+                in_redact_comprehend_entities,
+                in_redact_llm_entities,
+                in_allow_list_state,
+                in_deny_list_state,
+                handwrite_signature_checkbox,
+                page_min,
+                page_max,
+                output_folder_textbox,
+            ],
+            outputs=[
+                redaction_output_summary_textbox,
+                agent_activity_markdown,
+                output_file,
+            ],
+            api_visibility="undocumented",
+        )
 
     # Run redaction function from document redaction tab button
     document_redact_btn.click(
@@ -11328,6 +11411,21 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             "tools.preview_redaction_boxes.preview_redaction_boxes() directly is faster."
         ),
     )
+
+    if USE_AGENTCORE:
+        from tools.agentcore_harness import agentic_redact_api
+
+        gr.api(
+            agentic_redact_api,
+            api_name="agentic_redact",
+            api_description=(
+                "Agentic redaction of one PDF/image via the configured AWS AgentCore Harness: "
+                "the agent follows the plain-language instructions, runs doc_redact, reviews "
+                "and edits the review CSV, verifies coverage and applies the redactions once. "
+                "Returns (output_paths, summary). Requires USE_AGENTCORE=True and "
+                "AGENTCORE_HARNESS_ARN."
+            ),
+        )
 
     ###
     # APP RUN SETTINGS

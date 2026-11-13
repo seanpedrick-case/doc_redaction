@@ -2461,6 +2461,39 @@ POST_REDACT_PASS1_INCLUDE_IN_OUTPUTS = convert_string_to_boolean(
     get_or_create_env_var("POST_REDACT_PASS1_INCLUDE_IN_OUTPUTS", "True")
 )
 
+###
+# AgentCore Harness (agentic redaction inside the main app, see tools/agentcore_harness.py)
+###
+
+# Show the "AI agent redaction instructions" box on the Redact PDFs/images tab and route
+# instruction-driven runs to a Bedrock AgentCore Harness (redaction tools run in this container).
+USE_AGENTCORE = convert_string_to_boolean(
+    get_or_create_env_var("USE_AGENTCORE", "False")
+)
+AGENTCORE_HARNESS_ARN = get_or_create_env_var("AGENTCORE_HARNESS_ARN", "")
+AGENTCORE_HARNESS_ENDPOINT = get_or_create_env_var(
+    "AGENTCORE_HARNESS_ENDPOINT", "DEFAULT"
+)
+AGENTCORE_REGION = get_or_create_env_var("AGENTCORE_REGION", AWS_REGION)
+# s3://bucket/prefix/ used to exchange page-review bundles with harness subagents.
+AGENTCORE_HARNESS_S3_STAGING_PREFIX = get_or_create_env_var(
+    "AGENTCORE_HARNESS_S3_STAGING_PREFIX",
+    f"s3://{S3_OUTPUTS_BUCKET}/harness-staging/" if S3_OUTPUTS_BUCKET else "",
+)
+AGENTCORE_HARNESS_MAX_TOOL_ROUNDS = int(
+    get_or_create_env_var("AGENTCORE_HARNESS_MAX_TOOL_ROUNDS", "60")
+)
+AGENTCORE_HARNESS_ENABLE_PAGE_REVIEW = convert_string_to_boolean(
+    get_or_create_env_var("AGENTCORE_HARNESS_ENABLE_PAGE_REVIEW", "True")
+)
+AGENTCORE_HARNESS_PRESIGN_SECONDS = int(
+    get_or_create_env_var("AGENTCORE_HARNESS_PRESIGN_SECONDS", "3600")
+)
+# Max characters returned to the harness by read_session_text in one call.
+AGENTCORE_HARNESS_MAX_READ_CHARS = int(
+    get_or_create_env_var("AGENTCORE_HARNESS_MAX_READ_CHARS", "60000")
+)
+
 # Main Gradio app gold eval (reuse agent-redact/eval gold cases + CSV).
 APP_EVAL_ENABLED = convert_string_to_boolean(
     get_or_create_env_var("APP_EVAL_ENABLED", "False")

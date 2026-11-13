@@ -896,6 +896,55 @@ AGENTCORE_TASK_ROLE_POLICY_FILES = parse_comma_separated_list(
 )
 
 ###
+# AgentCore Harness for the main app (single container: the app runs the inline redaction
+# tools itself; AWS runs the agent loop). Sets USE_AGENTCORE / AGENTCORE_HARNESS_ARN on the
+# main container.
+###
+
+ENABLE_AGENTCORE_HARNESS = get_or_create_env_var("ENABLE_AGENTCORE_HARNESS", "False")
+AGENTCORE_HARNESS_NAME = get_or_create_env_var(
+    "AGENTCORE_HARNESS_NAME", f"{CDK_PREFIX}RedactionHarness"
+)
+
+
+def default_harness_model_id(model: str, region: str) -> str:
+    """Bedrock cross-region inference profile id (e.g. ``eu.anthropic...``) for the region.
+
+    Recent Claude models are not invocable on-demand by bare model id.
+    """
+    model = (model or "").strip()
+    if not model.startswith("anthropic."):
+        return model
+    geo = {"eu": "eu", "us": "us", "ap": "apac"}.get((region or "").split("-")[0], "")
+    return f"{geo}.{model}" if geo else model
+
+
+AGENTCORE_HARNESS_MODEL_ID = get_or_create_env_var(
+    "AGENTCORE_HARNESS_MODEL_ID",
+    default_harness_model_id(AGENTCORE_BEDROCK_MODEL, AWS_REGION),
+)
+AGENTCORE_HARNESS_MAX_ITERATIONS = get_or_create_env_var(
+    "AGENTCORE_HARNESS_MAX_ITERATIONS", "150"
+)
+AGENTCORE_HARNESS_TIMEOUT_SECONDS = get_or_create_env_var(
+    "AGENTCORE_HARNESS_TIMEOUT_SECONDS", "3600"
+)
+AGENTCORE_HARNESS_MAX_TOKENS = get_or_create_env_var(
+    "AGENTCORE_HARNESS_MAX_TOKENS", "16000"
+)
+AGENTCORE_HARNESS_ENABLE_PAGE_REVIEW = get_or_create_env_var(
+    "AGENTCORE_HARNESS_ENABLE_PAGE_REVIEW", "True"
+)
+# Key prefixes: skills live in the log/config bucket (no expiry); per-run page-review staging
+# lives in the output bucket (expires with its lifecycle rule).
+AGENTCORE_HARNESS_SKILLS_S3_PREFIX = get_or_create_env_var(
+    "AGENTCORE_HARNESS_SKILLS_S3_PREFIX", "agentcore-harness/skills/"
+)
+AGENTCORE_HARNESS_STAGING_S3_PREFIX = get_or_create_env_var(
+    "AGENTCORE_HARNESS_STAGING_S3_PREFIX", "harness-staging/"
+)
+
+###
 # WHOLE DOCUMENT API OPTIONS
 ###
 

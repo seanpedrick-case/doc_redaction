@@ -246,6 +246,17 @@ AGENTCORE_RUNTIME_URL=https://bedrock-agentcore.<region>.amazonaws.com/runtimes/
 
 The CDK demo installer can also build an ARM64 runtime image and create the AgentCore resource (`python cdk/cdk_install.py --profile demo --enable-agentic --enable-agentcore-cdk-deploy`). For a console Harness instead of the LangGraph bundle, use `AGENT_ORCHESTRATOR=agentcore-harness` with `AGENTCORE_HARNESS_ARN`. Full deploy, auth, and troubleshooting: [agent-redact/agentcore/README.md](https://github.com/seanpedrick-case/doc_redaction/blob/main/agent-redact/agentcore/README.md).
 
+**AgentCore Harness inside the main app (single container).** Without the separate agent UI, the main app can drive an AgentCore Harness directly. The harness calls the app's redaction functions as inline tools that run in the main container. Set these in `config/app_config.env`:
+
+| Variable | Purpose |
+|----------|---------|
+| `USE_AGENTCORE` | `True` shows the *AI agent redaction instructions* box on the Redact tab and registers the `agentic_redact` API |
+| `AGENTCORE_HARNESS_ARN` | Harness ARN (`arn:aws:bedrock-agentcore:<region>:<account>:harness/...`) |
+| `AGENTCORE_HARNESS_S3_STAGING_PREFIX` | S3 prefix for per-page review bundles (presigned URLs for harness subagents); defaults to `s3://$S3_OUTPUTS_BUCKET/harness-staging/` |
+| `AGENTCORE_HARNESS_ENABLE_PAGE_REVIEW` | `False` keeps review in the parent agent (no subagents / staging) |
+
+On AWS, `python cdk/cdk_install.py --enable-agentcore-harness` creates the harness, its skill and IAM, and wires these variables into the main container. See [Option 3 in the AgentCore options guide](https://github.com/seanpedrick-case/doc_redaction/blob/main/agent-redact/agentcore/OPTIONS.md).
+
 For llama.cpp + the agent UI together, see the compose examples at the top of [docker-compose_llama_agentic.yml](https://github.com/seanpedrick-case/doc_redaction/blob/main/docker-compose_llama_agentic.yml). Layout of the agent tree: [agent-redact/README.md](https://github.com/seanpedrick-case/doc_redaction/blob/main/agent-redact/README.md). LLM providers, env vars, and Gradio usage: [agent-redact/pi/agent/README.md](https://github.com/seanpedrick-case/doc_redaction/blob/main/agent-redact/pi/agent/README.md).
 
 ### Command line interface

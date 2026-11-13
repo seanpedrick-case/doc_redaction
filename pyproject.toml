@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc_redaction"
-version = "2.9.0"
+version = "2.10.0"
 description = "Redact PDF/image-based documents, Word, or CSV/XLSX files using a Gradio-based GUI interface"
 readme = "README_PYPI.md"
 authors = [
@@ -47,14 +47,14 @@ dependencies = [
     "pymupdf>=1.26.2,<2",
     "bleach>=6.4.0,<7",
     "opencv-python>=4.14.0.94,<5",
-    "presidio_analyzer==2.2.365",
+    "presidio_analyzer==2.2.362",
     "presidio_anonymizer==2.2.365",
     "presidio-image-redactor==0.0.61",
     "pikepdf>=10.12.0,<11",
     "pandas>=2.3.3,<4",
     "scikit-learn>=1.7.2,<1.8",
     "spacy>=3.8.18,<4",
-    "boto3>=1.43.117,<2",
+    "boto3>=1.44.3,<2",
     "pyarrow>=25.0.1,<26",
     "openpyxl>=3.1.5,<4",
     "Faker>=40.44.0,<50",
@@ -62,7 +62,7 @@ dependencies = [
     "spaczz>=0.6.1,<1",
     "rapidfuzz>=3.10.0,<=3.14.5",
     "python-dotenv>=1.2.4,<2",
-    "awslambdaric>=4.2.3,<5",
+    #"awslambdaric>=4.2.3,<5",
     "python-docx>=1.2.0,<2",
     "polars>=1.44,<2",
     "defusedxml>=0.7.1,<1",
@@ -134,6 +134,7 @@ doc_redaction = [
     "assets/*.png",
     "example_data/**/*",
 ]
+tools = ["agentcore_harness_tools.json"]
 
 [tool.setuptools.packages.find]
 where = ["."]
