@@ -18,7 +18,7 @@ Bucket names default to `doc-redact-harness-skills-<region>-<account>` and `doc-
 - **AWS CDK CLI** on PATH (`npm install -g aws-cdk`; on Windows the script looks for `cdk.cmd`, or falls back to `npx aws-cdk`)
 - Python deps from [`cdk/requirements.txt`](../requirements.txt)
 - `cdk bootstrap aws://ACCOUNT/REGION` once per account/region
-- Bedrock access to the chosen inference profile (e.g. `eu.anthropic.claude-sonnet-4-6`)
+- Bedrock access to the harness model (default `anthropic.claude-sonnet-5`; override with `AGENTCORE_HARNESS_MODEL_ID`)
 - Local app: `boto3>=1.44.3`, Tesseract/Poppler as for normal redaction
 
 ## Deploy

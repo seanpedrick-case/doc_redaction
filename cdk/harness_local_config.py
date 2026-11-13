@@ -34,17 +34,15 @@ HARNESS_NAME = _env("AGENTCORE_HARNESS_NAME", "LocalRedactionHarness")
 HARNESS_MODEL_ID = _env("AGENTCORE_HARNESS_MODEL_ID", "")
 
 
-def default_harness_model_id(model: str, region: str) -> str:
-    model = (model or "anthropic.claude-sonnet-4-6").strip()
-    if not model.startswith("anthropic."):
-        return model
-    geo = {"eu": "eu", "us": "us", "ap": "apac"}.get(region.split("-")[0], "")
-    return f"{geo}.{model}" if geo else model
+def default_harness_model_id(model: str, region: str = "") -> str:
+    """Return Bedrock model id as configured (no automatic ``eu.`` inference profile)."""
+    _ = region  # kept for call-site compatibility
+    return (model or "anthropic.claude-sonnet-5").strip()
 
 
 if not HARNESS_MODEL_ID:
     HARNESS_MODEL_ID = default_harness_model_id(
-        _env("AGENTCORE_BEDROCK_MODEL", "anthropic.claude-sonnet-4-6"), AWS_REGION
+        _env("AGENTCORE_BEDROCK_MODEL", "anthropic.claude-sonnet-5"), AWS_REGION
     )
 
 HARNESS_MAX_ITERATIONS = int(_env("AGENTCORE_HARNESS_MAX_ITERATIONS", "150") or "150")

@@ -143,15 +143,13 @@ def test_sanitize_harness_name():
     assert len(sanitize_harness_name("x" * 80)) == 40
 
 
-def test_default_harness_model_id_uses_regional_profile():
+def test_default_harness_model_id_passes_through():
     from cdk_config import default_harness_model_id
 
-    assert default_harness_model_id("anthropic.claude-sonnet-4-6", "eu-west-2") == (
-        "eu.anthropic.claude-sonnet-4-6"
+    assert default_harness_model_id("anthropic.claude-sonnet-5", "eu-west-2") == (
+        "anthropic.claude-sonnet-5"
     )
-    assert default_harness_model_id("anthropic.claude-sonnet-4-6", "us-east-1") == (
-        "us.anthropic.claude-sonnet-4-6"
-    )
+    assert default_harness_model_id("", "us-east-1") == "anthropic.claude-sonnet-5"
     assert default_harness_model_id("eu.anthropic.x", "eu-west-2") == "eu.anthropic.x"
 
 

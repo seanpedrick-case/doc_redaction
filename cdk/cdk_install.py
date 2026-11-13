@@ -4526,8 +4526,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--agentcore-harness-model",
         default="",
         help=(
-            "Bedrock model / inference profile id for the AgentCore Harness. Default: the "
-            "regional inference profile for the AgentCore model (e.g. eu.anthropic...)."
+            "Bedrock model id for the AgentCore Harness (default anthropic.claude-sonnet-5). "
+            "Set a cross-region inference profile explicitly if required (e.g. eu.anthropic...)."
         ),
     )
     agentic.add_argument(

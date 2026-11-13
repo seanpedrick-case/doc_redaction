@@ -161,7 +161,7 @@ The task role needs `bedrock-agentcore:InvokeHarness` ([`cdk/policies/agentcore_
 - grants the main task role `InvokeHarness` on that harness;
 - injects `USE_AGENTCORE`, `AGENTCORE_HARNESS_ARN` and the staging prefix into the main container.
 
-Tunables: `AGENTCORE_HARNESS_MODEL_ID` (defaults to the regional inference profile, e.g. `eu.anthropic.claude-sonnet-4-6`), `AGENTCORE_HARNESS_MAX_ITERATIONS`, `AGENTCORE_HARNESS_TIMEOUT_SECONDS` and `AGENTCORE_HARNESS_MAX_TOKENS`.
+Tunables: `AGENTCORE_HARNESS_MODEL_ID` (default `anthropic.claude-sonnet-5`; set explicitly if your account requires a cross-region inference profile such as `eu.anthropic.*`), `AGENTCORE_HARNESS_MAX_ITERATIONS`, `AGENTCORE_HARNESS_TIMEOUT_SECONDS` and `AGENTCORE_HARNESS_MAX_TOKENS`.
 
 **Limits to keep in mind:**
 

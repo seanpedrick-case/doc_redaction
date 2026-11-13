@@ -879,9 +879,9 @@ AGENTCORE_RUNTIME_NAME = get_or_create_env_var(
     "AGENTCORE_RUNTIME_NAME", f"{CDK_PREFIX}RedactionAgent"
 )
 # Bedrock model the AgentCore runtime uses (fixed at runtime creation via the
-# AGENT_DEFAULT_MODEL env var; cannot be changed from the Gradio UI). Default Sonnet 4.6.
+# AGENT_DEFAULT_MODEL env var; cannot be changed from the Gradio UI). Default Sonnet 5.
 AGENTCORE_BEDROCK_MODEL = get_or_create_env_var(
-    "AGENTCORE_BEDROCK_MODEL", "anthropic.claude-sonnet-4-6"
+    "AGENTCORE_BEDROCK_MODEL", "anthropic.claude-sonnet-5"
 )
 AGENT_ORCHESTRATOR_DEFAULT = get_or_create_env_var("AGENT_ORCHESTRATOR", "pi")
 # Optional JSON policies for the AgentCore *runtime* task role (Bedrock invoke, secrets, logs).
@@ -907,16 +907,10 @@ AGENTCORE_HARNESS_NAME = get_or_create_env_var(
 )
 
 
-def default_harness_model_id(model: str, region: str) -> str:
-    """Bedrock cross-region inference profile id (e.g. ``eu.anthropic...``) for the region.
-
-    Recent Claude models are not invocable on-demand by bare model id.
-    """
-    model = (model or "").strip()
-    if not model.startswith("anthropic."):
-        return model
-    geo = {"eu": "eu", "us": "us", "ap": "apac"}.get((region or "").split("-")[0], "")
-    return f"{geo}.{model}" if geo else model
+def default_harness_model_id(model: str, region: str = "") -> str:
+    """Harness default model id (direct ``anthropic.*`` unless ``AGENTCORE_HARNESS_MODEL_ID`` is set)."""
+    _ = region
+    return (model or "anthropic.claude-sonnet-5").strip()
 
 
 AGENTCORE_HARNESS_MODEL_ID = get_or_create_env_var(

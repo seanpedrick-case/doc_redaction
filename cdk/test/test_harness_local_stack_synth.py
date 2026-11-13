@@ -44,6 +44,8 @@ def test_harness_local_stack_synth():
 def test_harness_local_config_default_model():
     import harness_local_config as cfg
 
-    assert cfg.default_harness_model_id(
-        "anthropic.claude-sonnet-4-6", "eu-west-2"
-    ).startswith("eu.")
+    assert (
+        cfg.default_harness_model_id("anthropic.claude-sonnet-5", "eu-west-2")
+        == "anthropic.claude-sonnet-5"
+    )
+    assert cfg.default_harness_model_id("", "eu-west-2") == "anthropic.claude-sonnet-5"
