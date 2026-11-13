@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -24,9 +25,57 @@ CDK_DIR = Path(__file__).resolve().parent
 REPO_ROOT = CDK_DIR.parent
 
 
+def _path_for_cdk_lookup() -> str:
+    """PATH plus common Node/npm install dirs (conda shells often omit ``%APPDATA%\\npm``)."""
+    entries: List[str] = []
+    seen: set[str] = set()
+
+    def add(chunk: str) -> None:
+        for part in chunk.split(os.pathsep):
+            key = part.strip().lower()
+            if key and key not in seen:
+                seen.add(key)
+                entries.append(part)
+
+    add(os.environ.get("PATH", ""))
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        add(str(Path(appdata) / "npm"))
+    pf = os.environ.get("ProgramFiles")
+    if pf:
+        add(str(Path(pf) / "nodejs"))
+    return os.pathsep.join(entries)
+
+
+def _resolve_cdk_argv() -> List[str]:
+    """AWS CDK CLI on PATH (``cdk.cmd`` on Windows) or ``npx aws-cdk``."""
+    lookup = _path_for_cdk_lookup()
+    for name in ("cdk", "cdk.cmd", "cdk.exe"):
+        found = shutil.which(name, path=lookup)
+        if found:
+            return [found]
+    npx = shutil.which("npx", path=lookup) or shutil.which("npx.cmd", path=lookup)
+    if npx:
+        return [npx, "aws-cdk"]
+    raise SystemExit(
+        "AWS CDK CLI not found on PATH.\n"
+        "Install: npm install -g aws-cdk\n"
+        "Then open a new terminal, or run: npx aws-cdk deploy ...\n"
+        "See cdk/docs/harness_local_stack.md"
+    )
+
+
 def _run(cmd: List[str], *, cwd: Path, env: Optional[Dict[str, str]] = None) -> None:
     print("+", " ".join(cmd))
-    subprocess.run(cmd, cwd=cwd, env=env, check=True)
+    try:
+        subprocess.run(cmd, cwd=cwd, env=env, check=True)
+    except FileNotFoundError as exc:
+        raise SystemExit(
+            f"Failed to run: {' '.join(cmd)}\n"
+            f"{exc}\n"
+            "If this is the CDK CLI, install aws-cdk (npm install -g aws-cdk) "
+            "and ensure Node/npm are on PATH."
+        ) from exc
 
 
 def _sts_identity(profile: str, region: str) -> tuple[str, str]:
@@ -134,7 +183,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     app_cmd = f"{sys.executable} app_harness_local.py"
     cdk_args = [
-        "cdk",
+        *_resolve_cdk_argv(),
         "destroy" if args.destroy else "deploy",
         STACK_NAME,
         "-a",

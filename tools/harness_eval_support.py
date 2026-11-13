@@ -68,8 +68,10 @@ def resolve_harness_gold_case(
         from app_eval_env import app_eval_enabled
         from post_run_app_eval import resolve_app_eval_gold_dir
     except ImportError:
+
         def app_eval_enabled():
             return False  # type: ignore[assignment, misc]
+
         resolve_app_eval_gold_dir = None  # type: ignore[assignment, misc]
 
     if app_eval_enabled() and resolve_app_eval_gold_dir is not None:
