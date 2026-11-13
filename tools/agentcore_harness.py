@@ -947,6 +947,8 @@ def run_agentic_redaction(
     session: HarnessSession | None = None,
     max_rounds: int | None = None,
     should_stop: Callable[[], bool] | None = None,
+    eval_recorder: Any | None = None,
+    eval_session_hash: str = "",
 ) -> Iterator[HarnessProgress]:
     """
     Drive one harness redaction task; yields progress for streaming UIs.
@@ -1032,6 +1034,8 @@ def run_agentic_redaction(
                     (call.tool_use_id, json.dumps({"error": str(exc)}), False)
                 )
                 continue
+            if eval_recorder is not None:
+                eval_recorder.record_tool(call.name, arguments)
             activity.add(f"Running `{call.name}`…")
             yield HarnessProgress(
                 activity.markdown(), [], f"Running {call.name} (round {round_no})…"
@@ -1054,6 +1058,19 @@ def run_agentic_redaction(
     if session.finished and session.finish_summary:
         summary = session.finish_summary
     outputs = session.output_files()
+    if eval_recorder is not None and getattr(eval_recorder, "started", False):
+        eval_path = eval_recorder.write_post_run(
+            workspace=session.session_dir,
+            document_name=session.source_pdf.name,
+            instructions=instructions,
+            assistant_output=summary,
+            workflow_incomplete=not session.finished,
+            session_hash=eval_session_hash,
+        )
+        if eval_path is not None:
+            activity.add(
+                f"**Post-run eval:** `{eval_path.name}` → `{eval_path.parent}`"
+            )
     activity.add(f"Finished with {len(outputs)} output file(s).")
     yield HarnessProgress(
         activity.markdown(), outputs, summary or "Agent run ended.", True
@@ -1147,6 +1164,7 @@ def agentic_redact_for_gradio(
     page_min: Any,
     page_max: Any,
     output_folder: str | None = None,
+    session_hash: str = "",
 ) -> Iterator[tuple[str, str, list[str]]]:
     """Gradio streaming handler: yields ``(summary, activity_markdown, output_files)``."""
     import gradio as gr
@@ -1173,12 +1191,37 @@ def agentic_redact_for_gradio(
         page_min=int(page_min or 0),
         page_max=int(page_max or 0),
     )
+    from tools.harness_eval_support import (
+        HarnessEvalRecorder,
+        harness_post_run_eval_enabled,
+    )
+
+    eval_recorder: HarnessEvalRecorder | None = None
+    session = HarnessSession(
+        document, defaults=defaults, output_root=output_folder or OUTPUT_FOLDER
+    )
+    if harness_post_run_eval_enabled():
+        eval_recorder = HarnessEvalRecorder(session_hash=(session_hash or "").strip())
+        gold_line = eval_recorder.begin(
+            workspace=session.session_dir,
+            pdf_path=session.source_pdf,
+            document_name=session.source_pdf.name,
+            instructions=instructions,
+            text_extract_method=text_extract_method,
+            pii_method=pii_method or "Local",
+            ocr_method_short=defaults.ocr_method,
+        )
+        if gold_line:
+            yield "Starting agent run…", gold_line, []
     for progress in run_agentic_redaction(
         document,
         instructions,
         defaults=defaults,
         page_range=_page_range_text(page_min, page_max),
         output_root=output_folder or OUTPUT_FOLDER,
+        session=session,
+        eval_recorder=eval_recorder,
+        eval_session_hash=(session_hash or "").strip(),
     ):
         yield progress.summary, progress.activity, progress.output_files
 

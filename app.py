@@ -2868,6 +2868,46 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                         lines=5,
                         visible=USE_AGENTCORE,
                     )
+                    if USE_AGENTCORE:
+                        from tools.harness_gradio_examples import (
+                            harness_example_rows,
+                            harness_examples_status_md,
+                        )
+
+                        _agent_ex_rows, _agent_ex_labels = harness_example_rows(
+                            local_entities=CHOSEN_REDACT_ENTITIES,
+                            comprehend_entities=CHOSEN_COMPREHEND_ENTITIES,
+                            llm_entities=CHOSEN_LLM_ENTITIES,
+                        )
+                        if _agent_ex_rows:
+                            gr.Markdown(
+                                "### Try an agent example\n"
+                                "Click a row to load the sample PDF and instructions, "
+                                "then **Redact with AI agent**."
+                            )
+                            gr.Examples(
+                                examples=_agent_ex_rows,
+                                inputs=[
+                                    in_doc_files,
+                                    agent_redaction_instructions_textbox,
+                                    text_extract_method_radio,
+                                    local_ocr_method_radio,
+                                    pii_identification_method_drop,
+                                    in_redact_entities,
+                                    in_redact_comprehend_entities,
+                                    in_redact_llm_entities,
+                                    in_allow_list_state,
+                                    in_deny_list_state,
+                                    handwrite_signature_checkbox,
+                                    page_min,
+                                    page_max,
+                                ],
+                                example_labels=_agent_ex_labels,
+                                examples_per_page=2,
+                                cache_examples=False,
+                            )
+                        else:
+                            gr.Markdown(harness_examples_status_md())
 
                 with gr.Accordion(
                     "Redaction settings",
@@ -5846,6 +5886,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                 page_min,
                 page_max,
                 output_folder_textbox,
+                session_hash_textbox,
             ],
             outputs=[
                 redaction_output_summary_textbox,

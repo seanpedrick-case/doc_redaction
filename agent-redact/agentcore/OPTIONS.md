@@ -171,6 +171,8 @@ Tunables: `AGENTCORE_HARNESS_MODEL_ID` (defaults to the regional inference profi
 
 **Local app only (minimal AWS footprint):** deploy just the harness, two S3 buckets, and a developer IAM policy—no ECS or VPC—with [`cdk/deploy_harness_local.py`](../../cdk/deploy_harness_local.py). Details: [`cdk/docs/harness_local_stack.md`](../../cdk/docs/harness_local_stack.md).
 
+**Eval (main app):** With ``APP_EVAL_ENABLED=True`` (or ``AGENT_EVAL_DEEPEVAL_TRACING=1``), completed harness runs write ``eval/run_*/eval_summary.json`` under the harness session folder, using the real inline tool trace (``doc_redact``, ``verify_coverage``, …). Gold auto-match uses the same ``APP_EVAL_*`` / ``AGENT_EVAL_*`` variables as standard redaction and agent-redact. Try the two agent examples on the Redact tab when ``USE_AGENTCORE=True``.
+
 ---
 
 ## Side-by-side
