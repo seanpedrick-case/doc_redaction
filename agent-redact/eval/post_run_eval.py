@@ -115,6 +115,9 @@ def write_session_post_run_eval(
     model_name: str = "",
     encourage_vlm_faces: bool = False,
     encourage_vlm_signatures: bool = False,
+    workspace_root: Path | str | None = None,
+    gold_case_dir: Path | str | None = None,
+    force: bool = False,
 ) -> Path | None:
     """
     Persist artifacts under ``{session_workspace}/eval/run_<ts>/`` and ``eval_summary.json``.
@@ -132,16 +135,23 @@ def write_session_post_run_eval(
     except ImportError:
         from arize_monitoring import agent_eval_deepeval_tracing_enabled
 
-    if not agent_eval_deepeval_tracing_enabled():
+    if not force and not agent_eval_deepeval_tracing_enabled():
         return None
 
     _, _, eval_dir = _ensure_agent_imports()
     from session_workspace import session_workspace_dir
 
-    workspace = session_workspace_dir(session_hash)
+    if workspace_root is not None:
+        workspace = Path(workspace_root).resolve()
+    else:
+        workspace = session_workspace_dir(session_hash)
     stamp = time.strftime("%Y%m%d_%H%M%S")
     run_dir = (workspace / "eval" / f"run_{stamp}").resolve()
-    gold_case_dir = resolve_eval_gold_dir(session_hash)
+    if gold_case_dir is not None:
+        gold_path = Path(gold_case_dir).resolve()
+        gold_case_dir = gold_path if gold_path.is_dir() else None
+    else:
+        gold_case_dir = resolve_eval_gold_dir(session_hash)
 
     if cumulative_tool_calls is not None:
         tool_args = {"tool_calls": list(cumulative_tool_calls)}

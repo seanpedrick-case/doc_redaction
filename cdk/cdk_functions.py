@@ -11,6 +11,7 @@ import pandas as pd
 from aws_cdk import (
     App,
     CfnOutput,
+    CfnResource,
     CfnTag,
     CustomResource,
     Duration,
@@ -3802,6 +3803,211 @@ def create_headless_s3_batch_seed(
         destination_bucket=destination_bucket,
         prune=False,
     )
+
+
+HARNESS_BUILTIN_ALLOWED_TOOLS = [
+    "shell",
+    "read",
+    "write",
+    "edit",
+    "todo_write",
+    "subagent",
+    "retrieve_context",
+    "skills",
+]
+
+HARNESS_SYSTEM_PROMPT = (
+    "You are a careful document redaction agent running inside the doc_redaction app. "
+    "The app's redaction functions are inline tools that you call; each task prompt names the "
+    "session's source document and the user's redaction requirements, which are authoritative. "
+    "Read the doc-redaction-harness skill before starting and follow it: one doc_redact first "
+    "pass, Pass 1 review of the review CSV (parallel per-page subagents when "
+    "stage_page_review_bundles is available), verify_redaction_coverage, a single review_apply, "
+    "then finish_task exactly once. Never send document content to any destination other than "
+    "the presigned URLs returned by the inline tools. Answer in British English."
+)
+
+
+def sanitize_harness_name(name: str) -> str:
+    """Coerce to the AgentCore harness name pattern ``[a-zA-Z][a-zA-Z0-9_]{0,39}``."""
+    cleaned = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in (name or ""))
+    if not cleaned or not cleaned[0].isalpha():
+        cleaned = f"H{cleaned}"
+    return cleaned[:40]
+
+
+def harness_inline_tools_to_cfn(specs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Convert InvokeHarness-style (camelCase) inline tool specs to CloudFormation casing.
+
+    Only the structural keys change; ``InputSchema`` is passed through as a JSON document.
+    """
+    cfn_tools: List[Dict[str, Any]] = []
+    for spec in specs:
+        inline = (spec.get("config") or {}).get("inlineFunction") or {}
+        cfn_tools.append(
+            {
+                "Type": spec["type"],
+                "Name": spec["name"],
+                "Config": {
+                    "InlineFunction": {
+                        "Description": inline["description"],
+                        "InputSchema": inline["inputSchema"],
+                    }
+                },
+            }
+        )
+    return cfn_tools
+
+
+def create_agentcore_harness(
+    scope: Construct,
+    logical_id: str,
+    *,
+    harness_name: str,
+    model_id: str,
+    inline_tool_specs: List[Dict[str, Any]],
+    skills_bucket: s3.IBucket,
+    skills_source_directory: str,
+    skills_s3_prefix: str,
+    region: str,
+    account: str,
+    kms_key: Optional[kms.IKey] = None,
+    max_iterations: int = 150,
+    timeout_seconds: int = 3600,
+    max_tokens: int = 16000,
+) -> CfnResource:
+    """AgentCore Harness for the main app's agentic redaction (inline tools, S3 skill).
+
+    The caller grants ``bedrock-agentcore:InvokeHarness`` on the returned resource's ``Arn``
+    to the app task role and injects that ARN into the container environment.
+    """
+    from aws_cdk import aws_s3_deployment as s3deploy
+
+    skills_prefix = skills_s3_prefix.strip("/") + "/"
+    skill_folder = os.path.basename(os.path.normpath(skills_source_directory))
+    skill_key_prefix = f"{skills_prefix}{skill_folder}/"
+
+    s3deploy.BucketDeployment(
+        scope,
+        f"{logical_id}SkillsDeployment",
+        sources=[s3deploy.Source.asset(skills_source_directory)],
+        destination_bucket=skills_bucket,
+        destination_key_prefix=skill_key_prefix,
+        prune=True,
+    )
+
+    role = iam.Role(
+        scope,
+        f"{logical_id}ExecutionRole",
+        assumed_by=iam.ServicePrincipal("bedrock-agentcore.amazonaws.com"),
+        description="Execution role for the doc_redaction AgentCore Harness",
+    )
+    role.add_to_policy(
+        iam.PolicyStatement(
+            sid="BedrockModelInvoke",
+            actions=[
+                "bedrock:InvokeModel",
+                "bedrock:InvokeModelWithResponseStream",
+                "bedrock:Converse",
+                "bedrock:ConverseStream",
+            ],
+            # Cross-region inference profiles route to foundation models in other regions.
+            resources=[
+                "arn:aws:bedrock:*::foundation-model/*",
+                f"arn:aws:bedrock:*:{account}:inference-profile/*",
+            ],
+        )
+    )
+    role.add_to_policy(
+        iam.PolicyStatement(
+            sid="WorkloadIdentity",
+            actions=[
+                "bedrock-agentcore:GetWorkloadAccessToken",
+                "bedrock-agentcore:GetWorkloadAccessTokenForJWT",
+            ],
+            resources=[
+                f"arn:aws:bedrock-agentcore:{region}:{account}:workload-identity-directory/default",
+                f"arn:aws:bedrock-agentcore:{region}:{account}:workload-identity-directory/default/workload-identity/*",
+            ],
+        )
+    )
+    role.add_to_policy(
+        iam.PolicyStatement(
+            sid="Logs",
+            actions=[
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+                "logs:DescribeLogStreams",
+            ],
+            resources=[
+                f"arn:aws:logs:{region}:{account}:log-group:/aws/bedrock-agentcore/*"
+            ],
+        )
+    )
+    role.add_to_policy(
+        iam.PolicyStatement(
+            sid="ObservabilityWrite",
+            actions=[
+                "logs:DescribeLogGroups",
+                "xray:PutTraceSegments",
+                "xray:PutTelemetryRecords",
+                "xray:GetSamplingRules",
+                "xray:GetSamplingTargets",
+                "cloudwatch:PutMetricData",
+            ],
+            resources=["*"],
+        )
+    )
+    role.add_to_policy(
+        iam.PolicyStatement(
+            sid="ReadHarnessSkills",
+            actions=["s3:GetObject"],
+            resources=[f"{skills_bucket.bucket_arn}/{skills_prefix}*"],
+        )
+    )
+    role.add_to_policy(
+        iam.PolicyStatement(
+            sid="ListHarnessSkills",
+            actions=["s3:ListBucket"],
+            resources=[skills_bucket.bucket_arn],
+            conditions={"StringLike": {"s3:prefix": [f"{skills_prefix}*"]}},
+        )
+    )
+    if kms_key is not None:
+        kms_key.grant_decrypt(role)
+
+    harness = CfnResource(
+        scope,
+        logical_id,
+        type="AWS::BedrockAgentCore::Harness",
+        properties={
+            "HarnessName": sanitize_harness_name(harness_name),
+            "ExecutionRoleArn": role.role_arn,
+            "MaxIterations": int(max_iterations),
+            "TimeoutSeconds": int(timeout_seconds),
+            "Memory": {"Disabled": {}},
+            "Model": {
+                "BedrockModelConfig": {
+                    "ModelId": model_id,
+                    "ApiFormat": "converse_stream",
+                    "MaxTokens": int(max_tokens),
+                }
+            },
+            "SystemPrompt": [{"Text": HARNESS_SYSTEM_PROMPT}],
+            # No web_fetch / browser: document text must only leave via presigned staging URLs.
+            # Inline doc_redaction tools are passed only on each ``InvokeHarness`` (app code).
+            # Do not attach them here: when registered on the Harness resource, AgentCore tries
+            # to run them on the VM (``Unknown tool``) instead of handing off to the client.
+            "AllowedTools": list(HARNESS_BUILTIN_ALLOWED_TOOLS),
+            "Tools": [],
+            "Skills": [
+                {"S3": {"Uri": f"s3://{skills_bucket.bucket_name}/{skill_key_prefix}"}}
+            ],
+        },
+    )
+    harness.node.add_dependency(role)
+    return harness
 
 
 def build_pi_agent_container_environment(

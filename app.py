@@ -211,6 +211,8 @@ from tools.config import (
     DEFAULT_TEXT_COLUMNS,
     DEFAULT_TEXT_EXTRACTION_MODEL,
     DENY_LIST_PATH,
+    DIRECT_MODE_AGENT_INSTRUCTIONS,
+    DIRECT_MODE_AGENT_INSTRUCTIONS_FILE,
     DIRECT_MODE_ANON_STRATEGY,
     DIRECT_MODE_CHOSEN_LOCAL_OCR_MODEL,
     DIRECT_MODE_COMBINE_PAGES,
@@ -361,6 +363,7 @@ from tools.config import (
     USAGE_LOG_DYNAMODB_TABLE_NAME,
     USAGE_LOG_FILE_NAME,
     USAGE_LOGS_FOLDER,
+    USE_AGENTCORE,
     USE_GREEDY_DUPLICATE_DETECTION,
     WHOLE_PAGE_REDACTION_LIST_PATH,
 )
@@ -368,6 +371,10 @@ from tools.custom_csvlogger import CSVLogger_custom
 from tools.data_anonymise import (
     REDACTION_EXAMPLE_PLACEHOLDER,
     anonymise_files_with_open_text,
+)
+from tools.example_data_paths import (
+    bundled_example_asset_available,
+    gradio_example_allowed_paths,
 )
 from tools.file_conversion import (
     combine_review_pdf_files,
@@ -1824,7 +1831,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                 example_labels = list()
 
                 # Check each example file and add to examples if it exists
-                if os.path.exists(example_files[0]):
+                if bundled_example_asset_available(example_files[0]):
                     available_examples.append(
                         [
                             [example_files[0]],
@@ -1845,7 +1852,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                     )
                     example_labels.append("PDF with selectable text redaction")
 
-                if os.path.exists(example_files[1]):
+                if bundled_example_asset_available(example_files[1]):
                     available_examples.append(
                         [
                             [example_files[1]],
@@ -1866,7 +1873,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                     )
                     example_labels.append("Image redaction with local OCR")
 
-                if os.path.exists(example_files[2]):
+                if bundled_example_asset_available(example_files[2]):
                     available_examples.append(
                         [
                             [example_files[2]],
@@ -1889,7 +1896,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                         "PDF redaction with custom entities (Titles, Person, Dates)"
                     )
 
-                if os.path.exists(example_files[3]):
+                if bundled_example_asset_available(example_files[3]):
                     if SHOW_AWS_EXAMPLES:
                         available_examples.append(
                             [
@@ -1915,9 +1922,9 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
                 # Add new example for custom deny list and whole page redaction
                 if (
-                    os.path.exists(example_files[3])
-                    and os.path.exists(example_files[4])
-                    and os.path.exists(example_files[5])
+                    bundled_example_asset_available(example_files[3])
+                    and bundled_example_asset_available(example_files[4])
+                    and bundled_example_asset_available(example_files[5])
                 ):
                     available_examples.append(
                         [
@@ -1994,6 +2001,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                             in_redact_comprehend_entities,  # Main component - update visibility
                             in_redact_llm_entities,  # Main component - update visibility
                             custom_llm_instructions_textbox,  # Main component - update visibility
+                            in_doc_files,  # Stable bundled paths (HF /tmp/gradio cache)
+                            prepared_pdf_state,
                         ],
                         example_labels=example_labels,
                         fn=show_info_box_on_click,
@@ -2085,7 +2094,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
                 available_ocr_examples = list()
                 ocr_example_labels = list()
-                if os.path.exists(ocr_example_files[0]):
+                if bundled_example_asset_available(ocr_example_files[0]):
                     available_ocr_examples.append(
                         [
                             [ocr_example_files[0]],
@@ -2126,7 +2135,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                     )
                     ocr_example_labels.append("Scanned document page with signatures")
 
-                if os.path.exists(ocr_example_files[1]):
+                if bundled_example_asset_available(ocr_example_files[1]):
                     available_ocr_examples.append(
                         [
                             [ocr_example_files[1]],
@@ -2147,7 +2156,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                     )
                     ocr_example_labels.append("Unclear text on handwritten note")
 
-                if os.path.exists(ocr_example_files[2]):
+                if bundled_example_asset_available(ocr_example_files[2]):
                     available_ocr_examples.append(
                         [
                             [ocr_example_files[2]],
@@ -2168,7 +2177,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                     )
                     ocr_example_labels.append("CV with photo - face identification")
 
-                if os.path.exists(example_files[0]):
+                if bundled_example_asset_available(example_files[0]):
                     available_ocr_examples.append(
                         [
                             [example_files[0]],
@@ -2231,6 +2240,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                             walkthrough_custom_llm_instructions_textbox,
                             in_redact_llm_entities,  # Main component
                             custom_llm_instructions_textbox,  # Main component
+                            in_doc_files,  # Stable bundled paths (HF /tmp/gradio cache)
+                            prepared_pdf_state,
                         ],
                         example_labels=ocr_example_labels,
                         fn=show_info_box_on_click_ocr_examples,
@@ -2845,6 +2856,63 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                 with gr.Accordion("Load in file"):
                     in_doc_files.render()
 
+                if USE_AGENTCORE:
+                    with gr.Accordion("AI agent redaction", open=True):
+                        agent_redaction_instructions_textbox = gr.Textbox(
+                            label="AI agent redaction instructions (optional)",
+                            info=(
+                                "Leave blank for standard redaction. If filled in, an AWS "
+                                "AgentCore agent redacts, reviews and applies the redactions "
+                                "following these instructions, using the settings below as "
+                                "defaults."
+                            ),
+                            placeholder=(
+                                "- Redact all personal names\n"
+                                "- Remove organisation addresses\n"
+                                "- Keep publication titles visible"
+                            ),
+                            lines=5,
+                        )
+                        from tools.harness_gradio_examples import (
+                            harness_example_rows,
+                            harness_examples_status_md,
+                        )
+
+                        _agent_ex_rows, _agent_ex_labels = harness_example_rows(
+                            local_entities=CHOSEN_REDACT_ENTITIES,
+                            comprehend_entities=CHOSEN_COMPREHEND_ENTITIES,
+                            llm_entities=CHOSEN_LLM_ENTITIES,
+                        )
+                        if _agent_ex_rows:
+                            gr.Markdown(
+                                "### Try an agent example\n"
+                                "Click a row to load the sample PDF and instructions, "
+                                "then **Redact with AI agent**."
+                            )
+                            gr.Examples(
+                                examples=_agent_ex_rows,
+                                inputs=[
+                                    in_doc_files,
+                                    agent_redaction_instructions_textbox,
+                                    text_extract_method_radio,
+                                    local_ocr_method_radio,
+                                    pii_identification_method_drop,
+                                    in_redact_entities,
+                                    in_redact_comprehend_entities,
+                                    in_redact_llm_entities,
+                                    in_allow_list_state,
+                                    in_deny_list_state,
+                                    handwrite_signature_checkbox,
+                                    page_min,
+                                    page_max,
+                                ],
+                                example_labels=_agent_ex_labels,
+                                examples_per_page=3,
+                                cache_examples=False,
+                            )
+                        else:
+                            gr.Markdown(harness_examples_status_md())
+
                 with gr.Accordion(
                     "Redaction settings",
                     open=REDACTION_SETTINGS_ACCORDION_OPEN,
@@ -3134,6 +3202,19 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                     scale=4,
                     elem_id="document-redact-btn",
                 )
+                agent_redact_btn = gr.Button(
+                    "Redact with AI agent (follows the instructions above)",
+                    variant="primary",
+                    scale=4,
+                    visible=False,
+                    elem_id="agent-redact-btn",
+                )
+                with gr.Accordion(
+                    "AI agent activity", open=False, visible=USE_AGENTCORE
+                ):
+                    agent_activity_markdown = gr.Markdown(
+                        "No agent run yet.", container=True
+                    )
 
                 with gr.Row(equal_height=True):
                     with gr.Column(scale=1):
@@ -3600,7 +3681,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                     "example_outputs/doubled_output_joined.pdf_ocr_output.csv"
                 )
 
-                if os.path.exists(duplicate_example_file):
+                if bundled_example_asset_available(duplicate_example_file):
 
                     duplicate_examples = gr.Examples(
                         examples=[
@@ -3760,7 +3841,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                 tabular_example_labels = list()
 
                 # Check each tabular example file and add to examples if it exists
-                if os.path.exists(tabular_example_files[0]):
+                if bundled_example_asset_available(tabular_example_files[0]):
                     available_tabular_examples.append(
                         [
                             [tabular_example_files[0]],
@@ -3776,7 +3857,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                         "CSV file redaction with specific columns - remove text"
                     )
 
-                if os.path.exists(tabular_example_files[1]):
+                if bundled_example_asset_available(tabular_example_files[1]):
                     available_tabular_examples.append(
                         [
                             [tabular_example_files[1]],
@@ -3792,7 +3873,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                         "Word document redaction - replace with REDACTED"
                     )
 
-                if os.path.exists(tabular_example_files[2]):
+                if bundled_example_asset_available(tabular_example_files[2]):
                     available_tabular_examples.append(
                         [
                             [tabular_example_files[2]],
@@ -3831,6 +3912,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                             walkthrough_file_input,
                             walkthrough_pii_identification_method_drop_tabular,
                             walkthrough_anon_strategy,
+                            in_data_files,  # Stable bundled paths (HF /tmp/gradio cache)
                         ],
                         example_labels=tabular_example_labels,
                         fn=show_tabular_info_box_on_click,
@@ -5762,6 +5844,73 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         show_progress_on=[],
         api_visibility="undocumented",
     )
+
+    if USE_AGENTCORE:
+        from tools.agentcore_harness import agentic_redact_for_gradio
+
+        def _toggle_agent_redact_buttons(instructions: str):
+            use_agent = bool((instructions or "").strip())
+            return gr.update(visible=not use_agent), gr.update(visible=use_agent)
+
+        agent_redaction_instructions_textbox.change(
+            fn=_toggle_agent_redact_buttons,
+            inputs=[agent_redaction_instructions_textbox],
+            outputs=[document_redact_btn, agent_redact_btn],
+            queue=False,
+            api_visibility="undocumented",
+        )
+
+        agent_redact_btn.click(
+            fn=release_document_session_state,
+            inputs=[pdf_doc_state],
+            outputs=_release_document_session_state_outputs,
+            api_visibility="undocumented",
+        ).success(
+            fn=enforce_cost_codes,
+            inputs=[
+                enforce_cost_code_bool,
+                cost_code_choice_drop,
+                cost_code_dataframe,
+            ],
+            api_visibility="undocumented",
+        ).success(
+            fn=agentic_redact_for_gradio,
+            inputs=[
+                in_doc_files,
+                agent_redaction_instructions_textbox,
+                text_extract_method_radio,
+                local_ocr_method_radio,
+                pii_identification_method_drop,
+                in_redact_entities,
+                in_redact_comprehend_entities,
+                in_redact_llm_entities,
+                in_allow_list_state,
+                in_deny_list_state,
+                handwrite_signature_checkbox,
+                page_min,
+                page_max,
+                output_folder_textbox,
+                session_hash_textbox,
+                cost_code_choice_drop,
+            ],
+            outputs=[
+                redaction_output_summary_textbox,
+                agent_activity_markdown,
+                output_file,
+                output_file_list_state,
+            ],
+            api_visibility="undocumented",
+        ).success(
+            fn=export_outputs_to_s3,
+            inputs=[
+                output_file_list_state,
+                s3_output_folder_state,
+                save_outputs_to_s3_checkbox,
+                in_doc_files,
+            ],
+            outputs=None,
+            api_visibility="undocumented",
+        )
 
     # Run redaction function from document redaction tab button
     document_redact_btn.click(
@@ -11320,6 +11469,21 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         ),
     )
 
+    if USE_AGENTCORE:
+        from tools.agentcore_harness import agentic_redact_api
+
+        gr.api(
+            agentic_redact_api,
+            api_name="agentic_redact",
+            api_description=(
+                "Agentic redaction of one PDF/image via the configured AWS AgentCore Harness: "
+                "the agent follows the plain-language instructions, runs doc_redact, reviews "
+                "and edits the review CSV, verifies coverage and applies the redactions once. "
+                "Returns (output_paths, summary). Requires USE_AGENTCORE=True and "
+                "AGENTCORE_HARNESS_ARN."
+            ),
+        )
+
     ###
     # APP RUN SETTINGS
     ###
@@ -11336,6 +11500,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             str(Path(OUTPUT_FOLDER).resolve()),
             str(Path(INPUT_FOLDER).resolve()),
         ]
+        _gradio_file_allowed_paths.extend(gradio_example_allowed_paths())
         if GRADIO_TEMP_DIR:
             _gradio_file_allowed_paths.append(str(Path(GRADIO_TEMP_DIR).resolve()))
         # Pi agent + local dev: /redact_document may return paths under workspace/.gradio_uploads
@@ -11426,6 +11591,33 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
     else:
         if __name__ == "__main__":
             from cli_redact import main
+
+            if DIRECT_MODE_TASK == "agentic_redact":
+                try:
+                    from tools.agentcore_harness import (
+                        harness_feature_ready,
+                        resolve_harness_instructions,
+                    )
+
+                    ready, reason = harness_feature_ready()
+                    if not ready:
+                        print(
+                            f"Error: DIRECT_MODE_TASK=agentic_redact requires a "
+                            f"configured harness: {reason}"
+                        )
+                        exit(1)
+                    if not resolve_harness_instructions(
+                        DIRECT_MODE_AGENT_INSTRUCTIONS,
+                        DIRECT_MODE_AGENT_INSTRUCTIONS_FILE,
+                    ):
+                        print(
+                            "Error: Set DIRECT_MODE_AGENT_INSTRUCTIONS or "
+                            "DIRECT_MODE_AGENT_INSTRUCTIONS_FILE for agentic_redact."
+                        )
+                        exit(1)
+                except OSError as exc:
+                    print(f"Error: {exc}")
+                    exit(1)
 
             # Validate required direct mode configuration
             if not DIRECT_MODE_INPUT_FILE:
@@ -11549,6 +11741,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                 # Textract Batch Operations Arguments
                 "textract_action": DIRECT_MODE_TEXTRACT_ACTION,
                 "job_id": DIRECT_MODE_JOB_ID,
+                "agent_instructions": DIRECT_MODE_AGENT_INSTRUCTIONS,
+                "agent_instructions_file": DIRECT_MODE_AGENT_INSTRUCTIONS_FILE,
                 "textract_bucket": TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET,
                 "textract_input_prefix": TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER,
                 "textract_output_prefix": TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER,
@@ -11586,6 +11780,17 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                 print(
                     "Combine review PDFs: merge redaction comments from multiple '_redactions_for_review' PDFs. "
                     "Set DIRECT_MODE_INPUT_FILE to comma-separated paths (at least 2)."
+                )
+
+            if DIRECT_MODE_TASK == "agentic_redact":
+                print(
+                    "Agentic redaction: AgentCore Harness inline-tool workflow "
+                    "(doc_redact → review → verify_redaction_coverage → review_apply). "
+                    "Requires AGENTCORE_HARNESS_ARN and IAM InvokeHarness. "
+                    "Set DIRECT_MODE_AGENT_INSTRUCTIONS (bullet points) or "
+                    "DIRECT_MODE_AGENT_INSTRUCTIONS_FILE. OCR/PII knobs: "
+                    "DIRECT_MODE_OCR_METHOD, DIRECT_MODE_PII_DETECTOR, page min/max, "
+                    "deny/allow list paths."
                 )
 
             # Combine extraction options

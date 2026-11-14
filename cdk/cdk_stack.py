@@ -30,6 +30,14 @@ from cdk_config import (
     AGENT_GRADIO_PORT,
     AGENTCORE_BEDROCK_MODEL,
     AGENTCORE_CDK_DEPLOY,
+    AGENTCORE_HARNESS_ENABLE_PAGE_REVIEW,
+    AGENTCORE_HARNESS_MAX_ITERATIONS,
+    AGENTCORE_HARNESS_MAX_TOKENS,
+    AGENTCORE_HARNESS_MODEL_ID,
+    AGENTCORE_HARNESS_NAME,
+    AGENTCORE_HARNESS_SKILLS_S3_PREFIX,
+    AGENTCORE_HARNESS_STAGING_S3_PREFIX,
+    AGENTCORE_HARNESS_TIMEOUT_SECONDS,
     AGENTCORE_NETWORK_MODE,
     AGENTCORE_RUNTIME_NAME,
     AGENTCORE_RUNTIME_ROLE_ARN,
@@ -108,6 +116,7 @@ from cdk_config import (
     ECS_TASK_ROLE_NAME,
     ECS_USE_FARGATE_SPOT,
     ENABLE_AGENTCORE_CDK_RUNTIME,
+    ENABLE_AGENTCORE_HARNESS,
     ENABLE_AGENTCORE_RUNTIME,
     ENABLE_CLOUDFRONT_WAF,
     ENABLE_ECS_SERVICE_CONNECT,
@@ -170,6 +179,7 @@ from cdk_functions import (  # Only keep CDK-native functions
     build_express_gateway_primary_container,
     build_pi_express_container_environment,
     configure_public_github_codebuild_source,
+    create_agentcore_harness,
     create_ecs_express_infrastructure_role,
     create_ecs_vpc_endpoints_for_private_subnets,
     create_express_gateway_service,
@@ -1646,6 +1656,59 @@ class CdkStack(Stack):
         except Exception as e:
             raise Exception("Could not handle Codebuild project due to:", e)
 
+        # --- AgentCore Harness (main app agentic redaction, single container) ---
+        harness_container_env: Dict[str, str] = {}
+        if ENABLE_AGENTCORE_HARNESS == "True":
+            try:
+                repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                with open(
+                    os.path.join(repo_root, "tools", "agentcore_harness_tools.json"),
+                    encoding="utf-8",
+                ) as f:
+                    harness_tool_specs = json.load(f)
+                redaction_harness = create_agentcore_harness(
+                    self,
+                    "RedactionAgentCoreHarness",
+                    harness_name=AGENTCORE_HARNESS_NAME,
+                    model_id=AGENTCORE_HARNESS_MODEL_ID,
+                    inline_tool_specs=harness_tool_specs,
+                    skills_bucket=bucket,
+                    skills_source_directory=os.path.join(
+                        repo_root, "skills", "doc-redaction-harness"
+                    ),
+                    skills_s3_prefix=AGENTCORE_HARNESS_SKILLS_S3_PREFIX,
+                    region=AWS_REGION,
+                    account=self.account,
+                    kms_key=kms_key if USE_CUSTOM_KMS_KEY == "1" else None,
+                    max_iterations=int(AGENTCORE_HARNESS_MAX_ITERATIONS),
+                    timeout_seconds=int(AGENTCORE_HARNESS_TIMEOUT_SECONDS),
+                    max_tokens=int(AGENTCORE_HARNESS_MAX_TOKENS),
+                )
+                harness_arn = redaction_harness.get_att("Arn").to_string()
+                task_role.add_to_principal_policy(
+                    iam.PolicyStatement(
+                        sid="InvokeRedactionHarness",
+                        actions=["bedrock-agentcore:InvokeHarness"],
+                        resources=[harness_arn],
+                    )
+                )
+                staging_prefix = AGENTCORE_HARNESS_STAGING_S3_PREFIX.strip("/") + "/"
+                harness_container_env = {
+                    "USE_AGENTCORE": "True",
+                    "AGENTCORE_HARNESS_ARN": harness_arn,
+                    "AGENTCORE_REGION": AWS_REGION,
+                    "AGENTCORE_HARNESS_S3_STAGING_PREFIX": (
+                        f"s3://{output_bucket.bucket_name}/{staging_prefix}"
+                    ),
+                    "AGENTCORE_HARNESS_ENABLE_PAGE_REVIEW": (
+                        AGENTCORE_HARNESS_ENABLE_PAGE_REVIEW
+                    ),
+                }
+                CfnOutput(self, "RedactionHarnessArn", value=harness_arn)
+                print("Defined AgentCore Harness", AGENTCORE_HARNESS_NAME)
+            except Exception as e:
+                raise Exception("Could not create AgentCore Harness due to:", e)
+
         agentic_ecs_service = None
         agentic_ecs_security_group = None
 
@@ -2165,6 +2228,7 @@ class CdkStack(Stack):
                     # gradio_client unless credentials are passed on every call.
                     # Magic-link edge auth replaces in-app Cognito on demo.
                     express_app_overrides["COGNITO_AUTH"] = "False"
+                express_app_overrides.update(harness_container_env)
                 express_app_environment = load_app_config_env_for_express(
                     APP_CONFIG_ENV_FILE,
                     overrides=express_app_overrides or None,
@@ -2692,6 +2756,8 @@ class CdkStack(Stack):
                         container_def_params["name"],
                         **container_kwargs,
                     )
+                    for env_name, env_value in harness_container_env.items():
+                        container.add_environment(env_name, env_value)
 
                     for port_mapping in container_def_params["portMappings"]:
                         container.add_port_mappings(

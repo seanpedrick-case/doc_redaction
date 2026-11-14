@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from collections.abc import Iterator
@@ -10,6 +9,8 @@ from typing import Any
 
 from agent_runtime import AgentRuntime, AgentRuntimeError, AgentStreamEvent
 from agentcore_boto import bedrock_agentcore_client, region_from_agentcore_arn
+
+from tools.agentcore_harness_stream import harness_runtime_session_id
 
 
 def agentcore_harness_arn() -> str:
@@ -26,13 +27,6 @@ def agentcore_harness_endpoint() -> str:
     return (
         os.environ.get("AGENTCORE_HARNESS_ENDPOINT") or "DEFAULT"
     ).strip() or "DEFAULT"
-
-
-def harness_runtime_session_id(session_hash: str | None) -> str:
-    """Stable AgentCore Harness session id (must be at least 33 characters)."""
-    base = (session_hash or "default").strip() or "default"
-    digest = hashlib.sha256(base.encode("utf-8")).hexdigest()
-    return f"harness-{digest}"
 
 
 def parse_agentcore_harness_arn(arn: str) -> tuple[str, str]:
@@ -230,7 +224,7 @@ class AgentCoreHarnessRuntime(AgentRuntime):
             }
             endpoint = agentcore_harness_endpoint()
             if endpoint and endpoint.upper() != "DEFAULT":
-                request["endpointName"] = endpoint
+                request["qualifier"] = endpoint
 
             yield AgentStreamEvent(kind="status", text="AgentCore Harness started…")
             try:
