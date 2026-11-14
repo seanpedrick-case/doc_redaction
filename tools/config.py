@@ -2461,6 +2461,42 @@ POST_REDACT_PASS1_INCLUDE_IN_OUTPUTS = convert_string_to_boolean(
     get_or_create_env_var("POST_REDACT_PASS1_INCLUDE_IN_OUTPUTS", "True")
 )
 
+###
+# AgentCore Harness (agentic redaction inside the main app, see tools/agentcore_harness.py)
+###
+
+# Show the "AI agent redaction instructions" box on the Redact PDFs/images tab and route
+# instruction-driven runs to a Bedrock AgentCore Harness (redaction tools run in this container).
+USE_AGENTCORE = convert_string_to_boolean(
+    get_or_create_env_var("USE_AGENTCORE", "False")
+)
+AGENTCORE_HARNESS_ARN = get_or_create_env_var("AGENTCORE_HARNESS_ARN", "")
+AGENTCORE_HARNESS_ENDPOINT = get_or_create_env_var(
+    "AGENTCORE_HARNESS_ENDPOINT", "DEFAULT"
+)
+AGENTCORE_REGION = get_or_create_env_var("AGENTCORE_REGION", AWS_REGION)
+# s3://bucket/prefix/ used to exchange page-review bundles with harness subagents.
+AGENTCORE_HARNESS_S3_STAGING_PREFIX = get_or_create_env_var(
+    "AGENTCORE_HARNESS_S3_STAGING_PREFIX",
+    f"s3://{S3_OUTPUTS_BUCKET}/harness-staging/" if S3_OUTPUTS_BUCKET else "",
+)
+AGENTCORE_HARNESS_MAX_TOOL_ROUNDS = int(
+    get_or_create_env_var("AGENTCORE_HARNESS_MAX_TOOL_ROUNDS", "60")
+)
+AGENTCORE_HARNESS_ENABLE_PAGE_REVIEW = convert_string_to_boolean(
+    get_or_create_env_var("AGENTCORE_HARNESS_ENABLE_PAGE_REVIEW", "True")
+)
+AGENTCORE_HARNESS_PRESIGN_SECONDS = int(
+    get_or_create_env_var("AGENTCORE_HARNESS_PRESIGN_SECONDS", "3600")
+)
+# Max characters returned to the harness by read_session_text in one call.
+AGENTCORE_HARNESS_MAX_READ_CHARS = int(
+    get_or_create_env_var("AGENTCORE_HARNESS_MAX_READ_CHARS", "60000")
+)
+AGENTCORE_HARNESS_MODEL_ID = get_or_create_env_var(
+    "AGENTCORE_HARNESS_MODEL_ID", ""
+)  # Logged as llm_model_name on harness usage rows (task=agent)
+
 # Main Gradio app gold eval (reuse agent-redact/eval gold cases + CSV).
 APP_EVAL_ENABLED = convert_string_to_boolean(
     get_or_create_env_var("APP_EVAL_ENABLED", "False")
@@ -2938,6 +2974,14 @@ DIRECT_MODE_TEXTRACT_ACTION = get_or_create_env_var(
 DIRECT_MODE_JOB_ID = get_or_create_env_var(
     "DIRECT_MODE_JOB_ID", ""
 )  # Job ID for Textract operations
+
+# AgentCore Harness agentic redaction (DIRECT_MODE_TASK=agentic_redact)
+DIRECT_MODE_AGENT_INSTRUCTIONS = get_or_create_env_var(
+    "DIRECT_MODE_AGENT_INSTRUCTIONS", ""
+)  # Bullet-point redaction requirements (same as the Gradio instructions box)
+DIRECT_MODE_AGENT_INSTRUCTIONS_FILE = get_or_create_env_var(
+    "DIRECT_MODE_AGENT_INSTRUCTIONS_FILE", ""
+)  # UTF-8 text file; used when DIRECT_MODE_AGENT_INSTRUCTIONS is empty
 
 # Lambda-specific configuration options
 LAMBDA_POLL_INTERVAL = int(

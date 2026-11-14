@@ -1474,6 +1474,8 @@ class InstallAnswers:
     agentcore_api_key: str = ""
     agentcore_bedrock_model: str = ""
     allow_empty_agentcore_url: bool = False
+    enable_agentcore_harness: bool = False
+    agentcore_harness_model: str = ""
     write_pi_agent_env: bool = True
     overwrite_pi_agent_env: bool = False
     write_app_config_env: bool = True
@@ -2412,6 +2414,13 @@ def build_env_values(answers: InstallAnswers) -> Dict[str, str]:
         )
 
     use_cloudfront = values.get("USE_CLOUDFRONT") == "True"
+    values["ENABLE_AGENTCORE_HARNESS"] = (
+        "True"
+        if answers.enable_agentcore_harness and not answers_use_headless(answers)
+        else "False"
+    )
+    if answers.agentcore_harness_model.strip():
+        values["AGENTCORE_HARNESS_MODEL_ID"] = answers.agentcore_harness_model.strip()
     if answers.agentic_enabled:
         orchestrator = normalize_agent_orchestrator(answers.agent_orchestrator)
         agentcore_enabled = (
@@ -3669,6 +3678,30 @@ def configure_agent_orchestrator_options(
         )
 
 
+def configure_agentcore_harness_options(
+    answers: InstallAnswers,
+    args: argparse.Namespace,
+    *,
+    interactive: bool,
+) -> None:
+    """Optional AI-agent redaction inside the main app (AgentCore Harness, one container)."""
+    if getattr(args, "agentcore_harness_model", None):
+        answers.agentcore_harness_model = str(args.agentcore_harness_model).strip()
+    if getattr(args, "enable_agentcore_harness", False):
+        answers.enable_agentcore_harness = True
+        return
+    if interactive and not answers.enable_agentcore_harness:
+        print("\n--- AI agent redaction in the main app (AgentCore Harness) ---")
+        print(
+            "Adds an instructions box to the Redact tab. AWS runs the agent loop; the main "
+            "container runs the redaction tools itself, so no second service is deployed."
+        )
+        answers.enable_agentcore_harness = ask_yes_no(
+            "Enable AgentCore Harness agent redaction in the main app?",
+            default=False,
+        )
+
+
 def apply_agentic_cli_flags(args: argparse.Namespace, answers: InstallAnswers) -> None:
     apply_agent_orchestrator_cli_flags(args, answers)
     if getattr(args, "enable_agentic", False):
@@ -4199,6 +4232,9 @@ def run_wizard(args: argparse.Namespace) -> InstallAnswers:
             interactive=interactive,
             assume_yes=assume_yes,
         )
+        configure_agentcore_harness_options(
+            answers, args, interactive=interactive and not assume_yes
+        )
     else:
         answers.enable_s3_batch = True
 
@@ -4476,6 +4512,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "Bedrock model id for the AgentCore runtime engine (fixed at runtime "
             f"creation). Default: {AGENTCORE_DEFAULT_BEDROCK_MODEL}. Common choices: "
             + ", ".join(m for m, _ in AGENTCORE_BEDROCK_MODEL_CHOICES)
+        ),
+    )
+    agentic.add_argument(
+        "--enable-agentcore-harness",
+        action="store_true",
+        help=(
+            "Enable AI-agent redaction inside the main app via an AWS AgentCore Harness "
+            "(CDK creates the harness; the single main container runs the inline tools)."
+        ),
+    )
+    agentic.add_argument(
+        "--agentcore-harness-model",
+        default="",
+        help=(
+            "Bedrock model id for the AgentCore Harness (default anthropic.claude-sonnet-5). "
+            "Set a cross-region inference profile explicitly if required (e.g. eu.anthropic...)."
         ),
     )
     agentic.add_argument(

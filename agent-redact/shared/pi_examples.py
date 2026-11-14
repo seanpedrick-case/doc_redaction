@@ -82,6 +82,14 @@ def _is_lfs_pointer(path: Path) -> bool:
     return first_line.startswith("version https://git-lfs.github.com/spec/v1")
 
 
+_PARTNERSHIP_AGENT_INSTRUCTIONS = (
+    "- All signatures should be redacted\n"
+    "- Any redaction box related to general country names should be removed\n"
+    "- All redactions for Rudy Giuliani should be removed\n"
+    "- All mentions of London, and 'Sister City' should be redacted\n"
+)
+
+
 def _catalog() -> tuple[PiRedactionExample, ...]:
     selectable_text_ocr = (
         HF_DEFAULT_OCR if is_hf_space_profile() else "Local model - selectable text"
@@ -113,6 +121,14 @@ def _catalog() -> tuple[PiRedactionExample, ...]:
                 "- Redact any organisation names\n"
                 "- Redact any place names\n"
             ),
+        ),
+        PiRedactionExample(
+            label="Partnership agreement (sister cities)",
+            file_name="Partnership-Agreement-Toolkit_0_0.pdf",
+            ocr_method=selectable_text_ocr,
+            pii_method="Local",
+            encourage_vlm_signatures=True,
+            instructions=_PARTNERSHIP_AGENT_INSTRUCTIONS,
         ),
     )
 

@@ -7,7 +7,7 @@ bleach>=6.4.0,<7
 polars>=1.44,<2
 pyarrow>=25.0.1,<26
 openpyxl>=3.1.5,<4
-boto3>=1.43.117,<2
+boto3>=1.44.3,<2
 python-dotenv>=1.2.4,<2
 defusedxml>=0.7.1,<1
 Faker>=40.44.0,<50
@@ -28,7 +28,7 @@ pdf2image>=1.17.0,<2
 pymupdf>=1.26.2,<2
 pikepdf>=10.12.0,<11
 opencv-python>=4.14.0.94,<5
-presidio_analyzer==2.2.365
+presidio_analyzer==2.2.362
 presidio_anonymizer==2.2.365
 presidio-image-redactor==0.0.61
 
