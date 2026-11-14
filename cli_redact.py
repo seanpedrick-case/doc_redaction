@@ -442,6 +442,7 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
         "--task",
         choices=[
             "redact",
+            "agentic_redact",
             "deduplicate",
             "textract",
             "summarise",
@@ -450,7 +451,7 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
             "export_review_page_ocr_visualisation",
         ],
         default="redact",
-        help="Task to perform: redact (PII redaction/anonymisation), deduplicate (find duplicate content), textract (AWS Textract batch operations), summarise (LLM-based document summarisation from OCR CSV files), combine_review_pdfs (merge redaction comments from multiple '_redactions_for_review' PDFs into one file), export_review_redaction_overlay (write a redaction overlay JPEG for a page image + boxes JSON), or export_review_page_ocr_visualisation (write an OCR visualisation PNG for a page image + OCR JSON).",
+        help="Task to perform: redact (PII redaction/anonymisation), agentic_redact (AgentCore Harness Pass 1 workflow via inline tools; requires AGENTCORE_HARNESS_ARN), deduplicate (find duplicate content), textract (AWS Textract batch operations), summarise (LLM-based document summarisation from OCR CSV files), combine_review_pdfs (merge redaction comments from multiple '_redactions_for_review' PDFs into one file), export_review_redaction_overlay (write a redaction overlay JPEG for a page image + boxes JSON), or export_review_page_ocr_visualisation (write an OCR visualisation PNG for a page image + OCR JSON).",
     )
 
     # --- General Arguments (apply to all file types) ---
@@ -507,6 +508,20 @@ python cli_redact.py --task combine_review_pdfs --input_file path/to/review1.pdf
         default="",
         help="Path to JSON file containing OCR-with-words results dict for OCR visualisation export.",
     )
+    agent_group = parser.add_argument_group(
+        "Agentic redaction (AgentCore Harness; task agentic_redact)"
+    )
+    agent_group.add_argument(
+        "--agent_instructions",
+        default="",
+        help="Bullet-point redaction requirements for the harness agent (required for agentic_redact unless --agent_instructions_file is set).",
+    )
+    agent_group.add_argument(
+        "--agent_instructions_file",
+        default="",
+        help="UTF-8 text file with agent instructions (used when --agent_instructions is empty).",
+    )
+
     general_group.add_argument(
         "--language", default=DEFAULT_LANGUAGE, help="Language of the document content."
     )
@@ -1200,6 +1215,11 @@ def main(direct_mode_args={}):
             args.redact_whole_page_file,
             default_filename="downloaded_redact_whole_page.csv",
         )
+    if getattr(args, "agent_instructions_file", None):
+        args.agent_instructions_file = _download_s3_file_if_needed(
+            args.agent_instructions_file,
+            default_filename="downloaded_agent_instructions.txt",
+        )
 
     # --- Initial Setup ---
     # Convert string boolean variables to boolean
@@ -1268,6 +1288,7 @@ def main(direct_mode_args={}):
 
     if args.task in [
         "redact",
+        "agentic_redact",
         "deduplicate",
         "summarise",
         "combine_review_pdfs",
@@ -1337,7 +1358,14 @@ def main(direct_mode_args={}):
 
     # Validate input_file requirement for tasks that need it
     if (
-        args.task in ["redact", "deduplicate", "summarise", "combine_review_pdfs"]
+        args.task
+        in [
+            "redact",
+            "agentic_redact",
+            "deduplicate",
+            "summarise",
+            "combine_review_pdfs",
+        ]
         and not args.input_file
     ):
         print(f"Error: --input_file is required for '{args.task}' task.")
@@ -2622,6 +2650,101 @@ def main(direct_mode_args={}):
 
             traceback.print_exc()
 
+    elif args.task == "agentic_redact":
+        print("--- AgentCore Harness agentic redaction ---")
+        from tools.agentcore_harness import (
+            build_harness_run_defaults_from_cli_args,
+            harness_feature_ready,
+            resolve_harness_instructions,
+            run_agentic_redaction,
+        )
+
+        ready, reason = harness_feature_ready()
+        if not ready:
+            print(f"Error: AgentCore harness is not configured: {reason}")
+            return
+        try:
+            instructions = resolve_harness_instructions(
+                getattr(args, "agent_instructions", ""),
+                getattr(args, "agent_instructions_file", ""),
+            )
+        except OSError as exc:
+            print(f"Error: {exc}")
+            return
+        if not instructions:
+            print(
+                "Error: agentic_redact requires --agent_instructions or "
+                "--agent_instructions_file (or DIRECT_MODE_AGENT_* in RUN_DIRECT_MODE)."
+            )
+            return
+        if file_extension not in [".pdf", ".png", ".jpg", ".jpeg"]:
+            print(
+                "Error: agentic_redact supports PDF/image inputs only "
+                f"(got {file_extension!r})."
+            )
+            return
+        document = (
+            args.input_file[0]
+            if isinstance(args.input_file, list)
+            else str(args.input_file)
+        )
+        defaults = build_harness_run_defaults_from_cli_args(args)
+        page_min = int(getattr(args, "page_min", 0) or 0)
+        page_max = int(getattr(args, "page_max", 0) or 0)
+        page_range = "all"
+        if page_min or page_max:
+            page_range = f"{page_min or 1}-{page_max or 'end'}"
+        final = None
+        try:
+            for progress in run_agentic_redaction(
+                document,
+                instructions,
+                defaults=defaults,
+                page_range=page_range,
+                output_root=args.output_dir,
+                eval_session_hash=session_hash,
+            ):
+                if progress.summary:
+                    print(progress.summary)
+                final = progress
+        except Exception as exc:
+            print(f"\nAn error occurred during agentic redaction: {exc}")
+            import traceback
+
+            traceback.print_exc()
+            return
+        if final is None:
+            print("Agent run produced no output.")
+            return
+        if final.output_files:
+            print("\nOutput files:")
+            for path in final.output_files:
+                print(f"  {path}")
+        else:
+            print("\nNo output files returned (see activity above).")
+        if usage_logger and final.done:
+            from tools.agentcore_harness import _pdf_page_count
+            from tools.harness_usage_log import record_harness_agent_usage
+
+            doc_name = Path(document).name
+            if not args.display_file_names_in_logs:
+                doc_name = "hidden"
+            record_harness_agent_usage(
+                session_hash=session_hash,
+                document_name=doc_name,
+                time_taken=final.elapsed_seconds,
+                token_usage=final.token_usage,
+                pii_method=args.pii_detector,
+                text_extraction_method=args.ocr_method,
+                cost_code=args.cost_code,
+                total_pages=_pdf_page_count(Path(document)),
+                usage_logs_folder=args.usage_logs_folder,
+                save_to_dynamodb=args.save_logs_to_dynamodb,
+                save_to_s3=args.upload_logs_to_s3,
+                s3_bucket=args.s3_bucket,
+                s3_key_prefix=args.s3_logs_prefix,
+            )
+
     elif args.task == "combine_review_pdfs":
         print("--- Combine review PDFs ---")
         try:
@@ -2757,7 +2880,9 @@ def main(direct_mode_args={}):
     else:
         print(f"Error: Invalid task '{args.task}'.")
         print(
-            "Valid options: 'redact', 'deduplicate', 'textract', 'summarise', 'combine_review_pdfs', 'export_review_redaction_overlay', or 'export_review_page_ocr_visualisation'"
+            "Valid options: 'redact', 'agentic_redact', 'deduplicate', 'textract', "
+            "'summarise', 'combine_review_pdfs', 'export_review_redaction_overlay', "
+            "or 'export_review_page_ocr_visualisation'"
         )
 
 

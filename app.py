@@ -211,6 +211,8 @@ from tools.config import (
     DEFAULT_TEXT_COLUMNS,
     DEFAULT_TEXT_EXTRACTION_MODEL,
     DENY_LIST_PATH,
+    DIRECT_MODE_AGENT_INSTRUCTIONS,
+    DIRECT_MODE_AGENT_INSTRUCTIONS_FILE,
     DIRECT_MODE_ANON_STRATEGY,
     DIRECT_MODE_CHOSEN_LOCAL_OCR_MODEL,
     DIRECT_MODE_COMBINE_PAGES,
@@ -2853,22 +2855,24 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
                 with gr.Accordion("Load in file"):
                     in_doc_files.render()
-                    agent_redaction_instructions_textbox = gr.Textbox(
-                        label="AI agent redaction instructions (optional)",
-                        info=(
-                            "Leave blank for standard redaction. If filled in, an AWS AgentCore "
-                            "agent redacts, reviews and applies the redactions following these "
-                            "instructions, using the settings below as defaults."
-                        ),
-                        placeholder=(
-                            "- Redact all personal names\n"
-                            "- Remove organisation addresses\n"
-                            "- Keep publication titles visible"
-                        ),
-                        lines=5,
-                        visible=USE_AGENTCORE,
-                    )
-                    if USE_AGENTCORE:
+
+                if USE_AGENTCORE:
+                    with gr.Accordion("AI agent redaction", open=True):
+                        agent_redaction_instructions_textbox = gr.Textbox(
+                            label="AI agent redaction instructions (optional)",
+                            info=(
+                                "Leave blank for standard redaction. If filled in, an AWS "
+                                "AgentCore agent redacts, reviews and applies the redactions "
+                                "following these instructions, using the settings below as "
+                                "defaults."
+                            ),
+                            placeholder=(
+                                "- Redact all personal names\n"
+                                "- Remove organisation addresses\n"
+                                "- Keep publication titles visible"
+                            ),
+                            lines=5,
+                        )
                         from tools.harness_gradio_examples import (
                             harness_example_rows,
                             harness_examples_status_md,
@@ -5887,6 +5891,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                 page_max,
                 output_folder_textbox,
                 session_hash_textbox,
+                cost_code_choice_drop,
             ],
             outputs=[
                 redaction_output_summary_textbox,
@@ -11576,6 +11581,33 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
         if __name__ == "__main__":
             from cli_redact import main
 
+            if DIRECT_MODE_TASK == "agentic_redact":
+                try:
+                    from tools.agentcore_harness import (
+                        harness_feature_ready,
+                        resolve_harness_instructions,
+                    )
+
+                    ready, reason = harness_feature_ready()
+                    if not ready:
+                        print(
+                            f"Error: DIRECT_MODE_TASK=agentic_redact requires a "
+                            f"configured harness: {reason}"
+                        )
+                        exit(1)
+                    if not resolve_harness_instructions(
+                        DIRECT_MODE_AGENT_INSTRUCTIONS,
+                        DIRECT_MODE_AGENT_INSTRUCTIONS_FILE,
+                    ):
+                        print(
+                            "Error: Set DIRECT_MODE_AGENT_INSTRUCTIONS or "
+                            "DIRECT_MODE_AGENT_INSTRUCTIONS_FILE for agentic_redact."
+                        )
+                        exit(1)
+                except OSError as exc:
+                    print(f"Error: {exc}")
+                    exit(1)
+
             # Validate required direct mode configuration
             if not DIRECT_MODE_INPUT_FILE:
                 print(
@@ -11698,6 +11730,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                 # Textract Batch Operations Arguments
                 "textract_action": DIRECT_MODE_TEXTRACT_ACTION,
                 "job_id": DIRECT_MODE_JOB_ID,
+                "agent_instructions": DIRECT_MODE_AGENT_INSTRUCTIONS,
+                "agent_instructions_file": DIRECT_MODE_AGENT_INSTRUCTIONS_FILE,
                 "textract_bucket": TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_BUCKET,
                 "textract_input_prefix": TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_INPUT_SUBFOLDER,
                 "textract_output_prefix": TEXTRACT_WHOLE_DOCUMENT_ANALYSIS_OUTPUT_SUBFOLDER,
@@ -11735,6 +11769,17 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                 print(
                     "Combine review PDFs: merge redaction comments from multiple '_redactions_for_review' PDFs. "
                     "Set DIRECT_MODE_INPUT_FILE to comma-separated paths (at least 2)."
+                )
+
+            if DIRECT_MODE_TASK == "agentic_redact":
+                print(
+                    "Agentic redaction: AgentCore Harness inline-tool workflow "
+                    "(doc_redact → review → verify_redaction_coverage → review_apply). "
+                    "Requires AGENTCORE_HARNESS_ARN and IAM InvokeHarness. "
+                    "Set DIRECT_MODE_AGENT_INSTRUCTIONS (bullet points) or "
+                    "DIRECT_MODE_AGENT_INSTRUCTIONS_FILE. OCR/PII knobs: "
+                    "DIRECT_MODE_OCR_METHOD, DIRECT_MODE_PII_DETECTOR, page min/max, "
+                    "deny/allow list paths."
                 )
 
             # Combine extraction options

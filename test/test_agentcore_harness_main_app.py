@@ -10,6 +10,7 @@ import pytest
 
 from tools import agentcore_harness as ah
 from tools.agentcore_harness_stream import (
+    HarnessTokenUsage,
     HarnessTurnCollector,
     load_inline_tool_specs,
     tool_result_message,
@@ -125,15 +126,50 @@ def _run(session, client, **kwargs):
 def test_collector_accumulates_inline_tool_input():
     collector = HarnessTurnCollector()
     for event in _tool_turn(("t1", "list_session_files", {"a": 1})):
-        collector.feed(event)
+        collector.feed(event, inline_names={"list_session_files"})
     pending = collector.turn.pending_inline_calls({"list_session_files"})
     assert [p.tool_use_id for p in pending] == ["t1"]
     assert pending[0].arguments() == {"a": 1}
 
 
-def test_collector_ignores_harness_resolved_tools():
+def test_handoff_inline_requires_tool_use_stop():
+    collector = HarnessTurnCollector()
+    for event in _tool_turn(("t1", "doc_redact", {})):
+        collector.feed(event, inline_names={"doc_redact"})
+    collector.turn.stop_reason = "end_turn"
+    assert collector.turn.pending_inline_calls({"doc_redact"})
+    assert collector.turn.handoff_inline_calls({"doc_redact"}) == []
+
+
+def test_collector_keeps_inline_pending_when_harness_sent_tool_result():
+    """Spurious harness-side toolResult must not block client inline dispatch."""
     collector = HarnessTurnCollector()
     events = _tool_turn(("t1", "list_session_files", {}))
+    events.insert(
+        -1,
+        {
+            "contentBlockStart": {
+                "contentBlockIndex": 5,
+                "start": {
+                    "toolResult": {
+                        "toolUseId": "t1",
+                        "status": "error",
+                        "content": [{"text": "Unknown tool"}],
+                    }
+                },
+            }
+        },
+    )
+    inline = {"list_session_files"}
+    for event in events:
+        collector.feed(event, inline_names=inline)
+    pending = collector.turn.pending_inline_calls(inline)
+    assert [p.tool_use_id for p in pending] == ["t1"]
+
+
+def test_collector_marks_harness_builtin_tool_result_resolved():
+    collector = HarnessTurnCollector()
+    events = _tool_turn(("t1", "shell", {}))
     events.insert(
         -1,
         {
@@ -143,9 +179,10 @@ def test_collector_ignores_harness_resolved_tools():
             }
         },
     )
+    inline = {"list_session_files"}
     for event in events:
-        collector.feed(event)
-    assert collector.turn.pending_inline_calls({"list_session_files"}) == []
+        collector.feed(event, inline_names=inline)
+    assert collector.turn.pending_inline_calls({"shell"}) == []
 
 
 def test_tool_result_message_shape():
@@ -183,6 +220,7 @@ def test_text_only_run_finishes_in_one_round(sample_pdf, tmp_path):
     assert "qualifier" not in request
     assert "User redaction requirements" in request["messages"][0]["content"][0]["text"]
     assert {t["name"] for t in request["tools"]} >= {"doc_redact", "finish_task"}
+    assert request["allowedTools"] == ["*"]
 
 
 def test_single_inline_handoff_returns_tool_result(sample_pdf, tmp_path):
@@ -394,6 +432,29 @@ def test_prompt_puts_user_requirements_last(sample_pdf, tmp_path):
     assert "- Keep job titles" in tail
     assert "source/sample.pdf" in prompt
     assert "{INPUT_PATH}" not in prompt
+
+
+def test_harness_token_usage_sums_metadata_events():
+    usage = HarnessTokenUsage()
+    usage.absorb_stream_event(
+        {"metadata": {"usage": {"inputTokens": 100, "outputTokens": 40}}}
+    )
+    usage.absorb_stream_event(
+        {"metadata": {"usage": {"inputTokens": 50, "outputTokens": 10}}}
+    )
+    assert usage.input_tokens == 150
+    assert usage.output_tokens == 50
+    assert usage.metadata_events == 2
+    usage.absorb_stream_event({"messageStop": {"stopReason": "end_turn"}})
+    assert usage.metadata_events == 2
+
+
+def test_resolve_harness_instructions_inline_or_file(tmp_path):
+    assert ah.resolve_harness_instructions("- Redact names", None) == "- Redact names"
+    path = tmp_path / "req.txt"
+    path.write_text("- From file\n", encoding="utf-8")
+    assert ah.resolve_harness_instructions("", path) == "- From file"
+    assert ah.resolve_harness_instructions("", "") == ""
 
 
 def test_feature_ready_requires_valid_arn(monkeypatch):

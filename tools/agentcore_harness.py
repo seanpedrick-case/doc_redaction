@@ -26,7 +26,9 @@ from typing import Any, Callable, Iterator
 from urllib.parse import urlparse
 
 from tools.agentcore_harness_stream import (
+    HarnessTokenUsage,
     HarnessTurnCollector,
+    harness_invoke_allowed_tools,
     harness_runtime_session_id,
     inline_tool_names,
     load_inline_tool_specs,
@@ -81,6 +83,8 @@ class HarnessProgress:
     output_files: list[str]
     summary: str
     done: bool = False
+    token_usage: HarnessTokenUsage | None = None
+    elapsed_seconds: float = 0.0
 
 
 def harness_feature_ready() -> tuple[bool, str]:
@@ -780,8 +784,10 @@ class HarnessSession:
 _HARNESS_SKILLS_SECTION = """### Harness tool workflow (doc_redaction app inline tools)
 
 You are running in an AgentCore Harness invoked by the doc_redaction app. The app's redaction
-functions are **inline tools that run inside the app**. There is no Gradio URL to call: do not
-use `gradio_client`, `handle_file`, curl to the app, or `/gradio_api/*`.
+functions are **inline tools that run inside the app** (`list_session_files`, `doc_redact`, …).
+Call those tools by name on every step — they are registered for this session. The harness VM's
+built-in `shell`, `read`, and `write` cannot see the app's session folder. There is no Gradio URL:
+do not use `gradio_client`, curl to the app, or `/gradio_api/*`.
 
 If the `doc-redaction-harness` skill is available, read it first; it supersedes the
 Gradio-client mechanics in the other redaction skills. The other skills (`doc-redaction-app`,
@@ -974,10 +980,13 @@ def run_agentic_redaction(
         client = _default_agentcore_client(region)
 
     runtime_session_id = harness_runtime_session_id(f"doc-redaction:{session.run_id}")
+    run_started = time.time()
+    token_usage = HarnessTokenUsage()
     activity.add(
         f"Started agent run `{session.run_id}` on `{session.source_pdf.name}`."
     )
     yield HarnessProgress(activity.markdown(), [], "Agent run started…")
+    activity.add(f"Inline tools on each InvokeHarness: {', '.join(sorted(names))}.")
 
     messages: list[dict[str, Any]] = [{"role": "user", "content": [{"text": prompt}]}]
     summary = ""
@@ -987,6 +996,7 @@ def run_agentic_redaction(
             "runtimeSessionId": runtime_session_id,
             "messages": messages,
             "tools": specs,
+            "allowedTools": harness_invoke_allowed_tools(),
         }
         if qualifier and qualifier.upper() != "DEFAULT":
             request["qualifier"] = qualifier
@@ -999,17 +1009,30 @@ def run_agentic_redaction(
 
         collector = HarnessTurnCollector()
         stopped = False
-        for raw in response.get("stream") or []:
-            if should_stop is not None and should_stop():
-                stopped = True
-                break
-            if not isinstance(raw, dict):
-                continue
-            for event in collector.feed(raw):
-                if event.kind == "tool_start" and event.tool_name not in names:
-                    activity.add(f"Harness tool: `{event.tool_name}`")
-                elif event.kind == "error":
-                    activity.add(f"**Harness error:** {_short(event.text)}")
+        try:
+            event_iter = response.get("stream") or []
+            for raw in event_iter:
+                if should_stop is not None and should_stop():
+                    stopped = True
+                    break
+                if not isinstance(raw, dict):
+                    continue
+                token_usage.absorb_stream_event(raw)
+                for event in collector.feed(raw, inline_names=names):
+                    if event.kind == "tool_start" and event.tool_name not in names:
+                        activity.add(f"Harness tool: `{event.tool_name}`")
+                    elif event.kind == "error":
+                        activity.add(f"**Harness error:** {_short(event.text)}")
+        except Exception as exc:  # noqa: BLE001 — EventStreamError from botocore
+            err_text = str(exc)
+            activity.add(f"**Harness stream error:** {_short(err_text)}")
+            if "no pending handoff" in err_text.lower():
+                activity.add(
+                    "The harness session lost the inline-tool handoff (often after a "
+                    "long local tool run or a stale ``toolResult``). Restart the agent run."
+                )
+            summary = f"Agent run failed: {err_text}"
+            break
         if stopped:
             activity.add("Stopped by user.")
             summary = "Agent run stopped."
@@ -1019,7 +1042,24 @@ def run_agentic_redaction(
         if turn.text.strip():
             activity.add(f"Agent: {_short(turn.text)}")
             summary = turn.text.strip()
-        pending = turn.pending_inline_calls(names)
+        orphan = turn.pending_inline_calls(names)
+        pending = turn.handoff_inline_calls(names)
+        if pending:
+            activity.add(
+                f"Client inline dispatch: {', '.join(f'`{c.name}`' for c in pending)} "
+                f"(stop `{turn.stop_reason or 'unknown'}`)."
+            )
+        elif orphan and turn.stop_reason != "tool_use":
+            activity.add(
+                f"Ignored {len(orphan)} inline tool use(s) without harness handoff "
+                f"(stop `{turn.stop_reason}`)."
+            )
+        elif turn.tool_uses and turn.stop_reason in ("tool_use", "tool_result", ""):
+            activity.add(
+                "**No client inline dispatch** — harness tool uses: "
+                f"{[t.name for t in turn.tool_uses]} "
+                f"(resolved {sorted(turn.resolved_tool_use_ids)})."
+            )
         if not pending:
             if turn.stop_reason and turn.stop_reason != "end_turn":
                 activity.add(f"Harness stopped: `{turn.stop_reason}`.")
@@ -1071,9 +1111,20 @@ def run_agentic_redaction(
             activity.add(
                 f"**Post-run eval:** `{eval_path.name}` → `{eval_path.parent}`"
             )
+    elapsed = max(0.0, time.time() - run_started)
+    if token_usage.metadata_events:
+        activity.add(
+            "Harness LLM tokens (stream metadata): "
+            f"in={token_usage.input_tokens}, out={token_usage.output_tokens}"
+        )
     activity.add(f"Finished with {len(outputs)} output file(s).")
     yield HarnessProgress(
-        activity.markdown(), outputs, summary or "Agent run ended.", True
+        activity.markdown(),
+        outputs,
+        summary or "Agent run ended.",
+        True,
+        token_usage=token_usage,
+        elapsed_seconds=elapsed,
     )
 
 
@@ -1149,6 +1200,70 @@ def _page_range_text(page_min: Any, page_max: Any) -> str:
     return f"{lo or 1}-{hi or 'end'}"
 
 
+def resolve_harness_instructions(
+    inline: str | None,
+    instructions_file: str | Path | None,
+) -> str:
+    """Resolve agent instructions from inline text or a UTF-8 file (headless / CLI)."""
+    text = (inline or "").strip()
+    if text:
+        return text
+    path = str(instructions_file or "").strip()
+    if not path:
+        return ""
+    resolved = Path(path)
+    if not resolved.is_file():
+        raise FileNotFoundError(f"Agent instructions file not found: {path}")
+    return resolved.read_text(encoding="utf-8").strip()
+
+
+def _terms_from_path_or_list(value: Any) -> list[str]:
+    """Load allow/deny terms from a CSV path (first column) or a string list."""
+    if isinstance(value, list):
+        return [str(x).strip() for x in value if str(x).strip()]
+    if value and isinstance(value, str):
+        path = Path(value.strip())
+        if path.is_file():
+            import pandas as pd
+
+            frame = pd.read_csv(path, header=None, low_memory=False)
+            if frame.empty:
+                return []
+            return frame.iloc[:, 0].dropna().astype(str).tolist()
+    return []
+
+
+def build_harness_run_defaults_from_cli_args(args: Any) -> HarnessRunDefaults:
+    """Map ``cli_redact`` / direct-mode namespace fields to harness ``doc_redact`` defaults."""
+    from tools.config import DEFAULT_LOCAL_OCR_MODEL
+
+    allow_raw = getattr(args, "allow_list_file", None) or getattr(
+        args, "allow_list", None
+    )
+    deny_raw = getattr(args, "deny_list_file", None) or getattr(args, "deny_list", None)
+    return HarnessRunDefaults(
+        ocr_method=ui_ocr_method_to_tool_value(
+            str(getattr(args, "ocr_method", "") or "Local text"),
+            str(getattr(args, "chosen_local_ocr_model", "") or DEFAULT_LOCAL_OCR_MODEL),
+        ),
+        pii_method=str(getattr(args, "pii_detector", "") or "Local"),
+        redact_entities=ui_entities_for_pii_method(
+            str(getattr(args, "pii_detector", "") or "Local"),
+            getattr(args, "local_redact_entities", None),
+            getattr(args, "aws_redact_entities", None),
+            getattr(args, "llm_redact_entities", None),
+        ),
+        allow_list=_terms_from_path_or_list(allow_raw),
+        deny_list=_terms_from_path_or_list(deny_raw),
+        handwrite_signature_checkbox=list(
+            getattr(args, "handwrite_signature_extraction", None) or []
+        )
+        or None,
+        page_min=int(getattr(args, "page_min", 0) or 0),
+        page_max=int(getattr(args, "page_max", 0) or 0),
+    )
+
+
 def agentic_redact_for_gradio(
     files: Any,
     instructions: str,
@@ -1165,6 +1280,7 @@ def agentic_redact_for_gradio(
     page_max: Any,
     output_folder: str | None = None,
     session_hash: str = "",
+    cost_code: str = "",
 ) -> Iterator[tuple[str, str, list[str]]]:
     """Gradio streaming handler: yields ``(summary, activity_markdown, output_files)``."""
     import gradio as gr
@@ -1213,6 +1329,7 @@ def agentic_redact_for_gradio(
         )
         if gold_line:
             yield "Starting agent run…", gold_line, []
+    final: HarnessProgress | None = None
     for progress in run_agentic_redaction(
         document,
         instructions,
@@ -1223,7 +1340,21 @@ def agentic_redact_for_gradio(
         eval_recorder=eval_recorder,
         eval_session_hash=(session_hash or "").strip(),
     ):
+        final = progress
         yield progress.summary, progress.activity, progress.output_files
+    if final is not None and final.done:
+        from tools.harness_usage_log import record_harness_agent_usage
+
+        record_harness_agent_usage(
+            session_hash=(session_hash or "").strip() or session.run_id,
+            document_name=session.source_pdf.name,
+            time_taken=final.elapsed_seconds,
+            token_usage=final.token_usage,
+            pii_method=pii_method or "Local",
+            text_extraction_method=text_extract_method or defaults.ocr_method,
+            cost_code=(cost_code or "").strip(),
+            total_pages=_pdf_page_count(session.source_pdf),
+        )
 
 
 def agentic_redact_api(
@@ -1269,6 +1400,18 @@ def agentic_redact_api(
         final = progress
     if final is None:
         return [], "Agent run produced no output."
+    if final.done:
+        from tools.harness_usage_log import record_harness_agent_usage
+
+        record_harness_agent_usage(
+            session_hash="api",
+            document_name=Path(document).name,
+            time_taken=final.elapsed_seconds,
+            token_usage=final.token_usage,
+            pii_method=pii_method or "Local",
+            text_extraction_method=ocr_method or "Local text",
+            total_pages=_pdf_page_count(Path(document)),
+        )
     return final.output_files, final.summary
 
 
@@ -1279,8 +1422,10 @@ __all__ = [
     "HarnessRunDefaults",
     "HarnessSession",
     "HarnessToolError",
+    "build_harness_run_defaults_from_cli_args",
     "build_harness_task_prompt",
     "harness_feature_ready",
+    "resolve_harness_instructions",
     "run_agentic_redaction",
     "validate_and_repair_review_csv",
 ]

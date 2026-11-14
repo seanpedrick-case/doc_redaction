@@ -3813,6 +3813,7 @@ HARNESS_BUILTIN_ALLOWED_TOOLS = [
     "todo_write",
     "subagent",
     "retrieve_context",
+    "skills",
 ]
 
 HARNESS_SYSTEM_PROMPT = (
@@ -3976,7 +3977,6 @@ def create_agentcore_harness(
     if kms_key is not None:
         kms_key.grant_decrypt(role)
 
-    tool_names = [spec["name"] for spec in inline_tool_specs]
     harness = CfnResource(
         scope,
         logical_id,
@@ -3996,8 +3996,11 @@ def create_agentcore_harness(
             },
             "SystemPrompt": [{"Text": HARNESS_SYSTEM_PROMPT}],
             # No web_fetch / browser: document text must only leave via presigned staging URLs.
-            "AllowedTools": HARNESS_BUILTIN_ALLOWED_TOOLS + tool_names,
-            "Tools": harness_inline_tools_to_cfn(inline_tool_specs),
+            # Inline doc_redaction tools are passed only on each ``InvokeHarness`` (app code).
+            # Do not attach them here: when registered on the Harness resource, AgentCore tries
+            # to run them on the VM (``Unknown tool``) instead of handing off to the client.
+            "AllowedTools": list(HARNESS_BUILTIN_ALLOWED_TOOLS),
+            "Tools": [],
             "Skills": [
                 {"S3": {"Uri": f"s3://{skills_bucket.bucket_name}/{skill_key_prefix}"}}
             ],

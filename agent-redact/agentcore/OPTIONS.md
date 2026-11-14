@@ -135,7 +135,7 @@ IAM needs `bedrock-agentcore:InvokeHarness` (and S3 put/get for the input bridge
 
 1. With `USE_AGENTCORE=True` and `AGENTCORE_HARNESS_ARN` set, the **Redact PDFs/images** tab shows an *AI agent redaction instructions* box. When it has text, *Redact with AI agent* replaces the normal redact button. The same flow is exposed as the `agentic_redact` API (`gr.api`).
 2. [`tools/agentcore_harness.py`](../../tools/agentcore_harness.py) copies the upload into a per-run session folder (`OUTPUT_FOLDER/agentcore/<run_id>/`) and builds the partnership prompt (user requirements last). It then calls `InvokeHarness` with the inline tools from [`tools/agentcore_harness_tools.json`](../../tools/agentcore_harness_tools.json).
-3. When the harness stream ends with `stopReason=tool_use`, the app runs the requested tools in-process: `doc_redact`, `read_session_text` / `write_session_text`, `verify_redaction_coverage`, `preview_redaction_boxes`, `review_apply` and `finish_task`. Paths are confined to the session folder. The app then re-invokes with the `toolResult`s on the same `runtimeSessionId`.
+3. When the harness stream hands off inline tools (`stopReason` usually `tool_use`), the app runs the requested tools in-process: `doc_redact`, `read_session_text` / `write_session_text`, `verify_redaction_coverage`, `preview_redaction_boxes`, `review_apply` and `finish_task`. Paths are confined to the session folder. The app then re-invokes with the `toolResult`s on the same `runtimeSessionId`.
 4. **Page review with subagents.** Harness subagents cannot call inline tools. Instead, `stage_page_review_bundles` uploads per-page CSV slices to `AGENTCORE_HARNESS_S3_STAGING_PREFIX` and returns presigned GET/PUT URLs, which the subagents use with `curl`. `merge_page_reviews` then validates and merges the uploads into one review CSV for a single `review_apply`.
 5. The agent follows [`skills/doc-redaction-harness/SKILL.md`](../../skills/doc-redaction-harness/SKILL.md), which CDK uploads to S3 and attaches to the harness as a skill.
 
@@ -162,6 +162,15 @@ The task role needs `bedrock-agentcore:InvokeHarness` ([`cdk/policies/agentcore_
 - injects `USE_AGENTCORE`, `AGENTCORE_HARNESS_ARN` and the staging prefix into the main container.
 
 Tunables: `AGENTCORE_HARNESS_MODEL_ID` (default `anthropic.claude-sonnet-5`; set explicitly if your account requires a cross-region inference profile such as `eu.anthropic.*`), `AGENTCORE_HARNESS_MAX_ITERATIONS`, `AGENTCORE_HARNESS_TIMEOUT_SECONDS` and `AGENTCORE_HARNESS_MAX_TOKENS`.
+
+**Inline tools (critical):**
+
+1. Harness ``Tools: []`` on the deployed resource (CDK default). Do **not** attach inline schemas on the harness itself — AgentCore then runs them on the VM (`Unknown tool`, no client handoff).
+2. Each ``InvokeHarness`` from the main app sends the schemas in ``tools`` (`tools/agentcore_harness_tools.json`).
+3. Each ``InvokeHarness`` must also set ``allowedTools: ["*"]`` (see ``harness_invoke_allowed_tools()``). The harness ``AllowedTools`` property is builtins-only; without an invoke-time override, inline tools never appear in the model tool list (the agent correctly reports only ``shell`` / ``skills`` / … and cannot hand off).
+4. Expect ``stopReason: tool_use`` and **Client inline dispatch** in the Gradio activity log.
+
+Redeploy after CDK updates: `python cdk/deploy_harness_local.py --yes`.
 
 **Limits to keep in mind:**
 

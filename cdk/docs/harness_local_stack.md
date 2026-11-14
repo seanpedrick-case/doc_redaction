@@ -45,6 +45,8 @@ cdk deploy DocRedactionHarnessLocal -a "python app_harness_local.py"
 
 Copy `cdk.json.harness_local.example` to `cdk.json` if you want a dedicated output directory (`cdk.out.harness_local`) without touching the main app's `cdk.json`.
 
+**Inline tools:** CDK sets Harness ``Tools: []``. Schemas are sent on each ``InvokeHarness`` from `app.py` (`tools/agentcore_harness_tools.json`), with ``allowedTools: ["*"]`` so invoke-time inline functions reach the model (builtins-only ``AllowedTools`` on the resource is not enough). If inline tools are registered on the Harness ``Tools`` property, AgentCore runs them on the VM (`Unknown tool`, no client handoff). Redeploy after CDK changes: `deploy_harness_local.py --yes`.
+
 ## After deploy
 
 1. **IAM** — In the IAM console, attach managed policy `DocRedactionHarnessLocalInvoker-<region>` to the user or role your AWS CLI / SSO session uses locally (output `LocalInvokerPolicyName`).

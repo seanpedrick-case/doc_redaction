@@ -81,17 +81,11 @@ def test_harness_resource_properties():
     )
     assert props["Memory"] == {"Disabled": {}}
 
-    tool_names = {t["Name"] for t in props["Tools"]}
-    assert {"doc_redact", "review_apply", "finish_task"} <= tool_names
-    for tool in props["Tools"]:
-        assert tool["Type"] == "inline_function"
-        inline = tool["Config"]["InlineFunction"]
-        assert inline["Description"]
-        assert inline["InputSchema"]["type"] == "object"
-
+    assert props.get("Tools") == []
     assert "subagent" in props["AllowedTools"]
+    assert "skills" in props["AllowedTools"]
     assert "web_fetch" not in props["AllowedTools"]
-    assert tool_names <= set(props["AllowedTools"])
+    assert "doc_redact" not in props["AllowedTools"]
 
     skills_uri = json.dumps(props["Skills"])
     assert "agentcore-harness/skills/doc-redaction-harness/" in skills_uri

@@ -2493,6 +2493,9 @@ AGENTCORE_HARNESS_PRESIGN_SECONDS = int(
 AGENTCORE_HARNESS_MAX_READ_CHARS = int(
     get_or_create_env_var("AGENTCORE_HARNESS_MAX_READ_CHARS", "60000")
 )
+AGENTCORE_HARNESS_MODEL_ID = get_or_create_env_var(
+    "AGENTCORE_HARNESS_MODEL_ID", ""
+)  # Logged as llm_model_name on harness usage rows (task=agent)
 
 # Main Gradio app gold eval (reuse agent-redact/eval gold cases + CSV).
 APP_EVAL_ENABLED = convert_string_to_boolean(
@@ -2971,6 +2974,14 @@ DIRECT_MODE_TEXTRACT_ACTION = get_or_create_env_var(
 DIRECT_MODE_JOB_ID = get_or_create_env_var(
     "DIRECT_MODE_JOB_ID", ""
 )  # Job ID for Textract operations
+
+# AgentCore Harness agentic redaction (DIRECT_MODE_TASK=agentic_redact)
+DIRECT_MODE_AGENT_INSTRUCTIONS = get_or_create_env_var(
+    "DIRECT_MODE_AGENT_INSTRUCTIONS", ""
+)  # Bullet-point redaction requirements (same as the Gradio instructions box)
+DIRECT_MODE_AGENT_INSTRUCTIONS_FILE = get_or_create_env_var(
+    "DIRECT_MODE_AGENT_INSTRUCTIONS_FILE", ""
+)  # UTF-8 text file; used when DIRECT_MODE_AGENT_INSTRUCTIONS is empty
 
 # Lambda-specific configuration options
 LAMBDA_POLL_INTERVAL = int(

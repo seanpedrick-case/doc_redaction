@@ -16,6 +16,30 @@ from typing import Any, Iterable, Iterator
 
 TOOLS_SPEC_PATH = Path(__file__).with_name("agentcore_harness_tools.json")
 
+# Built-ins on the harness VM (not doc_redaction inline tools).
+HARNESS_BUILTIN_ALLOWED_TOOLS = (
+    "shell",
+    "read",
+    "write",
+    "edit",
+    "todo_write",
+    "subagent",
+    "retrieve_context",
+    "skills",
+)
+
+# Harness ``AllowedTools`` is builtins-only (see CDK). Invoke-time ``inline_function`` tools
+# are listed in the ``tools`` array but are not exposed to the model unless ``allowedTools``
+# is overridden on each ``InvokeHarness``. Wildcard is required today: listing builtin names
+# plus inline tool names does not enable client-side inline handoff (AgentCore 2026-03).
+HARNESS_INVOKE_ALLOWED_TOOLS = ("*",)
+
+
+def harness_invoke_allowed_tools() -> list[str]:
+    """``allowedTools`` for each ``InvokeHarness`` when passing doc_redaction inline tools."""
+    return list(HARNESS_INVOKE_ALLOWED_TOOLS)
+
+
 # Stop reasons after which the harness is not waiting for anything from the caller.
 TERMINAL_STOP_REASONS = frozenset(
     {
@@ -74,6 +98,32 @@ def inline_tool_names(specs: Iterable[dict[str, Any]]) -> set[str]:
         for s in specs
         if s.get("type") == "inline_function" and s.get("name")
     }
+
+
+@dataclass
+class HarnessTokenUsage:
+    """Bedrock usage aggregated from ``InvokeHarness`` stream ``metadata`` events."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    cache_write_input_tokens: int = 0
+    metadata_events: int = 0
+
+    def absorb_stream_event(self, event: dict[str, Any]) -> None:
+        meta = event.get("metadata")
+        if not isinstance(meta, dict):
+            return
+        usage = meta.get("usage")
+        if not isinstance(usage, dict):
+            return
+        self.metadata_events += 1
+        self.input_tokens += int(usage.get("inputTokens") or 0)
+        self.output_tokens += int(usage.get("outputTokens") or 0)
+        self.total_tokens += int(usage.get("totalTokens") or 0)
+        self.cache_read_input_tokens += int(usage.get("cacheReadInputTokens") or 0)
+        self.cache_write_input_tokens += int(usage.get("cacheWriteInputTokens") or 0)
 
 
 @dataclass
@@ -173,15 +223,19 @@ class HarnessTurn:
     _by_block_index: dict[int, PendingToolUse] = field(default_factory=dict)
 
     def pending_inline_calls(self, inline_names: set[str]) -> list[PendingToolUse]:
-        """Inline calls the harness handed back (no harness-side toolResult)."""
-        if self.stop_reason != "tool_use":
-            return []
+        """Unresolved inline tool uses seen in the stream."""
         return [
             t
             for t in self.tool_uses
             if t.name in inline_names
             and t.tool_use_id not in self.resolved_tool_use_ids
         ]
+
+    def handoff_inline_calls(self, inline_names: set[str]) -> list[PendingToolUse]:
+        """Inline calls the harness handed off (client may return ``toolResult``)."""
+        if self.stop_reason != "tool_use":
+            return []
+        return self.pending_inline_calls(inline_names)
 
 
 class HarnessTurnCollector:
@@ -191,7 +245,12 @@ class HarnessTurnCollector:
         self.turn = HarnessTurn()
         self._text_parts: list[str] = []
 
-    def feed(self, event: dict[str, Any]) -> list[HarnessStreamEvent]:
+    def feed(
+        self,
+        event: dict[str, Any],
+        *,
+        inline_names: set[str] | None = None,
+    ) -> list[HarnessStreamEvent]:
         turn = self.turn
         if "contentBlockStart" in event:
             block = event.get("contentBlockStart") or {}
@@ -208,7 +267,16 @@ class HarnessTurnCollector:
                 turn._by_block_index[index] = pending
             tool_result = start.get("toolResult") or {}
             if isinstance(tool_result, dict) and tool_result.get("toolUseId"):
-                turn.resolved_tool_use_ids.add(str(tool_result["toolUseId"]))
+                tid = str(tool_result["toolUseId"])
+                matched = next(
+                    (t for t in turn.tool_uses if t.tool_use_id == tid), None
+                )
+                # Inline tools run in the app; ignore spurious harness-side toolResult
+                # (e.g. "Unknown tool") so the client can still dispatch handlers.
+                if matched is None or (inline_names and matched.name in inline_names):
+                    pass
+                else:
+                    turn.resolved_tool_use_ids.add(tid)
         elif "contentBlockDelta" in event:
             block = event.get("contentBlockDelta") or {}
             index = int(block.get("contentBlockIndex") or 0)
@@ -223,6 +291,19 @@ class HarnessTurnCollector:
                     )
             if delta.get("text"):
                 self._text_parts.append(str(delta["text"]))
+        elif "contentBlockStop" in event:
+            block = event.get("contentBlockStop") or {}
+            stop = block.get("stop") or {}
+            tool_result = stop.get("toolResult") or {}
+            if isinstance(tool_result, dict) and tool_result.get("toolUseId"):
+                tid = str(tool_result["toolUseId"])
+                matched = next(
+                    (t for t in turn.tool_uses if t.tool_use_id == tid), None
+                )
+                if matched is None or (inline_names and matched.name in inline_names):
+                    pass
+                else:
+                    turn.resolved_tool_use_ids.add(tid)
         elif "messageStop" in event:
             turn.stop_reason = str(
                 (event.get("messageStop") or {}).get("stopReason") or ""

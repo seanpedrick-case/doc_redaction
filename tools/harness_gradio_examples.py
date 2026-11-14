@@ -5,8 +5,22 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from tools.config import LOCAL_PII_OPTION, SELECTABLE_TEXT_EXTRACT_OPTION
+from tools.config import (
+    DEFAULT_LOCAL_OCR_MODEL,
+    LOCAL_OCR_MODEL_OPTIONS,
+    LOCAL_PII_OPTION,
+    SELECTABLE_TEXT_EXTRACT_OPTION,
+)
 from tools.example_data_paths import is_lfs_pointer
+
+
+def _example_local_ocr_choice() -> str:
+    """``local_ocr_method_radio`` rejects values outside ``LOCAL_OCR_MODEL_OPTIONS``."""
+    if DEFAULT_LOCAL_OCR_MODEL in LOCAL_OCR_MODEL_OPTIONS:
+        return DEFAULT_LOCAL_OCR_MODEL
+    if LOCAL_OCR_MODEL_OPTIONS:
+        return LOCAL_OCR_MODEL_OPTIONS[0]
+    return "tesseract"
 
 
 def _show_harness_examples() -> bool:
@@ -95,10 +109,10 @@ def harness_example_rows(
             continue
         rows.append(
             [
-                path,
+                [path],  # in_doc_files uses file_count="multiple"
                 example.instructions,
                 example.text_extract_method,
-                "",  # local_ocr_model_radio (unused for selectable-text demos)
+                _example_local_ocr_choice(),
                 example.pii_method,
                 list(local_entities),
                 list(comprehend_entities),
