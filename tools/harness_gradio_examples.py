@@ -51,6 +51,14 @@ class HarnessRedactionExample:
     page_max: int = 0
 
 
+_PARTNERSHIP_AGENT_INSTRUCTIONS = (
+    "- All signatures should be redacted\n"
+    "- Any redaction box related to general country names should be removed\n"
+    "- All redactions for Rudy Giuliani should be removed\n"
+    "- All mentions of London, and 'Sister City' should be redacted\n"
+)
+
+
 def _catalog() -> tuple[HarnessRedactionExample, ...]:
     return (
         HarnessRedactionExample(
@@ -71,6 +79,11 @@ def _catalog() -> tuple[HarnessRedactionExample, ...]:
                 "- Redact any organisation names\n"
                 "- Redact any place names\n"
             ),
+        ),
+        HarnessRedactionExample(
+            label="Partnership agreement (sister cities)",
+            file_name="Partnership-Agreement-Toolkit_0_0.pdf",
+            instructions=_PARTNERSHIP_AGENT_INSTRUCTIONS,
         ),
     )
 

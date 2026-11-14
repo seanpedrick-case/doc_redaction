@@ -5,6 +5,7 @@ import re
 import time
 import uuid
 from datetime import datetime
+from pathlib import Path
 
 import pandas as pd
 
@@ -2722,6 +2723,20 @@ def main(direct_mode_args={}):
                 print(f"  {path}")
         else:
             print("\nNo output files returned (see activity above).")
+        if args.save_outputs_to_s3 and s3_output_folder and final.output_files:
+            print("\n--- Uploading output files to S3 ---")
+            try:
+                from tools.agentcore_harness import upload_agentic_outputs_to_s3
+
+                upload_agentic_outputs_to_s3(
+                    final.output_files,
+                    s3_output_folder=s3_output_folder,
+                    save_outputs_to_s3=args.save_outputs_to_s3,
+                    base_document=document,
+                    s3_bucket=args.s3_outputs_bucket,
+                )
+            except Exception as e:
+                print(f"Warning: Could not upload output files to S3: {e}")
         if usage_logger and final.done:
             from tools.agentcore_harness import _pdf_page_count
             from tools.harness_usage_log import record_harness_agent_usage

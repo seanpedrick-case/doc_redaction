@@ -344,6 +344,71 @@ class HarnessSession:
             if contains in Path(f).name.lower() and f.lower().endswith(suffix)
         ]
 
+    def _newest_rel(
+        self,
+        *,
+        name_contains: str,
+        suffixes: tuple[str, ...] = (".pdf", ".csv"),
+        under: str | None = None,
+    ) -> str | None:
+        """Newest session file whose basename contains *name_contains* (case-insensitive)."""
+        matches: list[tuple[float, str]] = []
+        prefix = (under or "").strip().rstrip("/")
+        for rel in self._files():
+            if prefix and not rel.replace("\\", "/").startswith(f"{prefix}/"):
+                continue
+            path = Path(rel)
+            if path.suffix.lower() not in suffixes:
+                continue
+            if name_contains.lower() not in path.name.lower():
+                continue
+            try:
+                resolved = self.resolve(rel)
+            except HarnessToolError:
+                continue
+            matches.append((resolved.stat().st_mtime, rel))
+        if not matches:
+            return None
+        matches.sort(key=lambda item: item[0], reverse=True)
+        return matches[0][1]
+
+    def standard_ui_output_rels(self) -> list[str]:
+        """Pass 1 artifacts to show in the Gradio Output files box."""
+        rels: list[str] = []
+        seen: set[str] = set()
+
+        def push(rel: str | None) -> None:
+            if not rel or rel in seen:
+                return
+            seen.add(rel)
+            rels.append(rel)
+
+        push(
+            self._newest_rel(
+                name_contains="_redacted",
+                suffixes=(".pdf",),
+                under=REVIEW_OUTPUT_DIR,
+            )
+        )
+        push(
+            self._newest_rel(
+                name_contains="_redacted",
+                suffixes=(".pdf",),
+                under=REDACT_OUTPUT_DIR,
+            )
+        )
+        push(
+            self._newest_rel(
+                name_contains="redactions_for_review",
+                suffixes=(".pdf",),
+            )
+        )
+        push(self._newest_rel(name_contains="_review_file", suffixes=(".csv",)))
+        push(
+            self._newest_rel(name_contains="ocr_results_with_words", suffixes=(".csv",))
+        )
+        return rels
+
     def _ocr_words_for(self, args: dict[str, Any]) -> Path:
         value = args.get("ocr_words_csv_path")
         if value:
@@ -703,12 +768,20 @@ class HarnessSession:
 
     def finish_task(self, args: dict[str, Any]) -> dict[str, Any]:
         self.finish_summary = str(args.get("summary") or "").strip()
-        finals = []
+        finals: list[str] = []
+        seen: set[str] = set()
         for value in args.get("final_files") or []:
             try:
-                finals.append(self.rel(self.resolve(value)))
+                rel = self.rel(self.resolve(value))
             except HarnessToolError:
                 continue
+            if rel not in seen:
+                seen.add(rel)
+                finals.append(rel)
+        for rel in self.standard_ui_output_rels():
+            if rel not in seen:
+                seen.add(rel)
+                finals.append(rel)
         self.final_files = finals
         self.finished = True
         return {"status": "finished", "final_files": finals}
@@ -760,7 +833,17 @@ class HarnessSession:
 
     def output_files(self) -> list[str]:
         """Absolute paths to show in the app's Output files box."""
-        rels = self.final_files or list(self.review_apply_outputs)
+        rels: list[str] = []
+        seen: set[str] = set()
+        for rel in (
+            *self.final_files,
+            *self.review_apply_outputs,
+            *self.standard_ui_output_rels(),
+        ):
+            if rel in seen:
+                continue
+            seen.add(rel)
+            rels.append(rel)
         if not rels:
             rels = [
                 f
@@ -768,12 +851,14 @@ class HarnessSession:
                 if f.startswith(f"{REDACT_OUTPUT_DIR}/")
                 and (f.endswith(".pdf") or "_review_file" in f)
             ]
-        paths = []
+        paths: list[str] = []
         for rel in rels:
             try:
-                paths.append(str(self.resolve(rel)))
+                abs_path = str(self.resolve(rel))
             except HarnessToolError:
                 continue
+            if abs_path not in paths:
+                paths.append(abs_path)
         return paths
 
 
@@ -808,7 +893,10 @@ When this prompt or a skill names an endpoint, use the matching tool:
 
 - All paths are **relative to the session folder** (see `list_session_files`). The source
   document is `{INPUT_PATH}`.
-- `doc_redact` writes to `output_redact/`; `review_apply` writes to `review/output_review_final/`.
+- `doc_redact` writes to `output_redact/` (including `*_redactions_for_review*.pdf` and
+  `*_ocr_results_with_words*.csv`); `review_apply` writes to `review/output_review_final/`.
+- Pass 1 review aids are included in the Gradio Output files list when present (automatically and
+  via `finish_task` `final_files`).
 - Your own shell/filesystem is a separate sandbox: the app's files are only reachable through
   the inline tools (or the presigned URLs they return).
 - {PAGE_REVIEW_NOTE}
@@ -1281,8 +1369,8 @@ def agentic_redact_for_gradio(
     output_folder: str | None = None,
     session_hash: str = "",
     cost_code: str = "",
-) -> Iterator[tuple[str, str, list[str]]]:
-    """Gradio streaming handler: yields ``(summary, activity_markdown, output_files)``."""
+) -> Iterator[tuple[str, str, list[str], list[str]]]:
+    """Gradio streaming handler: yields ``(summary, activity, output_files, output_file_list_state)``."""
     import gradio as gr
 
     ready, reason = harness_feature_ready()
@@ -1328,7 +1416,7 @@ def agentic_redact_for_gradio(
             ocr_method_short=defaults.ocr_method,
         )
         if gold_line:
-            yield "Starting agent run…", gold_line, []
+            yield "Starting agent run…", gold_line, [], []
     final: HarnessProgress | None = None
     for progress in run_agentic_redaction(
         document,
@@ -1341,7 +1429,8 @@ def agentic_redact_for_gradio(
         eval_session_hash=(session_hash or "").strip(),
     ):
         final = progress
-        yield progress.summary, progress.activity, progress.output_files
+        files = progress.output_files
+        yield progress.summary, progress.activity, files, files
     if final is not None and final.done:
         from tools.harness_usage_log import record_harness_agent_usage
 
@@ -1355,6 +1444,30 @@ def agentic_redact_for_gradio(
             cost_code=(cost_code or "").strip(),
             total_pages=_pdf_page_count(session.source_pdf),
         )
+
+
+def upload_agentic_outputs_to_s3(
+    output_paths: list[str] | None,
+    *,
+    s3_output_folder: str,
+    save_outputs_to_s3: bool,
+    base_document: str | Path | None = None,
+    s3_bucket: str | None = None,
+) -> str | None:
+    """Upload harness deliverables using the same helper as the main redaction tab."""
+    from tools.aws_functions import export_outputs_to_s3
+    from tools.config import S3_OUTPUTS_BUCKET
+
+    paths = [p for p in (output_paths or []) if p]
+    if not paths or not (s3_output_folder or "").strip():
+        return None
+    return export_outputs_to_s3(
+        file_list_state=paths,
+        s3_output_folder_state_value=s3_output_folder.strip(),
+        save_outputs_to_s3_flag=save_outputs_to_s3,
+        base_file_state=str(base_document) if base_document else None,
+        s3_bucket=s3_bucket or S3_OUTPUTS_BUCKET,
+    )
 
 
 def agentic_redact_api(
@@ -1419,6 +1532,7 @@ __all__ = [
     "HarnessProgress",
     "agentic_redact_api",
     "agentic_redact_for_gradio",
+    "upload_agentic_outputs_to_s3",
     "HarnessRunDefaults",
     "HarnessSession",
     "HarnessToolError",

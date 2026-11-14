@@ -3169,7 +3169,7 @@ def build_ui():
                                 encourage_vlm_signatures,
                             ],
                             example_labels=pi_example_labels,
-                            examples_per_page=2,
+                            examples_per_page=3,
                             cache_examples=False,
                         )
                     else:

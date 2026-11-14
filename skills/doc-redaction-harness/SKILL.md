@@ -40,7 +40,7 @@ does not.
 | `stage_page_review_bundles` | Upload per-page slices (review rows, word OCR, line OCR) and return GET URLs plus one PUT URL per page for subagents. |
 | `merge_page_reviews` | Download each page's uploaded result, validate it and merge it into `<review>_merged.csv`. Pages with no upload keep their master rows. |
 | `review_apply` | Apply a review CSV to the original PDF. Writes to `review/output_review_final/`. |
-| `finish_task` | Call **exactly once, last**, with a short summary and the final file paths. |
+| `finish_task` | Call **exactly once, last**, with a short summary and `final_files` (deliverables plus Pass 1 review aids: `*_redactions_for_review*.pdf`, `*_ocr_results_with_words*.csv` when present). |
 
 ## Workflow
 
@@ -60,7 +60,9 @@ does not.
    result. Text-layer leaks mean a box is missing or misplaced: fix the CSV, then apply again (at
    most one more time).
 8. **Finish**: `finish_task` with a 3–6 line summary (what was redacted, what was kept, any pages
-   needing human review) and `final_files` (the redacted PDF and final review CSV).
+   needing human review) and `final_files`: post-apply `*_redacted.pdf`, final `*_review_file*.csv`, and
+   when they exist the Pass 1 review overlay `output_redact/*_redactions_for_review*.pdf` and
+   `output_redact/*_ocr_results_with_words*.csv` so the user can spot-check boxes and OCR.
 
 ### Pass 1, mode A: single agent (short documents, or page review unavailable)
 

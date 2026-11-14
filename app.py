@@ -2907,7 +2907,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                                     page_max,
                                 ],
                                 example_labels=_agent_ex_labels,
-                                examples_per_page=2,
+                                examples_per_page=3,
                                 cache_examples=False,
                             )
                         else:
@@ -5897,7 +5897,18 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                 redaction_output_summary_textbox,
                 agent_activity_markdown,
                 output_file,
+                output_file_list_state,
             ],
+            api_visibility="undocumented",
+        ).success(
+            fn=export_outputs_to_s3,
+            inputs=[
+                output_file_list_state,
+                s3_output_folder_state,
+                save_outputs_to_s3_checkbox,
+                in_doc_files,
+            ],
+            outputs=None,
             api_visibility="undocumented",
         )
 

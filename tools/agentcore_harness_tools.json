@@ -166,7 +166,7 @@
     "name": "finish_task",
     "config": {
       "inlineFunction": {
-        "description": "Finish the task. Call exactly once at the end with a short markdown summary (what was redacted, coverage result, any pages needing human review) and the relative paths of the deliverable files (post-apply *_redacted.pdf, final review CSV, summary).",
+        "description": "Finish the task. Call exactly once at the end with a short markdown summary (what was redacted, coverage result, any pages needing human review) and final_files: relative paths of deliverables (post-apply *_redacted.pdf in review/output_review_final/, final *_review_file*.csv). Always include Pass 1 review aids when they exist: output_redact/*_redactions_for_review*.pdf and output_redact/*_ocr_results_with_words*.csv (the app also adds these to the download list if you omit them).",
         "inputSchema": {
           "type": "object",
           "properties": {

@@ -255,6 +255,20 @@ def test_adjacent_inline_calls_returned_together(sample_pdf, tmp_path):
     assert [c["toolResult"]["status"] for c in content] == ["success", "error"]
 
 
+def test_output_files_include_pass1_review_artifacts(sample_pdf, tmp_path):
+    session = _session(sample_pdf, tmp_path)
+    redact_dir = session.session_dir / "output_redact"
+    redact_dir.mkdir(parents=True)
+    review_pdf = redact_dir / "sample_redactions_for_review.pdf"
+    ocr_csv = redact_dir / "sample_ocr_results_with_words.csv"
+    review_pdf.write_bytes(b"%PDF-1.4\n")
+    ocr_csv.write_text("word,page\n", encoding="utf-8")
+
+    paths = session.output_files()
+    assert str(review_pdf.resolve()) in paths
+    assert str(ocr_csv.resolve()) in paths
+
+
 def test_finish_task_ends_run_and_sets_outputs(sample_pdf, tmp_path):
     session = _session(sample_pdf, tmp_path)
     client = FakeHarnessClient(
@@ -492,6 +506,51 @@ def test_ui_ocr_method_mapping():
         ah.ui_ocr_method_to_tool_value(LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION, "paddle")
         == "paddle"
     )
+
+
+def test_upload_agentic_outputs_to_s3_delegates(monkeypatch, sample_pdf):
+    calls: list[dict] = []
+
+    def fake_export(**kwargs):
+        calls.append(kwargs)
+        return None
+
+    monkeypatch.setattr(
+        "tools.aws_functions.export_outputs_to_s3",
+        fake_export,
+    )
+    ah.upload_agentic_outputs_to_s3(
+        [str(sample_pdf)],
+        s3_output_folder="outputs/abc123/20251114/",
+        save_outputs_to_s3=True,
+        base_document=sample_pdf,
+        s3_bucket="my-bucket",
+    )
+    assert len(calls) == 1
+    assert calls[0]["file_list_state"] == [str(sample_pdf)]
+    assert calls[0]["s3_output_folder_state_value"] == "outputs/abc123/20251114/"
+    assert calls[0]["save_outputs_to_s3_flag"] is True
+    assert calls[0]["s3_bucket"] == "my-bucket"
+
+
+def test_upload_agentic_outputs_to_s3_skips_empty(monkeypatch):
+    called = False
+
+    def fake_export(**_kwargs):
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(
+        "tools.aws_functions.export_outputs_to_s3",
+        fake_export,
+    )
+    assert (
+        ah.upload_agentic_outputs_to_s3(
+            [], s3_output_folder="x/", save_outputs_to_s3=True
+        )
+        is None
+    )
+    assert not called
 
 
 def test_ui_entities_follow_pii_method():
