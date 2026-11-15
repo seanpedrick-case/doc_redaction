@@ -180,7 +180,7 @@ Redeploy after CDK updates: `python cdk/deploy_harness_local.py --yes`.
 
 **Local app only (minimal AWS footprint):** deploy just the harness, two S3 buckets, and a developer IAM policy—no ECS or VPC—with [`cdk/deploy_harness_local.py`](../../cdk/deploy_harness_local.py). Details: [`cdk/docs/harness_local_stack.md`](../../cdk/docs/harness_local_stack.md).
 
-**Eval (main app):** With ``APP_EVAL_ENABLED=True`` (or ``AGENT_EVAL_DEEPEVAL_TRACING=1``), completed harness runs write ``eval/run_*/eval_summary.json`` under the harness session folder, using the real inline tool trace (``doc_redact``, ``verify_coverage``, …). Gold auto-match uses the same ``APP_EVAL_*`` / ``AGENT_EVAL_*`` variables as standard redaction and agent-redact. Try the two agent examples on the Redact tab when ``USE_AGENTCORE=True``.
+**Eval (main app):** With ``APP_EVAL_ENABLED=True`` (or ``AGENT_EVAL_DEEPEVAL_TRACING=1``), completed harness runs write ``eval/run_*/`` under the harness session folder: ``tool_args.json`` (inline tool trajectory for DeepEval), ``trace_events.jsonl`` (turn/tool start-end journal), ``eval_summary.json``, and gate artifacts. CSV ``run_source`` is ``main_app_harness`` (Gradio) or ``main_app_harness_api`` (``/agentic_redact``). Optional ``ARIZE_TRACING_ENABLED`` exports Pi-parity OTEL spans (``main_app.harness`` + TOOL children with ``redaction.*`` on verify); harness LLM turns remain AWS-side. Gold auto-match uses the same ``APP_EVAL_*`` / ``AGENT_EVAL_*`` variables as standard redaction and agent-redact.
 
 ---
 

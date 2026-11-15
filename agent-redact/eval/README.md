@@ -30,6 +30,7 @@ PHOENIX_COLLECTOR_ENDPOINT=http://localhost:6006
 
 - **LangGraph / AgentCore Runtime:** OpenInference LangChain spans + `session.id` = Gradio `session_hash`.
 - **Pi:** coarser AGENT/TOOL spans via `iter_pi_events_with_tracing` (LLM stays in Node).
+- **Main-app AgentCore Harness** (`USE_AGENTCORE` in [`app.py`](../../app.py)): root `main_app.harness` + inline TOOL spans around client dispatch ([`harness_eval_support.py`](../../tools/harness_eval_support.py)); LLM turns stay AWS-side. When `APP_EVAL_ENABLED` / `AGENT_EVAL_DEEPEVAL_TRACING` is on, also writes local `trace_events.jsonl` next to `tool_args.json` under `OUTPUT_FOLDER/agentcore/<run_id>/eval/run_*/`.
 
 ### Recommended process KPIs
 
@@ -60,7 +61,7 @@ When the agent runs `verify_coverage`, reports are no longer only buried in trun
 | `redaction.verify_coverage_calls` | Root AGENT | How many coverage calls this turn |
 | `redaction.workflow_incomplete` | Root AGENT (LangGraph) | `review_apply` not completed |
 
-**Phoenix / AX:** filter sessions where `redaction.final_pass_strict = false` or `redaction.any_verify_fail = true`. Wire: LangGraph + AgentCore Runtime via `run_verify_coverage` → `annotate_current_span_with_coverage`; Pi via tool-output JSON parse in `iter_pi_events_with_tracing`.
+**Phoenix / AX:** filter sessions where `redaction.final_pass_strict = false` or `redaction.any_verify_fail = true`. Wire: LangGraph + AgentCore Runtime via `run_verify_coverage` → `annotate_current_span_with_coverage`; Pi via tool-output JSON parse in `iter_pi_events_with_tracing`; main-app harness via `harness_inline_tool_span` + `maybe_annotate_coverage_from_tool_output` on `verify_redaction_coverage` results.
 
 ### Phoenix / AX tips
 
@@ -81,7 +82,9 @@ When the agent runs `verify_coverage`, reports are no longer only buried in trun
 | AgentCore Evaluations **built-ins** (tool selection, goal success) | Process/trajectory only — they do **not** auto-score `pass_strict` |
 | Custom AgentCore / offline eval that reads span attrs or re-runs `run_policy_gate.py` | Straight-forward; prefer offline policy gate for CI pass/fail |
 
-**Harness** (skills/shell) does not go through `run_verify_coverage` in Python, so these attributes appear only if a tool returns the same JSON and you add Harness-side span mapping — Runtime is the easy path.
+**Harness (agent-redact Gradio, skills/shell):** AWS-managed builtins do not emit app-side OTEL; map coverage only when a tool returns verify JSON you can parse.
+
+**Main-app harness (Option 3):** inline tools run in-process. With `ARIZE_TRACING_ENABLED`, Phoenix/AX gets `main_app.harness` + TOOL children and `redaction.*` on verify. DeepEval metrics still score from local `tool_args.json` / `eval_summary.json` (same as Pi); `trace_events.jsonl` is the durable local journal. Full LLM message spans inside the harness VM are not available from the app.
 
 Pair AgentCore process scores with tier 2 policy gate + tier 3 gold F1 for product quality.
 

@@ -367,6 +367,15 @@ from tools.config import (
     USE_GREEDY_DUPLICATE_DETECTION,
     WHOLE_PAGE_REDACTION_LIST_PATH,
 )
+
+if USE_AGENTCORE:
+    try:
+        from tools.harness_eval_support import maybe_setup_harness_arize_tracing
+
+        maybe_setup_harness_arize_tracing()
+    except Exception:
+        pass
+
 from tools.custom_csvlogger import CSVLogger_custom
 from tools.data_anonymise import (
     REDACTION_EXAMPLE_PLACEHOLDER,

@@ -1185,167 +1185,227 @@ def run_agentic_redaction(
     )
     activity.add(f"Inline tools on each InvokeHarness: {', '.join(sorted(names))}.")
 
+    from tools.harness_eval_support import (
+        harness_agent_turn_span,
+        harness_inline_tool_span,
+    )
+
     messages: list[dict[str, Any]] = [{"role": "user", "content": [{"text": prompt}]}]
     summary = ""
-    for round_no in range(1, rounds + 1):
-        request: dict[str, Any] = {
-            "harnessArn": arn,
-            "runtimeSessionId": runtime_session_id,
-            "messages": messages,
-            "tools": specs,
-            "allowedTools": harness_invoke_allowed_tools(),
-        }
-        if qualifier and qualifier.upper() != "DEFAULT":
-            request["qualifier"] = qualifier
-        try:
-            response = client.invoke_harness(**request)
-        except Exception as exc:  # noqa: BLE001 - surface AWS errors in the UI
-            activity.add(f"**Harness invoke failed:** {_short(str(exc))}")
-            summary = f"Agent run failed: {exc}"
-            break
-
-        collector = HarnessTurnCollector()
-        stopped = False
-        try:
-            event_iter = response.get("stream") or []
-            for raw in event_iter:
-                if should_stop is not None and should_stop():
-                    stopped = True
-                    break
-                if not isinstance(raw, dict):
-                    continue
-                token_usage.absorb_stream_event(raw)
-                for event in collector.feed(raw, inline_names=names):
-                    if event.kind == "tool_start" and event.tool_name not in names:
-                        activity.add(f"Harness tool: `{event.tool_name}`")
-                    elif event.kind == "error":
-                        activity.add(f"**Harness error:** {_short(event.text)}")
-        except Exception as exc:  # noqa: BLE001 — EventStreamError from botocore
-            err_text = str(exc)
-            activity.add(f"**Harness stream error:** {_short(err_text)}")
-            if "no pending handoff" in err_text.lower():
-                activity.add(
-                    "The harness session lost the inline-tool handoff (often after a "
-                    "long local tool run or a stale ``toolResult``). Restart the agent run."
-                )
-            summary = f"Agent run failed: {err_text}"
-            break
-        if stopped:
-            activity.add("Stopped by user.")
-            summary = "Agent run stopped."
-            break
-
-        turn = collector.turn
-        if turn.text.strip():
-            activity.add(f"Agent: {_short(turn.text)}")
-            summary = turn.text.strip()
-        orphan = turn.pending_inline_calls(names)
-        pending = turn.handoff_inline_calls(names)
-        if pending:
-            activity.add(
-                f"Client inline dispatch: {', '.join(f'`{c.name}`' for c in pending)} "
-                f"(stop `{turn.stop_reason or 'unknown'}`)."
-            )
-        elif orphan and turn.stop_reason != "tool_use":
-            activity.add(
-                f"Ignored {len(orphan)} inline tool use(s) without harness handoff "
-                f"(stop `{turn.stop_reason}`)."
-            )
-        elif turn.tool_uses and turn.stop_reason in ("tool_use", "tool_result", ""):
-            activity.add(
-                "**No client inline dispatch** — harness tool uses: "
-                f"{[t.name for t in turn.tool_uses]} "
-                f"(resolved {sorted(turn.resolved_tool_use_ids)})."
-            )
-        if not pending:
-            if turn.stop_reason and turn.stop_reason != "end_turn":
-                activity.add(f"Harness stopped: `{turn.stop_reason}`.")
-            break
-
-        results: list[tuple[str, str, bool]] = []
-        for call in pending:
-            try:
-                arguments = call.arguments()
-            except ValueError as exc:
-                results.append(
-                    (call.tool_use_id, json.dumps({"error": str(exc)}), False)
-                )
-                continue
+    sid = (eval_session_hash or session.run_id or "").strip()
+    with harness_agent_turn_span(session_hash=sid, message=instructions) as turn_meta:
+        for round_no in range(1, rounds + 1):
             if eval_recorder is not None:
-                eval_recorder.record_tool(call.name, arguments)
-            activity.add(f"Running `{call.name}`…")
+                eval_recorder.record_turn_start(round_no=round_no)
+            request: dict[str, Any] = {
+                "harnessArn": arn,
+                "runtimeSessionId": runtime_session_id,
+                "messages": messages,
+                "tools": specs,
+                "allowedTools": harness_invoke_allowed_tools(),
+            }
+            if qualifier and qualifier.upper() != "DEFAULT":
+                request["qualifier"] = qualifier
+            try:
+                response = client.invoke_harness(**request)
+            except Exception as exc:  # noqa: BLE001 - surface AWS errors in the UI
+                activity.add(f"**Harness invoke failed:** {_short(str(exc))}")
+                summary = f"Agent run failed: {exc}"
+                if eval_recorder is not None:
+                    eval_recorder.record_stream_status(
+                        "invoke_failed", error=_short(str(exc), 500)
+                    )
+                break
+
+            collector = HarnessTurnCollector()
+            stopped = False
+            try:
+                event_iter = response.get("stream") or []
+                for raw in event_iter:
+                    if should_stop is not None and should_stop():
+                        stopped = True
+                        break
+                    if not isinstance(raw, dict):
+                        continue
+                    token_usage.absorb_stream_event(raw)
+                    for event in collector.feed(raw, inline_names=names):
+                        if event.kind == "tool_start" and event.tool_name not in names:
+                            activity.add(f"Harness tool: `{event.tool_name}`")
+                        elif event.kind == "error":
+                            activity.add(f"**Harness error:** {_short(event.text)}")
+            except Exception as exc:  # noqa: BLE001 — EventStreamError from botocore
+                err_text = str(exc)
+                activity.add(f"**Harness stream error:** {_short(err_text)}")
+                if "no pending handoff" in err_text.lower():
+                    activity.add(
+                        "The harness session lost the inline-tool handoff (often after a "
+                        "long local tool run or a stale ``toolResult``). Restart the agent run."
+                    )
+                summary = f"Agent run failed: {err_text}"
+                if eval_recorder is not None:
+                    eval_recorder.record_stream_status(
+                        "stream_error", error=_short(err_text, 500)
+                    )
+                break
+            if stopped:
+                activity.add("Stopped by user.")
+                summary = "Agent run stopped."
+                if eval_recorder is not None:
+                    eval_recorder.record_stream_status(
+                        "user_stopped", round_no=round_no
+                    )
+                break
+
+            turn = collector.turn
+            if turn.text.strip():
+                activity.add(f"Agent: {_short(turn.text)}")
+                summary = turn.text.strip()
+            orphan = turn.pending_inline_calls(names)
+            pending = turn.handoff_inline_calls(names)
+            if pending:
+                activity.add(
+                    f"Client inline dispatch: {', '.join(f'`{c.name}`' for c in pending)} "
+                    f"(stop `{turn.stop_reason or 'unknown'}`)."
+                )
+            elif orphan and turn.stop_reason != "tool_use":
+                activity.add(
+                    f"Ignored {len(orphan)} inline tool use(s) without harness handoff "
+                    f"(stop `{turn.stop_reason}`)."
+                )
+            elif turn.tool_uses and turn.stop_reason in ("tool_use", "tool_result", ""):
+                activity.add(
+                    "**No client inline dispatch** — harness tool uses: "
+                    f"{[t.name for t in turn.tool_uses]} "
+                    f"(resolved {sorted(turn.resolved_tool_use_ids)})."
+                )
+            if eval_recorder is not None:
+                eval_recorder.record_turn_end(
+                    round_no=round_no,
+                    stop_reason=turn.stop_reason or "",
+                    input_tokens=token_usage.input_tokens,
+                    output_tokens=token_usage.output_tokens,
+                    pending_tools=[c.name for c in pending],
+                )
+            if not pending:
+                if turn.stop_reason and turn.stop_reason != "end_turn":
+                    activity.add(f"Harness stopped: `{turn.stop_reason}`.")
+                break
+
+            results: list[tuple[str, str, bool]] = []
+            for call in pending:
+                try:
+                    arguments = call.arguments()
+                except ValueError as exc:
+                    err_payload = json.dumps({"error": str(exc)})
+                    results.append((call.tool_use_id, err_payload, False))
+                    if eval_recorder is not None:
+                        eval_recorder.record_tool(call.name, {})
+                        eval_recorder.record_tool_end(
+                            call.name,
+                            ok=False,
+                            duration_ms=0.0,
+                            output=err_payload,
+                            error=str(exc),
+                            tool_use_id=call.tool_use_id,
+                        )
+                    continue
+                if eval_recorder is not None:
+                    eval_recorder.record_tool(call.name, arguments)
+                activity.add(f"Running `{call.name}`…")
+                yield HarnessProgress(
+                    activity.markdown(),
+                    [],
+                    format_agentic_gradio_summary(
+                        headline=f"Running `{call.name}` (round {round_no})…",
+                        activity_markdown=activity.markdown(),
+                    ),
+                )
+                tool_t0 = time.time()
+                with harness_inline_tool_span(
+                    tool_name=call.name,
+                    arguments=arguments,
+                    tool_use_id=call.tool_use_id,
+                ) as tool_meta:
+                    text, ok = session.dispatch(call.name, arguments)
+                    tool_meta["output"] = text
+                    tool_meta["ok"] = ok
+                duration_ms = (time.time() - tool_t0) * 1000.0
+                if eval_recorder is not None:
+                    eval_recorder.record_tool_end(
+                        call.name,
+                        ok=ok,
+                        duration_ms=duration_ms,
+                        output=text,
+                        error="" if ok else _short(text, 500),
+                        tool_use_id=call.tool_use_id,
+                    )
+                activity.add(
+                    f"`{call.name}` {'done' if ok else 'failed'}"
+                    + ("" if ok else f": {_short(text, 300)}")
+                )
+                results.append((call.tool_use_id, text, ok))
             yield HarnessProgress(
                 activity.markdown(),
                 [],
                 format_agentic_gradio_summary(
-                    headline=f"Running `{call.name}` (round {round_no})…",
+                    headline=f"Round {round_no} complete",
                     activity_markdown=activity.markdown(),
                 ),
             )
-            text, ok = session.dispatch(call.name, arguments)
+            if session.finished:
+                break
+            messages = [tool_result_message(results)]
+        else:
             activity.add(
-                f"`{call.name}` {'done' if ok else 'failed'}"
-                + ("" if ok else f": {_short(text, 300)}")
+                f"**Stopped after {rounds} tool rounds** "
+                "(AGENTCORE_HARNESS_MAX_TOOL_ROUNDS)."
             )
-            results.append((call.tool_use_id, text, ok))
-        yield HarnessProgress(
-            activity.markdown(),
-            [],
-            format_agentic_gradio_summary(
-                headline=f"Round {round_no} complete",
-                activity_markdown=activity.markdown(),
-            ),
-        )
-        if session.finished:
-            break
-        messages = [tool_result_message(results)]
-    else:
-        activity.add(
-            f"**Stopped after {rounds} tool rounds** (AGENTCORE_HARNESS_MAX_TOOL_ROUNDS)."
-        )
+            if eval_recorder is not None:
+                eval_recorder.record_stream_status("max_rounds", rounds=rounds)
 
-    if session.finished and session.finish_summary:
-        summary = session.finish_summary
-    outputs = session.output_files()
-    if eval_recorder is not None and getattr(eval_recorder, "started", False):
-        eval_path = eval_recorder.write_post_run(
-            workspace=session.session_dir,
-            document_name=session.source_pdf.name,
-            instructions=instructions,
-            assistant_output=summary,
-            workflow_incomplete=not session.finished,
-            session_hash=eval_session_hash,
-        )
-        if eval_path is not None:
-            activity.add(
-                f"**Post-run eval:** `{eval_path.name}` → `{eval_path.parent}`"
+        turn_meta["workflow_incomplete"] = not session.finished
+        if session.finished and session.finish_summary:
+            summary = session.finish_summary
+        outputs = session.output_files()
+        if eval_recorder is not None and getattr(eval_recorder, "started", False):
+            eval_path = eval_recorder.write_post_run(
+                workspace=session.session_dir,
+                document_name=session.source_pdf.name,
+                instructions=instructions,
+                assistant_output=summary,
+                workflow_incomplete=not session.finished,
+                session_hash=eval_session_hash,
             )
-    elapsed = max(0.0, time.time() - run_started)
-    if token_usage.metadata_events:
-        activity.add(
-            "Harness LLM tokens (stream metadata): "
-            f"in={token_usage.input_tokens}, out={token_usage.output_tokens}"
+            if eval_path is not None:
+                activity.add(
+                    f"**Post-run eval:** `{eval_path.name}` → `{eval_path.parent}`"
+                )
+        elapsed = max(0.0, time.time() - run_started)
+        if token_usage.metadata_events:
+            activity.add(
+                "Harness LLM tokens (stream metadata): "
+                f"in={token_usage.input_tokens}, out={token_usage.output_tokens}"
+            )
+        activity.add(f"Finished with {len(outputs)} output file(s).")
+        activity_md = activity.markdown()
+        summary_text = format_agentic_gradio_summary(
+            headline=summary or "Agent run ended.",
+            activity_markdown=activity_md,
+            finish_summary=session.finish_summary if session.finished else "",
+            output_files=outputs,
+            done=True,
+            elapsed_seconds=elapsed,
+            token_usage=token_usage,
+            workflow_finished=session.finished,
         )
-    activity.add(f"Finished with {len(outputs)} output file(s).")
-    activity_md = activity.markdown()
-    summary_text = format_agentic_gradio_summary(
-        headline=summary or "Agent run ended.",
-        activity_markdown=activity_md,
-        finish_summary=session.finish_summary if session.finished else "",
-        output_files=outputs,
-        done=True,
-        elapsed_seconds=elapsed,
-        token_usage=token_usage,
-        workflow_finished=session.finished,
-    )
-    yield HarnessProgress(
-        activity_md,
-        outputs,
-        summary_text,
-        True,
-        token_usage=token_usage,
-        elapsed_seconds=elapsed,
-    )
+        yield HarnessProgress(
+            activity_md,
+            outputs,
+            summary_text,
+            True,
+            token_usage=token_usage,
+            elapsed_seconds=elapsed,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1537,7 +1597,10 @@ def agentic_redact_for_gradio(
         document, defaults=defaults, output_root=output_folder or OUTPUT_FOLDER
     )
     if harness_post_run_eval_enabled():
-        eval_recorder = HarnessEvalRecorder(session_hash=(session_hash or "").strip())
+        eval_recorder = HarnessEvalRecorder(
+            session_hash=(session_hash or "").strip(),
+            run_source="main_app_harness",
+        )
         gold_line = eval_recorder.begin(
             workspace=session.session_dir,
             pdf_path=session.source_pdf,
@@ -1614,14 +1677,19 @@ def agentic_redact_api(
     page_max: int | None = None,
 ) -> tuple[list[str], str]:
     """Short ``gr.api`` wrapper: run the harness agent to completion on one document."""
+    ready, reason = harness_feature_ready()
+    if not ready:
+        raise ValueError(f"AgentCore agent redaction is not configured: {reason}")
+
+    from tools.harness_eval_support import (
+        HarnessEvalRecorder,
+        harness_post_run_eval_enabled,
+    )
     from tools.simplified_api import (
         normalize_gradio_file_to_path,
         stage_gradio_upload_if_ephemeral,
     )
 
-    ready, reason = harness_feature_ready()
-    if not ready:
-        raise ValueError(f"AgentCore agent redaction is not configured: {reason}")
     document = normalize_gradio_file_to_path(document_file)
     if not document or not Path(document).is_file():
         raise ValueError("document_file is missing or could not be resolved to a path.")
@@ -1635,12 +1703,31 @@ def agentic_redact_api(
         page_min=int(page_min or 0),
         page_max=int(page_max or 0),
     )
+    session = HarnessSession(document, defaults=defaults, output_root=OUTPUT_FOLDER)
+    eval_recorder: HarnessEvalRecorder | None = None
+    if harness_post_run_eval_enabled():
+        eval_recorder = HarnessEvalRecorder(
+            session_hash="api",
+            run_source="main_app_harness_api",
+        )
+        eval_recorder.begin(
+            workspace=session.session_dir,
+            pdf_path=session.source_pdf,
+            document_name=session.source_pdf.name,
+            instructions=instructions,
+            text_extract_method=ocr_method or "Local text",
+            pii_method=pii_method or "Local",
+            ocr_method_short=defaults.ocr_method,
+        )
     final: HarnessProgress | None = None
     for progress in run_agentic_redaction(
         document,
         instructions,
         defaults=defaults,
         page_range=_page_range_text(page_min, page_max),
+        session=session,
+        eval_recorder=eval_recorder,
+        eval_session_hash="api",
     ):
         final = progress
     if final is None:
