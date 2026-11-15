@@ -278,6 +278,8 @@ def write_app_post_run_eval(
         "text_extraction_only": settings.text_extraction_only,
         "ocr_method": settings.text_extraction_method or None,
         "pii_method": settings.pii_identification_method or None,
+        "chosen_local_ocr_model": settings.chosen_local_ocr_model or None,
+        "app_config_path": settings.app_config_path or None,
         "encourage_vlm_faces": None,
         "encourage_vlm_signatures": None,
         "eval_profile": "app_gradio",

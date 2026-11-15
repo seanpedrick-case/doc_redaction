@@ -66,6 +66,26 @@ def test_ocr_method_mismatch_skips(tmp_path: Path) -> None:
     assert "mismatch" in reason
 
 
+def test_compare_ocr_gold_runs_despite_method_mismatch(tmp_path: Path) -> None:
+    fixture = tmp_path / "fixture"
+    run = tmp_path / "run"
+    fixture.mkdir()
+    run.mkdir()
+    rows = [(1, "Hello", 0.1, 0.2, 0.2, 0.3)]
+    _write_ocr_csv(fixture / "ocr_results_with_words.csv", rows)
+    _write_ocr_csv(run / "ocr_results_with_words.csv", rows)
+    (fixture / "manifest.json").write_text(
+        json.dumps({"ocr_method": "pymupdf"}), encoding="utf-8"
+    )
+    (run / "manifest.json").write_text(
+        json.dumps({"ocr_method": "paddle"}), encoding="utf-8"
+    )
+    report = compare_ocr_gold_for_run(gold_case_dir=fixture, run_dir=run)
+    assert report.skipped is False
+    assert report.f1 == 1.0
+    assert report.notes
+
+
 def test_compare_ocr_gold_for_run_writes_skipped(tmp_path: Path) -> None:
     fixture = tmp_path / "fixture"
     run = tmp_path / "run"

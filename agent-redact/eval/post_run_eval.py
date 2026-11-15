@@ -68,6 +68,7 @@ def _merge_run_manifest_stack(
     *,
     ocr_method: str = "",
     pii_method: str = "",
+    chosen_local_ocr_model: str = "",
     orchestrator: str = "",
     model_name: str = "",
     encourage_vlm_faces: bool | None = None,
@@ -87,6 +88,8 @@ def _merge_run_manifest_stack(
         data["run_ocr_method"] = ocr_method.strip()
     if pii_method.strip():
         data["run_pii_method"] = pii_method.strip()
+    if chosen_local_ocr_model.strip():
+        data["run_chosen_local_ocr_model"] = chosen_local_ocr_model.strip()
     if orchestrator.strip():
         data["run_orchestrator"] = orchestrator.strip()
     if model_name.strip():

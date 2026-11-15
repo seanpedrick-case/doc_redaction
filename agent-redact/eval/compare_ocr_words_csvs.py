@@ -141,6 +141,7 @@ class OcrCompareReport:
     f1: float = 0.0
     skipped: bool = False
     skip_reason: str = ""
+    notes: list[str] = field(default_factory=list)
     bbox_iou_threshold: float | None = None
     unmatched_gold_samples: list[str] = field(default_factory=list)
     unmatched_observed_samples: list[str] = field(default_factory=list)
@@ -256,7 +257,7 @@ def compare_ocr_gold_for_run(
     observed_csv: Path | None = None,
     fixture_dir: Path | None = None,
 ) -> OcrCompareReport:
-    """Compare gold case OCR to run OCR with manifest guardrail."""
+    """Compare gold case OCR to run OCR (always when both CSVs exist)."""
     if fixture_dir is not None:
         gold_case_dir = fixture_dir
     gold_case_dir = gold_case_dir.resolve()
@@ -275,15 +276,42 @@ def compare_ocr_gold_for_run(
             skip_reason="missing run ocr_results_with_words.csv",
         )
 
-    skip, reason = ocr_method_mismatch(gold_case_dir=gold_case_dir, run_dir=run_dir)
-    if skip:
-        return OcrCompareReport(skipped=True, skip_reason=reason)
+    notes: list[str] = []
+    skip_legacy, reason = ocr_method_mismatch(
+        gold_case_dir=gold_case_dir, run_dir=run_dir
+    )
+    if skip_legacy and reason:
+        notes.append(f"{reason} (comparison still ran; gold OCR is method-agnostic)")
+    if (
+        os.environ.get("AGENT_EVAL_OCR_SKIP_ON_METHOD_MISMATCH") or ""
+    ).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
+        return OcrCompareReport(skipped=True, skip_reason=reason, notes=notes)
 
-    return compare_ocr_words_csvs(
+    report = compare_ocr_words_csvs(
         gold_path,
         obs_path,
         bbox_iou_threshold=env_bbox_iou_threshold(),
     )
+    if notes:
+        return OcrCompareReport(
+            gold_word_count=report.gold_word_count,
+            observed_word_count=report.observed_word_count,
+            matched=report.matched,
+            precision=report.precision,
+            recall=report.recall,
+            f1=report.f1,
+            skipped=report.skipped,
+            skip_reason=report.skip_reason,
+            notes=notes,
+            bbox_iou_threshold=report.bbox_iou_threshold,
+            unmatched_gold_samples=report.unmatched_gold_samples,
+            unmatched_observed_samples=report.unmatched_observed_samples,
+        )
+    return report
 
 
 def _build_parser() -> argparse.ArgumentParser:

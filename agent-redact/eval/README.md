@@ -403,7 +403,7 @@ Set **`AGENT_ORCHESTRATOR`** to `langgraph` or `pi` before running the harness (
    | `AGENT_EVAL_OCR_IOU_THRESHOLD` | *(unset)* | Require word bbox IoU for OCR token matches |
    | `AGENT_EVAL_OVERALL_INCLUDE_GOLD=1` | off | Include min gold/OCR F1 in Gradio `overall_pass` |
 
-   OCR gold compare uses fixture `ocr_results_with_words.csv` vs run copy; skipped when `manifest.json` `ocr_method` differs between fixture and run.
+   OCR gold compare uses fixture `ocr_results_with_words.csv` vs run copy whenever both files exist (method mismatch is recorded in `ocr_gold.json` `notes` only). Set `AGENT_EVAL_OCR_SKIP_ON_METHOD_MISMATCH=1` to restore the old skip-on-mismatch behaviour.
 
 ### Fixtures
 
@@ -444,6 +444,17 @@ python agent-redact/eval/run_benchmark_suite.py \
   --gold-root agent-redact/eval/gold \
   --surfaces agent,main \
   --orchestrator langgraph
+
+# Compare OCR/PII stacks (CLI overrides on top of each case's app_eval_settings.json)
+python agent-redact/eval/run_benchmark_suite.py --surfaces main,harness --case show_ex_partnership \
+  --ocr-method "Local OCR model - PDFs without selectable text" \
+  --chosen-local-ocr-model paddle \
+  --pii-method Local
+
+# Bedrock LLM PII model ids live in APP_CONFIG_PATH — load per matrix row:
+python agent-redact/eval/run_benchmark_suite.py --surfaces main --case show_ex_partnership \
+  --pii-method "LLM (AWS Bedrock)" \
+  --app-config-path config/bench_bedrock_nova.env
 
 # One case, agent only
 python agent-redact/eval/run_benchmark_suite.py --case example_live --surfaces agent

@@ -24,6 +24,12 @@ from benchmark_cases import (  # noqa: E402
     default_gold_root,
     discover_benchmark_gold_cases,
 )
+from benchmark_stack import (  # noqa: E402
+    BenchmarkStackOverrides,
+    apply_benchmark_overrides,
+    effective_ocr_method_label,
+    overrides_from_argv,
+)
 from derive_app_eval_instructions import (  # noqa: E402
     AppEvalRedactionSettings,
     settings_from_json,
@@ -137,7 +143,10 @@ def _read_case_instructions(case_dir: Path) -> str:
     return path.read_text(encoding="utf-8").strip()
 
 
-def _harness_defaults_from_gold(case_dir: Path) -> Any:
+def _harness_defaults_from_gold(
+    case_dir: Path,
+    overrides: BenchmarkStackOverrides | None = None,
+) -> Any:
     """Map gold case artifacts to ``HarnessRunDefaults`` (main-app AgentCore, not LangGraph)."""
     repo = _repo_root()
     if str(repo) not in sys.path:
@@ -146,10 +155,13 @@ def _harness_defaults_from_gold(case_dir: Path) -> Any:
 
     settings_path = case_dir / "app_eval_settings.json"
     if settings_path.is_file():
-        settings = settings_from_json(str(settings_path))
+        settings = apply_benchmark_overrides(
+            settings_from_json(str(settings_path)), overrides
+        )
         sig = list(settings.handwrite_signature_checkbox)
+        ocr = effective_ocr_method_label(settings)
         return HarnessRunDefaults(
-            ocr_method=(settings.text_extraction_method or "Local text").strip(),
+            ocr_method=ocr or "Local text",
             pii_method=(settings.pii_identification_method or "Local").strip(),
             redact_entities=settings.merged_entities(),
             allow_list=list(settings.allow_list),
@@ -171,6 +183,18 @@ def _harness_defaults_from_gold(case_dir: Path) -> Any:
 
     ocr = str(manifest.get("ocr_method") or "Local text").strip()
     pii = str(manifest.get("pii_method") or "Local").strip()
+    if overrides:
+        if overrides.text_extraction_method:
+            ocr = overrides.text_extraction_method.strip()
+        if overrides.pii_identification_method:
+            pii = overrides.pii_identification_method.strip()
+        if overrides.chosen_local_ocr_model:
+            ocr = effective_ocr_method_label(
+                AppEvalRedactionSettings(
+                    text_extraction_method=ocr,
+                    chosen_local_ocr_model=overrides.chosen_local_ocr_model,
+                )
+            )
     if "pin in agent" in ocr.casefold():
         ocr = "Local text"
     if "pin in agent" in pii.casefold():
@@ -252,13 +276,42 @@ def _settings_to_cli_args(
         args["deny_list"] = deny
     if allow:
         args["allow_list"] = allow
+    local_model = (settings.chosen_local_ocr_model or "").strip()
+    if local_model:
+        args["chosen_local_ocr_model"] = local_model
     return args
+
+
+def _invoke_main_redact_subprocess(
+    direct: dict[str, Any],
+    *,
+    app_config_path: str | None,
+) -> int:
+    """Fresh Python process so ``APP_CONFIG_PATH`` loads before ``tools.config``."""
+    eval_dir = Path(__file__).resolve().parent
+    child = eval_dir / "_benchmark_main_child.py"
+    env = os.environ.copy()
+    env["BENCHMARK_DIRECT_MODE_JSON"] = json.dumps(direct)
+    if app_config_path:
+        env["BENCHMARK_APP_CONFIG_PATH"] = str(
+            Path(app_config_path).expanduser().resolve()
+        )
+    else:
+        env.pop("BENCHMARK_APP_CONFIG_PATH", None)
+    proc = subprocess.run(
+        [sys.executable, str(child)],
+        cwd=str(_repo_root()),
+        env=env,
+        check=False,
+    )
+    return int(proc.returncode or 0)
 
 
 def _run_main_surface(
     case_dir: Path,
     suite_id: str,
     runs_root: Path,
+    overrides: BenchmarkStackOverrides | None = None,
 ) -> dict[str, Any]:
     """Redact via CLI then score with app post-run eval."""
     readiness = case_readiness(case_dir)
@@ -280,18 +333,18 @@ def _run_main_surface(
         return record
 
     settings_path = case_dir / "app_eval_settings.json"
-    settings = settings_from_json(str(settings_path))
+    settings = apply_benchmark_overrides(
+        settings_from_json(str(settings_path)), overrides
+    )
     pdf_path = resolve_gold_case_pdf(case_dir)
     out_dir = runs_root / "main" / case_dir.name
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    repo = _repo_root()
-    if str(repo) not in sys.path:
-        sys.path.insert(0, str(repo))
-
-    import cli_redact
-
     direct = _settings_to_cli_args(settings, pdf_path=pdf_path, output_dir=out_dir)
+    app_config = (settings.app_config_path or "").strip()
+    if overrides and overrides.app_config_path:
+        app_config = overrides.app_config_path.strip()
+
     prev_app_eval = os.environ.get("APP_EVAL_ENABLED")
     prev_gold = os.environ.get("APP_EVAL_GOLD")
     prev_auto_gold = os.environ.get("APP_EVAL_AUTO_GOLD")
@@ -299,7 +352,19 @@ def _run_main_surface(
     os.environ["APP_EVAL_GOLD"] = str(case_dir.resolve())
     os.environ["APP_EVAL_AUTO_GOLD"] = "0"
     try:
-        cli_redact.main(direct_mode_args=direct)
+        if app_config:
+            rc = _invoke_main_redact_subprocess(direct, app_config_path=app_config)
+            if rc != 0:
+                record["exit_code"] = rc
+                record["message"] = f"cli_redact subprocess exited {rc}"
+                return record
+        else:
+            repo = _repo_root()
+            if str(repo) not in sys.path:
+                sys.path.insert(0, str(repo))
+            import cli_redact
+
+            cli_redact.main(direct_mode_args=direct)
     except SystemExit as exc:
         rc = int(exc.code) if isinstance(exc.code, int) else 1
         if rc != 0:
@@ -475,6 +540,7 @@ def _run_harness_surface(
     case_dir: Path,
     suite_id: str,
     runs_root: Path,
+    overrides: BenchmarkStackOverrides | None = None,
 ) -> dict[str, Any]:
     """Main-app Bedrock AgentCore harness (inline tools), same eval stack as Gradio agentic redact."""
     readiness = case_readiness(case_dir)
@@ -519,7 +585,7 @@ def _run_harness_surface(
         record["message"] = "harness surface skipped: empty instructions.txt"
         return record
 
-    defaults = _harness_defaults_from_gold(case_dir)
+    defaults = _harness_defaults_from_gold(case_dir, overrides)
     out_root = runs_root / "harness" / case_dir.name
     out_root.mkdir(parents=True, exist_ok=True)
 
@@ -640,6 +706,7 @@ def run_benchmark_suite(
     allow_fail: bool,
     fail_on_qa: bool,
     case_filter: str | None,
+    stack_overrides: BenchmarkStackOverrides | None = None,
 ) -> tuple[dict[str, Any], int]:
     git_commit = _git_commit_short()
     suite_id = suite_id or _new_suite_id()
@@ -700,14 +767,16 @@ def run_benchmark_suite(
             )
 
         if "main" in surfaces:
-            main_rec = _run_main_surface(case_dir, suite_id, runs_root)
+            main_rec = _run_main_surface(case_dir, suite_id, runs_root, stack_overrides)
             case_report["surfaces"]["main"] = main_rec
             max_technical, any_qa_fail = _accumulate_surface_outcome(
                 main_rec, max_technical, any_qa_fail
             )
 
         if "harness" in surfaces:
-            harness_rec = _run_harness_surface(case_dir, suite_id, runs_root)
+            harness_rec = _run_harness_surface(
+                case_dir, suite_id, runs_root, stack_overrides
+            )
             case_report["surfaces"]["harness"] = harness_rec
             max_technical, any_qa_fail = _accumulate_surface_outcome(
                 harness_rec, max_technical, any_qa_fail
@@ -783,6 +852,26 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--provider", default=None)
     p.add_argument("--model", default=None)
+    p.add_argument(
+        "--ocr-method",
+        default=None,
+        help="Override gold app_eval text_extraction_method / harness OCR.",
+    )
+    p.add_argument(
+        "--pii-method",
+        default=None,
+        help="Override gold pii_identification_method.",
+    )
+    p.add_argument(
+        "--chosen-local-ocr-model",
+        default=None,
+        help="Override local OCR engine (e.g. paddle, tesseract).",
+    )
+    p.add_argument(
+        "--app-config-path",
+        default=None,
+        help="Load this env file in a fresh process for main-app legs (APP_CONFIG_PATH).",
+    )
     p.add_argument("--timeout-s", type=float, default=3600.0)
     p.add_argument("--suite-id", default=None, help="Override benchmark suite id.")
     p.add_argument(
@@ -837,6 +926,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
+        stack_overrides = overrides_from_argv(
+            ocr_method=args.ocr_method,
+            pii_method=args.pii_method,
+            chosen_local_ocr_model=args.chosen_local_ocr_model,
+            app_config_path=args.app_config_path,
+        )
         envelope, code = run_benchmark_suite(
             gold_root=gold_root,
             surfaces=surfaces,
@@ -848,6 +943,7 @@ def main(argv: list[str] | None = None) -> int:
             allow_fail=bool(args.allow_fail),
             fail_on_qa=bool(args.fail_on_qa),
             case_filter=args.case_filter,
+            stack_overrides=stack_overrides,
         )
     except FileNotFoundError as exc:
         print(str(exc), file=sys.stderr)

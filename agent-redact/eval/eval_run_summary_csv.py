@@ -26,6 +26,7 @@ SUMMARY_CSV_COLUMNS: tuple[str, ...] = (
     "model_name",
     "ocr_method",
     "pii_method",
+    "chosen_local_ocr_model",
     "encourage_vlm_faces",
     "encourage_vlm_signatures",
     "gold_case_path",
@@ -216,6 +217,13 @@ def run_stack_from_dir(run_dir: Path) -> dict[str, str]:
         manifest.get("run_pii_method"),
         manifest.get("pii_method"),
     )
+    chosen_local_ocr_model = _first_non_empty_str(
+        meta.get("chosen_local_ocr_model"),
+        app_meta.get("chosen_local_ocr_model"),
+        summary.get("chosen_local_ocr_model"),
+        manifest.get("run_chosen_local_ocr_model"),
+        manifest.get("chosen_local_ocr_model"),
+    )
     encourage_vlm_faces = _first_bool_csv(
         meta.get("encourage_vlm_faces"),
         summary.get("encourage_vlm_faces"),
@@ -231,6 +239,7 @@ def run_stack_from_dir(run_dir: Path) -> dict[str, str]:
         "model_name": model_name,
         "ocr_method": ocr_method,
         "pii_method": pii_method,
+        "chosen_local_ocr_model": chosen_local_ocr_model,
         "encourage_vlm_faces": encourage_vlm_faces,
         "encourage_vlm_signatures": encourage_vlm_signatures,
     }
@@ -250,6 +259,7 @@ def _apply_run_stack_to_row(row: dict[str, Any], *, run_dir: Path) -> None:
 
     row["ocr_method"] = stack["ocr_method"]
     row["pii_method"] = stack["pii_method"]
+    row["chosen_local_ocr_model"] = stack["chosen_local_ocr_model"]
     row["encourage_vlm_faces"] = stack["encourage_vlm_faces"]
     row["encourage_vlm_signatures"] = stack["encourage_vlm_signatures"]
 
