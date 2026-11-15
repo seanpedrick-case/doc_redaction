@@ -1028,6 +1028,108 @@ def _short(text: str, limit: int = 400) -> str:
     return text if len(text) <= limit else text[:limit] + "…"
 
 
+def _activity_line_text(raw_line: str) -> str:
+    """Strip the leading activity timestamp bullet."""
+    line = (raw_line or "").strip()
+    if line.startswith("- `") and "` " in line[3:]:
+        after_tick = line[3:]
+        close = after_tick.find("` ")
+        if close != -1:
+            return after_tick[close + 2 :].strip()
+    return line.lstrip("- ").strip()
+
+
+def _meaningful_activity_lines(
+    activity_markdown: str, *, max_lines: int = 10
+) -> list[str]:
+    needles = (
+        "running `",
+        "` done",
+        "` failed",
+        "agent:",
+        "finished with",
+        "post-run eval",
+        "harness llm tokens",
+        "invoke failed",
+        "stream error",
+        "stopped",
+        "client inline dispatch",
+        "finished",
+    )
+    picked: list[str] = []
+    for raw in (activity_markdown or "").splitlines():
+        text = _activity_line_text(raw)
+        if not text:
+            continue
+        low = text.lower()
+        if any(n in low for n in needles):
+            picked.append(text)
+    if not picked:
+        for raw in (activity_markdown or "").splitlines()[-max_lines:]:
+            text = _activity_line_text(raw)
+            if text:
+                picked.append(text)
+    return picked[-max_lines:]
+
+
+def format_agentic_gradio_summary(
+    *,
+    headline: str,
+    activity_markdown: str = "",
+    finish_summary: str = "",
+    output_files: list[str] | None = None,
+    done: bool = False,
+    elapsed_seconds: float = 0.0,
+    token_usage: HarnessTokenUsage | None = None,
+    workflow_finished: bool = True,
+) -> str:
+    """
+    User-facing text for the Redact tab summary box (not the full activity log).
+    """
+    sections: list[str] = []
+    headline = (headline or "").strip()
+    finish = (finish_summary or "").strip()
+
+    if done and finish:
+        sections.append("Agent summary:\n" + finish)
+    elif headline:
+        sections.append(headline)
+
+    highlights = _meaningful_activity_lines(
+        activity_markdown, max_lines=8 if done else 5
+    )
+    if highlights:
+        body = "\n".join(f"  - {h}" for h in highlights)
+        title = "Activity:" if done else "Latest activity:"
+        sections.append(f"{title}\n{body}")
+
+    paths = [p for p in (output_files or []) if p]
+    if done and paths:
+        names = [Path(p).name for p in paths]
+        shown = names[:14]
+        body = "\n".join(f"  - {n}" for n in shown)
+        if len(names) > len(shown):
+            body += f"\n  - … plus {len(names) - len(shown)} more"
+        sections.append(f"Output files ({len(names)}):\n{body}")
+
+    meta: list[str] = []
+    if done and elapsed_seconds > 0:
+        meta.append(f"Elapsed: {elapsed_seconds:.0f}s")
+    if token_usage and (token_usage.input_tokens or token_usage.output_tokens):
+        meta.append(
+            f"Harness LLM tokens: {token_usage.input_tokens} in, "
+            f"{token_usage.output_tokens} out"
+        )
+    if done and not workflow_finished:
+        meta.append(
+            "Workflow may be incomplete (`finish_task` was not called or the run stopped early)."
+        )
+    if meta:
+        sections.append("Run info:\n" + "\n".join(f"  - {m}" for m in meta))
+
+    return "\n\n".join(sections).strip() or headline or "Agent run in progress…"
+
+
 def run_agentic_redaction(
     document_path: str | Path,
     instructions: str,
@@ -1073,7 +1175,14 @@ def run_agentic_redaction(
     activity.add(
         f"Started agent run `{session.run_id}` on `{session.source_pdf.name}`."
     )
-    yield HarnessProgress(activity.markdown(), [], "Agent run started…")
+    yield HarnessProgress(
+        activity.markdown(),
+        [],
+        format_agentic_gradio_summary(
+            headline="Agent run started…",
+            activity_markdown=activity.markdown(),
+        ),
+    )
     activity.add(f"Inline tools on each InvokeHarness: {', '.join(sorted(names))}.")
 
     messages: list[dict[str, Any]] = [{"role": "user", "content": [{"text": prompt}]}]
@@ -1166,7 +1275,12 @@ def run_agentic_redaction(
                 eval_recorder.record_tool(call.name, arguments)
             activity.add(f"Running `{call.name}`…")
             yield HarnessProgress(
-                activity.markdown(), [], f"Running {call.name} (round {round_no})…"
+                activity.markdown(),
+                [],
+                format_agentic_gradio_summary(
+                    headline=f"Running `{call.name}` (round {round_no})…",
+                    activity_markdown=activity.markdown(),
+                ),
             )
             text, ok = session.dispatch(call.name, arguments)
             activity.add(
@@ -1174,7 +1288,14 @@ def run_agentic_redaction(
                 + ("" if ok else f": {_short(text, 300)}")
             )
             results.append((call.tool_use_id, text, ok))
-        yield HarnessProgress(activity.markdown(), [], f"Round {round_no} complete.")
+        yield HarnessProgress(
+            activity.markdown(),
+            [],
+            format_agentic_gradio_summary(
+                headline=f"Round {round_no} complete",
+                activity_markdown=activity.markdown(),
+            ),
+        )
         if session.finished:
             break
         messages = [tool_result_message(results)]
@@ -1206,10 +1327,21 @@ def run_agentic_redaction(
             f"in={token_usage.input_tokens}, out={token_usage.output_tokens}"
         )
     activity.add(f"Finished with {len(outputs)} output file(s).")
+    activity_md = activity.markdown()
+    summary_text = format_agentic_gradio_summary(
+        headline=summary or "Agent run ended.",
+        activity_markdown=activity_md,
+        finish_summary=session.finish_summary if session.finished else "",
+        output_files=outputs,
+        done=True,
+        elapsed_seconds=elapsed,
+        token_usage=token_usage,
+        workflow_finished=session.finished,
+    )
     yield HarnessProgress(
-        activity.markdown(),
+        activity_md,
         outputs,
-        summary or "Agent run ended.",
+        summary_text,
         True,
         token_usage=token_usage,
         elapsed_seconds=elapsed,
@@ -1538,6 +1670,7 @@ __all__ = [
     "HarnessToolError",
     "build_harness_run_defaults_from_cli_args",
     "build_harness_task_prompt",
+    "format_agentic_gradio_summary",
     "harness_feature_ready",
     "resolve_harness_instructions",
     "run_agentic_redaction",

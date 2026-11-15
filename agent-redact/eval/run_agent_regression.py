@@ -261,6 +261,28 @@ def run_agent_turn(
     return result
 
 
+def _stage_gold_pdf_under_upload_root(pdf_path: Path, *, session_hash: str) -> Path:
+    """Copy gold PDF into Gradio upload root when it lives under eval/gold or example_data."""
+    from redaction_prompt import upload_root
+
+    source = pdf_path.resolve()
+    root = upload_root()
+    try:
+        source.relative_to(root)
+        return source
+    except ValueError:
+        pass
+    tag = "".join(ch for ch in session_hash if ch.isalnum())[:16] or "eval"
+    dest = (root / f"{tag}_{source.name}").resolve()
+    try:
+        dest.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"Staged upload path is outside upload root: {dest}") from exc
+    if source != dest:
+        shutil.copyfile(source, dest)
+    return dest
+
+
 def seed_gold_case_workspace(
     gold_case_dir: Path,
     session_hash: str,
@@ -281,7 +303,9 @@ def seed_gold_case_workspace(
     instructions = _read_text(gold_case_dir / "instructions.txt")
     if not instructions:
         instructions = _read_text(gold_case_dir / "instruction.txt")
-    pdf_path = resolve_gold_case_pdf(gold_case_dir)
+    pdf_path = _stage_gold_pdf_under_upload_root(
+        resolve_gold_case_pdf(gold_case_dir), session_hash=session_hash
+    )
     workspace = ensure_session_workspace(session_hash)
     file_name, prompt, _renamed = prepare_redaction_task(
         pdf_path,

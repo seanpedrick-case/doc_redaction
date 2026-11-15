@@ -118,6 +118,7 @@ def write_session_post_run_eval(
     workspace_root: Path | str | None = None,
     gold_case_dir: Path | str | None = None,
     force: bool = False,
+    run_source: str = "agent_gradio",
 ) -> Path | None:
     """
     Persist artifacts under ``{session_workspace}/eval/run_<ts>/`` and ``eval_summary.json``.
@@ -283,13 +284,17 @@ def write_session_post_run_eval(
         run_id = (
             Path(mirrored).name if mirrored else f"gradio_{session_hash[:8]}_{stamp}"
         )
+        env_source = (os.environ.get("EVAL_APPEND_RUN_SOURCE") or "").strip()
+        resolved_source = env_source or (run_source or "agent_gradio")
+        skip_csv_check = bool((os.environ.get("BENCHMARK_SUITE_ID") or "").strip())
         append_eval_run_summary_row(
             summary=summary,
             run_dir=run_dir,
             task_instructions=task_instructions,
             run_id=run_id,
-            run_source="agent_gradio",
+            run_source=resolved_source,
             extra_csv_paths=[session_csv],
+            skip_enabled_check=skip_csv_check or force,
         )
 
     return summary_path

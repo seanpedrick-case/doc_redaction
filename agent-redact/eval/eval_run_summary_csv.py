@@ -32,6 +32,8 @@ SUMMARY_CSV_COLUMNS: tuple[str, ...] = (
     "eval_turn_kind",
     "follow_up_steer_count",
     "run_source",
+    "benchmark_suite_id",
+    "git_commit",
     "run_timestamp_utc",
     "summary_appended_at_utc",
     "workflow_incomplete",
@@ -102,6 +104,14 @@ def default_summary_csv_path() -> Path:
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _benchmark_csv_metadata() -> dict[str, str]:
+    """Optional suite/git columns set by ``run_benchmark_suite.py``."""
+    return {
+        "benchmark_suite_id": (os.environ.get("BENCHMARK_SUITE_ID") or "").strip(),
+        "git_commit": (os.environ.get("BENCHMARK_GIT_COMMIT") or "").strip(),
+    }
 
 
 def _run_timestamp_from_dir(run_dir: Path) -> str:
@@ -411,6 +421,7 @@ def append_eval_run_summary_row(
         "eval_turn_kind": summary.get("eval_turn_kind") or "",
         "follow_up_steer_count": summary.get("follow_up_steer_count", ""),
         "run_source": run_source,
+        **_benchmark_csv_metadata(),
         "run_timestamp_utc": _run_timestamp_from_dir(run_dir),
         "summary_appended_at_utc": _utc_now_iso(),
         "workflow_incomplete": summary.get("workflow_incomplete", ""),

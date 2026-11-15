@@ -2,6 +2,8 @@
 
 Each **gold case** is a directory of reference artifacts (PDF, instructions, ideal review CSV, OCR gold, policy lists, etc.).
 
+**Benchmark audit:** run `python agent-redact/eval/run_benchmark_suite.py --audit-only` to refresh [`BENCHMARK_GOLD_AUDIT.md`](BENCHMARK_GOLD_AUDIT.md) (which cases have `ideal_review_file.csv`, `app_eval_settings.json`, etc.).
+
 **Git:** only `example_smoke/` and `example_live/` (plus this README) are tracked for CI. Add a new `!agent-redact/eval/gold/<case_id>/` pair in the repo `.gitignore` if you intentionally want another case in GitHub. All other directories under `gold/` stay local (including PDFs).
 
 ```text

@@ -508,6 +508,30 @@ def test_ui_ocr_method_mapping():
     )
 
 
+def test_format_agentic_gradio_summary_includes_activity_and_files():
+    activity = "\n".join(
+        [
+            "- `12:00:01` Running `doc_redact`…",
+            "- `12:01:02` `doc_redact` done",
+            "- `12:05:00` `finish_task` done",
+            "- `12:05:01` Finished with 3 output file(s).",
+        ]
+    )
+    text = ah.format_agentic_gradio_summary(
+        headline="ignored",
+        activity_markdown=activity,
+        finish_summary="Redacted names; London and Sister City covered.",
+        output_files=["/tmp/a_redacted.pdf", "/tmp/a_review_file.csv"],
+        done=True,
+        elapsed_seconds=305.2,
+        workflow_finished=True,
+    )
+    assert "Redacted names" in text
+    assert "doc_redact" in text
+    assert "a_redacted.pdf" in text
+    assert "Elapsed: 305s" in text
+
+
 def test_upload_agentic_outputs_to_s3_delegates(monkeypatch, sample_pdf):
     calls: list[dict] = []
 

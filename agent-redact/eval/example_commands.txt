@@ -1,3 +1,10 @@
+# Standardized benchmark suite (append eval/outputs/eval_run_summary.csv)
+python agent-redact/eval/run_benchmark_suite.py --audit-only
+python agent-redact/eval/run_benchmark_suite.py --list-cases
+python agent-redact/eval/run_benchmark_suite.py --surfaces agent,main --orchestrator langgraph
+# AgentCore harness (main app; requires AGENTCORE_HARNESS_ARN + APP_EVAL)
+python agent-redact/eval/run_benchmark_suite.py --surfaces harness --case example_emails_to_professor_agentic
+
 # Offline (no LLM) — policy gate only in DeepEval test
 python agent-redact/eval/run_agent_regression.py --gold agent-redact/eval/gold/example_smoke --gates-only
 

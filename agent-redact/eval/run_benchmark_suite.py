@@ -1,0 +1,861 @@
+#!/usr/bin/env python3
+"""Run standardized benchmark: gold cases on LangGraph agent, main app, and/or AgentCore harness."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import Any, Literal
+
+SurfaceChoice = Literal["agent", "main", "harness"]
+
+_EVAL = Path(__file__).resolve().parent
+if str(_EVAL) not in sys.path:
+    sys.path.insert(0, str(_EVAL))
+
+from benchmark_cases import (  # noqa: E402
+    audit_benchmark_gold_cases,
+    case_readiness,
+    default_gold_root,
+    discover_benchmark_gold_cases,
+)
+from derive_app_eval_instructions import (  # noqa: E402
+    AppEvalRedactionSettings,
+    settings_from_json,
+)
+from run_agent_regression import (  # noqa: E402
+    _ensure_agent_imports,
+    resolve_gold_case_pdf,
+    run_regression,
+)
+
+
+def _repo_root() -> Path:
+    repo, _, _ = _ensure_agent_imports()
+    return repo
+
+
+def _git_commit_short() -> str:
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            cwd=_repo_root(),
+            timeout=10,
+            check=False,
+        )
+        if out.returncode == 0:
+            return out.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return ""
+
+
+def _new_suite_id() -> str:
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    sha = _git_commit_short()
+    return f"bench_{stamp}_{sha}" if sha else f"bench_{stamp}"
+
+
+def _parse_surfaces(raw: str) -> set[SurfaceChoice]:
+    parts = {p.strip().lower() for p in raw.split(",") if p.strip()}
+    allowed = {"agent", "main", "harness"}
+    bad = parts - allowed
+    if bad:
+        raise ValueError(f"Unknown surfaces: {bad}; use agent, main, harness")
+    if not parts:
+        parts = allowed
+    return parts  # type: ignore[return-value]
+
+
+def resolve_benchmark_runs_root(eval_dir: Path, suite_id: str) -> Path:
+    """
+    Writable directory for per-suite artifacts (``eval/runs`` in dev).
+
+    Docker ``redaction-app-llama`` mounts ``eval/outputs`` but often not
+    ``eval/runs`` (image tree may be root-owned). Fall back to
+    ``eval/outputs/benchmark_runs``, then ``OUTPUT_FOLDER``.
+    """
+    eval_dir = eval_dir.resolve()
+    custom = (os.environ.get("BENCHMARK_RUNS_ROOT") or "").strip()
+    if custom:
+        base = Path(custom)
+        if not base.is_absolute():
+            base = (_repo_root() / custom).resolve()
+        target = base / suite_id
+        target.mkdir(parents=True, exist_ok=True)
+        return target
+
+    for base in (
+        eval_dir / "runs",
+        eval_dir / "outputs" / "benchmark_runs",
+    ):
+        try:
+            base.mkdir(parents=True, exist_ok=True)
+            probe = base / ".write_probe"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink(missing_ok=True)
+        except OSError:
+            continue
+        target = base / suite_id
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            return target
+        except OSError:
+            continue
+
+    fallback_base: Path
+    try:
+        from tools.config import OUTPUT_FOLDER
+
+        fallback_base = Path(OUTPUT_FOLDER) / "benchmark_runs"
+    except ImportError:
+        fallback_base = Path("/tmp/doc_redaction_benchmark_runs")
+    target = fallback_base / suite_id
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def _set_benchmark_csv_env(suite_id: str, git_commit: str) -> None:
+    os.environ["BENCHMARK_SUITE_ID"] = suite_id
+    os.environ["BENCHMARK_GIT_COMMIT"] = git_commit
+    os.environ.setdefault("AGENT_EVAL_RUN_SUMMARY_CSV", "1")
+    os.environ["APP_EVAL_ENABLED"] = "1"
+    os.environ.setdefault("APP_EVAL_RUN_SUMMARY_CSV", "1")
+
+
+def _read_case_instructions(case_dir: Path) -> str:
+    path = case_dir / "instructions.txt"
+    if not path.is_file():
+        return ""
+    return path.read_text(encoding="utf-8").strip()
+
+
+def _harness_defaults_from_gold(case_dir: Path) -> Any:
+    """Map gold case artifacts to ``HarnessRunDefaults`` (main-app AgentCore, not LangGraph)."""
+    repo = _repo_root()
+    if str(repo) not in sys.path:
+        sys.path.insert(0, str(repo))
+    from tools.agentcore_harness import HarnessRunDefaults
+
+    settings_path = case_dir / "app_eval_settings.json"
+    if settings_path.is_file():
+        settings = settings_from_json(str(settings_path))
+        sig = list(settings.handwrite_signature_checkbox)
+        return HarnessRunDefaults(
+            ocr_method=(settings.text_extraction_method or "Local text").strip(),
+            pii_method=(settings.pii_identification_method or "Local").strip(),
+            redact_entities=settings.merged_entities(),
+            allow_list=list(settings.allow_list),
+            deny_list=list(settings.deny_list),
+            handwrite_signature_checkbox=sig or None,
+            page_min=int(settings.page_min or 0),
+            page_max=int(settings.page_max or 0),
+        )
+
+    manifest: dict[str, Any] = {}
+    manifest_path = case_dir / "manifest.json"
+    if manifest_path.is_file():
+        try:
+            loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                manifest = loaded
+        except (OSError, json.JSONDecodeError):
+            manifest = {}
+
+    ocr = str(manifest.get("ocr_method") or "Local text").strip()
+    pii = str(manifest.get("pii_method") or "Local").strip()
+    if "pin in agent" in ocr.casefold():
+        ocr = "Local text"
+    if "pin in agent" in pii.casefold():
+        pii = "Local"
+    return HarnessRunDefaults(ocr_method=ocr, pii_method=pii)
+
+
+def _harness_configured() -> tuple[bool, str]:
+    repo = _repo_root()
+    if str(repo) not in sys.path:
+        sys.path.insert(0, str(repo))
+    from tools.agentcore_harness import harness_feature_ready
+
+    return harness_feature_ready()
+
+
+def _accumulate_surface_outcome(
+    rec: dict[str, Any],
+    max_technical: int,
+    any_qa_fail: bool,
+) -> tuple[int, bool]:
+    if rec.get("skipped"):
+        return max_technical, any_qa_fail
+    tech = int(rec.get("exit_code", 0) or 0)
+    if tech != 0:
+        max_technical = max(max_technical, tech)
+    if rec.get("qa_completed") and rec.get("qa_pass") is False:
+        any_qa_fail = True
+    return max_technical, any_qa_fail
+
+
+def _apply_qa_outcome(
+    record: dict[str, Any],
+    *,
+    technical_exit: int,
+    qa_pass: bool | None,
+    message: str = "",
+) -> dict[str, Any]:
+    """``exit_code`` = run health only; ``qa_pass`` = gold/policy result (may be poor)."""
+    record["exit_code"] = int(technical_exit)
+    record["qa_pass"] = qa_pass
+    record["qa_completed"] = qa_pass is not None
+    if message:
+        record["message"] = message
+    return record
+
+
+def _settings_to_cli_args(
+    settings: AppEvalRedactionSettings,
+    *,
+    pdf_path: Path,
+    output_dir: Path,
+) -> dict[str, Any]:
+    """Build ``cli_redact.main(direct_mode_args=...)`` for one main-app benchmark case."""
+    repo = _repo_root()
+    if str(repo) not in sys.path:
+        sys.path.insert(0, str(repo))
+
+    deny = list(settings.deny_list)
+    allow = list(settings.allow_list)
+
+    args: dict[str, Any] = {
+        "input_file": [str(pdf_path.resolve())],
+        "output_dir": str(output_dir.resolve()),
+        "local_redact_entities": list(settings.chosen_redact_entities),
+        "aws_redact_entities": list(settings.chosen_redact_comprehend_entities),
+        "llm_redact_entities": list(settings.chosen_llm_entities),
+        "ocr_method": settings.text_extraction_method or "Local text",
+        "pii_detector": settings.pii_identification_method or "Local",
+        "page_min": int(settings.page_min or 0),
+        "page_max": int(settings.page_max or 0),
+        "text_extraction_only": bool(settings.text_extraction_only),
+        "handwrite_signature_extraction": list(settings.handwrite_signature_checkbox),
+        "custom_llm_instructions": settings.custom_llm_instructions or "",
+        "app_eval": True,
+        "save_to_user_folders": False,
+    }
+    if deny:
+        args["deny_list"] = deny
+    if allow:
+        args["allow_list"] = allow
+    return args
+
+
+def _run_main_surface(
+    case_dir: Path,
+    suite_id: str,
+    runs_root: Path,
+) -> dict[str, Any]:
+    """Redact via CLI then score with app post-run eval."""
+    readiness = case_readiness(case_dir)
+    record: dict[str, Any] = {
+        "surface": "main",
+        "case_id": readiness.case_id,
+        "case_dir": str(case_dir),
+        "skipped": False,
+        "exit_code": 0,
+        "run_dir": "",
+        "eval_summary": "",
+        "message": "",
+    }
+    if not readiness.main_surface_ready:
+        record["skipped"] = True
+        record["message"] = "main surface skipped: " + (
+            "; ".join(readiness.notes) if readiness.notes else "not ready"
+        )
+        return record
+
+    settings_path = case_dir / "app_eval_settings.json"
+    settings = settings_from_json(str(settings_path))
+    pdf_path = resolve_gold_case_pdf(case_dir)
+    out_dir = runs_root / "main" / case_dir.name
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    repo = _repo_root()
+    if str(repo) not in sys.path:
+        sys.path.insert(0, str(repo))
+
+    import cli_redact
+
+    direct = _settings_to_cli_args(settings, pdf_path=pdf_path, output_dir=out_dir)
+    prev_app_eval = os.environ.get("APP_EVAL_ENABLED")
+    prev_gold = os.environ.get("APP_EVAL_GOLD")
+    prev_auto_gold = os.environ.get("APP_EVAL_AUTO_GOLD")
+    os.environ["APP_EVAL_ENABLED"] = "1"
+    os.environ["APP_EVAL_GOLD"] = str(case_dir.resolve())
+    os.environ["APP_EVAL_AUTO_GOLD"] = "0"
+    try:
+        cli_redact.main(direct_mode_args=direct)
+    except SystemExit as exc:
+        rc = int(exc.code) if isinstance(exc.code, int) else 1
+        if rc != 0:
+            record["exit_code"] = rc
+            record["message"] = f"cli_redact exited {rc}"
+            return record
+    except Exception as exc:
+        record["exit_code"] = 1
+        record["message"] = f"cli_redact failed: {exc}"
+        return record
+    finally:
+        if prev_app_eval is None:
+            os.environ.pop("APP_EVAL_ENABLED", None)
+        else:
+            os.environ["APP_EVAL_ENABLED"] = prev_app_eval
+        if prev_gold is None:
+            os.environ.pop("APP_EVAL_GOLD", None)
+        else:
+            os.environ["APP_EVAL_GOLD"] = prev_gold
+        if prev_auto_gold is None:
+            os.environ.pop("APP_EVAL_AUTO_GOLD", None)
+        else:
+            os.environ["APP_EVAL_AUTO_GOLD"] = prev_auto_gold
+
+    candidates = sorted(
+        runs_root.rglob("eval/run_*/eval_summary.json"),
+        key=lambda p: p.stat().st_mtime,
+    )
+    case_key = case_dir.name
+    scoped = [p for p in candidates if case_key in str(p)]
+    summary_path = (scoped or candidates)[-1] if (scoped or candidates) else None
+    if summary_path is None:
+        _, _, eval_root = _ensure_agent_imports()
+        mirrored = sorted(
+            (eval_root / "runs").glob("app_*/eval_summary.json"),
+            key=lambda p: p.stat().st_mtime,
+        )
+        if mirrored:
+            summary_path = mirrored[-1]
+
+    if summary_path and summary_path.is_file():
+        record["eval_summary"] = str(summary_path)
+        record["run_dir"] = str(summary_path.parent)
+        try:
+            data = json.loads(summary_path.read_text(encoding="utf-8"))
+            msg = (
+                f"gold_case={data.get('gold_case')!s}; "
+                f"overall_pass={data.get('overall_pass')!s}"
+            )
+            if data.get("gold_case") in (None, ""):
+                return _apply_qa_outcome(
+                    record,
+                    technical_exit=1,
+                    qa_pass=None,
+                    message=msg + " (gold not pinned — use APP_EVAL_GOLD)",
+                )
+            qa = data.get("overall_pass")
+            if isinstance(qa, bool):
+                qa_pass: bool | None = qa
+            else:
+                qa_pass = None
+            return _apply_qa_outcome(
+                record, technical_exit=0, qa_pass=qa_pass, message=msg
+            )
+        except (OSError, json.JSONDecodeError) as exc:
+            return _apply_qa_outcome(
+                record,
+                technical_exit=1,
+                qa_pass=None,
+                message=f"eval_summary unreadable: {exc}",
+            )
+    return _apply_qa_outcome(
+        record,
+        technical_exit=1,
+        qa_pass=None,
+        message="no eval summary written under benchmark output dir",
+    )
+
+
+def _run_agent_surface(
+    case_dir: Path,
+    *,
+    orchestrator: str,
+    provider: str | None,
+    model: str | None,
+    timeout_s: float,
+    suite_id: str,
+    runs_root: Path,
+) -> dict[str, Any]:
+    readiness = case_readiness(case_dir)
+    record: dict[str, Any] = {
+        "surface": "agent",
+        "case_id": readiness.case_id,
+        "case_dir": str(case_dir),
+        "skipped": False,
+        "exit_code": 0,
+        "run_dir": "",
+        "message": "",
+    }
+    if not readiness.agent_surface_ready:
+        record["skipped"] = True
+        record["message"] = "agent surface skipped: " + (
+            "; ".join(readiness.notes) if readiness.notes else "not ready"
+        )
+        return record
+
+    run_dir = runs_root / "agent" / case_dir.name
+    try:
+        gates, out_dir = run_regression(
+            gold_case_dir=case_dir,
+            orchestrator=orchestrator,  # type: ignore[arg-type]
+            run_dir=run_dir,
+            gates_only=False,
+            provider=provider,
+            model=model,
+            timeout_s=timeout_s,
+        )
+    except Exception as exc:
+        record["exit_code"] = 1
+        record["message"] = str(exc)
+        return record
+
+    record["run_dir"] = str(out_dir)
+    policy = gates.policy_gate or {}
+    pass_strict = policy.get("pass_strict")
+    gate_exit = int(gates.exit_code)
+    if gate_exit >= 2:
+        _apply_qa_outcome(
+            record,
+            technical_exit=gate_exit,
+            qa_pass=None,
+            message="; ".join(gates.messages) if gates.messages else "ok",
+        )
+    else:
+        qa_pass = bool(pass_strict) if gates.policy_gate else None
+        _apply_qa_outcome(
+            record,
+            technical_exit=0,
+            qa_pass=qa_pass,
+            message="; ".join(gates.messages) if gates.messages else "ok",
+        )
+
+    try:
+        from eval_run_summary_csv import append_regression_run_row
+
+        append_regression_run_row(
+            gates=gates,
+            run_dir=out_dir,
+            gold_case_dir=case_dir,
+            orchestrator=orchestrator,
+            run_source="benchmark_agent",
+        )
+    except ImportError:
+        pass
+
+    summary_path = out_dir / "eval_summary.json"
+    if not summary_path.is_file():
+        policy = gates.policy_gate or {}
+        pass_strict = policy.get("pass_strict")
+        summary = {
+            "document_name": case_dir.name,
+            "gold_case": str(case_dir.resolve()),
+            "workflow_incomplete": False,
+            "overall_pass": gates.exit_code == 0 and bool(pass_strict),
+            "metrics": [],
+        }
+        summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+
+    return record
+
+
+def _run_harness_surface(
+    case_dir: Path,
+    suite_id: str,
+    runs_root: Path,
+) -> dict[str, Any]:
+    """Main-app Bedrock AgentCore harness (inline tools), same eval stack as Gradio agentic redact."""
+    readiness = case_readiness(case_dir)
+    record: dict[str, Any] = {
+        "surface": "harness",
+        "case_id": readiness.case_id,
+        "case_dir": str(case_dir),
+        "skipped": False,
+        "exit_code": 0,
+        "run_dir": "",
+        "eval_summary": "",
+        "message": "",
+    }
+
+    harness_ok, harness_reason = _harness_configured()
+    if not harness_ok:
+        record["skipped"] = True
+        record["message"] = f"harness not configured: {harness_reason}"
+        return record
+
+    if not readiness.harness_surface_ready:
+        record["skipped"] = True
+        record["message"] = "harness surface skipped: " + (
+            "; ".join(readiness.notes) if readiness.notes else "not ready"
+        )
+        return record
+
+    repo = _repo_root()
+    if str(repo) not in sys.path:
+        sys.path.insert(0, str(repo))
+
+    from tools.agentcore_harness import HarnessSession, run_agentic_redaction
+    from tools.harness_eval_support import (
+        HarnessEvalRecorder,
+        harness_post_run_eval_enabled,
+    )
+
+    pdf_path = resolve_gold_case_pdf(case_dir)
+    instructions = _read_case_instructions(case_dir)
+    if not instructions:
+        record["skipped"] = True
+        record["message"] = "harness surface skipped: empty instructions.txt"
+        return record
+
+    defaults = _harness_defaults_from_gold(case_dir)
+    out_root = runs_root / "harness" / case_dir.name
+    out_root.mkdir(parents=True, exist_ok=True)
+
+    session_hash = f"bench_{suite_id}_{readiness.case_id}".replace(" ", "_")[:48]
+    eval_recorder: HarnessEvalRecorder | None = None
+    prev_source = os.environ.get("EVAL_APPEND_RUN_SOURCE")
+    os.environ["EVAL_APPEND_RUN_SOURCE"] = "benchmark_harness"
+
+    try:
+        session = HarnessSession(
+            pdf_path,
+            defaults=defaults,
+            output_root=out_root,
+        )
+        record["run_dir"] = str(session.session_dir)
+
+        eval_on = harness_post_run_eval_enabled() or bool(
+            (os.environ.get("BENCHMARK_SUITE_ID") or "").strip()
+        )
+        if eval_on:
+            eval_recorder = HarnessEvalRecorder(session_hash=session_hash)
+            eval_recorder.begin(
+                workspace=session.session_dir,
+                pdf_path=session.source_pdf,
+                document_name=session.source_pdf.name,
+                instructions=instructions,
+                text_extract_method=defaults.ocr_method,
+                pii_method=defaults.pii_method,
+                ocr_method_short=defaults.ocr_method,
+            )
+            eval_recorder.gold_case_dir = case_dir.resolve()
+
+        page_range = "all"
+        if defaults.page_min or defaults.page_max:
+            page_range = f"{defaults.page_min or 1}-{defaults.page_max or 'end'}"
+
+        final = None
+        for progress in run_agentic_redaction(
+            pdf_path,
+            instructions,
+            defaults=defaults,
+            page_range=page_range,
+            output_root=out_root,
+            session=session,
+            eval_recorder=eval_recorder,
+            eval_session_hash=session_hash,
+        ):
+            final = progress
+
+        if final is None:
+            record["exit_code"] = 1
+            record["message"] = "harness run produced no progress"
+            return record
+
+        if not final.done:
+            record["exit_code"] = 1
+            record["message"] = final.summary or "harness run did not complete"
+            return record
+
+        record["message"] = final.summary or "ok"
+        eval_root = session.session_dir / "eval"
+        summary_path: Path | None = None
+        if eval_root.is_dir():
+            candidates = sorted(eval_root.glob("run_*/eval_summary.json"))
+            if candidates:
+                summary_path = candidates[-1]
+        if summary_path and summary_path.is_file():
+            record["eval_summary"] = str(summary_path)
+            try:
+                data = json.loads(summary_path.read_text(encoding="utf-8"))
+                if data.get("workflow_incomplete"):
+                    _apply_qa_outcome(
+                        record,
+                        technical_exit=1,
+                        qa_pass=None,
+                        message=record.get("message", "") + "; workflow_incomplete",
+                    )
+                else:
+                    op = data.get("overall_pass")
+                    qa = op if isinstance(op, bool) else None
+                    _apply_qa_outcome(
+                        record,
+                        technical_exit=0,
+                        qa_pass=qa,
+                        message=record.get("message", ""),
+                    )
+            except (OSError, json.JSONDecodeError):
+                pass
+        elif eval_recorder is not None:
+            _apply_qa_outcome(
+                record,
+                technical_exit=1,
+                qa_pass=None,
+                message=record.get("message", "")
+                + "; no eval_summary.json (eval disabled or failed)",
+            )
+    except Exception as exc:
+        record["exit_code"] = 1
+        record["message"] = f"harness run failed: {exc}"
+    finally:
+        if prev_source is None:
+            os.environ.pop("EVAL_APPEND_RUN_SOURCE", None)
+        else:
+            os.environ["EVAL_APPEND_RUN_SOURCE"] = prev_source
+
+    return record
+
+
+def run_benchmark_suite(
+    *,
+    gold_root: Path,
+    surfaces: set[SurfaceChoice],
+    orchestrator: str,
+    provider: str | None,
+    model: str | None,
+    timeout_s: float,
+    suite_id: str | None,
+    allow_fail: bool,
+    fail_on_qa: bool,
+    case_filter: str | None,
+) -> tuple[dict[str, Any], int]:
+    git_commit = _git_commit_short()
+    suite_id = suite_id or _new_suite_id()
+    _set_benchmark_csv_env(suite_id, git_commit)
+
+    _, _, eval_dir = _ensure_agent_imports()
+    runs_root = resolve_benchmark_runs_root(eval_dir, suite_id)
+    outputs_dir = eval_dir / "outputs"
+    try:
+        outputs_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        outputs_dir = runs_root.parent
+
+    cases = discover_benchmark_gold_cases(gold_root)
+    if case_filter:
+        cases = [
+            c
+            for c in cases
+            if c.name == case_filter or case_readiness(c).case_id == case_filter
+        ]
+        if not cases:
+            raise FileNotFoundError(
+                f"No benchmark case named {case_filter!r} under {gold_root}"
+            )
+
+    envelope: dict[str, Any] = {
+        "benchmark_suite_id": suite_id,
+        "git_commit": git_commit,
+        "gold_root": str(gold_root.resolve()),
+        "surfaces": sorted(surfaces),
+        "orchestrator": orchestrator,
+        "started_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "cases": [],
+        "exit_code": 0,
+    }
+
+    max_technical = 0
+    any_qa_fail = False
+    for case_dir in cases:
+        case_report: dict[str, Any] = {
+            "case_id": case_readiness(case_dir).case_id,
+            "case_dir": str(case_dir),
+            "surfaces": {},
+        }
+        if "agent" in surfaces:
+            agent_rec = _run_agent_surface(
+                case_dir,
+                orchestrator=orchestrator,
+                provider=provider,
+                model=model,
+                timeout_s=timeout_s,
+                suite_id=suite_id,
+                runs_root=runs_root,
+            )
+            case_report["surfaces"]["agent"] = agent_rec
+            max_technical, any_qa_fail = _accumulate_surface_outcome(
+                agent_rec, max_technical, any_qa_fail
+            )
+
+        if "main" in surfaces:
+            main_rec = _run_main_surface(case_dir, suite_id, runs_root)
+            case_report["surfaces"]["main"] = main_rec
+            max_technical, any_qa_fail = _accumulate_surface_outcome(
+                main_rec, max_technical, any_qa_fail
+            )
+
+        if "harness" in surfaces:
+            harness_rec = _run_harness_surface(case_dir, suite_id, runs_root)
+            case_report["surfaces"]["harness"] = harness_rec
+            max_technical, any_qa_fail = _accumulate_surface_outcome(
+                harness_rec, max_technical, any_qa_fail
+            )
+
+        envelope["cases"].append(case_report)
+
+    envelope["finished_at_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    envelope["qa_any_fail"] = any_qa_fail
+    if allow_fail:
+        suite_exit = 0
+    elif fail_on_qa and any_qa_fail and max_technical == 0:
+        suite_exit = 1
+    else:
+        suite_exit = max_technical
+    envelope["exit_code"] = suite_exit
+
+    out_json = outputs_dir / f"{suite_id}.json"
+    out_json.write_text(json.dumps(envelope, indent=2), encoding="utf-8")
+    envelope["report_path"] = str(out_json)
+    return envelope, envelope["exit_code"]
+
+
+def _write_gold_audit(gold_root: Path, dest: Path) -> int:
+    reports = audit_benchmark_gold_cases(gold_root)
+    lines = [
+        "# Benchmark gold audit",
+        "",
+        f"Gold root: `{gold_root.resolve()}`",
+        "",
+        "| case_id | benchmark_eligible | agent | harness | main | notes |",
+        "|---------|-------------------|-------|---------|------|-------|",
+    ]
+    for row in reports:
+        notes = "; ".join(row.notes[:3])
+        if len(row.notes) > 3:
+            notes += f" (+{len(row.notes) - 3} more)"
+        lines.append(
+            f"| {row.case_id} | {row.benchmark_eligible} | "
+            f"{row.agent_surface_ready} | {row.harness_surface_ready} | "
+            f"{row.main_surface_ready} | {notes} |"
+        )
+    lines.extend(
+        [
+            "",
+            "Regenerate: `python agent-redact/eval/run_benchmark_suite.py --audit-only`",
+            "",
+        ]
+    )
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text("\n".join(lines), encoding="utf-8")
+    print(f"Wrote audit: {dest}")
+    return 0
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument(
+        "--gold-root",
+        type=Path,
+        default=None,
+        help="Gold cases root (default: APP_EVAL_GOLD_ROOT / AGENT_EVAL_GOLD_ROOT).",
+    )
+    p.add_argument(
+        "--surfaces",
+        default="agent,main",
+        help="Comma-separated: agent (LangGraph/Pi), harness (AgentCore), main (default: agent,main).",
+    )
+    p.add_argument(
+        "--orchestrator",
+        choices=("langgraph", "pi", "both"),
+        default=os.environ.get("AGENT_ORCHESTRATOR", "langgraph"),
+    )
+    p.add_argument("--provider", default=None)
+    p.add_argument("--model", default=None)
+    p.add_argument("--timeout-s", type=float, default=3600.0)
+    p.add_argument("--suite-id", default=None, help="Override benchmark suite id.")
+    p.add_argument(
+        "--case", dest="case_filter", help="Run a single case id / folder name."
+    )
+    p.add_argument(
+        "--allow-fail",
+        action="store_true",
+        help="Always exit 0 (ignores technical and QA failures).",
+    )
+    p.add_argument(
+        "--fail-on-qa",
+        action="store_true",
+        help="Exit 1 when eval/gates score poorly (default: only technical failures fail).",
+    )
+    p.add_argument(
+        "--audit-only",
+        action="store_true",
+        help="Write gold/BENCHMARK_GOLD_AUDIT.md and exit (no LLM runs).",
+    )
+    p.add_argument(
+        "--list-cases",
+        action="store_true",
+        help="Print benchmark-eligible cases and exit.",
+    )
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
+    gold_root = (args.gold_root or default_gold_root()).resolve()
+
+    if args.audit_only:
+        _, _, eval_dir = _ensure_agent_imports()
+        return _write_gold_audit(
+            gold_root, eval_dir / "gold" / "BENCHMARK_GOLD_AUDIT.md"
+        )
+
+    if args.list_cases:
+        for case_dir in discover_benchmark_gold_cases(gold_root):
+            r = case_readiness(case_dir)
+            print(
+                f"{r.case_id}\tagent={r.agent_surface_ready}"
+                f"\tharness={r.harness_surface_ready}\tmain={r.main_surface_ready}"
+            )
+        return 0
+
+    try:
+        surfaces = _parse_surfaces(args.surfaces)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+
+    try:
+        envelope, code = run_benchmark_suite(
+            gold_root=gold_root,
+            surfaces=surfaces,
+            orchestrator=args.orchestrator,
+            provider=args.provider,
+            model=args.model,
+            timeout_s=args.timeout_s,
+            suite_id=args.suite_id,
+            allow_fail=bool(args.allow_fail),
+            fail_on_qa=bool(args.fail_on_qa),
+            case_filter=args.case_filter,
+        )
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    print(json.dumps(envelope, indent=2))
+    return int(code)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -47,6 +48,9 @@ def harness_eval_tracing_enabled() -> bool:
 
 def harness_post_run_eval_enabled() -> bool:
     """Main-app harness eval: ``APP_EVAL_ENABLED`` or ``AGENT_EVAL_DEEPEVAL_TRACING``."""
+    raw = (os.environ.get("APP_EVAL_ENABLED") or "").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
     try:
         from tools.config import APP_EVAL_ENABLED
 
@@ -191,6 +195,7 @@ class HarnessEvalRecorder:
             use_app_eval = bool(APP_EVAL_ENABLED)
         except ImportError:
             pass
+        bench = (os.environ.get("BENCHMARK_SUITE_ID") or "").strip()
         try:
             return write_session_post_run_eval(
                 session_hash=sid,
@@ -206,7 +211,7 @@ class HarnessEvalRecorder:
                 model_name="agentcore-harness",
                 workspace_root=workspace,
                 gold_case_dir=self.gold_case_dir,
-                force=use_app_eval,
+                force=use_app_eval or bool(bench),
             )
         except Exception:
             logger.exception("Harness post-run eval failed")

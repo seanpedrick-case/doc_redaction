@@ -428,6 +428,51 @@ The **base** Gradio app ([`app.py`](../../app.py)) reuses this eval tree when `A
 
 See [`gold/README.md`](gold/README.md) (main app authoring).
 
+### Standardized benchmark suite (agent + main app)
+
+One entrypoint runs **every blessed gold case** (directories with `ideal_review_file.csv` + resolvable input PDF) and appends rows to [`eval/outputs/eval_run_summary.csv`](outputs/eval_run_summary.csv). Suite JSON reports land beside the CSV as `eval/outputs/bench_<timestamp>_<gitsha>.json`.
+
+```bash
+# Audit local gold readiness (no LLM)
+python agent-redact/eval/run_benchmark_suite.py --audit-only
+
+# List cases that would run
+python agent-redact/eval/run_benchmark_suite.py --list-cases
+
+# Full suite (agent LangGraph turn + main-app CLI redact per case)
+python agent-redact/eval/run_benchmark_suite.py \
+  --gold-root agent-redact/eval/gold \
+  --surfaces agent,main \
+  --orchestrator langgraph
+
+# One case, agent only
+python agent-redact/eval/run_benchmark_suite.py --case example_live --surfaces agent
+```
+
+| Leg | Requirement | CSV `run_source` |
+|-----|-------------|------------------|
+| Agent | `instructions.txt`, input PDF, ideal CSV; LangGraph/Pi stack | `benchmark_agent` |
+| Harness | same as agent; `AGENTCORE_HARNESS_ARN` + AWS creds (main app route) | `benchmark_harness` |
+| Main | above + `app_eval_settings.json` | `main_app` (via `cli_redact --app-eval`) |
+
+AgentCore harness leg (not LangGraph):
+
+```bash
+python agent-redact/eval/run_benchmark_suite.py \
+  --surfaces harness \
+  --case example_emails_to_professor_agentic
+```
+
+Uses [`run_agentic_redaction`](../../tools/agentcore_harness.py) and the same [`HarnessEvalRecorder`](../../tools/harness_eval_support.py) / [`post_run_eval`](post_run_eval.py) gates as the Redact tab **Run agent redact** flow.
+
+Set `AGENT_EVAL_RUN_SUMMARY_CSV=1`, `APP_EVAL_ENABLED=1`, and `APP_EVAL_RUN_SUMMARY_CSV=1` (the suite sets these by default). New CSV columns: `benchmark_suite_id`, `git_commit`.
+
+**Exit codes:** by default the process exits **0** when redaction + eval complete, even if scores are poor (`overall_pass=false`, low geometry F1). Per-surface JSON records separate `exit_code` (technical) from `qa_pass`. Use `--fail-on-qa` for CI that should fail on bad gold scores; `--allow-fail` forces exit 0 even on crashes.
+
+Gold readiness table: [`gold/BENCHMARK_GOLD_AUDIT.md`](gold/BENCHMARK_GOLD_AUDIT.md) (regenerate with `--audit-only`).
+
+**Docker main app:** mount host `agent-redact/eval/runs` (see `x-redaction-app-volumes` in compose) or the suite falls back to `eval/outputs/benchmark_runs/` / `OUTPUT_FOLDER/benchmark_runs/`. Optional: `BENCHMARK_RUNS_ROOT=/path`.
+
 ---
 
 ## Module map
@@ -445,6 +490,8 @@ See [`gold/README.md`](gold/README.md) (main app authoring).
 | [`compare_policy_lists.py`](compare_policy_lists.py) | Gold vs observed must_redact / deny_list extraction F1 + guardrail |
 | [`run_policy_gate.py`](run_policy_gate.py) | Fixture-friendly coverage gate (+ `--dual`) |
 | [`run_agent_regression.py`](run_agent_regression.py) | Local live/offline harness → deterministic gates |
+| [`benchmark_cases.py`](benchmark_cases.py) | Discover / audit benchmark-eligible gold cases |
+| [`run_benchmark_suite.py`](run_benchmark_suite.py) | Multi-case benchmark (agent + main app) |
 | [`deepeval_metrics.py`](deepeval_metrics.py) | DeepEval metric wired to `pass_strict` |
 | [`run_local_agent_eval.ps1`](run_local_agent_eval.ps1) / [`.sh`](run_local_agent_eval.sh) | Thin wrappers for local runs |
 | [`gold/`](gold/) | Case layout + `example_smoke` / `example_live` |
