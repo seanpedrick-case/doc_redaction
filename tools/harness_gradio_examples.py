@@ -81,7 +81,7 @@ def _catalog() -> tuple[HarnessRedactionExample, ...]:
             ),
         ),
         HarnessRedactionExample(
-            label="Partnership agreement (sister cities)",
+            label="Seven page PDF with scanned pages and signatures",
             file_name="Partnership-Agreement-Toolkit_0_0.pdf",
             instructions=_PARTNERSHIP_AGENT_INSTRUCTIONS,
         ),

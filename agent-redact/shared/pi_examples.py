@@ -123,7 +123,7 @@ def _catalog() -> tuple[PiRedactionExample, ...]:
             ),
         ),
         PiRedactionExample(
-            label="Partnership agreement (sister cities)",
+            label="Seven page PDF with scanned pages and signatures",
             file_name="Partnership-Agreement-Toolkit_0_0.pdf",
             ocr_method=selectable_text_ocr,
             pii_method="Local",
