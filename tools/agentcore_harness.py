@@ -67,8 +67,8 @@ class HarnessToolError(Exception):
 class HarnessRunDefaults:
     """App-side defaults suggested to the agent and merged into ``doc_redact`` calls."""
 
-    ocr_method: str = "Local text"
-    pii_method: str = "Local"
+    ocr_method: str = "AWS Textract"
+    pii_method: str = "AWS Comprehend"
     redact_entities: list[str] = field(default_factory=list)
     allow_list: list[str] = field(default_factory=list)
     deny_list: list[str] = field(default_factory=list)
@@ -1577,7 +1577,7 @@ def agentic_redact_for_gradio(
 
     defaults = HarnessRunDefaults(
         ocr_method=ui_ocr_method_to_tool_value(text_extract_method, local_ocr_model),
-        pii_method=pii_method or "Local",
+        pii_method=pii_method or "AWS Comprehend",
         redact_entities=ui_entities_for_pii_method(
             pii_method, local_entities, comprehend_entities, llm_entities
         ),
@@ -1607,7 +1607,7 @@ def agentic_redact_for_gradio(
             document_name=session.source_pdf.name,
             instructions=instructions,
             text_extract_method=text_extract_method,
-            pii_method=pii_method or "Local",
+            pii_method=pii_method or "AWS Comprehend",
             ocr_method_short=defaults.ocr_method,
         )
         if gold_line:
@@ -1634,7 +1634,7 @@ def agentic_redact_for_gradio(
             document_name=session.source_pdf.name,
             time_taken=final.elapsed_seconds,
             token_usage=final.token_usage,
-            pii_method=pii_method or "Local",
+            pii_method=pii_method or "AWS Comprehend",
             text_extraction_method=text_extract_method or defaults.ocr_method,
             cost_code=(cost_code or "").strip(),
             total_pages=_pdf_page_count(session.source_pdf),
@@ -1668,8 +1668,8 @@ def upload_agentic_outputs_to_s3(
 def agentic_redact_api(
     document_file: Any,
     instructions: str,
-    ocr_method: str | None = "Local text",
-    pii_method: str | None = "Local",
+    ocr_method: str | None = "AWS Textract",
+    pii_method: str | None = "AWS Comprehend",
     redact_entities: list[str] | None = None,
     allow_list: list[str] | None = None,
     deny_list: list[str] | None = None,
@@ -1695,8 +1695,8 @@ def agentic_redact_api(
         raise ValueError("document_file is missing or could not be resolved to a path.")
     document = stage_gradio_upload_if_ephemeral(document)
     defaults = HarnessRunDefaults(
-        ocr_method=ocr_method or "Local text",
-        pii_method=pii_method or "Local",
+        ocr_method=ocr_method or "AWS Textract",
+        pii_method=pii_method or "AWS Comprehend",
         redact_entities=list(redact_entities or []),
         allow_list=list(allow_list or []),
         deny_list=list(deny_list or []),
@@ -1715,8 +1715,8 @@ def agentic_redact_api(
             pdf_path=session.source_pdf,
             document_name=session.source_pdf.name,
             instructions=instructions,
-            text_extract_method=ocr_method or "Local text",
-            pii_method=pii_method or "Local",
+            text_extract_method=ocr_method or "AWS Textract",
+            pii_method=pii_method or "AWS Comprehend",
             ocr_method_short=defaults.ocr_method,
         )
     final: HarnessProgress | None = None
@@ -1740,8 +1740,8 @@ def agentic_redact_api(
             document_name=Path(document).name,
             time_taken=final.elapsed_seconds,
             token_usage=final.token_usage,
-            pii_method=pii_method or "Local",
-            text_extraction_method=ocr_method or "Local text",
+            pii_method=pii_method or "AWS Comprehend",
+            text_extraction_method=ocr_method or "AWS Textract",
             total_pages=_pdf_page_count(Path(document)),
         )
     return final.output_files, final.summary

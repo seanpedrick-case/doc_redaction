@@ -1310,6 +1310,12 @@ div[class*="tab-nav"] button {
     overflow-wrap: anywhere;
 }
 
+/* Agent activity log: keep accordion content scrollable within max height */
+#agent-activity-markdown {
+    max-height: 600px !important;
+    overflow-y: auto !important;
+}
+
 """ + LOGOUT_FOOTER_CSS
 
 # Additional test annotator object resize rules, not currently used
@@ -3225,7 +3231,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                     "AI agent activity", open=False, visible=USE_AGENTCORE
                 ):
                     agent_activity_markdown = gr.Markdown(
-                        "No agent run yet.", container=True
+                        "No agent run yet.",
+                        container=True,
+                        max_height=600,
+                        elem_id="agent-activity-markdown",
                     )
 
                 with gr.Row(equal_height=True):

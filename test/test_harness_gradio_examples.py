@@ -32,6 +32,8 @@ def test_show_harness_examples_explicit_off(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_harness_example_rows_shape() -> None:
+    from tools.config import AWS_PII_OPTION, TEXTRACT_TEXT_EXTRACT_OPTION
+
     rows, labels = harness_example_rows(
         local_entities=["NAME"],
         comprehend_entities=[],
@@ -43,7 +45,12 @@ def test_harness_example_rows_shape() -> None:
     assert len(rows[0]) == 13
     assert isinstance(rows[0][0], list)
     assert rows[0][0][0].endswith(".pdf")
+    assert rows[0][2] == TEXTRACT_TEXT_EXTRACT_OPTION
     assert rows[0][3] in LOCAL_OCR_MODEL_OPTIONS
+    assert rows[0][4] == AWS_PII_OPTION
+    for row in rows:
+        assert row[2] == TEXTRACT_TEXT_EXTRACT_OPTION
+        assert row[4] == AWS_PII_OPTION
 
 
 def test_example_local_ocr_choice_is_valid() -> None:

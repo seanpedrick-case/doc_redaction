@@ -6,10 +6,10 @@ import os
 from dataclasses import dataclass
 
 from tools.config import (
+    AWS_PII_OPTION,
     DEFAULT_LOCAL_OCR_MODEL,
     LOCAL_OCR_MODEL_OPTIONS,
-    LOCAL_PII_OPTION,
-    SELECTABLE_TEXT_EXTRACT_OPTION,
+    TEXTRACT_TEXT_EXTRACT_OPTION,
 )
 from tools.example_data_paths import is_lfs_pointer
 
@@ -45,8 +45,9 @@ class HarnessRedactionExample:
     label: str
     file_name: str
     instructions: str
-    text_extract_method: str = SELECTABLE_TEXT_EXTRACT_OPTION
-    pii_method: str = LOCAL_PII_OPTION
+    # Bedrock harness examples default to AWS OCR/PII (not local/tesseract).
+    text_extract_method: str = TEXTRACT_TEXT_EXTRACT_OPTION
+    pii_method: str = AWS_PII_OPTION
     page_min: int = 0
     page_max: int = 0
 

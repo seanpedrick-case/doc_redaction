@@ -38,7 +38,7 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "gradio>=6.31.0,<7",
+    "gradio>=6.32.0,<7",
     "gradio-pdf-redaction>=0.0.25,<1",
     "gradio_image_annotation_redaction>=0.7.4,<1",
     "spaces",
@@ -47,9 +47,9 @@ dependencies = [
     "pymupdf>=1.26.2,<2",
     "bleach>=6.4.0,<7",
     "opencv-python>=4.14.0.94,<5",
-    "presidio_analyzer==2.2.362",
-    "presidio_anonymizer==2.2.365",
-    "presidio-image-redactor==0.0.61",
+    "presidio_analyzer>=2.2.362",
+    "presidio_anonymizer>=2.2.362",
+    "presidio-image-redactor>=0.0.61",
     "pikepdf>=10.12.0,<11",
     "pandas>=2.3.3,<4",
     "scikit-learn>=1.7.2,<1.8",
@@ -71,7 +71,7 @@ dependencies = [
     "openai>=3.26.1,<4",
     "markdown>=3.10.3,<4",
     "tabulate>=0.9.0,<1",
-    "pillow>=12.3.0,<13"
+    "pillow>=12.3.0"
 ]
 
 [project.optional-dependencies]
@@ -105,7 +105,7 @@ vlm = [
 
 # Run Gradio as an mcp server
 mcp = [
-    "gradio[mcp]>=6.31.0,<7"
+    "gradio[mcp]>=6.32.0,<7"
 ]
 
 [project.urls]

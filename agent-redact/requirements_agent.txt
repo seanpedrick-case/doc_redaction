@@ -6,7 +6,7 @@
 # Version ranges for packages also in pyproject.toml [project] dependencies align with that file.
 
 # --- Gradio UI + API client ---
-gradio>=6.31.0,<7
+gradio>=6.32.0,<7
 gradio-pdf-redaction>=0.0.25,<1
 httpx>=0.28.1,<1
 requests>=2.34.2,<3

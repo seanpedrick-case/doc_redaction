@@ -25,7 +25,7 @@ ARG INSTALL_GRADIO_MCP=False
 ENV INSTALL_GRADIO_MCP=${INSTALL_GRADIO_MCP}
 
 RUN if [ "$INSTALL_GRADIO_MCP" = "True" ]; then \
-    pip install --verbose --no-cache-dir --force-reinstall --target=/install "gradio[mcp]>=6.31.0,<7"; \
+    pip install --verbose --no-cache-dir --force-reinstall --target=/install "gradio[mcp]>=6.32.0,<7"; \
 fi
 
 # Optionally install PaddleOCR if the INSTALL_PADDLEOCR environment variable is set to True. Note that GPU-enabled PaddleOCR is unlikely to work in the same environment as a GPU-enabled version of PyTorch, so it is recommended to install PaddleOCR as a CPU-only version if you want to use GPU-enabled PyTorch.
