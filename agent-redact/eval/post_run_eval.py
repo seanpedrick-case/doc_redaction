@@ -511,9 +511,20 @@ def score_post_run_metrics(
 def _gold_eval_skip_reason(session_hash: str) -> str:
     from agent_eval_env import agent_eval_auto_gold_enabled
 
-    if agent_eval_auto_gold_enabled():
+    auto = agent_eval_auto_gold_enabled()
+    if not auto:
+        try:
+            from app_eval_env import app_eval_auto_gold_enabled
+
+            auto = app_eval_auto_gold_enabled()
+        except ImportError:
+            pass
+
+    if auto:
         if not session_hash:
-            return "Auto-gold enabled but session_hash missing."
+            # Main-app redact path: auto-gold already attempted match without
+            # agent session task context (APP_EVAL_AUTO_GOLD).
+            return "No matching gold case for this PDF/instructions."
         try:
             from eval_task_context import get_active_task_for_eval
         except ImportError:
@@ -522,7 +533,10 @@ def _gold_eval_skip_reason(session_hash: str) -> str:
         if task is None:
             return "No active redaction task for gold eval."
         return task.eval_gold_match_reason or "No matching gold case for this task."
-    return "Set AGENT_EVAL_GOLD for gold policy lists (or enable AGENT_EVAL_AUTO_GOLD)."
+    return (
+        "Set APP_EVAL_GOLD / AGENT_EVAL_GOLD for a fixed gold case "
+        "(or enable APP_EVAL_AUTO_GOLD / AGENT_EVAL_AUTO_GOLD)."
+    )
 
 
 def _load_expected_tool_names(gold_case_dir: Path) -> list[str]:
