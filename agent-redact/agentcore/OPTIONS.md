@@ -182,6 +182,8 @@ Redeploy after CDK updates: `python cdk/deploy_harness_local.py --yes`.
 
 **Eval (main app):** With ``APP_EVAL_ENABLED=True`` (or ``AGENT_EVAL_DEEPEVAL_TRACING=1``), completed harness runs write ``eval/run_*/`` under the harness session folder: ``tool_args.json`` (inline tool trajectory for DeepEval), ``trace_events.jsonl`` (turn/tool start-end journal), ``eval_summary.json``, and gate artifacts. CSV ``run_source`` is ``main_app_harness`` (Gradio) or ``main_app_harness_api`` (``/agentic_redact``). Optional ``ARIZE_TRACING_ENABLED`` exports Pi-parity OTEL spans (``main_app.harness`` + TOOL children with ``redaction.*`` on verify); harness LLM turns remain AWS-side. Gold auto-match uses the same ``APP_EVAL_*`` / ``AGENT_EVAL_*`` variables as standard redaction and agent-redact.
 
+**Detached Gradio jobs (opt-in):** Set ``AGENTCORE_HARNESS_DETACHED_JOBS=True`` so **Redact with AI agent** runs in a background worker (``tools/harness_job_runner.py``). A browser refresh no longer cancels the InvokeHarness loop while ``app.py`` stays up; reattach via the Active/recent jobs controls under AI agent activity. Default ``False`` keeps the streaming generator (refresh cancels). When ``SAVE_OUTPUTS_TO_S3`` is True, Output-files deliverables are uploaded on completion into ``…/<document_stem>/agentic/`` beside the first-pass redaction prefix when available (streaming via ``export_agentic_outputs_to_s3_for_gradio``; detached path inside the worker so refresh cannot skip S3).
+
 ---
 
 ## Side-by-side

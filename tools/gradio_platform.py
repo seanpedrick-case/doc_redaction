@@ -173,15 +173,27 @@ def build_s3_outputs_prefix(
     *,
     session_scoped: bool = True,
 ) -> str:
-    """Build the S3 key prefix for output uploads (optional session + date suffix)."""
-    s3_outputs_folder = base_folder or ""
+    """Build the S3 key prefix for output uploads (optional session + date suffix).
 
-    if session_scoped and session_hash and s3_outputs_folder:
+    Session identity is sanitized the same way as ``cli_redact`` (Cognito emails,
+    etc.) so Gradio and CLI first-pass uploads share one prefix.
+    """
+    s3_outputs_folder = base_folder or ""
+    safe_hash = session_hash or ""
+    if safe_hash:
+        try:
+            from cli_redact import _sanitize_folder_name
+
+            safe_hash = _sanitize_folder_name(safe_hash)
+        except Exception:  # noqa: BLE001 — keep raw hash if CLI import unavailable
+            pass
+
+    if session_scoped and safe_hash and s3_outputs_folder:
         if SAVE_OUTPUTS_TO_S3:
-            s3_outputs_folder = s3_outputs_folder.rstrip("/") + "/" + session_hash + "/"
+            s3_outputs_folder = s3_outputs_folder.rstrip("/") + "/" + safe_hash + "/"
     elif not session_scoped:
         pass
-    elif not session_hash or not s3_outputs_folder:
+    elif not safe_hash or not s3_outputs_folder:
         s3_outputs_folder = base_folder or ""
 
     if SAVE_OUTPUTS_TO_S3 and s3_outputs_folder:

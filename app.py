@@ -166,6 +166,7 @@ from tools.aws_functions import (
 from tools.config import (
     ACCESS_LOGS_FOLDER,
     AGENT_REDACTION_ACCORDION_OPEN,
+    AGENTCORE_HARNESS_DETACHED_JOBS,
     ALLOW_LIST_PATH,
     ALLOWED_HOSTS,
     ALLOWED_ORIGINS,
@@ -3233,6 +3234,35 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                         max_height=600,
                         elem_id="agent-activity-markdown",
                     )
+                    with gr.Row(
+                        visible=bool(USE_AGENTCORE and AGENTCORE_HARNESS_DETACHED_JOBS)
+                    ):
+                        agent_job_dropdown = gr.Dropdown(
+                            label="Active / recent detached agent jobs",
+                            choices=[],
+                            interactive=True,
+                            scale=3,
+                        )
+                        agent_job_attach_btn = gr.Button(
+                            "Attach",
+                            scale=1,
+                            visible=True,
+                        )
+                        agent_job_cancel_btn = gr.Button(
+                            "Cancel job",
+                            scale=1,
+                            variant="stop",
+                        )
+                        agent_job_refresh_btn = gr.Button(
+                            "Refresh job list",
+                            scale=1,
+                        )
+                    agent_job_run_id_state = gr.State(value="")
+                    agent_job_just_finished_state = gr.State(value=False)
+                    agent_job_timer = gr.Timer(
+                        value=2.0,
+                        active=False,
+                    )
 
                 with gr.Row(equal_height=True):
                     with gr.Column(scale=1):
@@ -5864,7 +5894,10 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
     )
 
     if USE_AGENTCORE:
-        from tools.agentcore_harness import agentic_redact_for_gradio
+        from tools.agentcore_harness import (
+            agentic_redact_for_gradio,
+            export_agentic_outputs_to_s3_for_gradio,
+        )
 
         def _toggle_agent_redact_buttons(instructions: str):
             use_agent = bool((instructions or "").strip())
@@ -5878,182 +5911,300 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             api_visibility="undocumented",
         )
 
-        agent_redact_btn.click(
-            fn=release_document_session_state,
-            inputs=[pdf_doc_state],
-            outputs=_release_document_session_state_outputs,
-            api_visibility="undocumented",
-        ).success(
-            fn=enforce_cost_codes,
-            inputs=[
-                enforce_cost_code_bool,
-                cost_code_choice_drop,
-                cost_code_dataframe,
-            ],
-            api_visibility="undocumented",
-        ).success(
-            fn=agentic_redact_for_gradio,
-            inputs=[
-                in_doc_files,
-                agent_redaction_instructions_textbox,
-                text_extract_method_radio,
-                local_ocr_method_radio,
-                pii_identification_method_drop,
-                in_redact_entities,
-                in_redact_comprehend_entities,
-                in_redact_llm_entities,
-                in_allow_list_state,
-                in_deny_list_state,
-                handwrite_signature_checkbox,
-                page_min,
-                page_max,
-                output_folder_textbox,
-                session_hash_textbox,
-                cost_code_choice_drop,
-            ],
-            outputs=[
-                redaction_output_summary_textbox,
-                agent_activity_markdown,
-                output_file,
-                output_file_list_state,
-            ],
-            api_visibility="undocumented",
-        ).success(
-            fn=export_outputs_to_s3,
-            inputs=[
-                output_file_list_state,
-                s3_output_folder_state,
-                save_outputs_to_s3_checkbox,
-                in_doc_files,
-            ],
-            outputs=None,
-            api_visibility="undocumented",
-        ).success(
-            fn=load_agentic_harness_outputs_for_gradio_tabs,
-            inputs=[
-                output_file_list_state,
-                in_doc_files,
-                text_extract_method_radio,
-                all_page_line_level_ocr_results_df_base,
-                all_page_line_level_ocr_results_with_words_df_base,
-                latest_file_completed_num,
-                redaction_output_summary_textbox,
-                annotate_max_pages,
-                all_image_annotations_state,
-                prepare_for_review_bool,
-                in_fully_redacted_list_state,
-                output_folder_textbox,
-                input_folder_textbox,
-                efficient_ocr_checkbox,
-                prepare_images_bool_false,
-                page_sizes,
-                pdf_doc_state,
-                page_min,
-                page_max,
-                review_file_df,
-            ],
-            outputs=[
-                redaction_output_summary_textbox,
-                prepared_pdf_state,
-                images_pdf_state,
-                annotate_max_pages,
-                annotate_max_pages_bottom,
-                pdf_doc_state,
-                all_image_annotations_state,
-                review_file_df,
-                document_cropboxes,
-                page_sizes,
-                input_pdf_for_review,
-                latest_review_file_path,
-                latest_ocr_file_path,
-                input_review_files,
-                in_duplicate_pages,
-                in_summarisation_ocr_files,
-                duplication_file_path_outputs_list_state,
-                all_page_line_level_ocr_results,
-                all_page_line_level_ocr_results_with_words,
-                all_page_line_level_ocr_results_with_words_df_base,
-                all_page_line_level_ocr_results_df_base,
-                total_pdf_page_count,
-            ],
-            show_progress_on=[redaction_output_summary_textbox, input_pdf_for_review],
-            api_visibility="undocumented",
-        ).success(
-            fn=get_document_file_names,
-            inputs=[input_pdf_for_review],
-            outputs=[
-                doc_file_name_no_extension_textbox,
-                doc_file_name_with_extension_textbox,
-                doc_full_file_name_textbox,
-                doc_file_name_textbox_list,
-                total_pdf_page_count,
-            ],
-            api_visibility="undocumented",
-        ).success(
-            fn=update_review_filters_after_redaction,
-            inputs=[
-                all_image_annotations_state,
-                page_min,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[],
-            api_visibility="undocumented",
-        ).success(
-            fn=update_annotator_object_for_page_navigation,
-            inputs=[
-                all_image_annotations_state,
-                page_min,
-                recogniser_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                text_entity_dropdown,
-                recogniser_entity_dataframe_base,
-                annotator_zoom_number,
-                review_file_df,
-                page_sizes,
-                doc_full_file_name_textbox,
-                input_folder_textbox,
-            ],
-            outputs=[
-                annotator,
-                annotate_current_page,
-                annotate_current_page_bottom,
-                annotate_previous_page,
-                recogniser_entity_dropdown,
-                recogniser_entity_dataframe,
-                recogniser_entity_dataframe_base,
-                text_entity_dropdown,
-                page_entity_dropdown,
-                page_entity_dropdown_redaction,
-                page_sizes,
-                all_image_annotations_state,
-            ],
-            show_progress_on=[],
-            api_visibility="undocumented",
-        )
+        _agent_review_load_inputs = [
+            output_file_list_state,
+            in_doc_files,
+            text_extract_method_radio,
+            all_page_line_level_ocr_results_df_base,
+            all_page_line_level_ocr_results_with_words_df_base,
+            latest_file_completed_num,
+            redaction_output_summary_textbox,
+            annotate_max_pages,
+            all_image_annotations_state,
+            prepare_for_review_bool,
+            in_fully_redacted_list_state,
+            output_folder_textbox,
+            input_folder_textbox,
+            efficient_ocr_checkbox,
+            prepare_images_bool_false,
+            page_sizes,
+            pdf_doc_state,
+            page_min,
+            page_max,
+            review_file_df,
+        ]
+        _agent_review_load_outputs = [
+            redaction_output_summary_textbox,
+            prepared_pdf_state,
+            images_pdf_state,
+            annotate_max_pages,
+            annotate_max_pages_bottom,
+            pdf_doc_state,
+            all_image_annotations_state,
+            review_file_df,
+            document_cropboxes,
+            page_sizes,
+            input_pdf_for_review,
+            latest_review_file_path,
+            latest_ocr_file_path,
+            input_review_files,
+            in_duplicate_pages,
+            in_summarisation_ocr_files,
+            duplication_file_path_outputs_list_state,
+            all_page_line_level_ocr_results,
+            all_page_line_level_ocr_results_with_words,
+            all_page_line_level_ocr_results_with_words_df_base,
+            all_page_line_level_ocr_results_df_base,
+            total_pdf_page_count,
+        ]
+
+        if AGENTCORE_HARNESS_DETACHED_JOBS:
+            from tools.harness_job_runner import (
+                attach_detached_harness_job,
+                cancel_detached_harness_job,
+                mark_post_complete_hooks_done,
+                poll_detached_harness_job,
+                refresh_detached_job_choices,
+                start_detached_agentic_redact_for_gradio,
+            )
+
+            def _on_detached_job_just_finished(just_finished, run_id, *load_args):
+                if not just_finished:
+                    return tuple(gr.update() for _ in _agent_review_load_outputs)
+                mark_post_complete_hooks_done(str(run_id or ""))
+                return load_agentic_harness_outputs_for_gradio_tabs(*load_args)
+
+            agent_redact_btn.click(
+                fn=release_document_session_state,
+                inputs=[pdf_doc_state],
+                outputs=_release_document_session_state_outputs,
+                api_visibility="undocumented",
+            ).success(
+                fn=enforce_cost_codes,
+                inputs=[
+                    enforce_cost_code_bool,
+                    cost_code_choice_drop,
+                    cost_code_dataframe,
+                ],
+                api_visibility="undocumented",
+            ).success(
+                fn=start_detached_agentic_redact_for_gradio,
+                inputs=[
+                    in_doc_files,
+                    agent_redaction_instructions_textbox,
+                    text_extract_method_radio,
+                    local_ocr_method_radio,
+                    pii_identification_method_drop,
+                    in_redact_entities,
+                    in_redact_comprehend_entities,
+                    in_redact_llm_entities,
+                    in_allow_list_state,
+                    in_deny_list_state,
+                    handwrite_signature_checkbox,
+                    page_min,
+                    page_max,
+                    output_folder_textbox,
+                    session_hash_textbox,
+                    cost_code_choice_drop,
+                    s3_output_folder_state,
+                    save_outputs_to_s3_checkbox,
+                ],
+                outputs=[
+                    redaction_output_summary_textbox,
+                    agent_activity_markdown,
+                    output_file,
+                    output_file_list_state,
+                    agent_job_run_id_state,
+                    agent_job_timer,
+                    agent_job_dropdown,
+                ],
+                api_visibility="undocumented",
+            )
+
+            agent_job_timer.tick(
+                fn=poll_detached_harness_job,
+                inputs=[agent_job_run_id_state, output_folder_textbox],
+                outputs=[
+                    redaction_output_summary_textbox,
+                    agent_activity_markdown,
+                    output_file,
+                    output_file_list_state,
+                    agent_job_run_id_state,
+                    agent_job_timer,
+                    agent_job_dropdown,
+                    agent_job_just_finished_state,
+                ],
+            )
+            agent_job_just_finished_state.change(
+                fn=_on_detached_job_just_finished,
+                inputs=[agent_job_just_finished_state, agent_job_run_id_state]
+                + _agent_review_load_inputs,
+                outputs=_agent_review_load_outputs,
+                api_visibility="undocumented",
+            )
+
+            agent_job_attach_btn.click(
+                fn=attach_detached_harness_job,
+                inputs=[agent_job_dropdown, output_folder_textbox],
+                outputs=[
+                    redaction_output_summary_textbox,
+                    agent_activity_markdown,
+                    output_file,
+                    output_file_list_state,
+                    agent_job_run_id_state,
+                    agent_job_timer,
+                    agent_job_dropdown,
+                ],
+                api_visibility="undocumented",
+            )
+            agent_job_cancel_btn.click(
+                fn=cancel_detached_harness_job,
+                inputs=[agent_job_run_id_state],
+                outputs=[redaction_output_summary_textbox],
+                api_visibility="undocumented",
+            )
+            agent_job_refresh_btn.click(
+                fn=refresh_detached_job_choices,
+                inputs=[output_folder_textbox],
+                outputs=[agent_job_dropdown],
+                api_visibility="undocumented",
+            )
+        else:
+            agent_redact_btn.click(
+                fn=release_document_session_state,
+                inputs=[pdf_doc_state],
+                outputs=_release_document_session_state_outputs,
+                api_visibility="undocumented",
+            ).success(
+                fn=enforce_cost_codes,
+                inputs=[
+                    enforce_cost_code_bool,
+                    cost_code_choice_drop,
+                    cost_code_dataframe,
+                ],
+                api_visibility="undocumented",
+            ).success(
+                fn=agentic_redact_for_gradio,
+                inputs=[
+                    in_doc_files,
+                    agent_redaction_instructions_textbox,
+                    text_extract_method_radio,
+                    local_ocr_method_radio,
+                    pii_identification_method_drop,
+                    in_redact_entities,
+                    in_redact_comprehend_entities,
+                    in_redact_llm_entities,
+                    in_allow_list_state,
+                    in_deny_list_state,
+                    handwrite_signature_checkbox,
+                    page_min,
+                    page_max,
+                    output_folder_textbox,
+                    session_hash_textbox,
+                    cost_code_choice_drop,
+                ],
+                outputs=[
+                    redaction_output_summary_textbox,
+                    agent_activity_markdown,
+                    output_file,
+                    output_file_list_state,
+                ],
+                api_visibility="undocumented",
+            ).success(
+                fn=export_agentic_outputs_to_s3_for_gradio,
+                inputs=[
+                    output_file_list_state,
+                    s3_output_folder_state,
+                    save_outputs_to_s3_checkbox,
+                    in_doc_files,
+                ],
+                outputs=None,
+                api_visibility="undocumented",
+            ).success(
+                fn=load_agentic_harness_outputs_for_gradio_tabs,
+                inputs=_agent_review_load_inputs,
+                outputs=_agent_review_load_outputs,
+                show_progress_on=[
+                    redaction_output_summary_textbox,
+                    input_pdf_for_review,
+                ],
+                api_visibility="undocumented",
+            ).success(
+                fn=get_document_file_names,
+                inputs=[input_pdf_for_review],
+                outputs=[
+                    doc_file_name_no_extension_textbox,
+                    doc_file_name_with_extension_textbox,
+                    doc_full_file_name_textbox,
+                    doc_file_name_textbox_list,
+                    total_pdf_page_count,
+                ],
+                api_visibility="undocumented",
+            ).success(
+                fn=update_review_filters_after_redaction,
+                inputs=[
+                    all_image_annotations_state,
+                    page_min,
+                    recogniser_entity_dropdown,
+                    page_entity_dropdown,
+                    page_entity_dropdown_redaction,
+                    text_entity_dropdown,
+                    recogniser_entity_dataframe_base,
+                    annotator_zoom_number,
+                    review_file_df,
+                    page_sizes,
+                    doc_full_file_name_textbox,
+                    input_folder_textbox,
+                ],
+                outputs=[
+                    annotator,
+                    annotate_current_page,
+                    annotate_current_page_bottom,
+                    annotate_previous_page,
+                    recogniser_entity_dropdown,
+                    recogniser_entity_dataframe,
+                    recogniser_entity_dataframe_base,
+                    text_entity_dropdown,
+                    page_entity_dropdown,
+                    page_entity_dropdown_redaction,
+                    page_sizes,
+                    all_image_annotations_state,
+                ],
+                show_progress_on=[],
+                api_visibility="undocumented",
+            ).success(
+                fn=update_annotator_object_for_page_navigation,
+                inputs=[
+                    all_image_annotations_state,
+                    page_min,
+                    recogniser_entity_dropdown,
+                    page_entity_dropdown,
+                    page_entity_dropdown_redaction,
+                    text_entity_dropdown,
+                    recogniser_entity_dataframe_base,
+                    annotator_zoom_number,
+                    review_file_df,
+                    page_sizes,
+                    doc_full_file_name_textbox,
+                    input_folder_textbox,
+                ],
+                outputs=[
+                    annotator,
+                    annotate_current_page,
+                    annotate_current_page_bottom,
+                    annotate_previous_page,
+                    recogniser_entity_dropdown,
+                    recogniser_entity_dataframe,
+                    recogniser_entity_dataframe_base,
+                    text_entity_dropdown,
+                    page_entity_dropdown,
+                    page_entity_dropdown_redaction,
+                    page_sizes,
+                    all_image_annotations_state,
+                ],
+                show_progress_on=[],
+                api_visibility="undocumented",
+            )
 
     # Run redaction function from document redaction tab button
     document_redact_btn.click(

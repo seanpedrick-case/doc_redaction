@@ -251,6 +251,8 @@ The CDK demo installer can also build an ARM64 runtime image and create the Agen
 | Variable | Purpose |
 |----------|---------|
 | `USE_AGENTCORE` | `True` shows the *AI agent redaction instructions* box on the Redact tab and registers the `agentic_redact` API |
+| `AGENTCORE_HARNESS_DETACHED_JOBS` | Optional `True` runs agent redact in a background worker so a Gradio page refresh does not cancel the job (default `False` = streaming) |
+| `SAVE_OUTPUTS_TO_S3` | When `True`, Output-files deliverables from agentic runs are uploaded (streaming path and detached worker both) |
 | `AGENTCORE_HARNESS_ARN` | Harness ARN (`arn:aws:bedrock-agentcore:<region>:<account>:harness/...`) |
 | `AGENTCORE_HARNESS_S3_STAGING_PREFIX` | S3 prefix for per-page review bundles (presigned URLs for harness subagents); defaults to `s3://$S3_OUTPUTS_BUCKET/harness-staging/` |
 | `AGENTCORE_HARNESS_ENABLE_PAGE_REVIEW` | `False` keeps review in the parent agent (no subagents / staging) |

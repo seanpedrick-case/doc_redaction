@@ -2497,6 +2497,13 @@ AGENTCORE_HARNESS_MODEL_ID = get_or_create_env_var(
     "AGENTCORE_HARNESS_MODEL_ID", ""
 )  # Logged as llm_model_name on harness usage rows (task=agent)
 
+# When True, Gradio "Redact with AI agent" runs in a background thread so a browser
+# refresh does not cancel the InvokeHarness loop. Default False keeps today's
+# streaming generator (cancel-on-disconnect).
+AGENTCORE_HARNESS_DETACHED_JOBS = convert_string_to_boolean(
+    get_or_create_env_var("AGENTCORE_HARNESS_DETACHED_JOBS", "False")
+)
+
 AGENT_REDACTION_ACCORDION_OPEN = convert_string_to_boolean(
     get_or_create_env_var("AGENT_REDACTION_ACCORDION_OPEN", "True")
 )  # Agentcore instructions accordion open by default

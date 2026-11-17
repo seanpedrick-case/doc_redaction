@@ -555,6 +555,62 @@ def test_upload_agentic_outputs_to_s3_delegates(monkeypatch, sample_pdf):
     assert calls[0]["s3_output_folder_state_value"] == "outputs/abc123/20251114/"
     assert calls[0]["save_outputs_to_s3_flag"] is True
     assert calls[0]["s3_bucket"] == "my-bucket"
+    assert calls[0]["s3_subfolder"] == "agentic"
+
+
+def test_resolve_agentic_s3_folder_prefers_gradio_session_prefix(tmp_path, monkeypatch):
+    from tools import config as cfg
+
+    monkeypatch.setattr(cfg, "S3_OUTPUTS_FOLDER", "output")
+    session = tmp_path / "agentcore" / "run1"
+    (session / "output_redact" / "fb8c2a22").mkdir(parents=True)
+    resolved = ah.resolve_agentic_s3_output_folder(
+        session_dir=session,
+        fallback_s3_folder="output/gradio_sess/20261117/",
+    )
+    assert resolved == "output/gradio_sess/20261117/"
+
+
+def test_resolve_agentic_s3_folder_falls_back_to_first_pass_username(
+    tmp_path, monkeypatch
+):
+    from tools import config as cfg
+
+    monkeypatch.setattr(cfg, "S3_OUTPUTS_FOLDER", "output")
+    session = tmp_path / "agentcore" / "run1"
+    (session / "output_redact" / "fb8c2a22").mkdir(parents=True)
+    resolved = ah.resolve_agentic_s3_output_folder(
+        session_dir=session,
+        fallback_s3_folder="",
+    )
+    assert resolved.startswith("output/fb8c2a22/")
+    assert resolved.endswith("/")
+
+
+def test_upload_agentic_prefers_gradio_prefix_and_agentic_subfolder(
+    monkeypatch, sample_pdf, tmp_path
+):
+    calls: list[dict] = []
+
+    def fake_export(**kwargs):
+        calls.append(kwargs)
+        return None
+
+    monkeypatch.setattr("tools.aws_functions.export_outputs_to_s3", fake_export)
+    from tools import config as cfg
+
+    monkeypatch.setattr(cfg, "S3_OUTPUTS_FOLDER", "output")
+    session = tmp_path / "agentcore" / "runx"
+    (session / "output_redact" / "userhash1").mkdir(parents=True)
+    ah.upload_agentic_outputs_to_s3(
+        [str(sample_pdf)],
+        s3_output_folder="output/gradio_sess/20261117/",
+        save_outputs_to_s3=True,
+        base_document=sample_pdf,
+        session_dir=session,
+    )
+    assert calls[0]["s3_output_folder_state_value"] == "output/gradio_sess/20261117/"
+    assert calls[0]["s3_subfolder"] == "agentic"
 
 
 def test_upload_agentic_outputs_to_s3_skips_empty(monkeypatch):

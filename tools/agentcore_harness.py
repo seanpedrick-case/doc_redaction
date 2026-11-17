@@ -257,9 +257,13 @@ class HarnessSession:
         staging_prefix: str | None = None,
         s3_client: Any = None,
         enable_page_review: bool = AGENTCORE_HARNESS_ENABLE_PAGE_REVIEW,
+        session_hash: str = "",
     ) -> None:
         self.run_id = run_id or uuid.uuid4().hex
         self.defaults = defaults or HarnessRunDefaults()
+        # Gradio / Cognito identity — used as CLI ``username`` so first-pass S3
+        # lands under the same prefix as Gradio ``s3_output_folder_state``.
+        self.session_hash = (session_hash or "").strip()
         self.output_root = Path(output_root)
         self.session_dir = secure_path_join(self.output_root, "agentcore", self.run_id)
         self.session_dir.mkdir(parents=True, exist_ok=True)
@@ -484,6 +488,7 @@ class HarnessSession:
                 args.get("handwrite_signature_checkbox")
                 or d.handwrite_signature_checkbox
             ),
+            username=self.session_hash or None,
         )
         rels = [self.rel(p) for p in paths if Path(p).is_file()]
         payload: dict[str, Any] = {"message": message, "output_files": rels}
@@ -1161,8 +1166,13 @@ def run_agentic_redaction(
 
     if session is None:
         session = HarnessSession(
-            document_path, defaults=defaults, output_root=output_root
+            document_path,
+            defaults=defaults,
+            output_root=output_root,
+            session_hash=(eval_session_hash or "").strip(),
         )
+    elif (eval_session_hash or "").strip() and not session.session_hash:
+        session.session_hash = (eval_session_hash or "").strip()
     specs = load_inline_tool_specs()
     names = inline_tool_names(specs)
     prompt = build_harness_task_prompt(session, instructions, page_range=page_range)
@@ -1593,12 +1603,16 @@ def agentic_redact_for_gradio(
     )
 
     eval_recorder: HarnessEvalRecorder | None = None
+    sid = (session_hash or "").strip()
     session = HarnessSession(
-        document, defaults=defaults, output_root=output_folder or OUTPUT_FOLDER
+        document,
+        defaults=defaults,
+        output_root=output_folder or OUTPUT_FOLDER,
+        session_hash=sid,
     )
     if harness_post_run_eval_enabled():
         eval_recorder = HarnessEvalRecorder(
-            session_hash=(session_hash or "").strip(),
+            session_hash=sid,
             run_source="main_app_harness",
         )
         gold_line = eval_recorder.begin(
@@ -1621,7 +1635,7 @@ def agentic_redact_for_gradio(
         output_root=output_folder or OUTPUT_FOLDER,
         session=session,
         eval_recorder=eval_recorder,
-        eval_session_hash=(session_hash or "").strip(),
+        eval_session_hash=sid,
     ):
         final = progress
         files = progress.output_files
@@ -1641,6 +1655,80 @@ def agentic_redact_for_gradio(
         )
 
 
+def infer_harness_session_dir_from_paths(
+    paths: list[str] | None,
+) -> Path | None:
+    """Return ``…/agentcore/<run_id>`` when output paths sit under a harness session."""
+    for raw in paths or []:
+        try:
+            parts = Path(raw).resolve().parts
+        except OSError:
+            continue
+        if "agentcore" not in parts:
+            continue
+        idx = parts.index("agentcore")
+        if idx + 1 >= len(parts):
+            continue
+        return Path(*parts[: idx + 2])
+    return None
+
+
+def first_pass_cli_username_from_session(
+    session_dir: str | Path | None,
+) -> str | None:
+    """
+    Local first-pass redaction writes under ``output_redact/<username>/``.
+
+    That same username is used by ``cli_redact`` as the S3 session segment
+    (``output/<username>/<YYYYMMDD>/…``). Prefer it so agentic finals land next
+    to the first-pass objects the user already sees in the bucket.
+    """
+    if not session_dir:
+        return None
+    root = Path(session_dir) / REDACT_OUTPUT_DIR
+    if not root.is_dir():
+        return None
+    subdirs = sorted(
+        (p for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return subdirs[0].name if subdirs else None
+
+
+def resolve_agentic_s3_output_folder(
+    *,
+    session_dir: str | Path | None = None,
+    output_paths: list[str] | None = None,
+    fallback_s3_folder: str = "",
+) -> str:
+    """
+    Prefer Gradio/Cognito ``s3_output_folder_state`` (session-scoped) when set.
+
+    If that is empty, fall back to the CLI first-pass prefix derived from
+    ``output_redact/<username>/`` (``output/<username>/<YYYYMMDD>/``).
+    """
+    from datetime import datetime
+
+    from tools.config import S3_OUTPUTS_FOLDER
+
+    gradio_prefix = (fallback_s3_folder or "").strip()
+    if gradio_prefix:
+        return gradio_prefix if gradio_prefix.endswith("/") else gradio_prefix + "/"
+
+    sess = (
+        Path(session_dir)
+        if session_dir
+        else infer_harness_session_dir_from_paths(output_paths)
+    )
+    username = first_pass_cli_username_from_session(sess)
+    base = (S3_OUTPUTS_FOLDER or "").strip()
+    if username and base:
+        today = datetime.now().strftime("%Y%m%d")
+        return f"{base.rstrip('/')}/{username}/{today}/"
+    return ""
+
+
 def upload_agentic_outputs_to_s3(
     output_paths: list[str] | None,
     *,
@@ -1648,20 +1736,37 @@ def upload_agentic_outputs_to_s3(
     save_outputs_to_s3: bool,
     base_document: str | Path | None = None,
     s3_bucket: str | None = None,
+    session_dir: str | Path | None = None,
+    s3_subfolder: str = "agentic",
 ) -> str | None:
-    """Upload harness deliverables using the same helper as the main redaction tab."""
+    """
+    Upload harness deliverables under ``…/<stem>/agentic/``.
+
+    Prefers Gradio/Cognito ``s3_output_folder`` so finals share the session
+    identity tree with first-pass (harness pins CLI ``username`` to that hash).
+    Falls back to the first-pass ``output/<username>/<date>/`` prefix when Gradio
+    state is empty.
+    """
     from tools.aws_functions import export_outputs_to_s3
     from tools.config import S3_OUTPUTS_BUCKET
 
     paths = [p for p in (output_paths or []) if p]
-    if not paths or not (s3_output_folder or "").strip():
+    if not paths:
+        return None
+    resolved = resolve_agentic_s3_output_folder(
+        session_dir=session_dir,
+        output_paths=paths,
+        fallback_s3_folder=s3_output_folder,
+    )
+    if not resolved:
         return None
     return export_outputs_to_s3(
         file_list_state=paths,
-        s3_output_folder_state_value=s3_output_folder.strip(),
+        s3_output_folder_state_value=resolved,
         save_outputs_to_s3_flag=save_outputs_to_s3,
         base_file_state=str(base_document) if base_document else None,
         s3_bucket=s3_bucket or S3_OUTPUTS_BUCKET,
+        s3_subfolder=(s3_subfolder or "").strip() or None,
     )
 
 
@@ -1703,7 +1808,12 @@ def agentic_redact_api(
         page_min=int(page_min or 0),
         page_max=int(page_max or 0),
     )
-    session = HarnessSession(document, defaults=defaults, output_root=OUTPUT_FOLDER)
+    session = HarnessSession(
+        document,
+        defaults=defaults,
+        output_root=OUTPUT_FOLDER,
+        session_hash="api",
+    )
     eval_recorder: HarnessEvalRecorder | None = None
     if harness_post_run_eval_enabled():
         eval_recorder = HarnessEvalRecorder(
@@ -1747,11 +1857,35 @@ def agentic_redact_api(
     return final.output_files, final.summary
 
 
+def export_agentic_outputs_to_s3_for_gradio(
+    file_list_state,
+    s3_output_folder_state_value: str,
+    save_outputs_to_s3_flag: bool,
+    base_file_state=None,
+) -> str | None:
+    """Gradio ``.success`` wrapper: same inputs as ``export_outputs_to_s3``, agentic layout."""
+    paths: list[str] = []
+    if isinstance(file_list_state, str) and file_list_state:
+        paths = [file_list_state]
+    elif isinstance(file_list_state, (list, tuple)):
+        paths = [str(p) for p in file_list_state if p]
+    return upload_agentic_outputs_to_s3(
+        paths,
+        s3_output_folder=str(s3_output_folder_state_value or ""),
+        save_outputs_to_s3=bool(save_outputs_to_s3_flag),
+        base_document=base_file_state,
+        session_dir=infer_harness_session_dir_from_paths(paths),
+        s3_subfolder="agentic",
+    )
+
+
 __all__ = [
     "HarnessProgress",
     "agentic_redact_api",
     "agentic_redact_for_gradio",
+    "export_agentic_outputs_to_s3_for_gradio",
     "upload_agentic_outputs_to_s3",
+    "resolve_agentic_s3_output_folder",
     "HarnessRunDefaults",
     "HarnessSession",
     "HarnessToolError",
