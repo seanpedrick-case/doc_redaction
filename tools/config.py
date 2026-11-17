@@ -463,7 +463,7 @@ SAVE_OUTPUTS_TO_S3 = convert_string_to_boolean(
 
 # Base S3 folder (key prefix) for saving redaction outputs within the DOCUMENT_REDACTION_BUCKET.
 # If left blank, S3 uploads for outputs will be skipped even if SAVE_OUTPUTS_TO_S3 is True.
-S3_OUTPUTS_FOLDER = get_or_create_env_var("S3_OUTPUTS_FOLDER", "")
+S3_OUTPUTS_FOLDER = get_or_create_env_var("S3_OUTPUTS_FOLDER", "output/")
 
 S3_OUTPUTS_BUCKET = get_or_create_env_var(
     "S3_OUTPUTS_BUCKET", DOCUMENT_REDACTION_BUCKET
