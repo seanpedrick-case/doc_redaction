@@ -39,6 +39,8 @@ class HarnessJob:
     s3_upload_done: bool = False
     post_complete_hooks_done: bool = False
     s3_message: str = ""
+    # Gradio / Cognito identity — dropdown/attach must not leak across sessions.
+    gradio_session_hash: str = ""
 
     def is_terminal(self) -> bool:
         return self.status in _TERMINAL
@@ -58,6 +60,7 @@ class HarnessJob:
             "s3_upload_done": self.s3_upload_done,
             "post_complete_hooks_done": self.post_complete_hooks_done,
             "s3_message": self.s3_message,
+            "gradio_session_hash": self.gradio_session_hash,
         }
 
 
@@ -120,15 +123,40 @@ def _active_count() -> int:
     return sum(1 for j in _JOBS.values() if j.status in {"queued", "running"})
 
 
-def list_jobs(*, limit: int = 20) -> list[dict[str, Any]]:
+def _normalize_session_hash(session_hash: str | None) -> str:
+    return (session_hash or "").strip()
+
+
+def _job_matches_session(row: dict[str, Any] | HarnessJob, session_hash: str) -> bool:
+    """True when the job belongs to this Gradio/Cognito session (or session filter is off)."""
+    want = _normalize_session_hash(session_hash)
+    if not want:
+        # No session identity yet — only show jobs that also have no owner hash.
+        if isinstance(row, HarnessJob):
+            return not (row.gradio_session_hash or "").strip()
+        return not str(row.get("gradio_session_hash") or "").strip()
+    if isinstance(row, HarnessJob):
+        owned = (row.gradio_session_hash or "").strip()
+        if owned:
+            return owned == want
+        # Legacy in-memory job: fall back to session_dir path segment.
+        return want in Path(row.session_dir).parts
+    owned = str(row.get("gradio_session_hash") or "").strip()
+    if owned:
+        return owned == want
+    session_dir = str(row.get("session_dir") or "")
+    return bool(session_dir) and want in Path(session_dir).parts
+
+
+def list_jobs(*, limit: int = 20, session_hash: str = "") -> list[dict[str, Any]]:
     with _JOBS_LOCK:
         jobs = sorted(
             _JOBS.values(),
             key=lambda j: j.started_at or 0.0,
             reverse=True,
         )
-        out = [j.to_public_dict() for j in jobs[: max(1, int(limit))]]
-    # Supplement with recent disk statuses not in memory (same process scan of known dirs).
+        filtered = [j for j in jobs if _job_matches_session(j, session_hash)]
+        out = [j.to_public_dict() for j in filtered[: max(1, int(limit))]]
     return out
 
 
@@ -136,10 +164,13 @@ def list_jobs_with_disk_scan(
     output_root: str | Path,
     *,
     limit: int = 20,
+    session_hash: str = "",
 ) -> list[dict[str, Any]]:
-    """Active/recent jobs from memory, plus recent ``job_status.json`` under output_root."""
+    """Active/recent jobs for one Gradio session (memory + ``job_status.json`` under output_root)."""
     by_id: dict[str, dict[str, Any]] = {
-        d["run_id"]: d for d in list_jobs(limit=limit * 2) if d.get("run_id")
+        d["run_id"]: d
+        for d in list_jobs(limit=limit * 2, session_hash=session_hash)
+        if d.get("run_id")
     }
     root = Path(output_root)
     if root.is_dir():
@@ -148,6 +179,10 @@ def list_jobs_with_disk_scan(
             for status_path in root.glob("**/agentcore/*/job_status.json"):
                 data = load_job_status_from_disk(status_path.parent)
                 if not data or not data.get("run_id"):
+                    continue
+                if not data.get("session_dir"):
+                    data = {**data, "session_dir": str(status_path.parent)}
+                if not _job_matches_session(data, session_hash):
                     continue
                 rid = str(data["run_id"])
                 if rid in by_id:
@@ -171,8 +206,9 @@ def job_choices_for_dropdown(
     output_root: str | Path,
     *,
     limit: int = 20,
+    session_hash: str = "",
 ) -> list[str]:
-    rows = list_jobs_with_disk_scan(output_root, limit=limit)
+    rows = list_jobs_with_disk_scan(output_root, limit=limit, session_hash=session_hash)
     choices: list[str] = []
     for row in rows:
         rid = str(row.get("run_id") or "")
@@ -445,6 +481,7 @@ def start_harness_job(
         summary="Queued detached agent run…",
         activity="Job queued.",
         started_at=time.time(),
+        gradio_session_hash=sid,
     )
     with _JOBS_LOCK:
         _JOBS[job.run_id] = job
@@ -580,7 +617,8 @@ def start_detached_agentic_redact_for_gradio(
 
     from tools.config import OUTPUT_FOLDER
 
-    choices = job_choices_for_dropdown(output_folder or OUTPUT_FOLDER)
+    sid = (session_hash or "").strip()
+    choices = job_choices_for_dropdown(output_folder or OUTPUT_FOLDER, session_hash=sid)
     summary = f"Detached agent job `{job.run_id}` started. You can refresh this page; the run continues on the server."
     activity = job.activity or "Job started."
     return (
@@ -597,6 +635,7 @@ def start_detached_agentic_redact_for_gradio(
 def poll_detached_harness_job(
     run_id: str,
     output_folder: str | None = None,
+    session_hash: str = "",
 ) -> tuple[str, str, list[str], list[str], str, Any, Any, bool]:
     """Poll job for Gradio Timer. Last value is ``just_finished_for_hooks``."""
     import gradio as gr
@@ -604,7 +643,8 @@ def poll_detached_harness_job(
     from tools.config import OUTPUT_FOLDER
 
     rid = (run_id or "").strip()
-    choices = job_choices_for_dropdown(output_folder or OUTPUT_FOLDER)
+    sid = (session_hash or "").strip()
+    choices = job_choices_for_dropdown(output_folder or OUTPUT_FOLDER, session_hash=sid)
     drop = _dropdown_update(choices, preferred_run_id=rid)
     if not rid:
         return (
@@ -619,6 +659,8 @@ def poll_detached_harness_job(
         )
 
     snap = poll_job_snapshot_or_disk(rid, output_root=output_folder or OUTPUT_FOLDER)
+    if snap is not None and not _job_matches_session(snap, sid):
+        snap = None
     if snap is None:
         return (
             f"Unknown job `{rid}`.",
@@ -653,10 +695,13 @@ def poll_detached_harness_job(
     )
 
 
-def cancel_detached_harness_job(run_id: str) -> str:
+def cancel_detached_harness_job(run_id: str, session_hash: str = "") -> str:
     rid = (run_id or "").strip()
     if not rid:
         return "No job to cancel."
+    snap = poll_job_snapshot_or_disk(rid)
+    if snap is None or not _job_matches_session(snap, session_hash):
+        return f"Could not cancel `{rid}` (missing, finished, or not in this session)."
     if request_cancel(rid):
         return f"Cancel requested for `{rid}`."
     return f"Could not cancel `{rid}` (missing or already finished)."
@@ -665,13 +710,15 @@ def cancel_detached_harness_job(run_id: str) -> str:
 def attach_detached_harness_job(
     choice: str,
     output_folder: str | None = None,
+    session_hash: str = "",
 ) -> tuple[str, str, list[str], list[str], str, Any, Any]:
     import gradio as gr
 
     from tools.config import OUTPUT_FOLDER
 
     rid = parse_run_id_from_choice(choice)
-    choices = job_choices_for_dropdown(output_folder or OUTPUT_FOLDER)
+    sid = (session_hash or "").strip()
+    choices = job_choices_for_dropdown(output_folder or OUTPUT_FOLDER, session_hash=sid)
     drop = _dropdown_update(choices, preferred_run_id=rid)
     if not rid:
         return (
@@ -684,9 +731,12 @@ def attach_detached_harness_job(
             drop,
         )
     snap = poll_job_snapshot_or_disk(rid, output_root=output_folder or OUTPUT_FOLDER)
-    if snap is None:
-        # Try matching session_dir from dropdown scan
-        for row in list_jobs_with_disk_scan(output_folder or OUTPUT_FOLDER):
+    if snap is None or not _job_matches_session(snap, sid):
+        # Try matching session_dir from dropdown scan (already session-filtered)
+        snap = None
+        for row in list_jobs_with_disk_scan(
+            output_folder or OUTPUT_FOLDER, session_hash=sid
+        ):
             if row.get("run_id") == rid:
                 snap = row
                 break
@@ -713,10 +763,16 @@ def attach_detached_harness_job(
     )
 
 
-def refresh_detached_job_choices(output_folder: str | None = None) -> Any:
+def refresh_detached_job_choices(
+    output_folder: str | None = None,
+    session_hash: str = "",
+) -> Any:
     from tools.config import OUTPUT_FOLDER
 
-    choices = job_choices_for_dropdown(output_folder or OUTPUT_FOLDER)
+    choices = job_choices_for_dropdown(
+        output_folder or OUTPUT_FOLDER,
+        session_hash=(session_hash or "").strip(),
+    )
     return _dropdown_update(choices)
 
 

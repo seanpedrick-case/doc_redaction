@@ -6030,7 +6030,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
             agent_job_timer.tick(
                 fn=poll_detached_harness_job,
-                inputs=[agent_job_run_id_state, output_folder_textbox],
+                inputs=[
+                    agent_job_run_id_state,
+                    output_folder_textbox,
+                    session_hash_textbox,
+                ],
                 outputs=[
                     redaction_output_summary_textbox,
                     agent_activity_markdown,
@@ -6052,7 +6056,11 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
             agent_job_attach_btn.click(
                 fn=attach_detached_harness_job,
-                inputs=[agent_job_dropdown, output_folder_textbox],
+                inputs=[
+                    agent_job_dropdown,
+                    output_folder_textbox,
+                    session_hash_textbox,
+                ],
                 outputs=[
                     redaction_output_summary_textbox,
                     agent_activity_markdown,
@@ -6066,13 +6074,13 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
             )
             agent_job_cancel_btn.click(
                 fn=cancel_detached_harness_job,
-                inputs=[agent_job_run_id_state],
+                inputs=[agent_job_run_id_state, session_hash_textbox],
                 outputs=[redaction_output_summary_textbox],
                 api_visibility="undocumented",
             )
             agent_job_refresh_btn.click(
                 fn=refresh_detached_job_choices,
-                inputs=[output_folder_textbox],
+                inputs=[output_folder_textbox, session_hash_textbox],
                 outputs=[agent_job_dropdown],
                 api_visibility="undocumented",
             )

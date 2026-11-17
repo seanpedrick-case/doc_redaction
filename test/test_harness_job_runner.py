@@ -201,6 +201,34 @@ def test_dropdown_update_sets_choices_and_value():
     assert update.get("__type__") == "update"
 
 
+def test_job_choices_filtered_by_gradio_session(tmp_path: Path):
+    a = hjr.HarnessJob(
+        run_id="run-a",
+        session_dir=str(tmp_path / "a" / "agentcore" / "run-a"),
+        document_name="a.pdf",
+        status="running",
+        started_at=2.0,
+        gradio_session_hash="user-a",
+    )
+    b = hjr.HarnessJob(
+        run_id="run-b",
+        session_dir=str(tmp_path / "b" / "agentcore" / "run-b"),
+        document_name="b.pdf",
+        status="succeeded",
+        started_at=1.0,
+        gradio_session_hash="user-b",
+    )
+    with hjr._JOBS_LOCK:
+        hjr._JOBS[a.run_id] = a
+        hjr._JOBS[b.run_id] = b
+    choices_a = hjr.job_choices_for_dropdown(tmp_path, session_hash="user-a")
+    choices_b = hjr.job_choices_for_dropdown(tmp_path, session_hash="user-b")
+    assert len(choices_a) == 1 and "run-a" in choices_a[0]
+    assert len(choices_b) == 1 and "run-b" in choices_b[0]
+    assert "run-b" not in "".join(choices_a)
+    assert "run-a" not in "".join(choices_b)
+
+
 def test_mark_post_complete_hooks_done(tmp_path: Path):
     job = hjr.HarnessJob(
         run_id="hooks",
