@@ -532,6 +532,28 @@ def test_format_agentic_gradio_summary_includes_activity_and_files():
     assert "Elapsed: 305s" in text
 
 
+def test_harness_doc_redact_disables_interim_s3_upload(
+    monkeypatch, sample_pdf, tmp_path
+):
+    captured: dict = {}
+
+    def fake_doc_redact_api(**kwargs):
+        captured.update(kwargs)
+        out = tmp_path / "out" / "agentcore" / "run1" / "output_redact" / "x"
+        out.mkdir(parents=True, exist_ok=True)
+        review = out / "sample_review_file.csv"
+        review.write_text(REVIEW_HEADER, encoding="utf-8")
+        return [str(review)], "ok"
+
+    monkeypatch.setattr(
+        "tools.simplified_api.doc_redact_api",
+        fake_doc_redact_api,
+    )
+    session = _session(sample_pdf, tmp_path)
+    session.doc_redact({})
+    assert captured.get("save_outputs_to_s3") is False
+
+
 def test_upload_agentic_outputs_to_s3_delegates(monkeypatch, sample_pdf):
     calls: list[dict] = []
 

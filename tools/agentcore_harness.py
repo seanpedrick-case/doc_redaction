@@ -489,6 +489,9 @@ class HarnessSession:
                 or d.handwrite_signature_checkbox
             ),
             username=self.session_hash or None,
+            # Keep interim first-pass off S3; finals upload via Output files /
+            # upload_agentic_outputs_to_s3 when SAVE_OUTPUTS_TO_S3 is on.
+            save_outputs_to_s3=False,
         )
         rels = [self.rel(p) for p in paths if Path(p).is_file()]
         payload: dict[str, Any] = {"message": message, "output_files": rels}
