@@ -68,6 +68,7 @@ def _merge_run_manifest_stack(
     *,
     ocr_method: str = "",
     pii_method: str = "",
+    chosen_local_ocr_model: str = "",
     orchestrator: str = "",
     model_name: str = "",
     encourage_vlm_faces: bool | None = None,
@@ -87,6 +88,8 @@ def _merge_run_manifest_stack(
         data["run_ocr_method"] = ocr_method.strip()
     if pii_method.strip():
         data["run_pii_method"] = pii_method.strip()
+    if chosen_local_ocr_model.strip():
+        data["run_chosen_local_ocr_model"] = chosen_local_ocr_model.strip()
     if orchestrator.strip():
         data["run_orchestrator"] = orchestrator.strip()
     if model_name.strip():
@@ -115,6 +118,10 @@ def write_session_post_run_eval(
     model_name: str = "",
     encourage_vlm_faces: bool = False,
     encourage_vlm_signatures: bool = False,
+    workspace_root: Path | str | None = None,
+    gold_case_dir: Path | str | None = None,
+    force: bool = False,
+    run_source: str = "agent_gradio",
 ) -> Path | None:
     """
     Persist artifacts under ``{session_workspace}/eval/run_<ts>/`` and ``eval_summary.json``.
@@ -132,16 +139,23 @@ def write_session_post_run_eval(
     except ImportError:
         from arize_monitoring import agent_eval_deepeval_tracing_enabled
 
-    if not agent_eval_deepeval_tracing_enabled():
+    if not force and not agent_eval_deepeval_tracing_enabled():
         return None
 
     _, _, eval_dir = _ensure_agent_imports()
     from session_workspace import session_workspace_dir
 
-    workspace = session_workspace_dir(session_hash)
+    if workspace_root is not None:
+        workspace = Path(workspace_root).resolve()
+    else:
+        workspace = session_workspace_dir(session_hash)
     stamp = time.strftime("%Y%m%d_%H%M%S")
     run_dir = (workspace / "eval" / f"run_{stamp}").resolve()
-    gold_case_dir = resolve_eval_gold_dir(session_hash)
+    if gold_case_dir is not None:
+        gold_path = Path(gold_case_dir).resolve()
+        gold_case_dir = gold_path if gold_path.is_dir() else None
+    else:
+        gold_case_dir = resolve_eval_gold_dir(session_hash)
 
     if cumulative_tool_calls is not None:
         tool_args = {"tool_calls": list(cumulative_tool_calls)}
@@ -273,13 +287,17 @@ def write_session_post_run_eval(
         run_id = (
             Path(mirrored).name if mirrored else f"gradio_{session_hash[:8]}_{stamp}"
         )
+        env_source = (os.environ.get("EVAL_APPEND_RUN_SOURCE") or "").strip()
+        resolved_source = env_source or (run_source or "agent_gradio")
+        skip_csv_check = bool((os.environ.get("BENCHMARK_SUITE_ID") or "").strip())
         append_eval_run_summary_row(
             summary=summary,
             run_dir=run_dir,
             task_instructions=task_instructions,
             run_id=run_id,
-            run_source="agent_gradio",
+            run_source=resolved_source,
             extra_csv_paths=[session_csv],
+            skip_enabled_check=skip_csv_check or force,
         )
 
     return summary_path
@@ -493,9 +511,20 @@ def score_post_run_metrics(
 def _gold_eval_skip_reason(session_hash: str) -> str:
     from agent_eval_env import agent_eval_auto_gold_enabled
 
-    if agent_eval_auto_gold_enabled():
+    auto = agent_eval_auto_gold_enabled()
+    if not auto:
+        try:
+            from app_eval_env import app_eval_auto_gold_enabled
+
+            auto = app_eval_auto_gold_enabled()
+        except ImportError:
+            pass
+
+    if auto:
         if not session_hash:
-            return "Auto-gold enabled but session_hash missing."
+            # Main-app redact path: auto-gold already attempted match without
+            # agent session task context (APP_EVAL_AUTO_GOLD).
+            return "No matching gold case for this PDF/instructions."
         try:
             from eval_task_context import get_active_task_for_eval
         except ImportError:
@@ -504,7 +533,10 @@ def _gold_eval_skip_reason(session_hash: str) -> str:
         if task is None:
             return "No active redaction task for gold eval."
         return task.eval_gold_match_reason or "No matching gold case for this task."
-    return "Set AGENT_EVAL_GOLD for gold policy lists (or enable AGENT_EVAL_AUTO_GOLD)."
+    return (
+        "Set APP_EVAL_GOLD / AGENT_EVAL_GOLD for a fixed gold case "
+        "(or enable APP_EVAL_AUTO_GOLD / AGENT_EVAL_AUTO_GOLD)."
+    )
 
 
 def _load_expected_tool_names(gold_case_dir: Path) -> list[str]:

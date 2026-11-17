@@ -3825,13 +3825,27 @@ def apply_redactions_to_review_df_and_files(
                     output_image_path = (
                         output_folder + file_name_without_ext + "_redacted.png"
                     )
+                    # Review-pipeline boxes are stored as relative (0-1) coords
+                    # (see update_all_page_annotation_object_based_on_previous_page).
+                    # Initial redaction draws absolute pixels; apply must scale here
+                    # or PIL gets sub-pixel rectangles and the PNG looks unredacted.
+                    img_w, img_h = image.size
                     for img_annotation_box in page_image_annotator_object["boxes"]:
-                        coords = [
-                            img_annotation_box["xmin"],
-                            img_annotation_box["ymin"],
-                            img_annotation_box["xmax"],
-                            img_annotation_box["ymax"],
-                        ]
+                        try:
+                            xmin = float(img_annotation_box["xmin"])
+                            ymin = float(img_annotation_box["ymin"])
+                            xmax = float(img_annotation_box["xmax"])
+                            ymax = float(img_annotation_box["ymax"])
+                        except (KeyError, TypeError, ValueError):
+                            continue
+
+                        if _box_coords_are_relative(img_annotation_box):
+                            xmin *= img_w
+                            xmax *= img_w
+                            ymin *= img_h
+                            ymax *= img_h
+
+                        coords = [xmin, ymin, xmax, ymax]
 
                         fill = img_annotation_box["color"]
 

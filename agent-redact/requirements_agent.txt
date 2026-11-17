@@ -6,7 +6,7 @@
 # Version ranges for packages also in pyproject.toml [project] dependencies align with that file.
 
 # --- Gradio UI + API client ---
-gradio>=6.31.0,<7
+gradio>=6.32.0,<7
 gradio-pdf-redaction>=0.0.25,<1
 httpx>=0.28.1,<1
 requests>=2.34.2,<3
@@ -44,7 +44,7 @@ rapidfuzz>=3.10.0,<=3.14.5
 defusedxml>=0.7.1,<1
 
 # --- Shared platform features (logging, Cognito, S3 via tools/) ---
-boto3>=1.43.117,<2
+boto3>=1.44.3,<2
 bleach>=6.4.0,<7
 fastapi>=0.162.0,<1
 uvicorn>=0.54.0,<1

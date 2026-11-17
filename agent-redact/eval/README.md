@@ -30,6 +30,7 @@ PHOENIX_COLLECTOR_ENDPOINT=http://localhost:6006
 
 - **LangGraph / AgentCore Runtime:** OpenInference LangChain spans + `session.id` = Gradio `session_hash`.
 - **Pi:** coarser AGENT/TOOL spans via `iter_pi_events_with_tracing` (LLM stays in Node).
+- **Main-app AgentCore Harness** (`USE_AGENTCORE` in [`app.py`](../../app.py)): root `main_app.harness` + inline TOOL spans around client dispatch ([`harness_eval_support.py`](../../tools/harness_eval_support.py)); LLM turns stay AWS-side. When `APP_EVAL_ENABLED` / `AGENT_EVAL_DEEPEVAL_TRACING` is on, also writes local `trace_events.jsonl` next to `tool_args.json` under `OUTPUT_FOLDER/agentcore/<run_id>/eval/run_*/`.
 
 ### Recommended process KPIs
 
@@ -60,7 +61,7 @@ When the agent runs `verify_coverage`, reports are no longer only buried in trun
 | `redaction.verify_coverage_calls` | Root AGENT | How many coverage calls this turn |
 | `redaction.workflow_incomplete` | Root AGENT (LangGraph) | `review_apply` not completed |
 
-**Phoenix / AX:** filter sessions where `redaction.final_pass_strict = false` or `redaction.any_verify_fail = true`. Wire: LangGraph + AgentCore Runtime via `run_verify_coverage` → `annotate_current_span_with_coverage`; Pi via tool-output JSON parse in `iter_pi_events_with_tracing`.
+**Phoenix / AX:** filter sessions where `redaction.final_pass_strict = false` or `redaction.any_verify_fail = true`. Wire: LangGraph + AgentCore Runtime via `run_verify_coverage` → `annotate_current_span_with_coverage`; Pi via tool-output JSON parse in `iter_pi_events_with_tracing`; main-app harness via `harness_inline_tool_span` + `maybe_annotate_coverage_from_tool_output` on `verify_redaction_coverage` results.
 
 ### Phoenix / AX tips
 
@@ -81,7 +82,9 @@ When the agent runs `verify_coverage`, reports are no longer only buried in trun
 | AgentCore Evaluations **built-ins** (tool selection, goal success) | Process/trajectory only — they do **not** auto-score `pass_strict` |
 | Custom AgentCore / offline eval that reads span attrs or re-runs `run_policy_gate.py` | Straight-forward; prefer offline policy gate for CI pass/fail |
 
-**Harness** (skills/shell) does not go through `run_verify_coverage` in Python, so these attributes appear only if a tool returns the same JSON and you add Harness-side span mapping — Runtime is the easy path.
+**Harness (agent-redact Gradio, skills/shell):** AWS-managed builtins do not emit app-side OTEL; map coverage only when a tool returns verify JSON you can parse.
+
+**Main-app harness (Option 3):** inline tools run in-process. With `ARIZE_TRACING_ENABLED`, Phoenix/AX gets `main_app.harness` + TOOL children and `redaction.*` on verify. DeepEval metrics still score from local `tool_args.json` / `eval_summary.json` (same as Pi); `trace_events.jsonl` is the durable local journal. Full LLM message spans inside the harness VM are not available from the app.
 
 Pair AgentCore process scores with tier 2 policy gate + tier 3 gold F1 for product quality.
 
@@ -403,7 +406,7 @@ Set **`AGENT_ORCHESTRATOR`** to `langgraph` or `pi` before running the harness (
    | `AGENT_EVAL_OCR_IOU_THRESHOLD` | *(unset)* | Require word bbox IoU for OCR token matches |
    | `AGENT_EVAL_OVERALL_INCLUDE_GOLD=1` | off | Include min gold/OCR F1 in Gradio `overall_pass` |
 
-   OCR gold compare uses fixture `ocr_results_with_words.csv` vs run copy; skipped when `manifest.json` `ocr_method` differs between fixture and run.
+   OCR gold compare uses fixture `ocr_results_with_words.csv` vs run copy whenever both files exist (method mismatch is recorded in `ocr_gold.json` `notes` only). Set `AGENT_EVAL_OCR_SKIP_ON_METHOD_MISMATCH=1` to restore the old skip-on-mismatch behaviour.
 
 ### Fixtures
 
@@ -428,6 +431,62 @@ The **base** Gradio app ([`app.py`](../../app.py)) reuses this eval tree when `A
 
 See [`gold/README.md`](gold/README.md) (main app authoring).
 
+### Standardized benchmark suite (agent + main app)
+
+One entrypoint runs **every blessed gold case** (directories with `ideal_review_file.csv` + resolvable input PDF) and appends rows to [`eval/outputs/eval_run_summary.csv`](outputs/eval_run_summary.csv). Suite JSON reports land beside the CSV as `eval/outputs/bench_<timestamp>_<gitsha>.json`.
+
+```bash
+# Audit local gold readiness (no LLM)
+python agent-redact/eval/run_benchmark_suite.py --audit-only
+
+# List cases that would run
+python agent-redact/eval/run_benchmark_suite.py --list-cases
+
+# Full suite (agent LangGraph turn + main-app CLI redact per case)
+python agent-redact/eval/run_benchmark_suite.py \
+  --gold-root agent-redact/eval/gold \
+  --surfaces agent,main \
+  --orchestrator langgraph
+
+# Compare OCR/PII stacks (CLI overrides on top of each case's app_eval_settings.json)
+python agent-redact/eval/run_benchmark_suite.py --surfaces main,harness --case show_ex_partnership \
+  --ocr-method "Local OCR model - PDFs without selectable text" \
+  --chosen-local-ocr-model paddle \
+  --pii-method Local
+
+# Bedrock LLM PII model ids live in APP_CONFIG_PATH — load per matrix row:
+python agent-redact/eval/run_benchmark_suite.py --surfaces main --case show_ex_partnership \
+  --pii-method "LLM (AWS Bedrock)" \
+  --app-config-path config/bench_bedrock_nova.env
+
+# One case, agent only
+python agent-redact/eval/run_benchmark_suite.py --case example_live --surfaces agent
+```
+
+| Leg | Requirement | CSV `run_source` |
+|-----|-------------|------------------|
+| Agent | `instructions.txt`, input PDF, ideal CSV; LangGraph/Pi stack | `benchmark_agent` |
+| Harness | same as agent; `AGENTCORE_HARNESS_ARN` + AWS creds (main app route) | `benchmark_harness` |
+| Main | above + `app_eval_settings.json` | `main_app` (via `cli_redact --app-eval`) |
+
+AgentCore harness leg (not LangGraph):
+
+```bash
+python agent-redact/eval/run_benchmark_suite.py \
+  --surfaces harness \
+  --case example_emails_to_professor_agentic
+```
+
+Uses [`run_agentic_redaction`](../../tools/agentcore_harness.py) and the same [`HarnessEvalRecorder`](../../tools/harness_eval_support.py) / [`post_run_eval`](post_run_eval.py) gates as the Redact tab **Run agent redact** flow.
+
+Set `AGENT_EVAL_RUN_SUMMARY_CSV=1`, `APP_EVAL_ENABLED=1`, and `APP_EVAL_RUN_SUMMARY_CSV=1` (the suite sets these by default). New CSV columns: `benchmark_suite_id`, `git_commit`.
+
+**Exit codes:** by default the process exits **0** when redaction + eval complete, even if scores are poor (`overall_pass=false`, low geometry F1). Per-surface JSON records separate `exit_code` (technical) from `qa_pass`. Use `--fail-on-qa` for CI that should fail on bad gold scores; `--allow-fail` forces exit 0 even on crashes.
+
+Gold readiness table: [`gold/BENCHMARK_GOLD_AUDIT.md`](gold/BENCHMARK_GOLD_AUDIT.md) (regenerate with `--audit-only`).
+
+**Docker main app:** mount host `agent-redact/eval/runs` (see `x-redaction-app-volumes` in compose) or the suite falls back to `eval/outputs/benchmark_runs/` / `OUTPUT_FOLDER/benchmark_runs/`. Optional: `BENCHMARK_RUNS_ROOT=/path`.
+
 ---
 
 ## Module map
@@ -445,6 +504,8 @@ See [`gold/README.md`](gold/README.md) (main app authoring).
 | [`compare_policy_lists.py`](compare_policy_lists.py) | Gold vs observed must_redact / deny_list extraction F1 + guardrail |
 | [`run_policy_gate.py`](run_policy_gate.py) | Fixture-friendly coverage gate (+ `--dual`) |
 | [`run_agent_regression.py`](run_agent_regression.py) | Local live/offline harness → deterministic gates |
+| [`benchmark_cases.py`](benchmark_cases.py) | Discover / audit benchmark-eligible gold cases |
+| [`run_benchmark_suite.py`](run_benchmark_suite.py) | Multi-case benchmark (agent + main app) |
 | [`deepeval_metrics.py`](deepeval_metrics.py) | DeepEval metric wired to `pass_strict` |
 | [`run_local_agent_eval.ps1`](run_local_agent_eval.ps1) / [`.sh`](run_local_agent_eval.sh) | Thin wrappers for local runs |
 | [`gold/`](gold/) | Case layout + `example_smoke` / `example_live` |

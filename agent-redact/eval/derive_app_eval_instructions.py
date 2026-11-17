@@ -83,6 +83,8 @@ class AppEvalRedactionSettings:
     text_extraction_only: bool = False
     handwrite_signature_checkbox: list[str] = field(default_factory=list)
     custom_llm_instructions: str = ""
+    chosen_local_ocr_model: str = ""
+    app_config_path: str = ""
 
     def merged_entities(self) -> list[str]:
         """Entity labels that affect derived instructions / gold strict match."""
@@ -201,6 +203,11 @@ def synthetic_doc_redact_tool_args(
                     "deny_list": deny,
                     "ocr_method": settings.text_extraction_method,
                     "pii_method": settings.pii_identification_method,
+                    **(
+                        {"chosen_local_ocr_model": settings.chosen_local_ocr_model}
+                        if settings.chosen_local_ocr_model
+                        else {}
+                    ),
                 },
             }
         ]
@@ -228,4 +235,6 @@ def settings_from_json(path: str) -> AppEvalRedactionSettings:
             data.get("handwrite_signature_checkbox") or []
         ),
         custom_llm_instructions=str(data.get("custom_llm_instructions") or ""),
+        chosen_local_ocr_model=str(data.get("chosen_local_ocr_model") or ""),
+        app_config_path=str(data.get("app_config_path") or ""),
     )

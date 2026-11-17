@@ -731,6 +731,8 @@ def redact_document_from_upload_for_gradio_api(
     page_min: int | None = None,
     page_max: int | None = None,
     handwrite_signature_checkbox: list[str] | None = None,
+    username: str | None = None,
+    save_outputs_to_s3: bool | None = None,
 ) -> tuple[list[str], str]:
     """
     Short, stateless ``gr.api`` wrapper for PDF/image document redaction.
@@ -755,6 +757,12 @@ def redact_document_from_upload_for_gradio_api(
             `Extract handwriting`, `Extract signatures`; deployment config may
             also expose `Extract forms`, `Extract layout`, `Extract tables`, or
             `Face detection`. When omitted, CLI/deployment defaults apply.
+        username: Optional Gradio/Cognito session identity. When set, CLI uses this
+            instead of a random hash for per-user local/S3 folders (important for
+            harness runs so first-pass S3 matches ``s3_output_folder_state``).
+        save_outputs_to_s3: When set, overrides CLI/config ``SAVE_OUTPUTS_TO_S3`` for
+            this call. Harness first-pass uses ``False`` so only final agent deliverables
+            are uploaded from the main app Output files path.
 
     Returns:
         (output_paths, message)
@@ -796,6 +804,10 @@ def redact_document_from_upload_for_gradio_api(
         overrides["page_max"] = int(page_max)
     if handwrite_signature_checkbox is not None:
         overrides["handwrite_signature_extraction"] = list(handwrite_signature_checkbox)
+    if username is not None and str(username).strip():
+        overrides["username"] = str(username).strip()
+    if save_outputs_to_s3 is not None:
+        overrides["save_outputs_to_s3"] = bool(save_outputs_to_s3)
 
     cli_ocr_method, ocr_overrides = _resolve_cli_ocr_inputs(ocr_method)
     cli_pii_method = _resolve_cli_pii_method(pii_method)
@@ -1318,6 +1330,8 @@ def doc_redact_api(
     page_min: int | None = None,
     page_max: int | None = None,
     handwrite_signature_checkbox: list[str] | None = None,
+    username: str | None = None,
+    save_outputs_to_s3: bool | None = None,
 ) -> tuple[list[str], str]:
     """Short-name wrapper; prefer calling this via `api_name='/doc_redact'`."""
     return redact_document_from_upload_for_gradio_api(
@@ -1331,6 +1345,8 @@ def doc_redact_api(
         page_min=page_min,
         page_max=page_max,
         handwrite_signature_checkbox=handwrite_signature_checkbox,
+        username=username,
+        save_outputs_to_s3=save_outputs_to_s3,
     )
 
 

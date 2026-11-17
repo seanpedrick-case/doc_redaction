@@ -26,12 +26,15 @@ SUMMARY_CSV_COLUMNS: tuple[str, ...] = (
     "model_name",
     "ocr_method",
     "pii_method",
+    "chosen_local_ocr_model",
     "encourage_vlm_faces",
     "encourage_vlm_signatures",
     "gold_case_path",
     "eval_turn_kind",
     "follow_up_steer_count",
     "run_source",
+    "benchmark_suite_id",
+    "git_commit",
     "run_timestamp_utc",
     "summary_appended_at_utc",
     "workflow_incomplete",
@@ -102,6 +105,14 @@ def default_summary_csv_path() -> Path:
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _benchmark_csv_metadata() -> dict[str, str]:
+    """Optional suite/git columns set by ``run_benchmark_suite.py``."""
+    return {
+        "benchmark_suite_id": (os.environ.get("BENCHMARK_SUITE_ID") or "").strip(),
+        "git_commit": (os.environ.get("BENCHMARK_GIT_COMMIT") or "").strip(),
+    }
 
 
 def _run_timestamp_from_dir(run_dir: Path) -> str:
@@ -206,6 +217,13 @@ def run_stack_from_dir(run_dir: Path) -> dict[str, str]:
         manifest.get("run_pii_method"),
         manifest.get("pii_method"),
     )
+    chosen_local_ocr_model = _first_non_empty_str(
+        meta.get("chosen_local_ocr_model"),
+        app_meta.get("chosen_local_ocr_model"),
+        summary.get("chosen_local_ocr_model"),
+        manifest.get("run_chosen_local_ocr_model"),
+        manifest.get("chosen_local_ocr_model"),
+    )
     encourage_vlm_faces = _first_bool_csv(
         meta.get("encourage_vlm_faces"),
         summary.get("encourage_vlm_faces"),
@@ -221,6 +239,7 @@ def run_stack_from_dir(run_dir: Path) -> dict[str, str]:
         "model_name": model_name,
         "ocr_method": ocr_method,
         "pii_method": pii_method,
+        "chosen_local_ocr_model": chosen_local_ocr_model,
         "encourage_vlm_faces": encourage_vlm_faces,
         "encourage_vlm_signatures": encourage_vlm_signatures,
     }
@@ -240,6 +259,7 @@ def _apply_run_stack_to_row(row: dict[str, Any], *, run_dir: Path) -> None:
 
     row["ocr_method"] = stack["ocr_method"]
     row["pii_method"] = stack["pii_method"]
+    row["chosen_local_ocr_model"] = stack["chosen_local_ocr_model"]
     row["encourage_vlm_faces"] = stack["encourage_vlm_faces"]
     row["encourage_vlm_signatures"] = stack["encourage_vlm_signatures"]
 
@@ -411,6 +431,7 @@ def append_eval_run_summary_row(
         "eval_turn_kind": summary.get("eval_turn_kind") or "",
         "follow_up_steer_count": summary.get("follow_up_steer_count", ""),
         "run_source": run_source,
+        **_benchmark_csv_metadata(),
         "run_timestamp_utc": _run_timestamp_from_dir(run_dir),
         "summary_appended_at_utc": _utc_now_iso(),
         "workflow_incomplete": summary.get("workflow_incomplete", ""),

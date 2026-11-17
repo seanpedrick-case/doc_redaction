@@ -879,9 +879,9 @@ AGENTCORE_RUNTIME_NAME = get_or_create_env_var(
     "AGENTCORE_RUNTIME_NAME", f"{CDK_PREFIX}RedactionAgent"
 )
 # Bedrock model the AgentCore runtime uses (fixed at runtime creation via the
-# AGENT_DEFAULT_MODEL env var; cannot be changed from the Gradio UI). Default Sonnet 4.6.
+# AGENT_DEFAULT_MODEL env var; cannot be changed from the Gradio UI). Default Sonnet 5.
 AGENTCORE_BEDROCK_MODEL = get_or_create_env_var(
-    "AGENTCORE_BEDROCK_MODEL", "anthropic.claude-sonnet-4-6"
+    "AGENTCORE_BEDROCK_MODEL", "anthropic.claude-sonnet-5"
 )
 AGENT_ORCHESTRATOR_DEFAULT = get_or_create_env_var("AGENT_ORCHESTRATOR", "pi")
 # Optional JSON policies for the AgentCore *runtime* task role (Bedrock invoke, secrets, logs).
@@ -893,6 +893,49 @@ AGENTCORE_TASK_ROLE_POLICY_FILES = get_or_create_env_var(
 )
 AGENTCORE_TASK_ROLE_POLICY_FILES = parse_comma_separated_list(
     AGENTCORE_TASK_ROLE_POLICY_FILES
+)
+
+###
+# AgentCore Harness for the main app (single container: the app runs the inline redaction
+# tools itself; AWS runs the agent loop). Sets USE_AGENTCORE / AGENTCORE_HARNESS_ARN on the
+# main container.
+###
+
+ENABLE_AGENTCORE_HARNESS = get_or_create_env_var("ENABLE_AGENTCORE_HARNESS", "False")
+AGENTCORE_HARNESS_NAME = get_or_create_env_var(
+    "AGENTCORE_HARNESS_NAME", f"{CDK_PREFIX}RedactionHarness"
+)
+
+
+def default_harness_model_id(model: str, region: str = "") -> str:
+    """Harness default model id (direct ``anthropic.*`` unless ``AGENTCORE_HARNESS_MODEL_ID`` is set)."""
+    _ = region
+    return (model or "anthropic.claude-sonnet-5").strip()
+
+
+AGENTCORE_HARNESS_MODEL_ID = get_or_create_env_var(
+    "AGENTCORE_HARNESS_MODEL_ID",
+    default_harness_model_id(AGENTCORE_BEDROCK_MODEL, AWS_REGION),
+)
+AGENTCORE_HARNESS_MAX_ITERATIONS = get_or_create_env_var(
+    "AGENTCORE_HARNESS_MAX_ITERATIONS", "150"
+)
+AGENTCORE_HARNESS_TIMEOUT_SECONDS = get_or_create_env_var(
+    "AGENTCORE_HARNESS_TIMEOUT_SECONDS", "3600"
+)
+AGENTCORE_HARNESS_MAX_TOKENS = get_or_create_env_var(
+    "AGENTCORE_HARNESS_MAX_TOKENS", "16000"
+)
+AGENTCORE_HARNESS_ENABLE_PAGE_REVIEW = get_or_create_env_var(
+    "AGENTCORE_HARNESS_ENABLE_PAGE_REVIEW", "True"
+)
+# Key prefixes: skills live in the log/config bucket (no expiry); per-run page-review staging
+# lives in the output bucket (expires with its lifecycle rule).
+AGENTCORE_HARNESS_SKILLS_S3_PREFIX = get_or_create_env_var(
+    "AGENTCORE_HARNESS_SKILLS_S3_PREFIX", "agentcore-harness/skills/"
+)
+AGENTCORE_HARNESS_STAGING_S3_PREFIX = get_or_create_env_var(
+    "AGENTCORE_HARNESS_STAGING_S3_PREFIX", "harness-staging/"
 )
 
 ###

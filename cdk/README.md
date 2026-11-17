@@ -2,6 +2,8 @@
 
 Interactive installer: [`cdk_install.py`](cdk_install.py). Configuration: [`config/cdk_config.env`](config/cdk_config.env).
 
+**Harness only (local `app.py`):** minimal stack with no ECS/VPC—[`docs/harness_local_stack.md`](docs/harness_local_stack.md), deploy via [`deploy_harness_local.py`](deploy_harness_local.py).
+
 Human-oriented walkthrough: [Installation Guide](https://seanpedrick-case.github.io/doc_redaction/src/installation_guide.html).
 
 ## CloudFront response headers (CSP / CORS)

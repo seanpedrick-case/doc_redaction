@@ -2,6 +2,8 @@
 
 Each **gold case** is a directory of reference artifacts (PDF, instructions, ideal review CSV, OCR gold, policy lists, etc.).
 
+**Benchmark audit:** run `python agent-redact/eval/run_benchmark_suite.py --audit-only` to refresh [`BENCHMARK_GOLD_AUDIT.md`](BENCHMARK_GOLD_AUDIT.md) (which cases have `ideal_review_file.csv`, `app_eval_settings.json`, etc.).
+
 **Git:** only `example_smoke/` and `example_live/` (plus this README) are tracked for CI. Add a new `!agent-redact/eval/gold/<case_id>/` pair in the repo `.gitignore` if you intentionally want another case in GitHub. All other directories under `gold/` stay local (including PDFs).
 
 ```text
@@ -16,7 +18,8 @@ gold/<case_id>/
   tool_args.json            # recorded tool_calls (deny_list / must_*) for extraction eval
   ocr_results_with_words.csv  # policy gate + gold OCR compare (run vs this file)
   redacted.pdf              # optional post-apply deliverable
-  manifest.json             # case_id, input_pdf, input_pdf_sha256, instructions_sha256, …
+  manifest.json             # case_id, input_pdf, input_pdf_sha256, instructions_sha256, ocr_method, pii_method, …
+  app_eval_settings.json    # main-app benchmark: entities, deny/allow, text_extraction_method, pii_identification_method, chosen_local_ocr_model, app_config_path (optional)
 ```
 
 **Gold phrase lists** (`must_redact.txt`, etc.) serve two roles:

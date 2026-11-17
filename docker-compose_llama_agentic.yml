@@ -51,6 +51,7 @@ x-redaction-app-volumes: &redaction-app-volumes
   - ./output:/home/user/app/output:rw
   - ./agent-redact/eval/gold:/home/user/app/agent-redact/eval/gold:ro
   - ./agent-redact/eval/outputs:/home/user/app/agent-redact/eval/outputs:rw
+  - ./agent-redact/eval/runs:/home/user/app/agent-redact/eval/runs:rw
 
 x-agent-common: &agent-common
   build:
@@ -784,6 +785,7 @@ services:
       - ./output:/home/user/app/output:rw
       - ./agent-redact/eval/gold:/home/user/app/agent-redact/eval/gold:ro
       - ./agent-redact/eval/outputs:/home/user/app/agent-redact/eval/outputs:rw
+      - ./agent-redact/eval/runs:/home/user/app/agent-redact/eval/runs:rw
       - ${USERPROFILE}/.aws:/home/user/.aws:rw
     networks:
       redaction-net-llama:

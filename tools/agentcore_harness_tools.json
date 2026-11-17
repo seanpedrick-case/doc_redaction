@@ -1,0 +1,181 @@
+[
+  {
+    "type": "inline_function",
+    "name": "list_session_files",
+    "config": {
+      "inlineFunction": {
+        "description": "List files in this redaction session folder on the doc_redaction app (source document, doc_redact outputs, edited review CSVs, review_apply outputs). All other tools take paths relative to this folder.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    }
+  },
+  {
+    "type": "inline_function",
+    "name": "doc_redact",
+    "config": {
+      "inlineFunction": {
+        "description": "Run the initial (Pass 1 draft) redaction on the session document with the doc_redaction app. Returns relative paths of the outputs, including the *_review_file.csv and *_ocr_results_with_words*.csv. Cover all user requirements in one call: put explicit organisation, place or phrase terms in deny_list and names that must stay visible in allow_list.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "pdf_path": {"type": "string", "description": "Relative path of the source document. Defaults to the uploaded document."},
+            "ocr_method": {"type": "string", "description": "Text extraction method, e.g. 'Local text', 'Local OCR', 'AWS Textract'. Defaults to the value in the task prompt."},
+            "pii_method": {"type": "string", "description": "PII detection method, e.g. 'Local', 'AWS Comprehend', 'LLM (AWS Bedrock)', 'None'. Defaults to the value in the task prompt."},
+            "redact_entities": {"type": "array", "items": {"type": "string"}, "description": "Entity types to redact, e.g. PERSON, EMAIL_ADDRESS, PHONE_NUMBER, CUSTOM_VLM_SIGNATURE."},
+            "allow_list": {"type": "array", "items": {"type": "string"}, "description": "Terms that must never be redacted."},
+            "deny_list": {"type": "array", "items": {"type": "string"}, "description": "Terms that must always be redacted."},
+            "page_min": {"type": "integer", "description": "First page to process (1-based, 0 = first page)."},
+            "page_max": {"type": "integer", "description": "Last page to process (1-based, 0 = last page)."},
+            "handwrite_signature_checkbox": {"type": "array", "items": {"type": "string"}, "description": "AWS Textract options such as 'Extract handwriting', 'Extract signatures'."}
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "inline_function",
+    "name": "read_session_text",
+    "config": {
+      "inlineFunction": {
+        "description": "Read a text file (CSV, JSON, TXT, MD) from the session folder. Large files are returned in chunks: pass offset to continue. For large documents prefer stage_page_review_bundles and shell scripts over reading whole OCR CSVs into context.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "path": {"type": "string", "description": "Relative path within the session folder."},
+            "offset": {"type": "integer", "description": "Character offset to start reading from (default 0)."},
+            "max_chars": {"type": "integer", "description": "Maximum characters to return (capped by the app)."}
+          },
+          "required": ["path"]
+        }
+      }
+    }
+  },
+  {
+    "type": "inline_function",
+    "name": "write_session_text",
+    "config": {
+      "inlineFunction": {
+        "description": "Write a text file into the session folder (overwrites). Use for edited review CSVs (basename must contain _review_file, utf-8, bbox columns xmin/xmax/ymin/ymax as floats in [0, 1]) and for the summary markdown. Review CSV colour cells are repaired to '(R, G, B)' automatically.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "path": {"type": "string", "description": "Relative destination path within the session folder."},
+            "content": {"type": "string", "description": "Full file contents."}
+          },
+          "required": ["path", "content"]
+        }
+      }
+    }
+  },
+  {
+    "type": "inline_function",
+    "name": "verify_redaction_coverage",
+    "config": {
+      "inlineFunction": {
+        "description": "Pass 1 QA: check a review CSV (and optionally the post-apply *_redacted.pdf) against must_redact / must_not_redact regex lists. Returns pass_strict, pass_with_cleanup, per-page issues, pages_flagged_for_vlm and pages_needing_csv_cleanup. Set auto_prune_suspicious to write a *_pruned.csv sibling with suspicious short OCR fragments removed.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "review_csv_path": {"type": "string"},
+            "ocr_words_csv_path": {"type": "string", "description": "Word-level OCR CSV from doc_redact. Auto-detected when omitted."},
+            "must_redact": {"type": "array", "items": {"type": "string"}, "description": "Regex patterns that must be covered by a redaction box."},
+            "must_not_redact": {"type": "array", "items": {"type": "string"}, "description": "Regex patterns that must not be redacted."},
+            "redacted_pdf_path": {"type": "string", "description": "Post-apply *_redacted.pdf for text-layer leak checks."},
+            "auto_prune_suspicious": {"type": "boolean"}
+          },
+          "required": ["review_csv_path"]
+        }
+      }
+    }
+  },
+  {
+    "type": "inline_function",
+    "name": "preview_redaction_boxes",
+    "config": {
+      "inlineFunction": {
+        "description": "Render the proposed boxes from a review CSV onto the original PDF as PNGs (QA only, no redaction applied). Returns the relative PNG paths and, when S3 staging is configured, presigned GET URLs that shell commands can download.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "review_csv_path": {"type": "string"},
+            "pdf_path": {"type": "string", "description": "Defaults to the uploaded document."},
+            "pages": {"type": "array", "items": {"type": "integer"}, "description": "1-based pages to render (default: pages that have boxes, max 10)."}
+          },
+          "required": ["review_csv_path"]
+        }
+      }
+    }
+  },
+  {
+    "type": "inline_function",
+    "name": "stage_page_review_bundles",
+    "config": {
+      "inlineFunction": {
+        "description": "Prepare parallel page review for subagents. For each page, uploads that page's review CSV rows, word OCR rows and line OCR rows to S3 and returns presigned GET URLs plus a presigned PUT URL where the subagent must upload its final page review CSV (same columns as the review CSV, rows for that page only). Subagents cannot call app tools, so give each one its page's URLs and rules. After all subagents finish, call merge_page_reviews.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "review_csv_path": {"type": "string"},
+            "ocr_words_csv_path": {"type": "string", "description": "Auto-detected when omitted."},
+            "pages": {"type": "array", "items": {"type": "integer"}, "description": "1-based pages to stage (default: all pages in the review CSV and word OCR CSV)."}
+          },
+          "required": ["review_csv_path"]
+        }
+      }
+    }
+  },
+  {
+    "type": "inline_function",
+    "name": "merge_page_reviews",
+    "config": {
+      "inlineFunction": {
+        "description": "Download the per-page review CSVs uploaded by subagents via the PUT URLs from stage_page_review_bundles, replace those pages in the master review CSV (pages without an upload keep their master rows), validate, and write {document}_review_file_merged.csv in the session folder. Returns the merged path and per-page row counts.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "review_csv_path": {"type": "string", "description": "Master review CSV that was staged."},
+            "pages": {"type": "array", "items": {"type": "integer"}, "description": "Pages to merge (default: all staged pages)."}
+          },
+          "required": ["review_csv_path"]
+        }
+      }
+    }
+  },
+  {
+    "type": "inline_function",
+    "name": "review_apply",
+    "config": {
+      "inlineFunction": {
+        "description": "Apply a review CSV to the original PDF. This is the only way to produce the deliverable *_redacted.pdf. Call once per pass with the final merged/pruned CSV.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "review_csv_path": {"type": "string"},
+            "pdf_path": {"type": "string", "description": "Original (unredacted) PDF. Defaults to the uploaded document."}
+          },
+          "required": ["review_csv_path"]
+        }
+      }
+    }
+  },
+  {
+    "type": "inline_function",
+    "name": "finish_task",
+    "config": {
+      "inlineFunction": {
+        "description": "Finish the task. Call exactly once at the end with a short markdown summary (what was redacted, coverage result, any pages needing human review) and final_files: relative paths of deliverables (post-apply *_redacted.pdf in review/output_review_final/, final *_review_file*.csv). Always include Pass 1 review aids when they exist: output_redact/*_redactions_for_review*.pdf and output_redact/*_ocr_results_with_words*.csv (the app also adds these to the download list if you omit them).",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "summary": {"type": "string"},
+            "final_files": {"type": "array", "items": {"type": "string"}}
+          },
+          "required": ["summary"]
+        }
+      }
+    }
+  }
+]
