@@ -5,9 +5,13 @@
             "Sid": "InvokeAgentCoreHarness",
             "Effect": "Allow",
             "Action": [
-                "bedrock-agentcore:InvokeHarness"
+                "bedrock-agentcore:InvokeHarness",
+                "bedrock-agentcore:InvokeAgentRuntime"
             ],
-            "Resource": "arn:aws:bedrock-agentcore:*:*:harness/*"
+            "Resource": [
+                "arn:aws:bedrock-agentcore:*:*:harness/*",
+                "arn:aws:bedrock-agentcore:*:*:harness/*/harness-endpoint/*"
+            ]
         }
     ]
 }

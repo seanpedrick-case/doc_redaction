@@ -3266,8 +3266,15 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
 
                 with gr.Row(equal_height=True):
                     with gr.Column(scale=1):
-                        redaction_output_summary_textbox = gr.Textbox(
-                            label="Output summary", scale=1, lines=4
+                        redaction_output_summary_textbox = gr.Markdown(
+                            label="Output summary",
+                            value="Output summary will appear here.",
+                            scale=1,
+                            max_height=500,
+                            show_label=True,
+                            container=True,
+                            padding=True,
+                            buttons=["copy"],
                         )
                     with gr.Column(scale=2):
                         output_file = gr.File(label="Output files", scale=2)

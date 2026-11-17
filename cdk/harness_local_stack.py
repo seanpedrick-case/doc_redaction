@@ -103,8 +103,15 @@ class HarnessLocalStack(Stack):
             statements=[
                 iam.PolicyStatement(
                     sid="InvokeHarness",
-                    actions=["bedrock-agentcore:InvokeHarness"],
-                    resources=[harness_arn],
+                    # AWS requires both actions for InvokeHarness (harness + underlying runtime).
+                    actions=[
+                        "bedrock-agentcore:InvokeHarness",
+                        "bedrock-agentcore:InvokeAgentRuntime",
+                    ],
+                    resources=[
+                        harness_arn,
+                        f"{harness_arn}/harness-endpoint/*",
+                    ],
                 ),
                 iam.PolicyStatement(
                     sid="StagingBucketList",

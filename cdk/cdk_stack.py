@@ -1685,11 +1685,19 @@ class CdkStack(Stack):
                     max_tokens=int(AGENTCORE_HARNESS_MAX_TOKENS),
                 )
                 harness_arn = redaction_harness.get_att("Arn").to_string()
+                # AWS requires both actions for InvokeHarness (harness + underlying runtime).
+                # https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-security.html
                 task_role.add_to_principal_policy(
                     iam.PolicyStatement(
                         sid="InvokeRedactionHarness",
-                        actions=["bedrock-agentcore:InvokeHarness"],
-                        resources=[harness_arn],
+                        actions=[
+                            "bedrock-agentcore:InvokeHarness",
+                            "bedrock-agentcore:InvokeAgentRuntime",
+                        ],
+                        resources=[
+                            harness_arn,
+                            f"{harness_arn}/harness-endpoint/*",
+                        ],
                     )
                 )
                 staging_prefix = AGENTCORE_HARNESS_STAGING_S3_PREFIX.strip("/") + "/"

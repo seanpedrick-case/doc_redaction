@@ -49,10 +49,14 @@ def _synth_harness(*, with_kms: bool = False):
     task_role = iam.Role(
         stack, "TaskRole", assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com")
     )
+    harness_arn = harness.get_att("Arn").to_string()
     task_role.add_to_principal_policy(
         iam.PolicyStatement(
-            actions=["bedrock-agentcore:InvokeHarness"],
-            resources=[harness.get_att("Arn").to_string()],
+            actions=[
+                "bedrock-agentcore:InvokeHarness",
+                "bedrock-agentcore:InvokeAgentRuntime",
+            ],
+            resources=[harness_arn, f"{harness_arn}/harness-endpoint/*"],
         )
     )
     return Template.from_stack(stack)
@@ -111,6 +115,7 @@ def test_harness_roles_and_skill_deployment():
     actions = _all_actions(template)
     assert "bedrock:InvokeModelWithResponseStream" in actions
     assert "bedrock-agentcore:InvokeHarness" in actions
+    assert "bedrock-agentcore:InvokeAgentRuntime" in actions
     assert "s3:GetObject" in actions
 
 
@@ -182,4 +187,10 @@ def test_agentcore_harness_invoke_policy_file():
         )
     )
     actions = {a for s in data["Statement"] for a in s["Action"]}
-    assert actions == {"bedrock-agentcore:InvokeHarness"}
+    assert actions == {
+        "bedrock-agentcore:InvokeHarness",
+        "bedrock-agentcore:InvokeAgentRuntime",
+    }
+    resources = {r for s in data["Statement"] for r in s["Resource"]}
+    assert "arn:aws:bedrock-agentcore:*:*:harness/*" in resources
+    assert "arn:aws:bedrock-agentcore:*:*:harness/*/harness-endpoint/*" in resources

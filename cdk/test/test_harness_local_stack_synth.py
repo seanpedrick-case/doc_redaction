@@ -35,6 +35,7 @@ def test_harness_local_stack_synth():
         )
     }
     assert "bedrock-agentcore:InvokeHarness" in actions
+    assert "bedrock-agentcore:InvokeAgentRuntime" in actions
     assert "s3:PutObject" in actions
 
     template.has_output("RedactionHarnessArn", {})

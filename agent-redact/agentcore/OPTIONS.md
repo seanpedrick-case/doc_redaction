@@ -153,7 +153,7 @@ AGENTCORE_HARNESS_S3_STAGING_PREFIX=s3://your-output-bucket/harness-staging/
 # AGENTCORE_HARNESS_MAX_TOOL_ROUNDS=60
 ```
 
-The task role needs `bedrock-agentcore:InvokeHarness` ([`cdk/policies/agentcore_harness_invoke_policy.json`](../../cdk/policies/agentcore_harness_invoke_policy.json)) and S3 read/write on the staging prefix. It needs `boto3>=1.44.3`.
+The task role needs both `bedrock-agentcore:InvokeHarness` and `bedrock-agentcore:InvokeAgentRuntime` on the harness ARN (and typically `…/harness-endpoint/*`) — AWS requires both for `InvokeHarness` ([docs](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-security.html); policy file [`cdk/policies/agentcore_harness_invoke_policy.json`](../../cdk/policies/agentcore_harness_invoke_policy.json)). Also S3 read/write on the staging prefix. Needs `boto3>=1.44.3`.
 
 **CDK:** `python cdk/cdk_install.py --enable-agentcore-harness` (or answer *yes* in the wizard) sets `ENABLE_AGENTCORE_HARNESS=True`. The stack then:
 
