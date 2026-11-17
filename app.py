@@ -165,6 +165,7 @@ from tools.aws_functions import (
 )
 from tools.config import (
     ACCESS_LOGS_FOLDER,
+    AGENT_REDACTION_ACCORDION_OPEN,
     ALLOW_LIST_PATH,
     ALLOWED_HOSTS,
     ALLOWED_ORIGINS,
@@ -2875,25 +2876,23 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                     in_doc_files.render()
 
                 if USE_AGENTCORE:
-                    with gr.Accordion("AI agent redaction", open=True):
+                    with gr.Accordion(
+                        "AI agent redaction", open=AGENT_REDACTION_ACCORDION_OPEN
+                    ):
                         agent_redaction_instructions_textbox = gr.Textbox(
                             label="AI agent redaction instructions (optional)",
                             info=(
-                                "Leave blank for standard redaction. If filled in, an AWS "
-                                "AgentCore agent redacts, reviews and applies the redactions "
-                                "following these instructions, using the settings below as "
-                                "defaults."
+                                "Add some instructions for an agent to follow during redaction"
                             ),
                             placeholder=(
-                                "- Redact all personal names\n"
-                                "- Remove organisation addresses\n"
-                                "- Keep publication titles visible"
+                                "- Redact all names, apart from John Smith\n"
+                                "- Remove organisation addresses. Ensure that full university names are removed\n"
+                                "- Redact all photo images of faces, and any signatures"
                             ),
                             lines=5,
                         )
                         from tools.harness_gradio_examples import (
                             harness_example_rows,
-                            harness_examples_status_md,
                         )
 
                         _agent_ex_rows, _agent_ex_labels = harness_example_rows(
@@ -2902,34 +2901,32 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                             llm_entities=CHOSEN_LLM_ENTITIES,
                         )
                         if _agent_ex_rows:
-                            gr.Markdown(
-                                "### Try an agent example\n"
-                                "Click a row to load the sample PDF and instructions, "
-                                "then **Redact with AI agent**."
-                            )
-                            gr.Examples(
-                                examples=_agent_ex_rows,
-                                inputs=[
-                                    in_doc_files,
-                                    agent_redaction_instructions_textbox,
-                                    text_extract_method_radio,
-                                    local_ocr_method_radio,
-                                    pii_identification_method_drop,
-                                    in_redact_entities,
-                                    in_redact_comprehend_entities,
-                                    in_redact_llm_entities,
-                                    in_allow_list_state,
-                                    in_deny_list_state,
-                                    handwrite_signature_checkbox,
-                                    page_min,
-                                    page_max,
-                                ],
-                                example_labels=_agent_ex_labels,
-                                examples_per_page=3,
-                                cache_examples=False,
-                            )
-                        else:
-                            gr.Markdown(harness_examples_status_md())
+                            with gr.Accordion("Try an agent example", open=False):
+                                gr.Markdown(
+                                    "Click a row to load the sample PDF and instructions, "
+                                    "then **Redact with AI agent**."
+                                )
+                                gr.Examples(
+                                    examples=_agent_ex_rows,
+                                    inputs=[
+                                        in_doc_files,
+                                        agent_redaction_instructions_textbox,
+                                        text_extract_method_radio,
+                                        local_ocr_method_radio,
+                                        pii_identification_method_drop,
+                                        in_redact_entities,
+                                        in_redact_comprehend_entities,
+                                        in_redact_llm_entities,
+                                        in_allow_list_state,
+                                        in_deny_list_state,
+                                        handwrite_signature_checkbox,
+                                        page_min,
+                                        page_max,
+                                    ],
+                                    example_labels=_agent_ex_labels,
+                                    examples_per_page=3,
+                                    cache_examples=False,
+                                )
 
                 with gr.Accordion(
                     "Redaction settings",

@@ -3817,7 +3817,7 @@ HARNESS_BUILTIN_ALLOWED_TOOLS = [
 ]
 
 HARNESS_SYSTEM_PROMPT = (
-    "You are a careful document redaction agent running inside the doc_redaction app. "
+    "You are a document redaction agent running inside the doc_redaction app. "
     "The app's redaction functions are inline tools that you call; each task prompt names the "
     "session's source document and the user's redaction requirements, which are authoritative. "
     "Read the doc-redaction-harness skill before starting and follow it: one doc_redact first "
@@ -3874,7 +3874,7 @@ def create_agentcore_harness(
     kms_key: Optional[kms.IKey] = None,
     max_iterations: int = 150,
     timeout_seconds: int = 3600,
-    max_tokens: int = 16000,
+    max_tokens: int = 65536,
 ) -> CfnResource:
     """AgentCore Harness for the main app's agentic redaction (inline tools, S3 skill).
 

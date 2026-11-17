@@ -2497,6 +2497,10 @@ AGENTCORE_HARNESS_MODEL_ID = get_or_create_env_var(
     "AGENTCORE_HARNESS_MODEL_ID", ""
 )  # Logged as llm_model_name on harness usage rows (task=agent)
 
+AGENT_REDACTION_ACCORDION_OPEN = convert_string_to_boolean(
+    get_or_create_env_var("AGENT_REDACTION_ACCORDION_OPEN", "True")
+)  # Agentcore instructions accordion open by default
+
 # Main Gradio app gold eval (reuse agent-redact/eval gold cases + CSV).
 APP_EVAL_ENABLED = convert_string_to_boolean(
     get_or_create_env_var("APP_EVAL_ENABLED", "False")
