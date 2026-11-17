@@ -6046,11 +6046,90 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                     agent_job_just_finished_state,
                 ],
             )
+            # Same post-load Review wiring as the streaming agentic path: file
+            # state alone is not enough — page PNGs stay as EFFICIENT_OCR
+            # placeholders until update_annotator_* materializes page 1 into the
+            # image_annotator component.
             agent_job_just_finished_state.change(
                 fn=_on_detached_job_just_finished,
                 inputs=[agent_job_just_finished_state, agent_job_run_id_state]
                 + _agent_review_load_inputs,
                 outputs=_agent_review_load_outputs,
+                api_visibility="undocumented",
+            ).success(
+                fn=get_document_file_names,
+                inputs=[input_pdf_for_review],
+                outputs=[
+                    doc_file_name_no_extension_textbox,
+                    doc_file_name_with_extension_textbox,
+                    doc_full_file_name_textbox,
+                    doc_file_name_textbox_list,
+                    total_pdf_page_count,
+                ],
+                api_visibility="undocumented",
+            ).success(
+                fn=update_review_filters_after_redaction,
+                inputs=[
+                    all_image_annotations_state,
+                    page_min,
+                    recogniser_entity_dropdown,
+                    page_entity_dropdown,
+                    page_entity_dropdown_redaction,
+                    text_entity_dropdown,
+                    recogniser_entity_dataframe_base,
+                    annotator_zoom_number,
+                    review_file_df,
+                    page_sizes,
+                    doc_full_file_name_textbox,
+                    input_folder_textbox,
+                ],
+                outputs=[
+                    annotator,
+                    annotate_current_page,
+                    annotate_current_page_bottom,
+                    annotate_previous_page,
+                    recogniser_entity_dropdown,
+                    recogniser_entity_dataframe,
+                    recogniser_entity_dataframe_base,
+                    text_entity_dropdown,
+                    page_entity_dropdown,
+                    page_entity_dropdown_redaction,
+                    page_sizes,
+                    all_image_annotations_state,
+                ],
+                show_progress_on=[],
+                api_visibility="undocumented",
+            ).success(
+                fn=update_annotator_object_for_page_navigation,
+                inputs=[
+                    all_image_annotations_state,
+                    page_min,
+                    recogniser_entity_dropdown,
+                    page_entity_dropdown,
+                    page_entity_dropdown_redaction,
+                    text_entity_dropdown,
+                    recogniser_entity_dataframe_base,
+                    annotator_zoom_number,
+                    review_file_df,
+                    page_sizes,
+                    doc_full_file_name_textbox,
+                    input_folder_textbox,
+                ],
+                outputs=[
+                    annotator,
+                    annotate_current_page,
+                    annotate_current_page_bottom,
+                    annotate_previous_page,
+                    recogniser_entity_dropdown,
+                    recogniser_entity_dataframe,
+                    recogniser_entity_dataframe_base,
+                    text_entity_dropdown,
+                    page_entity_dropdown,
+                    page_entity_dropdown_redaction,
+                    page_sizes,
+                    all_image_annotations_state,
+                ],
+                show_progress_on=[],
                 api_visibility="undocumented",
             )
 
