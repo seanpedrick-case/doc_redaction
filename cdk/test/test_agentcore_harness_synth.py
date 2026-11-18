@@ -83,6 +83,17 @@ def test_harness_resource_properties():
     assert props["Model"]["BedrockModelConfig"]["ModelId"] == (
         "eu.anthropic.claude-sonnet-4-6"
     )
+    assert props["Model"]["BedrockModelConfig"]["MaxTokens"] == 16384
+    assert props["MaxTokens"] == 262144
+    assert props["Truncation"] == {
+        "Strategy": "summarization",
+        "Config": {
+            "Summarization": {
+                "SummaryRatio": 0.8,
+                "PreserveRecentMessages": 10,
+            }
+        },
+    }
     assert props["Memory"] == {"Disabled": {}}
 
     assert props.get("Tools") == []

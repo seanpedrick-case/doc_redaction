@@ -161,7 +161,7 @@ The task role needs both `bedrock-agentcore:InvokeHarness` and `bedrock-agentcor
 - grants the main task role `InvokeHarness` on that harness;
 - injects `USE_AGENTCORE`, `AGENTCORE_HARNESS_ARN` and the staging prefix into the main container.
 
-Tunables: `AGENTCORE_HARNESS_MODEL_ID` (default `anthropic.claude-sonnet-5`; set explicitly if your account requires a cross-region inference profile such as `eu.anthropic.*`), `AGENTCORE_HARNESS_MAX_ITERATIONS`, `AGENTCORE_HARNESS_TIMEOUT_SECONDS` and `AGENTCORE_HARNESS_MAX_TOKENS`.
+Tunables: `AGENTCORE_HARNESS_MODEL_ID` (default `anthropic.claude-sonnet-5`; set explicitly if your account requires a cross-region inference profile such as `eu.anthropic.*`), `AGENTCORE_HARNESS_MAX_ITERATIONS`, `AGENTCORE_HARNESS_TIMEOUT_SECONDS`, `AGENTCORE_HARNESS_MAX_TOKENS` (per-call **output** cap, default `16384`), `AGENTCORE_HARNESS_INVOCATION_MAX_TOKENS` (total output budget for one invocation, default `262144`), and truncation (`AGENTCORE_HARNESS_TRUNCATION_STRATEGY` default `summarization`, `AGENTCORE_HARNESS_TRUNCATION_SUMMARY_RATIO` default `0.8`, `AGENTCORE_HARNESS_TRUNCATION_PRESERVE_RECENT_MESSAGES` default `10`). Truncation is harness-resource only (not overridable from `InvokeHarness` / the app).
 
 **Inline tools (critical):**
 

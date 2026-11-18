@@ -31,6 +31,7 @@ from cdk_config import (
     AGENTCORE_BEDROCK_MODEL,
     AGENTCORE_CDK_DEPLOY,
     AGENTCORE_HARNESS_ENABLE_PAGE_REVIEW,
+    AGENTCORE_HARNESS_INVOCATION_MAX_TOKENS,
     AGENTCORE_HARNESS_MAX_ITERATIONS,
     AGENTCORE_HARNESS_MAX_TOKENS,
     AGENTCORE_HARNESS_MODEL_ID,
@@ -38,6 +39,10 @@ from cdk_config import (
     AGENTCORE_HARNESS_SKILLS_S3_PREFIX,
     AGENTCORE_HARNESS_STAGING_S3_PREFIX,
     AGENTCORE_HARNESS_TIMEOUT_SECONDS,
+    AGENTCORE_HARNESS_TRUNCATION_PRESERVE_RECENT_MESSAGES,
+    AGENTCORE_HARNESS_TRUNCATION_SLIDING_WINDOW_MESSAGES,
+    AGENTCORE_HARNESS_TRUNCATION_STRATEGY,
+    AGENTCORE_HARNESS_TRUNCATION_SUMMARY_RATIO,
     AGENTCORE_NETWORK_MODE,
     AGENTCORE_RUNTIME_NAME,
     AGENTCORE_RUNTIME_ROLE_ARN,
@@ -1683,6 +1688,17 @@ class CdkStack(Stack):
                     max_iterations=int(AGENTCORE_HARNESS_MAX_ITERATIONS),
                     timeout_seconds=int(AGENTCORE_HARNESS_TIMEOUT_SECONDS),
                     max_tokens=int(AGENTCORE_HARNESS_MAX_TOKENS),
+                    invocation_max_tokens=int(AGENTCORE_HARNESS_INVOCATION_MAX_TOKENS),
+                    truncation_strategy=AGENTCORE_HARNESS_TRUNCATION_STRATEGY,
+                    truncation_summary_ratio=float(
+                        AGENTCORE_HARNESS_TRUNCATION_SUMMARY_RATIO
+                    ),
+                    truncation_preserve_recent_messages=int(
+                        AGENTCORE_HARNESS_TRUNCATION_PRESERVE_RECENT_MESSAGES
+                    ),
+                    truncation_sliding_window_messages=int(
+                        AGENTCORE_HARNESS_TRUNCATION_SLIDING_WINDOW_MESSAGES
+                    ),
                 )
                 harness_arn = redaction_harness.get_att("Arn").to_string()
                 # AWS requires both actions for InvokeHarness (harness + underlying runtime).
