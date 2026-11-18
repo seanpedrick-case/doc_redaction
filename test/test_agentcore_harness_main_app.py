@@ -269,6 +269,44 @@ def test_output_files_include_pass1_review_artifacts(sample_pdf, tmp_path):
     assert str(ocr_csv.resolve()) in paths
 
 
+def test_output_files_prefer_final_redacted_over_interim_draft(sample_pdf, tmp_path):
+    session = _session(sample_pdf, tmp_path)
+    redact_dir = session.session_dir / "output_redact"
+    final_dir = session.session_dir / "review" / "output_review_final"
+    redact_dir.mkdir(parents=True)
+    final_dir.mkdir(parents=True)
+
+    interim = redact_dir / "sample_redacted.pdf"
+    final = final_dir / "sample_redacted.pdf"
+    for_review = redact_dir / "sample_redactions_for_review.pdf"
+    review_csv = redact_dir / "sample_review_file.csv"
+    interim.write_bytes(b"%PDF-interim\n")
+    final.write_bytes(b"%PDF-final\n")
+    for_review.write_bytes(b"%PDF-review\n")
+    review_csv.write_text(REVIEW_HEADER, encoding="utf-8")
+
+    session.review_apply_outputs = [
+        f"review/output_review_final/{final.name}",
+    ]
+    session.final_files = [
+        f"output_redact/{interim.name}",
+        f"review/output_review_final/{final.name}",
+        f"output_redact/{for_review.name}",
+        f"output_redact/{review_csv.name}",
+    ]
+
+    paths = session.output_files()
+    abs_paths = {Path(p).resolve() for p in paths}
+    assert final.resolve() in abs_paths
+    assert interim.resolve() not in abs_paths
+    assert for_review.resolve() in abs_paths
+    assert review_csv.resolve() in abs_paths
+    redacted_names = [
+        Path(p).name for p in paths if Path(p).name.endswith("_redacted.pdf")
+    ]
+    assert redacted_names == ["sample_redacted.pdf"]
+
+
 def test_finish_task_ends_run_and_sets_outputs(sample_pdf, tmp_path):
     session = _session(sample_pdf, tmp_path)
     client = FakeHarnessClient(

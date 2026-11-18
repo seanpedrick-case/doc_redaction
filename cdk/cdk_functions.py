@@ -3872,9 +3872,9 @@ def create_agentcore_harness(
     region: str,
     account: str,
     kms_key: Optional[kms.IKey] = None,
-    max_iterations: int = 150,
-    timeout_seconds: int = 3600,
-    max_tokens: int = 65536,
+    max_iterations: int = 500,
+    timeout_seconds: int = 7200,
+    max_tokens: int = 262144,
 ) -> CfnResource:
     """AgentCore Harness for the main app's agentic redaction (inline tools, S3 skill).
 
