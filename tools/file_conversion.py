@@ -499,20 +499,19 @@ def process_file_for_image_creation(
     if file_extension in [".jpg", ".jpeg", ".png"]:
         print("File is an image file.")
         progress(0.1, desc="Processing image file")
-        # Perform image processing here
-        img_object = [file_path]  # [Image.open(file_path)]
-
-        # Load images from the file paths. Test to see if it is bigger than 4.5 mb and reduct if needed (Textract limit is 5mb)
-        image = Image.open(file_path)
-        img_object, image_sizes_width, image_sizes_height, all_img_details, img_path = (
-            check_image_size_and_reduce(file_path, image)
+        # Copy/normalize into input_folder as a durable PNG (same as PDF page
+        # conversion). Keeping the original example_data / Gradio-temp path breaks
+        # Review-tab OCR visualisation export, which refuses ephemeral paths.
+        page_num, out_path, width, height = process_single_page_for_image_conversion(
+            file_path,
+            page_num=0,
+            input_folder=input_folder,
+            create_images=create_images,
         )
-
-        if not isinstance(image_sizes_width, list):
-            img_path = [img_path]
-            image_sizes_width = [image_sizes_width]
-            image_sizes_height = [image_sizes_height]
-            all_img_details = [all_img_details]
+        img_path = [out_path]
+        image_sizes_width = [width]
+        image_sizes_height = [height]
+        all_img_details = [(page_num, out_path, width, height)]
 
     # Check if the file is a PDF
     elif file_extension == ".pdf":

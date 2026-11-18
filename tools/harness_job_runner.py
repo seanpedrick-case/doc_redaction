@@ -160,6 +160,28 @@ def list_jobs(*, limit: int = 20, session_hash: str = "") -> list[dict[str, Any]
     return out
 
 
+def _safe_output_root(output_root: str | Path | None) -> Path:
+    """Resolve ``output_root`` only if contained under ``OUTPUT_FOLDER`` (CodeQL py/path-injection)."""
+    from tools.config import OUTPUT_FOLDER
+    from tools.secure_path_utils import validate_folder_containment
+
+    fallback = Path(OUTPUT_FOLDER)
+    if output_root is None or not str(output_root).strip():
+        return fallback
+    candidate = Path(str(output_root).strip())
+    try:
+        if validate_folder_containment(candidate, OUTPUT_FOLDER):
+            return candidate
+    except Exception:
+        pass
+    logger.warning(
+        "Ignoring output_root outside OUTPUT_FOLDER (%r); using %s",
+        str(output_root),
+        fallback,
+    )
+    return fallback
+
+
 def list_jobs_with_disk_scan(
     output_root: str | Path,
     *,
@@ -172,7 +194,7 @@ def list_jobs_with_disk_scan(
         for d in list_jobs(limit=limit * 2, session_hash=session_hash)
         if d.get("run_id")
     }
-    root = Path(output_root)
+    root = _safe_output_root(output_root)
     if root.is_dir():
         found: list[tuple[float, dict[str, Any]]] = []
         try:
