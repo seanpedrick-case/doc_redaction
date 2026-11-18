@@ -2520,10 +2520,18 @@ def show_info_box_on_click(
     in_fully_redacted_list_state,
     total_pdf_page_count,
 ):
+    from tools.example_data_paths import resolve_gradio_example_file_paths
     from tools.malware_scan import mark_gradio_example_files_malware_clean
 
-    mark_gradio_example_files_malware_clean(in_doc_files)
-    mark_gradio_example_files_malware_clean(prepared_pdf_state)
+    resolved_doc_files = resolve_gradio_example_file_paths(in_doc_files)
+    if not resolved_doc_files:
+        resolved_doc_files = resolve_gradio_example_file_paths(prepared_pdf_state)
+    resolved_prepared = resolve_gradio_example_file_paths(prepared_pdf_state)
+    if not resolved_prepared:
+        resolved_prepared = list(resolved_doc_files)
+
+    mark_gradio_example_files_malware_clean(resolved_doc_files)
+    mark_gradio_example_files_malware_clean(resolved_prepared)
 
     gr.Info(
         "Example data loaded. Now click on 'Extract text and redact document' on the Redact PDFs/images tab to run the example redaction."
@@ -2617,7 +2625,7 @@ def show_info_box_on_click(
     )
 
     return (
-        gr.File(value=in_doc_files, visible=True),  # walkthrough_file_input
+        gr.update(value=resolved_doc_files, visible=True),  # walkthrough_file_input
         walkthrough_local_update,  # walkthrough_in_redact_entities
         walkthrough_comprehend_update,  # walkthrough_in_redact_comprehend_entities
         gr.Radio(
@@ -2645,6 +2653,8 @@ def show_info_box_on_click(
         main_comprehend_entities_update,  # in_redact_comprehend_entities (main component)
         main_llm_entities_update,  # in_redact_llm_entities (main component)
         main_llm_instructions_update,  # custom_llm_instructions_textbox (main component)
+        gr.update(value=resolved_doc_files),  # in_doc_files (main upload)
+        resolved_prepared,  # prepared_pdf_state
     )
 
 
@@ -2664,10 +2674,18 @@ def show_info_box_on_click_ocr_examples(
     in_redact_llm_entities,
     custom_llm_instructions_textbox,
 ):
+    from tools.example_data_paths import resolve_gradio_example_file_paths
     from tools.malware_scan import mark_gradio_example_files_malware_clean
 
-    mark_gradio_example_files_malware_clean(in_doc_files)
-    mark_gradio_example_files_malware_clean(prepared_pdf_state)
+    resolved_doc_files = resolve_gradio_example_file_paths(in_doc_files)
+    if not resolved_doc_files:
+        resolved_doc_files = resolve_gradio_example_file_paths(prepared_pdf_state)
+    resolved_prepared = resolve_gradio_example_file_paths(prepared_pdf_state)
+    if not resolved_prepared:
+        resolved_prepared = list(resolved_doc_files)
+
+    mark_gradio_example_files_malware_clean(resolved_doc_files)
+    mark_gradio_example_files_malware_clean(resolved_prepared)
 
     gr.Info(
         "Example OCR data loaded. Now click on 'Extract text and redact document' on the Redact PDFs/images tab to run the OCR analysis."
@@ -2698,7 +2716,7 @@ def show_info_box_on_click_ocr_examples(
     )
 
     return (
-        gr.File(value=in_doc_files, visible=True),  # walkthrough_file_input
+        gr.update(value=resolved_doc_files, visible=True),  # walkthrough_file_input
         main_local_entities_update,  # walkthrough_in_redact_entities
         gr.Radio(
             value=text_extract_method_radio, visible=True
@@ -2716,6 +2734,8 @@ def show_info_box_on_click_ocr_examples(
         main_llm_instructions_update,  # walkthrough_custom_llm_instructions_textbox
         main_llm_entities_update,  # in_redact_llm_entities (main component)
         main_llm_instructions_update,  # custom_llm_instructions_textbox (main component)
+        gr.update(value=resolved_doc_files),  # in_doc_files (main upload)
+        resolved_prepared,  # prepared_pdf_state
     )
 
 
@@ -2739,16 +2759,21 @@ def show_tabular_info_box_on_click(
     tabular_text_columns,
     tabular_min_word_count,
 ):
+    from tools.example_data_paths import resolve_gradio_example_file_paths
+
+    resolved_data_files = resolve_gradio_example_file_paths(in_data_files)
+
     gr.Info(
         "Example data loaded. Now click on 'Redact text/data files' or 'Find duplicate cells/rows' on the Word or Excel/CSV files tab to run the example."
     )
 
     return (
-        gr.File(value=in_data_files),  # walkthrough_file_input
+        gr.update(value=resolved_data_files),  # walkthrough_file_input
         gr.Radio(
             value=pii_identification_method_drop_tabular
         ),  # walkthrough_pii_identification_method_drop_tabular
         gr.Radio(value=anon_strategy),  # walkthrough_anon_strategy
+        gr.update(value=resolved_data_files),  # in_data_files (main upload)
     )
 
 

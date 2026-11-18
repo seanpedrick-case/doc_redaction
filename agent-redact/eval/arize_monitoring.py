@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import threading
 import warnings
 from collections.abc import Callable, Iterator
@@ -57,6 +58,7 @@ from contextlib import contextmanager
 from typing import Any
 
 _INITIALIZED = False
+_SETUP_LOCK = threading.Lock()
 _TRACER_NAME = "doc_redaction.agent"
 _MAX_ATTR_CHARS = 4000
 
@@ -125,7 +127,47 @@ def _json_attr(value: Any) -> str:
 
 def tracing_initialized() -> bool:
     """True after a successful :func:`setup_arize_ax_tracing` call."""
-    return _INITIALIZED
+    return _tracing_initialized_anywhere()
+
+
+def _global_tracer_provider_registered() -> bool:
+    """True when OpenTelemetry already has a real SDK ``TracerProvider``."""
+    try:
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider
+    except ImportError:
+        return False
+    return isinstance(trace.get_tracer_provider(), TracerProvider)
+
+
+def _mark_tracing_initialized() -> None:
+    """Set ``_INITIALIZED`` on this module and any duplicate import alias."""
+    global _INITIALIZED
+    _INITIALIZED = True
+    here = sys.modules.get(__name__)
+    for alias in ("eval.arize_monitoring", "arize_monitoring"):
+        if alias == __name__:
+            continue
+        sibling = sys.modules.get(alias)
+        if sibling is not None and sibling is not here:
+            sibling._INITIALIZED = True  # type: ignore[attr-defined]
+
+
+def _tracing_initialized_anywhere() -> bool:
+    if _INITIALIZED:
+        return True
+    here = sys.modules.get(__name__)
+    for alias in ("eval.arize_monitoring", "arize_monitoring"):
+        if alias == __name__:
+            continue
+        sibling = sys.modules.get(alias)
+        if (
+            sibling is not None
+            and sibling is not here
+            and getattr(sibling, "_INITIALIZED", False)
+        ):
+            return True
+    return _global_tracer_provider_registered()
 
 
 def arize_session_id(session_hash: str | None) -> str | None:
@@ -150,7 +192,30 @@ def langgraph_trace_config(
             "conversation_id": sid,
         }
         config["configurable"] = {"thread_id": sid}
+    if _deepeval_langchain_tracing_enabled():
+        handler = _deepeval_callback_handler()
+        if handler is not None:
+            config["callbacks"] = [handler]
     return config
+
+
+def _deepeval_langchain_tracing_enabled() -> bool:
+    raw = (os.environ.get("AGENT_EVAL_DEEPEVAL_TRACING") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def agent_eval_deepeval_tracing_enabled() -> bool:
+    """True when Gradio/regression should emit DeepEval traces and post-run eval files."""
+    return _deepeval_langchain_tracing_enabled()
+
+
+def _deepeval_callback_handler() -> Any | None:
+    try:
+        from deepeval.integrations.langchain import CallbackHandler
+
+        return CallbackHandler()
+    except ImportError:
+        return None
 
 
 @contextmanager
@@ -311,7 +376,7 @@ def agent_turn_span(
         "span": None,
         "workflow_incomplete": None,
     }
-    if not _INITIALIZED:
+    if not tracing_initialized():
         yield meta
         return
     try:
@@ -393,12 +458,23 @@ def _setup_phoenix_tracing(
     register_kwargs: dict[str, Any] = {
         "project_name": project_name,
         "endpoint": endpoint,
+        # Older phoenix-otel builds crash in verbose ``_tracing_details`` when
+        # OpenTelemetry's HTTP exporter no longer exposes ``_headers``.
+        "verbose": False,
     }
     api_key = (os.environ.get("PHOENIX_API_KEY") or "").strip()
     if api_key:
         register_kwargs["api_key"] = api_key
 
-    tracer_provider = register(**register_kwargs)
+    try:
+        tracer_provider = register(**register_kwargs)
+    except Exception as exc:
+        warnings.warn(
+            f"Phoenix tracing registration failed ({exc}); tracing skipped.",
+            UserWarning,
+            stacklevel=3,
+        )
+        return False
     if instrument_langchain:
         _instrument_langchain(tracer_provider)
     return True
@@ -470,25 +546,33 @@ def setup_arize_ax_tracing(*, instrument_langchain: bool = True) -> bool:
     Returns True if tracing was enabled (or already initialized). Soft-fails
     with a warning when partially configured or packages are missing.
     """
-    global _INITIALIZED
-    if _INITIALIZED:
+    if _tracing_initialized_anywhere():
+        _mark_tracing_initialized()
         return True
 
     if not _env_truthy("ARIZE_TRACING_ENABLED"):
         return False
 
-    project_name = _project_name()
-    backend = _tracing_backend()
-    if backend == "phoenix":
-        ok = _setup_phoenix_tracing(
-            project_name, instrument_langchain=instrument_langchain
-        )
-    else:
-        ok = _setup_ax_tracing(project_name, instrument_langchain=instrument_langchain)
+    with _SETUP_LOCK:
+        if _tracing_initialized_anywhere():
+            _mark_tracing_initialized()
+            return True
 
-    if ok:
-        _INITIALIZED = True
-    return ok
+        project_name = _project_name()
+        backend = _tracing_backend()
+        if backend == "phoenix":
+            ok = _setup_phoenix_tracing(
+                project_name, instrument_langchain=instrument_langchain
+            )
+        else:
+            ok = _setup_ax_tracing(
+                project_name, instrument_langchain=instrument_langchain
+            )
+
+        if ok or _global_tracer_provider_registered():
+            _mark_tracing_initialized()
+            return True
+        return ok
 
 
 def _apply_session_stats_to_span(span: Any, stats: dict[str, Any]) -> None:
@@ -536,7 +620,7 @@ def iter_pi_events_with_tracing(
     No-op (passthrough) when tracing was not initialized. LLM HTTP calls remain
     inside the Node ``pi`` process and are not auto-instrumented.
     """
-    if not _INITIALIZED:
+    if not tracing_initialized():
         yield from events
         return
 

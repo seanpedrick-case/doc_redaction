@@ -15,13 +15,13 @@ if str(_REPO) not in sys.path:
 from run_policy_gate import main as policy_main  # noqa: E402
 from run_policy_gate import run_policy_gate  # noqa: E402
 
-_FIXTURE = _EVAL / "fixtures" / "example_smoke"
+_GOLD = _EVAL / "gold" / "example_smoke"
 
 
 def test_run_policy_gate_example_smoke():
     summary = run_policy_gate(
-        review_csv=_FIXTURE / "agent_review_file.csv",
-        ocr_words_csv=_FIXTURE / "ocr_results_with_words.csv",
+        review_csv=_GOLD / "agent_review_file.csv",
+        ocr_words_csv=_GOLD / "ocr_results_with_words.csv",
         must_redact=["Alice"],
         must_not_redact=[r"Example\s+Council"],
     )
@@ -29,10 +29,10 @@ def test_run_policy_gate_example_smoke():
 
 
 def test_policy_gate_cli_fixture():
-    code = policy_main(["--fixture", str(_FIXTURE)])
+    code = policy_main(["--gold", str(_GOLD)])
     assert code == 0
 
 
 def test_policy_gate_cli_dual():
-    code = policy_main(["--fixture", str(_FIXTURE), "--dual"])
+    code = policy_main(["--gold", str(_GOLD), "--dual"])
     assert code == 0

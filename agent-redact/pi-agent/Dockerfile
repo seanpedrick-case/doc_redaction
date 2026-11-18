@@ -8,11 +8,15 @@
 #   dev     — docker-compose: Pi CLI + Python deps; app tree bind-mounted at runtime.
 #   runtime — HF Space / AWS ECS: baked agent-redact tree (shared/pi/agentcore/
 #             redaction_langgraph/eval), non-root user, named volumes.
+#
+# Optional DeepEval / post-run eval (Gradio eval_summary.json):
+#   docker build ... --build-arg INSTALL_AGENT_EVAL=1
+#   or compose: INSTALL_AGENT_EVAL=1 docker compose ... --build up -d pi-agent-38
 
 # ===================================================================
-# Stage 1: Pi CLI (Node) — isolated so the runtime base stays Python 3.12
+# Stage 1: Pi CLI (Node) — isolated so the runtime base stays Python 3.13
 # ===================================================================
-FROM public.ecr.aws/docker/library/node:24.16.0-slim AS pi-cli
+FROM public.ecr.aws/docker/library/node:24.22.2-slim AS pi-cli
 
 ENV NPM_CONFIG_PREFIX=/opt/pi
 ENV PATH="/opt/pi/bin:${PATH}"
@@ -22,7 +26,7 @@ RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 # ===================================================================
 # Stage 2: Shared Python base (aligned with main app Dockerfile)
 # ===================================================================
-FROM public.ecr.aws/docker/library/python:3.12.13-slim-trixie AS pi-base
+FROM public.ecr.aws/docker/library/python:3.13.18-slim-trixie AS pi-base
 
 ENV NODE_ENV=production
 ENV DEBIAN_FRONTEND=noninteractive
@@ -49,8 +53,14 @@ COPY --from=pi-cli /opt/pi /opt/pi
 COPY --from=pi-cli /usr/local/bin/node /usr/local/bin/node
 
 COPY agent-redact/requirements_agent.txt /tmp/requirements_agent.txt
+COPY agent-redact/requirements_agent_eval.txt /tmp/requirements_agent_eval.txt
+ARG INSTALL_AGENT_EVAL=0
 RUN pip install --no-cache-dir -r /tmp/requirements_agent.txt \
-    && rm /tmp/requirements_agent.txt
+    && if [ "$INSTALL_AGENT_EVAL" = "1" ] || [ "$INSTALL_AGENT_EVAL" = "true" ] || [ "$INSTALL_AGENT_EVAL" = "True" ]; then \
+         pip install --no-cache-dir -r /tmp/requirements_agent_eval.txt; \
+       fi \
+    && rm -f /tmp/requirements_agent.txt /tmp/requirements_agent_eval.txt
+ENV AGENT_INSTALL_EVAL_DEPS=${INSTALL_AGENT_EVAL}
 
 # ===================================================================
 # Stage 3: Dev — thin image for docker-compose (repo bind-mounted)

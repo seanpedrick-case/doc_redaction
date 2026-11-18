@@ -5,7 +5,7 @@
 # AgentCore requires arm64, port 8080, POST /invocations and GET /ping
 # (provided by BedrockAgentCoreApp in entrypoint.py).
 
-FROM --platform=linux/arm64 public.ecr.aws/docker/library/python:3.12.13-slim-trixie
+FROM --platform=linux/arm64 public.ecr.aws/docker/library/python:3.13.18-slim-trixie
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1

@@ -1,0 +1,7 @@
+{
+  "app": "python app_harness_local.py",
+  "output": "cdk.out.harness_local",
+  "context": {
+    "@aws-cdk/aws-ec2:restrictDefaultSecurityGroup": false
+  }
+}

@@ -446,6 +446,9 @@ def redaction_allowed_io_roots() -> list[str]:
     for folder in (INPUT_FOLDER, OUTPUT_FOLDER):
         if folder:
             roots.append(str(folder))
+    agent_workspace = os.environ.get("AGENT_WORKSPACE_DIR", "").strip()
+    if agent_workspace:
+        roots.append(agent_workspace)
     roots.append(tempfile.gettempdir())
     return roots
 

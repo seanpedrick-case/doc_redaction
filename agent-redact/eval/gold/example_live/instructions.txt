@@ -1,0 +1,1 @@
+Redact personal contact details: email addresses, phone numbers, and postal addresses. Do not redact the employer name or job title headings unless they contain personal home addresses.

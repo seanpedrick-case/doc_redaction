@@ -401,6 +401,7 @@ def export_outputs_to_s3(
     save_outputs_to_s3_flag: bool,
     base_file_state=None,
     s3_bucket: str = S3_OUTPUTS_BUCKET,
+    s3_subfolder: str | None = None,
 ) -> str | None:
     """
     Upload a list of local output files to the configured S3 outputs folder.
@@ -410,6 +411,8 @@ def export_outputs_to_s3(
     - s3_output_folder_state_value: Final S3 key prefix (including any session hash)
         to use as the destination folder for uploads.
     - s3_bucket: Name of the S3 bucket.
+    - s3_subfolder: Optional extra folder under the document stem (e.g. ``agentic``)
+        so finals can sit beside first-pass outputs without basename collisions.
 
     Returns a short user-facing warning when any upload fails, else ``None``.
     """
@@ -467,10 +470,15 @@ def export_outputs_to_s3(
         if not base_prefix.endswith("/"):
             base_prefix = base_prefix + "/"
 
+        extra = (s3_subfolder or "").strip().strip("/")
+        extra_suffix = f"{extra}/" if extra else ""
+
         # For each file, append a subfolder. If we have a derived base_stem
         # from the input being analysed, use that; otherwise, fall back to
         # the individual output file name stem. Final pattern:
         #   <session_output_folder>/<date>/<base_file_stem>/<file_name>
+        # or, with s3_subfolder (e.g. agentic):
+        #   <session_output_folder>/<date>/<base_file_stem>/<s3_subfolder>/<file_name>
         # or, if base_file_stem is not available:
         #   <session_output_folder>/<date>/<output_file_stem>/<file_name>
         upload_failed = False
@@ -483,7 +491,7 @@ def export_outputs_to_s3(
             else:
                 folder_stem, _ = os.path.splitext(file_name)
 
-            per_file_prefix = base_prefix + folder_stem + "/"
+            per_file_prefix = base_prefix + folder_stem + "/" + extra_suffix
 
             out_message = upload_file_to_s3(
                 local_file_paths=[file],

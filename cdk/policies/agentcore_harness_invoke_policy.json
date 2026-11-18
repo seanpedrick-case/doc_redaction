@@ -1,0 +1,17 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "InvokeAgentCoreHarness",
+            "Effect": "Allow",
+            "Action": [
+                "bedrock-agentcore:InvokeHarness",
+                "bedrock-agentcore:InvokeAgentRuntime"
+            ],
+            "Resource": [
+                "arn:aws:bedrock-agentcore:*:*:harness/*",
+                "arn:aws:bedrock-agentcore:*:*:harness/*/harness-endpoint/*"
+            ]
+        }
+    ]
+}

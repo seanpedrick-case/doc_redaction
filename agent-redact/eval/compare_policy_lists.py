@@ -16,8 +16,8 @@ Observed lists usually come from recorded tool args::
 Example::
 
     python agent-redact/eval/compare_policy_lists.py \\
-      --fixture agent-redact/eval/fixtures/example_smoke \\
-      --observed agent-redact/eval/fixtures/example_smoke/tool_args.json \\
+      --gold agent-redact/eval/gold/example_smoke \\
+      --observed agent-redact/eval/gold/example_smoke/tool_args.json \\
       --min-must-redact-recall 0.9
 """
 
@@ -337,8 +337,8 @@ def compare_policy_extraction(
     )
 
 
-def _discover_fixture(fixture_dir: Path) -> dict[str, Path | None]:
-    root = fixture_dir.resolve()
+def _discover_gold_case(gold_case_dir: Path) -> dict[str, Path | None]:
+    root = gold_case_dir.resolve()
 
     def first(*names: str) -> Path | None:
         for name in names:
@@ -360,7 +360,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="Compare gold vs observed policy phrase lists (extraction F1)."
     )
-    p.add_argument("--fixture", type=Path, help="Fixture directory")
+    p.add_argument(
+        "--gold",
+        "--fixture",
+        type=Path,
+        dest="gold_case_dir",
+        help="Gold case directory",
+    )
     p.add_argument("--gold-must-redact", type=Path)
     p.add_argument("--gold-must-not-redact", type=Path)
     p.add_argument("--gold-deny-list", type=Path)
@@ -416,8 +422,8 @@ def main(argv: list[str] | None = None) -> int:
     gold_deny_path = args.gold_deny_list
     observed_path = args.observed
 
-    if args.fixture:
-        disc = _discover_fixture(args.fixture)
+    if args.gold_case_dir:
+        disc = _discover_gold_case(args.gold_case_dir)
         gold_must_path = gold_must_path or disc["must_redact"]
         gold_not_path = gold_not_path or disc["must_not_redact"]
         gold_deny_path = gold_deny_path or disc["deny_list"]

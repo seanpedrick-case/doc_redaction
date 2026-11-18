@@ -199,8 +199,15 @@ def sync_repo_skills_to_workspace(*, force: bool = False) -> Path:
     if force or _should_resync(dest, src):
         if dest.exists():
             _make_writable(dest)
-            shutil.rmtree(dest)
-        dest.mkdir(parents=True, exist_ok=True)
+            try:
+                shutil.rmtree(dest)
+            except (PermissionError, OSError):
+                # Bind mounts (e.g. Windows host workspace): merge in place instead.
+                pass
+            else:
+                dest.mkdir(parents=True, exist_ok=True)
+        if not dest.is_dir():
+            dest.mkdir(parents=True, exist_ok=True)
         for item in sorted(src.iterdir()):
             rel = item.relative_to(src)
             try:

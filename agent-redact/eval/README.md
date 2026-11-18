@@ -7,7 +7,8 @@ Layered quality measurement for agentic Pass 1 redaction (`pi` / `langgraph` / `
 | **1. Process health** | Did the orchestrator run reliably? | Arize AX / Phoenix ([`arize_monitoring.py`](arize_monitoring.py)); optional Bedrock AgentCore Evaluations |
 | **2. Policy gate** | Did boxes satisfy instructions? | [`run_policy_gate.py`](run_policy_gate.py) → [`tools/verify_redaction_coverage.py`](../../tools/verify_redaction_coverage.py) |
 | **2b. Policy extraction** | Did the agent derive the right `must_redact` / `must_not_redact` / `deny_list` from free-text instructions? | [`compare_policy_lists.py`](compare_policy_lists.py) + recorded `tool_args.json` |
-| **3. Gold regression** | Do boxes match an ideal review CSV? | [`compare_review_csvs.py`](compare_review_csvs.py) + [`fixtures/`](fixtures/) |
+| **3. Gold regression** | Do boxes match an ideal review CSV? | [`compare_review_csvs.py`](compare_review_csvs.py) + [`gold/`](gold/) |
+| **3b. OCR gold** | Does run word OCR match fixture gold OCR? | [`compare_ocr_words_csvs.py`](compare_ocr_words_csvs.py) |
 | **4. LLM-as-judge** (optional) | Human-readable summary: concision, instruction coverage, narrative accuracy | Not implemented as a gate — see [§4](#4-llm-as-judge-optional-reporting) |
 
 Telemetry alone does not prove redaction correctness. Gold geometry alone is brittle when alternate boxings are policy-OK. Use tiers 1–3 (and 2b when tool args are recorded) for pass/fail; use an LLM judge only for explainability when needed.
@@ -29,6 +30,7 @@ PHOENIX_COLLECTOR_ENDPOINT=http://localhost:6006
 
 - **LangGraph / AgentCore Runtime:** OpenInference LangChain spans + `session.id` = Gradio `session_hash`.
 - **Pi:** coarser AGENT/TOOL spans via `iter_pi_events_with_tracing` (LLM stays in Node).
+- **Main-app AgentCore Harness** (`USE_AGENTCORE` in [`app.py`](../../app.py)): root `main_app.harness` + inline TOOL spans around client dispatch ([`harness_eval_support.py`](../../tools/harness_eval_support.py)); LLM turns stay AWS-side. When `APP_EVAL_ENABLED` / `AGENT_EVAL_DEEPEVAL_TRACING` is on, also writes local `trace_events.jsonl` next to `tool_args.json` under `OUTPUT_FOLDER/agentcore/<run_id>/eval/run_*/`.
 
 ### Recommended process KPIs
 
@@ -59,7 +61,7 @@ When the agent runs `verify_coverage`, reports are no longer only buried in trun
 | `redaction.verify_coverage_calls` | Root AGENT | How many coverage calls this turn |
 | `redaction.workflow_incomplete` | Root AGENT (LangGraph) | `review_apply` not completed |
 
-**Phoenix / AX:** filter sessions where `redaction.final_pass_strict = false` or `redaction.any_verify_fail = true`. Wire: LangGraph + AgentCore Runtime via `run_verify_coverage` → `annotate_current_span_with_coverage`; Pi via tool-output JSON parse in `iter_pi_events_with_tracing`.
+**Phoenix / AX:** filter sessions where `redaction.final_pass_strict = false` or `redaction.any_verify_fail = true`. Wire: LangGraph + AgentCore Runtime via `run_verify_coverage` → `annotate_current_span_with_coverage`; Pi via tool-output JSON parse in `iter_pi_events_with_tracing`; main-app harness via `harness_inline_tool_span` + `maybe_annotate_coverage_from_tool_output` on `verify_redaction_coverage` results.
 
 ### Phoenix / AX tips
 
@@ -80,7 +82,9 @@ When the agent runs `verify_coverage`, reports are no longer only buried in trun
 | AgentCore Evaluations **built-ins** (tool selection, goal success) | Process/trajectory only — they do **not** auto-score `pass_strict` |
 | Custom AgentCore / offline eval that reads span attrs or re-runs `run_policy_gate.py` | Straight-forward; prefer offline policy gate for CI pass/fail |
 
-**Harness** (skills/shell) does not go through `run_verify_coverage` in Python, so these attributes appear only if a tool returns the same JSON and you add Harness-side span mapping — Runtime is the easy path.
+**Harness (agent-redact Gradio, skills/shell):** AWS-managed builtins do not emit app-side OTEL; map coverage only when a tool returns verify JSON you can parse.
+
+**Main-app harness (Option 3):** inline tools run in-process. With `ARIZE_TRACING_ENABLED`, Phoenix/AX gets `main_app.harness` + TOOL children and `redaction.*` on verify. DeepEval metrics still score from local `tool_args.json` / `eval_summary.json` (same as Pi); `trace_events.jsonl` is the durable local journal. Full LLM message spans inside the harness VM are not available from the app.
 
 Pair AgentCore process scores with tier 2 policy gate + tier 3 gold F1 for product quality.
 
@@ -94,7 +98,7 @@ Instruction-tied product QA: does the agent’s `*_review_file.csv` (and optiona
 
 ```bash
 python agent-redact/eval/run_policy_gate.py \
-  --fixture agent-redact/eval/fixtures/example_smoke
+  --gold agent-redact/eval/gold/example_smoke
 
 # Or explicit paths:
 python agent-redact/eval/run_policy_gate.py \
@@ -187,7 +191,7 @@ This matters for Gradio: if the agent never passes `must_redact`, live `verify_c
 
 ```bash
 python agent-redact/eval/compare_policy_lists.py \
-  --fixture agent-redact/eval/fixtures/example_smoke \
+  --gold agent-redact/eval/gold/example_smoke \
   --min-must-redact-recall 0.9 \
   --min-must-not-redact-recall 0.9 \
   --require-guardrail \
@@ -209,7 +213,7 @@ Run application scoring twice (compliance = **gold** lists; agent lists are diag
 
 ```bash
 python agent-redact/eval/run_policy_gate.py \
-  --fixture agent-redact/eval/fixtures/example_smoke \
+  --gold agent-redact/eval/gold/example_smoke \
   --dual
 ```
 
@@ -229,7 +233,7 @@ Given `instructions.txt` + agent lists (not the PDF), a judge can score paraphra
 
 ### Fixture protocol
 
-Layout under [`fixtures/<case>/`](fixtures/):
+Layout under [`gold/<case>/`](gold/):
 
 | File | Required | Purpose |
 |------|----------|---------|
@@ -245,37 +249,48 @@ Layout under [`fixtures/<case>/`](fixtures/):
 
 Version gold CSVs with PDF content hash + instruction text so fixtures stay reproducible. Pin `ocr_method` / `pii_method` / redaction backend URL when comparing orchestrators (`pi` vs `langgraph`).
 
-### Matching rules ([`compare_review_csvs.py`](compare_review_csvs.py))
+### Gold geometry scoring ([`compare_review_csvs.py`](compare_review_csvs.py))
 
-| Mode | Score | Use when |
+**Default (Gradio + regression):** `AGENT_EVAL_GOLD_GEOMETRY_SCORING=core_coverage` (set `legacy_box_match` for the old greedy 1:1 row matcher).
+
+| Scoring | Meaning |
+|---------|---------|
+| **`core_coverage`** | Derive **core** rows from ideal/agent CSV (drop nested sub-spans like `Dr` inside `Dr David R.`). **Recall** = fraction of core gold spans whose area is covered by the **union** of agent boxes (≥ threshold). **Precision** = fraction of core agent boxes that overlap a core gold span. |
+| **`legacy_box_match`** | Every CSV row counts; greedy pairwise match with containment/IoU modes below. |
+
+Core coverage answers “are blessed **spans** redacted?” without requiring duplicate PII-detector layers. Tier 2 **policy gate** still answers “are **words** covered per regex lists?”
+
+| Legacy mode (`AGENT_EVAL_GOLD_GEOMETRY_CONTAINMENT`) | Score | Use when |
 |------|-------|----------|
-| `iou` (default) | Intersection-over-union | Strict geometric agreement |
 | `gold_contained` | ∩ / area(gold) | Agent may draw larger boxes |
 | `agent_contained` | ∩ / area(agent) | Penalize huge unnecessary boxes |
+| `iou` | Intersection-over-union | Strict geometric agreement |
 
-Default threshold **0.5**. Reports **precision**, **recall**, **F1**, and **strict_pass** (every gold matched and no unmatched agent boxes).
+Threshold **0.85** default (`AGENT_EVAL_GOLD_IOU_THRESHOLD`). Legacy also supports **`AGENT_EVAL_GOLD_MANY_TO_ONE=true`**.
+
+| Env | Default | Role |
+|-----|---------|------|
+| `AGENT_EVAL_GOLD_GEOMETRY_SCORING` | `core_coverage` | `core_coverage` or `legacy_box_match` |
+| `AGENT_EVAL_GOLD_GEOMETRY_CONTAINMENT` | `gold_contained` | Legacy matcher only (replaces overloading `AGENT_EVAL_GOLD_MATCH_MODE` for geometry) |
+| `AGENT_EVAL_GOLD_CORE_SUBSUME_THRESHOLD` | `0.9` | Drop nested core rows when smaller box is ≥90% inside larger + text sub-span |
+| `AGENT_EVAL_GOLD_CORE_AGENT_OVERLAP` | `0.05` | Min intersection/area(agent) for precision TP |
 
 ```bash
 python agent-redact/eval/compare_review_csvs.py \
-  fixtures/example_smoke/ideal_review_file.csv \
-  fixtures/example_smoke/agent_review_file.csv \
-  --iou-threshold 0.5 --min-f1 0.9
+  gold/example_smoke/ideal_review_file.csv \
+  gold/example_smoke/agent_review_file.csv \
+  --scoring core_coverage --iou-threshold 0.85
 
-# Smoke subset: require perfect 1:1 coverage
-python agent-redact/eval/compare_review_csvs.py gold.csv agent.csv --require-strict
-
-# Merged agent boxes vs one gold span
+# Legacy greedy matcher
 python agent-redact/eval/compare_review_csvs.py gold.csv agent.csv \
-  --mode gold_contained --many-to-one --min-f1 0.85
+  --scoring legacy_box_match --mode gold_contained --many-to-one --min-f1 0.85
 ```
 
 ### Brittleness mitigations
 
-- Prefer F1 + containment modes over exact coordinate equality.  
-- Use `--many-to-one` when agents split or merge word boxes.  
-- Geometry-only by default; add `--require-label-match` for a separate label gate.  
-- Keep fixtures small; re-generate gold after OCR pipeline changes.  
-- Always run the **policy gate** on the same case — policy can pass when gold F1 fails (acceptable alternate boxing).
+- Prefer **core_coverage** for agentic runs; use **legacy** only when you need strict CSV row parity.  
+- Keep gold CSVs as exported from review (PII stack rows OK — core is derived at score time).  
+- Always run the **policy gate** on the same case — policy can pass when geometry F1 is low (alternate boxing).
 
 ---
 
@@ -309,18 +324,168 @@ Treat it as **reporting / triage**, not the source of truth:
 
 ---
 
-## 5. Suggested CI usage
+## 5. Local agent regression (DeepEval-ready)
 
-Unit tests cover the comparator (`test/test_compare_review_csvs.py`) on synthetic CSVs (no PDF/OCR stack required).
+Fast **offline** tests (no LLM) run in default `pytest`: comparators and [`run_agent_regression.py --gates-only`](run_agent_regression.py) on [`gold/example_smoke/`](gold/example_smoke/).
 
-For a nightly or manual agent regression (not in default lightweight CI):
+**Live** regression runs on your machine only (not GitHub Actions in this phase): Docker compose + the same orchestrator models as the Gradio agent (`AGENT_DEFAULT_PROVIDER` / `AGENT_DEFAULT_MODEL` in [`config/agent.env`](../../config/agent.env.example)).
 
-1. Run agent (or LangGraph headless) on each fixture with pinned backend settings.  
-2. Persist `tool_args.json` from the run; score extraction with `compare_policy_lists.py --fixture …`.  
-3. Copy output `*_review_file.csv` → compare to `ideal_review_file.csv` with `--min-f1` (when gold boxes exist).  
-4. Run `run_policy_gate.py --fixture …` (gold lists); optionally `--dual` with recorded tool args.  
-5. Optionally assert process KPIs from Phoenix export / AgentCore evaluation results.  
-6. Optionally attach an LLM-as-judge summary on failures only ([§4](#4-llm-as-judge-optional-reporting)).
+### Orchestrator providers (same as Gradio)
+
+| Provider | `AGENT_DEFAULT_PROVIDER` | Typical local setup |
+|----------|--------------------------|---------------------|
+| llama.cpp | `llama-cpp` | [`docker-compose_llama_agentic.yml`](../../docker-compose_llama_agentic.yml) + `AGENT_LLAMA_BASE_URL` |
+| Gemini | `google-gemini` | `GOOGLE_API_KEY` (or project env) in `config/agent.env` |
+| Bedrock | `amazon-bedrock` | AWS creds + `AGENT_DEFAULT_MODEL` |
+
+Set **`AGENT_ORCHESTRATOR`** to `langgraph` or `pi` before running the harness (or pass `--orchestrator`).
+
+### Recipe
+
+1. Start stack (example):
+
+   ```bash
+   docker compose -f docker-compose_llama_agentic.yml --profile 27b_38 up -d
+   # Also start the matching agent-* compose service
+   ```
+
+2. Configure [`config/agent.env`](../../config/agent.env.example) (never commit secrets).
+
+3. Run regression:
+
+   ```powershell
+   # Windows
+   .\agent-redact\eval\run_local_agent_eval.ps1 -Gold agent-redact/eval/gold/example_live -Orchestrator langgraph
+
+   # Linux/macOS
+   GOLD=agent-redact/eval/gold/example_live ORCHESTRATOR=langgraph \
+     ./agent-redact/eval/run_local_agent_eval.sh
+   ```
+
+   Or directly:
+
+   ```bash
+   python agent-redact/eval/run_agent_regression.py \
+     --gold agent-redact/eval/gold/example_live \
+     --orchestrator langgraph
+
+   # Offline scoring only (recorded CSVs / example_smoke):
+   python agent-redact/eval/run_agent_regression.py \
+     --gold agent-redact/eval/gold/example_smoke --gates-only
+   ```
+
+4. Outputs land under [`eval/runs/`](runs/) (`agent_review_file.csv`, `tool_args.json`, `policy_gate.json`, `gold_geometry.json`, `ocr_gold.json`, …).
+
+5. **Optional DeepEval** (dev venv):
+
+   ```bash
+   pip install -r agent-redact/requirements_agent.txt -r agent-redact/requirements_agent_eval.txt
+   deepeval test run test/agent/test_agent_deepeval.py
+   deepeval inspect   # requires pip install "deepeval[inspect]"
+   ```
+
+   **DeepEval metrics:** offline pytest uses custom **`PolicyStrictMetric`** only. Live runs can add DeepEval **`ToolCorrectnessMetric`** + **`TaskCompletionMetric`** via [`build_regression_deepeval_metrics()`](deepeval_metrics.py) (set `AGENT_EVAL_DEEPEVAL_TRACING=1` for LangGraph tool traces; **TaskCompletion** judge via **`USE_BEDROCK_JUDGE=1`** / Bedrock provider auto-select, or OpenAI-compatible **`USE_OPENAI_MODEL`** / **`USE_LOCAL_MODEL`**). See [`example_commands.txt`](example_commands.txt). Product pass/fail should still rely on policy gate / gold F1 ([§4](#4-llm-as-judge-optional-reporting)).
+
+   **Gradio agent UI:** with `AGENT_EVAL_DEEPEVAL_TRACING=1`, each completed **Start redaction task** writes `{session_workspace}/eval/run_<timestamp>/eval_summary.json` (pass/fail/score for **policy_strict**, **tool_correctness**, **task_completion**, plus deterministic **gold_geometry**, **ocr_gold**, **policy_extraction** when a gold case applies). With **`AGENT_EVAL_AUTO_GOLD=1`**, the UI matches upload + instructions to one case under **`AGENT_EVAL_GOLD_ROOT`** at task start (see [`gold/README.md`](gold/README.md)); no unique match skips gold-tied metrics (fail closed). Legacy: **`AGENT_EVAL_GOLD=<case_dir>`** with auto off scores every task against that case. Task completion uses your redaction instructions and needs judge API credentials when DeepEval is installed. Optional **`AGENT_EVAL_MIRROR_RUNS=1`** copies the folder to [`eval/runs/`](runs/).
+
+   **Run summary CSV:** when tracing is on (opt out with `AGENT_EVAL_RUN_SUMMARY_CSV=0`), each run appends one row to [`eval/outputs/eval_run_summary.csv`](outputs/eval_run_summary.csv) and `{session_workspace}/eval/eval_run_summary.csv` — same idea as topic-modeller `eval_run_summary.csv` (timestamps, pass/score columns, `output_files` / `intermediate_files`). Columns **`orchestrator`**, **`model_name`**, **`ocr_method`**, **`pii_method`**, **`encourage_vlm_faces`**, and **`encourage_vlm_signatures`** (Gradio “Encourage CUSTOM_VLM_*…” checkboxes at task start) are taken from the run folder’s `gradio_run_meta.json` (written at post-run eval from the Gradio task), then `eval_summary.json`, then `manifest.json` (`run_*` overlays or gold defaults). Rebuilds without meta still get OCR/PII from a copied gold `manifest.json`. Refresh geometry + rebuild from mirrored runs: [`refresh_eval_geometry.py`](refresh_eval_geometry.py) (or `rebuild_eval_run_summary_csv()` alone if JSON is already current).
+
+   **Deterministic CSV columns** (from `gold_geometry.json`, `ocr_gold.json`, `policy_extraction.json` under each run dir): `gold_geometry_f1` / `_recall` / `_precision`, `ocr_gold_f1` / `_recall` / `_precision`, `policy_extraction_must_redact_f1`, `policy_extraction_deny_list_f1`, plus `*_skipped` flags when comparison did not run.
+
+   **Gold / OCR env tunables** (optional):
+
+   | Variable | Default | Role |
+   |----------|---------|------|
+   | `AGENT_EVAL_GOLD_GEOMETRY_SCORING` | `core_coverage` | `core_coverage` or `legacy_box_match` |
+   | `AGENT_EVAL_GOLD_GEOMETRY_CONTAINMENT` | `gold_contained` | Legacy matcher: `iou`, `gold_contained`, `agent_contained` |
+   | `AGENT_EVAL_GOLD_IOU_THRESHOLD` | `0.85` | Coverage threshold (core union recall + legacy match) |
+   | `AGENT_EVAL_GOLD_MANY_TO_ONE` | `true` | Legacy: multiple agent boxes per gold box |
+   | `AGENT_EVAL_GOLD_MATCH_MODE` | `strict_then_soft` | **Task auto-match only** (PDF + instructions), not geometry |
+   | `AGENT_EVAL_MIN_GOLD_F1` | *(unset)* | Fail gates / optional `overall_pass` when below |
+   | `AGENT_EVAL_MIN_OCR_F1` | *(unset)* | Fail gates when OCR gold F1 below threshold |
+   | `AGENT_EVAL_OCR_IOU_THRESHOLD` | *(unset)* | Require word bbox IoU for OCR token matches |
+   | `AGENT_EVAL_OVERALL_INCLUDE_GOLD=1` | off | Include min gold/OCR F1 in Gradio `overall_pass` |
+
+   OCR gold compare uses fixture `ocr_results_with_words.csv` vs run copy whenever both files exist (method mismatch is recorded in `ocr_gold.json` `notes` only). Set `AGENT_EVAL_OCR_SKIP_ON_METHOD_MISMATCH=1` to restore the old skip-on-mismatch behaviour.
+
+### Fixtures
+
+- [`example_smoke/`](gold/example_smoke/) — synthetic CSVs, no PDF (`--gates-only`).
+- [`example_live/`](gold/example_live/) — small public PDF via `manifest.json` `input_pdf`; tune gold lists after a blessed run.
+
+GitHub Actions can reuse the same CLI later; default repo CI remains lightweight ([`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)).
+
+### Main redaction app (`APP_EVAL_ENABLED`)
+
+The **base** Gradio app ([`app.py`](../../app.py)) reuses this eval tree when `APP_EVAL_ENABLED=1` in [`config/app_config.env`](../../config/app_config.env) (or `config/docker_app_config.env` for Compose):
+
+- **Docker (`docker-compose_llama_agentic.yml`):** host [`agent-redact/eval/gold`](gold) and [`agent-redact/eval/outputs`](outputs) are mounted (gold read-only, outputs read-write for `eval_run_summary.csv`). Eval Python deps: set `INSTALL_APP_EVAL=1` and rebuild `redaction-app-llama`, or `APP_EVAL_ENABLED=True` / `APP_INSTALL_EVAL_DEPS=true` in `docker_app_config.env` for a one-time `pip install` at container start ([`entrypoint.sh`](../../entrypoint.sh)).
+
+- **Trigger:** **Extract text and redact document**, **Redact document**, and extract-text-only paths (via [`tools/app_eval_hook.py`](../../tools/app_eval_hook.py)).
+- **Match:** PDF + derived instructions from entity/deny/OCR settings ([`derive_app_eval_instructions.py`](derive_app_eval_instructions.py)); same [`gold_match.py`](gold_match.py) tiers as the agent (`APP_EVAL_AUTO_GOLD`, `APP_EVAL_GOLD`, `APP_EVAL_GOLD_ROOT`).
+- **Gates:** [`post_run_app_eval.py`](post_run_app_eval.py) → [`run_deterministic_gates`](run_agent_regression.py) (full redact) or OCR gold only (extract-text-only).
+- **Policy gate:** still [`verify_redaction_coverage`](../../tools/verify_redaction_coverage.py) via [`run_policy_gate.py`](run_policy_gate.py) and gold `must_redact.txt`.
+- **Metrics:** deterministic tiers + DeepEval **task_completion** by default when `APP_EVAL_ENABLED` is on (opt out with `APP_EVAL_DEEPEVAL_METRICS=0`); **tool_correctness** skipped. This does **not** require `AGENT_EVAL_DEEPEVAL_TRACING` (that flag is for the **agent** LangGraph/LangChain trace hooks only). Task completion uses a **synthetic** `actual_output` ([`app_task_completion_output.py`](app_task_completion_output.py): QA summary from gates/artifacts, no Gradio chat). By default **no uncovered-term text** is sent to the judge; set `APP_EVAL_TASK_COMPLETION_INCLUDE_TERM_SAMPLES=1` for length-only placeholders. **`overall_pass`** ignores `task_completion` unless `APP_EVAL_TASK_COMPLETION_AFFECTS_OVERALL=1` — treat policy gate / gold F1 as authoritative.
+- **CSV:** `run_source=main_app` in [`eval_run_summary.csv`](outputs/eval_run_summary.csv) when `APP_EVAL_RUN_SUMMARY_CSV` is not off (agentic Gradio uses `run_source=agent_gradio`). Docker: mount `agent-redact/eval/outputs` (see compose `x-redaction-app-volumes`) so rows land on the host.
+- **CLI:** `python cli_redact.py … --app-eval` or offline `python agent-redact/eval/run_app_eval.py --pdf … --settings-json …`.
+
+See [`gold/README.md`](gold/README.md) (main app authoring).
+
+### Standardized benchmark suite (agent + main app)
+
+One entrypoint runs **every blessed gold case** (directories with `ideal_review_file.csv` + resolvable input PDF) and appends rows to [`eval/outputs/eval_run_summary.csv`](outputs/eval_run_summary.csv). Suite JSON reports land beside the CSV as `eval/outputs/bench_<timestamp>_<gitsha>.json`.
+
+```bash
+# Audit local gold readiness (no LLM)
+python agent-redact/eval/run_benchmark_suite.py --audit-only
+
+# List cases that would run
+python agent-redact/eval/run_benchmark_suite.py --list-cases
+
+# Full suite (agent LangGraph turn + main-app CLI redact per case)
+python agent-redact/eval/run_benchmark_suite.py \
+  --gold-root agent-redact/eval/gold \
+  --surfaces agent,main \
+  --orchestrator langgraph
+
+# Compare OCR/PII stacks (CLI overrides on top of each case's app_eval_settings.json)
+python agent-redact/eval/run_benchmark_suite.py --surfaces main,harness --case show_ex_partnership \
+  --ocr-method "Local OCR model - PDFs without selectable text" \
+  --chosen-local-ocr-model paddle \
+  --pii-method Local
+
+# Bedrock LLM PII model ids live in APP_CONFIG_PATH — load per matrix row:
+python agent-redact/eval/run_benchmark_suite.py --surfaces main --case show_ex_partnership \
+  --pii-method "LLM (AWS Bedrock)" \
+  --app-config-path config/bench_bedrock_nova.env
+
+# One case, agent only
+python agent-redact/eval/run_benchmark_suite.py --case example_live --surfaces agent
+```
+
+| Leg | Requirement | CSV `run_source` |
+|-----|-------------|------------------|
+| Agent | `instructions.txt`, input PDF, ideal CSV; LangGraph/Pi stack | `benchmark_agent` |
+| Harness | same as agent; `AGENTCORE_HARNESS_ARN` + AWS creds (main app route) | `benchmark_harness` |
+| Main | above + `app_eval_settings.json` | `main_app` (via `cli_redact --app-eval`) |
+
+AgentCore harness leg (not LangGraph):
+
+```bash
+python agent-redact/eval/run_benchmark_suite.py \
+  --surfaces harness \
+  --case example_emails_to_professor_agentic
+```
+
+Uses [`run_agentic_redaction`](../../tools/agentcore_harness.py) and the same [`HarnessEvalRecorder`](../../tools/harness_eval_support.py) / [`post_run_eval`](post_run_eval.py) gates as the Redact tab **Run agent redact** flow.
+
+Set `AGENT_EVAL_RUN_SUMMARY_CSV=1`, `APP_EVAL_ENABLED=1`, and `APP_EVAL_RUN_SUMMARY_CSV=1` (the suite sets these by default). New CSV columns: `benchmark_suite_id`, `git_commit`.
+
+**Exit codes:** by default the process exits **0** when redaction + eval complete, even if scores are poor (`overall_pass=false`, low geometry F1). Per-surface JSON records separate `exit_code` (technical) from `qa_pass`. Use `--fail-on-qa` for CI that should fail on bad gold scores; `--allow-fail` forces exit 0 even on crashes.
+
+Gold readiness table: [`gold/BENCHMARK_GOLD_AUDIT.md`](gold/BENCHMARK_GOLD_AUDIT.md) (regenerate with `--audit-only`).
+
+**Docker main app:** mount host `agent-redact/eval/runs` (see `x-redaction-app-volumes` in compose) or the suite falls back to `eval/outputs/benchmark_runs/` / `OUTPUT_FOLDER/benchmark_runs/`. Optional: `BENCHMARK_RUNS_ROOT=/path`.
 
 ---
 
@@ -329,7 +494,18 @@ For a nightly or manual agent regression (not in default lightweight CI):
 | Path | Role |
 |------|------|
 | [`arize_monitoring.py`](arize_monitoring.py) | OTEL setup for Gradio agent runtimes |
+| [`post_run_eval.py`](post_run_eval.py) | Gradio post-task `eval_summary.json` when `AGENT_EVAL_DEEPEVAL_TRACING=1` |
+| [`post_run_app_eval.py`](post_run_app_eval.py) | Main app post-redact eval when `APP_EVAL_ENABLED=1` |
+| [`derive_app_eval_instructions.py`](derive_app_eval_instructions.py) | Canonical instructions from main-app UI settings |
+| [`app_eval_env.py`](app_eval_env.py) | `APP_EVAL_*` environment helpers |
+| [`eval_run_summary_csv.py`](eval_run_summary_csv.py) | Append-only `eval_run_summary.csv` across Gradio + regression runs |
 | [`compare_review_csvs.py`](compare_review_csvs.py) | Gold vs agent box F1 CLI / library |
+| [`compare_ocr_words_csvs.py`](compare_ocr_words_csvs.py) | Gold vs run word OCR F1 CLI / library |
 | [`compare_policy_lists.py`](compare_policy_lists.py) | Gold vs observed must_redact / deny_list extraction F1 + guardrail |
 | [`run_policy_gate.py`](run_policy_gate.py) | Fixture-friendly coverage gate (+ `--dual`) |
-| [`fixtures/`](fixtures/) | Case layout + `example_smoke` synthetic CSVs / tool_args |
+| [`run_agent_regression.py`](run_agent_regression.py) | Local live/offline harness → deterministic gates |
+| [`benchmark_cases.py`](benchmark_cases.py) | Discover / audit benchmark-eligible gold cases |
+| [`run_benchmark_suite.py`](run_benchmark_suite.py) | Multi-case benchmark (agent + main app) |
+| [`deepeval_metrics.py`](deepeval_metrics.py) | DeepEval metric wired to `pass_strict` |
+| [`run_local_agent_eval.ps1`](run_local_agent_eval.ps1) / [`.sh`](run_local_agent_eval.sh) | Thin wrappers for local runs |
+| [`gold/`](gold/) | Case layout + `example_smoke` / `example_live` |

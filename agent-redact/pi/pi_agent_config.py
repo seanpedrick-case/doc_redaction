@@ -12,6 +12,14 @@ DEPLOYMENT_HF_SPACE = "hf-space"
 DEPLOYMENT_AWS_ECS = "aws-ecs"
 
 
+def orchestrator_is_pi() -> bool:
+    """True when ``AGENT_ORCHESTRATOR`` is Pi (default); not LangGraph / AgentCore."""
+    value = (os.environ.get("AGENT_ORCHESTRATOR") or "pi").strip().lower()
+    if value == "harness":
+        value = "agentcore-harness"
+    return value == "pi"
+
+
 def resolve_agent_dir() -> Path:
     """Directory for Pi ``models.json`` / ``settings.json`` (must be writable at runtime)."""
     explicit = (os.environ.get("AGENT_CODING_AGENT_DIR") or "").strip()
@@ -719,10 +727,11 @@ def build_settings_config(
         or provider in (PROVIDER_GEMINI, PROVIDER_BEDROCK)
     ):
         _apply_retry_settings(settings, provider=provider)
-    from pi_workspace_skills import ensure_workspace_skills, workspace_skills_dir
+    if orchestrator_is_pi():
+        from pi_workspace_skills import ensure_workspace_skills, workspace_skills_dir
 
-    ensure_workspace_skills()
-    settings["skills"] = [workspace_skills_dir().as_posix()]
+        ensure_workspace_skills()
+        settings["skills"] = [workspace_skills_dir().as_posix()]
     return settings
 
 
@@ -843,7 +852,7 @@ def pi_model_fallback_notice(
         f"The configured orchestration model {intended_label} was not found or could "
         f"not be selected. Pi is using **{active_label}** instead.{llama_hint}"
         f"{cloud_hint} Click **Apply backend** with the correct model, or recreate "
-        f"`pi-agent` after updating `config/agent.env`."
+        f"the agent compose service after updating `config/agent.env`."
     )
 
 

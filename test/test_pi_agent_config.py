@@ -526,3 +526,10 @@ def test_active_model_from_pi_state():
     )
     assert provider == pac.PROVIDER_GEMINI
     assert model_id == "gemini-3.1-pro-preview"
+
+
+def test_build_settings_config_skips_skills_for_langgraph(monkeypatch, pi_workspace):
+    monkeypatch.setenv("AGENT_ORCHESTRATOR", "langgraph")
+    settings = pac.build_settings_config()
+    assert "skills" not in settings
+    assert pac.orchestrator_is_pi() is False
