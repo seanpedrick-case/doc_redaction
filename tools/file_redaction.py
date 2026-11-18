@@ -9828,8 +9828,10 @@ def redact_image_pdf(
                         and "temp" in normalized_path.lower()
                     )
 
+                    # Prefer the session input_folder (durable PNG copies from
+                    # process_file_for_image_creation) over the global INPUT_FOLDER.
                     if is_gradio_temp or validate_path_containment(
-                        normalized_path, INPUT_FOLDER
+                        normalized_path, input_folder
                     ):
                         image = Image.open(normalized_path)
                     else:
