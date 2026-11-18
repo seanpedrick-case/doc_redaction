@@ -229,6 +229,62 @@ def test_job_choices_filtered_by_gradio_session(tmp_path: Path):
     assert "run-a" not in "".join(choices_b)
 
 
+def test_safe_output_root_rejects_paths_outside_output_folder(
+    tmp_path: Path, monkeypatch
+):
+    import os
+
+    from tools import config as config_mod
+
+    allowed = tmp_path / "allowed_output"
+    allowed.mkdir()
+    monkeypatch.setattr(config_mod, "OUTPUT_FOLDER", str(allowed) + "/")
+
+    def _strict_containment(path, base_path):
+        try:
+            return os.path.commonpath(
+                [
+                    os.path.normpath(os.path.abspath(str(path))),
+                    os.path.normpath(os.path.abspath(str(base_path))),
+                ]
+            ) == os.path.normpath(os.path.abspath(str(base_path)))
+        except ValueError:
+            return False
+
+    monkeypatch.setattr(
+        "tools.secure_path_utils.validate_folder_containment",
+        _strict_containment,
+    )
+
+    # Contained path is kept.
+    nested = allowed / "session"
+    nested.mkdir()
+    assert hjr._safe_output_root(nested) == nested
+
+    # Outside path falls back to OUTPUT_FOLDER (no disk scan of attacker path).
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    assert hjr._safe_output_root(outside) == Path(config_mod.OUTPUT_FOLDER)
+
+    # Disk scan of an unsafe root must not discover jobs planted there.
+    planted = outside / "agentcore" / "evil-run"
+    planted.mkdir(parents=True)
+    (planted / "job_status.json").write_text(
+        json.dumps(
+            {
+                "run_id": "evil-run",
+                "status": "succeeded",
+                "gradio_session_hash": "user-a",
+                "session_dir": str(planted),
+                "started_at": 9.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    rows = hjr.list_jobs_with_disk_scan(outside, session_hash="user-a")
+    assert all(r.get("run_id") != "evil-run" for r in rows)
+
+
 def test_mark_post_complete_hooks_done(tmp_path: Path):
     job = hjr.HarnessJob(
         run_id="hooks",

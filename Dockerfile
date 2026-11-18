@@ -36,14 +36,25 @@ ENV INSTALL_PADDLEOCR=${INSTALL_PADDLEOCR}
 ARG PADDLE_GPU_ENABLED=False
 ENV PADDLE_GPU_ENABLED=${PADDLE_GPU_ENABLED}
 
+# PP-OCRv6 uses engine=transformers, so torch/torchvision/transformers are required for both
+# CPU and GPU Paddle paths. Keep torch/torchvision pins as a matching pair (2.14.1 <-> 0.29.1).
+# Installing them in separate --target passes with mismatched upper bounds previously left
+# torch 2.14.1 + torchvision 0.28.0, which breaks AutoImageProcessor (torchvision::nms).
 RUN if [ "$INSTALL_PADDLEOCR" = "True" ] && [ "$PADDLE_GPU_ENABLED" = "False" ]; then \
     pip install --verbose --no-cache-dir --target=/install "paddlepaddle>=3.3.1,<4" && \
-    pip install --verbose --no-cache-dir --target=/install "paddleocr>=3.7.0,<4"; \
+    pip install --verbose --no-cache-dir --target=/install "paddleocr>=3.7.0,<4" && \
+    pip install --verbose --no-cache-dir --target=/install \
+        "torch==2.14.1+cpu" \
+        "torchvision==0.29.1+cpu" \
+        "transformers>=5.19.0,<6" \
+        --extra-index-url https://download.pytorch.org/whl/cpu; \
 elif [ "$INSTALL_PADDLEOCR" = "True" ] && [ "$PADDLE_GPU_ENABLED" = "True" ]; then \
     pip install --verbose --no-cache-dir --target=/install "paddlepaddle>=3.3.1,<4" && \
     pip install --verbose --no-cache-dir --target=/install "paddleocr>=3.7.0,<4" && \
-    pip install --verbose --no-cache-dir --target=/install "torch<=2.14.1" --index-url https://download.pytorch.org/whl/cu130 && \
-    pip install --verbose --no-cache-dir --target=/install "torchvision<=0.28.0" --index-url https://download.pytorch.org/whl/cu130 && \
+    pip install --verbose --no-cache-dir --target=/install \
+        "torch==2.14.1" \
+        "torchvision==0.29.1" \
+        --index-url https://download.pytorch.org/whl/cu130 && \
     pip install --verbose --no-cache-dir --target=/install "transformers>=5.19.0,<6"; \
 fi
 
@@ -55,18 +66,21 @@ ENV TORCH_GPU_ENABLED=${TORCH_GPU_ENABLED}
 
 # Optionally install VLM/LLM packages if the INSTALL_VLM environment variable is set to True.
 # GPU + VLM does not install flash-attn (no official cp313 + cu130/torch wheel); see tools/inference_attention.py (sdpa fallback).
+# Pin torchvision to the matching torch release (0.29.1 with 2.14.1) in one install command.
 RUN if [ "$INSTALL_VLM" = "True" ] && [ "$TORCH_GPU_ENABLED" = "False" ]; then \
     pip install --verbose --no-cache-dir --target=/install \
     "torch==2.14.1+cpu" \
-    "torchvision" \
+    "torchvision==0.29.1+cpu" \
     "transformers>=5.19.0,<6" \
     "accelerate>=1.15.0,<2" \
     "bitsandbytes>=0.50.2,<1" \
     "sentencepiece>=0.2.2,<1" \
     --extra-index-url https://download.pytorch.org/whl/cpu; \
 elif [ "$INSTALL_VLM" = "True" ] && [ "$TORCH_GPU_ENABLED" = "True" ]; then \
-    pip install --verbose --no-cache-dir --target=/install "torch==2.14.1" --index-url https://download.pytorch.org/whl/cu130 && \
-    pip install --verbose --no-cache-dir --target=/install "torchvision" --index-url https://download.pytorch.org/whl/cu130 && \
+    pip install --verbose --no-cache-dir --target=/install \
+        "torch==2.14.1" \
+        "torchvision==0.29.1" \
+        --index-url https://download.pytorch.org/whl/cu130 && \
     pip install --verbose --no-cache-dir --target=/install \
         "transformers>=5.19.0,<6" \
         "accelerate>=1.15.0,<2" \
@@ -125,8 +139,9 @@ COPY --from=builder /install /usr/local/lib/python3.13/site-packages/
 COPY --from=builder /install/bin /usr/local/bin/
 
 # Reinstall protobuf into the final site-packages. Builder uses multiple `pip install --target=/install`
-# passes; that can break the `google` namespace so `google.protobuf` is missing and Paddle fails at import.
-# RUN pip install --no-cache-dir "protobuf"
+# passes; that can break the `google` namespace so `google.protobuf` is missing and Paddle fails at import
+# (dist-info remains while google/protobuf is overwritten by other google-* packages).
+RUN pip install --no-cache-dir --force-reinstall "protobuf"
 
 # English pipeline is not a normal PyPI dependency; bundle it in the image so runtime works offline.
 # Placed before COPY app code so application changes do not invalidate this layer.
