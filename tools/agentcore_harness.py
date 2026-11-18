@@ -376,8 +376,52 @@ class HarnessSession:
         matches.sort(key=lambda item: item[0], reverse=True)
         return matches[0][1]
 
+    @staticmethod
+    def _is_interim_first_pass_redacted(rel: str) -> bool:
+        """True for ``output_redact/*_redacted.pdf|.png`` (draft before review_apply)."""
+        norm = rel.replace("\\", "/")
+        if not norm.startswith(f"{REDACT_OUTPUT_DIR}/"):
+            return False
+        name = Path(norm).name.lower()
+        return name.endswith(("_redacted.pdf", "_redacted.png"))
+
+    def _filter_ui_output_rels(self, rels: list[str]) -> list[str]:
+        """
+        Prefer post-``review_apply`` deliverables and drop duplicate basenames.
+
+        When ``review/output_review_final/*_redacted.*`` exists, omit the first-pass
+        ``output_redact/*_redacted.*`` draft so Gradio does not show two files with
+        the same basename.
+        """
+        has_final_redacted = any(
+            rel.replace("\\", "/").startswith(f"{REVIEW_OUTPUT_DIR}/")
+            and Path(rel).name.lower().endswith(("_redacted.pdf", "_redacted.png"))
+            for rel in rels
+        )
+        by_basename: dict[str, str] = {}
+        order: list[str] = []
+        for rel in rels:
+            if not rel:
+                continue
+            if has_final_redacted and self._is_interim_first_pass_redacted(rel):
+                continue
+            key = Path(rel).name.lower()
+            existing = by_basename.get(key)
+            if existing is None:
+                by_basename[key] = rel
+                order.append(key)
+                continue
+            existing_norm = existing.replace("\\", "/")
+            rel_norm = rel.replace("\\", "/")
+            prefer_new = rel_norm.startswith(
+                f"{REVIEW_OUTPUT_DIR}/"
+            ) and not existing_norm.startswith(f"{REVIEW_OUTPUT_DIR}/")
+            if prefer_new:
+                by_basename[key] = rel
+        return [by_basename[key] for key in order]
+
     def standard_ui_output_rels(self) -> list[str]:
-        """Pass 1 artifacts to show in the Gradio Output files box."""
+        """Deliverables to show in the Gradio Output files box (finals preferred)."""
         rels: list[str] = []
         seen: set[str] = set()
 
@@ -387,20 +431,21 @@ class HarnessSession:
             seen.add(rel)
             rels.append(rel)
 
-        push(
-            self._newest_rel(
-                name_contains="_redacted",
-                suffixes=(".pdf",),
-                under=REVIEW_OUTPUT_DIR,
-            )
+        final_redacted = self._newest_rel(
+            name_contains="_redacted",
+            suffixes=(".pdf", ".png"),
+            under=REVIEW_OUTPUT_DIR,
         )
-        push(
-            self._newest_rel(
-                name_contains="_redacted",
-                suffixes=(".pdf",),
-                under=REDACT_OUTPUT_DIR,
+        push(final_redacted)
+        # First-pass draft only when review_apply has not produced a final yet.
+        if not final_redacted:
+            push(
+                self._newest_rel(
+                    name_contains="_redacted",
+                    suffixes=(".pdf", ".png"),
+                    under=REDACT_OUTPUT_DIR,
+                )
             )
-        )
         push(
             self._newest_rel(
                 name_contains="redactions_for_review",
@@ -411,7 +456,7 @@ class HarnessSession:
         push(
             self._newest_rel(name_contains="ocr_results_with_words", suffixes=(".csv",))
         )
-        return rels
+        return self._filter_ui_output_rels(rels)
 
     def _ocr_words_for(self, args: dict[str, Any]) -> Path:
         value = args.get("ocr_words_csv_path")
@@ -843,15 +888,18 @@ class HarnessSession:
         """Absolute paths to show in the app's Output files box."""
         rels: list[str] = []
         seen: set[str] = set()
+        # review_apply first so finals win basename collisions over finish_task /
+        # first-pass drafts that the agent may also list in final_files.
         for rel in (
-            *self.final_files,
             *self.review_apply_outputs,
+            *self.final_files,
             *self.standard_ui_output_rels(),
         ):
             if rel in seen:
                 continue
             seen.add(rel)
             rels.append(rel)
+        rels = self._filter_ui_output_rels(rels)
         if not rels:
             rels = [
                 f
@@ -859,6 +907,7 @@ class HarnessSession:
                 if f.startswith(f"{REDACT_OUTPUT_DIR}/")
                 and (f.endswith(".pdf") or "_review_file" in f)
             ]
+            rels = self._filter_ui_output_rels(rels)
         paths: list[str] = []
         for rel in rels:
             try:

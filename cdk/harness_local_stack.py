@@ -12,6 +12,7 @@ from cdk_functions import add_s3_enforce_ssl_policy, create_agentcore_harness
 from constructs import Construct
 from harness_local_config import (
     HARNESS_ENABLE_PAGE_REVIEW,
+    HARNESS_INVOCATION_MAX_TOKENS,
     HARNESS_MAX_ITERATIONS,
     HARNESS_MAX_TOKENS,
     HARNESS_MODEL_ID,
@@ -19,6 +20,10 @@ from harness_local_config import (
     HARNESS_SKILLS_S3_PREFIX,
     HARNESS_STAGING_S3_PREFIX,
     HARNESS_TIMEOUT_SECONDS,
+    HARNESS_TRUNCATION_PRESERVE_RECENT_MESSAGES,
+    HARNESS_TRUNCATION_SLIDING_WINDOW_MESSAGES,
+    HARNESS_TRUNCATION_STRATEGY,
+    HARNESS_TRUNCATION_SUMMARY_RATIO,
     INLINE_TOOLS_JSON,
     SKILL_SOURCE_DIR,
     SKILLS_BUCKET_NAME,
@@ -86,6 +91,11 @@ class HarnessLocalStack(Stack):
             max_iterations=HARNESS_MAX_ITERATIONS,
             timeout_seconds=HARNESS_TIMEOUT_SECONDS,
             max_tokens=HARNESS_MAX_TOKENS,
+            invocation_max_tokens=HARNESS_INVOCATION_MAX_TOKENS,
+            truncation_strategy=HARNESS_TRUNCATION_STRATEGY,
+            truncation_summary_ratio=HARNESS_TRUNCATION_SUMMARY_RATIO,
+            truncation_preserve_recent_messages=HARNESS_TRUNCATION_PRESERVE_RECENT_MESSAGES,
+            truncation_sliding_window_messages=HARNESS_TRUNCATION_SLIDING_WINDOW_MESSAGES,
         )
         harness_arn = harness.get_att("Arn").to_string()
 

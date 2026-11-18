@@ -3872,14 +3872,33 @@ def create_agentcore_harness(
     region: str,
     account: str,
     kms_key: Optional[kms.IKey] = None,
-    max_iterations: int = 150,
-    timeout_seconds: int = 3600,
-    max_tokens: int = 65536,
+    max_iterations: int = 500,
+    timeout_seconds: int = 14400,
+    max_tokens: int = 16384,
+    invocation_max_tokens: int = 262144,
+    truncation_strategy: str = "summarization",
+    truncation_summary_ratio: float = 0.8,
+    truncation_preserve_recent_messages: int = 10,
+    truncation_sliding_window_messages: int = 30,
 ) -> CfnResource:
     """AgentCore Harness for the main app's agentic redaction (inline tools, S3 skill).
 
     The caller grants ``bedrock-agentcore:InvokeHarness`` on the returned resource's ``Arn``
     to the app task role and injects that ARN into the container environment.
+
+    Token limits (both are *output* token caps, not context/input length):
+
+    - ``max_tokens`` → ``Model.BedrockModelConfig.MaxTokens``: max generated tokens
+      **per model call** (default 16384).
+    - ``invocation_max_tokens`` → top-level Harness ``MaxTokens``: total generated
+      tokens across the whole agent loop for one invocation (default 262144).
+
+    Truncation (harness resource only; not overridable per ``InvokeHarness``):
+
+    - ``truncation_strategy``: ``summarization`` (default), ``sliding_window``, or ``none``.
+    - ``truncation_summary_ratio`` / ``truncation_preserve_recent_messages``: used when
+      strategy is ``summarization``.
+    - ``truncation_sliding_window_messages``: used when strategy is ``sliding_window``.
     """
     from aws_cdk import aws_s3_deployment as s3deploy
 
@@ -3977,6 +3996,34 @@ def create_agentcore_harness(
     if kms_key is not None:
         kms_key.grant_decrypt(role)
 
+    strategy = (truncation_strategy or "summarization").strip().lower()
+    allowed_strategies = {"summarization", "sliding_window", "none"}
+    if strategy not in allowed_strategies:
+        raise ValueError(
+            f"truncation_strategy must be one of {sorted(allowed_strategies)}; "
+            f"got {truncation_strategy!r}"
+        )
+    truncation: Dict[str, Any] = {"Strategy": strategy}
+    if strategy == "summarization":
+        ratio = float(truncation_summary_ratio)
+        if not (0.0 < ratio <= 1.0):
+            raise ValueError(
+                "truncation_summary_ratio must be in (0, 1]; "
+                f"got {truncation_summary_ratio!r}"
+            )
+        truncation["Config"] = {
+            "Summarization": {
+                "SummaryRatio": ratio,
+                "PreserveRecentMessages": int(truncation_preserve_recent_messages),
+            }
+        }
+    elif strategy == "sliding_window":
+        truncation["Config"] = {
+            "SlidingWindow": {
+                "MessagesCount": int(truncation_sliding_window_messages),
+            }
+        }
+
     harness = CfnResource(
         scope,
         logical_id,
@@ -3986,14 +4033,18 @@ def create_agentcore_harness(
             "ExecutionRoleArn": role.role_arn,
             "MaxIterations": int(max_iterations),
             "TimeoutSeconds": int(timeout_seconds),
+            # Total output-token budget for one InvokeHarness (all model calls).
+            "MaxTokens": int(invocation_max_tokens),
             "Memory": {"Disabled": {}},
             "Model": {
                 "BedrockModelConfig": {
                     "ModelId": model_id,
                     "ApiFormat": "converse_stream",
+                    # Per-call output cap (not context / input length).
                     "MaxTokens": int(max_tokens),
                 }
             },
+            "Truncation": truncation,
             "SystemPrompt": [{"Text": HARNESS_SYSTEM_PROMPT}],
             # No web_fetch / browser: document text must only leave via presigned staging URLs.
             # Inline doc_redaction tools are passed only on each ``InvokeHarness`` (app code).
