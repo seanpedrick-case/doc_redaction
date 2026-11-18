@@ -5,7 +5,7 @@ colorFrom: blue
 colorTo: yellow
 sdk: docker
 app_file: app.py
-pinned: true
+pinned: false
 license: agpl-3.0
 short_description: OCR / redact PDF documents and tabular data
 ---
