@@ -484,6 +484,10 @@ def test_prompt_puts_user_requirements_last(sample_pdf, tmp_path):
     assert "- Keep job titles" in tail
     assert "source/sample.pdf" in prompt
     assert "{INPUT_PATH}" not in prompt
+    assert "| Source path (session-relative) | `source/sample.pdf` |" in prompt
+    assert "| File | `sample.pdf` |" in prompt
+    assert "Partnership-Agreement-Toolkit" not in prompt
+    assert "host.docker.internal" not in prompt
 
 
 def test_harness_token_usage_sums_metadata_events():

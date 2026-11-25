@@ -8,6 +8,9 @@ python agent-redact/eval/run_benchmark_suite.py --surfaces harness --case exampl
 # Offline (no LLM) — policy gate only in DeepEval test
 python agent-redact/eval/run_agent_regression.py --gold agent-redact/eval/gold/example_smoke --gates-only
 
+# Rescore an existing run folder against gold (gates + eval_summary + CSV; optional DeepEval)
+python agent-redact/eval/rescore_run.py --run-dir agent-redact/eval/runs/<prior_run> --gold agent-redact/eval/gold/<case_id> --no-deepeval
+
 # Recompute gold_geometry (core coverage) + rebuild eval_run_summary.csv from eval/runs/
 python agent-redact/eval/refresh_eval_geometry.py
 
@@ -46,3 +49,10 @@ python agent-redact/eval/run_agent_regression.py `
 
 # optional DeepEval pytest (with tracing/judge env set):
 deepeval test run test/agent/test_agent_deepeval.py
+
+# Statistical comparison of runs in eval_run_summary.csv (per metric, paired by task):
+python agent-redact/eval/compare_run_stats.py `
+  --csv agent-redact/eval/outputs/eval_run_summary.csv `
+  --config-cols model_name,ocr_method `
+  --min-pairs 3 `
+  --out agent-redact/eval/outputs/run_stats_comparison

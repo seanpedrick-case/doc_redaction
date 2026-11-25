@@ -54,13 +54,13 @@ python agent-redact/eval/scaffold_app_show_example_gold.py
 See [`APP_SHOW_EXAMPLES_INDEX.md`](APP_SHOW_EXAMPLES_INDEX.md). Each folder includes `instructions.txt`, `manifest.json`, `app_eval_settings.json`, and **partial** `must_redact.txt` (deny terms, LLM literals, optional bootstrap from shipped `example_outputs/*review_file.csv`, entity heuristics). Deny-list cases also get `expected_deny_list.txt`. Add `ideal_review_file.csv` and `ocr_results_with_words.csv` locally, then:
 
 ```bash
-python agent-redact/eval/update_gold_manifest_hashes.py --gold agent-redact/eval/gold/<case_id>
+python agent-redact/eval/update_gold_manifest_hashes.py agent-redact/eval/gold/<case_id>
 ```
 
 After editing a case PDF or `instructions.txt`, refresh manifest hashes:
 
 ```bash
-python agent-redact/eval/update_gold_manifest_hashes.py --gold agent-redact/eval/gold/<case_id>
+python agent-redact/eval/update_gold_manifest_hashes.py agent-redact/eval/gold/<case_id>
 ```
 
 ## Auto-match (Gradio)
@@ -92,3 +92,27 @@ Legacy: `AGENT_EVAL_AUTO_GOLD=0` and `AGENT_EVAL_GOLD=<case_dir>` scores every c
 See parent [README.md](../README.md) (§2 policy gate, §2b policy extraction).
 
 `example_smoke/` is a **synthetic** sample (no PDF) for unit tests and CLI `--gates-only` checks.
+
+## Rescore a previous run against gold
+
+To re-evaluate **existing** run outputs (no agent or redaction) against a gold case, use [`rescore_run.py`](../rescore_run.py):
+
+```bash
+python agent-redact/eval/rescore_run.py \
+  --run-dir agent-redact/eval/runs/bench_<suite>/agent/<case_id> \
+  --gold agent-redact/eval/gold/<case_id>
+```
+
+**Required in `--run-dir`:** a `*_review_file.csv` (prefer `agent_review_file.csv`) and an `*ocr_results_with_words*.csv`. Optional: `tool_args.json`, `redacted.pdf`, prior meta / `eval_summary.json`.
+
+**Writes** (default: new folder `eval/runs/rescore_<case_id>_<timestamp>/`):
+
+- Deterministic gate JSON (`policy_gate.json`, `gold_geometry.json`, `ocr_gold.json`, …)
+- `eval_summary.json` with `run_source=rescore`
+- One row appended to [`../outputs/eval_run_summary.csv`](../outputs/eval_run_summary.csv)
+
+Useful flags: `--in-place` (overwrite the run folder), `--out-dir <path>`, `--no-deepeval` (gates only), `--no-csv`, `--fail-on-qa`. Omit `--gold` only when the run’s meta already has a resolvable `gold_case` path.
+
+DeepEval tool/task metrics run by default when `requirements_agent_eval.txt` / judge env are available; without them those metrics skip and policy/geometry still score.
+
+Narrower alternatives (not a full rescore): `--gates-only` on [`run_agent_regression.py`](../run_agent_regression.py) (fixture/workspace discovery; no `eval_summary` / DeepEval); [`refresh_eval_geometry.py`](../refresh_eval_geometry.py) (geometry + CSV rebuild only).

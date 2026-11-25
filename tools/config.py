@@ -710,7 +710,7 @@ SHOW_WORD_EXCEL_REDACTION = convert_string_to_boolean(
 )
 
 REDACTION_SETTINGS_ACCORDION_OPEN = convert_string_to_boolean(
-    get_or_create_env_var("REDACTION_SETTINGS_ACCORDION_OPEN", "True")
+    get_or_create_env_var("REDACTION_SETTINGS_ACCORDION_OPEN", "False")
 )
 
 # Extraction and PII options open by default:
@@ -1161,7 +1161,7 @@ VLM_MIN_DPI = float(
 )  # _prepare_image_for_vlm: reported DPI below this implies upscale (effective DPI = reported_dpi * scale).
 
 VLM_MAX_DPI = float(
-    get_or_create_env_var("VLM_MAX_DPI", "200.0")
+    get_or_create_env_var("VLM_MAX_DPI", "300.0")
 )  # _prepare_image_for_vlm: reported DPI above this implies downscale. Bounds apply together with min/max pixels.
 
 # Max image aspect ratio max(width/height, height/width) after white-padding for VLM inputs.

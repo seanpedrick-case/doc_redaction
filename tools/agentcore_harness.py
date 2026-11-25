@@ -978,6 +978,38 @@ def _replace_section(text: str, start_marker: str, end_marker: str, new: str) ->
     return text[:start] + new + text[end:]
 
 
+def _harness_parameter_table(
+    *,
+    file_name: str,
+    input_path: str,
+    page_range: str,
+) -> str:
+    """Session values for the harness. Left column is labels, not ``{PLACEHOLDER}`` tokens."""
+    return "\n".join(
+        [
+            "| Parameter | Value |",
+            "|-------------|---------|",
+            f"| File | `{file_name}` |",
+            f"| Source path (session-relative) | `{input_path}` |",
+            "| Outputs | `doc_redact` writes `output_redact/`; `review_apply` writes `review/output_review_final/`; finals are the app Output files list |",
+            "| App API | inline tools (no Gradio URL) |",
+            f"| Page range | `{page_range}` |",
+            "| VLM | not available to this agent |",
+        ]
+    )
+
+
+def _replace_opening_parameter_table(text: str, table: str) -> str:
+    """Replace the Gradio example parameter table before ``{PLACEHOLDER}`` substitution."""
+    start = text.find("| Parameter | Value |")
+    if start == -1:
+        return text
+    end = text.find("\n---", start)
+    if end == -1:
+        return text
+    return text[:start] + table.rstrip() + "\n" + text[end:]
+
+
 def _strip_long_document_section(text: str) -> str:
     start = text.find("## Specific rules for long documents")
     if start == -1:
@@ -1031,12 +1063,23 @@ def build_harness_task_prompt(
         text = text.replace(obsolete, "")
     text = text.replace("- {REMOTE_BACKEND_GUIDANCE}\n", "")
     d = session.defaults
+    file_name = session.source_pdf.name
+    input_path = session.rel(session.source_pdf)
+    resolved_page_range = (page_range or "all").strip() or "all"
+    text = _replace_opening_parameter_table(
+        text,
+        _harness_parameter_table(
+            file_name=file_name,
+            input_path=input_path,
+            page_range=resolved_page_range,
+        ),
+    )
     replacements = {
-        "{FILE_NAME}": session.source_pdf.name,
-        "{INPUT_PATH}": session.rel(session.source_pdf),
+        "{FILE_NAME}": file_name,
+        "{INPUT_PATH}": input_path,
         "{OUTPUT_BASE}": "",
         "{GRADIO_URL}": "not used (inline tools)",
-        "{PAGE_RANGE}": (page_range or "all").strip() or "all",
+        "{PAGE_RANGE}": resolved_page_range,
         "{VLM_BASE_URL}": "N/A — no VLM endpoint for the agent",
         "{VLM_MODEL}": "N/A",
         "{DEFAULT_OCR_METHOD}": d.ocr_method,

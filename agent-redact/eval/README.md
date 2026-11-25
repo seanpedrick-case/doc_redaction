@@ -489,6 +489,34 @@ Gold readiness table: [`gold/BENCHMARK_GOLD_AUDIT.md`](gold/BENCHMARK_GOLD_AUDIT
 
 ---
 
+## 6. Statistical comparison of runs (model/stack A vs B)
+
+When the same tasks are run under several configurations (e.g. different `model_name` / `ocr_method`), [`compare_run_stats.py`](compare_run_stats.py) tests whether score differences in `eval_run_summary.csv` are statistically significant, per metric:
+
+```bash
+python agent-redact/eval/compare_run_stats.py \
+  --csv agent-redact/eval/outputs/eval_run_summary.csv \
+  --task-col document_name \
+  --config-cols model_name,ocr_method \
+  --out agent-redact/eval/outputs/run_stats_comparison   # writes .csv + .json
+```
+
+Design: rows are grouped by task (`document_name`) and config; repeated runs of the same (task, config) are aggregated first so each task is **one paired observation per config** (no pseudoreplication). Paired tests use complete task pairs only; rows with a truthy `<metric>_skipped` column are dropped per metric.
+
+| Situation | Test used | Notes |
+|-----------|-----------|-------|
+| 2 configs, continuous metric (default: `gold_geometry_f1/recall/precision`, `ocr_gold_f1/recall/precision`) | **paired permutation test** on mean per-task difference (exact ≤ 16 tasks, else Monte Carlo) | primary; assumption-free, handles ties/ceiling 1.0s |
+| same | **Wilcoxon signed-rank** (exact) + **sign test** (exact binomial) | robust alternatives; reported alongside |
+| same | **bootstrap percentile CI** of mean diff + probability-of-superiority | effect size, resampling tasks |
+| ≥ 3 configs, continuous | **Friedman test** + pairwise post-hocs | omnibus row `scope=omnibus` |
+| 2 configs, binary (`overall_pass`, `policy_strict_pass`) | **McNemar's exact test** (permutation on pass-rate if repeated runs) | discordant pairs `b`/`c` reported |
+| ≥ 3 configs, binary | **Cochran's Q** | |
+| multiple metrics / pairs | **Benjamini–Hochberg FDR** on primary p-values | `--fdr-scope metric` (default) or `all` |
+
+With small task counts (n < ~8) expect low power — read `mean_diff`, `ci_low/ci_high` and `q_value` together, not just significance. scipy is used when installed; exact stdlib fallbacks (sign / permutation / McNemar / chi-square tail) keep it working without. Use `--min-pairs` (default 3) to suppress underpowered comparisons.
+
+---
+
 ## Module map
 
 | Path | Role |
@@ -502,8 +530,10 @@ Gold readiness table: [`gold/BENCHMARK_GOLD_AUDIT.md`](gold/BENCHMARK_GOLD_AUDIT
 | [`compare_review_csvs.py`](compare_review_csvs.py) | Gold vs agent box F1 CLI / library |
 | [`compare_ocr_words_csvs.py`](compare_ocr_words_csvs.py) | Gold vs run word OCR F1 CLI / library |
 | [`compare_policy_lists.py`](compare_policy_lists.py) | Gold vs observed must_redact / deny_list extraction F1 + guardrail |
+| [`compare_run_stats.py`](compare_run_stats.py) | Significance tests (permutation / Wilcoxon / sign / McNemar / Friedman / Cochran) comparing configs in `eval_run_summary.csv` |
 | [`run_policy_gate.py`](run_policy_gate.py) | Fixture-friendly coverage gate (+ `--dual`) |
 | [`run_agent_regression.py`](run_agent_regression.py) | Local live/offline harness → deterministic gates |
+| [`rescore_run.py`](rescore_run.py) | Re-score a prior run folder vs gold → `eval_summary.json` + CSV (+ DeepEval) |
 | [`benchmark_cases.py`](benchmark_cases.py) | Discover / audit benchmark-eligible gold cases |
 | [`run_benchmark_suite.py`](run_benchmark_suite.py) | Multi-case benchmark (agent + main app) |
 | [`deepeval_metrics.py`](deepeval_metrics.py) | DeepEval metric wired to `pass_strict` |
