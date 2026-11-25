@@ -110,6 +110,9 @@ def test_run_stack_from_artifacts_and_csv_columns(tmp_path, monkeypatch):
                 "model_name": "llama/gemma-4-31b",
                 "ocr_method": "paddle",
                 "pii_method": "aws_comprehend",
+                "pii_llm_model": "amazon.nova-pro-v1:0",
+                "chosen_local_ocr_model": "hybrid-paddle-vlm",
+                "chosen_ocr_model": "qwen_3_5_27b",
                 "encourage_vlm_faces": True,
                 "encourage_vlm_signatures": False,
             }
@@ -127,6 +130,8 @@ def test_run_stack_from_artifacts_and_csv_columns(tmp_path, monkeypatch):
     stack = run_stack_from_dir(run_dir)
     assert stack["model_name"] == "llama/gemma-4-31b"
     assert stack["ocr_method"] == "paddle"
+    assert stack["chosen_local_ocr_model"] == "hybrid-paddle-vlm"
+    assert stack["chosen_ocr_model"] == "qwen_3_5_27b"
 
     append_eval_run_summary_row(
         summary=summary,
@@ -139,10 +144,96 @@ def test_run_stack_from_artifacts_and_csv_columns(tmp_path, monkeypatch):
         row = next(csv.DictReader(handle))
     assert row["model_name"] == "llama/gemma-4-31b"
     assert row["orchestrator"] == "langgraph"
+    assert row["agent_orchestrator"] == "langgraph"
+    assert row["agent_model_name"] == "llama/gemma-4-31b"
     assert row["ocr_method"] == "paddle"
     assert row["pii_method"] == "aws_comprehend"
+    assert row["pii_llm_model"] == "amazon.nova-pro-v1:0"
+    assert row["chosen_local_ocr_model"] == "hybrid-paddle-vlm"
+    assert row["chosen_ocr_model"] == "qwen_3_5_27b"
     assert row["encourage_vlm_faces"] == "true"
     assert row["encourage_vlm_signatures"] == "false"
+
+
+def test_main_app_row_does_not_inherit_agent_env(tmp_path, monkeypatch):
+    """Non-agentic (main_app) rows must not pick up ambient AGENT_* env values."""
+    monkeypatch.setenv(
+        "AGENT_EVAL_RUN_SUMMARY_CSV_PATH", str(tmp_path / "eval_run_summary.csv")
+    )
+    monkeypatch.setenv("AGENT_DEFAULT_PROVIDER", "amazon-bedrock")
+    monkeypatch.setenv("AGENT_DEFAULT_MODEL", "amazon.nova-pro-v1:0")
+    monkeypatch.setenv("AGENT_ORCHESTRATOR", "pi")
+
+    run_dir = tmp_path / "run_20261104_180000"
+    run_dir.mkdir()
+    (run_dir / "app_run_meta.json").write_text(
+        json.dumps(
+            {
+                "document_name": "doc.pdf",
+                "ocr_method": "AWS Textract",
+                "pii_method": "AWS Comprehend",
+                "chosen_ocr_model": "",
+                "eval_profile": "app_gradio",
+            }
+        ),
+        encoding="utf-8",
+    )
+    summary = {
+        "document_name": "doc.pdf",
+        "overall_pass": True,
+        "metrics": [],
+        "eval_turn_kind": "app_redact",
+    }
+    (run_dir / "eval_summary.json").write_text(json.dumps(summary), encoding="utf-8")
+
+    append_eval_run_summary_row(
+        summary=summary,
+        run_dir=run_dir,
+        run_id="app_test",
+        run_source="main_app",
+    )
+    with (tmp_path / "eval_run_summary.csv").open(
+        encoding="utf-8", newline=""
+    ) as handle:
+        row = next(csv.DictReader(handle))
+    assert row["run_source"] == "main_app"
+    assert row["orchestrator"] == ""
+    assert row["model_name"] == ""
+    assert row["agent_orchestrator"] == ""
+    assert row["agent_model_name"] == ""
+    assert row["ocr_method"] == "AWS Textract"
+    assert row["pii_method"] == "AWS Comprehend"
+    assert row["pii_llm_model"] == ""
+
+
+def test_agent_row_falls_back_to_agent_env(tmp_path, monkeypatch):
+    """Agentic rows without meta still resolve orchestrator/model from AGENT_* env."""
+    monkeypatch.setenv(
+        "AGENT_EVAL_RUN_SUMMARY_CSV_PATH", str(tmp_path / "eval_run_summary.csv")
+    )
+    monkeypatch.setenv("AGENT_DEFAULT_PROVIDER", "llama-cpp")
+    monkeypatch.setenv("AGENT_DEFAULT_MODEL", "unsloth/Inkling-2-Mini-GGUF")
+    monkeypatch.setenv("AGENT_ORCHESTRATOR", "pi")
+
+    run_dir = tmp_path / "run_20261104_181500"
+    run_dir.mkdir()
+    summary = {"document_name": "doc.pdf", "overall_pass": True, "metrics": []}
+    (run_dir / "eval_summary.json").write_text(json.dumps(summary), encoding="utf-8")
+
+    append_eval_run_summary_row(
+        summary=summary,
+        run_dir=run_dir,
+        run_id="agent_test",
+        run_source="agent_gradio",
+    )
+    with (tmp_path / "eval_run_summary.csv").open(
+        encoding="utf-8", newline=""
+    ) as handle:
+        row = next(csv.DictReader(handle))
+    assert row["orchestrator"] == "pi"
+    assert row["model_name"] == "llama-cpp/unsloth/Inkling-2-Mini-GGUF"
+    assert row["agent_orchestrator"] == "pi"
+    assert row["agent_model_name"] == "llama-cpp/unsloth/Inkling-2-Mini-GGUF"
 
 
 def test_run_stack_manifest_fallback(tmp_path):
@@ -154,6 +245,7 @@ def test_run_stack_manifest_fallback(tmp_path):
                 "ocr_method": "pymupdf",
                 "pii_method": "spacy",
                 "run_model_name": "openai/gpt-4o",
+                "run_chosen_ocr_model": "gemma_3_27b",
             }
         ),
         encoding="utf-8",
@@ -162,6 +254,7 @@ def test_run_stack_manifest_fallback(tmp_path):
     assert stack["ocr_method"] == "pymupdf"
     assert stack["pii_method"] == "spacy"
     assert stack["model_name"] == "openai/gpt-4o"
+    assert stack["chosen_ocr_model"] == "gemma_3_27b"
 
 
 def test_rebuild_from_runs(tmp_path, monkeypatch):

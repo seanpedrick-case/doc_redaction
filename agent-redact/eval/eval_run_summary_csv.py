@@ -24,9 +24,13 @@ SUMMARY_CSV_COLUMNS: tuple[str, ...] = (
     "task_instructions_preview",
     "orchestrator",
     "model_name",
+    "agent_orchestrator",
+    "agent_model_name",
     "ocr_method",
     "pii_method",
+    "pii_llm_model",
     "chosen_local_ocr_model",
+    "chosen_ocr_model",
     "encourage_vlm_faces",
     "encourage_vlm_signatures",
     "gold_case_path",
@@ -217,12 +221,34 @@ def run_stack_from_dir(run_dir: Path) -> dict[str, str]:
         manifest.get("run_pii_method"),
         manifest.get("pii_method"),
     )
+    pii_llm_model = _first_non_empty_str(
+        meta.get("pii_llm_model"),
+        app_meta.get("pii_llm_model"),
+        summary.get("pii_llm_model"),
+        manifest.get("run_pii_llm_model"),
+        manifest.get("pii_llm_model"),
+        meta.get("llm_model_choice"),
+        app_meta.get("llm_model_choice"),
+        meta.get("inference_server_pii_model"),
+        app_meta.get("inference_server_pii_model"),
+    )
     chosen_local_ocr_model = _first_non_empty_str(
         meta.get("chosen_local_ocr_model"),
         app_meta.get("chosen_local_ocr_model"),
         summary.get("chosen_local_ocr_model"),
         manifest.get("run_chosen_local_ocr_model"),
         manifest.get("chosen_local_ocr_model"),
+    )
+    chosen_ocr_model = _first_non_empty_str(
+        meta.get("chosen_ocr_model"),
+        app_meta.get("chosen_ocr_model"),
+        summary.get("chosen_ocr_model"),
+        manifest.get("run_chosen_ocr_model"),
+        manifest.get("chosen_ocr_model"),
+        meta.get("inference_server_vlm_model"),
+        app_meta.get("inference_server_vlm_model"),
+        meta.get("vlm_model_choice"),
+        app_meta.get("vlm_model_choice"),
     )
     encourage_vlm_faces = _first_bool_csv(
         meta.get("encourage_vlm_faces"),
@@ -239,27 +265,61 @@ def run_stack_from_dir(run_dir: Path) -> dict[str, str]:
         "model_name": model_name,
         "ocr_method": ocr_method,
         "pii_method": pii_method,
+        "pii_llm_model": pii_llm_model,
         "chosen_local_ocr_model": chosen_local_ocr_model,
+        "chosen_ocr_model": chosen_ocr_model,
         "encourage_vlm_faces": encourage_vlm_faces,
         "encourage_vlm_signatures": encourage_vlm_signatures,
     }
 
 
+_NON_AGENT_RUN_SOURCES = {"main_app", "rescore", "app_gradio"}
+
+
+def _is_agent_source_row(row: dict[str, Any], run_dir: Path) -> bool:
+    """
+    True when the row describes an agentic (orchestrator) run.
+
+    ``main_app`` / ``rescore`` rows only count as agentic when a
+    ``gradio_run_meta.json`` (written by the agent post-run eval) is present;
+    otherwise agent env vars must not leak into the row.
+    """
+    src = str(row.get("run_source") or "").strip().lower()
+    if src in _NON_AGENT_RUN_SOURCES:
+        return (run_dir / "gradio_run_meta.json").is_file()
+    return True
+
+
 def _apply_run_stack_to_row(row: dict[str, Any], *, run_dir: Path) -> None:
     stack = run_stack_from_dir(run_dir)
-    if stack["orchestrator"]:
-        row["orchestrator"] = stack["orchestrator"]
-    elif not row.get("orchestrator"):
-        row["orchestrator"] = (os.environ.get("AGENT_ORCHESTRATOR") or "").strip()
+    agent_run = _is_agent_source_row(row, run_dir)
 
-    if stack["model_name"]:
-        row["model_name"] = stack["model_name"]
-    elif not row.get("model_name"):
-        row["model_name"] = _model_label()
+    # Agent orchestrator/framework + orchestrator LLM. For non-agentic runs
+    # (e.g. run_source=main_app with only app_run_meta.json) these stay empty
+    # instead of falling back to the ambient AGENT_* env vars, which describe
+    # the orchestrator agent, not the main-app run.
+    orchestrator = stack["orchestrator"] or (
+        (os.environ.get("AGENT_ORCHESTRATOR") or "").strip() if agent_run else ""
+    )
+    model_name = stack["model_name"] or (_model_label() if agent_run else "")
+
+    if orchestrator:
+        row["orchestrator"] = orchestrator
+    elif not agent_run:
+        row["orchestrator"] = ""
+    if model_name:
+        row["model_name"] = model_name
+    elif not agent_run:
+        row["model_name"] = ""
+
+    row["agent_orchestrator"] = orchestrator
+    row["agent_model_name"] = model_name
 
     row["ocr_method"] = stack["ocr_method"]
     row["pii_method"] = stack["pii_method"]
+    row["pii_llm_model"] = stack["pii_llm_model"]
     row["chosen_local_ocr_model"] = stack["chosen_local_ocr_model"]
+    row["chosen_ocr_model"] = stack["chosen_ocr_model"]
     row["encourage_vlm_faces"] = stack["encourage_vlm_faces"]
     row["encourage_vlm_signatures"] = stack["encourage_vlm_signatures"]
 
@@ -456,6 +516,7 @@ def append_eval_run_summary_row(
         "intermediate_files": intermediate_files,
         "ocr_method": "",
         "pii_method": "",
+        "pii_llm_model": "",
         "encourage_vlm_faces": "",
         "encourage_vlm_signatures": "",
     }

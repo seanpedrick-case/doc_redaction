@@ -1,0 +1,17 @@
+| Key | Type | Typical values / meaning |
+| --- | --- | --- |
+| chosen_redact_entities | list[str] | Local (Presidio-style) entity checkboxes: "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "STREETNAME", "UKPOSTCODE", "TITLES", "DATE_TIME", "CUSTOM" |
+| chosen_redact_comprehend_entities | list[str] | AWS Comprehend types: "NAME", "ADDRESS", "EMAIL", "PHONE", "PASSPORT_NUMBER", "UK_NATIONAL_INSURANCE_NUMBER", "UK_NATIONAL_HEALTH_SERVICE_NUMBER", "CUSTOM" |
+| chosen_llm_entities | list[str] | LLM/VLM entity checkboxes: "PERSON_NAME", "STREET_ADDRESS", "EMAIL_ADDRESS", "PHONE_NUMBER", "CUSTOM" — only merged into merged_entities when the PII method is an LLM variant |
+| deny_list | list[str] | Literal terms to always redact, e.g. ["Sister", "Sister City", "Friendship City"] (legacy key in_deny_list also accepted) |
+| allow_list | list[str] | Literal terms to never redact (legacy key in_allow_list accepted); usually [] |
+| text_extraction_method | str | UI dropdown label: "Local model - selectable text", "Local OCR model - PDFs without selectable text", "AWS Textract service - all PDF types" |
+| pii_identification_method | str | "Local", "AWS Comprehend", "Local transformers LLM", "Only extract text (no redaction)" |
+| page_min / page_max | int | 0/0 = all pages; otherwise 1-based page range, e.g. 6/6 for a single page |
+| text_extraction_only | bool | true for extract-only runs |
+| handwrite_signature_checkbox | list[str] | AWS Textract options: ["Extract handwriting"], ["Extract handwriting", "Extract signatures"], or [] |
+| custom_llm_instructions | str | Free-form LLM instruction text, usually "" |
+| chosen_local_ocr_model | str | Local OCR engine id: "tesseract" (default), "paddle", "vlm", "inference-server", "bedrock-vlm"; often "" in gold cases (see LOCAL_OCR_MODEL_OPTIONS in tools/config.py:1319) |
+| app_config_path | str | Optional path to an app config env file used for the main-app subprocess leg; "" when unset |
+| derived_instructions_version | int | Written by to_settings_dict(), always 1; used for strict instruction-hash gold matching |
+| merged_entities | list[str] | Derived, not hand-authored: case-insensitive sorted union of the three entity lists (LLM list only when PII method includes LLM) |

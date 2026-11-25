@@ -27,13 +27,17 @@ def test_apply_benchmark_overrides() -> None:
         base,
         BenchmarkStackOverrides(
             text_extraction_method="Local OCR model - PDFs without selectable text",
-            chosen_local_ocr_model="paddle",
-            pii_identification_method="AWS Comprehend",
+            chosen_local_ocr_model="hybrid-paddle-inference-server",
+            chosen_ocr_model="qwen_3_5_27b",
+            pii_identification_method="LLM (AWS Bedrock)",
+            pii_llm_model="anthropic.claude-3-7-sonnet-20250219-v1:0",
         ),
     )
     assert "Local OCR" in out.text_extraction_method
-    assert out.chosen_local_ocr_model == "paddle"
-    assert out.pii_identification_method == "AWS Comprehend"
+    assert out.chosen_local_ocr_model == "hybrid-paddle-inference-server"
+    assert out.chosen_ocr_model == "qwen_3_5_27b"
+    assert out.pii_identification_method == "LLM (AWS Bedrock)"
+    assert out.pii_llm_model == "anthropic.claude-3-7-sonnet-20250219-v1:0"
 
 
 def test_overrides_from_argv_empty() -> None:
@@ -46,3 +50,45 @@ def test_overrides_from_argv_empty() -> None:
         )
         is None
     )
+
+
+def test_overrides_from_argv_chosen_ocr_model() -> None:
+    out = overrides_from_argv(
+        ocr_method=None,
+        pii_method=None,
+        chosen_local_ocr_model="hybrid-paddle-vlm",
+        app_config_path=None,
+        chosen_ocr_model="gemma-3-27b",
+    )
+    assert out is not None
+    assert out.chosen_ocr_model == "gemma-3-27b"
+    assert out.chosen_local_ocr_model == "hybrid-paddle-vlm"
+
+
+def test_apply_benchmark_overrides_local_model_switches_extraction_method() -> None:
+    """Overriding only the local OCR engine must also select the local-OCR method."""
+    base = AppEvalRedactionSettings(
+        text_extraction_method="Local model - selectable text",
+        pii_identification_method="Local",
+    )
+    out = apply_benchmark_overrides(
+        base, BenchmarkStackOverrides(chosen_local_ocr_model="paddle")
+    )
+    assert out.chosen_local_ocr_model == "paddle"
+    assert "local ocr" in out.text_extraction_method.casefold()
+
+
+def test_apply_benchmark_overrides_explicit_ocr_method_wins() -> None:
+    base = AppEvalRedactionSettings(
+        text_extraction_method="Local model - selectable text",
+        pii_identification_method="Local",
+    )
+    out = apply_benchmark_overrides(
+        base,
+        BenchmarkStackOverrides(
+            text_extraction_method="AWS Textract",
+            chosen_local_ocr_model="paddle",
+        ),
+    )
+    assert out.text_extraction_method == "AWS Textract"
+    assert out.chosen_local_ocr_model == "paddle"

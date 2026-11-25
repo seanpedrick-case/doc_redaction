@@ -68,6 +68,7 @@ def _merge_run_manifest_stack(
     *,
     ocr_method: str = "",
     pii_method: str = "",
+    pii_llm_model: str = "",
     chosen_local_ocr_model: str = "",
     orchestrator: str = "",
     model_name: str = "",
@@ -88,6 +89,8 @@ def _merge_run_manifest_stack(
         data["run_ocr_method"] = ocr_method.strip()
     if pii_method.strip():
         data["run_pii_method"] = pii_method.strip()
+    if pii_llm_model.strip():
+        data["run_pii_llm_model"] = pii_llm_model.strip()
     if chosen_local_ocr_model.strip():
         data["run_chosen_local_ocr_model"] = chosen_local_ocr_model.strip()
     if orchestrator.strip():
@@ -114,6 +117,7 @@ def write_session_post_run_eval(
     cumulative_tool_calls: list[dict[str, Any]] | None = None,
     ocr_method: str = "",
     pii_method: str = "",
+    pii_llm_model: str = "",
     orchestrator: str = "",
     model_name: str = "",
     encourage_vlm_faces: bool = False,
@@ -181,6 +185,14 @@ def write_session_post_run_eval(
     stack_ocr = (ocr_method or "").strip()
     stack_pii = (pii_method or "").strip()
     stack_model = (model_name or "").strip()
+    stack_pii_llm = (pii_llm_model or "").strip()
+    if not stack_pii_llm and stack_pii:
+        try:
+            from derive_app_eval_instructions import resolve_pii_llm_model
+
+            stack_pii_llm = resolve_pii_llm_model(stack_pii, "")
+        except Exception:
+            stack_pii_llm = ""
 
     meta = {
         "session_hash": session_hash,
@@ -194,6 +206,7 @@ def write_session_post_run_eval(
         "model_name": stack_model or None,
         "ocr_method": stack_ocr or None,
         "pii_method": stack_pii or None,
+        "pii_llm_model": stack_pii_llm or None,
         "encourage_vlm_faces": bool(encourage_vlm_faces),
         "encourage_vlm_signatures": bool(encourage_vlm_signatures),
     }
@@ -204,6 +217,7 @@ def write_session_post_run_eval(
         run_dir,
         ocr_method=stack_ocr,
         pii_method=stack_pii,
+        pii_llm_model=stack_pii_llm,
         orchestrator=stack_orchestrator,
         model_name=stack_model,
         encourage_vlm_faces=encourage_vlm_faces,
@@ -253,6 +267,7 @@ def write_session_post_run_eval(
         "model_name": stack_model or None,
         "ocr_method": stack_ocr or None,
         "pii_method": stack_pii or None,
+        "pii_llm_model": stack_pii_llm or None,
         "encourage_vlm_faces": bool(encourage_vlm_faces),
         "encourage_vlm_signatures": bool(encourage_vlm_signatures),
     }

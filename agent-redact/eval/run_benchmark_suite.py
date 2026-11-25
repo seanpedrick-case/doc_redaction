@@ -9,8 +9,15 @@ import os
 import subprocess
 import sys
 import time
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Literal
+
+# Snapshot the process environment before any project import can populate config
+# defaults into os.environ (tools.config's get_or_create_env_var writes defaults
+# back). Stack-flag fallbacks read this snapshot plus the app config env file, so an
+# unset knob never becomes a code-default "override" of the per-case gold settings.
+_PRISTINE_ENV = dict(os.environ)
 
 SurfaceChoice = Literal["agent", "main", "harness"]
 
@@ -44,6 +51,51 @@ from run_agent_regression import (  # noqa: E402
 def _repo_root() -> Path:
     repo, _, _ = _ensure_agent_imports()
     return repo
+
+
+def _app_config_env_file() -> Path:
+    raw = (_PRISTINE_ENV.get("APP_CONFIG_PATH") or "").strip()
+    repo = Path(__file__).resolve().parents[2]
+    if raw:
+        candidate = Path(raw).expanduser()
+        return candidate if candidate.is_absolute() else (repo / candidate)
+    return repo / "config" / "app_config.env"
+
+
+def _env_file_values() -> dict[str, str]:
+    """Values from the app config env file (e.g. config/app_config.env)."""
+    try:
+        from dotenv import dotenv_values
+    except ImportError:
+        return {}
+    path = _app_config_env_file()
+    try:
+        if not path.is_file():
+            return {}
+        return {
+            k: (v or "") for k, v in dotenv_values(str(path)).items() if v is not None
+        }
+    except Exception:
+        return {}
+
+
+def _env_default(*names: str) -> str | None:
+    """
+    Fallback value for a CLI flag: the first non-empty of ``names`` found in the
+    real process environment (snapshot taken before project imports), then in the
+    app config env file. Returns None when unset, so per-case gold settings stay
+    in charge unless the user explicitly sets a flag or env var.
+    """
+    for name in names:
+        value = (_PRISTINE_ENV.get(name) or "").strip()
+        if value:
+            return value
+    file_values = _env_file_values()
+    for name in names:
+        value = (file_values.get(name) or "").strip()
+        if value:
+            return value
+    return None
 
 
 def _git_commit_short() -> str:
@@ -256,12 +308,19 @@ def _settings_to_cli_args(
     deny = list(settings.deny_list)
     allow = list(settings.allow_list)
 
+    # Mirror the engine default (chosen_llm_entities falls back to the comprehend
+    # list when unset): an empty llm_redact_entities would trip the "no standard
+    # entities" guard in analyze_text even for non-LLM PII methods.
+    llm_entities = list(settings.chosen_llm_entities)
+    if not llm_entities:
+        llm_entities = list(settings.chosen_redact_comprehend_entities)
+
     args: dict[str, Any] = {
         "input_file": [str(pdf_path.resolve())],
         "output_dir": str(output_dir.resolve()),
         "local_redact_entities": list(settings.chosen_redact_entities),
         "aws_redact_entities": list(settings.chosen_redact_comprehend_entities),
-        "llm_redact_entities": list(settings.chosen_llm_entities),
+        "llm_redact_entities": llm_entities,
         "ocr_method": settings.text_extraction_method or "Local text",
         "pii_detector": settings.pii_identification_method or "Local",
         "page_min": int(settings.page_min or 0),
@@ -279,6 +338,25 @@ def _settings_to_cli_args(
     local_model = (settings.chosen_local_ocr_model or "").strip()
     if local_model:
         args["chosen_local_ocr_model"] = local_model
+    ocr_model = (settings.chosen_ocr_model or "").strip()
+    if ocr_model:
+        local_key = local_model.casefold().replace("_", "-")
+        if "inference-server" in local_key:
+            args["inference_server_vlm_model"] = ocr_model
+        else:
+            args["vlm_model_choice"] = ocr_model
+    pii_model = (settings.pii_llm_model or "").strip()
+    if pii_model:
+        pii_key = (
+            (settings.pii_identification_method or "")
+            .casefold()
+            .replace("_", " ")
+            .replace("-", " ")
+        )
+        if "inference server" in pii_key:
+            args["inference_server_pii_model"] = pii_model
+        else:
+            args["llm_model_choice"] = pii_model
     return args
 
 
@@ -738,6 +816,7 @@ def run_benchmark_suite(
         "gold_root": str(gold_root.resolve()),
         "surfaces": sorted(surfaces),
         "orchestrator": orchestrator,
+        "stack_overrides": asdict(stack_overrides) if stack_overrides else {},
         "started_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "cases": [],
         "exit_code": 0,
@@ -848,29 +927,61 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--orchestrator",
         choices=("langgraph", "pi", "both"),
-        default=os.environ.get("AGENT_ORCHESTRATOR", "langgraph"),
+        default=_env_default("BENCHMARK_ORCHESTRATOR", "AGENT_ORCHESTRATOR")
+        or "langgraph",
+        help="Agent orchestrator (default: $BENCHMARK_ORCHESTRATOR / $AGENT_ORCHESTRATOR / langgraph).",
     )
-    p.add_argument("--provider", default=None)
-    p.add_argument("--model", default=None)
+    p.add_argument(
+        "--provider",
+        default=_env_default("BENCHMARK_PROVIDER", "AGENT_DEFAULT_PROVIDER"),
+        help="Agent LLM provider (default: $BENCHMARK_PROVIDER / $AGENT_DEFAULT_PROVIDER).",
+    )
+    p.add_argument(
+        "--model",
+        default=_env_default("BENCHMARK_MODEL", "AGENT_DEFAULT_MODEL"),
+        help="Agent LLM model (default: $BENCHMARK_MODEL / $AGENT_DEFAULT_MODEL).",
+    )
     p.add_argument(
         "--ocr-method",
-        default=None,
-        help="Override gold app_eval text_extraction_method / harness OCR.",
+        default=_env_default("BENCHMARK_OCR_METHOD", "DEFAULT_TEXT_EXTRACTION_MODEL"),
+        help="Override gold app_eval text_extraction_method / harness OCR for ALL cases "
+        "(default: $BENCHMARK_OCR_METHOD / $DEFAULT_TEXT_EXTRACTION_MODEL from the env "
+        "or app config file).",
     )
     p.add_argument(
         "--pii-method",
-        default=None,
-        help="Override gold pii_identification_method.",
+        default=_env_default("BENCHMARK_PII_METHOD", "DEFAULT_PII_DETECTION_MODEL"),
+        help="Override gold pii_identification_method for ALL cases "
+        "(default: $BENCHMARK_PII_METHOD / $DEFAULT_PII_DETECTION_MODEL).",
+    )
+    p.add_argument(
+        "--pii-llm-model",
+        default=_env_default("BENCHMARK_PII_LLM_MODEL", "CLOUD_LLM_PII_MODEL_CHOICE"),
+        help="Override the PII-detector LLM model (gold pii_llm_model) for ALL cases, "
+        "e.g. the Bedrock / inference-server / local transformers model used when the "
+        "PII method is an LLM route (default: $BENCHMARK_PII_LLM_MODEL / "
+        "$CLOUD_LLM_PII_MODEL_CHOICE).",
     )
     p.add_argument(
         "--chosen-local-ocr-model",
-        default=None,
-        help="Override local OCR engine (e.g. paddle, tesseract).",
+        default=_env_default("BENCHMARK_LOCAL_OCR_MODEL", "DEFAULT_LOCAL_OCR_MODEL"),
+        help="Override local OCR engine (e.g. paddle, tesseract) for ALL cases; also "
+        "switches text extraction to the local OCR option unless --ocr-method is given "
+        "(default: $BENCHMARK_LOCAL_OCR_MODEL / $DEFAULT_LOCAL_OCR_MODEL).",
+    )
+    p.add_argument(
+        "--chosen-ocr-model",
+        default=_env_default("BENCHMARK_OCR_MODEL", "CLOUD_VLM_MODEL_CHOICE"),
+        help="Override the VLM / inference-server / hybrid second-pass OCR model "
+        "(gold chosen_ocr_model) for ALL cases, e.g. for hybrid-paddle-vlm or "
+        "hybrid-paddle-inference-server (default: $BENCHMARK_OCR_MODEL / "
+        "$CLOUD_VLM_MODEL_CHOICE).",
     )
     p.add_argument(
         "--app-config-path",
-        default=None,
-        help="Load this env file in a fresh process for main-app legs (APP_CONFIG_PATH).",
+        default=_env_default("BENCHMARK_APP_CONFIG_PATH", "APP_CONFIG_PATH"),
+        help="Load this env file in a fresh process for main-app legs "
+        "(default: $BENCHMARK_APP_CONFIG_PATH / $APP_CONFIG_PATH).",
     )
     p.add_argument("--timeout-s", type=float, default=3600.0)
     p.add_argument("--suite-id", default=None, help="Override benchmark suite id.")
@@ -931,6 +1042,8 @@ def main(argv: list[str] | None = None) -> int:
             pii_method=args.pii_method,
             chosen_local_ocr_model=args.chosen_local_ocr_model,
             app_config_path=args.app_config_path,
+            chosen_ocr_model=args.chosen_ocr_model,
+            pii_llm_model=args.pii_llm_model,
         )
         envelope, code = run_benchmark_suite(
             gold_root=gold_root,

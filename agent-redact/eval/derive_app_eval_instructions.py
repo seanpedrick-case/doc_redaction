@@ -78,12 +78,21 @@ class AppEvalRedactionSettings:
     allow_list: list[str] = field(default_factory=list)
     text_extraction_method: str = ""
     pii_identification_method: str = ""
+    # LLM model used by the PII detector when pii_identification_method is an
+    # LLM route (e.g. "LLM (AWS Bedrock)", "Local transformers LLM",
+    # inference server). Empty for non-LLM PII (Local / AWS Comprehend).
+    pii_llm_model: str = ""
     page_min: int = 0
     page_max: int = 0
     text_extraction_only: bool = False
     handwrite_signature_checkbox: list[str] = field(default_factory=list)
     custom_llm_instructions: str = ""
     chosen_local_ocr_model: str = ""
+    # Model id used by VLM / inference-server / hybrid second-pass OCR routes
+    # (e.g. with chosen_local_ocr_model "hybrid-paddle-vlm" or
+    # "hybrid-paddle-inference-server"). Empty for tesseract / paddle /
+    # local text / Textract, where no separate model is chosen.
+    chosen_ocr_model: str = ""
     app_config_path: str = ""
 
     def merged_entities(self) -> list[str]:
@@ -154,6 +163,78 @@ def derive_app_eval_instructions(settings: AppEvalRedactionSettings) -> str:
     return normalize_instructions_text("\n".join(lines))
 
 
+def resolve_pii_llm_model(pii_method: str, explicit: str) -> str:
+    """
+    LLM model id for the PII detector when *pii_method* is an LLM route.
+
+    An explicit per-run choice (``pii_llm_model`` / ``llm_model_choice`` /
+    ``inference_server_pii_model`` kwargs) wins; otherwise fall back to the
+    config default for the PII method. Returns "" for non-LLM PII methods
+    (Local, AWS Comprehend).
+    """
+    model = (explicit or "").strip()
+    if model:
+        return model
+    key = (pii_method or "").strip().casefold()
+    if not key or key in {"local", "aws comprehend", "comprehend"}:
+        return ""
+    try:
+        from tools.config import (
+            CHOSEN_INFERENCE_SERVER_PII_MODEL,
+            CLOUD_LLM_PII_MODEL_CHOICE,
+            DEFAULT_INFERENCE_SERVER_PII_MODEL,
+            LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE,
+        )
+    except ImportError:
+        return ""
+    if "inference server" in key or "inference-server" in key:
+        return (
+            CHOSEN_INFERENCE_SERVER_PII_MODEL
+            or DEFAULT_INFERENCE_SERVER_PII_MODEL
+            or ""
+        ).strip()
+    if "transformers" in key:
+        return (LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE or "").strip()
+    if "bedrock" in key or "llm" in key:
+        return (CLOUD_LLM_PII_MODEL_CHOICE or "").strip()
+    return ""
+
+
+def resolve_chosen_ocr_model(engine: str, explicit: str) -> str:
+    """
+    Model id for VLM / inference-server / hybrid OCR routes.
+
+    An explicit per-run choice (``chosen_ocr_model`` / ``inference_server_vlm_model`` /
+    ``vlm_model_choice`` kwargs) wins; otherwise fall back to the config default for
+    the selected engine. Returns "" for engines with no separate model
+    (tesseract, paddle, hybrid-paddle, local text, Textract).
+    """
+    model = (explicit or "").strip()
+    if model:
+        return model
+    eng = (engine or "").strip().casefold()
+    if not eng or eng in {"tesseract", "paddle", "hybrid-paddle"}:
+        return ""
+    try:
+        from tools.config import (
+            CLOUD_VLM_MODEL_CHOICE,
+            DEFAULT_INFERENCE_SERVER_VLM_MODEL,
+            INFERENCE_SERVER_MODEL_NAME,
+            SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL,
+        )
+    except ImportError:
+        return ""
+    if "inference-server" in eng:
+        return (
+            DEFAULT_INFERENCE_SERVER_VLM_MODEL or INFERENCE_SERVER_MODEL_NAME or ""
+        ).strip()
+    if "vlm" in eng:
+        return (
+            SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL or CLOUD_VLM_MODEL_CHOICE or ""
+        ).strip()
+    return ""
+
+
 def settings_from_legacy_redactor_kwargs(
     flat: dict[str, Any],
 ) -> AppEvalRedactionSettings:
@@ -185,6 +266,24 @@ def settings_from_legacy_redactor_kwargs(
         text_extraction_only=bool(flat.get("text_extraction_only")),
         handwrite_signature_checkbox=[str(x) for x in sig],
         custom_llm_instructions=str(flat.get("custom_llm_instructions") or "").strip(),
+        chosen_ocr_model=resolve_chosen_ocr_model(
+            str(flat.get("chosen_local_ocr_model") or ""),
+            str(
+                flat.get("chosen_ocr_model")
+                or flat.get("inference_server_vlm_model")
+                or flat.get("vlm_model_choice")
+                or ""
+            ),
+        ),
+        pii_llm_model=resolve_pii_llm_model(
+            str(flat.get("pii_identification_method") or ""),
+            str(
+                flat.get("pii_llm_model")
+                or flat.get("llm_model_choice")
+                or flat.get("inference_server_pii_model")
+                or ""
+            ),
+        ),
     )
 
 
@@ -228,6 +327,12 @@ def settings_from_json(path: str) -> AppEvalRedactionSettings:
         allow_list=list(data.get("allow_list") or data.get("in_allow_list") or []),
         text_extraction_method=str(data.get("text_extraction_method") or ""),
         pii_identification_method=str(data.get("pii_identification_method") or ""),
+        pii_llm_model=str(
+            data.get("pii_llm_model")
+            or data.get("llm_model_choice")
+            or data.get("inference_server_pii_model")
+            or ""
+        ),
         page_min=int(data.get("page_min") or 0),
         page_max=int(data.get("page_max") or 0),
         text_extraction_only=bool(data.get("text_extraction_only")),
@@ -236,5 +341,11 @@ def settings_from_json(path: str) -> AppEvalRedactionSettings:
         ),
         custom_llm_instructions=str(data.get("custom_llm_instructions") or ""),
         chosen_local_ocr_model=str(data.get("chosen_local_ocr_model") or ""),
+        chosen_ocr_model=str(
+            data.get("chosen_ocr_model")
+            or data.get("inference_server_vlm_model")
+            or data.get("vlm_model_choice")
+            or ""
+        ),
         app_config_path=str(data.get("app_config_path") or ""),
     )

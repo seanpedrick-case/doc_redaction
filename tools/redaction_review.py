@@ -179,6 +179,21 @@ def _page_equals(series: pd.Series, page) -> pd.Series:
     return _coerce_page_series(series) == int(round(float(page_num)))
 
 
+def _coerce_select_cell_int(value, default=pd.NA):
+    """Coerce a Gradio table cell to a nullable int.
+
+    Dataframe values round-trip through the frontend as JSON, so a column with
+    any missing cell is rebuilt as float64: ``3`` arrives as ``3.0`` and a
+    missing cell as ``None``/``NaN``. ``int(None)`` and ``int(float("nan"))``
+    raise, so coerce via ``pd.to_numeric`` and fall back to ``default`` when
+    the cell is missing or non-numeric.
+    """
+    num = pd.to_numeric(value, errors="coerce")
+    if pd.isna(num):
+        return default
+    return int(round(float(num)))
+
+
 def _ensure_numeric_columns(
     df: pd.DataFrame,
     columns: List[str],
@@ -1384,10 +1399,20 @@ def create_annotation_objects_from_filtered_ocr_results_with_words(
         print("No new annotations to add.")
         updated_annotations_df = existing_annotations_df.copy()
     else:
-        # Assuming index relationship holds for fast lookup
+        # Assuming index relationship holds for fast lookup. The index column can
+        # arrive as float64 after the Gradio JSON round-trip (any missing cell in
+        # the column forces float64), so coerce to nullable int and drop rows
+        # that cannot be located in the base dataframe.
+        filtered_ocr_results_with_words_df = filtered_ocr_results_with_words_df.copy()
+        _ensure_numeric_columns(
+            filtered_ocr_results_with_words_df, ["index"], integer=True
+        )
+        filtered_ocr_results_with_words_df = filtered_ocr_results_with_words_df.loc[
+            filtered_ocr_results_with_words_df["index"].notna()
+        ]
         filtered_ocr_results_with_words_df.index = filtered_ocr_results_with_words_df[
             "index"
-        ]
+        ].astype("int64")
         new_annotations_df = ocr_results_with_words_df_base.loc[
             filtered_ocr_results_with_words_df.index
         ].copy()
@@ -4807,19 +4832,24 @@ def df_select_callback_dataframe_row_ocr_with_words(
     df: pd.DataFrame, evt: gr.SelectData
 ):
 
-    row_value_page = int(evt.row_value[0])  # This is the page number value
-    row_value_line = int(evt.row_value[1])  # This is the label number value
-    row_value_text = evt.row_value[2]  # This is the text number value
+    # Cells can arrive as floats (float64 column after the Gradio JSON
+    # round-trip) or None/NaN for missing values; coerce safely.
+    row_value_page = _coerce_select_cell_int(evt.row_value[0])  # page number value
+    row_value_line = _coerce_select_cell_int(evt.row_value[1])  # line number value
+    row_value_text = evt.row_value[2]  # word text value
 
-    row_value_index = evt.row_value[3]  # This is the index value
+    row_value_index = _coerce_select_cell_int(evt.row_value[3])  # index value
 
     row_value_df = pd.DataFrame(
         data={
             "page": [row_value_page],
             "line": [row_value_line],
             "word_text": [row_value_text],
-            "index": row_value_index,
+            "index": [row_value_index],
         }
+    )
+    row_value_df = _ensure_numeric_columns(
+        row_value_df, ["page", "line", "index"], integer=True
     )
 
     return row_value_df, row_value_text
@@ -4827,7 +4857,7 @@ def df_select_callback_dataframe_row_ocr_with_words(
 
 def df_select_callback_dataframe_row(df: pd.DataFrame, evt: gr.SelectData):
 
-    row_value_page = int(evt.row_value[0])  # This is the page number value
+    row_value_page = _coerce_select_cell_int(evt.row_value[0])  # page number value
     row_value_label = evt.row_value[1]  # This is the label number value
     row_value_text = evt.row_value[2]  # This is the text number value
     row_value_id = evt.row_value[3]  # This is the text number value
@@ -4840,6 +4870,7 @@ def df_select_callback_dataframe_row(df: pd.DataFrame, evt: gr.SelectData):
             "id": [row_value_id],
         }
     )
+    row_value_df = _ensure_numeric_columns(row_value_df, ["page"], integer=True)
 
     return row_value_df, row_value_text
 
@@ -4869,7 +4900,9 @@ def df_select_callback_cost(df: pd.DataFrame, evt: gr.SelectData):
 
 def df_select_callback_ocr(df: pd.DataFrame, evt: gr.SelectData):
 
-    row_value_page = int(evt.row_value[0])  # This is the page_number value
+    # This feeds the gr.Number page component directly, so a missing page
+    # falls back to page 1 rather than pd.NA (which gr.Number cannot round).
+    row_value_page = _coerce_select_cell_int(evt.row_value[0], default=1)
     row_value_text = evt.row_value[1]  # This is the text contents
 
     row_value_df = pd.DataFrame(

@@ -124,7 +124,7 @@ from tools.run_vlm import (
     model_default_top_k,
     model_default_top_p,
 )
-from tools.secure_path_utils import validate_folder_containment
+from tools.secure_path_utils import validate_folder_within_allowed_roots
 from tools.secure_regex_utils import safe_sanitize_text
 from tools.word_segmenter import AdaptiveSegmenter
 
@@ -2977,8 +2977,8 @@ def _process_page_result_with_hybrid_vlm_ocr(
                                 + f"/hybrid_ocr_examples/{normalized_image_name}"
                             )
                             # Validate the constructed path is safe
-                            if not validate_folder_containment(
-                                hybrid_ocr_examples_folder, OUTPUT_FOLDER
+                            if not validate_folder_within_allowed_roots(
+                                hybrid_ocr_examples_folder
                             ):
                                 raise ValueError(
                                     f"Unsafe hybrid_ocr_examples folder path: {hybrid_ocr_examples_folder}"
@@ -3258,7 +3258,7 @@ def _process_textract_page_with_hybrid_bedrock_vlm(
         hybrid_examples_folder = os.path.join(
             output_folder, "textract_bedrock_hybrid_examples", normalized_image_name
         )
-        if validate_folder_containment(hybrid_examples_folder, OUTPUT_FOLDER):
+        if validate_folder_within_allowed_roots(hybrid_examples_folder):
             if not os.path.exists(hybrid_examples_folder):
                 os.makedirs(hybrid_examples_folder)
             page_no = page_line_level_ocr_results_with_words.get("page", "?")
@@ -4556,9 +4556,9 @@ def plot_text_bounding_boxes(
         )
         # Security: Validate that the constructed path is safe
         normalized_debug_dir = os.path.normpath(os.path.abspath(debug_dir))
-        if not validate_folder_containment(normalized_debug_dir, OUTPUT_FOLDER):
+        if not validate_folder_within_allowed_roots(normalized_debug_dir):
             raise ValueError(
-                f"Unsafe image folder path: {debug_dir}. Must be contained within {OUTPUT_FOLDER}"
+                f"Unsafe image folder path: {debug_dir}. Must be contained within a trusted redaction IO root (app repo, INPUT_FOLDER, OUTPUT_FOLDER, or system temp)"
             )
         os.makedirs(normalized_debug_dir, exist_ok=True)
         # Increment the number at the end of image_name before .png
@@ -7201,9 +7201,9 @@ class CustomImageAnalyzerEngine:
         # This ensures the object is always in a secure state and prevents
         # any future code from accidentally using an untrusted directory
         normalized_output_folder = os.path.normpath(os.path.abspath(output_folder))
-        if not validate_folder_containment(normalized_output_folder, OUTPUT_FOLDER):
+        if not validate_folder_within_allowed_roots(normalized_output_folder):
             raise ValueError(
-                f"Unsafe output folder path: {output_folder}. Must be contained within {OUTPUT_FOLDER}"
+                f"Unsafe output folder path: {output_folder}. Must be contained within a trusted redaction IO root (app repo, INPUT_FOLDER, OUTPUT_FOLDER, or system temp)"
             )
         self.output_folder = normalized_output_folder
         self.save_page_ocr_visualisations = bool(save_page_ocr_visualisations)
@@ -7975,7 +7975,7 @@ class CustomImageAnalyzerEngine:
         tesseract_viz_folder = os.path.join(self.output_folder, visualisation_folder)
 
         # Double-check the constructed path is safe
-        if not validate_folder_containment(tesseract_viz_folder, OUTPUT_FOLDER):
+        if not validate_folder_within_allowed_roots(tesseract_viz_folder):
             raise ValueError(
                 f"Unsafe tesseract visualisations folder path: {tesseract_viz_folder}"
             )
@@ -8314,8 +8314,8 @@ class CustomImageAnalyzerEngine:
                                 + f"/hybrid_ocr_examples/{normalized_image_name}"
                             )
                             # Validate the constructed path is safe before creating directories
-                            if not validate_folder_containment(
-                                hybrid_ocr_examples_folder, OUTPUT_FOLDER
+                            if not validate_folder_within_allowed_roots(
+                                hybrid_ocr_examples_folder
                             ):
                                 raise ValueError(
                                     f"Unsafe hybrid_ocr_examples folder path: {hybrid_ocr_examples_folder}"
@@ -8851,8 +8851,8 @@ class CustomImageAnalyzerEngine:
                                         + f"/hybrid_ocr_examples/{normalized_image_name}"
                                     )
                                     # Validate the constructed path is safe
-                                    if not validate_folder_containment(
-                                        hybrid_ocr_examples_folder, OUTPUT_FOLDER
+                                    if not validate_folder_within_allowed_roots(
+                                        hybrid_ocr_examples_folder
                                     ):
                                         raise ValueError(
                                             f"Unsafe hybrid_ocr_examples folder path: {hybrid_ocr_examples_folder}"
@@ -9300,9 +9300,7 @@ class CustomImageAnalyzerEngine:
                         self.output_folder, "paddle_visualisations"
                     )
                     # Double-check the constructed path is safe
-                    if not validate_folder_containment(
-                        paddle_viz_folder, OUTPUT_FOLDER
-                    ):
+                    if not validate_folder_within_allowed_roots(paddle_viz_folder):
                         raise ValueError(
                             f"Unsafe paddle visualisations folder path: {paddle_viz_folder}"
                         )
@@ -9403,7 +9401,7 @@ class CustomImageAnalyzerEngine:
                     self.output_folder, "paddle_visualisations"
                 )
                 # Double-check the constructed path is safe
-                if not validate_folder_containment(paddle_viz_folder, OUTPUT_FOLDER):
+                if not validate_folder_within_allowed_roots(paddle_viz_folder):
                     raise ValueError(
                         f"Unsafe paddle visualisations folder path: {paddle_viz_folder}"
                     )

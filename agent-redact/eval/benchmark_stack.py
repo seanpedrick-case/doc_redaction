@@ -13,7 +13,9 @@ class BenchmarkStackOverrides:
 
     text_extraction_method: str | None = None
     pii_identification_method: str | None = None
+    pii_llm_model: str | None = None
     chosen_local_ocr_model: str | None = None
+    chosen_ocr_model: str | None = None
     app_config_path: str | None = None
 
 
@@ -28,8 +30,24 @@ def apply_benchmark_overrides(
         patch["text_extraction_method"] = overrides.text_extraction_method.strip()
     if overrides.pii_identification_method:
         patch["pii_identification_method"] = overrides.pii_identification_method.strip()
+    if overrides.pii_llm_model:
+        patch["pii_llm_model"] = overrides.pii_llm_model.strip()
     if overrides.chosen_local_ocr_model:
         patch["chosen_local_ocr_model"] = overrides.chosen_local_ocr_model.strip()
+        # A local OCR engine only takes effect under the local-OCR text extraction
+        # method; when only the engine is overridden, switch the method too so the
+        # override applies uniformly to every case.
+        if not overrides.text_extraction_method:
+            try:
+                from tools.config import LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
+
+                patch["text_extraction_method"] = LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
+            except ImportError:
+                patch["text_extraction_method"] = (
+                    "Local OCR model - PDFs without selectable text"
+                )
+    if overrides.chosen_ocr_model:
+        patch["chosen_ocr_model"] = overrides.chosen_ocr_model.strip()
     if overrides.app_config_path:
         patch["app_config_path"] = overrides.app_config_path.strip()
     if not patch:
@@ -64,12 +82,25 @@ def overrides_from_argv(
     pii_method: str | None,
     chosen_local_ocr_model: str | None,
     app_config_path: str | None,
+    chosen_ocr_model: str | None = None,
+    pii_llm_model: str | None = None,
 ) -> BenchmarkStackOverrides | None:
-    if not any((ocr_method, pii_method, chosen_local_ocr_model, app_config_path)):
+    if not any(
+        (
+            ocr_method,
+            pii_method,
+            pii_llm_model,
+            chosen_local_ocr_model,
+            chosen_ocr_model,
+            app_config_path,
+        )
+    ):
         return None
     return BenchmarkStackOverrides(
         text_extraction_method=ocr_method,
         pii_identification_method=pii_method,
+        pii_llm_model=pii_llm_model,
         chosen_local_ocr_model=chosen_local_ocr_model,
+        chosen_ocr_model=chosen_ocr_model,
         app_config_path=app_config_path,
     )

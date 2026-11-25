@@ -3,9 +3,12 @@
 
 Reads the append-only summary CSV written by ``eval_run_summary_csv.py`` (one row
 per run), groups rows by task (``--task-col``, default ``document_name``) and by
-run configuration (``--config-cols``, default ``model_name,ocr_method`` — e.g.
-compare models), then tests whether configurations differ significantly on each
-metric.
+run configuration (``--config-cols``, default ``model_name,agent_orchestrator,
+ocr_method,chosen_local_ocr_model,chosen_ocr_model,pii_method,pii_llm_model`` —
+i.e. orchestrator LLM + framework for agentic runs, OCR engine, hybrid/VLM OCR
+model, PII method, and PII-detector LLM model), then tests whether configurations
+differ significantly on each metric. Columns missing from an older CSV read as
+``-`` in the config label.
 
 Recommended tests (chosen for small-n, paired-by-task, bounded [0,1] scores
 with ceiling effects such as many perfect 1.0s):
@@ -45,7 +48,7 @@ Example::
 
     python agent-redact/eval/compare_run_stats.py \\
       --csv agent-redact/eval/outputs/eval_run_summary.csv \\
-      --config-cols model_name,ocr_method \\
+      --config-cols model_name,agent_orchestrator,ocr_method,chosen_local_ocr_model,chosen_ocr_model,pii_method,pii_llm_model \\
       --out agent-redact/eval/outputs/run_stats_comparison
 
 Writes ``<out>.csv`` and ``<out>.json`` and prints a console table.
@@ -72,7 +75,20 @@ except Exception:  # pragma: no cover
 _EVAL_DIR = Path(__file__).resolve().parent
 
 DEFAULT_TASK_COL = "document_name"
-DEFAULT_CONFIG_COLS = ("model_name", "ocr_method")
+#: Orchestrator LLM + framework (agentic runs), OCR engine label + local OCR
+#: engine id, hybrid/VLM OCR model, PII method, and PII-detector LLM model —
+#: blank columns read as "-" in config labels. (``ocr_method`` is the UI label,
+#: identical across local engines, so ``chosen_local_ocr_model`` distinguishes
+#: e.g. tesseract vs paddle vs hybrid-paddle-vlm.)
+DEFAULT_CONFIG_COLS = (
+    "model_name",
+    "agent_orchestrator",
+    "ocr_method",
+    "chosen_local_ocr_model",
+    "chosen_ocr_model",
+    "pii_method",
+    "pii_llm_model",
+)
 DEFAULT_METRICS = (
     "gold_geometry_f1",
     "gold_geometry_recall",
@@ -874,7 +890,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--config-cols",
         default=",".join(DEFAULT_CONFIG_COLS),
-        help="Comma-separated columns defining a compared configuration (default: model_name,ocr_method).",
+        help="Comma-separated columns defining a compared configuration "
+        "(default: " + ",".join(DEFAULT_CONFIG_COLS) + ").",
     )
     p.add_argument(
         "--metrics",

@@ -1,7 +1,12 @@
 # Standardized benchmark suite (append eval/outputs/eval_run_summary.csv)
 python agent-redact/eval/run_benchmark_suite.py --audit-only
 python agent-redact/eval/run_benchmark_suite.py --list-cases
+python agent-redact/eval/run_benchmark_suite.py --surfaces main
 python agent-redact/eval/run_benchmark_suite.py --surfaces agent,main --orchestrator langgraph
+# Force ONE stack across ALL cases (flag > env var > app config env file > per-case gold):
+python agent-redact/eval/run_benchmark_suite.py --surfaces main --ocr-method "Local OCR model - PDFs without selectable text" --chosen-local-ocr-model paddle --pii-method Local
+# same via environment variables (BENCHMARK_* first, then app vars like DEFAULT_TEXT_EXTRACTION_MODEL):
+BENCHMARK_OCR_METHOD="Local OCR model - PDFs without selectable text" BENCHMARK_LOCAL_OCR_MODEL=paddle BENCHMARK_PII_METHOD=Local python agent-redact/eval/run_benchmark_suite.py --surfaces main
 # AgentCore harness (main app; requires AGENTCORE_HARNESS_ARN + APP_EVAL)
 python agent-redact/eval/run_benchmark_suite.py --surfaces harness --case example_emails_to_professor_agentic
 
