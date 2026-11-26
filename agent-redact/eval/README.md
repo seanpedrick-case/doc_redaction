@@ -388,7 +388,7 @@ Set **`AGENT_ORCHESTRATOR`** to `langgraph` or `pi` before running the harness (
 
    **Gradio agent UI:** with `AGENT_EVAL_DEEPEVAL_TRACING=1`, each completed **Start redaction task** writes `{session_workspace}/eval/run_<timestamp>/eval_summary.json` (pass/fail/score for **policy_strict**, **tool_correctness**, **task_completion**, plus deterministic **gold_geometry**, **ocr_gold**, **policy_extraction** when a gold case applies). With **`AGENT_EVAL_AUTO_GOLD=1`**, the UI matches upload + instructions to one case under **`AGENT_EVAL_GOLD_ROOT`** at task start (see [`gold/README.md`](gold/README.md)); no unique match skips gold-tied metrics (fail closed). Legacy: **`AGENT_EVAL_GOLD=<case_dir>`** with auto off scores every task against that case. Task completion uses your redaction instructions and needs judge API credentials when DeepEval is installed. Optional **`AGENT_EVAL_MIRROR_RUNS=1`** copies the folder to [`eval/runs/`](runs/).
 
-   **Run summary CSV:** when tracing is on (opt out with `AGENT_EVAL_RUN_SUMMARY_CSV=0`), each run appends one row to [`eval/outputs/eval_run_summary.csv`](outputs/eval_run_summary.csv) and `{session_workspace}/eval/eval_run_summary.csv` — same idea as topic-modeller `eval_run_summary.csv` (timestamps, pass/score columns, `output_files` / `intermediate_files`). Columns **`orchestrator`**, **`model_name`**, **`ocr_method`**, **`pii_method`**, **`encourage_vlm_faces`**, and **`encourage_vlm_signatures`** (Gradio “Encourage CUSTOM_VLM_*…” checkboxes at task start) are taken from the run folder’s `gradio_run_meta.json` (written at post-run eval from the Gradio task), then `eval_summary.json`, then `manifest.json` (`run_*` overlays or gold defaults). Rebuilds without meta still get OCR/PII from a copied gold `manifest.json`. Refresh geometry + rebuild from mirrored runs: [`refresh_eval_geometry.py`](refresh_eval_geometry.py) (or `rebuild_eval_run_summary_csv()` alone if JSON is already current).
+   **Run summary CSV:** when tracing is on (opt out with `AGENT_EVAL_RUN_SUMMARY_CSV=0`), each run appends one row to [`eval/outputs/eval_run_summary.csv`](outputs/eval_run_summary.csv) and `{session_workspace}/eval/eval_run_summary.csv` — same idea as topic-modeller `eval_run_summary.csv` (timestamps, pass/score columns, `output_files` / `intermediate_files`). Columns **`orchestrator`**, **`model_name`**, **`ocr_method`**, **`pii_method`**, **`pii_llm_model`** (LLM used by an LLM-route PII detector), **`chosen_local_ocr_model`**, **`chosen_ocr_model`** (hybrid/VLM/inference-server OCR model), **`encourage_vlm_faces`**, and **`encourage_vlm_signatures`** (Gradio “Encourage CUSTOM_VLM_*…” checkboxes at task start) are taken from the run folder’s `gradio_run_meta.json` (written at post-run eval from the Gradio task), then `eval_summary.json`, then `manifest.json` (`run_*` overlays or gold defaults). Rebuilds without meta still get OCR/PII from a copied gold `manifest.json`. **`orchestrator`** / **`model_name`** describe the orchestrator framework and orchestrator LLM of agentic runs (also mirrored in **`agent_orchestrator`** / **`agent_model_name`**); for non-agentic rows (`run_source=main_app`, or `rescore` without `gradio_run_meta.json`) they stay empty rather than falling back to the ambient `AGENT_ORCHESTRATOR` / `AGENT_DEFAULT_MODEL` env vars, which describe the agent host, not the redaction run. Refresh geometry + rebuild from mirrored runs: [`refresh_eval_geometry.py`](refresh_eval_geometry.py) (or `rebuild_eval_run_summary_csv()` alone if JSON is already current).
 
    **Deterministic CSV columns** (from `gold_geometry.json`, `ocr_gold.json`, `policy_extraction.json` under each run dir): `gold_geometry_f1` / `_recall` / `_precision`, `ocr_gold_f1` / `_recall` / `_precision`, `policy_extraction_must_redact_f1`, `policy_extraction_deny_list_f1`, plus `*_skipped` flags when comparison did not run.
 
@@ -489,6 +489,34 @@ Gold readiness table: [`gold/BENCHMARK_GOLD_AUDIT.md`](gold/BENCHMARK_GOLD_AUDIT
 
 ---
 
+## 6. Statistical comparison of runs (model/stack A vs B)
+
+When the same tasks are run under several configurations (e.g. different `model_name` / `ocr_method`, hybrid OCR model `chosen_ocr_model`, or PII LLM `pii_llm_model`), [`compare_run_stats.py`](compare_run_stats.py) tests whether score differences in `eval_run_summary.csv` are statistically significant, per metric. Default `--config-cols` is `model_name,agent_orchestrator,ocr_method,chosen_local_ocr_model,chosen_ocr_model,pii_method,pii_llm_model` (orchestrator LLM + framework for agentic runs, OCR engine label + local engine id, hybrid/VLM OCR model, PII method, PII-detector LLM):
+
+```bash
+python agent-redact/eval/compare_run_stats.py \
+  --csv agent-redact/eval/outputs/eval_run_summary.csv \
+  --task-col document_name \
+  --config-cols model_name,agent_orchestrator,ocr_method,chosen_local_ocr_model,chosen_ocr_model,pii_method,pii_llm_model \
+  --out agent-redact/eval/outputs/run_stats_comparison   # writes .csv + .json
+```
+
+Design: rows are grouped by task (`document_name`) and config; repeated runs of the same (task, config) are aggregated first so each task is **one paired observation per config** (no pseudoreplication). Paired tests use complete task pairs only; rows with a truthy `<metric>_skipped` column are dropped per metric.
+
+| Situation | Test used | Notes |
+|-----------|-----------|-------|
+| 2 configs, continuous metric (default: `gold_geometry_f1/recall/precision`, `ocr_gold_f1/recall/precision`) | **paired permutation test** on mean per-task difference (exact ≤ 16 tasks, else Monte Carlo) | primary; assumption-free, handles ties/ceiling 1.0s |
+| same | **Wilcoxon signed-rank** (exact) + **sign test** (exact binomial) | robust alternatives; reported alongside |
+| same | **bootstrap percentile CI** of mean diff + probability-of-superiority | effect size, resampling tasks |
+| ≥ 3 configs, continuous | **Friedman test** + pairwise post-hocs | omnibus row `scope=omnibus` |
+| 2 configs, binary (`overall_pass`, `policy_strict_pass`) | **McNemar's exact test** (permutation on pass-rate if repeated runs) | discordant pairs `b`/`c` reported |
+| ≥ 3 configs, binary | **Cochran's Q** | |
+| multiple metrics / pairs | **Benjamini–Hochberg FDR** on primary p-values | `--fdr-scope metric` (default) or `all` |
+
+With small task counts (n < ~8) expect low power — read `mean_diff`, `ci_low/ci_high` and `q_value` together, not just significance. scipy is used when installed; exact stdlib fallbacks (sign / permutation / McNemar / chi-square tail) keep it working without. Use `--min-pairs` (default 3) to suppress underpowered comparisons.
+
+---
+
 ## Module map
 
 | Path | Role |
@@ -502,8 +530,10 @@ Gold readiness table: [`gold/BENCHMARK_GOLD_AUDIT.md`](gold/BENCHMARK_GOLD_AUDIT
 | [`compare_review_csvs.py`](compare_review_csvs.py) | Gold vs agent box F1 CLI / library |
 | [`compare_ocr_words_csvs.py`](compare_ocr_words_csvs.py) | Gold vs run word OCR F1 CLI / library |
 | [`compare_policy_lists.py`](compare_policy_lists.py) | Gold vs observed must_redact / deny_list extraction F1 + guardrail |
+| [`compare_run_stats.py`](compare_run_stats.py) | Significance tests (permutation / Wilcoxon / sign / McNemar / Friedman / Cochran) comparing configs in `eval_run_summary.csv` |
 | [`run_policy_gate.py`](run_policy_gate.py) | Fixture-friendly coverage gate (+ `--dual`) |
 | [`run_agent_regression.py`](run_agent_regression.py) | Local live/offline harness → deterministic gates |
+| [`rescore_run.py`](rescore_run.py) | Re-score a prior run folder vs gold → `eval_summary.json` + CSV (+ DeepEval) |
 | [`benchmark_cases.py`](benchmark_cases.py) | Discover / audit benchmark-eligible gold cases |
 | [`run_benchmark_suite.py`](run_benchmark_suite.py) | Multi-case benchmark (agent + main app) |
 | [`deepeval_metrics.py`](deepeval_metrics.py) | DeepEval metric wired to `pass_strict` |

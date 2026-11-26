@@ -118,6 +118,15 @@ def _get_loaded_vlm_model_and_tokenizer():
     return get_loaded_vlm_model_and_tokenizer()
 
 
+class NonRetryableLLMError(RuntimeError):
+    """
+    LLM call failure that waiting/retrying cannot fix (e.g. misconfiguration:
+    USE_TRANSFORMERS_VLM_MODEL_AS_LLM=True while no local VLM is loaded).
+
+    ``send_request`` re-raises these immediately instead of sleeping and retrying.
+    """
+
+
 def load_local_llm_for_task(model=None, tokenizer=None, assistant_model=None):
     """
     Return (model, tokenizer, assistant_model) for local LLM tasks.
@@ -141,7 +150,7 @@ def load_local_llm_for_task(model=None, tokenizer=None, assistant_model=None):
                 tokenizer if tokenizer is not None else vlm_tokenizer,
                 assistant_model,
             )
-        raise RuntimeError(
+        raise NonRetryableLLMError(
             "USE_TRANSFORMERS_VLM_MODEL_AS_LLM is True but the local VLM is not loaded. "
             "Enable SHOW_VLM_MODEL_OPTIONS and SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL, "
             "or set USE_TRANSFORMERS_VLM_MODEL_AS_LLM=False to load "
@@ -1381,6 +1390,9 @@ def send_request(
                 # print("Successful call to Gemini model.")
                 break
             except Exception as e:
+                if isinstance(e, NonRetryableLLMError):
+                    # Configuration error (e.g. VLM-as-LLM requested but not loaded) — retrying cannot help
+                    raise
                 # If fails, try again after X seconds in case there is a throttle limit
                 print(
                     "Call to Gemini model failed:",
@@ -1418,6 +1430,9 @@ def send_request(
                 # print("Successful call to Claude model.")
                 break
             except Exception as e:
+                if isinstance(e, NonRetryableLLMError):
+                    # Configuration error (e.g. VLM-as-LLM requested but not loaded) — retrying cannot help
+                    raise
                 # If fails, try again after X seconds in case there is a throttle limit
                 print(
                     "Call to Bedrock model failed:",
@@ -1479,6 +1494,8 @@ def send_request(
                 )
                 break
             except Exception as e:
+                if isinstance(e, NonRetryableLLMError):
+                    raise
                 print(
                     "Call to Azure/OpenAI model failed:",
                     e,
@@ -1562,6 +1579,9 @@ def send_request(
 
                 break
             except Exception as e:
+                if isinstance(e, NonRetryableLLMError):
+                    # Configuration error (e.g. VLM-as-LLM requested but not loaded) — retrying cannot help
+                    raise
                 # If fails, try again after X seconds in case there is a throttle limit
                 print(
                     "Call to local model failed:",
@@ -1606,6 +1626,9 @@ def send_request(
 
                 break
             except Exception as e:
+                if isinstance(e, NonRetryableLLMError):
+                    # Configuration error (e.g. VLM-as-LLM requested but not loaded) — retrying cannot help
+                    raise
                 # If fails, try again after X seconds in case there is a throttle limit
                 print(
                     "Call to inference-server API failed:",

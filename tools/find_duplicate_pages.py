@@ -285,6 +285,10 @@ def run_full_search_and_analysis(
         ["page", "line", "word_text", "index"],
     ]
 
+    word_level_df_out["page"] = pd.to_numeric(
+        word_level_df_out["page"], downcast="integer", errors="coerce"
+    )
+
     return word_level_df_out, duplicate_files, full_data
 
 

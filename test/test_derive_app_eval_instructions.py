@@ -12,6 +12,7 @@ if str(_EVAL) not in sys.path:
 from derive_app_eval_instructions import (  # noqa: E402
     AppEvalRedactionSettings,
     derive_app_eval_instructions,
+    settings_from_json,
     settings_from_legacy_redactor_kwargs,
     synthetic_doc_redact_tool_args,
 )
@@ -58,6 +59,101 @@ def test_legacy_kwargs_mapping():
     assert settings.deny_list == ["x"]
     tool = synthetic_doc_redact_tool_args(settings)
     assert tool["tool_calls"][0]["args"]["deny_list"] == ["x"]
+
+
+def test_chosen_ocr_model_json_round_trip(tmp_path):
+    import json
+
+    settings = AppEvalRedactionSettings(
+        chosen_local_ocr_model="hybrid-paddle-inference-server",
+        chosen_ocr_model="qwen_3_5_27b",
+    )
+    assert settings.to_settings_dict()["chosen_ocr_model"] == "qwen_3_5_27b"
+    path = tmp_path / "app_eval_settings.json"
+    path.write_text(json.dumps(settings.to_settings_dict()), encoding="utf-8")
+    loaded = settings_from_json(str(path))
+    assert loaded.chosen_local_ocr_model == "hybrid-paddle-inference-server"
+    assert loaded.chosen_ocr_model == "qwen_3_5_27b"
+
+
+def test_chosen_ocr_model_legacy_kwargs_and_fallbacks(tmp_path):
+    import json
+
+    # explicit per-run model kwargs win
+    settings = settings_from_legacy_redactor_kwargs(
+        {
+            "chosen_local_ocr_model": "hybrid-paddle-inference-server",
+            "inference_server_vlm_model": "qwen_3_5_27b",
+        }
+    )
+    assert settings.chosen_ocr_model == "qwen_3_5_27b"
+
+    settings2 = settings_from_legacy_redactor_kwargs(
+        {
+            "chosen_local_ocr_model": "hybrid-paddle-vlm",
+            "vlm_model_choice": "gemma-3-27b",
+        }
+    )
+    assert settings2.chosen_ocr_model == "gemma-3-27b"
+
+    # engines without a separate model resolve to ""
+    settings3 = settings_from_legacy_redactor_kwargs(
+        {"chosen_local_ocr_model": "tesseract"}
+    )
+    assert settings3.chosen_ocr_model == ""
+
+    # settings_from_json accepts legacy key fallbacks
+    path = tmp_path / "s.json"
+    path.write_text(
+        json.dumps({"inference_server_vlm_model": "qwen_3_5_27b"}), encoding="utf-8"
+    )
+    assert settings_from_json(str(path)).chosen_ocr_model == "qwen_3_5_27b"
+
+
+def test_pii_llm_model_mapping(tmp_path):
+    import json
+
+    # explicit per-run kwargs win
+    settings = settings_from_legacy_redactor_kwargs(
+        {
+            "pii_identification_method": "LLM (AWS Bedrock)",
+            "llm_model_choice": "anthropic.claude-3-7-sonnet-20250219-v1:0",
+        }
+    )
+    assert settings.pii_llm_model == "anthropic.claude-3-7-sonnet-20250219-v1:0"
+
+    settings2 = settings_from_legacy_redactor_kwargs(
+        {
+            "pii_identification_method": "Inference server LLM",
+            "inference_server_pii_model": "gemma_3_27b",
+        }
+    )
+    assert settings2.pii_llm_model == "gemma_3_27b"
+
+    # non-LLM PII methods resolve to ""
+    settings3 = settings_from_legacy_redactor_kwargs(
+        {"pii_identification_method": "Local"}
+    )
+    assert settings3.pii_llm_model == ""
+    settings4 = settings_from_legacy_redactor_kwargs(
+        {"pii_identification_method": "AWS Comprehend"}
+    )
+    assert settings4.pii_llm_model == ""
+
+    # json round-trip incl. legacy fallback keys
+    settings5 = AppEvalRedactionSettings(
+        pii_identification_method="LLM (AWS Bedrock)",
+        pii_llm_model="amazon.nova-pro-v1:0",
+    )
+    assert settings5.to_settings_dict()["pii_llm_model"] == "amazon.nova-pro-v1:0"
+    path = tmp_path / "s2.json"
+    path.write_text(json.dumps(settings5.to_settings_dict()), encoding="utf-8")
+    assert settings_from_json(str(path)).pii_llm_model == "amazon.nova-pro-v1:0"
+    path2 = tmp_path / "s3.json"
+    path2.write_text(
+        json.dumps({"llm_model_choice": "amazon.nova-pro-v1:0"}), encoding="utf-8"
+    )
+    assert settings_from_json(str(path2)).pii_llm_model == "amazon.nova-pro-v1:0"
 
 
 def test_local_pii_ignores_llm_entity_checkboxes_for_gold_match():

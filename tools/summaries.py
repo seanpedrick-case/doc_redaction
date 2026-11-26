@@ -43,6 +43,7 @@ from tools.helper_functions import (
     get_file_name_no_ext,
 )
 from tools.llm_funcs import (
+    NonRetryableLLMError,
     calculate_tokens_from_metadata,
     construct_azure_client,
     construct_gemini_generative_model,
@@ -165,7 +166,7 @@ def _load_local_model_for_summarisation():
                 "(USE_TRANSFORMERS_VLM_MODEL_AS_LLM=True)"
             )
             return vlm_model, vlm_tokenizer, None
-        raise RuntimeError(
+        raise NonRetryableLLMError(
             "USE_TRANSFORMERS_VLM_MODEL_AS_LLM is True but the local VLM is not loaded. "
             "Enable SHOW_VLM_MODEL_OPTIONS and SELECTED_LOCAL_TRANSFORMERS_VLM_MODEL, "
             "or set USE_TRANSFORMERS_VLM_MODEL_AS_LLM=False to load "

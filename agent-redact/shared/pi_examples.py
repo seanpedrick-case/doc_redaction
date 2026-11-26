@@ -83,10 +83,10 @@ def _is_lfs_pointer(path: Path) -> bool:
 
 
 _PARTNERSHIP_AGENT_INSTRUCTIONS = (
+    "- Redact all names, place names (apart from country names), emails and phone numbers\n"
     "- All signatures should be redacted\n"
-    "- Any redaction box related to general country names should be removed\n"
-    "- All redactions for Rudy Giuliani should be removed\n"
     "- All mentions of London, and 'Sister City' should be redacted\n"
+    "- All redactions for Rudy Giuliani should be removed\n"
 )
 
 

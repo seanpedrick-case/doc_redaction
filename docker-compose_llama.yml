@@ -12,6 +12,7 @@
 # docker compose -f docker-compose_llama.yml --profile 27b_38 up -d
 # docker compose -f docker-compose_llama.yml --profile gemma4-31b up -d --build
 # docker compose -f docker-compose_llama.yml --profile gemma4-26b up -d
+# docker compose -f docker-compose_llama.yml --profile inkling2-mini up -d
 
 # Recommended for 16gb VRAM systems
 # docker compose -f docker-compose_llama.yml --profile 9b up -d
@@ -535,9 +536,87 @@ services:
         aliases:
           - llama-inference
 
+  # Inkling-2-Mini (Thinking Machines Lab, 26B MoE ~5B active, multimodal) UD-Q4_K_XL is 17.6 GB
+  # -> fits on 24GB VRAM (Unsloth hardware table: 17-18 GB for the 4-bit). Mainline llama.cpp
+  # (this ghcr.io/ggml-org image) reads the inkling2_loop layout, so it must use the
+  # Mainline_Support GGUF (needs mainline b12611+; pull_policy: always keeps the image current).
+  # The repo-root Inkling-2-Mini-UD-Q4_K_XL.gguf uses Unsloth's looped layout and only loads
+  # correctly in Unsloth's own llama.cpp prebuilts (b12631-mix or later). DSpark speculative
+  # decoding is not in mainline yet (ggml-org/llama.cpp#32218), so no --spec-type/--model-draft.
+  # Unsloth recommended sampling: temp 1.0, top-p 1.0, top-k 0 (off), min-p 0.0.
+  inkling2-mini_q4_gguf:
+    profiles: ["inkling2-mini"]
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda13
+    command:
+      - -hf
+      - unsloth/Inkling-2-Mini-GGUF
+      - --hf-file
+      - Mainline_Support/Inkling-2-Mini-UD-Q4_K_XL.gguf_file
+      - --mmproj-url
+      - https://huggingface.co/unsloth/Inkling-2-Mini-GGUF/resolve/main/mmproj-F16.gguf
+      - --n-gpu-layers
+      - "-1"
+      - --ctx-size
+      - "32768" # Model natively supports 1M ctx; reduce this if VRAM is tight on 24GB
+      - --fit
+      - "off"
+      - --jinja
+      # Inkling's chat template keys off reasoning_effort (defaults to 0.9/high when unset); the
+      # app sends enable_thinking=false which this template ignores, so disable thinking here.
+      # Use low/medium/high instead of none if you want reasoning on.
+      - --chat-template-kwargs
+      - "{\"reasoning_effort\": \"none\"}"
+      - --temp
+      - "1.0"
+      - --top-k
+      - "0"
+      - --top-p
+      - "1.0"
+      - --min-p
+      - "0.0"
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8080"
+      - --no-warmup
+      - --seed
+      - "42"
+      - --n-cpu-moe
+      - "0" # Increase this value to fit within your available VRAM
+      - --image_min_tokens
+      - "300"
+      - --cache-type-k
+      - "q8_0"
+      - --cache-type-v
+      - "q8_0"
+    ports:
+      - "8004:8080"
+    volumes:
+      - ./models:/models
+      - hf-llama-cache-inkling2-mini:/root/.cache/llama.cpp
+      - hf-hub-cache-inkling2-mini:/root/.cache/huggingface
+    pull_policy: always
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/v1/models >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 8
+      start_period: 1200s
+    networks:
+      redaction-net-llama:
+        aliases:
+          - llama-inference
+
   redaction-app-llama:
     <<: *redaction-app-env
-    profiles: ["35b_36", "27b_36", "27b_38", "35b", "27b", "9b", "gemma4-31b", "gemma4-26b", "gemma4-12b"]
+    profiles: ["35b_36", "27b_36", "27b_38", "35b", "27b", "9b", "gemma4-31b", "gemma4-26b", "gemma4-12b", "inkling2-mini"]
     image: redaction-app-main
     build:
       context: .              # Look in the current folder
@@ -571,6 +650,9 @@ services:
       gemma4-12b_q4_gguf:
         condition: service_healthy
         required: false
+      inkling2-mini_q4_gguf:
+        condition: service_healthy
+        required: false
     environment:
       - FLAGS_fraction_of_gpu_memory_to_use=0.05
       - RUN_FASTAPI=True
@@ -592,22 +674,18 @@ services:
       - DEFAULT_INFERENCE_SERVER_VLM_MODEL=""
       - DEFAULT_INFERENCE_SERVER_PII_MODEL=""
       - CUSTOM_VLM_BACKEND=inference_vlm
-      - MAX_WORKERS=12
-      - TESSERACT_MAX_WORKERS=8
       - PADDLE_MAX_WORKERS=1 # Keep this to 1 to avoid VRAM overflow or errors
       - LOAD_PADDLE_AT_STARTUP=False
       - EFFICIENT_OCR=True
       - SHOW_CUSTOM_VLM_ENTITIES=True
       - SESSION_OUTPUT_FOLDER=True
       - SAVE_PAGE_OCR_VISUALISATIONS=False
-      - HYBRID_OCR_CONFIDENCE_THRESHOLD=97
       - INCLUDE_OCR_VISUALISATION_IN_OUTPUT_FILES=True
       - PREPROCESS_LOCAL_OCR_IMAGES=False
       - INFERENCE_SERVER_DISABLE_THINKING=True
       - MAX_NEW_TOKENS=16384
       - SAVE_EXAMPLE_HYBRID_IMAGES=False
       - SAVE_VLM_INPUT_IMAGES=False
-      - VLM_MAX_DPI=200.0
       - DEFAULT_NEW_BATCH_CHAR_COUNT=1250
       - REPORT_VLM_OUTPUTS_TO_GUI=True
       - REPORT_LLM_OUTPUTS_TO_GUI=True
@@ -645,3 +723,5 @@ volumes:
   hf-hub-cache-gemma4-26b:
   hf-llama-cache-gemma4-12b:
   hf-hub-cache-gemma4-12b:
+  hf-llama-cache-inkling2-mini:
+  hf-hub-cache-inkling2-mini:

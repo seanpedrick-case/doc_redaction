@@ -224,7 +224,7 @@ Do **not** run VLM on every page. At ~1–2 min/page sequential on local VLMs, 5
 
 ## User redaction requirements (authoritative for this task)
 
+- Redact all names, place names (apart from country names), emails and phone numbers
 - All signatures should be redacted
-- Any redaction box related to general country names should be removed
-- All redactions for Rudy Giuliani should be removed
 - All mentions of London, and 'Sister City' should be redacted
+- All redactions for Rudy Giuliani should be removed

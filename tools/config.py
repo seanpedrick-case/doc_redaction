@@ -710,7 +710,7 @@ SHOW_WORD_EXCEL_REDACTION = convert_string_to_boolean(
 )
 
 REDACTION_SETTINGS_ACCORDION_OPEN = convert_string_to_boolean(
-    get_or_create_env_var("REDACTION_SETTINGS_ACCORDION_OPEN", "True")
+    get_or_create_env_var("REDACTION_SETTINGS_ACCORDION_OPEN", "False")
 )
 
 # Extraction and PII options open by default:
@@ -1161,7 +1161,7 @@ VLM_MIN_DPI = float(
 )  # _prepare_image_for_vlm: reported DPI below this implies upscale (effective DPI = reported_dpi * scale).
 
 VLM_MAX_DPI = float(
-    get_or_create_env_var("VLM_MAX_DPI", "200.0")
+    get_or_create_env_var("VLM_MAX_DPI", "300.0")
 )  # _prepare_image_for_vlm: reported DPI above this implies downscale. Bounds apply together with min/max pixels.
 
 # Max image aspect ratio max(width/height, height/width) after white-padding for VLM inputs.
@@ -1773,14 +1773,14 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
 
     if (
         "gemma-3-12b" in model_choice_lower
-        or "gemma3-12b"
+        or "gemma3-12b" in model_choice_lower
         or GEMMA3_12B_REPO_ID in model_choice_lower
     ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GEMMA3_12B_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Gemma 3 12B"
     elif (
         "gemma-3-27b" in model_choice_lower
-        or "gemma3-27b"
+        or "gemma3-27b" in model_choice_lower
         or GEMMA3_27B_REPO_ID in model_choice_lower
     ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = GEMMA3_27B_REPO_ID
@@ -1804,28 +1804,28 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3 8B Instruct"
     elif (
         "qwen3.5-0.8b" in model_choice_lower
-        or "qwen-3.5-0.8b"
+        or "qwen-3.5-0.8b" in model_choice_lower
         or QWEN35_08B_REPO_ID in model_choice_lower
     ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_08B_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 0.8B"
     elif (
         "qwen3.5-2b" in model_choice_lower
-        or "qwen-3.5-2b"
+        or "qwen-3.5-2b" in model_choice_lower
         or QWEN35_2B_REPO_ID in model_choice_lower
     ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_2B_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 2B"
     elif (
         "qwen3.5-4b" in model_choice_lower
-        or "qwen-3.5-4b"
+        or "qwen-3.5-4b" in model_choice_lower
         or QWEN35_4B_REPO_ID in model_choice_lower
     ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_4B_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 4B"
     elif (
         "qwen3.5-9b" in model_choice_lower
-        or "qwen-3.5-9b"
+        or "qwen-3.5-9b" in model_choice_lower
         or QWEN35_9B_REPO_ID in model_choice_lower
     ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_9B_REPO_ID
@@ -1839,14 +1839,14 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 27B (4-bit)"
     elif (
         "qwen3.5-27b" in model_choice_lower
-        or "qwen-3.5-27b"
+        or "qwen-3.5-27b" in model_choice_lower
         or QWEN35_27B_REPO_ID in model_choice_lower
     ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_27B_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 27B"
     elif (
         "qwen3.5-35b" in model_choice_lower
-        or "qwen-3.5-35b"
+        or "qwen-3.5-35b" in model_choice_lower
         or QWEN35_35B_A3B_REPO_ID in model_choice_lower
     ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_35B_A3B_REPO_ID
@@ -1860,7 +1860,7 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.6 27B (4-bit)"
     elif (
         "qwen3.6-27b" in model_choice_lower
-        or "qwen-3.6-27b"
+        or "qwen-3.6-27b" in model_choice_lower
         or QWEN36_27B_REPO_ID in model_choice_lower
     ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN36_27B_REPO_ID
@@ -1874,7 +1874,7 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.8 27B (4-bit)"
     elif (
         "qwen3.8-27b" in model_choice_lower
-        or "qwen-3.8-27b"
+        or "qwen-3.8-27b" in model_choice_lower
         or QWEN38_27B_REPO_ID in model_choice_lower
     ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN38_27B_REPO_ID
@@ -1887,14 +1887,14 @@ if LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE:
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.6 35B-A3B"
     elif (
         "qwen3.5-122b" in model_choice_lower
-        or "qwen-3.5-122b"
+        or "qwen-3.5-122b" in model_choice_lower
         or QWEN35_122B_A10B_REPO_ID in model_choice_lower
     ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = QWEN35_122B_A10B_REPO_ID
         LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE = "Qwen 3.5 122B-A10B"
     elif (
         "nvidia-nemotron-3-nano-30b-a3b-nvfp4" in model_choice_lower
-        or "nvidia-nemotron-3-nano-30b-a3b"
+        or "nvidia-nemotron-3-nano-30b-a3b" in model_choice_lower
         or NVIDIA_NEMOTRON_30B_A3B_REPO_ID in model_choice_lower
     ):
         LOCAL_TRANSFORMERS_LLM_PII_REPO_ID = NVIDIA_NEMOTRON_30B_A3B_REPO_ID

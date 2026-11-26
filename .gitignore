@@ -86,3 +86,4 @@ agent-redact/eval/gold/**/*.pdf
 agent-redact/eval/outputs/*
 .env
 .certs/*
+.vscode/*

@@ -9,8 +9,15 @@ import os
 import subprocess
 import sys
 import time
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Literal
+
+# Snapshot the process environment before any project import can populate config
+# defaults into os.environ (tools.config's get_or_create_env_var writes defaults
+# back). Stack-flag fallbacks read this snapshot plus the app config env file, so an
+# unset knob never becomes a code-default "override" of the per-case gold settings.
+_PRISTINE_ENV = dict(os.environ)
 
 SurfaceChoice = Literal["agent", "main", "harness"]
 
@@ -44,6 +51,105 @@ from run_agent_regression import (  # noqa: E402
 def _repo_root() -> Path:
     repo, _, _ = _ensure_agent_imports()
     return repo
+
+
+def _app_config_env_file() -> Path:
+    raw = (_PRISTINE_ENV.get("APP_CONFIG_PATH") or "").strip()
+    repo = Path(__file__).resolve().parents[2]
+    if raw:
+        candidate = Path(raw).expanduser()
+        return candidate if candidate.is_absolute() else (repo / candidate)
+    return repo / "config" / "app_config.env"
+
+
+def _agent_config_env_file() -> Path:
+    """Agent config file (config/agent.env, legacy pi_agent.env)."""
+    config_dir = Path(__file__).resolve().parents[2] / "config"
+    for name in ("agent.env", "pi_agent.env"):
+        candidate = config_dir / name
+        if candidate.is_file():
+            return candidate
+    return config_dir / "agent.env"
+
+
+def _env_file_values() -> dict[str, str]:
+    """
+    Values from the config env files: the app config file (APP_CONFIG_PATH or
+    config/app_config.env) first, then config/agent.env (legacy pi_agent.env) as a
+    lower-priority layer for agent-side variables like DOC_REDACTION_GRADIO_URL.
+    """
+    try:
+        from dotenv import dotenv_values
+    except ImportError:
+        return {}
+    values: dict[str, str] = {}
+    for path in (_app_config_env_file(), _agent_config_env_file()):
+        try:
+            if not path.is_file():
+                continue
+            for key, value in dotenv_values(str(path)).items():
+                if value is not None and key not in values:
+                    values[key] = value or ""
+        except Exception:
+            continue
+    return values
+
+
+def _env_default(*names: str) -> str | None:
+    """
+    Fallback value for a CLI flag: the first non-empty of ``names`` found in the
+    real process environment (snapshot taken before project imports), then in the
+    config env files (app config, then agent.env). Returns None when unset, so
+    per-case gold settings stay in charge unless the user explicitly sets a flag
+    or env var.
+    """
+    for name in names:
+        value = (_PRISTINE_ENV.get(name) or "").strip()
+        if value:
+            return value
+    file_values = _env_file_values()
+    for name in names:
+        value = (file_values.get(name) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _apply_gradio_url_env(url: str | None) -> None:
+    """
+    Point the agent surface at a given main-app URL by setting
+    ``DOC_REDACTION_GRADIO_URL`` (read on each call by the agent tools, so setting
+    it here — before ``run_regression`` imports the agent stack — takes effect).
+    None/empty is a no-op.
+    """
+    value = (url or "").strip().rstrip("/")
+    if value:
+        os.environ["DOC_REDACTION_GRADIO_URL"] = value
+
+
+def _apply_llm_base_url_env(url: str | None) -> None:
+    """
+    Point the OpenAI-compatible agent orchestrator LLM (Pi ``llama-cpp`` provider,
+    LangGraph ``ChatOpenAI``, DeepEval judge) at a given inference-server URL by
+    setting ``AGENT_LLAMA_BASE_URL`` (``/v1`` is appended by the consumers when
+    missing). ``OPENAI_BASE_URL`` is set too unless already configured. This runs
+    in ``main()`` before ``run_regression`` imports the agent stack; if
+    ``pi_agent_config`` was already imported (it resolves the URL at import time),
+    its constant is updated as well. None/empty is a no-op.
+    """
+    value = (url or "").strip().rstrip("/")
+    if not value:
+        return
+    os.environ["AGENT_LLAMA_BASE_URL"] = value
+    os.environ.setdefault("OPENAI_BASE_URL", value)
+    try:
+        import pi_agent_config
+
+        pi_agent_config.LLAMA_BASE_URL = (
+            value if value.endswith("/v1") else f"{value}/v1"
+        )
+    except ImportError:
+        pass
 
 
 def _git_commit_short() -> str:
@@ -256,12 +362,19 @@ def _settings_to_cli_args(
     deny = list(settings.deny_list)
     allow = list(settings.allow_list)
 
+    # Mirror the engine default (chosen_llm_entities falls back to the comprehend
+    # list when unset): an empty llm_redact_entities would trip the "no standard
+    # entities" guard in analyze_text even for non-LLM PII methods.
+    llm_entities = list(settings.chosen_llm_entities)
+    if not llm_entities:
+        llm_entities = list(settings.chosen_redact_comprehend_entities)
+
     args: dict[str, Any] = {
         "input_file": [str(pdf_path.resolve())],
         "output_dir": str(output_dir.resolve()),
         "local_redact_entities": list(settings.chosen_redact_entities),
         "aws_redact_entities": list(settings.chosen_redact_comprehend_entities),
-        "llm_redact_entities": list(settings.chosen_llm_entities),
+        "llm_redact_entities": llm_entities,
         "ocr_method": settings.text_extraction_method or "Local text",
         "pii_detector": settings.pii_identification_method or "Local",
         "page_min": int(settings.page_min or 0),
@@ -279,6 +392,25 @@ def _settings_to_cli_args(
     local_model = (settings.chosen_local_ocr_model or "").strip()
     if local_model:
         args["chosen_local_ocr_model"] = local_model
+    ocr_model = (settings.chosen_ocr_model or "").strip()
+    if ocr_model:
+        local_key = local_model.casefold().replace("_", "-")
+        if "inference-server" in local_key:
+            args["inference_server_vlm_model"] = ocr_model
+        else:
+            args["vlm_model_choice"] = ocr_model
+    pii_model = (settings.pii_llm_model or "").strip()
+    if pii_model:
+        pii_key = (
+            (settings.pii_identification_method or "")
+            .casefold()
+            .replace("_", " ")
+            .replace("-", " ")
+        )
+        if "inference server" in pii_key:
+            args["inference_server_pii_model"] = pii_model
+        else:
+            args["llm_model_choice"] = pii_model
     return args
 
 
@@ -738,6 +870,13 @@ def run_benchmark_suite(
         "gold_root": str(gold_root.resolve()),
         "surfaces": sorted(surfaces),
         "orchestrator": orchestrator,
+        "stack_overrides": asdict(stack_overrides) if stack_overrides else {},
+        "doc_redaction_gradio_url": (
+            os.environ.get("DOC_REDACTION_GRADIO_URL") or ""
+        ).strip()
+        or None,
+        "agent_llm_base_url": (os.environ.get("AGENT_LLAMA_BASE_URL") or "").strip()
+        or None,
         "started_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "cases": [],
         "exit_code": 0,
@@ -848,29 +987,80 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--orchestrator",
         choices=("langgraph", "pi", "both"),
-        default=os.environ.get("AGENT_ORCHESTRATOR", "langgraph"),
+        default=_env_default("BENCHMARK_ORCHESTRATOR", "AGENT_ORCHESTRATOR")
+        or "langgraph",
+        help="Agent orchestrator (default: $BENCHMARK_ORCHESTRATOR / $AGENT_ORCHESTRATOR / langgraph).",
     )
-    p.add_argument("--provider", default=None)
-    p.add_argument("--model", default=None)
+    p.add_argument(
+        "--provider",
+        default=_env_default("BENCHMARK_PROVIDER", "AGENT_DEFAULT_PROVIDER"),
+        help="Agent LLM provider (default: $BENCHMARK_PROVIDER / $AGENT_DEFAULT_PROVIDER).",
+    )
+    p.add_argument(
+        "--model",
+        default=_env_default("BENCHMARK_MODEL", "AGENT_DEFAULT_MODEL"),
+        help="Agent LLM model (default: $BENCHMARK_MODEL / $AGENT_DEFAULT_MODEL).",
+    )
+    p.add_argument(
+        "--gradio-url",
+        default=_env_default("BENCHMARK_GRADIO_URL", "DOC_REDACTION_GRADIO_URL"),
+        help="URL of the running main doc_redaction app that the agent surface drives "
+        "via gradio_client (sets DOC_REDACTION_GRADIO_URL). Default: "
+        "$BENCHMARK_GRADIO_URL / $DOC_REDACTION_GRADIO_URL from the environment or "
+        "config/agent.env; the app itself falls back to http://127.0.0.1:7860.",
+    )
+    p.add_argument(
+        "--llm-base-url",
+        default=_env_default(
+            "BENCHMARK_LLM_BASE_URL", "AGENT_LLAMA_BASE_URL", "OPENAI_BASE_URL"
+        ),
+        help="Base URL of the OpenAI-compatible inference server serving the agent "
+        "orchestrator LLM, e.g. the llama.cpp server for --provider llama-cpp "
+        "(sets AGENT_LLAMA_BASE_URL; /v1 appended if missing, and OPENAI_BASE_URL "
+        "if unset). Default: $BENCHMARK_LLM_BASE_URL / $AGENT_LLAMA_BASE_URL / "
+        "$OPENAI_BASE_URL from the environment or config/agent.env.",
+    )
     p.add_argument(
         "--ocr-method",
-        default=None,
-        help="Override gold app_eval text_extraction_method / harness OCR.",
+        default=_env_default("BENCHMARK_OCR_METHOD", "DEFAULT_TEXT_EXTRACTION_MODEL"),
+        help="Override gold app_eval text_extraction_method / harness OCR for ALL cases "
+        "(default: $BENCHMARK_OCR_METHOD / $DEFAULT_TEXT_EXTRACTION_MODEL from the env "
+        "or app config file).",
     )
     p.add_argument(
         "--pii-method",
-        default=None,
-        help="Override gold pii_identification_method.",
+        default=_env_default("BENCHMARK_PII_METHOD", "DEFAULT_PII_DETECTION_MODEL"),
+        help="Override gold pii_identification_method for ALL cases "
+        "(default: $BENCHMARK_PII_METHOD / $DEFAULT_PII_DETECTION_MODEL).",
+    )
+    p.add_argument(
+        "--pii-llm-model",
+        default=_env_default("BENCHMARK_PII_LLM_MODEL", "CLOUD_LLM_PII_MODEL_CHOICE"),
+        help="Override the PII-detector LLM model (gold pii_llm_model) for ALL cases, "
+        "e.g. the Bedrock / inference-server / local transformers model used when the "
+        "PII method is an LLM route (default: $BENCHMARK_PII_LLM_MODEL / "
+        "$CLOUD_LLM_PII_MODEL_CHOICE).",
     )
     p.add_argument(
         "--chosen-local-ocr-model",
-        default=None,
-        help="Override local OCR engine (e.g. paddle, tesseract).",
+        default=_env_default("BENCHMARK_LOCAL_OCR_MODEL", "DEFAULT_LOCAL_OCR_MODEL"),
+        help="Override local OCR engine (e.g. paddle, tesseract) for ALL cases; also "
+        "switches text extraction to the local OCR option unless --ocr-method is given "
+        "(default: $BENCHMARK_LOCAL_OCR_MODEL / $DEFAULT_LOCAL_OCR_MODEL).",
+    )
+    p.add_argument(
+        "--chosen-ocr-model",
+        default=_env_default("BENCHMARK_OCR_MODEL", "CLOUD_VLM_MODEL_CHOICE"),
+        help="Override the VLM / inference-server / hybrid second-pass OCR model "
+        "(gold chosen_ocr_model) for ALL cases, e.g. for hybrid-paddle-vlm or "
+        "hybrid-paddle-inference-server (default: $BENCHMARK_OCR_MODEL / "
+        "$CLOUD_VLM_MODEL_CHOICE).",
     )
     p.add_argument(
         "--app-config-path",
-        default=None,
-        help="Load this env file in a fresh process for main-app legs (APP_CONFIG_PATH).",
+        default=_env_default("BENCHMARK_APP_CONFIG_PATH", "APP_CONFIG_PATH"),
+        help="Load this env file in a fresh process for main-app legs "
+        "(default: $BENCHMARK_APP_CONFIG_PATH / $APP_CONFIG_PATH).",
     )
     p.add_argument("--timeout-s", type=float, default=3600.0)
     p.add_argument("--suite-id", default=None, help="Override benchmark suite id.")
@@ -925,12 +1115,17 @@ def main(argv: list[str] | None = None) -> int:
         print(exc, file=sys.stderr)
         return 2
 
+    _apply_gradio_url_env(args.gradio_url)
+    _apply_llm_base_url_env(args.llm_base_url)
+
     try:
         stack_overrides = overrides_from_argv(
             ocr_method=args.ocr_method,
             pii_method=args.pii_method,
             chosen_local_ocr_model=args.chosen_local_ocr_model,
             app_config_path=args.app_config_path,
+            chosen_ocr_model=args.chosen_ocr_model,
+            pii_llm_model=args.pii_llm_model,
         )
         envelope, code = run_benchmark_suite(
             gold_root=gold_root,

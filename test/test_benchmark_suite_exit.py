@@ -12,7 +12,10 @@ if str(_EVAL) not in sys.path:
 
 from run_benchmark_suite import (  # noqa: E402
     _accumulate_surface_outcome,
+    _apply_gradio_url_env,
+    _apply_llm_base_url_env,
     _apply_qa_outcome,
+    _env_default,
 )
 
 
@@ -31,3 +34,100 @@ def test_accumulate_surface_qa_fail_does_not_raise_technical():
     max_t, any_qa = _accumulate_surface_outcome(rec, 0, False)
     assert max_t == 0
     assert any_qa is True
+
+
+def test_env_default_prefers_pristine_env_then_env_file(monkeypatch) -> None:
+    import run_benchmark_suite as rbs
+
+    # Replace the whole snapshot: in a pytest process, tools.config may already
+    # have written code defaults into os.environ before run_benchmark_suite was
+    # imported, and those must not leak into the fallback.
+    monkeypatch.setattr(rbs, "_PRISTINE_ENV", {"BENCHMARK_OCR_METHOD": "from-env"})
+    monkeypatch.setattr(
+        rbs,
+        "_env_file_values",
+        lambda: {"BENCHMARK_OCR_METHOD": "from-file", "OTHER_VAR": "file-only"},
+    )
+    assert (
+        _env_default("BENCHMARK_OCR_METHOD", "DEFAULT_TEXT_EXTRACTION_MODEL")
+        == "from-env"
+    )
+    assert _env_default("OTHER_VAR") == "file-only"
+    monkeypatch.setattr(rbs, "_PRISTINE_ENV", {})
+    assert _env_default("BENCHMARK_OCR_METHOD") == "from-file"
+    assert _env_default("NO_SUCH_VAR_ANYWHERE") is None
+
+
+def test_parser_stack_flags_fall_back_to_env(monkeypatch) -> None:
+    import run_benchmark_suite as rbs
+
+    monkeypatch.setattr(rbs, "_PRISTINE_ENV", {"BENCHMARK_LOCAL_OCR_MODEL": "paddle"})
+    monkeypatch.setattr(
+        rbs,
+        "_env_file_values",
+        lambda: {"DEFAULT_TEXT_EXTRACTION_MODEL": "Local model - selectable text"},
+    )
+    args = rbs._build_parser().parse_args([])
+    assert args.chosen_local_ocr_model == "paddle"  # BENCHMARK_* env var
+    assert args.ocr_method == "Local model - selectable text"  # app config env file
+    # explicit flag beats env
+    args2 = rbs._build_parser().parse_args(["--chosen-local-ocr-model", "tesseract"])
+    assert args2.chosen_local_ocr_model == "tesseract"
+
+
+def test_gradio_url_flag_and_env_override(monkeypatch) -> None:
+    import os
+
+    import run_benchmark_suite as rbs
+
+    monkeypatch.setattr(rbs, "_PRISTINE_ENV", {})
+    monkeypatch.setattr(
+        rbs,
+        "_env_file_values",
+        lambda: {"DOC_REDACTION_GRADIO_URL": "http://env-file:7860"},
+    )
+    # env-file fallback becomes the flag default
+    args = rbs._build_parser().parse_args([])
+    assert args.gradio_url == "http://env-file:7860"
+    # explicit flag wins and normalizes the trailing slash when applied
+    args2 = rbs._build_parser().parse_args(["--gradio-url", "http://flag:9999/"])
+    assert args2.gradio_url == "http://flag:9999/"
+    monkeypatch.delenv("DOC_REDACTION_GRADIO_URL", raising=False)
+    _apply_gradio_url_env(args2.gradio_url)
+    assert os.environ["DOC_REDACTION_GRADIO_URL"] == "http://flag:9999"
+    # None/empty is a no-op
+    _apply_gradio_url_env(None)
+    _apply_gradio_url_env("")
+    assert os.environ["DOC_REDACTION_GRADIO_URL"] == "http://flag:9999"
+
+
+def test_llm_base_url_flag_and_env_override(monkeypatch) -> None:
+    import os
+
+    import run_benchmark_suite as rbs
+
+    monkeypatch.setattr(rbs, "_PRISTINE_ENV", {})
+    monkeypatch.setattr(
+        rbs,
+        "_env_file_values",
+        lambda: {"AGENT_LLAMA_BASE_URL": "http://agent-env:8080/v1"},
+    )
+    # env-file fallback becomes the flag default
+    args = rbs._build_parser().parse_args([])
+    assert args.llm_base_url == "http://agent-env:8080/v1"
+    # explicit flag wins
+    args2 = rbs._build_parser().parse_args(["--llm-base-url", "http://flag:9999"])
+    assert args2.llm_base_url == "http://flag:9999"
+    monkeypatch.delenv("AGENT_LLAMA_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    _apply_llm_base_url_env(args2.llm_base_url)
+    assert os.environ["AGENT_LLAMA_BASE_URL"] == "http://flag:9999"
+    assert os.environ["OPENAI_BASE_URL"] == "http://flag:9999"
+    # None/empty is a no-op
+    _apply_llm_base_url_env(None)
+    assert os.environ["AGENT_LLAMA_BASE_URL"] == "http://flag:9999"
+    # an existing OPENAI_BASE_URL is not clobbered
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://openai:4000/v1")
+    _apply_llm_base_url_env("http://other:1")
+    assert os.environ["AGENT_LLAMA_BASE_URL"] == "http://other:1"
+    assert os.environ["OPENAI_BASE_URL"] == "http://openai:4000/v1"

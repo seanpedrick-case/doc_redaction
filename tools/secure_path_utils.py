@@ -453,6 +453,43 @@ def redaction_allowed_io_roots() -> list[str]:
     return roots
 
 
+def validate_folder_within_allowed_roots(
+    path: Union[str, Path], extra_roots: Optional[Union[list, tuple]] = None
+) -> bool:
+    """
+    Validate that a folder path is contained within one of the trusted redaction IO
+    roots: the app repo root, INPUT_FOLDER, OUTPUT_FOLDER, AGENT_WORKSPACE_DIR, and
+    the system temp directory.
+
+    Output folders for CLI / agent / eval runs may live anywhere under the app repo
+    (e.g. ``agent-redact/eval/runs/...``), not only under OUTPUT_FOLDER — this matches
+    the writable-path rules of :func:`resolve_writable_io_path`.
+
+    Args:
+        path: The folder path to validate.
+        extra_roots: Optional additional trusted base directories to accept.
+
+    Returns:
+        True if the path is strictly contained within at least one trusted root.
+    """
+    # Strict containment (no test-pattern bypass): normpath + commonpath, like
+    # _is_under_allowed_io_root, so the system-temp root cannot whitelist everything.
+    candidate = os.path.normpath(os.path.abspath(str(path)))
+    roots = [str(root) for root in redaction_allowed_io_roots()]
+    if extra_roots:
+        roots.extend(str(root) for root in extra_roots)
+    for root in roots:
+        base = os.path.normpath(os.path.abspath(str(root)))
+        try:
+            common = os.path.commonpath([candidate, base])
+        except ValueError:
+            # Different drives (Windows) — cannot be contained
+            continue
+        if os.path.normcase(common) == os.path.normcase(base):
+            return True
+    return False
+
+
 def _candidate_abs_io_path(path: str) -> str:
     """Expand and realpath a user path; relative paths are under the repo root."""
     raw = str(path or "").strip()

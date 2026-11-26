@@ -1,12 +1,74 @@
 # Standardized benchmark suite (append eval/outputs/eval_run_summary.csv)
 python agent-redact/eval/run_benchmark_suite.py --audit-only
 python agent-redact/eval/run_benchmark_suite.py --list-cases
+python agent-redact/eval/run_benchmark_suite.py --surfaces main
 python agent-redact/eval/run_benchmark_suite.py --surfaces agent,main --orchestrator langgraph
+# Force ONE stack across ALL cases (flag > env var > app config env file > per-case gold):
+python agent-redact/eval/run_benchmark_suite.py --surfaces main --ocr-method "Local OCR model - PDFs without selectable text" --chosen-local-ocr-model paddle --pii-method Local
+# same via environment variables (BENCHMARK_* first, then app vars like DEFAULT_TEXT_EXTRACTION_MODEL):
+BENCHMARK_OCR_METHOD="Local OCR model - PDFs without selectable text" BENCHMARK_LOCAL_OCR_MODEL=paddle BENCHMARK_PII_METHOD=Local python agent-redact/eval/run_benchmark_suite.py --surfaces main
+# Agent surface: point at the running main app (sets DOC_REDACTION_GRADIO_URL; default http://127.0.0.1:7860):
+python agent-redact/eval/run_benchmark_suite.py --surfaces agent --orchestrator langgraph --gradio-url http://127.0.0.1:7860
 # AgentCore harness (main app; requires AGENTCORE_HARNESS_ARN + APP_EVAL)
 python agent-redact/eval/run_benchmark_suite.py --surfaces harness --case example_emails_to_professor_agentic
 
+# --- Common model/orchestrator combinations (flags apply to ALL gold cases;   ---
+# --- flag > BENCHMARK_* env > app/agent env var > config env file > gold)      ---
+
+# 1) MAIN gold tasks only — one fixed stack across every case, fully offline:
+#    paddle OCR + local Presidio PII
+python agent-redact/eval/run_benchmark_suite.py --surfaces main \
+  --ocr-method "Local OCR model - PDFs without selectable text" --chosen-local-ocr-model paddle --pii-method Local
+#    tesseract OCR + local PII, single case only, fail the suite on poor QA scores
+python agent-redact/eval/run_benchmark_suite.py --surfaces main \
+  --chosen-local-ocr-model tesseract --pii-method Local --case show_ex_partnership_deny_list_whole_pages --fail-on-qa
+#    selectable-text extraction + AWS Bedrock LLM PII (needs AWS creds in app config)
+python agent-redact/eval/run_benchmark_suite.py --surfaces main \
+  --ocr-method "Local model - selectable text" --pii-method "LLM (AWS Bedrock)" --pii-llm-model amazon.nova-pro-v1:0
+#    hybrid OCR (paddle + VLM second pass) + inference-server LLM PII
+python agent-redact/eval/run_benchmark_suite.py --surfaces main \
+  --ocr-method "Local OCR model - PDFs without selectable text" --chosen-local-ocr-model hybrid-paddle-inference-server \
+  --chosen-ocr-model qwen_3_8_27b --pii-method "Local inference server" --pii-llm-model qwen_3_8_27b
+#    local transformers LLM PII (loads LOCAL_TRANSFORMERS_LLM_PII_MODEL_CHOICE, or the
+#    loaded VLM when USE_TRANSFORMERS_VLM_MODEL_AS_LLM=True):
+python agent-redact/eval/run_benchmark_suite.py --surfaces main \
+  --ocr-method "Local model - selectable text" --pii-method "Local transformers LLM" --pii-llm-model "Qwen 3.5 9B"
+
+# 2) MAIN + AGENT tasks — same document set through the direct CLI run and the
+#    agentic orchestrator (main app must be running; --gradio-url sets
+#    DOC_REDACTION_GRADIO_URL). Agent LLM comes from --provider/--model or
+#    AGENT_DEFAULT_PROVIDER/AGENT_DEFAULT_MODEL in config/agent.env.
+#    LangGraph + Bedrock Nova Pro, local paddle stack pinned for the agent too:
+python agent-redact/eval/run_benchmark_suite.py --surfaces agent,main \
+  --orchestrator langgraph --provider amazon-bedrock --model amazon.nova-pro-v1:0 \
+  --gradio-url http://127.0.0.1:7860 \
+  --ocr-method "Local OCR model - PDFs without selectable text" --chosen-local-ocr-model paddle --pii-method Local
+#    Pi orchestrator + local llama.cpp inference-server model (the model server URL
+#    comes from AGENT_LLAMA_BASE_URL in config/agent.env, or --llm-base-url; /v1 is
+#    appended if missing):
+python agent-redact/eval/run_benchmark_suite.py --surfaces agent,main \
+  --orchestrator pi --provider llama-cpp --model unsloth/Inkling-2-Mini-GGUF \
+  --llm-base-url http://llama-inference:8080/v1 \
+  --gradio-url http://127.0.0.1:7860 --pii-method Local --chosen-local-ocr-model tesseract
+#    both orchestrators, one case:
+python agent-redact/eval/run_benchmark_suite.py --surfaces agent,main --orchestrator both \
+  --case example_emails_to_professor_agentic --gradio-url http://127.0.0.1:7860
+
+# 3) MAIN + HARNESS tasks — harness = in-app AgentCore inline tools (needs
+#    AGENTCORE_HARNESS_ARN and USE_AGENTCORE in the app env; the harness LLM is
+#    the Bedrock agent configured on the ARN, OCR/PII stack still pinned by flags):
+python agent-redact/eval/run_benchmark_suite.py --surfaces main,harness \
+  --ocr-method "Local OCR model - PDFs without selectable text" --chosen-local-ocr-model tesseract --pii-method Local
+#    all three surfaces at once, DeepEval follow-ups on for the agent legs
+#    (AGENT_EVAL_DEEPEVAL_TRACING=1 + judge env in config/agent.env):
+AGENT_EVAL_DEEPEVAL_TRACING=1 python agent-redact/eval/run_benchmark_suite.py --surfaces agent,main,harness \
+  --orchestrator langgraph --gradio-url http://127.0.0.1:7860 --pii-method Local
+
 # Offline (no LLM) — policy gate only in DeepEval test
 python agent-redact/eval/run_agent_regression.py --gold agent-redact/eval/gold/example_smoke --gates-only
+
+# Rescore an existing run folder against gold (gates + eval_summary + CSV; optional DeepEval)
+python agent-redact/eval/rescore_run.py --run-dir agent-redact/eval/runs/<prior_run> --gold agent-redact/eval/gold/<case_id> --no-deepeval
 
 # Recompute gold_geometry (core coverage) + rebuild eval_run_summary.csv from eval/runs/
 python agent-redact/eval/refresh_eval_geometry.py
@@ -46,3 +108,10 @@ python agent-redact/eval/run_agent_regression.py `
 
 # optional DeepEval pytest (with tracing/judge env set):
 deepeval test run test/agent/test_agent_deepeval.py
+
+# Statistical comparison of runs in eval_run_summary.csv (per metric, paired by task):
+python agent-redact/eval/compare_run_stats.py `
+  --csv agent-redact/eval/outputs/eval_run_summary.csv `
+  --config-cols model_name,ocr_method `
+  --min-pairs 3 `
+  --out agent-redact/eval/outputs/run_stats_comparison
