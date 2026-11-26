@@ -127,6 +127,31 @@ def _apply_gradio_url_env(url: str | None) -> None:
         os.environ["DOC_REDACTION_GRADIO_URL"] = value
 
 
+def _apply_llm_base_url_env(url: str | None) -> None:
+    """
+    Point the OpenAI-compatible agent orchestrator LLM (Pi ``llama-cpp`` provider,
+    LangGraph ``ChatOpenAI``, DeepEval judge) at a given inference-server URL by
+    setting ``AGENT_LLAMA_BASE_URL`` (``/v1`` is appended by the consumers when
+    missing). ``OPENAI_BASE_URL`` is set too unless already configured. This runs
+    in ``main()`` before ``run_regression`` imports the agent stack; if
+    ``pi_agent_config`` was already imported (it resolves the URL at import time),
+    its constant is updated as well. None/empty is a no-op.
+    """
+    value = (url or "").strip().rstrip("/")
+    if not value:
+        return
+    os.environ["AGENT_LLAMA_BASE_URL"] = value
+    os.environ.setdefault("OPENAI_BASE_URL", value)
+    try:
+        import pi_agent_config
+
+        pi_agent_config.LLAMA_BASE_URL = (
+            value if value.endswith("/v1") else f"{value}/v1"
+        )
+    except ImportError:
+        pass
+
+
 def _git_commit_short() -> str:
     try:
         out = subprocess.run(
@@ -850,6 +875,8 @@ def run_benchmark_suite(
             os.environ.get("DOC_REDACTION_GRADIO_URL") or ""
         ).strip()
         or None,
+        "agent_llm_base_url": (os.environ.get("AGENT_LLAMA_BASE_URL") or "").strip()
+        or None,
         "started_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "cases": [],
         "exit_code": 0,
@@ -983,6 +1010,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "config/agent.env; the app itself falls back to http://127.0.0.1:7860.",
     )
     p.add_argument(
+        "--llm-base-url",
+        default=_env_default(
+            "BENCHMARK_LLM_BASE_URL", "AGENT_LLAMA_BASE_URL", "OPENAI_BASE_URL"
+        ),
+        help="Base URL of the OpenAI-compatible inference server serving the agent "
+        "orchestrator LLM, e.g. the llama.cpp server for --provider llama-cpp "
+        "(sets AGENT_LLAMA_BASE_URL; /v1 appended if missing, and OPENAI_BASE_URL "
+        "if unset). Default: $BENCHMARK_LLM_BASE_URL / $AGENT_LLAMA_BASE_URL / "
+        "$OPENAI_BASE_URL from the environment or config/agent.env.",
+    )
+    p.add_argument(
         "--ocr-method",
         default=_env_default("BENCHMARK_OCR_METHOD", "DEFAULT_TEXT_EXTRACTION_MODEL"),
         help="Override gold app_eval text_extraction_method / harness OCR for ALL cases "
@@ -1078,6 +1116,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     _apply_gradio_url_env(args.gradio_url)
+    _apply_llm_base_url_env(args.llm_base_url)
 
     try:
         stack_overrides = overrides_from_argv(

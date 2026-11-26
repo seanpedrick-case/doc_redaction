@@ -1946,8 +1946,8 @@ def _run_pi_chat(
     vlm_model_name: str | None = None,
     redact_file: str | None = None,
     redaction_instructions: str = "",
-    encourage_vlm_faces: bool = False,
-    encourage_vlm_signatures: bool = False,
+    encourage_vlm_faces: bool = True,
+    encourage_vlm_signatures: bool = True,
 ):
     if not message or not message.strip():
         client = client if client and client.running else None
@@ -3112,8 +3112,8 @@ def build_ui():
                     if IS_HF_SPACE:
                         ocr_method = gr.State(DEFAULT_OCR_METHOD)
                         pii_method = gr.State(DEFAULT_PII_METHOD)
-                        encourage_vlm_faces = gr.State(False)
-                        encourage_vlm_signatures = gr.State(False)
+                        encourage_vlm_faces = gr.State(True)
+                        encourage_vlm_signatures = gr.State(True)
                         settings_accordion = None
                     else:
                         settings_accordion = gr.Accordion(

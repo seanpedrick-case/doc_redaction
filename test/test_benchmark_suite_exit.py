@@ -13,6 +13,7 @@ if str(_EVAL) not in sys.path:
 from run_benchmark_suite import (  # noqa: E402
     _accumulate_surface_outcome,
     _apply_gradio_url_env,
+    _apply_llm_base_url_env,
     _apply_qa_outcome,
     _env_default,
 )
@@ -98,3 +99,35 @@ def test_gradio_url_flag_and_env_override(monkeypatch) -> None:
     _apply_gradio_url_env(None)
     _apply_gradio_url_env("")
     assert os.environ["DOC_REDACTION_GRADIO_URL"] == "http://flag:9999"
+
+
+def test_llm_base_url_flag_and_env_override(monkeypatch) -> None:
+    import os
+
+    import run_benchmark_suite as rbs
+
+    monkeypatch.setattr(rbs, "_PRISTINE_ENV", {})
+    monkeypatch.setattr(
+        rbs,
+        "_env_file_values",
+        lambda: {"AGENT_LLAMA_BASE_URL": "http://agent-env:8080/v1"},
+    )
+    # env-file fallback becomes the flag default
+    args = rbs._build_parser().parse_args([])
+    assert args.llm_base_url == "http://agent-env:8080/v1"
+    # explicit flag wins
+    args2 = rbs._build_parser().parse_args(["--llm-base-url", "http://flag:9999"])
+    assert args2.llm_base_url == "http://flag:9999"
+    monkeypatch.delenv("AGENT_LLAMA_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    _apply_llm_base_url_env(args2.llm_base_url)
+    assert os.environ["AGENT_LLAMA_BASE_URL"] == "http://flag:9999"
+    assert os.environ["OPENAI_BASE_URL"] == "http://flag:9999"
+    # None/empty is a no-op
+    _apply_llm_base_url_env(None)
+    assert os.environ["AGENT_LLAMA_BASE_URL"] == "http://flag:9999"
+    # an existing OPENAI_BASE_URL is not clobbered
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://openai:4000/v1")
+    _apply_llm_base_url_env("http://other:1")
+    assert os.environ["AGENT_LLAMA_BASE_URL"] == "http://other:1"
+    assert os.environ["OPENAI_BASE_URL"] == "http://openai:4000/v1"
