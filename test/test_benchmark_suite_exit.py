@@ -37,7 +37,10 @@ def test_accumulate_surface_qa_fail_does_not_raise_technical():
 def test_env_default_prefers_pristine_env_then_env_file(monkeypatch) -> None:
     import run_benchmark_suite as rbs
 
-    monkeypatch.setitem(rbs._PRISTINE_ENV, "BENCHMARK_OCR_METHOD", "from-env")
+    # Replace the whole snapshot: in a pytest process, tools.config may already
+    # have written code defaults into os.environ before run_benchmark_suite was
+    # imported, and those must not leak into the fallback.
+    monkeypatch.setattr(rbs, "_PRISTINE_ENV", {"BENCHMARK_OCR_METHOD": "from-env"})
     monkeypatch.setattr(
         rbs,
         "_env_file_values",
@@ -48,7 +51,7 @@ def test_env_default_prefers_pristine_env_then_env_file(monkeypatch) -> None:
         == "from-env"
     )
     assert _env_default("OTHER_VAR") == "file-only"
-    monkeypatch.delitem(rbs._PRISTINE_ENV, "BENCHMARK_OCR_METHOD")
+    monkeypatch.setattr(rbs, "_PRISTINE_ENV", {})
     assert _env_default("BENCHMARK_OCR_METHOD") == "from-file"
     assert _env_default("NO_SUCH_VAR_ANYWHERE") is None
 
@@ -56,7 +59,7 @@ def test_env_default_prefers_pristine_env_then_env_file(monkeypatch) -> None:
 def test_parser_stack_flags_fall_back_to_env(monkeypatch) -> None:
     import run_benchmark_suite as rbs
 
-    monkeypatch.setitem(rbs._PRISTINE_ENV, "BENCHMARK_LOCAL_OCR_MODEL", "paddle")
+    monkeypatch.setattr(rbs, "_PRISTINE_ENV", {"BENCHMARK_LOCAL_OCR_MODEL": "paddle"})
     monkeypatch.setattr(
         rbs,
         "_env_file_values",

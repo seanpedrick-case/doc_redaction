@@ -157,6 +157,7 @@ def test_run_stack_from_artifacts_and_csv_columns(tmp_path, monkeypatch):
 
 def test_main_app_row_does_not_inherit_agent_env(tmp_path, monkeypatch):
     """Non-agentic (main_app) rows must not pick up ambient AGENT_* env values."""
+    monkeypatch.setenv("AGENT_EVAL_RUN_SUMMARY_CSV", "1")
     monkeypatch.setenv(
         "AGENT_EVAL_RUN_SUMMARY_CSV_PATH", str(tmp_path / "eval_run_summary.csv")
     )
@@ -208,6 +209,7 @@ def test_main_app_row_does_not_inherit_agent_env(tmp_path, monkeypatch):
 
 def test_agent_row_falls_back_to_agent_env(tmp_path, monkeypatch):
     """Agentic rows without meta still resolve orchestrator/model from AGENT_* env."""
+    monkeypatch.setenv("AGENT_EVAL_RUN_SUMMARY_CSV", "1")
     monkeypatch.setenv(
         "AGENT_EVAL_RUN_SUMMARY_CSV_PATH", str(tmp_path / "eval_run_summary.csv")
     )
