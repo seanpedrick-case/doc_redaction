@@ -62,29 +62,46 @@ def _app_config_env_file() -> Path:
     return repo / "config" / "app_config.env"
 
 
+def _agent_config_env_file() -> Path:
+    """Agent config file (config/agent.env, legacy pi_agent.env)."""
+    config_dir = Path(__file__).resolve().parents[2] / "config"
+    for name in ("agent.env", "pi_agent.env"):
+        candidate = config_dir / name
+        if candidate.is_file():
+            return candidate
+    return config_dir / "agent.env"
+
+
 def _env_file_values() -> dict[str, str]:
-    """Values from the app config env file (e.g. config/app_config.env)."""
+    """
+    Values from the config env files: the app config file (APP_CONFIG_PATH or
+    config/app_config.env) first, then config/agent.env (legacy pi_agent.env) as a
+    lower-priority layer for agent-side variables like DOC_REDACTION_GRADIO_URL.
+    """
     try:
         from dotenv import dotenv_values
     except ImportError:
         return {}
-    path = _app_config_env_file()
-    try:
-        if not path.is_file():
-            return {}
-        return {
-            k: (v or "") for k, v in dotenv_values(str(path)).items() if v is not None
-        }
-    except Exception:
-        return {}
+    values: dict[str, str] = {}
+    for path in (_app_config_env_file(), _agent_config_env_file()):
+        try:
+            if not path.is_file():
+                continue
+            for key, value in dotenv_values(str(path)).items():
+                if value is not None and key not in values:
+                    values[key] = value or ""
+        except Exception:
+            continue
+    return values
 
 
 def _env_default(*names: str) -> str | None:
     """
     Fallback value for a CLI flag: the first non-empty of ``names`` found in the
     real process environment (snapshot taken before project imports), then in the
-    app config env file. Returns None when unset, so per-case gold settings stay
-    in charge unless the user explicitly sets a flag or env var.
+    config env files (app config, then agent.env). Returns None when unset, so
+    per-case gold settings stay in charge unless the user explicitly sets a flag
+    or env var.
     """
     for name in names:
         value = (_PRISTINE_ENV.get(name) or "").strip()
@@ -96,6 +113,18 @@ def _env_default(*names: str) -> str | None:
         if value:
             return value
     return None
+
+
+def _apply_gradio_url_env(url: str | None) -> None:
+    """
+    Point the agent surface at a given main-app URL by setting
+    ``DOC_REDACTION_GRADIO_URL`` (read on each call by the agent tools, so setting
+    it here — before ``run_regression`` imports the agent stack — takes effect).
+    None/empty is a no-op.
+    """
+    value = (url or "").strip().rstrip("/")
+    if value:
+        os.environ["DOC_REDACTION_GRADIO_URL"] = value
 
 
 def _git_commit_short() -> str:
@@ -817,6 +846,10 @@ def run_benchmark_suite(
         "surfaces": sorted(surfaces),
         "orchestrator": orchestrator,
         "stack_overrides": asdict(stack_overrides) if stack_overrides else {},
+        "doc_redaction_gradio_url": (
+            os.environ.get("DOC_REDACTION_GRADIO_URL") or ""
+        ).strip()
+        or None,
         "started_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "cases": [],
         "exit_code": 0,
@@ -942,6 +975,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Agent LLM model (default: $BENCHMARK_MODEL / $AGENT_DEFAULT_MODEL).",
     )
     p.add_argument(
+        "--gradio-url",
+        default=_env_default("BENCHMARK_GRADIO_URL", "DOC_REDACTION_GRADIO_URL"),
+        help="URL of the running main doc_redaction app that the agent surface drives "
+        "via gradio_client (sets DOC_REDACTION_GRADIO_URL). Default: "
+        "$BENCHMARK_GRADIO_URL / $DOC_REDACTION_GRADIO_URL from the environment or "
+        "config/agent.env; the app itself falls back to http://127.0.0.1:7860.",
+    )
+    p.add_argument(
         "--ocr-method",
         default=_env_default("BENCHMARK_OCR_METHOD", "DEFAULT_TEXT_EXTRACTION_MODEL"),
         help="Override gold app_eval text_extraction_method / harness OCR for ALL cases "
@@ -1035,6 +1076,8 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         print(exc, file=sys.stderr)
         return 2
+
+    _apply_gradio_url_env(args.gradio_url)
 
     try:
         stack_overrides = overrides_from_argv(

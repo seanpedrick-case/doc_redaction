@@ -7,6 +7,8 @@ python agent-redact/eval/run_benchmark_suite.py --surfaces agent,main --orchestr
 python agent-redact/eval/run_benchmark_suite.py --surfaces main --ocr-method "Local OCR model - PDFs without selectable text" --chosen-local-ocr-model paddle --pii-method Local
 # same via environment variables (BENCHMARK_* first, then app vars like DEFAULT_TEXT_EXTRACTION_MODEL):
 BENCHMARK_OCR_METHOD="Local OCR model - PDFs without selectable text" BENCHMARK_LOCAL_OCR_MODEL=paddle BENCHMARK_PII_METHOD=Local python agent-redact/eval/run_benchmark_suite.py --surfaces main
+# Agent surface: point at the running main app (sets DOC_REDACTION_GRADIO_URL; default http://127.0.0.1:7860):
+python agent-redact/eval/run_benchmark_suite.py --surfaces agent --orchestrator langgraph --gradio-url http://127.0.0.1:7860
 # AgentCore harness (main app; requires AGENTCORE_HARNESS_ARN + APP_EVAL)
 python agent-redact/eval/run_benchmark_suite.py --surfaces harness --case example_emails_to_professor_agentic
 
