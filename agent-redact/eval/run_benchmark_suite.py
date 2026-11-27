@@ -127,21 +127,30 @@ def _apply_gradio_url_env(url: str | None) -> None:
         os.environ["DOC_REDACTION_GRADIO_URL"] = value
 
 
-def _apply_llm_base_url_env(url: str | None) -> None:
+def _apply_llm_base_url_env(
+    url: str | None, *, force_openai_base_url: bool = False
+) -> None:
     """
     Point the OpenAI-compatible agent orchestrator LLM (Pi ``llama-cpp`` provider,
     LangGraph ``ChatOpenAI``, DeepEval judge) at a given inference-server URL by
     setting ``AGENT_LLAMA_BASE_URL`` (``/v1`` is appended by the consumers when
-    missing). ``OPENAI_BASE_URL`` is set too unless already configured. This runs
-    in ``main()`` before ``run_regression`` imports the agent stack; if
-    ``pi_agent_config`` was already imported (it resolves the URL at import time),
-    its constant is updated as well. None/empty is a no-op.
+    missing). ``OPENAI_BASE_URL`` is set too unless already configured — or is
+    forced when the flag was given explicitly on the command line
+    (*force_openai_base_url*), so a stale ``OPENAI_BASE_URL`` from the shell/config
+    (e.g. an in-network ``llama-inference`` alias) cannot send the DeepEval judge
+    to an unreachable host. This runs in ``main()`` before ``run_regression``
+    imports the agent stack; if ``pi_agent_config`` was already imported (it
+    resolves the URL at import time), its constant is updated as well.
+    None/empty is a no-op.
     """
     value = (url or "").strip().rstrip("/")
     if not value:
         return
     os.environ["AGENT_LLAMA_BASE_URL"] = value
-    os.environ.setdefault("OPENAI_BASE_URL", value)
+    if force_openai_base_url:
+        os.environ["OPENAI_BASE_URL"] = value
+    else:
+        os.environ.setdefault("OPENAI_BASE_URL", value)
     try:
         import pi_agent_config
 
@@ -150,6 +159,61 @@ def _apply_llm_base_url_env(url: str | None) -> None:
         )
     except ImportError:
         pass
+
+
+def _validate_llm_base_url(url: str, *, timeout_s: float = 5.0) -> str | None:
+    """
+    Fail-fast check for ``--llm-base-url``: the host must resolve and accept a TCP
+    connection, because the agent orchestrator LLM and the DeepEval judge both use
+    this URL. Returns an error message, or None when reachable.
+    """
+    import socket
+    from urllib.parse import urlparse
+
+    raw = (url or "").strip()
+    parsed = urlparse(raw if "://" in raw else f"http://{raw}")
+    host = parsed.hostname
+    if not host:
+        return f"--llm-base-url {raw!r} has no host"
+    try:
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError as exc:
+        return f"--llm-base-url {raw!r} has an invalid port ({exc})"
+    # create_connection resolves host+port itself and accepts IPv4/IPv6 alike
+    # (passing a raw getaddrinfo sockaddr breaks on 4-tuple IPv6 addresses).
+    try:
+        with socket.create_connection((host, port), timeout=timeout_s):
+            return None
+    except socket.gaierror as exc:
+        return (
+            f"--llm-base-url {raw!r}: host {host!r} does not resolve ({exc}); "
+            "the agent LLM and DeepEval judge cannot use this URL"
+        )
+    except OSError as exc:
+        return (
+            f"--llm-base-url {raw!r}: cannot connect to {host}:{port} ({exc}); "
+            "the agent LLM and DeepEval judge cannot use this URL"
+        )
+
+
+def _apply_vlm_endpoint_env(llm_base_url: str | None, model: str | None) -> None:
+    """
+    When ``--llm-base-url`` points at an OpenAI-compatible inference server, also aim
+    the main app's inference-server VLM (custom ``CUSTOM_VLM_*`` passes and hybrid OCR
+    second pass) at the same server: ``INFERENCE_SERVER_API_URL`` gets the base URL
+    with any trailing ``/v1`` stripped (the engine appends ``/v1/...`` itself), and the
+    VLM model name gets ``--model``. Must run before ``tools.config`` is first imported
+    (it reads ``os.environ`` via ``get_or_create_env_var``); the subprocess main leg
+    inherits these through the copied environment and ``load_dotenv(override=False)``.
+    """
+    value = (llm_base_url or "").strip().rstrip("/")
+    if not value:
+        return
+    base = value[:-3] if value.endswith("/v1") else value
+    os.environ["INFERENCE_SERVER_API_URL"] = base
+    if (model or "").strip():
+        os.environ["DEFAULT_INFERENCE_SERVER_VLM_MODEL"] = model.strip()
+        os.environ["INFERENCE_SERVER_MODEL_NAME"] = model.strip()
 
 
 def _git_commit_short() -> str:
@@ -411,6 +475,15 @@ def _settings_to_cli_args(
             args["inference_server_pii_model"] = pii_model
         else:
             args["llm_model_choice"] = pii_model
+    # Effective inference-server VLM endpoint (set from --llm-base-url/--model in
+    # main()); passed explicitly so it applies even if tools.config constants were
+    # already imported before the env was updated.
+    vlm_api_url = (os.environ.get("INFERENCE_SERVER_API_URL") or "").strip()
+    if vlm_api_url:
+        args["inference_server_api_url"] = vlm_api_url
+    vlm_model = (os.environ.get("DEFAULT_INFERENCE_SERVER_VLM_MODEL") or "").strip()
+    if vlm_model:
+        args["inference_server_vlm_model"] = vlm_model
     return args
 
 
@@ -437,6 +510,44 @@ def _invoke_main_redact_subprocess(
         check=False,
     )
     return int(proc.returncode or 0)
+
+
+def _find_case_eval_summary(
+    runs_root: Path,
+    case_dir: Path,
+    *,
+    eval_root: Path | None = None,
+) -> Path | None:
+    """
+    Newest eval summary belonging to *case_dir*: first scoped to the case's own
+    folder under the suite runs root, then mirrored ``app_*`` runs matched on the
+    ``gold_case`` recorded inside each summary (their folder names use the document,
+    not the case). Never falls back to another case's summary. Returns None when
+    the case produced no eval output.
+    """
+    case_key = case_dir.name
+    candidates = sorted(
+        runs_root.rglob("eval/run_*/eval_summary.json"),
+        key=lambda p: p.stat().st_mtime,
+    )
+    scoped = [p for p in candidates if case_key in str(p)]
+    if scoped:
+        return scoped[-1]
+    if eval_root is None:
+        _, _, eval_root = _ensure_agent_imports()
+    mirrored = sorted(
+        (eval_root / "runs").glob("app_*/eval_summary.json"),
+        key=lambda p: p.stat().st_mtime,
+    )
+    wanted_gold = str(case_dir.resolve())
+    for candidate in reversed(mirrored):
+        try:
+            data = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if str(data.get("gold_case") or "") == wanted_gold:
+            return candidate
+    return None
 
 
 def _run_main_surface(
@@ -521,23 +632,19 @@ def _run_main_surface(
         else:
             os.environ["APP_EVAL_AUTO_GOLD"] = prev_auto_gold
 
-    candidates = sorted(
-        runs_root.rglob("eval/run_*/eval_summary.json"),
-        key=lambda p: p.stat().st_mtime,
-    )
-    case_key = case_dir.name
-    scoped = [p for p in candidates if case_key in str(p)]
-    summary_path = (scoped or candidates)[-1] if (scoped or candidates) else None
+    summary_path = _find_case_eval_summary(runs_root, case_dir)
     if summary_path is None:
-        _, _, eval_root = _ensure_agent_imports()
-        mirrored = sorted(
-            (eval_root / "runs").glob("app_*/eval_summary.json"),
-            key=lambda p: p.stat().st_mtime,
+        return _apply_qa_outcome(
+            record,
+            technical_exit=1,
+            qa_pass=None,
+            message=(
+                f"no eval summary written for case {case_dir.name} "
+                f"under {runs_root} (eval disabled or run failed)"
+            ),
         )
-        if mirrored:
-            summary_path = mirrored[-1]
 
-    if summary_path and summary_path.is_file():
+    if summary_path.is_file():
         record["eval_summary"] = str(summary_path)
         record["run_dir"] = str(summary_path.parent)
         try:
@@ -877,6 +984,14 @@ def run_benchmark_suite(
         or None,
         "agent_llm_base_url": (os.environ.get("AGENT_LLAMA_BASE_URL") or "").strip()
         or None,
+        "inference_server_api_url": (
+            os.environ.get("INFERENCE_SERVER_API_URL") or ""
+        ).strip()
+        or None,
+        "inference_server_vlm_model": (
+            os.environ.get("DEFAULT_INFERENCE_SERVER_VLM_MODEL") or ""
+        ).strip()
+        or None,
         "started_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "cases": [],
         "exit_code": 0,
@@ -971,6 +1086,21 @@ def _write_gold_audit(gold_root: Path, dest: Path) -> int:
     return 0
 
 
+class _RecordExplicitFlag(argparse.Action):
+    """Record the option string on ``namespace._explicit_flags`` when a flag is
+    given on the command line, so env-file defaults can be told apart from flags
+    the user actually typed."""
+
+    def __call__(self, parser, namespace, values, option_string=None):  # type: ignore[no-untyped-def]
+        flags = getattr(namespace, "_explicit_flags", None)
+        if flags is None:
+            flags = set()
+            setattr(namespace, "_explicit_flags", flags)
+        if option_string:
+            flags.add(option_string)
+        setattr(namespace, self.dest, values)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
@@ -1022,6 +1152,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--ocr-method",
+        action=_RecordExplicitFlag,
         default=_env_default("BENCHMARK_OCR_METHOD", "DEFAULT_TEXT_EXTRACTION_MODEL"),
         help="Override gold app_eval text_extraction_method / harness OCR for ALL cases "
         "(default: $BENCHMARK_OCR_METHOD / $DEFAULT_TEXT_EXTRACTION_MODEL from the env "
@@ -1029,12 +1160,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--pii-method",
+        action=_RecordExplicitFlag,
         default=_env_default("BENCHMARK_PII_METHOD", "DEFAULT_PII_DETECTION_MODEL"),
         help="Override gold pii_identification_method for ALL cases "
         "(default: $BENCHMARK_PII_METHOD / $DEFAULT_PII_DETECTION_MODEL).",
     )
     p.add_argument(
         "--pii-llm-model",
+        action=_RecordExplicitFlag,
         default=_env_default("BENCHMARK_PII_LLM_MODEL", "CLOUD_LLM_PII_MODEL_CHOICE"),
         help="Override the PII-detector LLM model (gold pii_llm_model) for ALL cases, "
         "e.g. the Bedrock / inference-server / local transformers model used when the "
@@ -1043,6 +1176,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--chosen-local-ocr-model",
+        action=_RecordExplicitFlag,
         default=_env_default("BENCHMARK_LOCAL_OCR_MODEL", "DEFAULT_LOCAL_OCR_MODEL"),
         help="Override local OCR engine (e.g. paddle, tesseract) for ALL cases; also "
         "switches text extraction to the local OCR option unless --ocr-method is given "
@@ -1050,6 +1184,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--chosen-ocr-model",
+        action=_RecordExplicitFlag,
         default=_env_default("BENCHMARK_OCR_MODEL", "CLOUD_VLM_MODEL_CHOICE"),
         help="Override the VLM / inference-server / hybrid second-pass OCR model "
         "(gold chosen_ocr_model) for ALL cases, e.g. for hybrid-paddle-vlm or "
@@ -1058,6 +1193,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--app-config-path",
+        action=_RecordExplicitFlag,
         default=_env_default("BENCHMARK_APP_CONFIG_PATH", "APP_CONFIG_PATH"),
         help="Load this env file in a fresh process for main-app legs "
         "(default: $BENCHMARK_APP_CONFIG_PATH / $APP_CONFIG_PATH).",
@@ -1115,10 +1251,27 @@ def main(argv: list[str] | None = None) -> int:
         print(exc, file=sys.stderr)
         return 2
 
+    if args.llm_base_url:
+        url_error = _validate_llm_base_url(args.llm_base_url)
+        if url_error:
+            print(url_error, file=sys.stderr)
+            return 2
+
+    # An explicitly typed --llm-base-url also overrides a stale OPENAI_BASE_URL
+    # (shell/config), which the DeepEval judge prefers when USE_OPENAI_MODEL=1.
+    raw_argv = argv if argv is not None else sys.argv[1:]
+    llm_base_url_explicit = "--llm-base-url" in {
+        tok.split("=", 1)[0] for tok in raw_argv if tok.startswith("--")
+    }
+
     _apply_gradio_url_env(args.gradio_url)
-    _apply_llm_base_url_env(args.llm_base_url)
+    _apply_llm_base_url_env(
+        args.llm_base_url, force_openai_base_url=llm_base_url_explicit
+    )
+    _apply_vlm_endpoint_env(args.llm_base_url, args.model)
 
     try:
+        explicit_flags = getattr(args, "_explicit_flags", None) or set()
         stack_overrides = overrides_from_argv(
             ocr_method=args.ocr_method,
             pii_method=args.pii_method,
@@ -1126,6 +1279,8 @@ def main(argv: list[str] | None = None) -> int:
             app_config_path=args.app_config_path,
             chosen_ocr_model=args.chosen_ocr_model,
             pii_llm_model=args.pii_llm_model,
+            ocr_method_explicit="--ocr-method" in explicit_flags,
+            local_ocr_model_explicit="--chosen-local-ocr-model" in explicit_flags,
         )
         envelope, code = run_benchmark_suite(
             gold_root=gold_root,

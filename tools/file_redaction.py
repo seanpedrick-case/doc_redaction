@@ -1682,6 +1682,14 @@ def _choose_and_run_redactor_impl(
 
     number_of_pages = pymupdf_doc.page_count
 
+    # Clamp the requested page range to the document so a stale range (e.g. left
+    # over from a previously clicked example) cannot produce an empty page loop.
+    # page_min/page_max are 1-based here; 0 means "first page"/"last page".
+    if page_max > number_of_pages:
+        page_max = number_of_pages
+    if page_min > number_of_pages or (page_max > 0 and page_min > page_max):
+        page_min = 0
+
     # page_max 0 means "last page of document"
     if page_min == 0 and page_max == 0:
         number_of_pages_to_process = number_of_pages
@@ -3213,7 +3221,16 @@ def _choose_and_run_redactor_impl(
                         page_max,
                     )
                     # pymupdf_doc is an image list in this case
-                    if isinstance(pymupdf_doc[-1], str):
+                    if isinstance(pymupdf_doc, pymupdf.Document):
+                        # Image file where the page loop did not replace the doc with
+                        # the image list (e.g. no pages in range): render the last page
+                        # to a PIL image (Page objects have no .save method)
+                        _last_page = pymupdf_doc.load_page(pymupdf_doc.page_count - 1)
+                        _pix = _last_page.get_pixmap(dpi=image_dpi)
+                        img = Image.frombytes(
+                            "RGB", (_pix.width, _pix.height), _pix.samples
+                        )
+                    elif isinstance(pymupdf_doc[-1], str):
                         # Normalize and validate path safety before opening image
                         normalized_path = os.path.normpath(
                             os.path.abspath(pymupdf_doc[-1])

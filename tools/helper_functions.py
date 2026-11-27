@@ -2519,6 +2519,8 @@ def show_info_box_on_click(
     in_fully_redacted_list,
     in_fully_redacted_list_state,
     total_pdf_page_count,
+    page_min,
+    page_max,
 ):
     from tools.example_data_paths import resolve_gradio_example_file_paths
     from tools.malware_scan import mark_gradio_example_files_malware_clean
