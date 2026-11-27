@@ -247,6 +247,18 @@ def run_agent_turn(
     """Run one redaction task prompt through Pi or LangGraph."""
     _apply_orchestrator_env(orchestrator)
     _apply_provider_env(provider, model)
+    if orchestrator == "pi":
+        # Regenerate pi's models.json/settings.json from the current AGENT_* env
+        # before the pi process is spawned: the node reads its model registry from
+        # those files, so a --model for the llama-cpp provider must be written there
+        # or set_model fails with "Model not found: llama-cpp/<model>".
+        try:
+            _ensure_agent_imports()
+            from pi_agent_config import write_runtime_config
+
+            write_runtime_config()
+        except ImportError:
+            pass
     from agent_runtime import AgentRuntimeError, create_agent_runtime
 
     started = time.monotonic()

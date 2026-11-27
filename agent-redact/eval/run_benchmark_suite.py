@@ -127,21 +127,30 @@ def _apply_gradio_url_env(url: str | None) -> None:
         os.environ["DOC_REDACTION_GRADIO_URL"] = value
 
 
-def _apply_llm_base_url_env(url: str | None) -> None:
+def _apply_llm_base_url_env(
+    url: str | None, *, force_openai_base_url: bool = False
+) -> None:
     """
     Point the OpenAI-compatible agent orchestrator LLM (Pi ``llama-cpp`` provider,
     LangGraph ``ChatOpenAI``, DeepEval judge) at a given inference-server URL by
     setting ``AGENT_LLAMA_BASE_URL`` (``/v1`` is appended by the consumers when
-    missing). ``OPENAI_BASE_URL`` is set too unless already configured. This runs
-    in ``main()`` before ``run_regression`` imports the agent stack; if
-    ``pi_agent_config`` was already imported (it resolves the URL at import time),
-    its constant is updated as well. None/empty is a no-op.
+    missing). ``OPENAI_BASE_URL`` is set too unless already configured — or is
+    forced when the flag was given explicitly on the command line
+    (*force_openai_base_url*), so a stale ``OPENAI_BASE_URL`` from the shell/config
+    (e.g. an in-network ``llama-inference`` alias) cannot send the DeepEval judge
+    to an unreachable host. This runs in ``main()`` before ``run_regression``
+    imports the agent stack; if ``pi_agent_config`` was already imported (it
+    resolves the URL at import time), its constant is updated as well.
+    None/empty is a no-op.
     """
     value = (url or "").strip().rstrip("/")
     if not value:
         return
     os.environ["AGENT_LLAMA_BASE_URL"] = value
-    os.environ.setdefault("OPENAI_BASE_URL", value)
+    if force_openai_base_url:
+        os.environ["OPENAI_BASE_URL"] = value
+    else:
+        os.environ.setdefault("OPENAI_BASE_URL", value)
     try:
         import pi_agent_config
 
@@ -1248,8 +1257,17 @@ def main(argv: list[str] | None = None) -> int:
             print(url_error, file=sys.stderr)
             return 2
 
+    # An explicitly typed --llm-base-url also overrides a stale OPENAI_BASE_URL
+    # (shell/config), which the DeepEval judge prefers when USE_OPENAI_MODEL=1.
+    raw_argv = argv if argv is not None else sys.argv[1:]
+    llm_base_url_explicit = "--llm-base-url" in {
+        tok.split("=", 1)[0] for tok in raw_argv if tok.startswith("--")
+    }
+
     _apply_gradio_url_env(args.gradio_url)
-    _apply_llm_base_url_env(args.llm_base_url)
+    _apply_llm_base_url_env(
+        args.llm_base_url, force_openai_base_url=llm_base_url_explicit
+    )
     _apply_vlm_endpoint_env(args.llm_base_url, args.model)
 
     try:

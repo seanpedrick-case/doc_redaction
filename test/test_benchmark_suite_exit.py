@@ -338,6 +338,85 @@ def test_settings_to_cli_args_picks_up_vlm_endpoint(monkeypatch, tmp_path) -> No
     assert args["inference_server_vlm_model"] == "unsloth/Inkling-2-Mini-GGUF"
 
 
+def test_main_explicit_llm_base_url_forces_openai_base_url(monkeypatch) -> None:
+    import os
+
+    import run_benchmark_suite as rbs
+
+    monkeypatch.setattr(rbs, "_PRISTINE_ENV", {})
+    monkeypatch.setattr(rbs, "_env_file_values", lambda: {})
+    monkeypatch.setattr(rbs, "_validate_llm_base_url", lambda url, **kw: None)
+    # stale value from shell/config must be overridden by an explicit flag
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://llama-inference:8080/v1")
+
+    def fake_suite(**kwargs):
+        raise FileNotFoundError("stop before any case runs")
+
+    monkeypatch.setattr(rbs, "run_benchmark_suite", fake_suite)
+    rc = rbs.main(["--llm-base-url", "http://localhost:8004/v1", "--model", "m"])
+    assert rc == 2
+    assert os.environ["AGENT_LLAMA_BASE_URL"] == "http://localhost:8004/v1"
+    assert os.environ["OPENAI_BASE_URL"] == "http://localhost:8004/v1"
+
+
+def test_run_agent_turn_pi_rewrites_runtime_config(monkeypatch, tmp_path) -> None:
+    import types
+
+    import run_agent_regression as rar
+
+    calls = {"write_runtime_config": 0}
+
+    fake_pi_config = types.ModuleType("pi_agent_config")
+    fake_pi_config.PROVIDER_LLAMA = "llama-cpp"
+    fake_pi_config.normalize_provider = lambda p: (p or "").strip().lower()  # type: ignore[attr-defined]
+
+    def fake_write_runtime_config(**kwargs):
+        calls["write_runtime_config"] += 1
+
+    fake_pi_config.write_runtime_config = fake_write_runtime_config  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "pi_agent_config", fake_pi_config)
+
+    class FakeRuntime:
+        running = True
+
+        def start(self):
+            pass
+
+        def apply_backend(self, provider, model):
+            pass
+
+        def set_model(self, provider, model):
+            pass
+
+        def prompt_events(self, message):
+            return iter(())
+
+        def close(self):
+            pass
+
+    fake_agent_runtime = types.ModuleType("agent_runtime")
+
+    class AgentRuntimeError(Exception):
+        pass
+
+    class AgentStreamEvent:
+        def __init__(self, kind="", text=""):
+            self.kind = kind
+            self.text = text
+
+    fake_agent_runtime.AgentRuntimeError = AgentRuntimeError  # type: ignore[attr-defined]
+    fake_agent_runtime.AgentStreamEvent = AgentStreamEvent  # type: ignore[attr-defined]
+    fake_agent_runtime.create_agent_runtime = lambda session_hash=None: FakeRuntime()  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "agent_runtime", fake_agent_runtime)
+
+    monkeypatch.delenv("AGENT_ORCHESTRATOR", raising=False)
+    result = rar.run_agent_turn(
+        orchestrator="pi", session_hash="s", prompt="p", provider="llama-cpp", model="m"
+    )
+    assert calls["write_runtime_config"] == 1
+    assert result.error is None
+
+
 def test_apply_provider_env_aligns_llama_model_id(monkeypatch) -> None:
     import os
     import types
