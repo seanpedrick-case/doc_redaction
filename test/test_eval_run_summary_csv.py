@@ -233,9 +233,9 @@ def test_agent_row_falls_back_to_agent_env(tmp_path, monkeypatch):
     ) as handle:
         row = next(csv.DictReader(handle))
     assert row["orchestrator"] == "pi"
-    assert row["model_name"] == "llama-cpp/unsloth/Inkling-2-Mini-GGUF"
+    assert row["model_name"] == "unsloth/Inkling-2-Mini-GGUF"
     assert row["agent_orchestrator"] == "pi"
-    assert row["agent_model_name"] == "llama-cpp/unsloth/Inkling-2-Mini-GGUF"
+    assert row["agent_model_name"] == "unsloth/Inkling-2-Mini-GGUF"
 
 
 def test_run_stack_manifest_fallback(tmp_path):

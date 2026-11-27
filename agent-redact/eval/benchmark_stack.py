@@ -19,6 +19,16 @@ class BenchmarkStackOverrides:
     app_config_path: str | None = None
 
 
+def _local_ocr_text_extract_option() -> str:
+    """The text-extraction option required for a local OCR engine override."""
+    try:
+        from tools.config import LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
+
+        return LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
+    except ImportError:
+        return "Local OCR model - PDFs without selectable text"
+
+
 def apply_benchmark_overrides(
     settings: AppEvalRedactionSettings,
     overrides: BenchmarkStackOverrides | None,
@@ -38,14 +48,7 @@ def apply_benchmark_overrides(
         # method; when only the engine is overridden, switch the method too so the
         # override applies uniformly to every case.
         if not overrides.text_extraction_method:
-            try:
-                from tools.config import LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
-
-                patch["text_extraction_method"] = LOCAL_OCR_MODEL_TEXT_EXTRACT_OPTION
-            except ImportError:
-                patch["text_extraction_method"] = (
-                    "Local OCR model - PDFs without selectable text"
-                )
+            patch["text_extraction_method"] = _local_ocr_text_extract_option()
     if overrides.chosen_ocr_model:
         patch["chosen_ocr_model"] = overrides.chosen_ocr_model.strip()
     if overrides.app_config_path:
@@ -84,6 +87,8 @@ def overrides_from_argv(
     app_config_path: str | None,
     chosen_ocr_model: str | None = None,
     pii_llm_model: str | None = None,
+    ocr_method_explicit: bool = True,
+    local_ocr_model_explicit: bool = False,
 ) -> BenchmarkStackOverrides | None:
     if not any(
         (
@@ -96,8 +101,14 @@ def overrides_from_argv(
         )
     ):
         return None
+    effective_ocr_method = ocr_method
+    if chosen_local_ocr_model and local_ocr_model_explicit and not ocr_method_explicit:
+        # Only the local OCR engine was chosen on the command line: map it back to
+        # the local-OCR text-extraction method it requires, ignoring an env-default
+        # --ocr-method value (e.g. DEFAULT_TEXT_EXTRACTION_MODEL from the app config).
+        effective_ocr_method = _local_ocr_text_extract_option()
     return BenchmarkStackOverrides(
-        text_extraction_method=ocr_method,
+        text_extraction_method=effective_ocr_method,
         pii_identification_method=pii_method,
         pii_llm_model=pii_llm_model,
         chosen_local_ocr_model=chosen_local_ocr_model,

@@ -1868,6 +1868,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                             [],
                             [],
                             2,
+                            0,
+                            0,
                         ]
                     )
                     example_labels.append("PDF with selectable text redaction")
@@ -1889,6 +1891,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                             [],
                             [],
                             1,
+                            0,
+                            0,
                         ]
                     )
                     example_labels.append("Image redaction with local OCR")
@@ -1910,6 +1914,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                             [],
                             [],
                             1,
+                            0,
+                            0,
                         ]
                     )
                     example_labels.append(
@@ -1934,6 +1940,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                                 [],
                                 [],
                                 7,
+                                0,
+                                0,
                             ]
                         )
                         example_labels.append(
@@ -1972,6 +1980,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                                 5,
                             ],  # pd.DataFrame(data={"fully_redacted_pages_list": [2, 5]}),
                             7,
+                            0,
+                            0,
                         ],
                     )
                     example_labels.append(
@@ -2005,6 +2015,8 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                             in_fully_redacted_list,
                             in_fully_redacted_list_state,
                             total_pdf_page_count,
+                            page_min,
+                            page_max,
                         ],
                         outputs=[
                             walkthrough_file_input,
@@ -3513,7 +3525,7 @@ If you are an LLM/agent calling this app programmatically, prefer the **short `g
                                 type="pandas",
                                 label="Click table row to select and go to page",
                                 headers=["page", "label", "text", "id"],
-                                column_widths=["10%", "40%", "40%", "10%"],
+                                column_widths=["15%", "40%", "40%", "5%"],
                                 wrap=False,
                                 max_height=400,
                                 show_search="filter",

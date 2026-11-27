@@ -185,6 +185,21 @@ def _apply_provider_env(provider: str | None, model: str | None) -> None:
         os.environ["AGENT_DEFAULT_PROVIDER"] = provider.strip()
     if model and model.strip():
         os.environ["AGENT_DEFAULT_MODEL"] = model.strip()
+        # The pi llama-cpp provider registers exactly one model in its catalog —
+        # the one from AGENT_LLAMA_MODEL_ID — so a model chosen for the llama-cpp
+        # provider must also land there; otherwise set_model fails with
+        # "Model not found: llama-cpp/<model>". Must be set before the pi agent
+        # process is spawned (create_agent_runtime) so the child inherits it.
+        prov = (provider or os.environ.get("AGENT_DEFAULT_PROVIDER") or "").strip()
+        try:
+            _ensure_agent_imports()
+            from pi_agent_config import PROVIDER_LLAMA, normalize_provider
+
+            if normalize_provider(prov) == PROVIDER_LLAMA:
+                os.environ["AGENT_LLAMA_MODEL_ID"] = model.strip()
+        except ImportError:
+            if prov.lower().replace("_", "-") in ("", "llama-cpp", "llama"):
+                os.environ["AGENT_LLAMA_MODEL_ID"] = model.strip()
 
 
 def _consume_prompt_events(

@@ -41,15 +41,15 @@ python agent-redact/eval/run_benchmark_suite.py --surfaces main \
 #    LangGraph + Bedrock Nova Pro, local paddle stack pinned for the agent too:
 python agent-redact/eval/run_benchmark_suite.py --surfaces agent,main \
   --orchestrator langgraph --provider amazon-bedrock --model amazon.nova-pro-v1:0 \
-  --gradio-url http://127.0.0.1:7860 \
+  --gradio-url http://127.0.0.1:7861 \
   --ocr-method "Local OCR model - PDFs without selectable text" --chosen-local-ocr-model paddle --pii-method Local
 #    Pi orchestrator + local llama.cpp inference-server model (the model server URL
 #    comes from AGENT_LLAMA_BASE_URL in config/agent.env, or --llm-base-url; /v1 is
 #    appended if missing):
 python agent-redact/eval/run_benchmark_suite.py --surfaces agent,main \
   --orchestrator pi --provider llama-cpp --model unsloth/Inkling-2-Mini-GGUF \
-  --llm-base-url http://llama-inference:8080/v1 \
-  --gradio-url http://127.0.0.1:7860 --pii-method Local --chosen-local-ocr-model tesseract
+  --llm-base-url http://localhost:8004/v1 \
+  --gradio-url http://localhost:7861 --pii-method Local --chosen-local-ocr-model tesseract
 #    both orchestrators, one case:
 python agent-redact/eval/run_benchmark_suite.py --surfaces agent,main --orchestrator both \
   --case example_emails_to_professor_agentic --gradio-url http://127.0.0.1:7860

@@ -92,3 +92,47 @@ def test_apply_benchmark_overrides_explicit_ocr_method_wins() -> None:
     )
     assert out.text_extraction_method == "AWS Textract"
     assert out.chosen_local_ocr_model == "paddle"
+
+
+def test_overrides_from_argv_explicit_local_ocr_model_maps_back_to_ocr_method() -> None:
+    """Only --chosen-local-ocr-model given on the CLI: the env-default --ocr-method
+    value must be replaced by the local-OCR extraction method the engine needs."""
+    out = overrides_from_argv(
+        ocr_method="Local model - selectable text",  # env default, not an explicit flag
+        pii_method=None,
+        chosen_local_ocr_model="tesseract",
+        app_config_path=None,
+        ocr_method_explicit=False,
+        local_ocr_model_explicit=True,
+    )
+    assert out is not None
+    assert out.chosen_local_ocr_model == "tesseract"
+    assert "local ocr" in out.text_extraction_method.casefold()
+    assert out.text_extraction_method != "Local model - selectable text"
+
+
+def test_overrides_from_argv_explicit_ocr_method_still_wins() -> None:
+    out = overrides_from_argv(
+        ocr_method="AWS Textract",
+        pii_method=None,
+        chosen_local_ocr_model="tesseract",
+        app_config_path=None,
+        ocr_method_explicit=True,
+        local_ocr_model_explicit=True,
+    )
+    assert out is not None
+    assert out.text_extraction_method == "AWS Textract"
+
+
+def test_overrides_from_argv_env_defaults_do_not_trigger_mapping() -> None:
+    """Both values coming from env defaults keeps the env ocr-method unchanged."""
+    out = overrides_from_argv(
+        ocr_method="Local model - selectable text",
+        pii_method=None,
+        chosen_local_ocr_model="paddle",
+        app_config_path=None,
+        ocr_method_explicit=False,
+        local_ocr_model_explicit=False,
+    )
+    assert out is not None
+    assert out.text_extraction_method == "Local model - selectable text"
